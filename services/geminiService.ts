@@ -1,4 +1,4 @@
-import { GoogleGenAI, Modality } from "@google/genai";
+import { GoogleGenAI, Modality, Type } from "@google/genai";
 import { parseDataUrl } from '../utils/imageUtils';
 import { StyleOption, ToneOption } from "../types";
 
@@ -8,34 +8,107 @@ if (!process.env.API_KEY) {
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-const generateImagePrompt = (style: StyleOption, dealershipName: string): string => {
-    const coreInstruction = `Act as a world-class graphic designer with an infallible eye for composition. Your mission is to create a viral-worthy social media post by enhancing a photo and adding text overlays. You must follow a strict, mandatory 2-phase process.
+interface FaceBox {
+    box: [number, number, number, number]; // [x_min, y_min, x_max, y_max]
+}
+
+/**
+ * Uses a vision model to detect faces and return their bounding boxes.
+ */
+const detectFaces = async (imagePart: { inlineData: { mimeType: string, data: string } }): Promise<FaceBox[]> => {
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-pro',
+            contents: { parts: [imagePart] },
+            config: {
+                systemInstruction: "You are a highly accurate face detection model. Analyze the user's image and identify all human faces. For each face, provide a bounding box with normalized coordinates (from 0.0 to 1.0) for [x_min, y_min, x_max, y_max]. If no faces are found, return an empty 'faces' array.",
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        faces: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    box: {
+                                        type: Type.ARRAY,
+                                        description: 'Bounding box with normalized coordinates [x_min, y_min, x_max, y_max].',
+                                        items: { type: Type.NUMBER },
+                                        minItems: 4,
+                                        maxItems: 4
+                                    }
+                                },
+                                required: ['box']
+                            }
+                        }
+                    },
+                    required: ['faces']
+                },
+            },
+        });
+
+        const jsonString = response.text.trim();
+        const result = JSON.parse(jsonString);
+        return result.faces || [];
+    } catch (error) {
+        console.error("Error detecting faces:", error);
+        // If face detection fails, return an empty array to not block the main flow.
+        // The image generator will fall back to its visual analysis.
+        return [];
+    }
+};
+
+
+const generateImagePrompt = (style: StyleOption, dealershipName: string, faces: FaceBox[], hasLogo: boolean): string => {
+    let faceAvoidanceInstruction = ``;
+
+    if (faces && faces.length > 0) {
+        const faceBoxesString = faces.map(f => `[${f.box.join(', ')}]`).join(', ');
+        faceAvoidanceInstruction = `
+1.  **Programmatically Identified No-Fly Zones:** This image has been pre-analyzed. The following bounding boxes contain human faces and are ABSOLUTE NO-FLY ZONES.
+    *   Face Bounding Boxes (normalized coordinates [x_min, y_min, x_max, y_max]): ${faceBoxesString}
+    *   You MUST NOT place any text or graphic elements within these boxes.
+    *   You MUST add a significant buffer zone (at least 15% of the box height/width) around each of these boxes to ensure text is not crowded near faces.
+    *   This is the most critical instruction. Failure to adhere to it will result in a failed task.
+
+2.  **Visual Unsafe Zone Identification:** In addition to the boxes above, visually identify other key vehicle features (grille, headlights, logos). These are also No-Fly Zones.`;
+    } else {
+        faceAvoidanceInstruction = `
+1.  **Identify Unsafe Zones (No-Fly Zones):** Before you do anything else, you MUST analyze the image and identify all areas that are off-limits. These are your "No-Fly Zones".
+    *   **Human Faces:** Locate ALL human faces in the photograph. These are the most critical No-Fly Zones.
+    *   **Key Vehicle Features:** Identify the car's grille, headlights, and any brand logos. These are also No-Fly Zones.`;
+    }
+    
+    const watermarkInstruction = hasLogo
+        ? `*   **WATERMARK:** A second image has been provided - this is the dealership's logo. You MUST place this logo image as a small, tasteful watermark in a lower corner of the final image, inside a Safe Zone. Do not distort it. Do NOT use the dealership name text as a watermark.`
+        : `*   **WATERMARK:** The dealership name, '${dealershipName}', MUST be used as a text watermark. Use the *exact* spelling provided and place it tastefully in a lower corner within a Safe Zone.`;
+
+    const coreInstruction = `Act as a world-class graphic designer with an infallible eye for composition. Your mission is to create a viral-worthy social media post by enhancing a photo and adding text overlays. You have been provided a primary photo of a customer and their car. You may also have been provided a second image which is a company logo. You must follow a strict, mandatory 2-phase process.
 
 **MANDATORY 2-PHASE PROCESS**
 
 **Phase 1: SAFE ZONE ANALYSIS & PHOTO ENHANCEMENT (Perform this first!)**
 
-1.  **Identify Unsafe Zones (No-Fly Zones):** Before you do anything else, you MUST analyze the image and identify all areas that are off-limits. These are your "No-Fly Zones".
-    *   **Human Faces:** Locate ALL human faces in the photograph. These are the most critical No-Fly Zones.
-    *   **Key Vehicle Features:** Identify the car's grille, headlights, and any brand logos. These are also No-Fly Zones.
+${faceAvoidanceInstruction}
 
-2.  **Identify Safe Zones:** After you have definitively identified the No-Fly Zones, you MUST find large, open areas suitable for text. These "Safe Zones" are your canvas.
+3.  **Identify Safe Zones:** After you have definitively identified all No-Fly Zones (both programmatically and visually), you MUST find large, open areas suitable for text. These "Safe Zones" are your canvas.
     *   Good examples include: The open sky, the empty ground, a blank building wall, or the upper/lower thirds of the image IF AND ONLY IF they are clear of people and key vehicle features.
 
-3.  **Professional Photo Enhancement:** Simultaneously, perform a full photo enhancement on the original image.
+4.  **Professional Photo Enhancement:** Simultaneously, perform a full photo enhancement on the original image.
     *   **Auto-Correction:** Automatically adjust brightness, contrast, and saturation.
     *   **Lighting & Shadow Balancing:** Subtly lighten harsh shadows on the people and car.
     *   **Color Grading & Sharpening:** Apply a professional color grade and a touch of sharpening.
 
 **Phase 2: INTELLIGENT TEXT OVERLAY (Restricted to Safe Zones)**
 
-**CRITICAL RULE: ALL text elements MUST be placed exclusively within the "Safe Zones" you identified in Phase 1.**
+**CRITICAL RULE: ALL text and graphic elements MUST be placed exclusively within the "Safe Zones" you identified in Phase 1.**
 
 *   **ABSOLUTE FAILURE CONDITION:** Placing ANY text over a human face is an immediate and total failure. Adherence to the "No-Fly Zone" rule is the most important part of your task.
 *   **DYNAMIC COMPOSITION:** Within the Safe Zones, create a dynamic, visually engaging composition. Use varied angles and creative positioning.
 *   **SPELLING ACCURACY:** The text must be spelled *exactly* as provided: "Congratulations!".
 *   **3D & REALISM:** Render the main text as a bold, chunky, 3D object that casts realistic shadows and reflects the scene's lighting.
-*   **WATERMARK:** The dealership name, '${dealershipName}', MUST be used as a watermark. Use the *exact* spelling provided and place it tastefully in a lower corner within a Safe Zone.`;
+${watermarkInstruction}`;
     
     const mainText = "Congratulations!";
     const subText = `Welcome to the ${dealershipName} Family`;
@@ -118,7 +191,8 @@ export const generateSocialPost = async (
     style: StyleOption, 
     tone: ToneOption,
     dealershipName: string,
-    customerName?: string
+    customerName?: string,
+    logoBase64Url?: string
 ): Promise<{ image: string; text: string }> => {
     const { mimeType, data: base64Data } = parseDataUrl(imageBase64Url);
 
@@ -128,9 +202,24 @@ export const generateSocialPost = async (
             data: base64Data,
         },
     };
+
+    let logoImagePart = null;
+    if (logoBase64Url) {
+        const { mimeType: logoMime, data: logoData } = parseDataUrl(logoBase64Url);
+        logoImagePart = {
+            inlineData: {
+                mimeType: logoMime,
+                data: logoData,
+            },
+        };
+    }
     
+    // Step 1: Detect faces to create "no-fly zones".
+    const detectedFaces = await detectFaces(imagePart);
+
+    // Step 2: Generate text and the final image in parallel, using the face data.
     const textPrompt = generateTextPrompt(tone, dealershipName, customerName);
-    const imagePrompt = generateImagePrompt(style, dealershipName);
+    const imagePrompt = generateImagePrompt(style, dealershipName, detectedFaces, !!logoImagePart);
 
     const textPromise = ai.models.generateContent({
         model: 'gemini-2.5-pro',
@@ -142,13 +231,15 @@ export const generateSocialPost = async (
         }
     });
 
+    const imageParts: (typeof imagePart | { text: string })[] = [imagePart, { text: imagePrompt }];
+    if (logoImagePart) {
+        imageParts.push(logoImagePart);
+    }
+
     const imagePromise = ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: {
-            parts: [
-                imagePart,
-                { text: imagePrompt }
-            ]
+            parts: imageParts,
         },
         config: {
             responseModalities: [Modality.IMAGE],

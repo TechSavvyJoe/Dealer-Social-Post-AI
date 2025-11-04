@@ -27,4 +27,5 @@ export interface GeneratedPost {
 
 export interface DealershipSettings {
   dealershipName: string;
+  dealershipLogo?: string; // base64 data URL
 }
