@@ -149,7 +149,7 @@ const App: React.FC = () => {
     setStep(AppStep.GENERATING);
     setError(null);
     try {
-      const result = await generateSocialPost(selectedImage, style, tone, settings.dealershipName, customerName);
+      const result = await generateSocialPost(selectedImage, style, tone, settings.dealershipName, customerName, settings.dealershipLogo);
       setGeneratedPost(result);
       setStep(AppStep.RESULT);
     } catch (err) {

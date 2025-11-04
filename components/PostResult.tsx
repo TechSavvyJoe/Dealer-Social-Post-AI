@@ -20,39 +20,105 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver }) => 
     document.body.removeChild(link);
   };
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(post.text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  // Uses a synchronous method to copy text, which is more reliable in complex scenarios.
+  const synchronousCopy = (text: string): boolean => {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    // Prevent screen from jumping
+    textArea.style.position = "fixed";
+    textArea.style.top = "0";
+    textArea.style.left = "0";
+    textArea.style.width = "2em";
+    textArea.style.height = "2em";
+    textArea.style.padding = "0";
+    textArea.style.border = "none";
+    textArea.style.outline = "none";
+    textArea.style.boxShadow = "none";
+    textArea.style.background = "transparent";
+
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+
+    let success = false;
+    try {
+      success = document.execCommand("copy");
+    } catch (err) {
+      console.error("Fallback copy command failed", err);
+    }
+
+    document.body.removeChild(textArea);
+    return success;
+  };
+
+  const handleCopy = async () => {
+    let success = false;
+    // Try modern async API first, as it's cleaner.
+    if (navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(post.text);
+        success = true;
+      } catch (err) {
+        console.warn("Async clipboard API failed, falling back to sync method.", err);
+        // Fallback to synchronous method if modern API fails.
+        success = synchronousCopy(post.text);
+      }
+    } else {
+      // Use synchronous method if clipboard API is not available at all.
+      success = synchronousCopy(post.text);
+    }
+
+    if (success) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } else {
+      alert("Failed to copy text to clipboard.");
+    }
   };
 
   const handleShare = async () => {
+    // CRITICAL FIX: To prevent a race condition on mobile where the share
+    // dialog interrupts an async clipboard write, we MUST use a synchronous
+    // copy method here. This ensures the text is on the clipboard *before*
+    // the share dialog is even invoked.
+    const copiedSuccess = synchronousCopy(post.text);
+
+    if (copiedSuccess) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+
     try {
       const blob = await dataUrlToBlob(post.image);
-      const file = new File([blob], 'social-media-post.jpg', { type: blob.type });
+      const file = new File([blob], "social-media-post.jpg", { type: blob.type });
       const shareData = {
-        title: 'New Car Celebration!',
+        title: "New Car Celebration!",
         text: post.text,
         files: [file],
       };
 
-      // Robustly check if the browser can actually share the data (especially files)
-      if (navigator.share && navigator.canShare && navigator.canShare(shareData)) {
+      if (navigator.share && navigator.canShare(shareData)) {
         await navigator.share(shareData);
-        // On success, the share sheet was shown.
       } else {
-        // If navigator.share doesn't exist or can't handle file sharing, trigger the fallback.
-        throw new Error('File sharing not supported on this browser.');
+        // Fallback for devices that don't support sharing files.
+        if (copiedSuccess) {
+          alert("Sharing is not available on this device, but the post text has been copied to your clipboard!");
+        } else {
+          alert("Sharing is not available on this device. Please use the copy and save buttons manually.");
+        }
       }
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
+      if (error instanceof DOMException && error.name === "AbortError") {
         // This is expected user behavior (closing the share dialog). Do nothing.
-        console.log('Share dialog was cancelled by the user.');
+        console.log("Share dialog was cancelled by the user.");
       } else {
-        // This catches the thrown error and any other sharing issues.
-        console.error('Sharing failed or is not supported:', error);
-        alert('This device does not support direct sharing. The post text has been copied to your clipboard instead!');
-        handleCopy();
+        // Generic fallback for any other share errors.
+        console.error("Sharing failed or is not supported:", error);
+        if (copiedSuccess) {
+          alert("Could not open share dialog, but your post text has been copied to the clipboard!");
+        } else {
+          alert("Could not share or copy. Please try saving the image and copying the text manually.");
+        }
       }
     }
   };
