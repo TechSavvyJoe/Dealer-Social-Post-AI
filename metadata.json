@@ -1,0 +1,7 @@
+{
+  "name": "Dealership Social AI",
+  "description": "An application for car dealership salespeople to take a photo of a customer with their new vehicle and instantly generate a professionally designed social media post with a custom message and text overlay on the image.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
