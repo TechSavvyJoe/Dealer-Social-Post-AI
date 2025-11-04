@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Dealership Social Post AI</title>
+    <title>Dealer Social Post AI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -21,13 +21,90 @@
 <style>
   body {
     font-family: 'Poppins', sans-serif;
-    background-color: #0f172a; /* slate-900 */
-    background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.05) 1px, transparent 0);
-    background-size: 2rem 2rem;
+    background-color: #020617; /* slate-950 */
+    overflow: hidden; /* Prevent body scroll during animations */
+  }
+
+  main {
+    overflow-y: auto;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.5); /* slate-900 */
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #4f46e5; /* indigo-600 */
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #6366f1; /* indigo-500 */
+  }
+
+  /* Aurora Background Effect */
+  .aurora-background {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: -10;
+    background-color: #020617; /* slate-950 */
+    overflow: hidden;
+  }
+  .aurora-background::before,
+  .aurora-background::after {
+    content: "";
+    position: absolute;
+    width: 100vmin;
+    height: 100vmin;
+    border-radius: 50%;
+    filter: blur(100px);
+    opacity: 0.2;
+    mix-blend-mode: screen;
+    animation: aurora-pulse 15s infinite alternate;
+  }
+  .aurora-background::before {
+    background: radial-gradient(circle, #4f46e5, transparent 60%);
+    top: -20%;
+    left: -20%;
+  }
+  .aurora-background::after {
+    background: radial-gradient(circle, #7c3aed, transparent 60%);
+    bottom: -20%;
+    right: -20%;
+    animation-delay: -5s;
+  }
+
+  @keyframes aurora-pulse {
+    0% { transform: scale(0.8) translate(0, 0); }
+    100% { transform: scale(1.2) translate(50px, -50px); }
+  }
+
+  /* Fade-in Animation */
+  @keyframes fade-in {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-fade-in {
+      animation: fade-in 0.5s ease-out forwards;
+  }
+
+  /* Fade-out Animation */
+  @keyframes fade-out {
+      from { opacity: 1; transform: translateY(0); }
+      to { opacity: 0; transform: translateY(-10px); }
+  }
+  .animate-fade-out {
+      animation: fade-out 0.5s ease-in forwards;
   }
 </style>
 </head>
   <body>
+    <div class="aurora-background"></div>
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>

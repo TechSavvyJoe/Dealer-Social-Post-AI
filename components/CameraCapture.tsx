@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Icon } from './Icons';
 import { fileToDataUrl } from '../utils/imageUtils';
 import { WebcamCapture } from './WebcamCapture';
+import { triggerHapticFeedback } from '../utils/haptics';
 
 interface ImageInputProps {
   onImageSelected: (imageSrc: string) => void;
@@ -44,6 +45,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected, onClose
   };
   
   const handleOpenCamera = () => {
+    triggerHapticFeedback();
     if (isMobileDevice()) {
         cameraInputRef.current?.click();
     } else {
@@ -52,6 +54,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected, onClose
   };
 
   const handleUploadPhoto = () => {
+    triggerHapticFeedback();
     fileInputRef.current?.click();
   }
 
@@ -90,7 +93,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected, onClose
       <div className="w-full h-full flex flex-col items-center justify-center bg-red-900/50 border border-red-700 text-red-300 p-8 text-center rounded-2xl">
         <Icon type="error" className="w-16 h-16 text-red-400 mb-4" />
         <p className="text-red-300 text-lg">{error}</p>
-        <button onClick={() => setError(null)} className="mt-6 bg-indigo-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-indigo-500 transition-colors">
+        <button onClick={() => { triggerHapticFeedback(); setError(null); }} className="mt-6 bg-indigo-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-indigo-500 transition-colors">
           Try Again
         </button>
       </div>
@@ -111,7 +114,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected, onClose
 
   return (
     <div 
-      className={`relative w-full max-w-2xl mx-auto p-4 bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 transition-all duration-300 ${
+      className={`relative w-full max-w-2xl mx-auto p-2 sm:p-4 bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 transition-all duration-300 ${
         isDraggingOver ? 'border-indigo-400 scale-105' : 'border-white/20'
       }`}
       onDrop={handleDrop}
@@ -127,7 +130,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected, onClose
           </div>
         </div>
       )}
-      <div className="relative border-2 border-dashed border-white/20 rounded-xl p-8 transition-colors duration-300">
+      <div className="relative border-2 border-dashed border-white/20 rounded-xl p-4 sm:p-8 transition-colors duration-300">
         <input
           type="file"
           ref={fileInputRef}
@@ -144,17 +147,17 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected, onClose
           className="hidden"
         />
         
-          <div className="text-center py-8">
-              <h2 className="text-3xl font-bold text-white mb-2">Add a Photo</h2>
-              <p className="text-indigo-300 mb-8">Capture a moment, upload a file, or drag & drop.</p>
+          <div className="text-center py-4 sm:py-8">
+              <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Add a Photo</h2>
+              <p className="text-indigo-300 mb-6 sm:mb-8 text-sm sm:text-base">Capture a moment, upload a file, or drag & drop.</p>
               <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
                   <button onClick={handleOpenCamera} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-6 rounded-full hover:scale-105 transition-all duration-300 shadow-lg">
-                      <Icon type="camera" className="w-7 h-7"/>
-                      <span className="text-lg">Open Camera</span>
+                      <Icon type="camera" className="w-6 sm:w-7 h-6 sm:h-7"/>
+                      <span className="text-base sm:text-lg">Open Camera</span>
                   </button>
                    <button onClick={handleUploadPhoto} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-white/10 border border-white/20 text-white font-bold py-3 px-6 rounded-full hover:bg-white/20 hover:scale-105 transition-all duration-300 shadow-lg">
-                      <Icon type="upload" className="w-7 h-7"/>
-                      <span className="text-lg">Upload Photo</span>
+                      <Icon type="upload" className="w-6 sm:w-7 h-6 sm:h-7"/>
+                      <span className="text-base sm:text-lg">Upload Photo</span>
                   </button>
               </div>
           </div>

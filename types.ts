@@ -17,8 +17,18 @@ export enum ToneOption {
   Excited = "Excited",
   Professional = "Professional",
   Family = "Family-Friendly",
+  Humorous = "Humorous",
+  Inspirational = "Inspirational",
+  Urgent = "Urgent/Promotional",
 }
 
+export enum VideoStyle {
+  EpicReveal = "Epic Reveal",
+  PartyTime = "Party Time",
+  VintageFilm = "Vintage Film",
+  NeonPulse = "Neon Pulse",
+  CometStrike = "Comet Strike",
+}
 
 export interface GeneratedPost {
   image: string; // base64 data URL
@@ -28,4 +38,10 @@ export interface GeneratedPost {
 export interface DealershipSettings {
   dealershipName: string;
   dealershipLogo?: string; // base64 data URL
+}
+
+export interface TemplateOption {
+  id: string;
+  name: string;
+  content: string;
 }

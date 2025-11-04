@@ -1,7 +1,12 @@
 import { DealershipSettings } from '../types';
 
-const SETTINGS_KEY = 'dealershipSocialAiSettings';
+// Key for storing settings in the browser's local storage.
+const SETTINGS_KEY = 'dealerSocialPostAiSettings';
 
+/**
+ * Saves the provided dealership settings to local storage, allowing them to persist across sessions.
+ * @param settings The settings object to save.
+ */
 export const saveSettings = (settings: DealershipSettings): void => {
   try {
     const settingsJson = JSON.stringify(settings);
@@ -11,6 +16,10 @@ export const saveSettings = (settings: DealershipSettings): void => {
   }
 };
 
+/**
+ * Loads dealership settings from local storage.
+ * @returns The saved settings object, or null if none are found or an error occurs.
+ */
 export const loadSettings = (): DealershipSettings | null => {
   try {
     const settingsJson = localStorage.getItem(SETTINGS_KEY);
