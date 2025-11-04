@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Icon } from './Icons';
+import { triggerHapticFeedback } from '../utils/haptics';
 
 interface WebcamCaptureProps {
   onImageSelected: (imageSrc: string) => void;
@@ -60,6 +61,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, o
   }, [cleanupCamera]);
 
   const handleCapture = () => {
+    triggerHapticFeedback();
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
@@ -76,6 +78,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, o
   };
   
   const handleClose = () => {
+      triggerHapticFeedback();
       cleanupCamera();
       onClose();
   }
