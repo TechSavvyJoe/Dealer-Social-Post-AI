@@ -311,16 +311,6 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                   />
               </div>
               <div className="space-y-3">
-                <button onClick={handleShare} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-teal-500 to-cyan-500 text-white font-bold py-3 px-4 rounded-lg hover:scale-105 transition-all duration-300 shadow-lg">
-                    <Icon type="share"/><span>Share Post</span>
-                </button>
-                <button onClick={handleCopy} className="w-full flex items-center justify-center gap-2 bg-white/10 border border-white/20 text-white font-bold py-2 px-4 rounded-lg hover:bg-white/20 transition-colors">
-                    <Icon type={copied ? 'check' : 'copy'} className="w-5 h-5" />
-                    <span>{copied ? 'Copied!' : 'Copy Text Only'}</span>
-                </button>
-              </div>
-              <div className="border-t border-white/10 my-4"></div>
-              <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                       <button onClick={() => { triggerHapticFeedback(); handleTextAction(onRegenerateText); }} className="flex items-center justify-center gap-2 bg-white/10 border border-white/20 text-white font-bold py-2 px-4 rounded-lg hover:bg-white/20 transition-colors text-sm">
                           <Icon type="regenerate" className="w-4 h-4" /><span>Regenerate</span>
@@ -332,6 +322,16 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                           <Icon type="edit" className="w-4 h-4" /><span>Edit with AI</span>
                       </button>
                   </div>
+              </div>
+              <div className="border-t border-white/10 my-4"></div>
+              <div className="space-y-3">
+                <button onClick={handleShare} className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-teal-500 to-cyan-500 text-white font-bold py-3 px-4 rounded-lg hover:scale-105 transition-all duration-300 shadow-lg">
+                    <Icon type="share"/><span>Share Post</span>
+                </button>
+                <button onClick={handleCopy} className="w-full flex items-center justify-center gap-2 bg-white/10 border border-white/20 text-white font-bold py-2 px-4 rounded-lg hover:bg-white/20 transition-colors">
+                    <Icon type={copied ? 'check' : 'copy'} className="w-5 h-5" />
+                    <span>{copied ? 'Copied!' : 'Copy Text Only'}</span>
+                </button>
               </div>
           </div>
         </div>
