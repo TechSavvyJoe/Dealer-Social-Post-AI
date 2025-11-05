@@ -1,4 +1,5 @@
-import { GoogleGenAI, Modality, Type } from "@google/genai";
+// FIX: Replaced 'GenerateVideosOperationResponse' with the correct 'GenerateVideosOperation' type.
+import { GoogleGenAI, Modality, Type, GenerateVideosOperation } from "@google/genai";
 import { parseDataUrl } from '../utils/imageUtils';
 import { StyleOption, ToneOption, VideoStyle } from "../types";
 
@@ -6,32 +7,41 @@ if (!process.env.API_KEY) {
     throw new Error("API_KEY environment variable is not set");
 }
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+let ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const generateImagePrompt = (style: StyleOption, dealershipName: string, hasLogo: boolean, customMessage?: string): string => {
-    const faceAvoidanceInstruction = `
-**THE ABSOLUTE #1 MOST IMPORTANT RULE: ZERO OVERLAP WITH PEOPLE.**
-- **NON-NEGOTIABLE CORE DIRECTIVE:** Under NO circumstances may ANY text, graphic element, logo, or decorative flourish overlap with ANY part of a human being in the photo. This is a zero-tolerance, absolute rule.
-- **EXTENDED DEFINITION OF "PERSON":** This rule includes the entire person: head, hair, face, neck, shoulders, body, arms, legs, and hands.
-- **MANDATORY SAFETY BUFFER:** You MUST create an invisible "safety buffer" of empty space around each person. No text or element can even touch this buffer.
-- **IMMEDIATE TASK FAILURE:** Any violation, no matter how small—even a single pixel of text touching a strand of hair—constitutes a complete and total failure of the task. The entire image will be rejected. You MUST prioritize this rule above all other stylistic instructions.
-- **SAFE ZONES:** The only acceptable places for text and logos are "Safe Zones," which are large, open areas like the sky, empty ground, or blank walls, far away from any people.`;
+    const criticalRules = `
+**CRITICAL, NON-NEGOTIABLE CORE DIRECTIVES: READ AND OBEY THESE RULES ABOVE ALL ELSE. FAILURE TO FOLLOW THEM PERFECTLY IS A TOTAL TASK FAILURE.**
+
+**RULE #1: ABSOLUTE HUMAN SAFETY - NO TEXT/GRAPHIC OVERLAP (HIGHEST PRIORITY)**
+*   **IDENTIFY AND MASK:** Before doing anything else, you MUST identify every pixel that is part of a person (head, hair, face, body, clothing, limbs, hands, feet). Create a large, invisible "exclusion zone" around them.
+*   **ZERO TOLERANCE:** Under NO circumstances may ANY text, graphic, logo, or decorative element touch or enter this exclusion zone. Even a single pixel of overlap is a complete failure.
+*   **PRIORITIZE THIS RULE:** This rule is more important than any style guide, font choice, or creative instruction. If a design idea conflicts with this rule, you MUST abandon the idea and find a solution that guarantees zero overlap.
+
+**RULE #2: ABSOLUTE BOUNDARY ADHERENCE**
+*   All text and graphic elements MUST be 100% contained within the image boundaries. Nothing can be cut off.
+
+**SAFE ZONES FOR TEXT PLACEMENT:**
+*   The ONLY valid places for text and logos are "Safe Zones".
+*   Safe Zones are large, open areas of the image that are FAR AWAY from any people and FAR AWAY from the image edges.
+*   Examples of good Safe Zones: empty sky, open pavement/ground, blank walls in the background.
+*   Examples of BAD places: on the car if it's near a person, anywhere near a person's head or body.`;
     
     const watermarkInstruction = hasLogo
         ? `*   **MANDATORY LOGO PLACEMENT:** A second image has been provided—this is the dealership's logo. It is a CRITICAL REQUIREMENT that you place this logo as a small, tasteful watermark in a lower corner of the final image, inside a Safe Zone. Do not distort it. Do NOT use the dealership name as a text watermark if the logo image is present. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.**`
         : `*   **WATERMARK:** The dealership name, '${dealershipName}', MUST be used as a text watermark. Use the *exact* spelling provided and place it tastefully in a lower corner within a Safe Zone.`;
 
-    const varietyInstruction = `**CRITICAL CREATIVE MANDATE:** For this specific generation, you MUST create a unique and visually fresh design. Do not default to a standard template. You are a creative designer, so be creative! Experiment with the following elements within the chosen style guide below:
-- **Font Combination:** Choose a unique pair of complementary fonts (one for the main text, one for the sub-text) that fit the selected style.
-- **Color Palette:** Select a dynamic color palette. You should derive the primary colors from the car, the background scene, or the customer's clothing to create a harmonious and professional design.
-- **Text Layout:** Experiment with creative layouts. Consider angled text, stacked words, curved text, or integrating text with the car's lines, while ALWAYS staying in the Safe Zones.
-- **Text Effects:** Apply a unique and tasteful text effect. Examples include a subtle neon glow, a realistic metallic sheen, a bold drop shadow, an elegant outline, or a 3D effect. The goal is to make every post look like a custom, one-of-a-kind design.`;
+    const varietyInstruction = `**CRITICAL CREATIVE MANDATE: VIRAL-WORTHY DESIGN.** Your goal is not just to make a post, but to create a visually stunning, one-of-a-kind piece of art that stops people from scrolling. For this specific generation, you MUST create a completely unique and fresh design. Do not default to a standard template. You are a creative director, so be bold! Experiment with the following elements within the chosen style guide below:
+- **Font Artistry:** Choose a unique pair of complementary fonts that make a statement. Don't just place text; treat it like a design element itself.
+- **Harmonious Color Palette:** Select a dynamic color palette. You MUST derive the primary colors from the car, the background scene, or the customer's clothing to create a professional, harmonious, and striking design.
+- **Dynamic Layout:** Experiment with unconventional layouts. Consider angled text, text that wraps around parts of the car (without touching people), stacked words, or integrating text with the scene's lines, while ALWAYS staying in the Safe Zones.
+- **High-Impact Text Effects:** Apply a unique and tasteful text effect that makes the text 'pop'. Examples include a vibrant neon glow, a realistic 3D metallic sheen, a bold graphic drop shadow, an elegant outline, or text that appears to be part of the environment itself. The goal is to make every post look like a custom, high-end design.`;
 
     const coreInstruction = `Act as a world-class graphic designer with an infallible eye for composition. Your mission is to create a viral-worthy social media post by enhancing a photo and adding text overlays. You have been provided a primary photo of a customer and their car. You may also have been provided a second image which is a company logo.
 
-${faceAvoidanceInstruction}
+${criticalRules}
 
 You must follow this process:
 
@@ -42,9 +52,9 @@ Perform a full, professional-grade photo enhancement on the original image to ma
 *   **COLOR GRADING & POLISH:** Apply a rich, appealing color grade. Add a final touch of sharpening to make details crisp and clear.
 
 **Step 2: INTELLIGENT TEXT OVERLAY (Restricted to Safe Zones)**
-After enhancing the photo, you will add text elements.
+After enhancing the photo, you will add text elements based on the provided instructions.
+*   **ABSOLUTE SPELLING & CONTENT ACCURACY:** The text you add to the image must be spelled *perfectly* and use the *exact* wording provided in the text instructions. DO NOT add, omit, or change any words. Any spelling error is a task failure.
 *   **DYNAMIC COMPOSITION:** Within the Safe Zones, create a dynamic, visually engaging composition based on your Creative Mandate. Use varied angles and creative positioning.
-*   **SPELLING ACCURACY:** The text must be spelled *exactly* as provided.
 *   **3D & REALISM:** When appropriate for the style, render the main text as a bold, chunky, 3D object that casts realistic shadows and reflects the scene's lighting.
 ${watermarkInstruction}`;
     
@@ -100,6 +110,7 @@ ${watermarkInstruction}`;
     }
 
     return `${coreInstruction}
+        ${varietyInstruction}
         ${textInstruction}
         
         **Your assigned style guide for THIS generation is:**
@@ -136,33 +147,34 @@ const generateTextPrompt = (tone: ToneOption, dealershipName: string, customerNa
             break;
     }
     
-    const regenerationInstruction = isRegeneration ? "You are generating a NEW version of a caption. It MUST be different from the previous one. Be creative and come up with a fresh angle." : "";
+    const regenerationInstruction = isRegeneration ? "CRITICAL: The user is asking for a new version. This caption MUST be different from any previous one you've generated. Use a fresh angle." : "";
 
-    return `You are a creative social media manager for a car dealership. Your task is to write a compelling and varied social media post caption based on an image of a happy customer with their new car.
-${regenerationInstruction}
+    return `You are an expert social media copywriter and viral marketing strategist for a car dealership. Your task is to write a short, vibrant, and highly engaging caption for the provided photo that will stop people from scrolling.
 
-**Image Analysis:**
-First, analyze the provided image to identify the car's make, model, and approximate year.
+**ABSOLUTE, NON-NEGOTIABLE REQUIREMENTS:**
+1.  **DEEP IMAGE ANALYSIS:** This is your most important task. Meticulously analyze the provided photo to identify:
+    *   **The exact car:** Make, model, and estimated year (e.g., Ford Mustang GT, Toyota RAV4 Hybrid).
+    *   **The car's characteristics:** Color, type (SUV, sedan, truck, sports car), and any visible special features.
+    *   **The scene's vibe:** Is it a family, a solo adventurer, a first-time car owner? Is the background urban, suburban, sunny, etc.?
+2.  **GENERATE A COMPLETE POST:** You MUST write a complete social media post (2-4 sentences), NOT just hashtags or a single sentence.
+3.  **USE EMOJIS:** You MUST strategically use 2-4 relevant emojis to add personality and visual appeal.
+4.  **FORMAT:** Your entire response must ONLY be the social media post text itself. Do not include preambles like "Here is your post...".
 
-**Core Information:**
-- ${nameInfo}
-- Our dealership is named '${dealershipName}'.
+**POST STRUCTURE:**
+1.  **The Hook:** Start with a high-energy, scroll-stopping opening line. Congratulate the customer. ${nameInfo}
+2.  **The Story:** Briefly mention the specific car you identified. Connect it to the 'vibe' of the photo. (e.g., "Ready for family adventures in their new SUV!" or "Ready to cruise in style in this sleek black sedan!").
+3.  **Call to Action (CTA):** End with a friendly invitation for others to find their dream car at '${dealershipName}'.
+4.  **Strategic Hashtags:** This is CRITICAL. Finish with a block of 5-7 hyper-relevant and popular hashtags. These MUST be derived from your deep image analysis.
+    *   **Required:** Include #${dealershipName.replace(/\s/g, '')} and #NewCar.
+    *   **Analysis-Based:** Include hashtags for the car brand, model, type, and color (e.g., #FordMustang, #MustangGT, #SUVLife, #BlueCar).
+    *   **Vibe-Based:** Add hashtags that match the scene's feeling (e.g., #HappyCustomer, #FirstCar, #FamilyAdventure, #DreamCar).
+
+**TONE:**
+- The required tone is: **${tone}**.
 - ${toneInstruction}
+- ${regenerationInstruction}
 
-**CREATIVE WRITING INSTRUCTIONS:**
-You MUST make each post unique. Do not use repetitive phrasing.
-1.  **Unique Opening Hook:** Start the post with an engaging opening line. DO NOT use the same one every time.
-    *   *Examples:* "And just like that, another dream car hits the road!", "From our showroom to their driveway! Huge congratulations to ${customerName || 'our newest customer'}!", "It's more than a car, it's a new chapter! We're so thrilled for...", "That new car feeling is unbeatable! We were so excited to help ${customerName || 'our latest happy customer'} get the keys to this beauty.", "Putting smiles on miles! Check out ${customerName || 'our latest happy customer'} with their incredible new ride."
-2.  **Varied Call-to-Action (CTA):** Your call-to-action at the end should also be varied.
-    *   *Examples:* "Who's next? Come find your perfect ride!", "Ready for an upgrade? Your dream car is waiting for you at ${dealershipName}!", "Experience the ${dealershipName} difference for yourself. Visit us today!", "Want a dealership experience this good? You know where to find us!"
-3.  **Engage with a Question:** When appropriate for the tone, consider ending with a question to encourage comments.
-    *   *Examples:* "What's the first road trip you'd take in this?", "What do you love most about this model?", "Let us know in the comments what you think of this color!"
-
-**Task:**
-Craft the social media post. Keep the caption concise and punchy, ideally 2-3 sentences plus hashtags. The goal is maximum engagement on platforms with character limits. Include details about the car you identified. Congratulate the customer. End with a strong CTA and relevant hashtags. The hashtags should include #NewCar, #HappyCustomer, #${dealershipName.replace(/\s/g, '')}, and specific hashtags for the car's make and model.
-
-**Output Format:**
-Your entire response must ONLY be the social media post text itself. Do not include any introductory phrases like "Here is a social media post..." or "Sure, here's a post...". The response should be ready to be copied and pasted directly.`;
+Now, write the eye-catching post.`;
 }
 
 const cleanGeneratedText = (inputText: string): string => {
@@ -191,12 +203,22 @@ export const generateFunSocialPostImage = async (
     const { mimeType, data: base64Data } = parseDataUrl(originalImageBase64Url);
     const originalImagePart = { inlineData: { mimeType, data: base64Data } };
 
-    const faceAvoidanceInstruction = `
-**THE ABSOLUTE #1 MOST IMPORTANT RULE: ZERO OVERLAP WITH PEOPLE.**
-- **NON-NEGOTIABLE CORE DIRECTIVE:** Under NO circumstances may ANY text, graphic element, logo, or decorative flourish overlap with ANY part of a human being in the photo. This is a zero-tolerance, absolute rule.
-- **EXTENDED DEFINITION OF "PERSON":** This rule includes the entire person: head, hair, face, neck, shoulders, body, arms, legs, and hands.
-- **MANDATORY SAFETY BUFFER:** You MUST create an invisible "safety buffer" of empty space around each person. No text or element can even touch this buffer.
-- **IMMEDIATE TASK FAILURE:** Any violation, no matter how small—even a single pixel of text touching a strand of hair—constitutes a complete and total failure of the task. The entire image will be rejected. You MUST prioritize this rule above all other stylistic instructions.`;
+    const criticalRules = `
+**CRITICAL, NON-NEGOTIABLE CORE DIRECTIVES: READ AND OBEY THESE RULES ABOVE ALL ELSE. FAILURE TO FOLLOW THEM PERFECTLY IS A TOTAL TASK FAILURE.**
+
+**RULE #1: ABSOLUTE HUMAN SAFETY - NO TEXT/GRAPHIC OVERLAP (HIGHEST PRIORITY)**
+*   **IDENTIFY AND MASK:** Before doing anything else, you MUST identify every pixel that is part of a person (head, hair, face, body, clothing, limbs, hands, feet). Create a large, invisible "exclusion zone" around them.
+*   **ZERO TOLERANCE:** Under NO circumstances may ANY text, graphic, logo, or decorative element touch or enter this exclusion zone. Even a single pixel of overlap is a complete failure.
+*   **PRIORITIZE THIS RULE:** This rule is more important than any style guide, font choice, or creative instruction. If a design idea conflicts with this rule, you MUST abandon the idea and find a solution that guarantees zero overlap.
+
+**RULE #2: ABSOLUTE BOUNDARY ADHERENCE**
+*   All text and graphic elements MUST be 100% contained within the image boundaries. Nothing can be cut off.
+
+**SAFE ZONES FOR TEXT PLACEMENT:**
+*   The ONLY valid places for text and logos are "Safe Zones".
+*   Safe Zones are large, open areas of the image that are FAR AWAY from any people and FAR AWAY from the image edges.
+*   Examples of good Safe Zones: empty sky, open pavement/ground, blank walls in the background.
+*   Examples of BAD places: on the car if it's near a person, anywhere near a person's head or body.`;
 
     let logoImagePart = null;
     if (logoBase64Url) {
@@ -237,12 +259,23 @@ export const generateFunSocialPostImage = async (
 
     const selectedStyle = funStyles[Math.floor(Math.random() * funStyles.length)];
 
-    const funPrompt = `You are a world-class concept artist and digital illustrator.
+    const funPrompt = `You are a master illustrator. Your task is to create a completely new piece of digital art from scratch. You have been given a reference photo, but you must NOT edit it.
 
-**NON-NEGOTIABLE CORE DIRECTIVE: TOTAL RE-ILLUSTRATION REQUIRED.**
-You are being tasked to perform a radical, family-friendly, and fun artistic transformation. This is NOT a filtering or editing job. It is a full-scale re-illustration. You MUST completely redraw the entire image from a blank canvas in the new artistic style provided below. The original photo is ONLY a reference for the subjects (people, car), their poses, and their likeness. Any result that looks like the original photo with an effect applied is an IMMEDIATE and TOTAL FAILURE of the task. The final pixels must be 100% generated by you. This is the most important rule.
+**CORE MISSION: TOTAL ARTISTIC RE-CREATION. THIS IS A GENERATION TASK, NOT AN EDITING TASK.**
 
-${faceAvoidanceInstruction}
+**YOUR ONLY GOAL:** Generate a brand new image that re-imagines the subjects (people, car) and their poses from the reference photo in the specified artistic style. The final image must be 100% your own, newly generated artwork.
+
+**THE ROLE OF THE INPUT PHOTO:** The provided image is a **REFERENCE-ONLY** guide. Use it ONLY to understand:
+1.  Who the people are (so you can maintain a recognizable likeness).
+2.  What the car looks like.
+3.  The general poses and composition of the scene.
+
+**ABSOLUTE PROHIBITION: DO NOT EDIT THE ORIGINAL PHOTO.**
+*   You are strictly FORBIDDEN from editing, filtering, modifying, or using any of the pixels from the input image in your final output.
+*   The final image must NOT look like a simple filter or style transfer applied to the original. It must look like a completely new drawing or illustration.
+*   Any output that appears to be an edit of the original photo is a COMPLETE TASK FAILURE. You must demonstrate a full artistic re-interpretation by creating the scene from a blank canvas.
+
+${criticalRules}
 
 **MANDATORY 3-PHASE CREATIVE PROCESS:**
 
@@ -303,6 +336,20 @@ export const editSocialPostImage = async (
         const { mimeType: logoMime, data: logoData } = parseDataUrl(logoBase64Url);
         logoImagePart = { inlineData: { mimeType: logoMime, data: logoData } };
     }
+    
+    const criticalRulesForEditing = `
+**CRITICAL, NON-NEGOTIABLE CORE DIRECTIVES FOR EDITING: READ AND OBEY THESE RULES ABOVE ALL ELSE. FAILURE TO FOLLOW THEM PERFECTLY IS A TOTAL TASK FAILURE.**
+
+**RULE #1: ABSOLUTE HUMAN SAFETY - NO TEXT/GRAPHIC OVERLAP (HIGHEST PRIORITY)**
+*   Your highest priority is to follow the user's edit request *without* placing any new text or elements over any part of the people in the photo.
+*   **IDENTIFY AND MASK:** Before doing anything else, you MUST identify every pixel that is part of a person (head, hair, face, body, clothing, limbs, hands, feet). Create a large, invisible "exclusion zone" around them.
+*   **ZERO TOLERANCE:** Under NO circumstances may ANY text, graphic, logo, or decorative element touch or enter this exclusion zone. This is a non-negotiable, zero-tolerance rule. Any violation is a task failure.
+
+**RULE #2: ABSOLUTE BOUNDARY ADHERENCE**
+*   All text and graphic elements you add or modify MUST be 100% contained within the visible boundaries of the image. Nothing can be cropped or cut off by the edge.
+
+**SAFE ZONES FOR TEXT PLACEMENT:**
+*   The ONLY valid places for text and logos are "Safe Zones"—large, open areas far away from people and edges (e.g., empty sky, open ground, blank walls).`;
 
     const watermarkInstruction = logoBase64Url
         ? `A dealership logo has been provided as a second image. It is a CRITICAL REQUIREMENT to ensure this logo is present and tastefully placed in a corner of the final edited image. Do not distort it. If the logo was missing from the original image, you MUST add it now. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.**`
@@ -310,17 +357,16 @@ export const editSocialPostImage = async (
 
     const editInstruction = `Act as a world-class photo editor and graphic designer. You have been provided an image that was previously generated for a social media post. The user wants you to make specific edits.
 
-    **THE ABSOLUTE #1 MOST IMPORTANT RULE: ZERO OVERLAP WITH PEOPLE.**
-    - Your highest priority is to follow the user's edit request *without* placing any new text or elements over any part of the people in the photo. 
-    - This is a non-negotiable, zero-tolerance rule that includes their heads, faces, hair, and bodies. Any violation is a task failure.
+${criticalRulesForEditing}
 
     **USER'S EDIT REQUEST:** "${editPrompt}"
 
     **YOUR TASK:**
     1.  Carefully analyze the user's request.
-    2.  Apply the requested changes to the provided image, strictly following the "ZERO OVERLAP" rule above.
+    2.  Apply the requested changes to the provided image, strictly following the Core Directives above.
     3.  **MAINTAIN QUALITY:** Ensure the final image is high-resolution and looks professional.
     4.  **WATERMARK/LOGO:** ${watermarkInstruction}
+    5.  **PERFECT WORDING:** If the user asks to change or add text, you MUST use the exact spelling and wording they provide. Do not add, omit, or change any words from their request.
 
     The final output must be only the edited image.`;
 
@@ -359,10 +405,11 @@ export const generateSocialPostText = async (
     tone: ToneOption,
     dealershipName: string,
     customerName?: string,
+    isRegeneration = false,
 ): Promise<string> => {
     const { mimeType, data: base64Data } = parseDataUrl(imageBase64Url);
     const imagePart = { inlineData: { mimeType, data: base64Data } };
-    const textPrompt = generateTextPrompt(tone, dealershipName, customerName, true);
+    const textPrompt = generateTextPrompt(tone, dealershipName, customerName, isRegeneration);
 
     const textResponse = await ai.models.generateContent({
         model: 'gemini-2.5-pro',
@@ -471,73 +518,88 @@ export const generateSocialPost = async (
     return { image: newImageBase64, text: textResult };
 };
 
-export const generateAnimatedPost = async (
-    imageBase64Url: string,
-    style: VideoStyle,
-): Promise<string> => {
-    // Per guideline: Create a new GoogleGenAI instance right before making a VEO API call
-    // to ensure it always uses the most up-to-date API key from the selection dialog.
-    const videoAi = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const generateVideoPrompt = (style: VideoStyle): string => {
+    const coreInstruction = "You are an AI motion graphics artist. You are given a static image of a person or people celebrating their new car. Your task is to transform this image into a short, dynamic, 4-second video clip. Do not change the subjects in the image; only add animation and effects based on the chosen theme.";
+
+    let styleInstruction = "";
+    switch(style) {
+        case VideoStyle.EpicReveal:
+            styleInstruction = "Theme: 'Epic Reveal'. Animate the image with a very slow, smooth cinematic zoom-in effect, focusing on the car and the happy customers. Add subtle, elegant lens flares that sweep across the screen. Introduce gentle, glowing light rays that emanate from behind the car. The overall mood should be premium, celebratory, and awe-inspiring.";
+            break;
+        case VideoStyle.PartyTime:
+            styleInstruction = "Theme: 'Party Time'. Create a high-energy, celebratory video. Animate colorful, realistic confetti and streamers falling all around the scene. Add a subtle, rhythmic 'pulse' or 'bounce' to the image to give it a fun, party vibe. The motion should be upbeat and exciting.";
+            break;
+        case VideoStyle.VintageFilm:
+            styleInstruction = "Theme: 'Vintage Film'. Give the video a nostalgic, retro 8mm or 16mm film look. Add a noticeable film grain overlay, subtle scratches, and dust specks. Create a gentle, slightly unsteady 'camera shake' effect. Incorporate warm-toned light leaks that occasionally flash in from the sides of the frame.";
+            break;
+        case VideoStyle.NeonPulse:
+            styleInstruction = "Theme: 'Neon Pulse'. Transform the scene with a futuristic, high-tech aesthetic. Trace the main contours of the car and people with thin, glowing neon lines. Make these lines pulse rhythmically with a soft glow. Add a subtle 'glitch' or 'scan line' effect over the video for a digital feel. The mood is cool, modern, and electronic.";
+            break;
+        case VideoStyle.CometStrike:
+            styleInstruction = "Theme: 'Comet Strike'. Create a magical and enchanting reveal. Animate a bright, sparkling streak of light, like a comet's tail, that gracefully swoops across the screen, revealing the image as it passes. The comet should leave a trail of glittering particles that gently fade away. The overall feel is magical, wondrous, and special.";
+            break;
+    }
+    return `${coreInstruction} ${styleInstruction}`;
+}
+
+const getImageDimensions = (dataUrl: string): Promise<{width: number, height: number}> => {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            resolve({ width: img.width, height: img.height });
+        };
+        img.onerror = () => {
+            reject(new Error("Could not load image to determine dimensions."));
+        }
+        img.src = dataUrl;
+    });
+};
+
+export const generatePostVideo = async (imageBase64Url: string, style: VideoStyle): Promise<string> => {
+    // Re-initialize 'ai' instance just before the call to ensure the latest key is used.
+    ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
     const { mimeType, data: base64Data } = parseDataUrl(imageBase64Url);
-    
-    const videoPrompts: Record<VideoStyle, { name: string; prompt: string; }> = {
-        [VideoStyle.EpicReveal]: {
-            name: "Epic Reveal",
-            prompt: "Create an ultra-luxurious, cinematic 4-second video reveal. The camera starts with a close-up and performs a slow, elegant dolly zoom backward. As it zooms, animate subtle, brilliant light glints sweeping across the car's bodywork and chrome. High-quality, anamorphic lens flares should gracefully wipe across the screen. The person in the photo should have a subtle animation, like a slow, proud smile forming. The 'Congratulations' text fades in smoothly with a soft glow. The final shot must feel prestigious, awe-inspiring, and worthy of a high-end car commercial.",
-        },
-        [VideoStyle.PartyTime]: {
-            name: "Party Time",
-            prompt: "Generate an explosive, high-energy 4-second celebratory video. Animate the people into a joyful jump or cheer. As they do, trigger a vibrant burst of multi-colored, metallic, slow-motion confetti that fills the air. The camera should perform a quick, energetic 'punch-in' zoom and have a very slight celebratory shake. The 'Congratulations' text should bounce into frame with a playful, springy animation. The entire video must feel like an exhilarating, fun-filled party moment.",
-        },
-        [VideoStyle.VintageFilm]: {
-            name: "Vintage Film",
-            prompt: "Produce an authentic, nostalgic 4-second video with a Super 8mm vintage film aesthetic. The colors must be warm and desaturated. The video should feature realistic film grain, a subtle vignette, soft focus, and occasional light leaks flickering from the edges. Animate a slight 'film gate weave' and a gentle, hand-cranked camera jitter. The text on the image should flicker subtly, as if part of the original film projection. The mood should be warm, timeless, and deeply nostalgic.",
-        },
-        [VideoStyle.NeonPulse]: {
-            name: "Neon Pulse",
-            prompt: "Create a slick, high-tech 4-second animation with a cyberpunk aesthetic. Animate vibrant neon lines that trace the car's contours, pulsing in sync with an imagined electronic beat. The ground should be reflective, as if rain-slicked, mirroring the neon glow. The text on the image should animate as if it's a flickering, holographic sign. The background should have a subtle digital glitch effect. The overall mood must be cool, futuristic, and stylish.",
-        },
-        [VideoStyle.CometStrike]: {
-            name: "Comet Strike",
-            prompt: "Generate a magical and enchanting 4-second video. Animate a brilliant comet of light, with a trail of sparkling, ethereal particles, arcing across the screen. The comet's color should complement the car's color. As the comet passes, it should magically animate the people to wave happily. The camera should pan slightly to follow the comet's path. The 'Congratulations' text should materialize with a beautiful sparkle effect, leaving a faint, lingering magical glow. The scene should feel wondrous and eye-catching.",
-        }
-    };
+    const image = { imageBytes: base64Data, mimeType };
+    const prompt = generateVideoPrompt(style);
 
-    const selectedPrompt = videoPrompts[style].prompt;
-    
-    let operation = await videoAi.models.generateVideos({
+    const { width, height } = await getImageDimensions(imageBase64Url);
+    const aspectRatio = width > height ? '16:9' : '9:16';
+
+    // FIX: Replaced deprecated 'GenerateVideosOperationResponse' with 'GenerateVideosOperation' to align with the latest SDK.
+    let operation: GenerateVideosOperation = await ai.models.generateVideos({
         model: 'veo-3.1-fast-generate-preview',
-        prompt: selectedPrompt,
-        image: {
-            imageBytes: base64Data,
-            mimeType: mimeType,
-        },
+        prompt: prompt,
+        image: image,
         config: {
             numberOfVideos: 1,
             resolution: '720p',
-            aspectRatio: '1:1'
+            aspectRatio: aspectRatio
         }
     });
 
     while (!operation.done) {
-        await sleep(5000); // Poll every 5 seconds for faster status updates
-        operation = await videoAi.operations.getVideosOperation({ operation: operation });
+        await new Promise(resolve => setTimeout(resolve, 10000)); // Poll every 10 seconds
+        operation = await ai.operations.getVideosOperation({ operation: operation });
+    }
+
+    if (operation.error) {
+        throw new Error(`Video generation failed: ${operation.error.message}`);
     }
 
     const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
-    if (!downloadLink) {
-        throw new Error("Video generation completed, but no download link was found.");
-    }
 
-    // Per guideline: The download link requires the API key to be appended for authorization.
-    const videoResponse = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
-    if (!videoResponse.ok) {
-        throw new Error(`Failed to download the generated video. Status: ${videoResponse.statusText}`);
+    if (!downloadLink) {
+        throw new Error("Video generation succeeded, but no download link was provided.");
     }
     
-    const videoBlob = await videoResponse.blob();
-    const videoObjectUrl = URL.createObjectURL(videoBlob);
-    
-    return videoObjectUrl;
-};
+    // Fetch the video as a blob and create a local URL.
+    // This avoids needing the API key on the client-side for the video src tag.
+    const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
+    if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Failed to download the generated video. Status: ${response.status}. Body: ${errorBody}`);
+    }
+    const videoBlob = await response.blob();
+    return URL.createObjectURL(videoBlob);
+}

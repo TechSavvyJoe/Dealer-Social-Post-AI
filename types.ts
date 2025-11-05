@@ -1,9 +1,10 @@
 export enum AppStep {
-  WELCOME,
+  LOGIN,
   CAPTURE,
   CUSTOMIZE,
   GENERATING,
   RESULT,
+  ADMIN,
 }
 
 export enum StyleOption {
@@ -22,6 +23,7 @@ export enum ToneOption {
   Urgent = "Urgent/Promotional",
 }
 
+// FIX: Added the VideoStyle enum to resolve the export error.
 export enum VideoStyle {
   EpicReveal = "Epic Reveal",
   PartyTime = "Party Time",
@@ -44,4 +46,18 @@ export interface TemplateOption {
   id: string;
   name: string;
   content: string;
+}
+
+// New types for the database and user authentication
+export interface Dealer {
+  id: string; // unique identifier
+  name: string;
+  logo?: string; // base64 data URL
+}
+
+// FIX: Added User interface to resolve import error in UserModal.tsx.
+export interface User {
+  id: string; // unique identifier, phone number
+  name: string;
+  dealerId: string;
 }

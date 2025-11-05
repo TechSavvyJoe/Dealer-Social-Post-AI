@@ -7,11 +7,31 @@ interface WebcamCaptureProps {
   onClose: () => void;
 }
 
+type Orientation = 'portrait' | 'landscape';
+
 export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, onClose }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [orientation, setOrientation] = useState<Orientation>('landscape');
+
+  // Effect to detect and update screen orientation
+  useEffect(() => {
+    const getOrientation = (): Orientation => window.innerHeight > window.innerWidth ? 'portrait' : 'landscape';
+    
+    setOrientation(getOrientation());
+
+    const handleOrientationChange = () => {
+      setOrientation(getOrientation());
+    };
+
+    window.addEventListener('resize', handleOrientationChange);
+    
+    return () => {
+      window.removeEventListener('resize', handleOrientationChange);
+    };
+  }, []);
 
   const cleanupCamera = useCallback(() => {
     if (streamRef.current) {
@@ -20,6 +40,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, o
     }
   }, []);
 
+  // Effect to initialize and restart the camera when orientation changes
   useEffect(() => {
     const startCamera = async () => {
       cleanupCamera();
@@ -28,13 +49,30 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, o
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
           throw new Error('Webcam access is not supported by your browser.');
         }
-        const stream = await navigator.mediaDevices.getUserMedia({ 
+
+        const isPortrait = orientation === 'portrait';
+        const idealWidth = isPortrait ? 1080 : 1920;
+        const idealHeight = isPortrait ? 1920 : 1080;
+
+        // More advanced constraints to get the best possible picture quality
+        const constraints: MediaStreamConstraints = { 
+            // FIX: Cast to 'any' to allow experimental properties 'focusMode', 'exposureMode', and 'whiteBalanceMode' 
+            // which are not present in the default TypeScript DOM library definitions, thus avoiding type errors.
             video: { 
-                width: { ideal: 1920 }, 
-                height: { ideal: 1080 },
-                facingMode: 'environment' 
-            } 
-        });
+                width: { ideal: idealWidth }, 
+                height: { ideal: idealHeight },
+                facingMode: 'environment',
+                // Request advanced features for better quality.
+                // Using 'advanced' makes them optional, preventing errors on unsupported devices.
+                advanced: [
+                  { focusMode: 'continuous' },
+                  { exposureMode: 'continuous' },
+                  { whiteBalanceMode: 'continuous' }
+                ]
+            } as any
+        };
+        
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -47,6 +85,8 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, o
                 message = "Webcam access was denied. Please enable it in your browser settings.";
             } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
                 message = "No webcam was found. Please ensure one is connected and enabled.";
+            } else if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
+                message = "Your camera does not support the required resolution or features. Please try a different device.";
             }
         }
         setError(message);
@@ -58,7 +98,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, o
     return () => {
       cleanupCamera();
     };
-  }, [cleanupCamera]);
+  }, [cleanupCamera, orientation]);
 
   const handleCapture = () => {
     triggerHapticFeedback();
@@ -95,10 +135,13 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, o
     );
   }
 
+  // Determine aspect ratio for the container. Using Tailwind's arbitrary values feature for portrait.
+  const aspectRatioClass = orientation === 'portrait' ? 'aspect-[9/16]' : 'aspect-video';
+
   return (
     <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-sm flex flex-col items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="webcam-title">
         <h2 id="webcam-title" className="sr-only">Webcam Capture</h2>
-        <div className="relative w-full max-w-4xl aspect-video bg-black rounded-lg overflow-hidden shadow-2xl border-2 border-white/10">
+        <div className={`relative w-full max-w-4xl ${aspectRatioClass} bg-black rounded-lg overflow-hidden shadow-2xl border-2 border-white/10`}>
             <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" aria-label="Live webcam feed" />
             <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
         </div>

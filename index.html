@@ -23,10 +23,49 @@
     font-family: 'Poppins', sans-serif;
     background-color: #020617; /* slate-950 */
     overflow: hidden; /* Prevent body scroll during animations */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 1rem;
   }
 
   main {
     overflow-y: auto;
+  }
+
+  .app-container {
+      width: 100%;
+      height: 100%;
+      max-width: 428px;
+      max-height: 95vh;
+      background-color: #020617;
+      border-radius: 36px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 0 80px rgba(79, 70, 229, 0.2);
+      overflow: hidden;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+  }
+
+  #root {
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+  }
+
+  @media (max-width: 480px), (max-height: 800px) {
+      body {
+          padding: 0;
+      }
+      .app-container {
+          max-width: 100%;
+          max-height: 100vh;
+          border-radius: 0;
+          border: none;
+          box-shadow: none;
+      }
   }
 
   /* Custom Scrollbar */
@@ -105,7 +144,9 @@
 </head>
   <body>
     <div class="aurora-background"></div>
-    <div id="root"></div>
+    <div class="app-container">
+      <div id="root"></div>
+    </div>
     <script type="module" src="/index.tsx"></script>
   </body>
 </html>
