@@ -21,57 +21,48 @@ interface PostCustomizerProps {
   isDesktopLayout: boolean;
 }
 
-interface StylePreviewMeta {
+interface StyleGuideMeta {
   subtitle: string;
-  gradient: string;
-  tip: string;
-  headline: string;
-  tagline: string;
-  badgeClass: string;
-  headlineClass: string;
-  taglineClass: string;
+  talkingPoints: string[];
+  aiHint: string;
 }
 
-const STYLE_PREVIEWS: Record<StyleOption, StylePreviewMeta> = {
+const STYLE_GUIDES: Record<StyleOption, StyleGuideMeta> = {
   [StyleOption.Luxury]: {
     subtitle: 'Polished metallic typography with rich gold highlights.',
-    gradient: 'from-amber-500/90 via-yellow-400/85 to-orange-300/90',
-    tip: 'Perfect for premium deliveries and luxury vehicles.',
-    headline: 'Crowned Arrival',
-    tagline: 'Your luxury drive awaits.',
-    badgeClass: 'bg-white/25 text-slate-900 font-semibold',
-    headlineClass: 'text-slate-900 font-bold drop-shadow-sm',
-    taglineClass: 'text-slate-900/80',
+    talkingPoints: [
+      'Think upscale magazine spreads and premium concierge vibes.',
+      'Use refined serif typography and generous negative space.',
+      'Lean into champagne, onyx, and warm spotlight accents.',
+    ],
+    aiHint: 'Deliver a luxurious, editorial layout with elevated metallic detailing and intimate spotlighting.',
   },
   [StyleOption.Modern]: {
     subtitle: 'Bold geometrics with crisp lighting and high contrast.',
-    gradient: 'from-indigo-500 via-purple-500 to-pink-500',
-    tip: 'Works well for electric vehicles or tech-forward messaging.',
-    headline: 'Future Ready',
-    tagline: 'Bold moves start today.',
-    badgeClass: 'bg-white/20 text-white',
-    headlineClass: 'text-white font-bold drop-shadow',
-    taglineClass: 'text-white/85',
+    talkingPoints: [
+      'Inspired by tech keynote splash screens and futurist posters.',
+      'Pair punchy sans-serifs with diagonal cuts and modular grids.',
+      'Play with neon glows, deep shadows, and asymmetry.',
+    ],
+    aiHint: 'Create an avant-garde, high-contrast composition with geometric overlays and futuristic motion cues.',
   },
   [StyleOption.Friendly]: {
     subtitle: 'Rounded lettering, warm tones, and playful stickers.',
-    gradient: 'from-rose-400 via-orange-400 to-amber-300',
-    tip: 'Ideal for family-focused stories and first-car celebrations.',
-    headline: 'Keys to Joy',
-    tagline: 'Say hello to happy miles.',
-    badgeClass: 'bg-white/20 text-white font-semibold',
-    headlineClass: 'text-white font-bold drop-shadow',
-    taglineClass: 'text-white/85',
+    talkingPoints: [
+      'Channel illustrated scrapbooks and joyful community boards.',
+      'Use handwritten or bubbly fonts with sticker-like callouts.',
+      'Include confetti, playful doodles, and warm sunshine palettes.',
+    ],
+    aiHint: 'Deliver a cheerful, handcrafted layout with sticker motifs, warm colors, and lively motion.',
   },
   [StyleOption.Sporty]: {
     subtitle: 'Dynamic angles with motion streaks and neon highlights.',
-    gradient: 'from-sky-500 via-blue-500 to-violet-600',
-    tip: 'Use to spotlight performance trims or racing-inspired features.',
-    headline: 'Full Throttle',
-    tagline: 'Built to chase every horizon.',
-    badgeClass: 'bg-white/15 text-white uppercase tracking-wide',
-    headlineClass: 'text-white font-bold drop-shadow',
-    taglineClass: 'text-white/85',
+    talkingPoints: [
+      'Reference racing posters and performance car commercials.',
+      'Tilt typography, add motion blur, and spotlight velocity.',
+      'Electric blues, reds, and neon accents keep energy high.',
+    ],
+    aiHint: 'Produce an aggressive, high-energy layout bursting with motion trails, angled type, and glowing accents.',
   },
 };
 
@@ -96,11 +87,10 @@ interface StyleCardProps {
   option: StyleOption;
   current: StyleOption;
   onSelect: (option: StyleOption) => void;
-  dealershipName: string;
 }
 
-const StyleCard: React.FC<StyleCardProps> = ({ option, current, onSelect, dealershipName }) => {
-  const meta = STYLE_PREVIEWS[option];
+const StyleCard: React.FC<StyleCardProps> = ({ option, current, onSelect }) => {
+  const meta = STYLE_GUIDES[option];
   const isActive = option === current;
 
   return (
@@ -110,20 +100,23 @@ const StyleCard: React.FC<StyleCardProps> = ({ option, current, onSelect, dealer
         onSelect(option);
       }}
       className={`group flex flex-col gap-3 rounded-2xl border px-4 py-5 text-left transition-all duration-200 ${
-        isActive ? 'border-indigo-400 bg-indigo-500/20 shadow-lg shadow-indigo-500/30' : 'border-white/10 bg-white/5 hover:border-indigo-400/70 hover:bg-white/10'
+        isActive ? 'border-indigo-400 bg-white/10 shadow-lg shadow-indigo-500/30' : 'border-white/10 bg-white/5 hover:border-indigo-400/70 hover:bg-white/10'
       }`}
     >
-      <div className={`relative h-28 w-full rounded-xl bg-gradient-to-r ${meta.gradient} opacity-95 group-hover:opacity-100 transition-all overflow-hidden shadow-inner`}> 
-        <span className={`absolute left-3 top-3 text-[10px] uppercase px-2 py-1 rounded-full ${meta.badgeClass}`}>{dealershipName}</span>
-        <span className={`absolute left-3 right-3 bottom-10 ${meta.headlineClass} text-sm`}>{meta.headline}</span>
-        <span className={`absolute left-3 right-3 bottom-3 text-[11px] ${meta.taglineClass}`}>{meta.tagline}</span>
-      </div>
-      <div className="space-y-1">
+      <div className="space-y-2">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-white">{option}</span>
           {isActive && <Badge variant="success">Selected</Badge>}
         </div>
         <p className="text-xs text-indigo-100/80 leading-relaxed">{meta.subtitle}</p>
+        <ul className="space-y-1 text-[11px] text-indigo-100/70">
+          {meta.talkingPoints.map(point => (
+            <li key={point} className="flex gap-2">
+              <span className="mt-1 block h-1 w-1 rounded-full bg-indigo-400"></span>
+              <span>{point}</span>
+            </li>
+          ))}
+        </ul>
       </div>
     </button>
   );
@@ -203,10 +196,22 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     }
   }, [templateOptions, selectedTemplateId]);
 
+  const selectedStyleGuide = STYLE_GUIDES[style];
+
   const handleGenerate = useCallback(() => {
     triggerHapticFeedback();
     let preparedText: string | undefined;
     let creativeBrief: string | undefined;
+
+    const styleBriefSections: string[] = [];
+    if (selectedStyleGuide) {
+      styleBriefSections.push(`Design DNA: ${selectedStyleGuide.aiHint}`);
+      if (selectedStyleGuide.talkingPoints.length > 0) {
+        styleBriefSections.push('Execution pillars:');
+        styleBriefSections.push(...selectedStyleGuide.talkingPoints.map((point) => `- ${point}`));
+      }
+    }
+    const baseStyleBrief = styleBriefSections.join('\n');
 
     if (captionSource === 'template') {
       const template = templateOptions.find((tpl) => tpl.id === selectedTemplateId);
@@ -215,27 +220,28 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           .replace(/\[Customer Name\]/g, customerName.trim() || 'our amazing customer')
           .replace(/\[Dealership Name\]/g, dealershipName);
       }
+      creativeBrief = baseStyleBrief || undefined;
     } else if (captionSource === 'custom') {
       preparedText = customMessage.trim() || undefined;
+      creativeBrief = baseStyleBrief || undefined;
     } else if (captionSource === 'prompted') {
-      creativeBrief = aiPrompt.trim() || undefined;
+      const userPrompt = aiPrompt.trim();
+      creativeBrief = [baseStyleBrief, userPrompt ? `Custom prompt: ${userPrompt}` : undefined]
+        .filter(Boolean)
+        .join('\n\n') || undefined;
     } else {
       const flavor = AI_FLAVORS.find((flavor) => flavor.id === aiFlavor);
-      creativeBrief = flavor?.description;
+      creativeBrief = [baseStyleBrief, flavor ? `AI storytelling focus: ${flavor.description}` : undefined]
+        .filter(Boolean)
+        .join('\n\n') || undefined;
     }
 
     onGenerate(style, tone, customerName, preparedText, creativeBrief);
-  }, [captionSource, tone, style, customerName, customMessage, dealershipName, onGenerate, selectedTemplateId, templateOptions, aiPrompt, aiFlavor]);
-
-  const layoutClasses = isDesktopLayout
-    ? 'grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] gap-8'
-    : 'grid-cols-1 gap-6';
-
-  const selectedStyleMeta = STYLE_PREVIEWS[style];
+  }, [captionSource, tone, style, customerName, customMessage, dealershipName, onGenerate, selectedTemplateId, templateOptions, aiPrompt, aiFlavor, selectedStyleGuide]);
 
   return (
-    <div className={`grid w-full max-w-screen-2xl mx-auto px-1 sm:px-0 ${layoutClasses}`}>
-      <Card className={`order-2 lg:order-1 ${isDesktopLayout ? 'h-full' : ''}`}>
+    <div className="w-full max-w-6xl mx-auto px-1 sm:px-0">
+      <Card className="overflow-hidden">
         <CardHeader className="flex items-center justify-between">
           <div>
             <CardTitle>Customize the Experience</CardTitle>
@@ -250,187 +256,193 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           </Tooltip>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="grid gap-4">
-            <label className="flex flex-col gap-2">
-              <span className="text-sm font-semibold text-indigo-100">Customer&apos;s first name</span>
-              <input
-                value={customerName}
-                onChange={(event) => setCustomerName(event.target.value)}
-                placeholder="Optional"
-                className="rounded-lg border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-              />
-            </label>
-          </div>
+          <div className={`grid gap-6 ${isDesktopLayout ? 'lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]' : ''}`}>
+            <div className="space-y-6">
+              <div className="grid gap-4">
+                <label className="flex flex-col gap-2">
+                  <span className="text-sm font-semibold text-indigo-100">Customer&apos;s first name</span>
+                  <input
+                    value={customerName}
+                    onChange={(event) => setCustomerName(event.target.value)}
+                    placeholder="Optional"
+                    className="rounded-lg border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                  />
+                </label>
+              </div>
 
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="text-sm font-semibold uppercase tracking-wide text-indigo-200">Design direction</h4>
-              <Badge variant="info">Illustrative preview</Badge>
-            </div>
-            <div className={`grid gap-3 ${isDesktopLayout ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-2'}`}>
-              {Object.values(StyleOption).map((option) => (
-                <StyleCard key={option} option={option} current={style} onSelect={setStyle} dealershipName={dealershipName} />
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <h4 className="text-sm font-semibold uppercase tracking-wide text-indigo-200">Caption strategy</h4>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <Button
-                variant={captionSource === 'ai' ? 'primary' : 'secondary'}
-                size="sm"
-                onClick={() => { triggerHapticFeedback(); setCaptionSource('ai'); }}
-              >
-                <Icon type="sparkles" className="h-4 w-4" />
-                <span>AI Auto-Magic</span>
-              </Button>
-              <Button
-                variant={captionSource === 'prompted' ? 'primary' : 'secondary'}
-                size="sm"
-                onClick={() => { triggerHapticFeedback(); setCaptionSource('prompted'); }}
-              >
-                <Icon type="edit" className="h-4 w-4" />
-                <span>AI Remix</span>
-              </Button>
-              <Button
-                variant={captionSource === 'template' ? 'primary' : 'secondary'}
-                size="sm"
-                onClick={() => { triggerHapticFeedback(); setCaptionSource('template'); }}
-              >
-                <Icon type="settings" className="h-4 w-4" />
-                <span>Templates</span>
-              </Button>
-              <Button
-                variant={captionSource === 'custom' ? 'primary' : 'secondary'}
-                size="sm"
-                onClick={() => { triggerHapticFeedback(); setCaptionSource('custom'); }}
-              >
-                <Icon type="edit" className="h-4 w-4" />
-                <span>Write my own</span>
-              </Button>
-            </div>
-
-            {captionSource === 'ai' && (
-              <div className="space-y-4">
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {Object.values(ToneOption).map((option) => (
-                    <ToneTile key={option} tone={option} current={tone} onSelect={setTone} />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold uppercase tracking-wide text-indigo-200">Design direction</h4>
+                </div>
+                <div className={`grid gap-3 ${isDesktopLayout ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-2'}`}>
+                  {Object.values(StyleOption).map((option) => (
+                    <StyleCard key={option} option={option} current={style} onSelect={setStyle} />
                   ))}
                 </div>
-                <div className="space-y-2">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Tell the AI what to emphasize</span>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    {AI_FLAVORS.map(({ id, label, description }) => (
-                      <button
-                        key={id}
-                        onClick={() => { triggerHapticFeedback(); setAiFlavor(id); }}
-                        className={`rounded-lg border px-3 py-2 text-left text-xs transition-all ${aiFlavor === id ? 'border-indigo-400 bg-indigo-500/25 text-white shadow' : 'border-white/10 bg-white/5 text-indigo-100 hover:border-indigo-400/40'}`}
-                      >
-                        <span className="font-semibold block text-sm">{label}</span>
-                        <span className="text-[11px] leading-relaxed text-indigo-100/80">{description}</span>
-                      </button>
-                    ))}
+              </div>
+
+              <div className="space-y-3">
+                <h4 className="text-sm font-semibold uppercase tracking-wide text-indigo-200">Caption strategy</h4>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <Button
+                    variant={captionSource === 'ai' ? 'primary' : 'secondary'}
+                    size="sm"
+                    onClick={() => { triggerHapticFeedback(); setCaptionSource('ai'); }}
+                  >
+                    <Icon type="sparkles" className="h-4 w-4" />
+                    <span>AI Auto-Magic</span>
+                  </Button>
+                  <Button
+                    variant={captionSource === 'prompted' ? 'primary' : 'secondary'}
+                    size="sm"
+                    onClick={() => { triggerHapticFeedback(); setCaptionSource('prompted'); }}
+                  >
+                    <Icon type="edit" className="h-4 w-4" />
+                    <span>AI Remix</span>
+                  </Button>
+                  <Button
+                    variant={captionSource === 'template' ? 'primary' : 'secondary'}
+                    size="sm"
+                    onClick={() => { triggerHapticFeedback(); setCaptionSource('template'); }}
+                  >
+                    <Icon type="settings" className="h-4 w-4" />
+                    <span>Templates</span>
+                  </Button>
+                  <Button
+                    variant={captionSource === 'custom' ? 'primary' : 'secondary'}
+                    size="sm"
+                    onClick={() => { triggerHapticFeedback(); setCaptionSource('custom'); }}
+                  >
+                    <Icon type="edit" className="h-4 w-4" />
+                    <span>Write my own</span>
+                  </Button>
+                </div>
+
+                {captionSource === 'ai' && (
+                  <div className="space-y-4">
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {Object.values(ToneOption).map((option) => (
+                        <ToneTile key={option} tone={option} current={tone} onSelect={setTone} />
+                      ))}
+                    </div>
+                    <div className="space-y-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Tell the AI what to emphasize</span>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        {AI_FLAVORS.map(({ id, label, description }) => (
+                          <button
+                            key={id}
+                            onClick={() => { triggerHapticFeedback(); setAiFlavor(id); }}
+                            className={`rounded-lg border px-3 py-2 text-left text-xs transition-all ${aiFlavor === id ? 'border-indigo-400 bg-indigo-500/25 text-white shadow' : 'border-white/10 bg-white/5 text-indigo-100 hover:border-indigo-400/40'}`}
+                          >
+                            <span className="font-semibold block text-sm">{label}</span>
+                            <span className="text-[11px] leading-relaxed text-indigo-100/80">{description}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
+                )}
+
+                {captionSource === 'template' && (
+                  <label className="flex flex-col gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Template</span>
+                    <select
+                      className="rounded-lg border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                      value={selectedTemplateId}
+                      onChange={(event) => setSelectedTemplateId(event.target.value)}
+                    >
+                      {templateOptions.map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {template.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                {captionSource === 'custom' && (
+                  <label className="flex flex-col gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Your message</span>
+                    <textarea
+                      value={customMessage}
+                      onChange={(event) => setCustomMessage(event.target.value)}
+                      rows={4}
+                      className="min-h-[120px] rounded-lg border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                      placeholder="We&apos;ll inject this copy straight into the design."
+                    />
+                  </label>
+                )}
+
+                {captionSource === 'prompted' && (
+                  <label className="flex flex-col gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Describe the vibe you want</span>
+                    <textarea
+                      value={aiPrompt}
+                      onChange={(event) => setAiPrompt(event.target.value)}
+                      rows={4}
+                      className="min-h-[120px] rounded-lg border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                      placeholder="e.g., Celebrate how they found their dream off-road rig and shout out the weekend adventures ahead."
+                    />
+                  </label>
+                )}
+
+                {!isApiKeyConfigured && (
+                  <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span className="flex items-center gap-2 font-semibold">
+                      <Icon type="settings" className="h-4 w-4" />
+                      Add your Gemini API key to turn on generation.
+                    </span>
+                    <Button variant="outline" size="sm" onClick={() => { triggerHapticFeedback(); onOpenSettings(); }}>
+                      Open Settings
+                    </Button>
+                  </div>
+                )}
+
+                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <Button variant="secondary" size="md" onClick={() => { triggerHapticFeedback(); onBack(); }}>
+                    <Icon type="retake" className="h-4 w-4" />
+                    Change photo
+                  </Button>
+                  <Button
+                    size="lg"
+                    onClick={handleGenerate}
+                    disabled={!isApiKeyConfigured || (captionSource === 'prompted' && !aiPrompt.trim())}
+                  >
+                    <Icon type="check" className="h-5 w-5" />
+                    {isApiKeyConfigured ? 'Generate hero image & caption' : 'Add API key to generate'}
+                  </Button>
                 </div>
               </div>
-            )}
-
-            {captionSource === 'template' && (
-              <label className="flex flex-col gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Template</span>
-                <select
-                  className="rounded-lg border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                  value={selectedTemplateId}
-                  onChange={(event) => setSelectedTemplateId(event.target.value)}
-                >
-                  {templateOptions.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-
-            {captionSource === 'custom' && (
-              <label className="flex flex-col gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Your message</span>
-                <textarea
-                  value={customMessage}
-                  onChange={(event) => setCustomMessage(event.target.value)}
-                  rows={4}
-                  className="min-h-[120px] rounded-lg border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                  placeholder="We&apos;ll inject this copy straight into the design."
-                />
-              </label>
-            )}
-
-            {captionSource === 'prompted' && (
-              <label className="flex flex-col gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Describe the vibe you want</span>
-                <textarea
-                  value={aiPrompt}
-                  onChange={(event) => setAiPrompt(event.target.value)}
-                  rows={4}
-                  className="min-h-[120px] rounded-lg border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                  placeholder="e.g., Celebrate how they found their dream off-road rig and shout out the weekend adventures ahead."
-                />
-              </label>
-            )}
-          </div>
-
-          {!isApiKeyConfigured && (
-            <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span className="flex items-center gap-2 font-semibold">
-                <Icon type="settings" className="h-4 w-4" />
-                Add your Gemini API key to turn on generation.
-              </span>
-              <Button variant="outline" size="sm" onClick={() => { triggerHapticFeedback(); onOpenSettings(); }}>
-                Open Settings
-              </Button>
             </div>
-          )}
 
-          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <Button variant="secondary" size="md" onClick={() => { triggerHapticFeedback(); onBack(); }}>
-              <Icon type="retake" className="h-4 w-4" />
-              Change photo
-            </Button>
-            <Button
-              size="lg"
-              onClick={handleGenerate}
-              disabled={!isApiKeyConfigured || (captionSource === 'prompted' && !aiPrompt.trim())}
-            >
-              <Icon type="check" className="h-5 w-5" />
-              {isApiKeyConfigured ? 'Generate hero image & caption' : 'Add API key to generate'}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className={`order-1 overflow-hidden lg:order-2 ${isDesktopLayout ? 'h-full' : ''}`}>
-        <CardHeader className="flex items-center justify-between">
-          <div>
-            <CardTitle>Live preview</CardTitle>
-            <CardDescription>
-              The final render will respect safe zones, dealership branding, and your selections above.
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="relative overflow-hidden rounded-2xl border border-white/10">
-            <img src={imageSrc} alt="Selected" className="h-full w-full object-cover" />
-            <div className="absolute left-4 top-4 flex flex-wrap items-center gap-2">
-              <Badge variant="info">Style: {style}</Badge>
-              <Badge variant="success">Tone: {tone}</Badge>
-            </div>
-            {selectedStyleMeta && (
-              <div className={`absolute inset-x-4 bottom-5 rounded-2xl bg-gradient-to-r ${selectedStyleMeta.gradient} px-4 py-3 text-white shadow-2xl backdrop-blur-sm bg-opacity-90`}> 
-                <span className={`block text-sm font-semibold ${selectedStyleMeta.headlineClass}`}>{selectedStyleMeta.headline}</span>
-                <span className={`block text-xs ${selectedStyleMeta.taglineClass}`}>{selectedStyleMeta.tagline}</span>
+            <aside className="space-y-4">
+              <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-900/60">
+                <img src={imageSrc} alt="Captured reference" className="h-full w-full object-cover" />
               </div>
-            )}
+              <div className="space-y-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Style playbook</span>
+                  <Badge variant="info">{style}</Badge>
+                </div>
+                <p className="text-sm text-indigo-100/85 leading-relaxed">{selectedStyleGuide.subtitle}</p>
+                <ul className="space-y-2 text-[12px] text-indigo-100/70">
+                  {selectedStyleGuide.talkingPoints.map((point) => (
+                    <li key={point} className="flex gap-2">
+                      <span className="mt-1 block h-1.5 w-1.5 rounded-full bg-indigo-400/80"></span>
+                      <span>{point}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="rounded-xl border border-indigo-400/30 bg-indigo-500/10 px-3 py-2 text-[12px] text-indigo-100/80">
+                  <strong className="block text-indigo-200 text-xs uppercase tracking-wide">AI brief</strong>
+                  <span>{selectedStyleGuide.aiHint}</span>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
+                <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Tone focus</span>
+                <p className="mt-2 text-sm text-indigo-100/80">{TONE_DESCRIPTIONS[tone]}</p>
+              </div>
+            </aside>
           </div>
         </CardContent>
       </Card>
