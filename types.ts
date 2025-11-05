@@ -76,3 +76,8 @@ export interface User {
   name: string;
   dealerId: string;
 }
+
+export interface VideoRequestOptions {
+  durationSeconds: number;
+  soundtrack: 'none' | 'celebration' | 'cinematic';
+}

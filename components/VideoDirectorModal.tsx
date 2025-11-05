@@ -1,12 +1,14 @@
-import React from 'react';
-import { VideoStyle } from '../types';
+import React, { useState } from 'react';
+import { VideoStyle, VideoRequestOptions } from '../types';
 import { Icon, IconProps } from './Icons';
 import { triggerHapticFeedback } from '../utils/haptics';
+import { Button } from './ui/Button';
+import { cn } from '../utils/classNames';
 
 interface VideoDirectorModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelectStyle: (style: VideoStyle) => void;
+  onSelectStyle: (style: VideoStyle, options: VideoRequestOptions) => void;
 }
 
 interface StyleCardProps {
@@ -14,6 +16,17 @@ interface StyleCardProps {
   icon: IconProps['type'];
   onSelect: (style: VideoStyle) => void;
 }
+
+const durations = [
+  { value: 4, label: '4 seconds', description: 'Perfect for quick social loops.' },
+  { value: 6, label: '6 seconds', description: 'Adds room for dramatic reveals.' },
+];
+
+const soundtracks: Array<{ value: VideoRequestOptions['soundtrack']; label: string; description: string }> = [
+  { value: 'none', label: 'No soundtrack', description: 'Silence — bring your own vibe.' },
+  { value: 'celebration', label: 'Celebration beat', description: 'Upbeat claps and synth pulses.' },
+  { value: 'cinematic', label: 'Cinematic swell', description: 'Ambient pads with a smooth rise.' },
+];
 
 const styles: { style: VideoStyle; icon: IconProps['type']; description: string }[] = [
   { style: VideoStyle.EpicReveal, icon: 'starburst', description: 'A cinematic, slow zoom with dramatic lens flares.' },
@@ -59,6 +72,13 @@ const StyleCard: React.FC<StyleCardProps> = React.memo(({ style, icon, onSelect 
 export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({ isOpen, onClose, onSelectStyle }) => {
   if (!isOpen) return null;
 
+  const [duration, setDuration] = useState<number>(durations[0].value);
+  const [soundtrack, setSoundtrack] = useState<VideoRequestOptions['soundtrack']>('celebration');
+
+  const handleStyleSelect = (style: VideoStyle) => {
+    onSelectStyle(style, { durationSeconds: duration, soundtrack });
+  };
+
   return (
     <div
       className="fixed inset-0 bg-slate-950/80 backdrop-blur-lg flex items-center justify-center z-50 p-4 animate-fade-in"
@@ -85,12 +105,57 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({ isOpen, 
           </button>
         </div>
 
-        <p className="text-center text-indigo-300 mb-6">Choose a style to bring your photo to life.</p>
-        
-        <div className="overflow-y-auto max-h-[60vh] pr-2 -mr-2">
+        <p className="text-center text-indigo-300 mb-6">Choose a style, duration, and soundtrack — we&apos;ll handle the cinematic finishing touches.</p>
+
+        <div className="mb-5 grid gap-4 sm:grid-cols-2">
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+            <h3 className="text-sm font-semibold text-white mb-3">Clip duration</h3>
+            <div className="flex flex-col gap-2">
+              {durations.map(({ value, label, description }) => (
+                <button
+                  key={value}
+                  onClick={() => { triggerHapticFeedback(); setDuration(value); }}
+                  className={cn(
+                    'flex flex-col rounded-lg border px-3 py-2 text-left transition-all',
+                    duration === value ? 'border-indigo-400 bg-indigo-500/20 text-white' : 'border-white/10 bg-white/5 text-indigo-100 hover:border-indigo-400/50'
+                  )}
+                >
+                  <span className="text-sm font-semibold">{label}</span>
+                  <span className="text-xs text-indigo-100/70">{description}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+            <h3 className="text-sm font-semibold text-white mb-3">Soundtrack</h3>
+            <div className="flex flex-col gap-2">
+              {soundtracks.map(({ value, label, description }) => (
+                <button
+                  key={value}
+                  onClick={() => { triggerHapticFeedback(); setSoundtrack(value); }}
+                  className={cn(
+                    'flex flex-col rounded-lg border px-3 py-2 text-left transition-all',
+                    soundtrack === value ? 'border-emerald-400 bg-emerald-500/20 text-white' : 'border-white/10 bg-white/5 text-indigo-100 hover:border-emerald-400/40'
+                  )}
+                >
+                  <span className="text-sm font-semibold">{label}</span>
+                  <span className="text-xs text-indigo-100/70">{description}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between border border-white/5 rounded-xl bg-white/5 px-4 py-3 mb-5 text-xs text-indigo-100/80">
+          <span>Queued clips play back-to-back; you can prepare multiple stylings while one renders.</span>
+          <Button variant="ghost" size="sm" onClick={() => { setDuration(4); setSoundtrack('celebration'); }}>Reset</Button>
+        </div>
+
+        <div className="overflow-y-auto max-h-[50vh] pr-2 -mr-2">
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
             {styles.map(({ style, icon }) => (
-                <StyleCard key={style} style={style} icon={icon} onSelect={onSelectStyle} />
+                <StyleCard key={style} style={style} icon={icon} onSelect={handleStyleSelect} />
             ))}
             </div>
         </div>
