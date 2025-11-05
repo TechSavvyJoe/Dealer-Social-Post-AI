@@ -18,6 +18,7 @@ interface PostResultProps {
   onFunMode: () => Promise<void>;
   onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
   error?: string | null;
+  isDesktopLayout: boolean;
 }
 
 const LoadingOverlay: React.FC<{ message: string }> = React.memo(({ message }) => (
@@ -31,7 +32,7 @@ const LoadingOverlay: React.FC<{ message: string }> = React.memo(({ message }) =
 ));
 
 
-export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onRegenerateImage, onEditImage, onRegenerateText, onEditText, onFunMode, onGenerateVideo, error }) => {
+export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onRegenerateImage, onEditImage, onRegenerateText, onEditText, onFunMode, onGenerateVideo, error, isDesktopLayout }) => {
   const [copied, setCopied] = useState(false);
   
   const [isImageEditing, setIsImageEditing] = useState(false);
@@ -72,6 +73,11 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
         }
     };
   }, [videoUrl]);
+
+  useEffect(() => {
+    setVideoJobs([]);
+    setVideoUrl(null);
+  }, [post.image]);
 
   const handleSave = async () => {
     triggerHapticFeedback();
@@ -260,7 +266,7 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
             <span>{error}</span>
           </div>
         )}
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <div className={`grid w-full ${isDesktopLayout ? 'grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-8' : 'grid-cols-1 gap-6'}`}>
           
           <div className="flex flex-col items-center bg-white/5 p-4 rounded-2xl shadow-2xl space-y-4">
               <div className="relative w-full">

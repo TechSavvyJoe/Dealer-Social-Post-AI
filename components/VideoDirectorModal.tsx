@@ -81,14 +81,14 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({ isOpen, 
 
   return (
     <div
-      className="fixed inset-0 bg-slate-950/80 backdrop-blur-lg flex items-center justify-center z-50 p-4 animate-fade-in"
+      className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-labelledby="video-director-title"
     >
       <div
-        className="w-full max-w-4xl bg-white/10 border border-white/20 rounded-2xl shadow-2xl p-6 sm:p-8 flex flex-col"
+        className="w-full max-w-4xl bg-slate-900/90 border border-white/15 rounded-2xl shadow-2xl p-6 sm:p-8 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-6">
@@ -108,7 +108,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({ isOpen, 
         <p className="text-center text-indigo-300 mb-6">Choose a style, duration, and soundtrack — we&apos;ll handle the cinematic finishing touches.</p>
 
         <div className="mb-5 grid gap-4 sm:grid-cols-2">
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="rounded-xl border border-white/10 bg-slate-900/80 p-4">
             <h3 className="text-sm font-semibold text-white mb-3">Clip duration</h3>
             <div className="flex flex-col gap-2">
               {durations.map(({ value, label, description }) => (
@@ -117,7 +117,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({ isOpen, 
                   onClick={() => { triggerHapticFeedback(); setDuration(value); }}
                   className={cn(
                     'flex flex-col rounded-lg border px-3 py-2 text-left transition-all',
-                    duration === value ? 'border-indigo-400 bg-indigo-500/20 text-white' : 'border-white/10 bg-white/5 text-indigo-100 hover:border-indigo-400/50'
+                    duration === value ? 'border-indigo-400 bg-indigo-500/30 text-white' : 'border-white/15 bg-slate-900/70 text-indigo-100 hover:border-indigo-400/50'
                   )}
                 >
                   <span className="text-sm font-semibold">{label}</span>
@@ -127,7 +127,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({ isOpen, 
             </div>
           </div>
 
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="rounded-xl border border-white/10 bg-slate-900/80 p-4">
             <h3 className="text-sm font-semibold text-white mb-3">Soundtrack</h3>
             <div className="flex flex-col gap-2">
               {soundtracks.map(({ value, label, description }) => (
@@ -136,7 +136,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({ isOpen, 
                   onClick={() => { triggerHapticFeedback(); setSoundtrack(value); }}
                   className={cn(
                     'flex flex-col rounded-lg border px-3 py-2 text-left transition-all',
-                    soundtrack === value ? 'border-emerald-400 bg-emerald-500/20 text-white' : 'border-white/10 bg-white/5 text-indigo-100 hover:border-emerald-400/40'
+                    soundtrack === value ? 'border-emerald-400 bg-emerald-500/25 text-white' : 'border-white/15 bg-slate-900/70 text-indigo-100 hover:border-emerald-400/40'
                   )}
                 >
                   <span className="text-sm font-semibold">{label}</span>
@@ -147,9 +147,9 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({ isOpen, 
           </div>
         </div>
 
-        <div className="flex items-center justify-between border border-white/5 rounded-xl bg-white/5 px-4 py-3 mb-5 text-xs text-indigo-100/80">
+        <div className="flex items-center justify-between border border-white/10 rounded-xl bg-slate-900/80 px-4 py-3 mb-5 text-xs text-indigo-100/80">
           <span>Queued clips play back-to-back; you can prepare multiple stylings while one renders.</span>
-          <Button variant="ghost" size="sm" onClick={() => { setDuration(4); setSoundtrack('celebration'); }}>Reset</Button>
+          <Button variant="outline" size="sm" onClick={() => { setDuration(4); setSoundtrack('celebration'); }}>Reset</Button>
         </div>
 
         <div className="overflow-y-auto max-h-[50vh] pr-2 -mr-2">

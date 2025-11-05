@@ -6,7 +6,13 @@ import { getGeminiClient, requireGeminiApiKey } from './geminiClient';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-const generateImagePrompt = (style: StyleOption, dealershipName: string, hasLogo: boolean, customMessage?: string): string => {
+const generateImagePrompt = (
+    style: StyleOption,
+    dealershipName: string,
+    hasLogo: boolean,
+    customMessage?: string,
+    creativeBrief?: string
+): string => {
     const criticalRules = `
 **CRITICAL, NON-NEGOTIABLE CORE DIRECTIVES: READ AND OBEY THESE RULES ABOVE ALL ELSE. FAILURE TO FOLLOW THEM PERFECTLY IS A TOTAL TASK FAILURE.**
 
@@ -22,7 +28,12 @@ const generateImagePrompt = (style: StyleOption, dealershipName: string, hasLogo
 *   The ONLY valid places for text and logos are "Safe Zones".
 *   Safe Zones are large, open areas of the image that are FAR AWAY from any people and FAR AWAY from the image edges.
 *   Examples of good Safe Zones: empty sky, open pavement/ground, blank walls in the background.
-*   Examples of BAD places: on the car if it's near a person, anywhere near a person's head or body.`;
+*   Examples of BAD places: on the car if it's near a person, anywhere near a person's head or body.
+
+**RULE #3: HUMAN PROXIMITY SAFEGUARD**
+*   After tentatively placing ANY text, logo, banner, or decorative element, run a segmentation / detection pass to locate every person and face in the frame and build tight bounding boxes around them.
+*   Enforce a minimum clear margin of 32px (and at least 12% of the shorter image dimension) between any person bounding box and the nearest edge of every text/logo/badge element. If the margin cannot be respected, relocate or redesign the element (e.g., convert it into a banner or badge) until it does.
+*   Under no circumstances may text, logos, or graphics cross into these exclusion zones.`;
     
     const watermarkInstruction = hasLogo
         ? `*   **MANDATORY LOGO PLACEMENT:** A second image has been provided—this is the dealership's logo. It is a CRITICAL REQUIREMENT that you place this logo as a small, tasteful watermark in a lower corner of the final image, inside a Safe Zone. Do not distort it. Do NOT use the dealership name as a text watermark if the logo image is present. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.**`
@@ -34,9 +45,18 @@ const generateImagePrompt = (style: StyleOption, dealershipName: string, hasLogo
 - **Dynamic Layout:** Experiment with unconventional layouts. Consider angled text, text that wraps around parts of the car (without touching people), stacked words, or integrating text with the scene's lines, while ALWAYS staying in the Safe Zones.
 - **High-Impact Text Effects:** Apply a unique and tasteful text effect that makes the text 'pop'. Examples include a vibrant neon glow, a realistic 3D metallic sheen, a bold graphic drop shadow, an elegant outline, or text that appears to be part of the environment itself. The goal is to make every post look like a custom, high-end design.`;
 
+    const creativeBriefInstruction = creativeBrief
+        ? `
+**USER CREATIVE INPUT:**
+“${creativeBrief}”
+Translate this into visual storytelling decisions (color palette, typography, supporting graphics) while still obeying every rule above.
+`
+        : '';
+
     const coreInstruction = `Act as a world-class graphic designer with an infallible eye for composition. Your mission is to create a viral-worthy social media post by enhancing a photo and adding text overlays. You have been provided a primary photo of a customer and their car. You may also have been provided a second image which is a company logo.
 
 ${criticalRules}
+${creativeBriefInstruction}
 
 You must follow this process:
 
@@ -49,9 +69,16 @@ Perform a full, professional-grade photo enhancement on the original image to ma
 **Step 2: INTELLIGENT TEXT OVERLAY (Restricted to Safe Zones)**
 After enhancing the photo, you will add text elements based on the provided instructions.
 *   **ABSOLUTE SPELLING & CONTENT ACCURACY:** The text you add to the image must be spelled *perfectly* and use the *exact* wording provided in the text instructions. DO NOT add, omit, or change any words. Any spelling error is a task failure.
-*   **DYNAMIC COMPOSITION:** Within the Safe Zones, create a dynamic, visually engaging composition based on your Creative Mandate. Use varied angles and creative positioning.
+*   **DYNAMIC COMPOSITION:** Within the Safe Zones, create a dynamic, visually engaging composition based on your Creative Mandate. Use varied angles and creative positioning. If you cannot find a valid Safe Zone that respects the exclusion margins, create a banner or ribbon that sits fully outside of all person bounding boxes.
 *   **3D & REALISM:** When appropriate for the style, render the main text as a bold, chunky, 3D object that casts realistic shadows and reflects the scene's lighting.
-${watermarkInstruction}`;
+${watermarkInstruction}
+
+**Step 3: HUMAN SAFETY VERIFICATION**
+*   Re-run the segmentation / detection pass from **RULE #3** on the finished composition. If ANY margin is violated or an overlap is detected, reposition the offending element and repeat this step until full compliance is achieved.
+
+**Step 4: FINAL COMPLIANCE REVIEW**
+*   Confirm that all text, logos, and decorations remain inside the image boundaries, respect the required margins, and look intentional.
+*   If a violation is discovered, adjust the layout and repeat Steps 2-3 before delivering the final image.`;
     
     let textInstruction = '';
     if (customMessage && customMessage.trim()) {
@@ -61,11 +88,11 @@ ${watermarkInstruction}`;
         *   **EXACT TEXT TO USE:** "${customMessage.trim()}"
         *   **Your task:** Intelligently and creatively display this exact text on the image. You have creative freedom to split it into a main headline and a smaller sub-text for better design, or use it as a single block if that looks better. The most important words should be emphasized. Do not add any text that isn't in the provided message, except for the dealership watermark/logo if applicable. Ensure every word from the user's message is included.`;
     } else {
-        const mainText = "Congratulations!";
-        const subText = `Welcome to the ${dealershipName} Family`;
         textInstruction = `
-        - Main Text: '${mainText}' should be the most prominent text element.
-        - Sub-Text: '${subText}' should be smaller and placed thoughtfully in relation to the main text.`;
+        - Craft a headline (1-3 words) that celebrates the moment. Avoid defaulting to the single word "Congratulations" unless the creative brief explicitly requires it.
+        - Add a supporting sub-text that warmly references '${dealershipName}' (keep it under 8 words).
+        - Use hierarchy, scale, and spacing so the headline feels hero-level while the sub-text feels supportive.
+        - Ensure both lines respect every exclusion zone and margin rule above.`;
     }
 
     let styleInstruction = "";
@@ -115,7 +142,13 @@ ${watermarkInstruction}`;
 };
 
 
-const generateTextPrompt = (tone: ToneOption, dealershipName: string, customerName?: string, isRegeneration = false): string => {
+const generateTextPrompt = (
+    tone: ToneOption,
+    dealershipName: string,
+    customerName?: string,
+    isRegeneration = false,
+    creativeBrief?: string,
+): string => {
     const nameInfo = customerName 
         ? `The customer's first name is ${customerName}. Personalize the post by addressing them directly.` 
         : "The customer's name was not provided, so refer to them as 'our latest happy customer' or a similar friendly phrase.";
@@ -144,6 +177,14 @@ const generateTextPrompt = (tone: ToneOption, dealershipName: string, customerNa
     
     const regenerationInstruction = isRegeneration ? "CRITICAL: The user is asking for a new version. This caption MUST be different from any previous one you've generated. Use a fresh angle." : "";
 
+    const creativeBriefInstruction = creativeBrief
+        ? `
+**Creative focus supplied by the user:**
+“${creativeBrief}”
+Reflect this direction in the imagery you describe, the emotion you convey, and the vocabulary you choose.
+`
+        : '';
+
     return `You are an expert social media copywriter and viral marketing strategist for a car dealership. Your task is to write a short, vibrant, and highly engaging caption for the provided photo that will stop people from scrolling.
 
 **ABSOLUTE, NON-NEGOTIABLE REQUIREMENTS:**
@@ -155,7 +196,7 @@ const generateTextPrompt = (tone: ToneOption, dealershipName: string, customerNa
 4.  **FORMAT:** Your entire response must ONLY be the social media post text itself. Do not include preambles like "Here is your post...".
 
 **POST STRUCTURE:**
-1.  **The Hook:** Start with a high-energy, scroll-stopping opening line. Congratulate the customer. ${nameInfo}
+1.  **The Hook:** Start with a high-energy, scroll-stopping opening line. Congratulate the customer. ${nameInfo} Avoid generic intros like "Congratulations"—invent something memorable.
 2.  **The Story:** Briefly mention the specific car you identified (or its characteristics). Connect it to the 'vibe' of the photo. (e.g., "Ready for family adventures in their new SUV!" or "Ready to cruise in style in this sleek black sedan!").
 3.  **Call to Action (CTA):** End with a friendly invitation for others to find their dream car at '${dealershipName}'.
 4.  **Strategic Hashtags:** This is CRITICAL. Finish with a block of 5-7 hyper-relevant and popular hashtags. These MUST be derived from your deep image analysis.
@@ -167,6 +208,8 @@ const generateTextPrompt = (tone: ToneOption, dealershipName: string, customerNa
 - The required tone is: **${tone}**.
 - ${toneInstruction}
 - ${regenerationInstruction}
+- ${regenerationInstruction}
+${creativeBriefInstruction}
 
 Now, write the eye-catching post.`;
 }
@@ -212,7 +255,12 @@ export const generateFunSocialPostImage = async (
 *   The ONLY valid places for text and logos are "Safe Zones".
 *   Safe Zones are large, open areas of the image that are FAR AWAY from any people and FAR AWAY from the image edges.
 *   Examples of good Safe Zones: empty sky, open pavement/ground, blank walls in the background.
-*   Examples of BAD places: on the car if it's near a person, anywhere near a person's head or body.`;
+*   Examples of BAD places: on the car if it's near a person, anywhere near a person's head or body.
+
+**RULE #3: HUMAN PROXIMITY SAFEGUARD**
+*   After tentatively placing ANY new graphic, badge, or text, run a segmentation / detection pass to locate every person in the frame.
+*   Maintain a buffer of at least 32px (and 12% of the shorter image dimension) between every person bounding box and the nearest edge of any added element. Relocate or redesign the element if the margin is violated.
+*   Do not output the final image until ALL elements satisfy these margins.`;
 
     let logoImagePart = null;
     if (logoBase64Url) {
@@ -358,6 +406,10 @@ ${criticalRules}
     *   **Sub-Text:** "Welcome to the '${dealershipName}' Family". **CRITICAL:** You MUST spell the dealership name exactly as it appears: '${dealershipName}'.
 2.  **Styling Guide for Text:** The text's font, color, texture, and effects must be an integral part of the chosen artistic style. It must look like it belongs in the scene (e.g., a comic book sound effect bubble, cinematic movie title font, etc.), not just placed on top.
 3.  **Integrate Watermark/Branding:** ${watermarkInstruction} This is separate from the sub-text and should be placed discreetly in a corner, also styled to match the theme.
+4.  **SAFETY CHECK:** After placing the text/branding, re-run the human proximity safeguard from **RULE #3**. If any element violates the required margin, relocate it and repeat this verification.
+
+**FINAL COMPLIANCE REVIEW**
+*   Confirm zero overlap with people, perfect spelling, and clean boundaries. If any violation is detected, adjust the layout and repeat the safety check before returning the final image.
 
 The final output must be a single, high-resolution, fully-composed image in the assigned artistic style, complete with integrated text.`;
 
@@ -413,7 +465,12 @@ export const editSocialPostImage = async (
 *   All text and graphic elements you add or modify MUST be 100% contained within the visible boundaries of the image. Nothing can be cropped or cut off by the edge.
 
 **SAFE ZONES FOR TEXT PLACEMENT:**
-*   The ONLY valid places for text and logos are "Safe Zones"—large, open areas far away from people and edges (e.g., empty sky, open ground, blank walls).`;
+*   The ONLY valid places for text and logos are "Safe Zones"—large, open areas far away from people and edges (e.g., empty sky, open ground, blank walls).
+
+**RULE #3: HUMAN PROXIMITY SAFEGUARD**
+*   After every edit, run a segmentation / detection pass to map every person and face.
+*   Maintain a buffer of at least 32px (and 12% of the shorter image dimension) between those bounding boxes and any text/logo/graphic element.
+*   If a margin is violated, relocate the element and re-run this safeguard before delivering the final image.`;
 
     const watermarkInstruction = logoBase64Url
         ? `A dealership logo has been provided as a second image. It is a CRITICAL REQUIREMENT to ensure this logo is present and tastefully placed in a corner of the final edited image. Do not distort it. If the logo was missing from the original image, you MUST add it now. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.**`
@@ -431,6 +488,7 @@ ${criticalRulesForEditing}
     3.  **MAINTAIN QUALITY:** Ensure the final image is high-resolution and looks professional.
     4.  **WATERMARK/LOGO:** ${watermarkInstruction}
     5.  **PERFECT WORDING:** If the user asks to change or add text, you MUST use the exact spelling and wording they provide. Do not add, omit, or change any words from their request.
+    6.  **SAFETY CHECK:** Re-run the proximity safeguard from **RULE #3**. If any text/logo/banner violates the required margin, adjust the layout and repeat this check before returning the image.
 
     The final output must be only the edited image.`;
 
@@ -471,10 +529,11 @@ export const generateSocialPostText = async (
     dealershipName: string,
     customerName?: string,
     isRegeneration = false,
+    creativeBrief?: string,
 ): Promise<string> => {
     const { mimeType, data: base64Data } = parseDataUrl(imageBase64Url);
     const imagePart = { inlineData: { mimeType, data: base64Data } };
-    const textPrompt = generateTextPrompt(tone, dealershipName, customerName, isRegeneration);
+    const textPrompt = generateTextPrompt(tone, dealershipName, customerName, isRegeneration, creativeBrief);
 
     const client = getGeminiClient();
     const textResponse = await client.models.generateContent({
@@ -530,6 +589,7 @@ export const generateSocialPost = async (
     customerName?: string,
     logoBase64Url?: string,
     initialText?: string,
+    creativeBrief?: string,
 ): Promise<{ image: string; text: string }> => {
     const { mimeType, data: base64Data } = parseDataUrl(imageBase64Url);
 
@@ -554,9 +614,9 @@ export const generateSocialPost = async (
     // Generate text (or use provided template/custom text) and the final image in parallel.
     const textPromise = initialText 
         ? Promise.resolve(initialText) 
-        : generateSocialPostText(imageBase64Url, tone, dealershipName, customerName);
+        : generateSocialPostText(imageBase64Url, tone, dealershipName, customerName, false, creativeBrief);
 
-    const imagePrompt = generateImagePrompt(style, dealershipName, !!logoImagePart, initialText);
+    const imagePrompt = generateImagePrompt(style, dealershipName, !!logoImagePart, initialText, creativeBrief);
     const imageParts: (typeof imagePart | { text: string })[] = [imagePart, { text: imagePrompt }];
     if (logoImagePart) {
         imageParts.push(logoImagePart);
