@@ -1,10 +1,36 @@
 // FIX: Replaced 'GenerateVideosOperationResponse' with the correct 'GenerateVideosOperation' type.
 import { GoogleGenAI, Modality, GenerateVideosOperation } from "@google/genai";
-import { parseDataUrl } from '../utils/imageUtils';
+import { parseDataUrl, urlToDataUrl } from '../utils/imageUtils';
 import { StyleOption, ToneOption, VideoStyle, VideoRequestOptions } from "../types";
 import { getGeminiClient, requireGeminiApiKey } from './geminiClient';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const normaliseDataUrl = async (source?: string): Promise<string> => {
+    if (!source) {
+        throw new Error('No image data provided.');
+    }
+    if (source.startsWith('data:')) {
+        return source;
+    }
+    if (source.startsWith('http')) {
+        return await urlToDataUrl(source);
+    }
+    if (source.startsWith('blob:')) {
+        const response = await fetch(source);
+        if (!response.ok) {
+            throw new Error(`Could not read blob url: ${response.statusText}`);
+        }
+        const blob = await response.blob();
+        const reader = new FileReader();
+        return await new Promise((resolve, reject) => {
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = () => reject(new Error('Failed to convert blob to data URL.'));
+            reader.readAsDataURL(blob);
+        });
+    }
+    throw new Error('Unsupported image format. Expected a data URL, http(s) URL, or blob URL.');
+};
 
 const generateImagePrompt = (
     style: StyleOption,
@@ -237,7 +263,8 @@ export const generateFunSocialPostImage = async (
     dealershipName: string,
     logoBase64Url?: string
 ): Promise<string> => {
-    const { mimeType, data: base64Data } = parseDataUrl(originalImageBase64Url);
+    const normalisedOriginal = await normaliseDataUrl(originalImageBase64Url);
+    const { mimeType, data: base64Data } = parseDataUrl(normalisedOriginal);
     const originalImagePart = { inlineData: { mimeType, data: base64Data } };
 
     const criticalRules = `
@@ -264,7 +291,8 @@ export const generateFunSocialPostImage = async (
 
     let logoImagePart = null;
     if (logoBase64Url) {
-        const { mimeType: logoMime, data: logoData } = parseDataUrl(logoBase64Url);
+        const normalisedLogo = await normaliseDataUrl(logoBase64Url);
+        const { mimeType: logoMime, data: logoData } = parseDataUrl(normalisedLogo);
         logoImagePart = { inlineData: { mimeType: logoMime, data: logoData } };
     }
 
@@ -444,12 +472,14 @@ export const editSocialPostImage = async (
     dealershipName: string,
     logoBase64Url?: string
 ): Promise<string> => {
-    const { mimeType, data: base64Data } = parseDataUrl(previousImageBase64Url);
+    const normalisedPrevious = await normaliseDataUrl(previousImageBase64Url);
+    const { mimeType, data: base64Data } = parseDataUrl(normalisedPrevious);
     const previousImagePart = { inlineData: { mimeType, data: base64Data } };
 
     let logoImagePart = null;
     if (logoBase64Url) {
-        const { mimeType: logoMime, data: logoData } = parseDataUrl(logoBase64Url);
+        const normalisedLogo = await normaliseDataUrl(logoBase64Url);
+        const { mimeType: logoMime, data: logoData } = parseDataUrl(normalisedLogo);
         logoImagePart = { inlineData: { mimeType: logoMime, data: logoData } };
     }
     
@@ -531,7 +561,8 @@ export const generateSocialPostText = async (
     isRegeneration = false,
     creativeBrief?: string,
 ): Promise<string> => {
-    const { mimeType, data: base64Data } = parseDataUrl(imageBase64Url);
+    const normalisedImage = await normaliseDataUrl(imageBase64Url);
+    const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
     const imagePart = { inlineData: { mimeType, data: base64Data } };
     const textPrompt = generateTextPrompt(tone, dealershipName, customerName, isRegeneration, creativeBrief);
 
@@ -591,7 +622,8 @@ export const generateSocialPost = async (
     initialText?: string,
     creativeBrief?: string,
 ): Promise<{ image: string; text: string }> => {
-    const { mimeType, data: base64Data } = parseDataUrl(imageBase64Url);
+    const normalisedImage = await normaliseDataUrl(imageBase64Url);
+    const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
 
     const imagePart = {
         inlineData: {
@@ -602,7 +634,8 @@ export const generateSocialPost = async (
 
     let logoImagePart = null;
     if (logoBase64Url) {
-        const { mimeType: logoMime, data: logoData } = parseDataUrl(logoBase64Url);
+        const normalisedLogo = await normaliseDataUrl(logoBase64Url);
+        const { mimeType: logoMime, data: logoData } = parseDataUrl(normalisedLogo);
         logoImagePart = {
             inlineData: {
                 mimeType: logoMime,
@@ -743,7 +776,8 @@ export const generatePostVideo = async (imageBase64Url: string, style: VideoStyl
     // Always create a fresh client so we respect any runtime key change.
     const videoAi = new GoogleGenAI({ apiKey });
 
-    const { mimeType, data: base64Data } = parseDataUrl(imageBase64Url);
+    const normalisedImage = await normaliseDataUrl(imageBase64Url);
+    const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
     const image = { imageBytes: base64Data, mimeType };
     const prompt = generateVideoPrompt(style, options);
 

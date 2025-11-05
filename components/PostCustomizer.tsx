@@ -25,28 +25,53 @@ interface StylePreviewMeta {
   subtitle: string;
   gradient: string;
   tip: string;
+  headline: string;
+  tagline: string;
+  badgeClass: string;
+  headlineClass: string;
+  taglineClass: string;
 }
 
 const STYLE_PREVIEWS: Record<StyleOption, StylePreviewMeta> = {
   [StyleOption.Luxury]: {
     subtitle: 'Polished metallic typography with rich gold highlights.',
-    gradient: 'from-yellow-500/80 via-amber-400/70 to-yellow-300/80',
+    gradient: 'from-amber-500/90 via-yellow-400/85 to-orange-300/90',
     tip: 'Perfect for premium deliveries and luxury vehicles.',
+    headline: 'Crowned Arrival',
+    tagline: 'Your luxury drive awaits.',
+    badgeClass: 'bg-white/25 text-slate-900 font-semibold',
+    headlineClass: 'text-slate-900 font-bold drop-shadow-sm',
+    taglineClass: 'text-slate-900/80',
   },
   [StyleOption.Modern]: {
     subtitle: 'Bold geometrics with crisp lighting and high contrast.',
-    gradient: 'from-indigo-500/60 via-purple-500/60 to-pink-500/60',
+    gradient: 'from-indigo-500 via-purple-500 to-pink-500',
     tip: 'Works well for electric vehicles or tech-forward messaging.',
+    headline: 'Future Ready',
+    tagline: 'Bold moves start today.',
+    badgeClass: 'bg-white/20 text-white',
+    headlineClass: 'text-white font-bold drop-shadow',
+    taglineClass: 'text-white/85',
   },
   [StyleOption.Friendly]: {
     subtitle: 'Rounded lettering, warm tones, and playful stickers.',
-    gradient: 'from-rose-400/60 via-orange-400/60 to-amber-400/60',
+    gradient: 'from-rose-400 via-orange-400 to-amber-300',
     tip: 'Ideal for family-focused stories and first-car celebrations.',
+    headline: 'Keys to Joy',
+    tagline: 'Say hello to happy miles.',
+    badgeClass: 'bg-white/20 text-white font-semibold',
+    headlineClass: 'text-white font-bold drop-shadow',
+    taglineClass: 'text-white/85',
   },
   [StyleOption.Sporty]: {
     subtitle: 'Dynamic angles with motion streaks and neon highlights.',
-    gradient: 'from-sky-500/60 via-blue-500/60 to-violet-500/60',
+    gradient: 'from-sky-500 via-blue-500 to-violet-600',
     tip: 'Use to spotlight performance trims or racing-inspired features.',
+    headline: 'Full Throttle',
+    tagline: 'Built to chase every horizon.',
+    badgeClass: 'bg-white/15 text-white uppercase tracking-wide',
+    headlineClass: 'text-white font-bold drop-shadow',
+    taglineClass: 'text-white/85',
   },
 };
 
@@ -88,9 +113,10 @@ const StyleCard: React.FC<StyleCardProps> = ({ option, current, onSelect, dealer
         isActive ? 'border-indigo-400 bg-indigo-500/20 shadow-lg shadow-indigo-500/30' : 'border-white/10 bg-white/5 hover:border-indigo-400/70 hover:bg-white/10'
       }`}
     >
-      <div className={`relative h-24 w-full rounded-xl bg-gradient-to-r ${meta.gradient} opacity-90 group-hover:opacity-100 transition-all overflow-hidden`}>
-        <span className="absolute left-3 top-3 text-sm font-semibold text-white drop-shadow">Headline</span>
-        <span className="absolute left-3 bottom-3 text-[11px] uppercase tracking-wide text-white/80">{dealershipName}</span>
+      <div className={`relative h-28 w-full rounded-xl bg-gradient-to-r ${meta.gradient} opacity-95 group-hover:opacity-100 transition-all overflow-hidden shadow-inner`}> 
+        <span className={`absolute left-3 top-3 text-[10px] uppercase px-2 py-1 rounded-full ${meta.badgeClass}`}>{dealershipName}</span>
+        <span className={`absolute left-3 right-3 bottom-10 ${meta.headlineClass} text-sm`}>{meta.headline}</span>
+        <span className={`absolute left-3 right-3 bottom-3 text-[11px] ${meta.taglineClass}`}>{meta.tagline}</span>
       </div>
       <div className="space-y-1">
         <div className="flex items-center gap-2">
@@ -204,6 +230,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   const layoutClasses = isDesktopLayout
     ? 'grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] gap-8'
     : 'grid-cols-1 gap-6';
+
+  const selectedStyleMeta = STYLE_PREVIEWS[style];
 
   return (
     <div className={`grid w-full max-w-screen-2xl mx-auto px-1 sm:px-0 ${layoutClasses}`}>
@@ -393,10 +421,16 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         <CardContent className="flex flex-col gap-4">
           <div className="relative overflow-hidden rounded-2xl border border-white/10">
             <img src={imageSrc} alt="Selected" className="h-full w-full object-cover" />
-            <div className="absolute left-4 top-4 flex flex-col gap-2">
+            <div className="absolute left-4 top-4 flex flex-wrap items-center gap-2">
               <Badge variant="info">Style: {style}</Badge>
               <Badge variant="success">Tone: {tone}</Badge>
             </div>
+            {selectedStyleMeta && (
+              <div className={`absolute inset-x-4 bottom-5 rounded-2xl bg-gradient-to-r ${selectedStyleMeta.gradient} px-4 py-3 text-white shadow-2xl backdrop-blur-sm bg-opacity-90`}> 
+                <span className={`block text-sm font-semibold ${selectedStyleMeta.headlineClass}`}>{selectedStyleMeta.headline}</span>
+                <span className={`block text-xs ${selectedStyleMeta.taglineClass}`}>{selectedStyleMeta.tagline}</span>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
