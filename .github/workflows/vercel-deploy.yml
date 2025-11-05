@@ -15,7 +15,6 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_PROJECT_NAME: ${{ secrets.VERCEL_PROJECT_NAME }}
@@ -41,29 +40,15 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Prepare Vercel deployment flags
-        run: |
-          set -euo pipefail
-
-          scope_arg=""
-          if [ -n "${VERCEL_ORG_ID:-}" ]; then
-            scope_arg="--scope $VERCEL_ORG_ID"
-            echo "VERCEL_SCOPE_ARG=$scope_arg" >> "$GITHUB_ENV"
-          fi
-
-          if [ -n "${VERCEL_PROJECT_ID:-}" ]; then
-            npx vercel pull --yes --environment=production --token="$VERCEL_TOKEN" $scope_arg --project "$VERCEL_PROJECT_ID"
-            echo "VERCEL_PROJECT_FLAG=--project $VERCEL_PROJECT_ID" >> "$GITHUB_ENV"
-          elif [ -n "${VERCEL_PROJECT_NAME:-}" ]; then
-            echo "VERCEL_PROJECT_FLAG=--name $VERCEL_PROJECT_NAME" >> "$GITHUB_ENV"
-          else
-            echo "Configure either VERCEL_PROJECT_ID or VERCEL_PROJECT_NAME as a repository secret." >&2
-            exit 1
-          fi
-
       - name: Deploy to Vercel
         run: |
           set -euo pipefail
-          scope_arg="${VERCEL_SCOPE_ARG:-}"
-          project_flag="${VERCEL_PROJECT_FLAG:?VERCEL_PROJECT_FLAG was not set}"
-          npx vercel deploy --prod --yes --token="$VERCEL_TOKEN" $scope_arg $project_flag
+          
+          # Pull existing project config if PROJECT_ID is set
+          if [ -n "${VERCEL_PROJECT_ID:-}" ]; then
+            npx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+            npx vercel deploy --prod --yes --token="$VERCEL_TOKEN"
+          else
+            # First time deployment - let Vercel create the project
+            npx vercel deploy --prod --yes --token="$VERCEL_TOKEN" --name="${VERCEL_PROJECT_NAME:-dealer-social-post-ai}"
+          fi
