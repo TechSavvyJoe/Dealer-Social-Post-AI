@@ -31,11 +31,15 @@ const parseCsv = (csvText: string): Dealer[] => {
         const line = lines[i];
         if (!line.trim()) continue;
 
-        const values = line.split(','); // Simple split, assumes no commas in names
+        // Robust parsing to handle commas in dealership names.
+        // Assumes ID is first, URL is last, and name is everything in between.
+        const values = line.split(',');
+        if (values.length < 3) continue; // Skip malformed lines
 
-        const id = values[idIndex]?.trim();
-        const name = values[nameIndex]?.trim();
-        const logo = values[logoIndex]?.trim();
+        const id = values[0]?.trim();
+        const logo = values[values.length - 1]?.trim();
+        // Join the parts between the first and last element to reconstruct the name
+        const name = values.slice(1, values.length - 1).join(',').trim();
         
         if (id && name) {
             dealers.push({

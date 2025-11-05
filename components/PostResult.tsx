@@ -52,6 +52,17 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
       setEditedText(post.text);
   }, [post.text]);
 
+  useEffect(() => {
+    // Cleanup function for the video object URL to prevent memory leaks.
+    // This runs when the component unmounts or when videoUrl changes.
+    const currentVideoUrl = videoUrl;
+    return () => {
+        if (currentVideoUrl && currentVideoUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(currentVideoUrl);
+        }
+    };
+  }, [videoUrl]);
+
   const handleSave = async () => {
     triggerHapticFeedback();
     const link = document.createElement('a');
@@ -67,11 +78,6 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    
-    if (videoUrl) {
-       // Blob URLs should be revoked after use to free up memory
-       URL.revokeObjectURL(videoUrl);
-    }
   };
 
   const synchronousCopy = (text: string): boolean => {
@@ -258,29 +264,22 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                           <span>Regenerate</span>
                       </button>
                       
-                       <button onClick={() => { triggerHapticFeedback(); videoUrl ? setIsVideoDirectorOpen(true) : setIsImageEditing(!isImageEditing); }} disabled={isImageLoading || !!videoUrl} className="flex flex-col items-center justify-center gap-2 bg-gradient-to-r from-sky-500 to-indigo-500 text-white font-bold py-3 px-4 rounded-lg hover:scale-105 transition-transform duration-300 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed aspect-square">
+                       <button onClick={() => { triggerHapticFeedback(); setIsImageEditing(!isImageEditing); }} disabled={isImageLoading || !!videoUrl} className="flex flex-col items-center justify-center gap-2 bg-gradient-to-r from-sky-500 to-indigo-500 text-white font-bold py-3 px-4 rounded-lg hover:scale-105 transition-transform duration-300 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed aspect-square">
                           <Icon type="edit" className="w-5 h-5" />
                           <span>{isImageEditing ? 'Cancel' : 'AI Image Edit'}</span>
                       </button>
                       
-                      {videoUrl ? (
-                         <button onClick={() => { triggerHapticFeedback(); setIsVideoDirectorOpen(true) }} disabled={isVideoLoading} className="flex flex-col items-center justify-center gap-2 bg-gradient-to-r from-teal-500 to-cyan-500 text-white font-bold py-3 px-4 rounded-lg hover:scale-105 transition-transform duration-300 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed aspect-square">
-                            <Icon type="movie" className="w-5 h-5" />
-                            <span>New Video</span>
-                        </button>
-                      ) : (
-                        <button onClick={() => { triggerHapticFeedback(); handleImageAction(onFunMode); }} disabled={isImageLoading} className="flex flex-col items-center justify-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold py-3 px-4 rounded-lg hover:scale-105 transition-transform duration-300 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed aspect-square">
-                            <Icon type="sparkles" className="w-5 h-5" />
-                            <span>Fun Mode</span>
-                        </button>
-                      )}
+                      <button onClick={() => { triggerHapticFeedback(); handleImageAction(onFunMode); }} disabled={isImageLoading || !!videoUrl} className="flex flex-col items-center justify-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold py-3 px-4 rounded-lg hover:scale-105 transition-transform duration-300 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed aspect-square">
+                          <Icon type="sparkles" className="w-5 h-5" />
+                          <span>Fun Mode</span>
+                      </button>
 
                       <button onClick={handleSave} className="flex flex-col items-center justify-center gap-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold py-3 px-4 rounded-lg hover:scale-105 transition-transform duration-300 text-xs sm:text-sm aspect-square">
                           <Icon type="download" className="w-5 h-5"/><span>Save {videoUrl ? 'Video' : 'Image'}</span>
                       </button>
                       
-                       <button onClick={() => { triggerHapticFeedback(); setIsVideoDirectorOpen(true); }} disabled={isImageLoading || isVideoLoading || !!videoUrl} className="flex flex-col items-center justify-center gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-4 rounded-lg hover:scale-105 transition-transform duration-300 text-xs sm:text-sm aspect-square disabled:opacity-50 disabled:cursor-not-allowed">
-                          <Icon type="movie" /><span>Animate with AI</span>
+                       <button onClick={() => { triggerHapticFeedback(); setIsVideoDirectorOpen(true); }} disabled={isImageLoading || isVideoLoading} className="flex flex-col items-center justify-center gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-4 rounded-lg hover:scale-105 transition-transform duration-300 text-xs sm:text-sm aspect-square disabled:opacity-50 disabled:cursor-not-allowed">
+                          <Icon type="movie" /><span>{videoUrl ? 'New Video' : 'Animate with AI'}</span>
                       </button>
                       
                       <button onClick={() => { triggerHapticFeedback(); onStartOver(); }} className="flex flex-col items-center justify-center gap-2 bg-white/10 border border-white/20 text-white font-bold py-3 px-4 rounded-lg hover:bg-white/20 transition-colors text-xs sm:text-sm aspect-square">

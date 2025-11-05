@@ -380,8 +380,10 @@ const App: React.FC = () => {
             // @ts-ignore
             await window.aistudio.openSelectKey();
          }
+      } else if (errorMessage.toLowerCase().includes("overloaded")) {
+        setError("The video generation service is very busy right now. We tried a few times, but it's still overloaded. Please try again in a few minutes.");
       } else {
-        setError(`Failed to generate video. ${errorMessage}`);
+        setError(`Failed to generate video. ${errorMessage.replace('Video generation failed: ', '')}`);
       }
       throw err; // Re-throw to be caught by the caller in PostResult
     }

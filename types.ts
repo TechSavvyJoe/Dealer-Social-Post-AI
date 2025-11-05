@@ -20,7 +20,7 @@ export enum ToneOption {
   Family = "Family-Friendly",
   Humorous = "Humorous",
   Inspirational = "Inspirational",
-  Urgent = "Urgent/Promotional",
+  Promotional = "Promotional",
 }
 
 // FIX: Added the VideoStyle enum to resolve the export error.
@@ -30,6 +30,21 @@ export enum VideoStyle {
   VintageFilm = "Vintage Film",
   NeonPulse = "Neon Pulse",
   CometStrike = "Comet Strike",
+  HappyDance = "Happy Dance",
+  JumpingForJoy = "Jumping for Joy",
+  SpeedLines = "Speed Lines",
+  CarSketch = "Car Sketch",
+  GoldenRadiance = "Golden Radiance",
+  GlitchPop = "Glitch Pop",
+  SmokeReveal = "Smoke Reveal",
+  Spotlight = "Spotlight",
+  FireEmbers = "Fire & Embers",
+  LiquidChrome = "Liquid Chrome",
+  StickerSlap = "Sticker Slap",
+  GraffitiReveal = "Graffiti Reveal",
+  HolographicScan = "Holographic Scan",
+  RoadTrip = "Road Trip",
+  Blueprint = "Blueprint",
 }
 
 export interface GeneratedPost {
