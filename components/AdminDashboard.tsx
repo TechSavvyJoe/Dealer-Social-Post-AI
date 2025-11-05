@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Dealer } from '../types';
 import * as db from '../services/database';
 import { Icon } from './Icons';
+import { logEvent, logError } from '../utils/telemetry';
 
 const DealerCard: React.FC<{ dealer: Dealer }> = ({ dealer }) => {
   return (
@@ -31,25 +33,22 @@ const DealerCard: React.FC<{ dealer: Dealer }> = ({ dealer }) => {
 
 
 export const AdminDashboard: React.FC = () => {
-  const [dealers, setDealers] = useState<Dealer[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const { data, error, isPending, refetch } = useQuery({
+    queryKey: ['dealers'],
+    queryFn: async () => {
+      try {
+        const list = await db.getDealers();
+        logEvent('admin.dealers.loaded', { count: list.length });
+        return list;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        logError('admin.dealers.failed', { message });
+        throw err;
+      }
+    },
+  });
 
-  useEffect(() => {
-    const loadDealers = async () => {
-        setIsLoading(true);
-        try {
-            setError(null);
-            const dealersData = await db.getDealers();
-            setDealers(dealersData);
-        } catch (e) {
-            setError(e instanceof Error ? e.message : 'Could not load dealer data.');
-        } finally {
-            setIsLoading(false);
-        }
-    };
-    loadDealers();
-  }, []);
+  const dealers = data ?? [];
 
   return (
     <div className="w-full max-w-4xl mx-auto p-2 sm:p-4 space-y-6">
@@ -74,11 +73,14 @@ export const AdminDashboard: React.FC = () => {
       {error && (
           <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg flex items-center justify-center gap-2">
               <Icon type="error" className="w-5 h-5"/>
-              <span>{error}</span>
+              <span>{error instanceof Error ? error.message : String(error)}</span>
+              <button onClick={() => refetch()} className="ml-4 text-indigo-300 hover:text-white text-sm font-semibold underline">
+                Retry
+              </button>
           </div>
       )}
 
-      {isLoading ? (
+      {isPending ? (
         <div className="flex justify-center items-center py-10">
             <svg className="animate-spin h-8 w-8 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>

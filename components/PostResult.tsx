@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { GeneratedPost, VideoStyle } from '../types';
+import { GeneratedPost, VideoStyle, VideoRequestOptions } from '../types';
 import { dataUrlToBlob } from '../utils/imageUtils';
 import { Icon } from './Icons';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { triggerHapticFeedback } from '../utils/haptics';
 import { EditTextModal } from './EditTextModal';
 import { VideoDirectorModal } from './VideoDirectorModal';
+import { Badge } from './ui/Badge';
 
 interface PostResultProps {
   post: GeneratedPost;
@@ -15,7 +16,7 @@ interface PostResultProps {
   onRegenerateText: () => Promise<void>;
   onEditText: (prompt: string) => Promise<void>;
   onFunMode: () => Promise<void>;
-  onGenerateVideo: (style: VideoStyle) => Promise<string>;
+  onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
   error?: string | null;
 }
 
@@ -45,6 +46,15 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isVideoLoading, setIsVideoLoading] = useState(false);
   const [videoLoadingMessage, setVideoLoadingMessage] = useState('');
+  const [videoJobs, setVideoJobs] = useState<Array<{
+    id: string;
+    style: VideoStyle;
+    status: 'queued' | 'processing' | 'completed' | 'failed';
+    duration: number;
+    soundtrack: string;
+    url?: string;
+    error?: string;
+  }>>([]);
   
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   
@@ -191,7 +201,7 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
     setIsTextEditing(false); // Close modal after action completes
   };
 
-  const handleGenerateVideo = async (style: VideoStyle) => {
+  const handleGenerateVideo = async (style: VideoStyle, options: VideoRequestOptions) => {
     setIsVideoDirectorOpen(false);
     setIsVideoLoading(true);
 
@@ -205,9 +215,17 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
         setVideoLoadingMessage(messages[messageIndex]);
     }, 4000);
 
+    const jobId = `video-${Date.now()}`;
+    setVideoJobs(prev => [...prev, { id: jobId, style, status: 'processing', duration: options.durationSeconds, soundtrack: options.soundtrack }]);
+
     try {
-        const url = await onGenerateVideo(style);
+        const url = await onGenerateVideo(style, options);
         setVideoUrl(url);
+        setVideoJobs(prev => prev.map(job => job.id === jobId ? { ...job, status: 'completed', url } : job));
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        setVideoJobs(prev => prev.map(job => job.id === jobId ? { ...job, status: 'failed', error: message } : job));
+        throw error;
     } finally {
         setIsVideoLoading(false);
         clearInterval(intervalId);
@@ -294,6 +312,39 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                               Submit Edit
                           </button>
                       </div>
+                  )}
+                  {videoJobs.length > 0 && (
+                    <div className="space-y-3 rounded-lg border border-white/10 bg-white/5 p-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-white">Video queue</span>
+                        <span className="text-[10px] text-indigo-200/70">{videoJobs.filter(job => job.status === 'processing').length} active</span>
+                      </div>
+                      <ul className="space-y-2">
+                        {videoJobs.map(job => (
+                          <li key={job.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-white/10 bg-slate-900/40 px-3 py-2 text-xs">
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-white">{job.style}</span>
+                              <span className="text-indigo-200/70">{job.duration}s · {job.soundtrack === 'none' ? 'No soundtrack' : job.soundtrack}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {job.status === 'completed' && <Badge variant="success">Ready</Badge>}
+                              {job.status === 'processing' && <Badge variant="info">Rendering</Badge>}
+                              {job.status === 'queued' && <Badge variant="neutral">Queued</Badge>}
+                              {job.status === 'failed' && <Badge variant="warning">Failed</Badge>}
+                              {job.url && (
+                                <button
+                                  onClick={() => setVideoUrl(job.url || null)}
+                                  className="text-[10px] font-semibold uppercase tracking-wide text-indigo-200 hover:text-white"
+                                >
+                                  Preview
+                                </button>
+                              )}
+                            </div>
+                            {job.error && <span className="text-[10px] text-amber-200">{job.error}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
               </div>
           </div>

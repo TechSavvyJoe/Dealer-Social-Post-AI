@@ -6,9 +6,11 @@ import { Dialpad } from './Dialpad';
 
 interface LoginScreenProps {
   onLogin: (dealerId: string) => Promise<boolean>;
+  onShowSettings?: () => void;
+  isApiKeyConfigured?: boolean;
 }
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
+export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onShowSettings, isApiKeyConfigured = false }) => {
   const [dealerCode, setDealerCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -59,12 +61,26 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         ) : (
           <>
             <h1 className="text-2xl font-bold text-center text-white mb-4">Enter Dealer Code</h1>
+            {!isApiKeyConfigured && (
+              <div className="mb-4 bg-amber-500/10 border border-amber-400/30 text-amber-100 px-4 py-2 rounded-lg text-sm flex items-center gap-2">
+                  <Icon type="settings" className="w-5 h-5" />
+                  <span>Add your Gemini API key to unlock AI-powered post creation.</span>
+              </div>
+            )}
             <div className="flex justify-center gap-4 mb-8">
               {[...Array(4)].map((_, i) => (
                 <div key={i} className={`w-4 h-4 rounded-full transition-all duration-300 ${i < dealerCode.length ? 'bg-indigo-400 scale-110' : 'bg-white/20'}`}></div>
               ))}
             </div>
             <Dialpad onKeyPress={handleDialpadKeyPress} />
+            <button
+              type="button"
+              onClick={() => { triggerHapticFeedback(); onShowSettings?.(); }}
+              className="mt-6 flex items-center justify-center gap-2 text-sm font-semibold text-indigo-200 hover:text-white transition-colors"
+            >
+              <Icon type="settings" className="w-4 h-4" />
+              <span>{isApiKeyConfigured ? 'Manage API Key' : 'Add API Key'}</span>
+            </button>
           </>
         )}
 

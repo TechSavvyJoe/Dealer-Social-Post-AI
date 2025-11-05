@@ -1,13 +1,8 @@
 // FIX: Replaced 'GenerateVideosOperationResponse' with the correct 'GenerateVideosOperation' type.
-import { GoogleGenAI, Modality, Type, GenerateVideosOperation } from "@google/genai";
+import { GoogleGenAI, Modality, GenerateVideosOperation } from "@google/genai";
 import { parseDataUrl } from '../utils/imageUtils';
-import { StyleOption, ToneOption, VideoStyle } from "../types";
-
-if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable is not set");
-}
-
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+import { StyleOption, ToneOption, VideoStyle, VideoRequestOptions } from "../types";
+import { getGeminiClient, requireGeminiApiKey } from './geminiClient';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -372,7 +367,8 @@ The final output must be a single, high-resolution, fully-composed image in the 
         imageParts.push(logoImagePart);
     }
     
-    const imageResponse = await ai.models.generateContent({
+    const client = getGeminiClient();
+    const imageResponse = await client.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: { parts: imageParts },
         config: {
@@ -443,7 +439,8 @@ ${criticalRulesForEditing}
         imageParts.push(logoImagePart);
     }
 
-    const imageResponse = await ai.models.generateContent({
+    const client = getGeminiClient();
+    const imageResponse = await client.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: {
             parts: imageParts,
@@ -479,7 +476,8 @@ export const generateSocialPostText = async (
     const imagePart = { inlineData: { mimeType, data: base64Data } };
     const textPrompt = generateTextPrompt(tone, dealershipName, customerName, isRegeneration);
 
-    const textResponse = await ai.models.generateContent({
+    const client = getGeminiClient();
+    const textResponse = await client.models.generateContent({
         model: 'gemini-2.5-pro',
         contents: { parts: [ imagePart, { text: textPrompt } ] }
     });
@@ -510,7 +508,8 @@ export const editSocialPostText = async (
     **Your task:**
     Rewrite the original text to incorporate the user's request while maintaining the specified tone. The output MUST be only the new, edited text, ready to be copied and pasted. Do not include any preamble.`;
 
-    const textResponse = await ai.models.generateContent({
+    const client = getGeminiClient();
+    const textResponse = await client.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: prompt
     });
@@ -563,7 +562,8 @@ export const generateSocialPost = async (
         imageParts.push(logoImagePart);
     }
 
-    const imagePromise = ai.models.generateContent({
+    const client = getGeminiClient();
+    const imagePromise = client.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: { parts: imageParts },
         config: { responseModalities: [Modality.IMAGE] }
@@ -586,8 +586,14 @@ export const generateSocialPost = async (
     return { image: newImageBase64, text: textResult };
 };
 
-const generateVideoPrompt = (style: VideoStyle): string => {
-    const coreInstruction = "You are an AI motion graphics artist. You are given a static image of a person or people celebrating their new car. Your task is to transform this image into a short, dynamic, 4-second video clip. Do not change the subjects in the image; only add animation and effects based on the chosen theme.";
+const generateVideoPrompt = (style: VideoStyle, options: VideoRequestOptions): string => {
+    const coreInstruction = `You are an AI motion graphics artist. You are given a static image of a person or people celebrating their new car. Your task is to transform this image into a short, dynamic video clip that runs for approximately ${options.durationSeconds} seconds. Do not change the subjects in the image; only add animation and effects based on the chosen theme.`;
+
+    const soundtrackInstruction = options.soundtrack === 'none'
+        ? 'No background audio is required; focus on crisp visuals that can loop cleanly without sound.'
+        : options.soundtrack === 'celebration'
+            ? 'Incorporate rhythmic motion that matches an upbeat, celebratory clap-driven track.'
+            : 'Design the animation with smooth, cinematic pacing that swells in sync with an ambient score.';
 
     let styleInstruction = "";
     switch(style) {
@@ -652,7 +658,11 @@ const generateVideoPrompt = (style: VideoStyle): string => {
             styleInstruction = "Theme: 'Blueprint'. Begin with a blue background. Animate white blueprint lines that quickly draw the technical schematic of the car on screen. Once the drawing is complete, have it seamlessly fade and transition into the final, full-color photograph of the car and customers.";
             break;
     }
-    return `${coreInstruction} ${styleInstruction}`;
+    return `${coreInstruction}
+
+${soundtrackInstruction}
+
+${styleInstruction}`;
 }
 
 const getImageDimensions = (dataUrl: string): Promise<{width: number, height: number}> => {
@@ -668,15 +678,14 @@ const getImageDimensions = (dataUrl: string): Promise<{width: number, height: nu
     });
 };
 
-export const generatePostVideo = async (imageBase64Url: string, style: VideoStyle): Promise<string> => {
-    // Create a fresh, locally-scoped AI instance for each call. This is crucial for video generation
-    // to guarantee it uses the most up-to-date API key selected by the user in the UI,
-    // avoiding issues with stale module-level variables.
-    const videoAi = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    
+export const generatePostVideo = async (imageBase64Url: string, style: VideoStyle, options: VideoRequestOptions): Promise<string> => {
+    const apiKey = requireGeminiApiKey();
+    // Always create a fresh client so we respect any runtime key change.
+    const videoAi = new GoogleGenAI({ apiKey });
+
     const { mimeType, data: base64Data } = parseDataUrl(imageBase64Url);
     const image = { imageBytes: base64Data, mimeType };
-    const prompt = generateVideoPrompt(style);
+    const prompt = generateVideoPrompt(style, options);
 
     const { width, height } = await getImageDimensions(imageBase64Url);
     const aspectRatio = width > height ? '16:9' : '9:16';
@@ -701,8 +710,11 @@ export const generatePostVideo = async (imageBase64Url: string, style: VideoStyl
             }
 
             if (operation.error) {
-                // This is an error from the completed (but failed) operation
-                throw new Error(operation.error.message);
+                const message =
+                    typeof operation.error === 'object' && operation.error !== null && 'message' in operation.error
+                        ? String((operation.error as { message?: unknown }).message ?? 'Video generation failed without an error message.')
+                        : 'Video generation failed without an error message.';
+                throw new Error(message);
             }
 
             const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
@@ -713,7 +725,17 @@ export const generatePostVideo = async (imageBase64Url: string, style: VideoStyl
             
             // Fetch the video as a blob and create a local URL.
             // This avoids needing the API key on the client-side for the video src tag.
-            const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
+            let downloadUrl: string;
+            try {
+                const url = new URL(downloadLink);
+                url.searchParams.set('key', apiKey);
+                downloadUrl = url.toString();
+            } catch {
+                const separator = downloadLink.includes('?') ? '&' : '?';
+                downloadUrl = `${downloadLink}${separator}key=${encodeURIComponent(apiKey)}`;
+            }
+
+            const response = await fetch(downloadUrl);
             if (!response.ok) {
                 const errorBody = await response.text();
                 throw new Error(`Failed to download the generated video. Status: ${response.status}. Body: ${errorBody}`);
@@ -721,16 +743,24 @@ export const generatePostVideo = async (imageBase64Url: string, style: VideoStyl
             const videoBlob = await response.blob();
             return URL.createObjectURL(videoBlob); // Success, exit function
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
+            const errorMessage = (() => {
+                if (error instanceof Error) return error.message;
+                if (typeof error === 'string') return error;
+                try {
+                    return JSON.stringify(error);
+                } catch {
+                    return 'Unknown error occurred.';
+                }
+            })();
 
             if (errorMessage.toLowerCase().includes("overloaded") && attempt < maxRetries) {
                 console.warn(`Attempt ${attempt} failed: Model overloaded. Retrying in ${attempt * 5} seconds...`);
-                await new Promise(resolve => setTimeout(resolve, attempt * 5000));
-                // Continue to next attempt
-            } else {
-                // This was the last attempt, or it's a non-retryable error. Re-throw it.
-                throw new Error(`Video generation failed: ${errorMessage}`);
+                await sleep(attempt * 5000);
+                continue;
             }
+
+            // This was the last attempt, or it's a non-retryable error. Re-throw it.
+            throw new Error(`Video generation failed: ${errorMessage}`);
         }
     }
     
