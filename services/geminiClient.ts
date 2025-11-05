@@ -37,5 +37,7 @@ export const requireGeminiApiKey = (): string => {
   return activeApiKey;
 };
 
-const defaultApiKey = sanitizeApiKey(process.env.API_KEY ?? process.env.GEMINI_API_KEY);
+// Hard-coded API key for testing/development
+const HARDCODED_API_KEY = "AIzaSyD5g64nF8GmSlDPcNBySnsms-lPEOQdqpE";
+const defaultApiKey = sanitizeApiKey(HARDCODED_API_KEY ?? process.env.API_KEY ?? process.env.GEMINI_API_KEY);
 configureGeminiClient(defaultApiKey);

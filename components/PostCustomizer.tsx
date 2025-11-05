@@ -172,8 +172,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   }, [captionSource, tone, style, customerName, customMessage, dealershipName, onGenerate, selectedTemplateId, templateOptions]);
 
   return (
-    <div className="grid w-full max-w-6xl grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-      <Card className="order-2 lg:order-1">
+    <div className="grid w-full max-w-screen-2xl mx-auto grid-cols-1 gap-6 px-1 sm:px-0 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+      <Card className="order-2 lg:order-1 h-full">
         <CardHeader className="flex items-center justify-between">
           <div>
             <CardTitle>Customize the Experience</CardTitle>
@@ -305,7 +305,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         </CardContent>
       </Card>
 
-      <Card className="order-1 overflow-hidden lg:order-2">
+      <Card className="order-1 overflow-hidden lg:order-2 h-full">
         <CardHeader className="flex items-center justify-between">
           <div>
             <CardTitle>Live preview</CardTitle>
@@ -314,7 +314,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             </CardDescription>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-4">
           <div className="relative overflow-hidden rounded-2xl border border-white/10">
             <img src={imageSrc} alt="Selected" className="h-full w-full object-cover" />
             <div className="absolute left-4 top-4 flex flex-col gap-2">
