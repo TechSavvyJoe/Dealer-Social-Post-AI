@@ -555,13 +555,12 @@ const App: React.FC = () => {
   };
 
   const isCenteredStep = displayedStep === AppStep.LOGIN || displayedStep === AppStep.GENERATING;
-  const layoutClasses = isCenteredStep
-    ? 'h-full justify-center'
-    : 'justify-start pt-4 sm:pt-8';
+  const layoutFlexClass = isCenteredStep ? 'justify-center' : 'justify-start';
+  const layoutPadding = isCenteredStep ? 'py-10' : 'pt-10 pb-16';
 
   return (
     <>
-      <main className="h-screen w-full text-slate-100 flex flex-col">
+      <main className="min-h-screen w-full text-slate-100 flex flex-col">
         {currentDealer && (
           <Header
             dealer={currentDealer}
@@ -570,9 +569,11 @@ const App: React.FC = () => {
             isApiKeyConfigured={isApiKeyConfigured}
           />
         )}
-        <div className={`w-full flex flex-col items-center flex-grow p-4 ${animationClass} ${layoutClasses}`}>
-          {displayedStep !== AppStep.ADMIN && <ProgressSteps activeStep={displayedStep} />}
-          {renderContent()}
+        <div className={`w-full flex flex-col flex-grow px-4 sm:px-6 lg:px-10 ${animationClass}`}>
+          <div className={`w-full max-w-screen-2xl mx-auto flex-1 flex flex-col gap-6 ${layoutFlexClass} ${layoutPadding}`}>
+            {displayedStep !== AppStep.ADMIN && <ProgressSteps activeStep={displayedStep} />}
+            {renderContent()}
+          </div>
         </div>
       </main>
       <SettingsModal

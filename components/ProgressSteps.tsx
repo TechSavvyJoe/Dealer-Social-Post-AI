@@ -18,8 +18,8 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
   const activeIndex = stepOrder.findIndex(({ step }) => step === activeStep);
 
   return (
-    <nav className="mb-6 w-full max-w-5xl">
-      <ol className="flex flex-wrap items-center justify-center gap-4 sm:gap-6">
+    <nav className="w-full max-w-screen-2xl px-2 md:px-4 mx-auto">
+      <ol className="flex flex-wrap items-center justify-center gap-3 sm:gap-5">
         {stepOrder.map(({ step, label }, index) => {
           const isActive = step === activeStep;
           const isComplete = index < activeIndex;

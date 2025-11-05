@@ -252,7 +252,7 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
           onClose={() => setIsVideoDirectorOpen(false)}
           onSelectStyle={handleGenerateVideo}
       />
-      <div className="w-full max-w-6xl mx-auto p-2 sm:p-4 md:p-6 space-y-6">
+      <div className="w-full max-w-screen-2xl mx-auto px-1 sm:px-4 md:px-6 space-y-6">
         <h2 className="text-3xl sm:text-4xl font-bold text-center text-white">Your Post is Ready!</h2>
         {error && (
           <div className="mb-4 bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg flex items-center justify-center gap-2">
@@ -260,9 +260,9 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
             <span>{error}</span>
           </div>
         )}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
           
-          <div className="lg:col-span-2 flex flex-col items-center bg-white/5 p-4 rounded-2xl shadow-2xl space-y-4">
+          <div className="flex flex-col items-center bg-white/5 p-4 rounded-2xl shadow-2xl space-y-4">
               <div className="relative w-full">
                   {(isImageLoading || isVideoLoading) && <LoadingOverlay message={isVideoLoading ? videoLoadingMessage : "Updating Image..."} />}
                   
@@ -349,7 +349,7 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
               </div>
           </div>
           
-          <div className="lg:col-span-1 bg-white/10 backdrop-blur-lg border border-white/20 p-4 lg:p-6 rounded-2xl flex flex-col">
+          <div className="bg-white/10 backdrop-blur-lg border border-white/20 p-4 lg:p-6 rounded-2xl flex flex-col">
               <h3 className="text-xl font-semibold mb-3 text-white">Generated Social Post</h3>
               <div className="relative mb-4 flex-grow">
                   {isTextLoading && <LoadingOverlay message="Updating Text..." />}
