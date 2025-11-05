@@ -10,7 +10,7 @@ import { POST_TEMPLATES } from './templates';
 
 interface PostCustomizerProps {
   imageSrc: string;
-  onGenerate: (style: StyleOption, tone: ToneOption, customerName: string, customText?: string) => void;
+  onGenerate: (style: StyleOption, tone: ToneOption, customerName: string, customText?: string, creativeBrief?: string) => void;
   onBack: () => void;
   dealershipName: string;
   defaultStyle: StyleOption;
@@ -18,6 +18,7 @@ interface PostCustomizerProps {
   onStyleToneChange: (style: StyleOption, tone: ToneOption) => void;
   isApiKeyConfigured: boolean;
   onOpenSettings: () => void;
+  isDesktopLayout: boolean;
 }
 
 interface StylePreviewMeta {
@@ -58,13 +59,22 @@ const TONE_DESCRIPTIONS: Record<ToneOption, string> = {
   [ToneOption.Promotional]: 'CTA-focused copy that teases offers without specifying pricing.',
 };
 
+type CaptionSource = 'ai' | 'prompted' | 'template' | 'custom';
+
+const AI_FLAVORS = [
+  { id: 'hero', label: 'Spotlight Moment', description: 'Lean into the triumph of the delivery and make the customer feel like a star.' },
+  { id: 'story', label: 'Mini Story', description: 'Tell a short, cinematic story about their journey to this new ride.' },
+  { id: 'community', label: 'Dealership Family', description: 'Celebrate the relationship with the team and invite others to join the family.' },
+];
+
 interface StyleCardProps {
   option: StyleOption;
   current: StyleOption;
   onSelect: (option: StyleOption) => void;
+  dealershipName: string;
 }
 
-const StyleCard: React.FC<StyleCardProps> = ({ option, current, onSelect }) => {
+const StyleCard: React.FC<StyleCardProps> = ({ option, current, onSelect, dealershipName }) => {
   const meta = STYLE_PREVIEWS[option];
   const isActive = option === current;
 
@@ -78,7 +88,10 @@ const StyleCard: React.FC<StyleCardProps> = ({ option, current, onSelect }) => {
         isActive ? 'border-indigo-400 bg-indigo-500/20 shadow-lg shadow-indigo-500/30' : 'border-white/10 bg-white/5 hover:border-indigo-400/70 hover:bg-white/10'
       }`}
     >
-      <div className={`h-24 w-full rounded-xl bg-gradient-to-r ${meta.gradient} opacity-80 group-hover:opacity-100 transition-opacity`} />
+      <div className={`relative h-24 w-full rounded-xl bg-gradient-to-r ${meta.gradient} opacity-90 group-hover:opacity-100 transition-all overflow-hidden`}>
+        <span className="absolute left-3 top-3 text-sm font-semibold text-white drop-shadow">Headline</span>
+        <span className="absolute left-3 bottom-3 text-[11px] uppercase tracking-wide text-white/80">{dealershipName}</span>
+      </div>
       <div className="space-y-1">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-white">{option}</span>
@@ -127,12 +140,15 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   onStyleToneChange,
   isApiKeyConfigured,
   onOpenSettings,
+  isDesktopLayout,
 }) => {
   const [customerName, setCustomerName] = useState('');
   const [style, setStyle] = useState<StyleOption>(defaultStyle);
   const [tone, setTone] = useState<ToneOption>(defaultTone);
   const [customMessage, setCustomMessage] = useState('');
-  const [captionSource, setCaptionSource] = useState<'ai' | 'template' | 'custom'>('ai');
+  const [captionSource, setCaptionSource] = useState<CaptionSource>('ai');
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiFlavor, setAiFlavor] = useState(AI_FLAVORS[0].id);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
 
   useEffect(() => {
@@ -147,6 +163,12 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     onStyleToneChange(style, tone);
   }, [style, tone, onStyleToneChange]);
 
+  useEffect(() => {
+    if (captionSource !== 'prompted') {
+      setAiPrompt('');
+    }
+  }, [captionSource]);
+
   const templateOptions = useMemo(() => POST_TEMPLATES, []);
 
   useEffect(() => {
@@ -158,6 +180,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   const handleGenerate = useCallback(() => {
     triggerHapticFeedback();
     let preparedText: string | undefined;
+    let creativeBrief: string | undefined;
+
     if (captionSource === 'template') {
       const template = templateOptions.find((tpl) => tpl.id === selectedTemplateId);
       if (template) {
@@ -167,13 +191,23 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
       }
     } else if (captionSource === 'custom') {
       preparedText = customMessage.trim() || undefined;
+    } else if (captionSource === 'prompted') {
+      creativeBrief = aiPrompt.trim() || undefined;
+    } else {
+      const flavor = AI_FLAVORS.find((flavor) => flavor.id === aiFlavor);
+      creativeBrief = flavor?.description;
     }
-    onGenerate(style, tone, customerName, preparedText);
-  }, [captionSource, tone, style, customerName, customMessage, dealershipName, onGenerate, selectedTemplateId, templateOptions]);
+
+    onGenerate(style, tone, customerName, preparedText, creativeBrief);
+  }, [captionSource, tone, style, customerName, customMessage, dealershipName, onGenerate, selectedTemplateId, templateOptions, aiPrompt, aiFlavor]);
+
+  const layoutClasses = isDesktopLayout
+    ? 'grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] gap-8'
+    : 'grid-cols-1 gap-6';
 
   return (
-    <div className="grid w-full max-w-screen-2xl mx-auto grid-cols-1 gap-6 px-1 sm:px-0 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-      <Card className="order-2 lg:order-1 h-full">
+    <div className={`grid w-full max-w-screen-2xl mx-auto px-1 sm:px-0 ${layoutClasses}`}>
+      <Card className={`order-2 lg:order-1 ${isDesktopLayout ? 'h-full' : ''}`}>
         <CardHeader className="flex items-center justify-between">
           <div>
             <CardTitle>Customize the Experience</CardTitle>
@@ -202,26 +236,34 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <h4 className="text-sm font-semibold uppercase tracking-wide text-indigo-200">Visual direction</h4>
-              <Badge variant="info">Live preview</Badge>
+              <h4 className="text-sm font-semibold uppercase tracking-wide text-indigo-200">Design direction</h4>
+              <Badge variant="info">Illustrative preview</Badge>
             </div>
-            <div className="grid gap-3 lg:grid-cols-2">
+            <div className={`grid gap-3 ${isDesktopLayout ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-2'}`}>
               {Object.values(StyleOption).map((option) => (
-                <StyleCard key={option} option={option} current={style} onSelect={setStyle} />
+                <StyleCard key={option} option={option} current={style} onSelect={setStyle} dealershipName={dealershipName} />
               ))}
             </div>
           </div>
 
           <div className="space-y-3">
             <h4 className="text-sm font-semibold uppercase tracking-wide text-indigo-200">Caption strategy</h4>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <Button
                 variant={captionSource === 'ai' ? 'primary' : 'secondary'}
                 size="sm"
                 onClick={() => { triggerHapticFeedback(); setCaptionSource('ai'); }}
               >
                 <Icon type="sparkles" className="h-4 w-4" />
-                <span>AI Generated</span>
+                <span>AI Auto-Magic</span>
+              </Button>
+              <Button
+                variant={captionSource === 'prompted' ? 'primary' : 'secondary'}
+                size="sm"
+                onClick={() => { triggerHapticFeedback(); setCaptionSource('prompted'); }}
+              >
+                <Icon type="edit" className="h-4 w-4" />
+                <span>AI Remix</span>
               </Button>
               <Button
                 variant={captionSource === 'template' ? 'primary' : 'secondary'}
@@ -229,7 +271,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 onClick={() => { triggerHapticFeedback(); setCaptionSource('template'); }}
               >
                 <Icon type="settings" className="h-4 w-4" />
-                <span>Template</span>
+                <span>Templates</span>
               </Button>
               <Button
                 variant={captionSource === 'custom' ? 'primary' : 'secondary'}
@@ -242,10 +284,27 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             </div>
 
             {captionSource === 'ai' && (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {Object.values(ToneOption).map((option) => (
-                  <ToneTile key={option} tone={option} current={tone} onSelect={setTone} />
-                ))}
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {Object.values(ToneOption).map((option) => (
+                    <ToneTile key={option} tone={option} current={tone} onSelect={setTone} />
+                  ))}
+                </div>
+                <div className="space-y-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Tell the AI what to emphasize</span>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {AI_FLAVORS.map(({ id, label, description }) => (
+                      <button
+                        key={id}
+                        onClick={() => { triggerHapticFeedback(); setAiFlavor(id); }}
+                        className={`rounded-lg border px-3 py-2 text-left text-xs transition-all ${aiFlavor === id ? 'border-indigo-400 bg-indigo-500/25 text-white shadow' : 'border-white/10 bg-white/5 text-indigo-100 hover:border-indigo-400/40'}`}
+                      >
+                        <span className="font-semibold block text-sm">{label}</span>
+                        <span className="text-[11px] leading-relaxed text-indigo-100/80">{description}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -278,6 +337,19 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 />
               </label>
             )}
+
+            {captionSource === 'prompted' && (
+              <label className="flex flex-col gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Describe the vibe you want</span>
+                <textarea
+                  value={aiPrompt}
+                  onChange={(event) => setAiPrompt(event.target.value)}
+                  rows={4}
+                  className="min-h-[120px] rounded-lg border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
+                  placeholder="e.g., Celebrate how they found their dream off-road rig and shout out the weekend adventures ahead."
+                />
+              </label>
+            )}
           </div>
 
           {!isApiKeyConfigured && (
@@ -297,7 +369,11 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               <Icon type="retake" className="h-4 w-4" />
               Change photo
             </Button>
-            <Button size="lg" onClick={handleGenerate} disabled={!isApiKeyConfigured}>
+            <Button
+              size="lg"
+              onClick={handleGenerate}
+              disabled={!isApiKeyConfigured || (captionSource === 'prompted' && !aiPrompt.trim())}
+            >
               <Icon type="check" className="h-5 w-5" />
               {isApiKeyConfigured ? 'Generate hero image & caption' : 'Add API key to generate'}
             </Button>
@@ -305,7 +381,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         </CardContent>
       </Card>
 
-      <Card className="order-1 overflow-hidden lg:order-2 h-full">
+      <Card className={`order-1 overflow-hidden lg:order-2 ${isDesktopLayout ? 'h-full' : ''}`}>
         <CardHeader className="flex items-center justify-between">
           <div>
             <CardTitle>Live preview</CardTitle>

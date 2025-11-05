@@ -62,12 +62,19 @@ const App: React.FC = () => {
   const [preferredStyle, setPreferredStyle] = useState<StyleOption>(StyleOption.Modern);
   const [preferredTone, setPreferredTone] = useState<ToneOption>(ToneOption.Excited);
   const isApiKeyConfigured = Boolean(apiKey);
+  const [isDesktopLayout, setIsDesktopLayout] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    const pointerFine = typeof window.matchMedia === 'function' ? window.matchMedia('(pointer: fine)').matches : true;
+    const uaIsMobile = typeof navigator !== 'undefined' ? /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) : false;
+    return window.innerWidth >= 1200 && pointerFine && !uaIsMobile;
+  });
 
   const [lastGenerationParams, setLastGenerationParams] = useState<{
     style: StyleOption;
     tone: ToneOption;
     customerName: string;
     customText?: string;
+    creativeBrief?: string;
   } | null>(null);
 
   const persistSession = useCallback((partial: Partial<{ generatedPost: GeneratedPost | null; selectedImage: string | null; step: AppStep }>) => {
@@ -92,6 +99,25 @@ const App: React.FC = () => {
       logError(`${name}.failure`, { ...metadata, message });
       throw error;
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const pointerMedia = typeof window.matchMedia === 'function' ? window.matchMedia('(pointer: fine)') : null;
+
+    const updateLayoutMode = () => {
+      const uaIsMobile = typeof navigator !== 'undefined' ? /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) : false;
+      const pointerFine = pointerMedia ? pointerMedia.matches : true;
+      setIsDesktopLayout(window.innerWidth >= 1200 && pointerFine && !uaIsMobile);
+    };
+
+    updateLayoutMode();
+    window.addEventListener('resize', updateLayoutMode);
+    pointerMedia?.addEventListener('change', updateLayoutMode);
+    return () => {
+      window.removeEventListener('resize', updateLayoutMode);
+      pointerMedia?.removeEventListener('change', updateLayoutMode);
+    };
   }, []);
 
   useEffect(() => {
@@ -250,18 +276,18 @@ const App: React.FC = () => {
       clearSession();
   };
 
-  const handleGenerate = useCallback(async (style: StyleOption, tone: ToneOption, customerName:string, customText?: string) => {
+  const handleGenerate = useCallback(async (style: StyleOption, tone: ToneOption, customerName:string, customText?: string, creativeBrief?: string) => {
     if (!selectedImage || !currentDealer) return;
     if (!ensureApiKeyReady()) return;
 
     setStep(AppStep.GENERATING);
     setError(null);
-    setLastGenerationParams({ style, tone, customerName, customText });
+    setLastGenerationParams({ style, tone, customerName, customText, creativeBrief });
     try {
       const { generateSocialPost } = await loadGeminiService();
       const result = await runGeminiTask('ai.generate', () =>
-        generateSocialPost(selectedImage, style, tone, currentDealer.name, customerName, currentDealer.logo, customText)
-      , { style, tone, dealership: currentDealer.name });
+        generateSocialPost(selectedImage, style, tone, currentDealer.name, customerName, currentDealer.logo, customText, creativeBrief)
+      , { style, tone, dealership: currentDealer.name, creativeBrief });
       setGeneratedPost(result);
       setStep(AppStep.RESULT);
       persistSession({ generatedPost: result, step: AppStep.RESULT });
@@ -282,9 +308,10 @@ const App: React.FC = () => {
         generateSocialPost(
           selectedImage, lastGenerationParams.style, lastGenerationParams.tone,
           currentDealer.name, lastGenerationParams.customerName, currentDealer.logo,
-          lastGenerationParams.customText || generatedPost?.text
+          lastGenerationParams.customText || generatedPost?.text,
+          lastGenerationParams.creativeBrief
         )
-      , { style: lastGenerationParams.style, tone: lastGenerationParams.tone, dealership: currentDealer.name });
+      , { style: lastGenerationParams.style, tone: lastGenerationParams.tone, dealership: currentDealer.name, creativeBrief: lastGenerationParams.creativeBrief });
       setGeneratedPost(result);
       persistSession({ generatedPost: result });
     } catch (err) {
@@ -346,9 +373,10 @@ const App: React.FC = () => {
           lastGenerationParams.tone,
           currentDealer.name,
           lastGenerationParams.customerName,
-          true
+          true,
+          lastGenerationParams.creativeBrief
         )
-      , { tone: lastGenerationParams.tone, dealership: currentDealer.name });
+      , { tone: lastGenerationParams.tone, dealership: currentDealer.name, creativeBrief: lastGenerationParams.creativeBrief });
       const updatedPost = generatedPost ? { ...generatedPost, text: newText } : null;
       setGeneratedPost(updatedPost);
       if (updatedPost) {
@@ -372,7 +400,7 @@ const App: React.FC = () => {
           editPrompt,
           lastGenerationParams.tone
         )
-      , { tone: lastGenerationParams.tone, dealership: currentDealer?.name });
+      , { tone: lastGenerationParams.tone, dealership: currentDealer?.name, creativeBrief: lastGenerationParams.creativeBrief });
       const updatedPost = generatedPost ? { ...generatedPost, text: newText } : null;
       setGeneratedPost(updatedPost);
       if (updatedPost) {
@@ -499,10 +527,11 @@ const App: React.FC = () => {
             onStyleToneChange: handleStyleToneChange,
             isApiKeyConfigured,
             onOpenSettings: () => setIsSettingsOpen(true),
+            isDesktopLayout,
         };
         if (error) {
             return (
-              <div className="w-full max-w-6xl mx-auto text-center p-4">
+              <div className="w-full max-w-screen-2xl mx-auto text-center p-4">
                 <div className="mb-4 bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg flex items-center justify-center gap-2">
                   <Icon type="error" className="w-5 h-5"/>
                   <span>{error}</span>
@@ -546,6 +575,7 @@ const App: React.FC = () => {
               onFunMode={handleFunMode}
               onGenerateVideo={handleGenerateVideo}
               error={error}
+              isDesktopLayout={isDesktopLayout}
             />
           </Suspense>
         ) : null;
@@ -557,6 +587,7 @@ const App: React.FC = () => {
   const isCenteredStep = displayedStep === AppStep.LOGIN || displayedStep === AppStep.GENERATING;
   const layoutFlexClass = isCenteredStep ? 'justify-center' : 'justify-start';
   const layoutPadding = isCenteredStep ? 'py-10' : 'pt-10 pb-16';
+  const layoutGap = isDesktopLayout ? 'gap-10' : 'gap-6';
 
   return (
     <>
@@ -570,8 +601,8 @@ const App: React.FC = () => {
           />
         )}
         <div className={`w-full flex flex-col flex-grow px-4 sm:px-6 lg:px-10 ${animationClass}`}>
-          <div className={`w-full max-w-screen-2xl mx-auto flex-1 flex flex-col gap-6 ${layoutFlexClass} ${layoutPadding}`}>
-            {displayedStep !== AppStep.ADMIN && <ProgressSteps activeStep={displayedStep} />}
+          <div className={`w-full max-w-screen-2xl mx-auto flex-1 flex flex-col ${layoutGap} ${layoutFlexClass} ${layoutPadding}`}>
+            {displayedStep !== AppStep.ADMIN && displayedStep !== AppStep.LOGIN && <ProgressSteps activeStep={displayedStep} />}
             {renderContent()}
           </div>
         </div>

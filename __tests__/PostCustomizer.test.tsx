@@ -17,6 +17,7 @@ describe('PostCustomizer', () => {
     onOpenSettings: vi.fn(),
     defaultStyle: StyleOption.Modern,
     defaultTone: ToneOption.Excited,
+    isDesktopLayout: true,
   };
 
   beforeEach(() => {
