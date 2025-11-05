@@ -46,16 +46,19 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({ isOpen, on
       aria-modal="true"
       aria-label="Image Preview"
     >
-      <div className="relative max-w-4xl max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-        <img src={imageSrc} alt="Social media post preview" className="object-contain w-full h-full max-h-[90vh] rounded-lg" />
-      </div>
-      <button
-        onClick={handleClose}
-        className="absolute top-4 right-4 text-white bg-black/50 rounded-full p-2 hover:bg-black/75 transition-colors"
-        aria-label="Close preview"
+      <div 
+        className="relative max-w-5xl w-full max-h-[95vh] flex items-center justify-center" 
+        onClick={(e) => e.stopPropagation()}
       >
-        <Icon type="close" className="w-8 h-8" />
-      </button>
+        <img src={imageSrc} alt="Social media post preview" className="object-contain w-auto h-auto max-w-full max-h-[95vh] rounded-lg shadow-2xl" />
+        <button
+          onClick={handleClose}
+          className="absolute top-2 right-2 text-white bg-black/50 rounded-full p-2 hover:bg-black/75 transition-colors focus:outline-none focus:ring-2 focus:ring-white"
+          aria-label="Close preview"
+        >
+          <Icon type="close" className="w-7 h-7" />
+        </button>
+      </div>
     </div>
   );
 };

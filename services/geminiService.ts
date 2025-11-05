@@ -7,7 +7,7 @@ if (!process.env.API_KEY) {
     throw new Error("API_KEY environment variable is not set");
 }
 
-let ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -142,7 +142,7 @@ const generateTextPrompt = (tone: ToneOption, dealershipName: string, customerNa
         case ToneOption.Inspirational:
             toneInstruction = "Write in an uplifting and motivational tone. Focus on the idea of a new journey, new beginnings, or achieving a dream. The post should feel inspiring and positive.";
             break;
-        case ToneOption.Urgent:
+        case ToneOption.Promotional:
             toneInstruction = "Write in a compelling, promotional, and urgent tone. Create a sense of excitement and encourage people to visit the dealership soon. You can hint at great deals or a limited-time opportunity without mentioning specifics.";
             break;
     }
@@ -153,8 +153,7 @@ const generateTextPrompt = (tone: ToneOption, dealershipName: string, customerNa
 
 **ABSOLUTE, NON-NEGOTIABLE REQUIREMENTS:**
 1.  **DEEP IMAGE ANALYSIS:** This is your most important task. Meticulously analyze the provided photo to identify:
-    *   **The exact car:** Make, model, and estimated year (e.g., Ford Mustang GT, Toyota RAV4 Hybrid).
-    *   **The car's characteristics:** Color, type (SUV, sedan, truck, sports car), and any visible special features.
+    *   **The Car:** Analyze the vehicle with extreme care. **Accuracy is your top priority.** If, and only if, you can identify the **exact make and model with over 99% certainty**, you may mention it (e.g., "this awesome Ford Mustang"). **If you have ANY uncertainty**, DO NOT guess the make or model. Instead, fall back to describing its certain characteristics, such as its **type** (e.g., "their new family-ready SUV", "this sleek sports car"), its **color** ("this stunning red truck"), or a general catchy phrase ("this beautiful new ride"). A correct generic description is infinitely better than an incorrect specific one.
     *   **The scene's vibe:** Is it a family, a solo adventurer, a first-time car owner? Is the background urban, suburban, sunny, etc.?
 2.  **GENERATE A COMPLETE POST:** You MUST write a complete social media post (2-4 sentences), NOT just hashtags or a single sentence.
 3.  **USE EMOJIS:** You MUST strategically use 2-4 relevant emojis to add personality and visual appeal.
@@ -162,11 +161,11 @@ const generateTextPrompt = (tone: ToneOption, dealershipName: string, customerNa
 
 **POST STRUCTURE:**
 1.  **The Hook:** Start with a high-energy, scroll-stopping opening line. Congratulate the customer. ${nameInfo}
-2.  **The Story:** Briefly mention the specific car you identified. Connect it to the 'vibe' of the photo. (e.g., "Ready for family adventures in their new SUV!" or "Ready to cruise in style in this sleek black sedan!").
+2.  **The Story:** Briefly mention the specific car you identified (or its characteristics). Connect it to the 'vibe' of the photo. (e.g., "Ready for family adventures in their new SUV!" or "Ready to cruise in style in this sleek black sedan!").
 3.  **Call to Action (CTA):** End with a friendly invitation for others to find their dream car at '${dealershipName}'.
 4.  **Strategic Hashtags:** This is CRITICAL. Finish with a block of 5-7 hyper-relevant and popular hashtags. These MUST be derived from your deep image analysis.
     *   **Required:** Include #${dealershipName.replace(/\s/g, '')} and #NewCar.
-    *   **Analysis-Based:** Include hashtags for the car brand, model, type, and color (e.g., #FordMustang, #MustangGT, #SUVLife, #BlueCar).
+    *   **Analysis-Based:** Include hashtags for the car brand (if certain), model (if certain), type, and color (e.g., #Ford, #Mustang, #SUVLife, #BlueCar).
     *   **Vibe-Based:** Add hashtags that match the scene's feeling (e.g., #HappyCustomer, #FirstCar, #FamilyAdventure, #DreamCar).
 
 **TONE:**
@@ -607,6 +606,51 @@ const generateVideoPrompt = (style: VideoStyle): string => {
         case VideoStyle.CometStrike:
             styleInstruction = "Theme: 'Comet Strike'. Create a magical and enchanting reveal. Animate a bright, sparkling streak of light, like a comet's tail, that gracefully swoops across the screen, revealing the image as it passes. The comet should leave a trail of glittering particles that gently fade away. The overall feel is magical, wondrous, and special.";
             break;
+        case VideoStyle.HappyDance:
+            styleInstruction = "Theme: 'Happy Dance'. Your primary task is to isolate the main customer in the photo. Animate them doing a simple, joyful dance in place. This should be a subtle shoulder groove and a gentle sway, capturing a moment of pure happiness. The car and the background should remain completely static to focus all attention on the customer's celebration.";
+            break;
+        case VideoStyle.JumpingForJoy:
+            styleInstruction = "Theme: 'Jumping for Joy'. Isolate the primary customer in the photo. Animate them performing a single, energetic 'jump for joy'. They should leap up slightly, arms raised in excitement, and land back in their original position. To add impact, create a very slight camera shake effect the moment they land. The car and background must remain static.";
+            break;
+        case VideoStyle.SpeedLines:
+            styleInstruction = "Theme: 'Speed Lines'. Keep the car and customer perfectly still, but create a powerful illusion of speed. Animate stylized, dynamic speed lines and motion blur effects that rush past the car, moving from the front towards the back. The effect should feel energetic and suggest high speed and performance.";
+            break;
+        case VideoStyle.CarSketch:
+            styleInstruction = "Theme: 'Car Sketch'. Create an artistic reveal. Animate the scene as if it is being drawn by a charcoal pencil on textured paper. Start with rough outlines that quickly sketch themselves in, then have the color and detail fill in, transitioning smoothly into the final, full-color photo by the end of the clip.";
+            break;
+        case VideoStyle.GoldenRadiance:
+            styleInstruction = "Theme: 'Golden Radiance'. Create a luxurious and premium effect. Animate a brilliant, warm golden light that sweeps across the car from one side to the other. This light should create intense, shimmering highlights on the car's body and windows, accompanied by elegant, subtle lens flares. The mood should be classy and awe-inspiring.";
+            break;
+        case VideoStyle.GlitchPop:
+            styleInstruction = "Theme: 'Glitch Pop'. Create a modern, energetic, and digital animation. Use quick, stylish 'glitch' effects, momentary flashes of colorful digital static, and slight RGB channel separation that quickly resolves. This should feel like a cool, trendy video effect, not a technical error.";
+            break;
+        case VideoStyle.SmokeReveal:
+            styleInstruction = "Theme: 'Smoke Reveal'. Create a dramatic and cool reveal. The video starts with a screen filled with thick, billowing colored smoke (e.g., blue or red). The smoke should then gracefully swirl and dissipate over the 4 seconds to dramatically unveil the car and happy customers behind it.";
+            break;
+        case VideoStyle.Spotlight:
+            styleInstruction = "Theme: 'Spotlight'. Create a theatrical, 'big reveal' effect. The video begins with a mostly dark screen. A bright, clean spotlight then sweeps into the frame, scans around for a moment, and then comes to rest, perfectly illuminating the car and customers, making them the star of the show.";
+            break;
+        case VideoStyle.FireEmbers:
+            styleInstruction = "Theme: 'Fire & Embers'. Create a powerful and epic mood. Animate glowing, fiery embers and soft-focus particles of fire that gently rise from the bottom of the screen. These particles should drift upwards in front of the subjects, adding a sense of intensity and prestige. The effect should be beautiful, not dangerous.";
+            break;
+        case VideoStyle.LiquidChrome:
+            styleInstruction = "Theme: 'Liquid Chrome'. Create a sleek, futuristic reveal. Animate liquid metal or chrome that flows and swirls across the screen, gradually conforming to the shape of the car and solidifying to reveal the final, polished image. The effect should be smooth, reflective, and high-end.";
+            break;
+        case VideoStyle.StickerSlap:
+            styleInstruction = "Theme: 'Sticker Slap'. Create a fun, energetic, and scrapbook-style animation. Have 2-3 colorful, cartoonish stickers (like stars, thumbs-ups, or 'SOLD!') animate and 'slap' onto the screen in the open spaces around the car and people. The image itself should have a slight jiggle effect when a sticker hits.";
+            break;
+        case VideoStyle.GraffitiReveal:
+            styleInstruction = "Theme: 'Graffiti Reveal'. Start the video with a stylized brick wall filling the screen. Animate a burst of colorful spray paint that creates a graffiti-style outline of the car, which then transitions into the full, real photo, as if the graffiti art has come to life. The mood is urban, cool, and artistic.";
+            break;
+        case VideoStyle.HolographicScan:
+            styleInstruction = "Theme: 'Holographic Scan'. Make the image appear as a flickering, blue-tinted hologram. Animate horizontal scan lines that move up and down the image. The hologram should briefly glitch and then resolve into the stable, full-color photo by the end of the clip. The feel is modern and tech-focused.";
+            break;
+        case VideoStyle.RoadTrip:
+            styleInstruction = "Theme: 'Road Trip'. Create a sense of adventure. Animate a stylized, dashed line that draws itself on screen, representing a map route. The line should loop around the happy customers and car. Overlay subtle, semi-transparent animated scenery (like mountains or trees) passing by on the sides of the frame.";
+            break;
+        case VideoStyle.Blueprint:
+            styleInstruction = "Theme: 'Blueprint'. Begin with a blue background. Animate white blueprint lines that quickly draw the technical schematic of the car on screen. Once the drawing is complete, have it seamlessly fade and transition into the final, full-color photograph of the car and customers.";
+            break;
     }
     return `${coreInstruction} ${styleInstruction}`;
 }
@@ -625,8 +669,10 @@ const getImageDimensions = (dataUrl: string): Promise<{width: number, height: nu
 };
 
 export const generatePostVideo = async (imageBase64Url: string, style: VideoStyle): Promise<string> => {
-    // Re-initialize 'ai' instance just before the call to ensure the latest key is used.
-    ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    // Create a fresh, locally-scoped AI instance for each call. This is crucial for video generation
+    // to guarantee it uses the most up-to-date API key selected by the user in the UI,
+    // avoiding issues with stale module-level variables.
+    const videoAi = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
     const { mimeType, data: base64Data } = parseDataUrl(imageBase64Url);
     const image = { imageBytes: base64Data, mimeType };
@@ -635,40 +681,59 @@ export const generatePostVideo = async (imageBase64Url: string, style: VideoStyl
     const { width, height } = await getImageDimensions(imageBase64Url);
     const aspectRatio = width > height ? '16:9' : '9:16';
 
-    // FIX: Replaced deprecated 'GenerateVideosOperationResponse' with 'GenerateVideosOperation' to align with the latest SDK.
-    let operation: GenerateVideosOperation = await ai.models.generateVideos({
-        model: 'veo-3.1-fast-generate-preview',
-        prompt: prompt,
-        image: image,
-        config: {
-            numberOfVideos: 1,
-            resolution: '720p',
-            aspectRatio: aspectRatio
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            let operation: GenerateVideosOperation = await videoAi.models.generateVideos({
+                model: 'veo-3.1-fast-generate-preview',
+                prompt: prompt,
+                image: image,
+                config: {
+                    numberOfVideos: 1,
+                    resolution: '720p',
+                    aspectRatio: aspectRatio
+                }
+            });
+
+            while (!operation.done) {
+                await new Promise(resolve => setTimeout(resolve, 10000)); // Poll every 10 seconds
+                operation = await videoAi.operations.getVideosOperation({ operation: operation });
+            }
+
+            if (operation.error) {
+                // This is an error from the completed (but failed) operation
+                throw new Error(operation.error.message);
+            }
+
+            const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+
+            if (!downloadLink) {
+                throw new Error("Video generation succeeded, but no download link was provided.");
+            }
+            
+            // Fetch the video as a blob and create a local URL.
+            // This avoids needing the API key on the client-side for the video src tag.
+            const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
+            if (!response.ok) {
+                const errorBody = await response.text();
+                throw new Error(`Failed to download the generated video. Status: ${response.status}. Body: ${errorBody}`);
+            }
+            const videoBlob = await response.blob();
+            return URL.createObjectURL(videoBlob); // Success, exit function
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+
+            if (errorMessage.toLowerCase().includes("overloaded") && attempt < maxRetries) {
+                console.warn(`Attempt ${attempt} failed: Model overloaded. Retrying in ${attempt * 5} seconds...`);
+                await new Promise(resolve => setTimeout(resolve, attempt * 5000));
+                // Continue to next attempt
+            } else {
+                // This was the last attempt, or it's a non-retryable error. Re-throw it.
+                throw new Error(`Video generation failed: ${errorMessage}`);
+            }
         }
-    });
-
-    while (!operation.done) {
-        await new Promise(resolve => setTimeout(resolve, 10000)); // Poll every 10 seconds
-        operation = await ai.operations.getVideosOperation({ operation: operation });
-    }
-
-    if (operation.error) {
-        throw new Error(`Video generation failed: ${operation.error.message}`);
-    }
-
-    const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
-
-    if (!downloadLink) {
-        throw new Error("Video generation succeeded, but no download link was provided.");
     }
     
-    // Fetch the video as a blob and create a local URL.
-    // This avoids needing the API key on the client-side for the video src tag.
-    const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
-    if (!response.ok) {
-        const errorBody = await response.text();
-        throw new Error(`Failed to download the generated video. Status: ${response.status}. Body: ${errorBody}`);
-    }
-    const videoBlob = await response.blob();
-    return URL.createObjectURL(videoBlob);
+    // This should not be reached if logic is correct, but is a fallback.
+    throw new Error("Video generation failed after multiple retries.");
 }
