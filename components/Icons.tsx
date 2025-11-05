@@ -1,7 +1,9 @@
 import React from 'react';
 
+// FIX: Added new icon types for the VideoDirectorModal component.
+// FIX: Added `className` to IconProps to allow passing CSS classes to the component.
 interface IconProps {
-  type: 'camera' | 'retake' | 'check' | 'download' | 'share' | 'copy' | 'restart' | 'error' | 'upload' | 'settings' | 'regenerate' | 'edit' | 'sparkles' | 'close' | 'movie' | 'starburst' | 'confetti' | 'film' | 'zap' | 'shooting-star';
+  type: 'camera' | 'retake' | 'check' | 'download' | 'share' | 'copy' | 'restart' | 'error' | 'upload' | 'settings' | 'regenerate' | 'edit' | 'sparkles' | 'close' | 'movie' | 'starburst' | 'confetti' | 'film' | 'zap' | 'shooting-star' | 'backspace' | 'trash' | 'plus' | 'building-office';
   className?: string;
 }
 
@@ -88,51 +90,71 @@ export const Icon: React.FC<IconProps> = React.memo(({ type, className = 'w-6 h-
           <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-6.857 2.143L12 21l-2.143-6.857L3 12l6.857-2.143L12 3z" />
         </svg>
       );
-    case 'movie':
-      return (
-        <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-        </svg>
-      );
     case 'close':
         return (
             <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
         );
+    case 'movie':
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      );
     case 'starburst':
       return (
         <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m1-9l1.06-1.06a5.5 5.5 0 017.78 7.78L12 17.5l-1.06 1.06a5.5 5.5 0 01-7.78-7.78L5 9.5m7 0l1.06-1.06a5.5 5.5 0 00-7.78-7.78L5 4.5m7 5l-1.06 1.06a5.5 5.5 0 007.78 7.78L19 14.5" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-6.857 2.143L12 21l-2.143-6.857L3 12l6.857-2.143L12 3z" />
         </svg>
       );
     case 'confetti':
       return (
         <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M7 4V2m0 14V4m0 12h2m-2-2h2m-2-2h2m2-10h2m-2 2h2m-2 2h2M4 16h16" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M14 4a2 2 0 11-4 0 2 2 0 014 0z" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 21v-2m0 0V5" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v4m0 8v4m-6-6h4m8 0h4m-8-8l-2.828 2.828M18.828 18.828L16 16m-10.172 0l2.828-2.828M6 6l2.828 2.828" />
         </svg>
       );
     case 'film':
       return (
         <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm2 0v12m12-12v12M8 6v12m8-12v12" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 8h2m12 0h2M4 12h2m12 0h2M4 16h2m12 0h2" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M7 4a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V6a2 2 0 00-2-2H7zm0 0V3m0 18v-1m10-17v1m0 17v-1M4 8h16M4 16h16" />
         </svg>
       );
     case 'zap':
-        return (
-            <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-        );
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+      );
     case 'shooting-star':
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 2l2.58 6.09L21 9.27l-5.18 4.73L17.16 21 12 17.5 6.84 21l1.34-7L3 9.27l6.42-1.18L12 2zM3 15h18" />
+        </svg>
+      );
+    case 'backspace':
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414 6.414a2 2 0 002.828 0L21 12M3 12l6.414-6.414a2 2 0 012.828 0L21 12" />
+        </svg>
+      );
+    case 'trash':
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+      );
+    case 'plus':
+       return (
+        <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+        </svg>
+      );
+    case 'building-office':
         return (
-            <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 8l-4 4-4-4" />
-                 <path strokeLinecap="round" strokeLinejoin="round" d="M16 8l-4 4-4-4" transform="translate(0, 4)"/>
-            </svg>
+          <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+          </svg>
         );
     default:
       return null;

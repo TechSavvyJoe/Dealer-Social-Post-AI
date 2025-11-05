@@ -1,14 +1,17 @@
 import React, { useState, useCallback, useEffect, ReactNode } from 'react';
-import { AppStep, GeneratedPost, StyleOption, ToneOption, DealershipSettings, TemplateOption, VideoStyle } from './types';
+import { AppStep, GeneratedPost, StyleOption, ToneOption, DealershipSettings, TemplateOption, VideoStyle, Dealer } from './types';
 import { ImageInput } from './components/CameraCapture';
 import { PostResult } from './components/PostResult';
-import { generateSocialPost, editSocialPostImage, generateSocialPostText, editSocialPostText, generateFunSocialPostImage, generateAnimatedPost } from './services/geminiService';
+import { generateSocialPost, editSocialPostImage, generateSocialPostText, editSocialPostText, generateFunSocialPostImage, generatePostVideo } from './services/geminiService';
 import { Icon } from './components/Icons';
-import { SettingsModal } from './components/SettingsModal';
-import { loadSettings, saveSettings } from './utils/settings';
 import { POST_TEMPLATES } from './components/templates';
 import { triggerHapticFeedback } from './utils/haptics';
-import { Logo } from './components/Logo';
+import { LoginScreen } from './components/LoginScreen';
+import { findDealer } from './services/database';
+import { urlToDataUrl } from './utils/imageUtils';
+import { Header } from './components/Header';
+import { AdminDashboard } from './components/AdminDashboard';
+
 
 const loadingMessages = [
   "Polishing the chrome...",
@@ -31,12 +34,11 @@ interface PostCustomizerProps {
     imageSrc: string;
     onGenerate: (style: StyleOption, tone: ToneOption, customerName: string, customText?: string) => void;
     onBack: () => void;
-    onOpenSettings: () => void;
     dealershipName: string;
 }
 
-const Accordion: React.FC<{ title: string; children: ReactNode; startOpen?: boolean; }> = React.memo(({ title, children, startOpen = false }) => {
-    const [isOpen, setIsOpen] = useState(startOpen);
+const Accordion: React.FC<{ title: string; children: ReactNode; defaultOpen?: boolean }> = React.memo(({ title, children, defaultOpen = false }) => {
+    const [isOpen, setIsOpen] = useState(defaultOpen);
 
     const toggleAccordion = () => {
         triggerHapticFeedback();
@@ -76,13 +78,13 @@ const Accordion: React.FC<{ title: string; children: ReactNode; startOpen?: bool
 });
 
 const OptionCard: React.FC<{ value: any; label: string; selectedValue: any; onClick: (value: any) => void;}> = React.memo(({ value, label, selectedValue, onClick}) => (
-    <button onClick={() => { triggerHapticFeedback(); onClick(value); }} className={`w-full text-center p-3 border-2 rounded-lg transition-all duration-200 font-semibold text-sm ${selectedValue === value ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg' : 'bg-white/5 border-white/20 hover:bg-white/10'}`}>
+    <button onClick={() => { triggerHapticFeedback(); onClick(value); }} className={`w-full text-center p-2 border-2 rounded-lg transition-all duration-200 font-semibold text-sm flex items-center justify-center h-16 ${selectedValue === value ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg' : 'bg-white/5 border-white/20 hover:bg-white/10'}`}>
         {label}
     </button>
 ));
 
 
-const PostCustomizer: React.FC<PostCustomizerProps> = ({ imageSrc, onGenerate, onBack, onOpenSettings, dealershipName }) => {
+const PostCustomizer: React.FC<PostCustomizerProps> = ({ imageSrc, onGenerate, onBack, dealershipName }) => {
     const [customerName, setCustomerName] = useState('');
     const [style, setStyle] = useState<StyleOption>(StyleOption.Modern);
     const [tone, setTone] = useState<ToneOption>(ToneOption.Excited);
@@ -108,26 +110,12 @@ const PostCustomizer: React.FC<PostCustomizerProps> = ({ imageSrc, onGenerate, o
 
     return (
         <div className="w-full max-w-6xl mx-auto p-2 sm:p-4 space-y-6">
-            { !dealershipName && (
-                <div className="w-full bg-yellow-900/50 border border-yellow-700 text-yellow-300 px-4 py-3 rounded-lg flex items-center justify-between gap-4 animate-fade-in">
-                    <div className="flex items-center gap-3">
-                        <Icon type="error" className="w-6 h-6 text-yellow-400"/>
-                        <span className="font-semibold">Your dealership name is not set!</span>
-                    </div>
-                    <button onClick={() => { triggerHapticFeedback(); onOpenSettings(); }} className="bg-yellow-600/50 text-white font-bold py-1 px-3 rounded-md hover:bg-yellow-600/80 text-sm transition-colors whitespace-nowrap">
-                        Set Name
-                    </button>
-                </div>
-            )}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                 <div className="flex flex-col items-center space-y-4">
                     <img src={imageSrc} alt="Preview" className="rounded-xl object-contain w-full max-w-lg shadow-2xl border-2 border-white/10" />
-                     <div className="w-full max-w-lg grid grid-cols-2 gap-3">
-                        <button onClick={() => { triggerHapticFeedback(); onBack(); }} className="flex items-center justify-center gap-2 bg-white/10 border border-white/20 text-white font-bold py-3 px-4 rounded-lg hover:bg-white/20 transition-colors">
+                     <div className="w-full max-w-lg">
+                        <button onClick={() => { triggerHapticFeedback(); onBack(); }} className="w-full flex items-center justify-center gap-2 bg-white/10 border border-white/20 text-white font-bold py-3 px-4 rounded-lg hover:bg-white/20 transition-colors">
                             <Icon type="retake" className="w-5 h-5"/><span>Change Photo</span>
-                        </button>
-                         <button onClick={() => { triggerHapticFeedback(); onOpenSettings(); }} className="flex items-center justify-center gap-2 bg-white/10 border border-white/20 text-white font-bold py-3 px-4 rounded-lg hover:bg-white/20 transition-colors">
-                            <Icon type="settings" className="w-5 h-5" /><span>Settings</span>
                         </button>
                     </div>
                 </div>
@@ -137,7 +125,7 @@ const PostCustomizer: React.FC<PostCustomizerProps> = ({ imageSrc, onGenerate, o
                         <input type="text" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="(Optional) e.g., Jane" className="w-full bg-slate-800/50 text-white border-2 border-white/20 rounded-md px-4 py-3 focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none transition"/>
                     </div>
                     
-                    <Accordion title="2. Visual Style" startOpen={true}>
+                    <Accordion title="2. Visual Style" defaultOpen={true}>
                         <div className="grid grid-cols-2 gap-3">{Object.values(StyleOption).map(s => <OptionCard key={s} value={s} label={s} selectedValue={style} onClick={setStyle} />)}</div>
                     </Accordion>
                     
@@ -146,7 +134,7 @@ const PostCustomizer: React.FC<PostCustomizerProps> = ({ imageSrc, onGenerate, o
                           <div className="grid grid-cols-3 gap-3">{Object.values(CaptionSource).map(s => <OptionCard key={s} value={s} label={s} selectedValue={captionSource} onClick={setCaptionSource} />)}</div>
                           
                           {captionSource === CaptionSource.AI && (
-                              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-3 bg-slate-800/30 rounded-lg animate-fade-in">
+                              <div className="grid grid-cols-2 gap-3 p-3 bg-slate-800/30 rounded-lg animate-fade-in">
                                   {Object.values(ToneOption).map(t => <OptionCard key={t} value={t} label={t} selectedValue={tone} onClick={setTone} />)}
                               </div>
                           )}
@@ -179,29 +167,23 @@ const PostCustomizer: React.FC<PostCustomizerProps> = ({ imageSrc, onGenerate, o
 
 
 const App: React.FC = () => {
-  const [step, setStep] = useState<AppStep>(AppStep.WELCOME);
+  const [step, setStep] = useState<AppStep>(AppStep.LOGIN);
   const [displayedStep, setDisplayedStep] = useState(step);
   const [animationClass, setAnimationClass] = useState('animate-fade-in');
 
+  const [currentDealer, setCurrentDealer] = useState<Dealer | null>(null);
+
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [generatedPost, setGeneratedPost] = useState<GeneratedPost | null>(null);
-  const [animatedVideoUrl, setAnimatedVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [settings, setSettings] = useState<DealershipSettings>({ dealershipName: '' });
+
   const [lastGenerationParams, setLastGenerationParams] = useState<{
     style: StyleOption;
     tone: ToneOption;
     customerName: string;
     customText?: string;
   } | null>(null);
-
-  // Load dealership settings from local storage on initial app load to persist them across sessions.
-  useEffect(() => {
-    const loadedSettings = loadSettings();
-    if (loadedSettings) setSettings(loadedSettings);
-  }, []);
 
   useEffect(() => {
     let intervalId: number;
@@ -231,19 +213,49 @@ const App: React.FC = () => {
     setError(null);
   }, []);
 
-  const handleGenerate = useCallback(async (style: StyleOption, tone: ToneOption, customerName:string, customText?: string) => {
-    if (!selectedImage) return;
-    if (!settings.dealershipName) {
-        // The new UI provides a non-blocking warning, but this alert remains as a final backstop.
-        alert("Please set your dealership name in the settings before generating a post.");
-        setIsSettingsOpen(true);
-        return;
+  const handleLogin = async (dealerId: string): Promise<boolean> => {
+    const dealer = await findDealer(dealerId);
+
+    if (dealer) {
+        if (dealer.logo && dealer.logo.startsWith('http')) {
+            try {
+                const logoDataUrl = await urlToDataUrl(dealer.logo);
+                dealer.logo = logoDataUrl;
+            } catch (error) {
+                console.error(`Failed to fetch and convert dealer logo from URL: ${dealer.logo}`, error);
+                dealer.logo = undefined;
+            }
+        }
+
+        setCurrentDealer(dealer);
+        if (dealer.id === '0000') {
+            setStep(AppStep.ADMIN);
+        } else {
+            setStep(AppStep.CAPTURE);
+        }
+        setError(null);
+        return true;
     }
+    return false;
+  };
+
+  const handleLogout = () => {
+      triggerHapticFeedback();
+      setCurrentDealer(null);
+      setSelectedImage(null);
+      setGeneratedPost(null);
+      setError(null);
+      setStep(AppStep.LOGIN);
+  };
+
+  const handleGenerate = useCallback(async (style: StyleOption, tone: ToneOption, customerName:string, customText?: string) => {
+    if (!selectedImage || !currentDealer) return;
+    
     setStep(AppStep.GENERATING);
     setError(null);
     setLastGenerationParams({ style, tone, customerName, customText });
     try {
-      const result = await generateSocialPost(selectedImage, style, tone, settings.dealershipName, customerName, settings.dealershipLogo, customText);
+      const result = await generateSocialPost(selectedImage, style, tone, currentDealer.name, customerName, currentDealer.logo, customText);
       setGeneratedPost(result);
       setStep(AppStep.RESULT);
     } catch (err) {
@@ -251,112 +263,67 @@ const App: React.FC = () => {
       setError(`Failed to generate your post. Please try again. ${errorMessage}`);
       setStep(AppStep.CUSTOMIZE);
     }
-  }, [selectedImage, settings]);
+  }, [selectedImage, currentDealer]);
   
   const handleRegenerateImage = useCallback(async () => {
-    if (!selectedImage || !lastGenerationParams) return;
+    if (!selectedImage || !lastGenerationParams || !currentDealer) return;
     setError(null);
     try {
       const result = await generateSocialPost(
         selectedImage, lastGenerationParams.style, lastGenerationParams.tone, 
-        settings.dealershipName, lastGenerationParams.customerName, settings.dealershipLogo,
+        currentDealer.name, lastGenerationParams.customerName, currentDealer.logo,
         lastGenerationParams.customText || generatedPost?.text // Keep the current text
       );
       setGeneratedPost(result);
-    } catch (err) {
+    } catch (err)
+ {
       const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
       setError(`Failed to regenerate image. ${errorMessage}`);
     }
-  }, [selectedImage, lastGenerationParams, settings, generatedPost]);
+  }, [selectedImage, lastGenerationParams, currentDealer, generatedPost]);
   
   const handleEditImage = useCallback(async (editPrompt: string) => {
-    if (!generatedPost?.image || !editPrompt.trim()) return;
+    if (!generatedPost?.image || !editPrompt.trim() || !currentDealer) return;
     setError(null);
     try {
-        const newImage = await editSocialPostImage(generatedPost.image, editPrompt, settings.dealershipName, settings.dealershipLogo);
+        const newImage = await editSocialPostImage(generatedPost.image, editPrompt, currentDealer.name, currentDealer.logo);
         setGeneratedPost(prev => prev ? { ...prev, image: newImage } : null);
     } catch(err) {
         const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
         setError(`Failed to apply image edits. ${errorMessage}`);
     }
-  }, [generatedPost, settings]);
+  }, [generatedPost, currentDealer]);
 
   const handleFunMode = useCallback(async () => {
-    if (!selectedImage) return;
+    if (!selectedImage || !currentDealer) return;
     setError(null);
     try {
         // Use the original selected image for Fun Mode for a clean slate
-        const newImage = await generateFunSocialPostImage(selectedImage, settings.dealershipName, settings.dealershipLogo);
+        const newImage = await generateFunSocialPostImage(selectedImage, currentDealer.name, currentDealer.logo);
         setGeneratedPost(prev => prev ? { ...prev, image: newImage } : { image: newImage, text: prev?.text || "Congratulations!" });
     } catch(err) {
         const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
         setError(`Failed to generate fun image. ${errorMessage}`);
     }
-  }, [selectedImage, settings]);
+  }, [selectedImage, currentDealer]);
 
-  const handleAnimatePost = useCallback(async (style: VideoStyle) => {
-    if (!generatedPost?.image) return;
-    setError(null);
-
-    let isFirstAttempt = true;
-
-    const attemptGeneration = async () => {
-        try {
-            const hasKey = await (window as any).aistudio.hasSelectedApiKey();
-            if (!hasKey) {
-                alert("Video generation requires an API key from a Google Cloud project with billing enabled. Please select a project to continue.\n\nFor more info on billing, visit:\nai.google.dev/gemini-api/docs/billing");
-                await (window as any).aistudio.openSelectKey();
-            }
-            
-            const videoUrl = await generateAnimatedPost(generatedPost.image, style);
-            setAnimatedVideoUrl(videoUrl);
-            
-        } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-            const isKeyError = errorMessage.includes("API key not valid") || errorMessage.includes("Requested entity was not found");
-            
-            if (isKeyError && isFirstAttempt) {
-                isFirstAttempt = false;
-                alert("Your selected API key appears to be invalid or lacks permissions. Please select a different project, and we will automatically retry.");
-                await (window as any).aistudio.openSelectKey();
-                await attemptGeneration();
-            } else {
-                const finalMessage = isKeyError 
-                    ? `Animation failed after retry. Please check your API key and project settings. Error: ${errorMessage}`
-                    : `Failed to create animation. Please try again. ${errorMessage}`;
-                setError(finalMessage);
-            }
-        }
-    };
-
-    await attemptGeneration();
-
-  }, [generatedPost]);
-
-  const handleRemoveAnimation = useCallback(() => {
-    if (animatedVideoUrl) {
-        URL.revokeObjectURL(animatedVideoUrl);
-    }
-    setAnimatedVideoUrl(null);
-    setError(null);
-  }, [animatedVideoUrl]);
-  
   const handleRegenerateText = useCallback(async () => {
-    if (!selectedImage || !lastGenerationParams) return;
+    if (!selectedImage || !lastGenerationParams || !currentDealer) return;
     setError(null);
     try {
       const newText = await generateSocialPostText(
         selectedImage,
         lastGenerationParams.tone,
-        settings.dealershipName,
-        lastGenerationParams.customerName
+        currentDealer.name,
+        lastGenerationParams.customerName,
+        true
       );
       setGeneratedPost(prev => prev ? { ...prev, text: newText } : null);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
       setError(`Failed to regenerate text. ${errorMessage}`);
     }
-  }, [selectedImage, lastGenerationParams, settings]);
+  }, [selectedImage, lastGenerationParams, currentDealer]);
 
   const handleEditText = useCallback(async (editPrompt: string) => {
     if (!generatedPost?.text || !editPrompt.trim() || !lastGenerationParams) return;
@@ -374,18 +341,60 @@ const App: React.FC = () => {
     }
   }, [generatedPost, lastGenerationParams]);
 
+  const handleGenerateVideo = useCallback(async (style: VideoStyle): Promise<string> => {
+    if (!generatedPost?.image) {
+        throw new Error("Cannot generate video without an image.");
+    }
+    setError(null);
+
+    // Check for API key selection for Veo models, a requirement for video generation.
+    // @ts-ignore - aistudio is globally available in this environment
+    if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
+        // @ts-ignore
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        if (!hasKey) {
+            // @ts-ignore
+            if (typeof window.aistudio.openSelectKey === 'function') {
+                alert("Video generation requires a personal API key due to processing costs. Please select your key.\n\nFor more info on billing, visit: ai.google.dev/gemini-api/docs/billing");
+                // @ts-ignore
+                await window.aistudio.openSelectKey();
+                // After this, we assume the key is selected and proceed. Errors will be caught below.
+            } else {
+                 const errMsg = "Video generation is not available. Could not find key selection utility.";
+                 setError(errMsg);
+                 throw new Error(errMsg);
+            }
+        }
+    }
+
+    try {
+        const videoUrl = await generatePostVideo(generatedPost.image, style);
+        return videoUrl;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
+      // Handle the specific error for an invalid API key selection.
+      if (errorMessage.includes("Requested entity was not found")) {
+         setError("There was an issue with your selected API key. Please try generating the video again.");
+         // @ts-ignore
+         if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
+            // @ts-ignore
+            await window.aistudio.openSelectKey();
+         }
+      } else {
+        setError(`Failed to generate video. ${errorMessage}`);
+      }
+      throw err; // Re-throw to be caught by the caller in PostResult
+    }
+  }, [generatedPost]);
+
 
   const handleStartOver = useCallback(() => {
     setGeneratedPost(null);
     setSelectedImage(null);
     setError(null);
     setLastGenerationParams(null);
-    if (animatedVideoUrl) {
-        URL.revokeObjectURL(animatedVideoUrl);
-    }
-    setAnimatedVideoUrl(null);
-    setStep(AppStep.WELCOME);
-  }, [animatedVideoUrl]);
+    setStep(AppStep.CAPTURE);
+  }, []);
 
   const handleBackToCapture = useCallback(() => {
       setSelectedImage(null);
@@ -393,29 +402,12 @@ const App: React.FC = () => {
       setStep(AppStep.CAPTURE);
   }, []);
 
-  const handleSaveSettings = useCallback((newSettings: DealershipSettings) => {
-    setSettings(newSettings);
-    // Persist the new settings to local storage.
-    saveSettings(newSettings);
-    setIsSettingsOpen(false);
-  }, []);
-
   const renderContent = () => {
     switch (displayedStep) {
-      case AppStep.WELCOME:
-        return (
-            <div className="text-center p-8 max-w-4xl mx-auto">
-                <Logo className="w-full max-w-lg h-auto mx-auto mb-12" />
-                <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
-                    <button onClick={() => { triggerHapticFeedback(); setStep(AppStep.CAPTURE); }} className="w-full sm:w-auto bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold text-lg sm:text-xl py-3 px-8 sm:py-4 sm:px-10 rounded-full hover:scale-105 transition-transform duration-300 shadow-lg hover:shadow-indigo-500/50">
-                        Get Started
-                    </button>
-                    <button onClick={() => { triggerHapticFeedback(); setIsSettingsOpen(true); }} title="Settings" aria-label="Open settings" className="bg-white/10 border border-white/20 text-white p-4 rounded-full hover:bg-white/20 hover:scale-105 transition-transform duration-300 shadow-lg">
-                        <Icon type="settings" className="w-7 h-7" />
-                    </button>
-                </div>
-            </div>
-        );
+      case AppStep.LOGIN:
+        return <LoginScreen onLogin={handleLogin} />;
+      case AppStep.ADMIN:
+        return <AdminDashboard />;
       case AppStep.CAPTURE:
         return <ImageInput onImageSelected={handleImageSelected} onClose={handleStartOver} />;
       case AppStep.CUSTOMIZE:
@@ -423,8 +415,7 @@ const App: React.FC = () => {
             imageSrc: selectedImage!, 
             onGenerate: handleGenerate, 
             onBack: handleBackToCapture, 
-            onOpenSettings: () => setIsSettingsOpen(true),
-            dealershipName: settings.dealershipName
+            dealershipName: currentDealer!.name
         };
         if (error) {
             return (
@@ -440,7 +431,7 @@ const App: React.FC = () => {
         return selectedImage ? <PostCustomizer {...customizerProps} /> : null;
       case AppStep.GENERATING:
         return (
-          <div className="text-center p-8 flex flex-col items-center justify-center">
+          <div className="text-center p-8 flex flex-col items-center justify-center h-full">
             <svg className="animate-spin h-20 w-20 text-indigo-400 mb-8" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -460,29 +451,22 @@ const App: React.FC = () => {
                                 onRegenerateText={handleRegenerateText}
                                 onEditText={handleEditText}
                                 onFunMode={handleFunMode}
-                                onAnimatePost={handleAnimatePost}
-                                onRemoveAnimation={handleRemoveAnimation}
-                                animatedVideoUrl={animatedVideoUrl}
+                                onGenerateVideo={handleGenerateVideo}
                                 error={error} /> : null;
       default:
         return null;
     }
   };
 
-  const isCenteredStep = displayedStep === AppStep.WELCOME || displayedStep === AppStep.GENERATING || displayedStep === AppStep.CAPTURE;
+  const isCenteredStep = displayedStep === AppStep.LOGIN || displayedStep === AppStep.GENERATING;
   const layoutClasses = isCenteredStep
     ? 'h-full justify-center'
     : 'justify-start pt-4 sm:pt-8';
 
   return (
-    <main className="h-screen w-full text-slate-100 flex flex-col p-4">
-      <SettingsModal 
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        onSave={handleSaveSettings}
-        currentSettings={settings}
-      />
-      <div key={displayedStep} className={`w-full flex flex-col items-center flex-grow ${animationClass} ${layoutClasses}`}>
+    <main className="h-screen w-full text-slate-100 flex flex-col">
+      {currentDealer && <Header dealer={currentDealer} onLogout={handleLogout} />}
+      <div className={`w-full flex flex-col items-center flex-grow p-4 ${animationClass} ${layoutClasses}`}>
         {renderContent()}
       </div>
     </main>
