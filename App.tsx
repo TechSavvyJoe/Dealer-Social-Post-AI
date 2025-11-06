@@ -64,9 +64,16 @@ const App: React.FC = () => {
   const isApiKeyConfigured = Boolean(apiKey);
   const [isDesktopLayout, setIsDesktopLayout] = useState(() => {
     if (typeof window === 'undefined') return true;
+
     const pointerFine = typeof window.matchMedia === 'function' ? window.matchMedia('(pointer: fine)').matches : true;
-    const uaIsMobile = typeof navigator !== 'undefined' ? /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) : false;
-    return window.innerWidth >= 1200 && pointerFine && !uaIsMobile;
+    const canHover = typeof window.matchMedia === 'function' ? window.matchMedia('(hover: hover)').matches : true;
+    const uaIsMobile = typeof navigator !== 'undefined'
+      ? /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+      : false;
+    const hasTouch = ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+    const isWideScreen = window.innerWidth >= 1200;
+
+    return isWideScreen && pointerFine && canHover && !uaIsMobile && (!hasTouch || window.innerWidth >= 1440);
   });
 
   const [lastGenerationParams, setLastGenerationParams] = useState<{
@@ -104,19 +111,47 @@ const App: React.FC = () => {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const pointerMedia = typeof window.matchMedia === 'function' ? window.matchMedia('(pointer: fine)') : null;
+    const hoverMedia = typeof window.matchMedia === 'function' ? window.matchMedia('(hover: hover)') : null;
+
+    let resizeTimeout: NodeJS.Timeout;
 
     const updateLayoutMode = () => {
-      const uaIsMobile = typeof navigator !== 'undefined' ? /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) : false;
+      // Enhanced mobile detection including tablets
+      const uaIsMobile = typeof navigator !== 'undefined'
+        ? /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+        : false;
+
+      // Check for touchscreen capability (tablets may report as desktop)
+      const hasTouch = typeof window !== 'undefined'
+        ? ('ontouchstart' in window || navigator.maxTouchPoints > 0)
+        : false;
+
       const pointerFine = pointerMedia ? pointerMedia.matches : true;
-      setIsDesktopLayout(window.innerWidth >= 1200 && pointerFine && !uaIsMobile);
+      const canHover = hoverMedia ? hoverMedia.matches : true;
+      const isWideScreen = window.innerWidth >= 1200;
+
+      // Desktop = wide screen + fine pointer + hover support + not mobile UA + (no touch OR very wide screen)
+      const isDesktop = isWideScreen && pointerFine && canHover && !uaIsMobile && (!hasTouch || window.innerWidth >= 1440);
+
+      setIsDesktopLayout(isDesktop);
+    };
+
+    // Debounced resize handler for better performance
+    const debouncedUpdate = () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(updateLayoutMode, 150);
     };
 
     updateLayoutMode();
-    window.addEventListener('resize', updateLayoutMode);
+    window.addEventListener('resize', debouncedUpdate);
     pointerMedia?.addEventListener('change', updateLayoutMode);
+    hoverMedia?.addEventListener('change', updateLayoutMode);
+
     return () => {
-      window.removeEventListener('resize', updateLayoutMode);
+      clearTimeout(resizeTimeout);
+      window.removeEventListener('resize', debouncedUpdate);
       pointerMedia?.removeEventListener('change', updateLayoutMode);
+      hoverMedia?.removeEventListener('change', updateLayoutMode);
     };
   }, []);
 
