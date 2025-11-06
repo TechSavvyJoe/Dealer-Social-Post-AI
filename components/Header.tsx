@@ -84,13 +84,14 @@ export const Header: React.FC<HeaderProps> = ({
         >
           {/* API Status Badge */}
           <div className="hidden sm:block">
-            <Badge
-              variant={isApiKeyConfigured ? 'success' : 'warning'}
-              dot
-              pulse={isApiKeyConfigured}
-            >
-              {isApiKeyConfigured ? 'Gemini Ready' : 'Add API Key'}
-            </Badge>
+            {!isApiKeyConfigured && (
+              <Badge
+                variant="warning"
+                dot
+              >
+                Add API Key
+              </Badge>
+            )}
           </div>
 
           {/* Settings Button */}
