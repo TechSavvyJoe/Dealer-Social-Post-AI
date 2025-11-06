@@ -8,9 +8,11 @@ interface SettingsModalProps {
   initialApiKey: string;
   defaultRemember: boolean;
   onSave: (options: { apiKey: string; remember: boolean }) => void;
+  compactMode: boolean;
+  onToggleCompactMode: (value: boolean) => void;
 }
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, initialApiKey, defaultRemember, onSave }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, initialApiKey, defaultRemember, onSave, compactMode, onToggleCompactMode }) => {
   const [apiKey, setApiKey] = useState(initialApiKey);
   const [remember, setRemember] = useState(defaultRemember);
   const [showKey, setShowKey] = useState(false);
@@ -118,6 +120,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, i
           />
           Remember this key on this device
         </label>
+
+        {/* Compact mode toggle */}
+        <div className="mt-2">
+          <label className="flex items-center justify-between gap-3 text-sm text-slate-200">
+            <span className="flex-1">
+              Compact mode
+              <span className="block text-xs text-slate-400">Reduce spacing on desktop for a denser layout.</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={compactMode}
+              onChange={(e) => { triggerHapticFeedback(); onToggleCompactMode(e.target.checked); }}
+              className="h-5 w-5 rounded border-white/20 bg-slate-900/60 text-indigo-500 focus:ring-indigo-400"
+            />
+          </label>
+        </div>
 
         <div className="mt-2 space-y-2 text-xs text-slate-400">
           <p>Leaving the field blank and saving will remove the current key.</p>

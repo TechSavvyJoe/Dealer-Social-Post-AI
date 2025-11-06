@@ -10,6 +10,7 @@ interface PersistedState {
   dealerId?: string;
   step?: number;
   loginTimestamp?: number;
+  compactMode?: boolean;
 }
 
 export const loadSession = (): PersistedState | null => {
@@ -43,7 +44,8 @@ export const saveSession = (state: PersistedState) => {
   try {
     // Preserve the login timestamp if it exists, or set it if this is a new login
     const existingSession = loadSessionRaw();
-    const sessionWithTimestamp = {
+    const sessionWithTimestamp: PersistedState = {
+      ...(existingSession ?? {}),
       ...state,
       loginTimestamp: state.loginTimestamp ?? existingSession?.loginTimestamp ?? Date.now()
     };

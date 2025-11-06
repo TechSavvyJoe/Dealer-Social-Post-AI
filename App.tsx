@@ -59,6 +59,7 @@ const App: React.FC = () => {
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [hasStoredApiKey, setHasStoredApiKey] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [compactMode, setCompactMode] = useState<boolean>(false);
   const [preferredStyle, setPreferredStyle] = useState<StyleOption>(StyleOption.Modern);
   const [preferredTone, setPreferredTone] = useState<ToneOption>(ToneOption.Excited);
   const isApiKeyConfigured = Boolean(apiKey);
@@ -188,7 +189,7 @@ const App: React.FC = () => {
         setPreferredTone(lastTone);
     }
 
-    const session = loadSession();
+  const session = loadSession();
     if (session?.dealerId) {
       (async () => {
         try {
@@ -215,6 +216,10 @@ const App: React.FC = () => {
           logError('app.session.restoreFailed', { message: error instanceof Error ? error.message : String(error) });
         }
       })();
+    }
+
+    if (typeof session?.compactMode === 'boolean') {
+      setCompactMode(session.compactMode);
     }
   }, []);
 
@@ -628,10 +633,10 @@ const App: React.FC = () => {
   const layoutFlexClass = isCenteredStep ? 'justify-center' : 'justify-start';
   // Reduce vertical padding on desktop to minimize unnecessary page scroll
   const layoutPadding = isCenteredStep
-    ? (isDesktopLayout ? 'py-8' : 'py-10')
-    : (isDesktopLayout ? 'py-6' : 'pt-8 pb-16');
-  // Slightly smaller gaps on desktop to tighten layout
-  const layoutGap = isDesktopLayout ? 'gap-6' : 'gap-6';
+    ? (isDesktopLayout ? (compactMode ? 'py-4' : 'py-8') : 'py-10')
+    : (isDesktopLayout ? (compactMode ? 'py-3' : 'py-6') : 'pt-8 pb-16');
+  // Smaller gaps on desktop in compact mode to tighten layout
+  const layoutGap = isDesktopLayout ? (compactMode ? 'gap-4' : 'gap-6') : 'gap-6';
 
   return (
     <>
@@ -657,6 +662,8 @@ const App: React.FC = () => {
         initialApiKey={apiKey ?? ''}
         defaultRemember={hasStoredApiKey}
         onSave={handleSettingsSave}
+        compactMode={compactMode}
+        onToggleCompactMode={(val) => { setCompactMode(val); saveSession({ compactMode: val }); }}
       />
     </>
   );
