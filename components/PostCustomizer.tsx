@@ -1,12 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Sparkles,
+  Edit3,
+  FileText,
+  Check,
+  Camera,
+  Settings,
+  ChevronRight,
+  AlertCircle,
+} from 'lucide-react';
 import { StyleOption, ToneOption } from '../types';
-import { Icon } from './Icons';
 import { triggerHapticFeedback } from '../utils/haptics';
 import { Button } from './ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/Card';
 import { Badge } from './ui/Badge';
+import { Input, Textarea } from './ui/Input';
 import { Tooltip } from './ui/Tooltip';
 import { POST_TEMPLATES } from './templates';
+import { cn } from '../utils/classNames';
 
 interface PostCustomizerProps {
   imageSrc: string;
@@ -94,31 +106,54 @@ const StyleCard: React.FC<StyleCardProps> = ({ option, current, onSelect }) => {
   const isActive = option === current;
 
   return (
-    <button
+    <motion.button
       onClick={() => {
         triggerHapticFeedback();
         onSelect(option);
       }}
-      className={`group flex flex-col gap-3 rounded-2xl border px-4 py-5 text-left transition-all duration-200 ${
-        isActive ? 'border-indigo-400 bg-white/10 shadow-lg shadow-indigo-500/30' : 'border-white/10 bg-white/5 hover:border-indigo-400/70 hover:bg-white/10'
-      }`}
+      className={cn(
+        'group flex flex-col gap-3 rounded-2xl border px-4 py-5 text-left',
+        'transition-all duration-200',
+        isActive
+          ? 'border-primary-400 glass-strong shadow-glow-primary'
+          : 'border-white/10 glass hover:border-primary-400/70 hover:glass-strong'
+      )}
+      whileHover={{ scale: 1.02, y: -2 }}
+      whileTap={{ scale: 0.98 }}
+      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
     >
       <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-white">{option}</span>
-          {isActive && <Badge variant="success">Selected</Badge>}
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-semibold text-surface-50">{option}</span>
+          {isActive && (
+            <motion.div
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+            >
+              <Badge variant="success" dot pulse size="sm">
+                Selected
+              </Badge>
+            </motion.div>
+          )}
         </div>
-        <p className="text-xs text-indigo-100/80 leading-relaxed">{meta.subtitle}</p>
-        <ul className="space-y-1 text-[11px] text-indigo-100/70">
-          {meta.talkingPoints.map(point => (
-            <li key={point} className="flex gap-2">
-              <span className="mt-1 block h-1 w-1 rounded-full bg-indigo-400"></span>
+        <p className="text-xs text-surface-300 leading-relaxed">{meta.subtitle}</p>
+        <ul className="space-y-1 text-[11px] text-surface-400">
+          {meta.talkingPoints.map((point, idx) => (
+            <motion.li
+              key={point}
+              className="flex gap-2"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: idx * 0.05 }}
+            >
+              <span className="mt-1 block h-1 w-1 rounded-full bg-primary-400"></span>
               <span>{point}</span>
-            </li>
+            </motion.li>
           ))}
         </ul>
       </div>
-    </button>
+    </motion.button>
   );
 };
 
@@ -131,21 +166,26 @@ interface ToneTileProps {
 const ToneTile: React.FC<ToneTileProps> = ({ tone, current, onSelect }) => {
   const isActive = tone === current;
   return (
-    <button
+    <motion.button
       onClick={() => {
         triggerHapticFeedback();
         onSelect(tone);
       }}
-      className={`rounded-xl border px-3 py-3 text-left transition-all duration-200 ${
-        isActive ? 'border-emerald-400/70 bg-emerald-500/20 shadow-lg shadow-emerald-500/20' : 'border-white/10 bg-white/5 hover:border-emerald-400/50 hover:bg-white/10'
-      }`}
+      className={cn(
+        'rounded-xl border px-3 py-3 text-left transition-all duration-200',
+        isActive
+          ? 'border-success-400/70 bg-success-500/20 shadow-lg shadow-success-500/20'
+          : 'border-white/10 glass hover:border-success-400/50 hover:glass-strong'
+      )}
+      whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
     >
-      <div className="flex items-center gap-2 text-sm font-semibold text-white">
-        <Icon type={isActive ? 'check' : 'sparkles'} className="h-4 w-4" />
+      <div className="flex items-center gap-2 text-sm font-semibold text-surface-50">
+        {isActive ? <Check className="h-4 w-4 text-success-400" /> : <Sparkles className="h-4 w-4 text-primary-400" />}
         {tone}
       </div>
-      <p className="mt-2 text-xs text-indigo-100/80 leading-relaxed">{TONE_DESCRIPTIONS[tone]}</p>
-    </button>
+      <p className="mt-2 text-xs text-surface-300 leading-relaxed">{TONE_DESCRIPTIONS[tone]}</p>
+    </motion.button>
   );
 };
 
@@ -240,212 +280,322 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   }, [captionSource, tone, style, customerName, customMessage, dealershipName, onGenerate, selectedTemplateId, templateOptions, aiPrompt, aiFlavor, selectedStyleGuide]);
 
   return (
-    <div className="w-full max-w-6xl mx-auto px-1 sm:px-0">
-      <Card className="overflow-hidden">
-        <CardHeader className="flex items-center justify-between">
-          <div>
+    <motion.div
+      className="w-full max-w-6xl mx-auto px-1 sm:px-0"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+    >
+      <Card elevation={3}>
+        <CardHeader className="flex-row items-start justify-between gap-4">
+          <div className="flex-1">
             <CardTitle>Customize the Experience</CardTitle>
             <CardDescription>
               Dial in the visuals and tone; we&apos;ll instantly remember your choices for the next post.
             </CardDescription>
           </div>
           <Tooltip label="Back to photo">
-            <Button variant="ghost" size="sm" onClick={() => { triggerHapticFeedback(); onBack(); }}>
-              <Icon type="retake" className="h-4 w-4" />
+            <Button
+              variant="plain"
+              size="sm"
+              onClick={() => {
+                triggerHapticFeedback();
+                onBack();
+              }}
+            >
+              <Camera className="h-4 w-4" />
             </Button>
           </Tooltip>
         </CardHeader>
-        <CardContent className="space-y-6">
-          <div className={`grid gap-6 ${isDesktopLayout ? 'lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]' : ''}`}>
-            <div className="space-y-6">
-              <div className="grid gap-4">
-                <label className="flex flex-col gap-2">
-                  <span className="text-sm font-semibold text-indigo-100">Customer&apos;s first name</span>
-                  <input
-                    value={customerName}
-                    onChange={(event) => setCustomerName(event.target.value)}
-                    placeholder="Optional"
-                    className="rounded-lg border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                  />
-                </label>
-              </div>
 
+        <CardContent className="space-y-6">
+          <div className={cn('grid gap-6', isDesktopLayout && 'lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]')}>
+            {/* Main Content */}
+            <div className="space-y-6">
+              {/* Customer Name Input */}
+              <Input
+                label="Customer's first name"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                placeholder="Optional"
+                fullWidth
+              />
+
+              {/* Design Direction */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-semibold uppercase tracking-wide text-indigo-200">Design direction</h4>
+                  <h4 className="text-sm font-semibold uppercase tracking-wide text-primary-300">Design Direction</h4>
                 </div>
-                <div className={`grid gap-3 ${isDesktopLayout ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-2'}`}>
+                <div className={cn('grid gap-3', isDesktopLayout ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-2')}>
                   {Object.values(StyleOption).map((option) => (
                     <StyleCard key={option} option={option} current={style} onSelect={setStyle} />
                   ))}
                 </div>
               </div>
 
+              {/* Caption Strategy */}
               <div className="space-y-3">
-                <h4 className="text-sm font-semibold uppercase tracking-wide text-indigo-200">Caption strategy</h4>
+                <h4 className="text-sm font-semibold uppercase tracking-wide text-primary-300">Caption Strategy</h4>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <Button
-                    variant={captionSource === 'ai' ? 'primary' : 'secondary'}
+                    variant={captionSource === 'ai' ? 'filled' : 'tinted'}
                     size="sm"
-                    onClick={() => { triggerHapticFeedback(); setCaptionSource('ai'); }}
+                    leftIcon={<Sparkles />}
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setCaptionSource('ai');
+                    }}
                   >
-                    <Icon type="sparkles" className="h-4 w-4" />
-                    <span>AI Auto-Magic</span>
+                    AI Auto-Magic
                   </Button>
                   <Button
-                    variant={captionSource === 'prompted' ? 'primary' : 'secondary'}
+                    variant={captionSource === 'prompted' ? 'filled' : 'tinted'}
                     size="sm"
-                    onClick={() => { triggerHapticFeedback(); setCaptionSource('prompted'); }}
+                    leftIcon={<Edit3 />}
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setCaptionSource('prompted');
+                    }}
                   >
-                    <Icon type="edit" className="h-4 w-4" />
-                    <span>AI Remix</span>
+                    AI Remix
                   </Button>
                   <Button
-                    variant={captionSource === 'template' ? 'primary' : 'secondary'}
+                    variant={captionSource === 'template' ? 'filled' : 'tinted'}
                     size="sm"
-                    onClick={() => { triggerHapticFeedback(); setCaptionSource('template'); }}
+                    leftIcon={<FileText />}
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setCaptionSource('template');
+                    }}
                   >
-                    <Icon type="settings" className="h-4 w-4" />
-                    <span>Templates</span>
+                    Templates
                   </Button>
                   <Button
-                    variant={captionSource === 'custom' ? 'primary' : 'secondary'}
+                    variant={captionSource === 'custom' ? 'filled' : 'tinted'}
                     size="sm"
-                    onClick={() => { triggerHapticFeedback(); setCaptionSource('custom'); }}
+                    leftIcon={<Edit3 />}
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setCaptionSource('custom');
+                    }}
                   >
-                    <Icon type="edit" className="h-4 w-4" />
-                    <span>Write my own</span>
+                    Write my own
                   </Button>
                 </div>
 
-                {captionSource === 'ai' && (
-                  <div className="space-y-4">
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                      {Object.values(ToneOption).map((option) => (
-                        <ToneTile key={option} tone={option} current={tone} onSelect={setTone} />
-                      ))}
-                    </div>
-                    <div className="space-y-2">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Tell the AI what to emphasize</span>
-                      <div className="grid gap-2 sm:grid-cols-3">
-                        {AI_FLAVORS.map(({ id, label, description }) => (
-                          <button
-                            key={id}
-                            onClick={() => { triggerHapticFeedback(); setAiFlavor(id); }}
-                            className={`rounded-lg border px-3 py-2 text-left text-xs transition-all ${aiFlavor === id ? 'border-indigo-400 bg-indigo-500/25 text-white shadow' : 'border-white/10 bg-white/5 text-indigo-100 hover:border-indigo-400/40'}`}
-                          >
-                            <span className="font-semibold block text-sm">{label}</span>
-                            <span className="text-[11px] leading-relaxed text-indigo-100/80">{description}</span>
-                          </button>
+                {/* AI Auto-Magic Options */}
+                <AnimatePresence mode="wait">
+                  {captionSource === 'ai' && (
+                    <motion.div
+                      className="space-y-4"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      {/* Tone Options */}
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {Object.values(ToneOption).map((option) => (
+                          <ToneTile key={option} tone={option} current={tone} onSelect={setTone} />
                         ))}
                       </div>
-                    </div>
-                  </div>
-                )}
 
-                {captionSource === 'template' && (
-                  <label className="flex flex-col gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Template</span>
-                    <select
-                      className="rounded-lg border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                      value={selectedTemplateId}
-                      onChange={(event) => setSelectedTemplateId(event.target.value)}
+                      {/* AI Flavors */}
+                      <div className="space-y-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-primary-300">
+                          Tell the AI what to emphasize
+                        </span>
+                        <div className="grid gap-2 sm:grid-cols-3">
+                          {AI_FLAVORS.map(({ id, label, description }) => (
+                            <motion.button
+                              key={id}
+                              onClick={() => {
+                                triggerHapticFeedback();
+                                setAiFlavor(id);
+                              }}
+                              className={cn(
+                                'rounded-lg border px-3 py-2 text-left text-xs transition-all',
+                                aiFlavor === id
+                                  ? 'border-primary-400 bg-primary-500/25 text-surface-50 shadow'
+                                  : 'border-white/10 glass text-surface-200 hover:border-primary-400/40'
+                              )}
+                              whileHover={{ scale: 1.02 }}
+                              whileTap={{ scale: 0.98 }}
+                            >
+                              <span className="font-semibold block text-sm">{label}</span>
+                              <span className="text-[11px] leading-relaxed text-surface-300">{description}</span>
+                            </motion.button>
+                          ))}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* Template Selection */}
+                  {captionSource === 'template' && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="flex flex-col gap-2"
                     >
-                      {templateOptions.map((template) => (
-                        <option key={template.id} value={template.id}>
-                          {template.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
+                      <label className="text-xs font-semibold uppercase tracking-wide text-primary-300">
+                        Template
+                      </label>
+                      <select
+                        className={cn(
+                          'rounded-xl border-2 border-surface-700',
+                          'bg-surface-900/60 px-4 py-3 text-sm text-surface-50',
+                          'focus:border-primary-500 focus:outline-none transition-colors'
+                        )}
+                        value={selectedTemplateId}
+                        onChange={(event) => setSelectedTemplateId(event.target.value)}
+                      >
+                        {templateOptions.map((template) => (
+                          <option key={template.id} value={template.id}>
+                            {template.name}
+                          </option>
+                        ))}
+                      </select>
+                    </motion.div>
+                  )}
 
-                {captionSource === 'custom' && (
-                  <label className="flex flex-col gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Your message</span>
-                    <textarea
-                      value={customMessage}
-                      onChange={(event) => setCustomMessage(event.target.value)}
-                      rows={4}
-                      className="min-h-[120px] rounded-lg border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                      placeholder="We&apos;ll inject this copy straight into the design."
-                    />
-                  </label>
-                )}
+                  {/* Custom Message */}
+                  {captionSource === 'custom' && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                    >
+                      <Textarea
+                        label="Your message"
+                        value={customMessage}
+                        onChange={(e) => setCustomMessage(e.target.value)}
+                        rows={4}
+                        placeholder="We'll inject this copy straight into the design."
+                        fullWidth
+                      />
+                    </motion.div>
+                  )}
 
-                {captionSource === 'prompted' && (
-                  <label className="flex flex-col gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Describe the vibe you want</span>
-                    <textarea
-                      value={aiPrompt}
-                      onChange={(event) => setAiPrompt(event.target.value)}
-                      rows={4}
-                      className="min-h-[120px] rounded-lg border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-white placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
-                      placeholder="e.g., Celebrate how they found their dream off-road rig and shout out the weekend adventures ahead."
-                    />
-                  </label>
-                )}
+                  {/* AI Prompt */}
+                  {captionSource === 'prompted' && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                    >
+                      <Textarea
+                        label="Describe the vibe you want"
+                        value={aiPrompt}
+                        onChange={(e) => setAiPrompt(e.target.value)}
+                        rows={4}
+                        placeholder="e.g., Celebrate how they found their dream off-road rig and shout out the weekend adventures ahead."
+                        fullWidth
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
+                {/* API Key Warning */}
                 {!isApiKeyConfigured && (
-                  <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <span className="flex items-center gap-2 font-semibold">
-                      <Icon type="settings" className="h-4 w-4" />
+                  <motion.div
+                    className="rounded-xl border border-warning-400/30 bg-warning-500/10 px-4 py-3 text-sm flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                  >
+                    <span className="flex items-center gap-2 font-semibold text-warning-300">
+                      <AlertCircle className="h-4 w-4" />
                       Add your Gemini API key to turn on generation.
                     </span>
-                    <Button variant="outline" size="sm" onClick={() => { triggerHapticFeedback(); onOpenSettings(); }}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      leftIcon={<Settings />}
+                      onClick={() => {
+                        triggerHapticFeedback();
+                        onOpenSettings();
+                      }}
+                    >
                       Open Settings
                     </Button>
-                  </div>
+                  </motion.div>
                 )}
 
-                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <Button variant="secondary" size="md" onClick={() => { triggerHapticFeedback(); onBack(); }}>
-                    <Icon type="retake" className="h-4 w-4" />
+                {/* Action Buttons */}
+                <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between pt-2">
+                  <Button
+                    variant="tinted"
+                    size="md"
+                    leftIcon={<Camera />}
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      onBack();
+                    }}
+                  >
                     Change photo
                   </Button>
                   <Button
+                    variant="filled"
                     size="lg"
+                    leftIcon={<Sparkles />}
+                    rightIcon={<ChevronRight />}
                     onClick={handleGenerate}
                     disabled={!isApiKeyConfigured || (captionSource === 'prompted' && !aiPrompt.trim())}
                   >
-                    <Icon type="check" className="h-5 w-5" />
                     {isApiKeyConfigured ? 'Generate hero image & caption' : 'Add API key to generate'}
                   </Button>
                 </div>
               </div>
             </div>
 
+            {/* Sidebar */}
             <aside className="space-y-4">
-              <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-900/60">
-                <img src={imageSrc} alt="Captured reference" className="h-full w-full object-cover" />
-              </div>
-              <div className="space-y-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Style playbook</span>
-                  <Badge variant="info">{style}</Badge>
-                </div>
-                <p className="text-sm text-indigo-100/85 leading-relaxed">{selectedStyleGuide.subtitle}</p>
-                <ul className="space-y-2 text-[12px] text-indigo-100/70">
-                  {selectedStyleGuide.talkingPoints.map((point) => (
-                    <li key={point} className="flex gap-2">
-                      <span className="mt-1 block h-1.5 w-1.5 rounded-full bg-indigo-400/80"></span>
-                      <span>{point}</span>
-                    </li>
-                  ))}
-                </ul>
-                <div className="rounded-xl border border-indigo-400/30 bg-indigo-500/10 px-3 py-2 text-[12px] text-indigo-100/80">
-                  <strong className="block text-indigo-200 text-xs uppercase tracking-wide">AI brief</strong>
-                  <span>{selectedStyleGuide.aiHint}</span>
-                </div>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
-                <span className="text-xs font-semibold uppercase tracking-wide text-indigo-200">Tone focus</span>
-                <p className="mt-2 text-sm text-indigo-100/80">{TONE_DESCRIPTIONS[tone]}</p>
-              </div>
+              {/* Image Preview */}
+              <motion.div
+                className="overflow-hidden rounded-2xl border border-white/10 glass"
+                whileHover={{ scale: 1.02 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+              >
+                <img src={imageSrc} alt="Captured reference" className="h-full w-full object-cover aspect-square" />
+              </motion.div>
+
+              {/* Style Playbook */}
+              <Card solid elevation={2}>
+                <CardContent className="space-y-3" padded>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-primary-300">
+                      Style Playbook
+                    </span>
+                    <Badge variant="primary">{style}</Badge>
+                  </div>
+                  <p className="text-sm text-surface-200 leading-relaxed">{selectedStyleGuide.subtitle}</p>
+                  <ul className="space-y-2 text-[12px] text-surface-300">
+                    {selectedStyleGuide.talkingPoints.map((point) => (
+                      <li key={point} className="flex gap-2">
+                        <span className="mt-1 block h-1.5 w-1.5 rounded-full bg-primary-400/80"></span>
+                        <span>{point}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="rounded-xl border border-primary-400/30 bg-primary-500/10 px-3 py-2 text-[12px] text-surface-200">
+                    <strong className="block text-primary-300 text-xs uppercase tracking-wide mb-1">AI Brief</strong>
+                    <span>{selectedStyleGuide.aiHint}</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Tone Focus */}
+              <Card solid elevation={2}>
+                <CardContent padded>
+                  <span className="text-xs font-semibold uppercase tracking-wide text-primary-300">Tone Focus</span>
+                  <p className="mt-2 text-sm text-surface-200">{TONE_DESCRIPTIONS[tone]}</p>
+                </CardContent>
+              </Card>
             </aside>
           </div>
         </CardContent>
       </Card>
-    </div>
+    </motion.div>
   );
 };
