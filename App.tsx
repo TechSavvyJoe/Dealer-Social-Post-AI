@@ -290,12 +290,17 @@ const App: React.FC = () => {
         }
 
         setCurrentDealer(dealer);
-        if (dealer.id === '0000') {
-            setStep(AppStep.ADMIN);
-        } else {
-            setStep(AppStep.CAPTURE);
-        }
+        const targetStep = dealer.id === '0000' ? AppStep.ADMIN : AppStep.CAPTURE;
+        setStep(targetStep);
         setError(null);
+        
+        // Save session with login timestamp for persistence
+        saveSession({
+            dealerId: dealer.id,
+            step: targetStep,
+            loginTimestamp: Date.now()
+        });
+        
         return true;
     }
     return false;
