@@ -3,6 +3,7 @@ import { Icon } from './Icons';
 import { fileToDataUrl } from '../utils/imageUtils';
 import { WebcamCapture } from './WebcamCapture';
 import { triggerHapticFeedback } from '../utils/haptics';
+import { ImagePreviewModal } from './ImagePreviewModal';
 
 interface ImageInputProps {
   onImageSelected: (imageSrc: string) => void;
@@ -19,7 +20,10 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
   const [showWebcam, setShowWebcam] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const cameraEnvInputRef = useRef<HTMLInputElement>(null);
+  const cameraUserInputRef = useRef<HTMLInputElement>(null);
+  const [captureFacing, setCaptureFacing] = useState<'environment' | 'user'>('environment');
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -37,7 +41,8 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
     try {
       setError(null);
       const dataUrl = await fileToDataUrl(file);
-      onImageSelected(dataUrl);
+      // Show preview first; confirm before committing upstream
+      setPendingImage(dataUrl);
     } catch (err) {
       console.error("Error reading file:", err);
       setError("Could not read the selected image file. Please try again.");
@@ -47,7 +52,13 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
   const handleOpenCamera = () => {
     triggerHapticFeedback();
     if (isMobileDevice()) {
-        cameraInputRef.current?.click();
+        if (captureFacing === 'environment' && cameraEnvInputRef.current) {
+          cameraEnvInputRef.current.setAttribute('capture', 'environment');
+          cameraEnvInputRef.current.click();
+        } else if (captureFacing === 'user' && cameraUserInputRef.current) {
+          cameraUserInputRef.current.setAttribute('capture', 'user');
+          cameraUserInputRef.current.click();
+        }
     } else {
         setShowWebcam(true);
     }
@@ -102,13 +113,27 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
 
   if (showWebcam) {
     return (
-      <WebcamCapture
-        onImageSelected={(imageSrc) => {
-          setShowWebcam(false);
-          onImageSelected(imageSrc);
-        }}
-        onClose={() => setShowWebcam(false)}
-      />
+      <>
+        <WebcamCapture
+          onImageSelected={(imageSrc) => {
+            setShowWebcam(false);
+            setPendingImage(imageSrc);
+          }}
+          onClose={() => setShowWebcam(false)}
+        />
+        <ImagePreviewModal
+          isOpen={Boolean(pendingImage)}
+          imageSrc={pendingImage || ''}
+          onClose={() => setPendingImage(null)}
+          onConfirm={() => {
+            if (pendingImage) {
+              onImageSelected(pendingImage);
+              setPendingImage(null);
+            }
+          }}
+          confirmLabel="Use Photo"
+        />
+      </>
     );
   }
 
@@ -137,20 +162,50 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
           onChange={handleFileChange}
           accept="image/*"
           className="hidden"
+          aria-label="Upload image file"
         />
+        {/* Native camera - environment (rear) */}
         <input
           type="file"
-          ref={cameraInputRef}
+          ref={cameraEnvInputRef}
           onChange={handleFileChange}
           accept="image/*"
-          capture="environment"
           className="hidden"
+          aria-label="Open rear camera"
+        />
+        {/* Native camera - user (front) */}
+        <input
+          type="file"
+          ref={cameraUserInputRef}
+          onChange={handleFileChange}
+          accept="image/*"
+          className="hidden"
+          aria-label="Open front camera"
         />
         
           <div className="text-center py-4 sm:py-8">
               <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Add a Photo</h2>
               <p className="text-indigo-300 mb-6 sm:mb-8 text-sm sm:text-base">Capture a moment, upload a file, or drag & drop.</p>
               <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
+                  {/* Facing selection */}
+                  <div className="flex items-center gap-2 bg-white/5 border border-white/15 rounded-full px-2 py-1">
+                    <button
+                      type="button"
+                      onClick={() => { triggerHapticFeedback(); setCaptureFacing('environment'); }}
+                      className={`px-3 py-1 rounded-full text-sm ${captureFacing === 'environment' ? 'bg-white/20 text-white' : 'text-white/80 hover:text-white'}`}
+                      aria-label="Use rear camera"
+                    >
+                      Rear
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { triggerHapticFeedback(); setCaptureFacing('user'); }}
+                      className={`px-3 py-1 rounded-full text-sm ${captureFacing === 'user' ? 'bg-white/20 text-white' : 'text-white/80 hover:text-white'}`}
+                      aria-label="Use front camera"
+                    >
+                      Front
+                    </button>
+                  </div>
                   <button onClick={handleOpenCamera} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-6 rounded-full hover:scale-105 transition-all duration-300 shadow-lg">
                       <Icon type="camera" className="w-6 sm:w-7 h-6 sm:h-7"/>
                       <span className="text-base sm:text-lg">Open Camera</span>
@@ -162,6 +217,19 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
               </div>
           </div>
       </div>
+      {/* Preview modal for mobile/native or upload flow */}
+      <ImagePreviewModal
+        isOpen={Boolean(pendingImage)}
+        imageSrc={pendingImage || ''}
+        onClose={() => setPendingImage(null)}
+        onConfirm={() => {
+          if (pendingImage) {
+            onImageSelected(pendingImage);
+            setPendingImage(null);
+          }
+        }}
+        confirmLabel="Use Photo"
+      />
     </div>
   );
 };

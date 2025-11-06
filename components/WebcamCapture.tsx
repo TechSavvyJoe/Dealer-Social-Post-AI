@@ -15,6 +15,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, o
   const streamRef = useRef<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [orientation, setOrientation] = useState<Orientation>('landscape');
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
 
   // Effect to detect and update screen orientation
   useEffect(() => {
@@ -61,7 +62,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, o
             video: { 
                 width: { ideal: idealWidth }, 
                 height: { ideal: idealHeight },
-                facingMode: 'environment',
+                facingMode,
                 // Request advanced features for better quality.
                 // Using 'advanced' makes them optional, preventing errors on unsupported devices.
                 advanced: [
@@ -98,7 +99,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, o
     return () => {
       cleanupCamera();
     };
-  }, [cleanupCamera, orientation]);
+  }, [cleanupCamera, orientation, facingMode]);
 
   const handleCapture = () => {
     triggerHapticFeedback();
@@ -144,6 +145,14 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, o
         <div className={`relative w-full max-w-4xl ${aspectRatioClass} bg-black rounded-lg overflow-hidden shadow-2xl border-2 border-white/10`}>
             <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" aria-label="Live webcam feed" />
             <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
+            {/* Flip camera button */}
+            <button
+              onClick={() => { triggerHapticFeedback(); setFacingMode(prev => prev === 'environment' ? 'user' : 'environment'); }}
+              className="absolute top-3 left-3 text-white bg-black/40 hover:bg-black/60 transition-colors rounded-full p-2"
+              aria-label="Flip camera"
+            >
+              <Icon type="restart" className="w-6 h-6" />
+            </button>
         </div>
         <div className="flex items-center justify-center w-full max-w-4xl mt-6">
              <button onClick={handleClose} title="Go Back" aria-label="Go Back" className="absolute left-4 sm:left-auto text-slate-300 hover:text-white transition-colors p-3 rounded-full bg-black/30 hover:bg-black/50">
