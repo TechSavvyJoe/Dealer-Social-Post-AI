@@ -626,12 +626,16 @@ const App: React.FC = () => {
 
   const isCenteredStep = displayedStep === AppStep.LOGIN || displayedStep === AppStep.GENERATING;
   const layoutFlexClass = isCenteredStep ? 'justify-center' : 'justify-start';
-  const layoutPadding = isCenteredStep ? 'py-10' : 'pt-10 pb-16';
-  const layoutGap = isDesktopLayout ? 'gap-10' : 'gap-6';
+  // Reduce vertical padding on desktop to minimize unnecessary page scroll
+  const layoutPadding = isCenteredStep
+    ? (isDesktopLayout ? 'py-8' : 'py-10')
+    : (isDesktopLayout ? 'py-6' : 'pt-8 pb-16');
+  // Slightly smaller gaps on desktop to tighten layout
+  const layoutGap = isDesktopLayout ? 'gap-6' : 'gap-6';
 
   return (
     <>
-      <main className="min-h-screen w-full text-slate-100 flex flex-col">
+  <main className="h-screen w-full text-slate-100 flex flex-col overflow-hidden">
         {currentDealer && (
           <Header
             dealer={currentDealer}
@@ -640,8 +644,8 @@ const App: React.FC = () => {
             isApiKeyConfigured={isApiKeyConfigured}
           />
         )}
-        <div className={`w-full flex flex-col flex-grow px-4 sm:px-6 lg:px-10 ${animationClass}`}>
-          <div className={`w-full max-w-screen-2xl mx-auto flex-1 flex flex-col ${layoutGap} ${layoutFlexClass} ${layoutPadding}`}>
+        <div className={`w-full flex flex-col flex-grow overflow-hidden px-4 sm:px-6 lg:px-10 ${animationClass}`}>
+          <div className={`w-full max-w-screen-2xl mx-auto flex-1 min-h-0 flex flex-col overflow-auto ${layoutGap} ${layoutFlexClass} ${layoutPadding}`}>
             {displayedStep !== AppStep.ADMIN && displayedStep !== AppStep.LOGIN && <ProgressSteps activeStep={displayedStep} />}
             {renderContent()}
           </div>
