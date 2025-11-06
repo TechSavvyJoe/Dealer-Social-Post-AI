@@ -43,6 +43,161 @@ export const fileToDataUrl = (file: File): Promise<string> => {
 };
 
 /**
+ * Detects the EXIF orientation value (1-8) from a JPEG file.
+ * Returns 1 if orientation can't be determined or file isn't a JPEG.
+ */
+export const getJpegExifOrientation = (file: File): Promise<number> => {
+  return new Promise((resolve) => {
+    if (file.type !== 'image/jpeg') {
+      resolve(1);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const view = new DataView(reader.result as ArrayBuffer);
+      // JPEG starts with 0xFFD8
+      if (view.getUint16(0, false) !== 0xFFD8) {
+        resolve(1);
+        return;
+      }
+      let offset = 2;
+      const length = view.byteLength;
+      while (offset < length) {
+        const marker = view.getUint16(offset, false);
+        offset += 2;
+        if (marker === 0xFFE1) { // APP1
+          const segmentLength = view.getUint16(offset, false);
+          offset += 2;
+          // Check for Exif header ("Exif\0\0")
+            if (
+              view.getUint32(offset, false) === 0x45786966 && // 'Exif'
+              view.getUint16(offset + 4, false) === 0x0000
+            ) {
+              let tiffOffset = offset + 6;
+              const endianness = view.getUint16(tiffOffset, false);
+              const littleEndian = endianness === 0x4949; // 'II'
+              if (!littleEndian && endianness !== 0x4D4D) { // 'MM'
+                resolve(1);
+                return;
+              }
+              // Validate TIFF magic number 0x002A
+              if (view.getUint16(tiffOffset + 2, littleEndian) !== 0x002A) {
+                resolve(1);
+                return;
+              }
+              const firstIFDOffset = view.getUint32(tiffOffset + 4, littleEndian);
+              let ifdOffset = tiffOffset + firstIFDOffset;
+              const entries = view.getUint16(ifdOffset, littleEndian);
+              for (let i = 0; i < entries; i++) {
+                const entryOffset = ifdOffset + 2 + i * 12;
+                const tag = view.getUint16(entryOffset, littleEndian);
+                if (tag === 0x0112) { // Orientation tag
+                  const valueOffset = entryOffset + 8;
+                  const orientation = view.getUint16(valueOffset, littleEndian);
+                  resolve(orientation);
+                  return;
+                }
+              }
+              resolve(1);
+              return;
+            }
+        } else if ((marker & 0xFF00) !== 0xFF00) {
+          // Invalid marker
+          break;
+        } else {
+          // Skip segment
+          const segmentLength = view.getUint16(offset, false);
+          offset += segmentLength;
+        }
+      }
+      resolve(1);
+    };
+    reader.onerror = () => resolve(1);
+    reader.readAsArrayBuffer(file);
+  });
+};
+
+/**
+ * Generates a new oriented (and EXIF metadata stripped) data URL from an image File.
+ * For JPEG files, applies EXIF orientation. For other formats, simply returns a re-encoded data URL.
+ */
+export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
+  // Get original data URL first (needed to load image contents)
+  const originalDataUrl = await fileToDataUrl(file);
+  let orientation = 1;
+  try {
+    orientation = await getJpegExifOrientation(file);
+  } catch {
+    orientation = 1;
+  }
+  // If orientation is 1 and not JPEG, just return original
+  if (orientation === 1 && file.type !== 'image/jpeg') {
+    return originalDataUrl; // Already no EXIF orientation or not JPEG
+  }
+  // Load image into canvas and apply transforms
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = reject;
+    i.src = originalDataUrl;
+  });
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    return originalDataUrl;
+  }
+  const { width, height } = img;
+  // Set canvas size depending on rotation
+  if (orientation > 4 && orientation < 9) {
+    canvas.width = height;
+    canvas.height = width;
+  } else {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  // Apply orientation transforms
+  switch (orientation) {
+    case 2: // Flip horizontal
+      ctx.translate(width, 0);
+      ctx.scale(-1, 1);
+      break;
+    case 3: // Rotate 180
+      ctx.translate(width, height);
+      ctx.rotate(Math.PI);
+      break;
+    case 4: // Flip vertical
+      ctx.translate(0, height);
+      ctx.scale(1, -1);
+      break;
+    case 5: // Transpose
+      ctx.rotate(0.5 * Math.PI);
+      ctx.scale(1, -1);
+      ctx.translate(0, -height);
+      break;
+    case 6: // Rotate 90 CW
+      ctx.rotate(0.5 * Math.PI);
+      ctx.translate(0, -height);
+      break;
+    case 7: // Transverse
+      ctx.rotate(0.5 * Math.PI);
+      ctx.translate(width, -height);
+      ctx.scale(-1, 1);
+      break;
+    case 8: // Rotate 270 CW
+      ctx.rotate(-0.5 * Math.PI);
+      ctx.translate(-width, 0);
+      break;
+    default:
+      // Orientation 1, no transform
+      break;
+  }
+  ctx.drawImage(img, 0, 0);
+  // Re-encode as JPEG (or original type if not JPEG) stripping EXIF metadata.
+  const mimeType = file.type === 'image/jpeg' ? 'image/jpeg' : file.type;
+  return canvas.toDataURL(mimeType, 0.92);
+};
+
+/**
  * Finds a direct image URL from an HTML string by looking for meta tags.
  * @param html The HTML content of a webpage.
  * @returns The found image URL or null.

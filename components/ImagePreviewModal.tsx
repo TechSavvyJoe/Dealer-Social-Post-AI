@@ -4,13 +4,14 @@ import { triggerHapticFeedback } from '../utils/haptics';
 
 interface ImagePreviewModalProps {
   isOpen: boolean;
-  onClose: () => void; // Treat as "retake" when confirm button is present
+  onClose: () => void; // Close modal without action
   imageSrc: string;
   onConfirm?: () => void;
+  onRetake?: () => void; // Explicit retake callback
   confirmLabel?: string;
 }
 
-export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({ isOpen, onClose, imageSrc, onConfirm, confirmLabel = 'Use Photo' }) => {
+export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({ isOpen, onClose, imageSrc, onConfirm, onRetake, confirmLabel = 'Use Photo' }) => {
   const handleClose = () => {
     triggerHapticFeedback();
     onClose();
@@ -59,7 +60,7 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({ isOpen, on
         />
         <div className="mt-6 flex gap-4">
           <button
-            onClick={handleClose}
+            onClick={() => { triggerHapticFeedback(); (onRetake ?? onClose)(); }}
             className="px-5 py-2.5 rounded-full bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-colors shadow focus:outline-none focus:ring-2 focus:ring-white/40"
           >
             Retake

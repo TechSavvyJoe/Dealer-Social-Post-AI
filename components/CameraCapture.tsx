@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Icon } from './Icons';
-import { fileToDataUrl } from '../utils/imageUtils';
+import { fileToNormalizedDataUrl } from '../utils/imageUtils';
 import { WebcamCapture } from './WebcamCapture';
 import { triggerHapticFeedback } from '../utils/haptics';
 import { ImagePreviewModal } from './ImagePreviewModal';
@@ -24,25 +24,28 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
   const cameraUserInputRef = useRef<HTMLInputElement>(null);
   const [captureFacing, setCaptureFacing] = useState<'environment' | 'user'>('environment');
   const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [lastSource, setLastSource] = useState<'upload' | 'camera-mobile' | 'camera-webcam' | null>(null);
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      processFile(file);
+      const source: 'upload' | 'camera-mobile' = (event.target === cameraEnvInputRef.current || event.target === cameraUserInputRef.current) ? 'camera-mobile' : 'upload';
+      processFile(file, source);
     }
     event.target.value = "";
   };
 
-  const processFile = async (file: File) => {
+  const processFile = async (file: File, source: 'upload' | 'camera-mobile') => {
     if (!file.type.startsWith('image/')) {
       setError("Invalid file type. Please use an image file.");
       return;
     }
     try {
       setError(null);
-      const dataUrl = await fileToDataUrl(file);
+      const dataUrl = await fileToNormalizedDataUrl(file);
       // Show preview first; confirm before committing upstream
       setPendingImage(dataUrl);
+      setLastSource(source);
     } catch (err) {
       console.error("Error reading file:", err);
       setError("Could not read the selected image file. Please try again.");
@@ -95,7 +98,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
 
     const file = event.dataTransfer.files?.[0];
     if (file) {
-      processFile(file);
+      processFile(file, 'upload');
     }
   };
   
@@ -118,20 +121,36 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
           onImageSelected={(imageSrc) => {
             setShowWebcam(false);
             setPendingImage(imageSrc);
+            setLastSource('camera-webcam');
           }}
           onClose={() => setShowWebcam(false)}
         />
         <ImagePreviewModal
           isOpen={Boolean(pendingImage)}
           imageSrc={pendingImage || ''}
-          onClose={() => setPendingImage(null)}
+          onClose={() => { setPendingImage(null); setLastSource(null); }}
           onConfirm={() => {
             if (pendingImage) {
               onImageSelected(pendingImage);
               setPendingImage(null);
+              setLastSource(null);
             }
           }}
           confirmLabel="Use Photo"
+          onRetake={() => {
+            if (lastSource === 'camera-webcam') {
+              setPendingImage(null);
+              setShowWebcam(true);
+            } else if (lastSource === 'camera-mobile') {
+              setPendingImage(null);
+              handleOpenCamera();
+            } else if (lastSource === 'upload') {
+              setPendingImage(null);
+              fileInputRef.current?.click();
+            } else {
+              setPendingImage(null);
+            }
+          }}
         />
       </>
     );
@@ -221,14 +240,29 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
       <ImagePreviewModal
         isOpen={Boolean(pendingImage)}
         imageSrc={pendingImage || ''}
-        onClose={() => setPendingImage(null)}
+        onClose={() => { setPendingImage(null); setLastSource(null); }}
         onConfirm={() => {
           if (pendingImage) {
             onImageSelected(pendingImage);
             setPendingImage(null);
+            setLastSource(null);
           }
         }}
         confirmLabel="Use Photo"
+        onRetake={() => {
+          if (lastSource === 'camera-webcam') {
+            setPendingImage(null);
+            setShowWebcam(true);
+          } else if (lastSource === 'camera-mobile') {
+            setPendingImage(null);
+            handleOpenCamera();
+          } else if (lastSource === 'upload') {
+            setPendingImage(null);
+            fileInputRef.current?.click();
+          } else {
+            setPendingImage(null);
+          }
+        }}
       />
     </div>
   );
