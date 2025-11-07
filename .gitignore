@@ -12,16 +12,6 @@ dist
 dist-ssr
 *.local
 
-# PocketBase runtime
-backend/pocketbase/pb_data/
-backend/pocketbase/pocketbase
-backend/pocketbase/*.log
-backend/pocketbase/backup.sh
-backend/pocketbase/tunnel-url.log
-
-# Environment overrides
-**/.env.local
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
