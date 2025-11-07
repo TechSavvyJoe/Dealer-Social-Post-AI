@@ -1,7 +1,0 @@
-{
-  "name": "Dealership AI Sales Coach Suite",
-  "description": "A full-suite AI-powered platform for car dealerships. Salespeople get pre-call briefings and live transcription. Managers get a real-time team dashboard with live call monitoring, deep performance analytics, sale success probability, and actionable coaching alerts.",
-  "requestFramePermissions": [
-    "microphone"
-  ]
-}
