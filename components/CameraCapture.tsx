@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Icon } from './Icons';
 import { fileToNormalizedDataUrl } from '../utils/imageUtils';
 import { WebcamCapture } from './WebcamCapture';
@@ -51,19 +51,19 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
       setError("Could not read the selected image file. Please try again.");
     }
   };
-  
+
   const handleOpenCamera = () => {
     triggerHapticFeedback();
     if (isMobileDevice()) {
-        if (captureFacing === 'environment' && cameraEnvInputRef.current) {
-          cameraEnvInputRef.current.setAttribute('capture', 'environment');
-          cameraEnvInputRef.current.click();
-        } else if (captureFacing === 'user' && cameraUserInputRef.current) {
-          cameraUserInputRef.current.setAttribute('capture', 'user');
-          cameraUserInputRef.current.click();
-        }
+      if (captureFacing === 'environment' && cameraEnvInputRef.current) {
+        cameraEnvInputRef.current.setAttribute('capture', 'environment');
+        cameraEnvInputRef.current.click();
+      } else if (captureFacing === 'user' && cameraUserInputRef.current) {
+        cameraUserInputRef.current.setAttribute('capture', 'user');
+        cameraUserInputRef.current.click();
+      }
     } else {
-        setShowWebcam(true);
+      setShowWebcam(true);
     }
   };
 
@@ -72,36 +72,55 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
     fileInputRef.current?.click();
   }
 
-  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (event.dataTransfer.items && event.dataTransfer.items.length > 0) {
+  useEffect(() => {
+    const handleWindowDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
       setIsDraggingOver(true);
-    }
-  };
+    };
 
-  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setIsDraggingOver(false);
-  };
+    const handleWindowDragEnter = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer?.items && e.dataTransfer.items.length > 0) {
+        setIsDraggingOver(true);
+      }
+    };
 
-  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setIsDraggingOver(false);
+    const handleWindowDragLeave = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // Only disable if we are leaving the window (clientX/Y are 0 or outside bounds)
+      // or if relatedTarget is null (meaning we left the document)
+      if (e.clientX === 0 || e.clientY === 0) {
+        setIsDraggingOver(false);
+      }
+    };
 
-    const file = event.dataTransfer.files?.[0];
-    if (file) {
-      processFile(file, 'upload');
-    }
-  };
-  
+    const handleWindowDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDraggingOver(false);
+
+      const file = e.dataTransfer?.files?.[0];
+      if (file) {
+        processFile(file, 'upload');
+      }
+    };
+
+    window.addEventListener('dragover', handleWindowDragOver);
+    window.addEventListener('dragenter', handleWindowDragEnter);
+    window.addEventListener('dragleave', handleWindowDragLeave);
+    window.addEventListener('drop', handleWindowDrop);
+
+    return () => {
+      window.removeEventListener('dragover', handleWindowDragOver);
+      window.removeEventListener('dragenter', handleWindowDragEnter);
+      window.removeEventListener('dragleave', handleWindowDragLeave);
+      window.removeEventListener('drop', handleWindowDrop);
+    };
+  }, []);
+
   if (error) {
     return (
       <div className="w-full h-full flex flex-col items-center justify-center bg-red-900/50 border border-red-700 text-red-300 p-8 text-center rounded-2xl">
@@ -157,14 +176,9 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
   }
 
   return (
-    <div 
-      className={`relative w-full max-w-2xl mx-auto p-2 sm:p-4 bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 transition-all duration-300 ${
-        isDraggingOver ? 'border-indigo-400 scale-105' : 'border-white/20'
-      }`}
-      onDrop={handleDrop}
-      onDragOver={handleDragOver}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
+    <div
+      className={`relative w-full max-w-2xl mx-auto p-2 sm:p-4 bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 transition-all duration-300 ${isDraggingOver ? 'border-indigo-400 scale-105' : 'border-white/20'
+        }`}
     >
       {isDraggingOver && (
         <div className="absolute inset-0 bg-indigo-600/50 rounded-2xl flex items-center justify-center pointer-events-none z-10">
@@ -201,40 +215,40 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
           className="hidden"
           aria-label="Open front camera"
         />
-        
-          <div className="text-center py-4 sm:py-8">
-              <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Add a Photo</h2>
-              <p className="text-indigo-300 mb-6 sm:mb-8 text-sm sm:text-base">Capture a moment, upload a file, or drag & drop.</p>
-              <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
-                  {/* Facing selection */}
-                  <div className="flex items-center gap-2 bg-white/5 border border-white/15 rounded-full px-2 py-1">
-                    <button
-                      type="button"
-                      onClick={() => { triggerHapticFeedback(); setCaptureFacing('environment'); }}
-                      className={`px-3 py-1 rounded-full text-sm ${captureFacing === 'environment' ? 'bg-white/20 text-white' : 'text-white/80 hover:text-white'}`}
-                      aria-label="Use rear camera"
-                    >
-                      Rear
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { triggerHapticFeedback(); setCaptureFacing('user'); }}
-                      className={`px-3 py-1 rounded-full text-sm ${captureFacing === 'user' ? 'bg-white/20 text-white' : 'text-white/80 hover:text-white'}`}
-                      aria-label="Use front camera"
-                    >
-                      Front
-                    </button>
-                  </div>
-                  <button onClick={handleOpenCamera} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-6 rounded-full hover:scale-105 transition-all duration-300 shadow-lg">
-                      <Icon type="camera" className="w-6 sm:w-7 h-6 sm:h-7"/>
-                      <span className="text-base sm:text-lg">Open Camera</span>
-                  </button>
-                   <button onClick={handleUploadPhoto} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-white/10 border border-white/20 text-white font-bold py-3 px-6 rounded-full hover:bg-white/20 hover:scale-105 transition-all duration-300 shadow-lg">
-                      <Icon type="upload" className="w-6 sm:w-7 h-6 sm:h-7"/>
-                      <span className="text-base sm:text-lg">Upload Photo</span>
-                  </button>
-              </div>
+
+        <div className="text-center py-4 sm:py-8">
+          <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Add a Photo</h2>
+          <p className="text-indigo-300 mb-6 sm:mb-8 text-sm sm:text-base">Capture a moment, upload a file, or drag & drop.</p>
+          <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
+            {/* Facing selection */}
+            <div className="flex items-center gap-2 bg-white/5 border border-white/15 rounded-full px-2 py-1">
+              <button
+                type="button"
+                onClick={() => { triggerHapticFeedback(); setCaptureFacing('environment'); }}
+                className={`px-3 py-1 rounded-full text-sm ${captureFacing === 'environment' ? 'bg-white/20 text-white' : 'text-white/80 hover:text-white'}`}
+                aria-label="Use rear camera"
+              >
+                Rear
+              </button>
+              <button
+                type="button"
+                onClick={() => { triggerHapticFeedback(); setCaptureFacing('user'); }}
+                className={`px-3 py-1 rounded-full text-sm ${captureFacing === 'user' ? 'bg-white/20 text-white' : 'text-white/80 hover:text-white'}`}
+                aria-label="Use front camera"
+              >
+                Front
+              </button>
+            </div>
+            <button onClick={handleOpenCamera} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-6 rounded-full hover:scale-105 transition-all duration-300 shadow-lg">
+              <Icon type="camera" className="w-6 sm:w-7 h-6 sm:h-7" />
+              <span className="text-base sm:text-lg">Open Camera</span>
+            </button>
+            <button onClick={handleUploadPhoto} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-white/10 border border-white/20 text-white font-bold py-3 px-6 rounded-full hover:bg-white/20 hover:scale-105 transition-all duration-300 shadow-lg">
+              <Icon type="upload" className="w-6 sm:w-7 h-6 sm:h-7" />
+              <span className="text-base sm:text-lg">Upload Photo</span>
+            </button>
           </div>
+        </div>
       </div>
       {/* Preview modal for mobile/native or upload flow */}
       <ImagePreviewModal
@@ -264,6 +278,6 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
           }
         }}
       />
-    </div>
+    </div >
   );
 };
