@@ -694,13 +694,29 @@ export const generateSocialPost = async (
 };
 
 const generateVideoPrompt = (style: VideoStyle, options: VideoRequestOptions): string => {
-    const coreInstruction = `You are an AI motion graphics artist. You are given a static image of a person or people celebrating their new car. Your task is to transform this image into a short, dynamic video clip that runs for approximately ${options.durationSeconds} seconds. Do not change the subjects in the image; only add animation and effects based on the chosen theme.`;
+    const coreInstruction = `You are an AI motion graphics artist. You are given a static image of a person or people celebrating their new car. Your task is to transform this image into a short, dynamic video clip that runs for approximately ${options.durationSeconds} seconds. Do not change the subjects in the image; only add animation and effects based on the chosen theme. Keep the framing clean and avoid cutting off the car or people.`;
 
     const soundtrackInstruction = options.soundtrack === 'none'
         ? 'No background audio is required; focus on crisp visuals that can loop cleanly without sound.'
         : options.soundtrack === 'celebration'
             ? 'Incorporate rhythmic motion that matches an upbeat, celebratory clap-driven track.'
-            : 'Design the animation with smooth, cinematic pacing that swells in sync with an ambient score.';
+            : options.soundtrack === 'cinematic'
+                ? 'Design the animation with smooth, cinematic pacing that swells in sync with an ambient score.'
+                : options.soundtrack === 'anthemic'
+                    ? 'Sync motion to an anthemic stadium beat with big hits and lifts; make it feel heroic.'
+                    : 'Lean into groove-forward motion that matches a funky, bass-led track.';
+
+    const pacingInstruction = options.pacing === 'snappy'
+        ? 'Use quick cuts, energetic reveals, and punchy easing. Keep moves brisk and impactful.'
+        : 'Use smooth easing, longer ramps, and graceful transitions for a polished cinematic feel.';
+
+    const resolutionInstruction = options.resolution === '1080p'
+        ? 'Render details sharply as if delivering a 1080p export.'
+        : 'Favor lightweight motion that still looks clean at 720p.';
+
+    const aspectInstruction = options.aspectPreference === 'auto'
+        ? 'Match the source photo orientation; do not crop out the main subject.'
+        : `Compose for a ${options.aspectPreference} frame and keep the car and people centered. If the source photo does not match, use subtle letterboxing or pillarboxing instead of cropping faces or the vehicle.`;
 
     let styleInstruction = "";
     switch (style) {
@@ -769,6 +785,12 @@ const generateVideoPrompt = (style: VideoStyle, options: VideoRequestOptions): s
 
 ${soundtrackInstruction}
 
+${pacingInstruction}
+
+${resolutionInstruction}
+
+${aspectInstruction}
+
 ${styleInstruction}`;
 }
 
@@ -796,7 +818,9 @@ export const generatePostVideo = async (imageBase64Url: string, style: VideoStyl
     const prompt = generateVideoPrompt(style, options);
 
     const { width, height } = await getImageDimensions(imageBase64Url);
-    const aspectRatio = width > height ? '16:9' : '9:16';
+    const derivedAspect = width === height ? '1:1' : (width > height ? '16:9' : '9:16');
+    const aspectRatio = options.aspectPreference === 'auto' ? derivedAspect : options.aspectPreference;
+    const resolution = options.resolution || '720p';
 
     const maxRetries = 3;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -807,7 +831,7 @@ export const generatePostVideo = async (imageBase64Url: string, style: VideoStyl
                 image: image,
                 config: {
                     numberOfVideos: 1,
-                    resolution: '720p',
+                    resolution,
                     aspectRatio: aspectRatio
                 }
             });
