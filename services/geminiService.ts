@@ -60,7 +60,7 @@ const generateImagePrompt = (
 *   After tentatively placing ANY text, logo, banner, or decorative element, run a segmentation / detection pass to locate every person and face in the frame and build tight bounding boxes around them.
 *   Enforce a minimum clear margin of 32px (and at least 12% of the shorter image dimension) between any person bounding box and the nearest edge of every text/logo/badge element. If the margin cannot be respected, relocate or redesign the element (e.g., convert it into a banner or badge) until it does.
 *   Under no circumstances may text, logos, or graphics cross into these exclusion zones.`;
-    
+
     const watermarkInstruction = hasLogo
         ? `*   **MANDATORY LOGO PLACEMENT:** A second image has been provided—this is the dealership's logo. It is a CRITICAL REQUIREMENT that you place this logo as a small, tasteful watermark in a lower corner of the final image, inside a Safe Zone. Do not distort it. Do NOT use the dealership name as a text watermark if the logo image is present. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.**`
         : `*   **WATERMARK:** The dealership name, '${dealershipName}', MUST be used as a text watermark. Use the *exact* spelling provided and place it tastefully in a lower corner within a Safe Zone.`;
@@ -105,7 +105,7 @@ ${watermarkInstruction}
 **Step 4: FINAL COMPLIANCE REVIEW**
 *   Confirm that all text, logos, and decorations remain inside the image boundaries, respect the required margins, and look intentional.
 *   If a violation is discovered, adjust the layout and repeat Steps 2-3 before delivering the final image.`;
-    
+
     let textInstruction = '';
     if (customMessage && customMessage.trim()) {
         textInstruction = `
@@ -175,12 +175,12 @@ const generateTextPrompt = (
     isRegeneration = false,
     creativeBrief?: string,
 ): string => {
-    const nameInfo = customerName 
-        ? `The customer's first name is ${customerName}. Personalize the post by addressing them directly.` 
+    const nameInfo = customerName
+        ? `The customer's first name is ${customerName}. Personalize the post by addressing them directly.`
         : "The customer's name was not provided, so refer to them as 'our latest happy customer' or a similar friendly phrase.";
-    
+
     let toneInstruction = "";
-    switch(tone) {
+    switch (tone) {
         case ToneOption.Excited:
             toneInstruction = "Write in an upbeat, energetic, and celebratory tone. Use exclamation points and enthusiastic language to convey excitement!";
             break;
@@ -200,7 +200,7 @@ const generateTextPrompt = (
             toneInstruction = "Write in a compelling, promotional, and urgent tone. Create a sense of excitement and encourage people to visit the dealership soon. You can hint at great deals or a limited-time opportunity without mentioning specifics.";
             break;
     }
-    
+
     const regenerationInstruction = isRegeneration ? "CRITICAL: The user is asking for a new version. This caption MUST be different from any previous one you've generated. Use a fresh angle." : "";
 
     const creativeBriefInstruction = creativeBrief
@@ -246,22 +246,23 @@ const cleanGeneratedText = (inputText: string): string => {
     const firstLine = lines[0].toLowerCase();
 
     const isPreamble = firstLine.includes('here is') ||
-                    firstLine.includes("here's") ||
-                    firstLine.startsWith('sure') ||
-                    firstLine.startsWith('certainly') ||
-                    (firstLine.includes('post') && firstLine.includes('for you'));
+        firstLine.includes("here's") ||
+        firstLine.startsWith('sure') ||
+        firstLine.startsWith('certainly') ||
+        (firstLine.includes('post') && firstLine.includes('for you'));
 
     if (lines.length > 1 && isPreamble) {
         return lines.slice(1).join('\n').trim();
     }
-    
+
     return inputText.trim();
 };
 
 export const generateFunSocialPostImage = async (
     originalImageBase64Url: string,
     dealershipName: string,
-    logoBase64Url?: string
+    logoBase64Url?: string,
+    requestedStyle?: string // Optional: specific style  name or 'random'
 ): Promise<string> => {
     const normalisedOriginal = await normaliseDataUrl(originalImageBase64Url);
     const { mimeType, data: base64Data } = parseDataUrl(normalisedOriginal);
@@ -301,102 +302,110 @@ export const generateFunSocialPostImage = async (
         : `The dealership name is '${dealershipName}'. You MUST use this EXACT name as a small, tasteful text watermark in a lower corner. Style it to match the aesthetic but keep it discreet. Double-check your spelling of '${dealershipName}'.`;
 
     const funStyles = [
-        { name: "Superhero Comic Book", prompt: "Redraw the entire scene in a classic American superhero comic book style. Use bold, dynamic ink lines, vibrant primary colors, and halftone dots for shading. The people should look like powerful heroes, and the car should look like their iconic vehicle." },
-        { name: "Japanese Anime/Manga", prompt: "Transform the photo into a vibrant, high-quality Japanese anime scene. Give the people expressive, large eyes and stylized hair. Use clean lines and crisp cel-shading. The car should look sleek and futuristic." },
-        { name: "Action Movie Poster", prompt: "Recreate the photo as a gritty, high-octane action movie poster. Use dramatic, high-contrast lighting with deep shadows. The people should have determined, heroic expressions. The car should look tough and ready for action. Add a fiery, explosive, or smoke-filled background." },
-        { name: "3D Animated Movie (Pixar-style)", prompt: "Reimagine the scene as if it's from a modern 3D animated family film. Give the people and car soft, appealing, rounded features. The lighting should be warm, friendly, and magical. The overall feeling must be charming and heartwarming." },
-        { name: "Grand Theft Auto Art Style", prompt: "Recreate the image in the iconic, stylized art style of a Grand Theft Auto loading screen. Use heavy, distinct black outlines, a semi-realistic but illustrated look, and a vibrant color palette. The scene should feel cool, edgy, and stylish." },
-        { name: "Vintage 1930s Cartoon", prompt: "Redraw the scene in the 'rubber hose' style of a 1930s cartoon. Use black and white, simple circular shapes, pie eyes for the characters, and noodle-like limbs that bend in curves. The mood should be nostalgic and playful." },
-        { name: "Claymation Stop-Motion", prompt: "Reimagine the scene as a claymation stop-motion animation. Characters and the car should have a tangible, slightly imperfect, finger-printed clay texture. The lighting should be dramatic and studio-like." },
-        { name: "LEGO Brick Creation", prompt: "Reconstruct the entire scene using only LEGO bricks. The people should be LEGO minifigures that resemble the real people, and the car should be a detailed LEGO model. The background should also be made of LEGOs." },
-        { name: "Impressionist Oil Painting", prompt: "Recreate the photo as an Impressionist oil painting. Use visible, expressive brushstrokes, focus on the play of light and color, and create a sense of movement and atmosphere, like a Monet or Renoir." },
-        { name: "Ancient Egyptian Hieroglyphs", prompt: "Transform the scene into an Ancient Egyptian hieroglyphic wall painting. The people should be depicted in the classic flat, side-profile style, and the car stylized as a royal chariot. Use a limited, earthy color palette on a stone or papyrus texture." },
-        { name: "Gothic Stained Glass Window", prompt: "Recreate the image as a medieval Gothic stained glass window. Use thick, bold black lines to separate vibrant, jewel-toned sections of colored glass. The composition should be formal and reverent." },
-        { name: "Vibrant Graffiti Street Art", prompt: "Reimagine the scene as a large, vibrant graffiti mural on a brick wall. Use spray paint textures, bold bubble letters for the text, and a dynamic, edgy composition with drips and splatters." },
-        { name: "Elegant Art Deco Poster", prompt: "Redesign the photo as a sleek Art Deco travel or automobile poster from the 1920s. Use strong geometric shapes, streamlined forms, luxurious metallic accents (gold, chrome), and a sophisticated font." },
-        { name: "8-Bit Pixel Art", prompt: "Convert the entire scene into 8-bit pixel art, as if from a classic Nintendo game. Use a limited color palette and blocky, pixelated forms for the people, car, and background. The resolution should be visibly low." },
-        { name: "Blueprint Technical Drawing", prompt: "Redraw the scene as a technical blueprint. Use crisp white lines on a blue background. The car should be shown with callouts and measurements, and the people should be rendered as simple schematic figures." },
-        { name: "Chalkboard Art", prompt: "Illustrate the scene as a detailed and whimsical piece of chalkboard art. Use varying chalk textures, from fine lines to smudged shading, on a dark chalkboard background. The style should be charming and handcrafted." },
-        { name: "Psychedelic 60s Poster", prompt: "Transform the photo into a psychedelic rock poster from the late 1960s. Use swirling, distorted forms, vibrant, clashing colors, and bubble-like, hard-to-read typography that flows with the artwork." },
-        { name: "Papercraft Diorama", prompt: "Recreate the scene as a 3D papercraft diorama. All elements—people, car, background—should appear to be constructed from folded, layered, and cut colored paper, giving it a tangible, handcrafted depth." },
-        { name: "Fantasy Map (Lord of the Rings style)", prompt: "Reimagine the scene as a location on a hand-drawn fantasy map. The dealership could be a castle, the car a noble steed, and the people adventurers. Use sepia tones and elegant calligraphy." },
-        { name: "Luminous Watercolor Painting", prompt: "Recreate the photo as a soft and luminous watercolor painting. Use translucent washes of color, let colors bleed into each other, and leave some white of the paper showing through for highlights. The feel should be light and airy." },
-        { name: "Cyberpunk Neon Noir", prompt: "Transform the scene into a cyberpunk cityscape. The car should be futuristic and augmented, the people should have cybernetic elements, and the background should be a rainy, neon-drenched city at night." },
-        { name: "Ukiyo-e Japanese Woodblock Print", prompt: "Recreate the photo in the style of a traditional Japanese Ukiyo-e woodblock print. Use flat areas of color, strong outlines, and a stylized, elegant composition reminiscent of artists like Hokusai." },
-        { name: "Children's Storybook Illustration", prompt: "Redraw the scene in the charming and simple style of a classic children's storybook. Use soft colors, friendly character designs with big smiles, and a gentle, whimsical atmosphere." },
-        { name: "Low-Poly 3D Render", prompt: "Reconstruct the scene using a low-poly 3D art style. All objects and people should be represented by a mesh of visible, flat-shaded polygons. The look should be stylized and geometric." },
-        { name: "Thermal Imaging Scan", prompt: "Reimagine the image as if viewed through a thermal imaging camera. Use a vibrant color gradient from blue (cold) to red/yellow (hot) to represent the heat signatures of the people, the car's engine, and the environment." },
-        { name: "Fairy Tale Silhouette", prompt: "Depict the scene as a black silhouette against a magical, colorful sunset or moonlit sky. The intricate shapes of the people and car should be clearly defined, creating a dramatic and enchanting storybook feel." },
-        { name: "Steampunk Invention", prompt: "Transform the photo into a steampunk-themed creation. The car should be a fantastic contraption of brass, copper, gears, and steam pipes. The people's clothing should be Victorian with futuristic goggles and gadgets." },
-        { name: "Vaporwave Aesthetic", prompt: "Recreate the scene with a Vaporwave aesthetic. Use a palette of pinks, teals, and purples. Incorporate elements like Roman busts, checkerboard grids, palm trees, and a hazy, nostalgic 90s digital feel." },
-        { name: "Tribal Tattoo Art", prompt: "Redraw the entire scene using the bold, black, flowing lines and patterns of Polynesian or Maori tribal tattoo art. The forms of the people and car should be abstracted into powerful, symbolic shapes." },
-        { name: "Detailed Coloring Book Page", prompt: "Transform the photo into a detailed, black and white coloring book page for adults. Use clean, intricate lines to outline the people, the car, and add complex patterns to the background. The image should be entirely line art, with no shading." },
-        { name: "Film Noir Scene", prompt: "Recreate the photo in a black and white Film Noir style. Use high-contrast lighting, deep dramatic shadows, and a mysterious, cinematic mood like a 1940s detective movie." },
-        { name: "Pop Art (Warhol Style)", prompt: "Transform the image into an Andy Warhol-style Pop Art piece. Use bright, saturated, unnatural colors in bold blocks with a screen-printed texture. The image could be repeated in a grid with different color schemes." },
-        { name: "Pointillism Painting", prompt: "Recreate the photo in the style of Pointillism, constructed from thousands of tiny, distinct dots of color that blend together in the viewer's eye." },
-        { name: "Surrealist Painting (Dali Style)", prompt: "Reimagine the scene as a dreamlike Surrealist painting. Feature melting objects, illogical juxtapositions, and a bizarre, subconscious landscape." },
-        { name: "Cubist Painting (Picasso Style)", prompt: "Deconstruct and reassemble the subjects in a Cubist style, showing them from multiple viewpoints simultaneously using geometric shapes and fragmented forms." },
-        { name: "Ancient Roman Mosaic", prompt: "Recreate the image as a detailed Roman mosaic, as if constructed from thousands of small, colored stone tiles (tesserae)." },
-        { name: "Mayan Codex Glyphs", prompt: "Illustrate the scene in the style of an ancient Mayan codex, with stylized figures, intricate glyphs, and a limited color palette on a fig-bark paper texture." },
-        { name: "Art Nouveau Poster", prompt: "Redesign the photo as an elegant Art Nouveau poster. Use flowing, organic lines, decorative floral patterns, and a graceful, stylized aesthetic reminiscent of Alphonse Mucha." },
-        { name: "Victorian Etching", prompt: "Render the scene as a fine, detailed black-and-white Victorian etching, with intricate cross-hatching for shading, like an illustration from an old book." },
-        { name: "1980s Trapper Keeper Art", prompt: "Transform the scene into 80s Trapper Keeper art. Use airbrushed neon colors, laser grids, chrome text, and a futuristic, radical aesthetic." },
-        { name: "Tie-Dye Fabric Pattern", prompt: "Reimagine the entire image as a vibrant, swirling tie-dye pattern. The forms of the people and car should be visible within the psychedelic colors." },
-        { name: "Golden Age Sci-Fi Book Cover", prompt: "Recreate the photo as a 1950s pulp sci-fi book cover. The car is a retro rocket ship, the people are space adventurers, and the background is a colorful alien planet." },
-        { name: "Knitted Wool Sweater Pattern", prompt: "Render the image as if it were a cozy, knitted pattern on a wool sweater, complete with a visible yarn texture." },
-        { name: "Cross-Stitch Embroidery", prompt: "Transform the scene into a charming cross-stitch embroidery piece, with visible 'X' stitches and a fabric canvas texture." },
-        { name: "Sand Sculpture", prompt: "Reimagine the scene as a massive, incredibly detailed sand sculpture on a sunny beach." },
-        { name: "Ice Sculpture", prompt: "Recreate the scene as a dramatic, crystal-clear ice sculpture, complete with internal refractions and cool-toned lighting." },
-        { name: "Topiary Garden Sculpture", prompt: "Depict the scene as if it were meticulously crafted from living topiary bushes in a formal garden." },
-        { name: "Carved Wooden Sculpture", prompt: "Illustrate the entire scene as if it were carved from a single piece of polished wood, emphasizing the natural grain and texture." },
-        { name: "Risograph Print", prompt: "Recreate the image with the aesthetic of a Risograph print. Use a limited palette of bright, overlapping, slightly misaligned colors with a characteristic grainy texture." },
-        { name: "Cave Painting", prompt: "Redraw the scene in the style of ancient cave paintings. Use simple, primitive figures, earthy pigments (red ochre, charcoal), and a rough stone wall texture." },
-        { name: "Botanical Illustration", prompt: "Render the image in the style of an antique botanical illustration, with precise lines, delicate watercolor washes, and scientific labels pointing to parts of the car." },
-        { name: "Minimalist Line Art", prompt: "Capture the entire scene using only a single, continuous, elegant black line on a white background." },
-        { name: "Heavy Metal Album Cover", prompt: "Transform the photo into an epic, dark fantasy heavy metal album cover. The car should be monstrous, the people heroic warriors, and the sky filled with lightning." },
-        { name: "Abstract Expressionism", prompt: "Reinterpret the scene in the style of Abstract Expressionism, focusing on emotion and energy through drips, splatters, and bold, non-representational brushstrokes." },
-        { name: "Spy Movie Gadget Blueprint", prompt: "Redraw the car as a secret agent's gadget-filled vehicle blueprint, revealing hidden weapons, oil slicks, and an ejector seat." },
-        { name: "Banknote Engraving", prompt: "Recreate the image in the intricate, fine-line engraving style found on currency, complete with guilloché patterns and a portrait-like quality." },
-        { name: "Casino Slot Machine Theme", prompt: "Reimagine the scene as the bright, flashy, chrome-and-neon art of a casino slot machine, incorporating lucky 7s and jackpot symbols." },
-        { name: "Architectural Model", prompt: "Reconstruct the scene as a miniature architectural model made of white cardboard, balsa wood, and tiny plastic figures." },
-        { name: "Tim Burton Style", prompt: "Redraw the scene in the gothic, quirky, and whimsical style of Tim Burton, with spindly characters, large expressive eyes, and a dark, fantastical atmosphere." },
-        { name: "Etch A Sketch Drawing", prompt: "Render the entire image as if it were drawn on an Etch A Sketch, using a single, continuous gray line with no breaks." },
-        { name: "Sugar Skull Art", prompt: "Transform the people and car with the intricate, colorful patterns of Dia de los Muertos (Day of the Dead) sugar skulls." },
-        { name: "Holographic Projection", prompt: "Depict the scene as a shimmering, semi-transparent, blue-green holographic projection with visible scan lines." },
-        { name: "Circuit Board", prompt: "Illustrate the scene as if it were a design on a computer circuit board, with people and the car made of traces, capacitors, and resistors." },
-        { name: "Constellation Star Map", prompt: "Reimagine the scene as a celestial constellation map, where the main outlines are formed by shining stars connected by faint lines against a dark night sky." },
-        { name: "Old World Nautical Chart", prompt: "Draw the scene on aged parchment in the style of an old nautical chart, complete with a compass rose, sea monsters, and rhumb lines." },
-        { name: "Russian Constructivist Poster", prompt: "Recreate the image as a bold Russian Constructivist propaganda poster, using strong diagonal lines, geometric shapes, and a limited color palette of red, black, and beige." },
-        { name: "1950s Diner Menu Illustration", prompt: "Redraw the scene in the cheerful, retro cartoon style of a 1950s American diner menu, with bright, happy colors and a friendly vibe." },
-        { name: "Miniature Train Set Scenery", prompt: "Recreate the entire scene as a tiny, detailed landscape from a model railroad set, with a focus on miniature realism." },
-        { name: "Food Art", prompt: "Construct the scene entirely out of different food items, like a landscape made of vegetables, a car from bread, and people from fruit." },
-        { name: "Baroque Ceiling Fresco", prompt: "Reimagine the scene as a dramatic Baroque ceiling fresco, with heroic figures, swirling clouds, and a sense of divine, upward motion." },
-        { name: "The Simpsons Cartoon Style", prompt: "Redraw the people and car as if they were characters appearing in an episode of The Simpsons, complete with the show's signature art style." },
-        { name: "South Park Paper Cutout Style", prompt: "Recreate the scene using the simple, construction-paper-cutout animation style of South Park." },
-        { name: "X-Ray Scan", prompt: "Transform the image into a monochrome X-ray scan, showing the skeletons of the people and the internal mechanics of the car." },
-        { name: "Solarized Photograph", prompt: "Apply a solarization effect to the photo, reversing some of the tones for a surreal, high-contrast, and metallic appearance." },
-        { name: "Tintype Photograph", prompt: "Give the image the look of an antique tintype photograph from the 19th century, with a metallic sheen, imperfections, and a desaturated, sepia tone." },
-        { name: "1970s Airbrush Van Art", prompt: "Recreate the scene as a fantasy mural airbrushed on the side of a 1970s van, featuring wizards, majestic landscapes, or cosmic themes." },
-        { name: "Newspaper Dot Matrix Print", prompt: "Render the image as a black-and-white photo from an old newspaper, composed of visible, coarse dots (halftone)." },
-        { name: "Bauhaus Poster Design", prompt: "Redesign the image as a clean, functional Bauhaus poster, emphasizing geometric shapes, primary colors, and sans-serif typography." },
-        { name: "Shadow Puppet Theater", prompt: "Depict the scene as a performance of shadow puppets, showing only the black silhouettes of the subjects against a brightly lit screen." },
-        { name: "Fuzzy Blacklight Poster", prompt: "Transform the image into a psychedelic blacklight poster on black velvet, with vibrant, glowing fluorescent colors." },
-        { name: "Rubber Stamp Art", prompt: "Reconstruct the image as if it were created by layering impressions from different rubber stamps, giving it a handcrafted, slightly imperfect texture." },
-        { name: "Anaglyph 3D", prompt: "Recreate the image with a retro anaglyph 3D effect, offsetting red and cyan color channels to be viewed with 3D glasses." },
-        { name: "Carved Jack-o'-Lantern", prompt: "Illustrate the scene as if it were intricately carved into the surface of a glowing jack-o'-lantern for Halloween." },
-        { name: "Rock Band Tour T-Shirt", prompt: "Design the image in the distressed, graphic style of a vintage concert t-shirt for a fictional rock band." },
-        { name: "Infographic", prompt: "Break down the scene into a clean, modern infographic, using charts, callouts, and clean vector illustrations to represent the elements." },
-        { name: "Sticker Bomb", prompt: "Recreate the image as a collage made from hundreds of overlapping, brightly colored, and custom-shaped stickers." },
-        { name: "Dutch Master Oil Painting", prompt: "Reimagine the scene as a dramatic Dutch Master oil painting, with deep shadows, rich colors, and a single, focused light source (chiaroscuro)." },
-        { name: "Tattoo Flash Sheet", prompt: "Redraw the scene in the classic American traditional tattoo style, with bold black outlines, a limited color palette (red, green, yellow), and iconic motifs." },
-        { name: "Rorschach Inkblot", prompt: "Transform the scene into a symmetrical, abstract Rorschach inkblot that vaguely resembles the original subjects." },
-        { name: "Celtic Knotwork", prompt: "Weave the outlines of the car and people into an intricate, seamless pattern of Celtic knotwork." },
-        { name: "Scientific Microscope View", prompt: "Reimagine the scene as if viewed through a microscope, with all elements appearing as cells, amoebas, or other microorganisms." },
-        { name: "Antique Persian Rug", prompt: "Illustrate the scene as if it were the central medallion woven into the intricate patterns and borders of a traditional Persian rug." },
-        { name: "Illuminated Manuscript", prompt: "Recreate the scene as a medieval illuminated manuscript page, with ornate, decorative borders, gold leaf details, and elegant calligraphy." },
+        { id: 'superhero', name: "Superhero Comic Book", prompt: "Redraw the entire scene in a classic American superhero comic book style. Use bold, dynamic ink lines, vibrant primary colors, and halftone dots for shading. The people should look like powerful heroes, and the car should look like their iconic vehicle." },
+        { id: 'anime', name: "Japanese Anime/Manga", prompt: "Transform the photo into a vibrant, high-quality Japanese anime scene. Give the people expressive, large eyes and stylized hair. Use clean lines and crisp cel-shading. The car should look sleek and futuristic." },
+        { id: 'action', name: "Action Movie Poster", prompt: "Recreate the photo as a gritty, high-octane action movie poster. Use dramatic, high-contrast lighting with deep shadows. The people should have determined, heroic expressions. The car should look tough and ready for action. Add a fiery, explosive, or smoke-filled background." },
+        { id: 'pixar', name: "3D Animated Movie (Pixar-style)", prompt: "Reimagine the scene as if it's from a modern 3D animated family film. Give the people and car soft, appealing, rounded features. The lighting should be warm, friendly, and magical. The overall feeling must be charming and heartwarming." },
+        { id: 'gta', name: "Grand Theft Auto Art Style", prompt: "Recreate the image in the iconic, stylized art style of a Grand Theft Auto loading screen. Use heavy, distinct black outlines, a semi-realistic but illustrated look, and a vibrant color palette. The scene should feel cool, edgy, and stylish." },
+        { id: 'vintage', name: "Vintage 1930s Cartoon", prompt: "Redraw the scene in the 'rubber hose' style of a 1930s cartoon. Use black and white, simple circular shapes, pie eyes for the characters, and noodle-like limbs that bend in curves. The mood should be nostalgic and playful." },
+        { id: 'claymation', name: "Claymation Stop-Motion", prompt: "Reimagine the scene as a claymation stop-motion animation. Characters and the car should have a tangible, slightly imperfect, finger-printed clay texture. The lighting should be dramatic and studio-like." },
+        { id: 'lego', name: "LEGO Brick Creation", prompt: "Reconstruct the entire scene using only LEGO bricks. The people should be LEGO minifigures that resemble the real people, and the car should be a detailed LEGO model. The background should also be made of LEGOs." },
+        { id: 'impressionist', name: "Impressionist Oil Painting", prompt: "Recreate the photo as an Impressionist oil painting. Use visible, expressive brushstrokes, focus on the play of light and color, and create a sense of movement and atmosphere, like a Monet or Renoir." },
+        { id: 'egyptian', name: "Ancient Egyptian Hieroglyphs", prompt: "Transform the scene into an Ancient Egyptian hieroglyphic wall painting. The people should be depicted in the classic flat, side-profile style, and the car stylized as a royal chariot. Use a limited, earthy color palette on a stone or papyrus texture." },
+        { id: 'stainedglass', name: "Gothic Stained Glass Window", prompt: "Recreate the image as a medieval Gothic stained glass window. Use thick, bold black lines to separate vibrant, jewel-toned sections of colored glass. The composition should be formal and reverent." },
+        { id: 'graffiti', name: "Vibrant Graffiti Street Art", prompt: "Reimagine the scene as a large, vibrant graffiti mural on a brick wall. Use spray paint textures, bold bubble letters for the text, and a dynamic, edgy composition with drips and splatters." },
+        { id: 'artdeco', name: "Elegant Art Deco Poster", prompt: "Redesign the photo as a sleek Art Deco travel or automobile poster from the 1920s. Use strong geometric shapes, streamlined forms, luxurious metallic accents (gold, chrome), and a sophisticated font." },
+        { id: '8bit', name: "8-Bit Pixel Art", prompt: "Convert the entire scene into 8-bit pixel art, as if from a classic Nintendo game. Use a limited color palette and blocky, pixelated forms for the people, car, and background. The resolution should be visibly low." },
+        { id: 'blueprint', name: "Blueprint Technical Drawing", prompt: "Redraw the scene as a technical blueprint. Use crisp white lines on a blue background. The car should be shown with callouts and measurements, and the people should be rendered as simple schematic figures." },
+        { id: 'chalkboard', name: "Chalkboard Art", prompt: "Illustrate the scene as a detailed and whimsical piece of chalkboard art. Use varying chalk textures, from fine lines to smudged shading, on a dark chalkboard background. The style should be charming and handcrafted." },
+        { id: 'psychedelic', name: "Psychedelic 60s Poster", prompt: "Transform the photo into a psychedelic rock poster from the late 1960s. Use swirling, distorted forms, vibrant, clashing colors, and bubble-like, hard-to-read typography that flows with the artwork." },
+        { id: 'papercraft', name: "Papercraft Diorama", prompt: "Recreate the scene as a 3D papercraft diorama. All elements—people, car, background—should appear to be constructed from folded, layered, and cut colored paper, giving it a tangible, handcrafted depth." },
+        { id: 'fantasy', name: "Fantasy Map (Lord of the Rings style)", prompt: "Reimagine the scene as a location on a hand-drawn fantasy map. The dealership could be a castle, the car a noble steed, and the people adventurers. Use sepia tones and elegant calligraphy." },
+        { id: 'watercolor', name: "Luminous Watercolor Painting", prompt: "Recreate the photo as a soft and luminous watercolor painting. Use translucent washes of color, let colors bleed into each other, and leave some white of the paper showing through for highlights. The feel should be light and airy." },
+        { id: 'cyberpunk', name: "Cyberpunk Neon Noir", prompt: "Transform the scene into a cyberpunk cityscape. The car should be futuristic and augmented, the people should have cybernetic elements, and the background should be a rainy, neon-drenched city at night." },
+        { id: 'ukiyoe', name: "Ukiyo-e Japanese Woodblock Print", prompt: "Recreate the photo in the style of a traditional Japanese Ukiyo-e woodblock print. Use flat areas of color, strong outlines, and a stylized, elegant composition reminiscent of artists like Hokusai." },
+        { id: 'storybook', name: "Children's Storybook Illustration", prompt: "Redraw the scene in the charming and simple style of a classic children's storybook. Use soft colors, friendly character designs with big smiles, and a gentle, whimsical atmosphere." },
+        { id: 'lowpoly', name: "Low-Poly 3D Render", prompt: "Reconstruct the scene using a low-poly 3D art style. All objects and people should be represented by a mesh of visible, flat-shaded polygons. The look should be stylized and geometric." },
+        { id: 'thermal', name: "Thermal Imaging Scan", prompt: "Reimagine the image as if viewed through a thermal imaging camera. Use a vibrant color gradient from blue (cold) to red/yellow (hot) to represent the heat signatures of the people, the car's engine, and the environment." },
+        { id: 'silhouette', name: "Fairy Tale Silhouette", prompt: "Depict the scene as a black silhouette against a magical, colorful sunset or moonlit sky. The intricate shapes of the people and car should be clearly defined, creating a dramatic and enchanting storybook feel." },
+        { id: 'steampunk', name: "Steampunk Invention", prompt: "Transform the photo into a steampunk-themed creation. The car should be a fantastic contraption of brass, copper, gears, and steam pipes. The people's clothing should be Victorian with futuristic goggles and gadgets." },
+        { id: 'vaporwave', name: "Vaporwave Aesthetic", prompt: "Recreate the scene with a Vaporwave aesthetic. Use a palette of pinks, teals, and purples. Incorporate elements like Roman busts, checkerboard grids, palm trees, and a hazy, nostalgic 90s digital feel." },
+        { id: 'tribal', name: "Tribal Tattoo Art", prompt: "Redraw the entire scene using the bold, black, flowing lines and patterns of Polynesian or Maori tribal tattoo art. The forms of the people and car should be abstracted into powerful, symbolic shapes." },
+        { id: 'coloringbook', name: "Detailed Coloring Book Page", prompt: "Transform the photo into a detailed, black and white coloring book page for adults. Use clean, intricate lines to outline the people, the car, and add complex patterns to the background. The image should be entirely line art, with no shading." },
+        { id: 'filmnoir', name: "Film Noir Scene", prompt: "Recreate the photo in a black and white Film Noir style. Use high-contrast lighting, deep dramatic shadows, and a mysterious, cinematic mood like a 1940s detective movie." },
+        { id: 'popart', name: "Pop Art (Warhol Style)", prompt: "Transform the image into an Andy Warhol-style Pop Art piece. Use bright, saturated, unnatural colors in bold blocks with a screen-printed texture. The image could be repeated in a grid with different color schemes." },
+        { id: 'pointillism', name: "Pointillism Painting", prompt: "Recreate the photo in the style of Pointillism, constructed from thousands of tiny, distinct dots of color that blend together in the viewer's eye." },
+        { id: 'surrealist', name: "Surrealist Painting (Dali Style)", prompt: "Reimagine the scene as a dreamlike Surrealist painting. Feature melting objects, illogical juxtapositions, and a bizarre, subconscious landscape." },
+        { id: 'cubist', name: "Cubist Painting (Picasso Style)", prompt: "Deconstruct and reassemble the subjects in a Cubist style, showing them from multiple viewpoints simultaneously using geometric shapes and fragmented forms." },
+        { id: 'romanmosaic', name: "Ancient Roman Mosaic", prompt: "Recreate the image as a detailed Roman mosaic, as if constructed from thousands of small, colored stone tiles (tesserae)." },
+        { id: 'mayancodex', name: "Mayan Codex Glyphs", prompt: "Illustrate the scene in the style of an ancient Mayan codex, with stylized figures, intricate glyphs, and a limited color palette on a fig-bark paper texture." },
+        { id: 'artnouveau', name: "Art Nouveau Poster", prompt: "Redesign the photo as an elegant Art Nouveau poster. Use flowing, organic lines, decorative floral patterns, and a graceful, stylized aesthetic reminiscent of Alphonse Mucha." },
+        { id: 'victorianetching', name: "Victorian Etching", prompt: "Render the scene as a fine, detailed black-and-white Victorian etching, with intricate cross-hatching for shading, like an illustration from an old book." },
+        { id: '80strapper', name: "1980s Trapper Keeper Art", prompt: "Transform the scene into 80s Trapper Keeper art. Use airbrushed neon colors, laser grids, chrome text, and a futuristic, radical aesthetic." },
+        { id: 'tiedye', name: "Tie-Dye Fabric Pattern", prompt: "Reimagine the entire image as a vibrant, swirling tie-dye pattern. The forms of the people and car should be visible within the psychedelic colors." },
+        { id: 'scifi', name: "Golden Age Sci-Fi Book Cover", prompt: "Recreate the photo as a 1950s pulp sci-fi book cover. The car is a retro rocket ship, the people are space adventurers, and the background is a colorful alien planet." },
+        { id: 'knitted', name: "Knitted Wool Sweater Pattern", prompt: "Render the image as if it were a cozy, knitted pattern on a wool sweater, complete with a visible yarn texture." },
+        { id: 'crossstitch', name: "Cross-Stitch Embroidery", prompt: "Transform the scene into a charming cross-stitch embroidery piece, with visible 'X' stitches and a fabric canvas texture." },
+        { id: 'sandsculpture', name: "Sand Sculpture", prompt: "Reimagine the scene as a massive, incredibly detailed sand sculpture on a sunny beach." },
+        { id: 'icesculpture', name: "Ice Sculpture", prompt: "Recreate the scene as a dramatic, crystal-clear ice sculpture, complete with internal refractions and cool-toned lighting." },
+        { id: 'topiary', name: "Topiary Garden Sculpture", prompt: "Depict the scene as if it were meticulously crafted from living topiary bushes in a formal garden." },
+        { id: 'woodcarving', name: "Carved Wooden Sculpture", prompt: "Illustrate the entire scene as if it were carved from a single piece of polished wood, emphasizing the natural grain and texture." },
+        { id: 'risograph', name: "Risograph Print", prompt: "Recreate the image with the aesthetic of a Risograph print. Use a limited palette of bright, overlapping, slightly misaligned colors with a characteristic grainy texture." },
+        { id: 'cavepainting', name: "Cave Painting", prompt: "Redraw the scene in the style of ancient cave paintings. Use simple, primitive figures, earthy pigments (red ochre, charcoal), and a rough stone wall texture." },
+        { id: 'botanical', name: "Botanical Illustration", prompt: "Render the image in the style of an antique botanical illustration, with precise lines, delicate watercolor washes, and scientific labels pointing to parts of the car." },
+        { id: 'minimalist', name: "Minimalist Line Art", prompt: "Capture the entire scene using only a single, continuous, elegant black line on a white background." },
+        { id: 'heavymetal', name: "Heavy Metal Album Cover", prompt: "Transform the photo into an epic, dark fantasy heavy metal album cover. The car should be monstrous, the people heroic warriors, and the sky filled with lightning." },
+        { id: 'abstractexpress', name: "Abstract Expressionism", prompt: "Reinterpret the scene in the style of Abstract Expressionism, focusing on emotion and energy through drips, splatters, and bold, non-representational brushstrokes." },
+        { id: 'spygadget', name: "Spy Movie Gadget Blueprint", prompt: "Redraw the car as a secret agent's gadget-filled vehicle blueprint, revealing hidden weapons, oil slicks, and an ejector seat." },
+        { id: 'banknote', name: "Banknote Engraving", prompt: "Recreate the image in the intricate, fine-line engraving style found on currency, complete with guilloché patterns and a portrait-like quality." },
+        { id: 'casino', name: "Casino Slot Machine Theme", prompt: "Reimagine the scene as the bright, flashy, chrome-and-neon art of a casino slot machine, incorporating lucky 7s and jackpot symbols." },
+        { id: 'archmodel', name: "Architectural Model", prompt: "Reconstruct the scene as a miniature architectural model made of white cardboard, balsa wood, and tiny plastic figures." },
+        { id: 'timburton', name: "Tim Burton Style", prompt: "Redraw the scene in the gothic, quirky, and whimsical style of Tim Burton, with spindly characters, large expressive eyes, and a dark, fantastical atmosphere." },
+        { id: 'etchasketch', name: "Etch A Sketch Drawing", prompt: "Render the entire image as if it were drawn on an Etch A Sketch, using a single, continuous gray line with no breaks." },
+        { id: 'sugarskull', name: "Sugar Skull Art", prompt: "Transform the people and car with the intricate, colorful patterns of Dia de los Muertos (Day of the Dead) sugar skulls." },
+        { id: 'hologram', name: "Holographic Projection", prompt: "Depict the scene as a shimmering, semi-transparent, blue-green holographic projection with visible scan lines." },
+        { id: 'circuitboard', name: "Circuit Board", prompt: "Illustrate the scene as if it were a design on a computer circuit board, with people and the car made of traces, capacitors, and resistors." },
+        { id: 'constellation', name: "Constellation Star Map", prompt: "Reimagine the scene as a celestial constellation map, where the main outlines are formed by shining stars connected by faint lines against a dark night sky." },
+        { id: 'nauticalchart', name: "Old World Nautical Chart", prompt: "Draw the scene on aged parchment in the style of an old nautical chart, complete with a compass rose, sea monsters, and rhumb lines." },
+        { id: 'constructivist', name: "Russian Constructivist Poster", prompt: "Recreate the image as a bold Russian Constructivist propaganda poster, using strong diagonal lines, geometric shapes, and a limited color palette of red, black, and beige." },
+        { id: 'dinermenu', name: "1950s Diner Menu Illustration", prompt: "Redraw the scene in the cheerful, retro cartoon style of a 1950s American diner menu, with bright, happy colors and a friendly vibe." },
+        { id: 'trainset', name: "Miniature Train Set Scenery", prompt: "Recreate the entire scene as a tiny, detailed landscape from a model railroad set, with a focus on miniature realism." },
+        { id: 'foodart', name: "Food Art", prompt: "Construct the scene entirely out of different food items, like a landscape made of vegetables, a car from bread, and people from fruit." },
+        { id: 'baroquefresco', name: "Baroque Ceiling Fresco", prompt: "Reimagine the scene as a dramatic Baroque ceiling fresco, with heroic figures, swirling clouds, and a sense of divine, upward motion." },
+        { id: 'simpsons', name: "The Simpsons Cartoon Style", prompt: "Redraw the people and car as if they were characters appearing in an episode of The Simpsons, complete with the show's signature art style." },
+        { id: 'southpark', name: "South Park Paper Cutout Style", prompt: "Recreate the scene using the simple, construction-paper-cutout animation style of South Park." },
+        { id: 'xray', name: "X-Ray Scan", prompt: "Transform the image into a monochrome X-ray scan, showing the skeletons of the people and the internal mechanics of the car." },
+        { id: 'solarized', name: "Solarized Photograph", prompt: "Apply a solarization effect to the photo, reversing some of the tones for a surreal, high-contrast, and metallic appearance." },
+        { id: 'tintype', name: "Tintype Photograph", prompt: "Give the image the look of an antique tintype photograph from the 19th century, with a metallic sheen, imperfections, and a desaturated, sepia tone." },
+        { id: 'vanair brush', name: "1970s Airbrush Van Art", prompt: "Recreate the scene as a fantasy mural airbrushed on the side of a 1970s van, featuring wizards, majestic landscapes, or cosmic themes." },
+        { id: 'newspaper', name: "Newspaper Dot Matrix Print", prompt: "Render the image as a black-and-white photo from an old newspaper, composed of visible, coarse dots (halftone)." },
+        { id: 'bauhaus', name: "Bauhaus Poster Design", prompt: "Redesign the image as a clean, functional Bauhaus poster, emphasizing geometric shapes, primary colors, and sans-serif typography." },
+        { id: 'shadowpuppet', name: "Shadow Puppet Theater", prompt: "Depict the scene as a performance of shadow puppets, showing only the black silhouettes of the subjects against a brightly lit screen." },
+        { id: 'blacklight', name: "Fuzzy Blacklight Poster", prompt: "Transform the image into a psychedelic blacklight poster on black velvet, with vibrant, glowing fluorescent colors." },
+        { id: 'rubberstamp', name: "Rubber Stamp Art", prompt: "Reconstruct the image as if it were created by layering impressions from different rubber stamps, giving it a handcrafted, slightly imperfect texture." },
+        { id: 'anaglyph', name: "Anaglyph 3D", prompt: "Recreate the image with a retro anaglyph 3D effect, offsetting red and cyan color channels to be viewed with 3D glasses." },
+        { id: 'jackolantern', name: "Carved Jack-o'-Lantern", prompt: "Illustrate the scene as if it were intricately carved into the surface of a glowing jack-o'-lantern for Halloween." },
+        { id: 'tshirt', name: "Rock Band Tour T-Shirt", prompt: "Design the image in the distressed, graphic style of a vintage concert t-shirt for a fictional rock band." },
+        { id: 'infographic', name: "Infographic", prompt: "Break down the scene into a clean, modern infographic, using charts, callouts, and clean vector illustrations to represent the elements." },
+        { id: 'stickerbomb', name: "Sticker Bomb", prompt: "Recreate the image as a collage made from hundreds of overlapping, brightly colored, and custom-shaped stickers." },
+        { id: 'dutchmaster', name: "Dutch Master Oil Painting", prompt: "Reimagine the scene as a dramatic Dutch Master oil painting, with deep shadows, rich colors, and a single, focused light source (chiaroscuro)." },
+        { id: 'tattooflash', name: "Tattoo Flash Sheet", prompt: "Redraw the scene in the classic American traditional tattoo style, with bold black outlines, a limited color palette (red, green, yellow), and iconic motifs." },
+        { id: 'rorschach', name: "Rorschach Inkblot", prompt: "Transform the scene into a symmetrical, abstract Rorschach inkblot that vaguely resembles the original subjects." },
+        { id: 'celticknotwork', name: "Celtic Knotwork", prompt: "Weave the outlines of the car and people into an intricate, seamless pattern of Celtic knotwork." },
+        { id: 'microscope', name: "Scientific Microscope View", prompt: "Reimagine the scene as if viewed through a microscope, with all elements appearing as cells, amoebas, or other microorganisms." },
+        { id: 'persianrug', name: "Antique Persian Rug", prompt: "Illustrate the scene as if it were the central medallion woven into the intricate patterns and borders of a traditional Persian rug." },
+        { id: 'illuminated', name: "Illuminated Manuscript", prompt: "Recreate the scene as a medieval illuminated manuscript page, with ornate, decorative borders, gold leaf details, and elegant calligraphy." },
     ];
 
-    const selectedStyle = funStyles[Math.floor(Math.random() * funStyles.length)];
+    // Select style based on request
+    let selectedStyle;
+    if (requestedStyle && requestedStyle !== 'random') {
+        // Find style by ID
+        selectedStyle = funStyles.find(s => s.id === requestedStyle) || funStyles[Math.floor(Math.random() * funStyles.length)];
+    } else {
+        // Random selection
+        selectedStyle = funStyles[Math.floor(Math.random() * funStyles.length)];
+    }
 
     const funPrompt = `You are a master illustrator. Your task is to create a completely new piece of digital art from scratch. You have been given a reference photo, but you must NOT edit it.
 
@@ -446,7 +455,7 @@ The final output must be a single, high-resolution, fully-composed image in the 
     if (logoImagePart) {
         imageParts.push(logoImagePart);
     }
-    
+
     const client = getGeminiClient();
     const imageResponse = await client.models.generateContent({
         model: 'gemini-2.5-flash-image',
@@ -482,7 +491,7 @@ export const editSocialPostImage = async (
         const { mimeType: logoMime, data: logoData } = parseDataUrl(normalisedLogo);
         logoImagePart = { inlineData: { mimeType: logoMime, data: logoData } };
     }
-    
+
     const criticalRulesForEditing = `
 **CRITICAL, NON-NEGOTIABLE CORE DIRECTIVES FOR EDITING: READ AND OBEY THESE RULES ABOVE ALL ELSE. FAILURE TO FOLLOW THEM PERFECTLY IS A TOTAL TASK FAILURE.**
 
@@ -554,7 +563,7 @@ ${criticalRulesForEditing}
 };
 
 export const generateSocialPostText = async (
-    imageBase64Url: string, 
+    imageBase64Url: string,
     tone: ToneOption,
     dealershipName: string,
     customerName?: string,
@@ -569,9 +578,9 @@ export const generateSocialPostText = async (
     const client = getGeminiClient();
     const textResponse = await client.models.generateContent({
         model: 'gemini-2.5-pro',
-        contents: { parts: [ imagePart, { text: textPrompt } ] }
+        contents: { parts: [imagePart, { text: textPrompt }] }
     });
-    
+
     const text = cleanGeneratedText(textResponse.text);
     if (!text) {
         throw new Error("Failed to generate post text from AI.");
@@ -613,8 +622,8 @@ export const editSocialPostText = async (
 
 
 export const generateSocialPost = async (
-    imageBase64Url: string, 
-    style: StyleOption, 
+    imageBase64Url: string,
+    style: StyleOption,
     tone: ToneOption,
     dealershipName: string,
     customerName?: string,
@@ -643,10 +652,10 @@ export const generateSocialPost = async (
             },
         };
     }
-    
+
     // Generate text (or use provided template/custom text) and the final image in parallel.
-    const textPromise = initialText 
-        ? Promise.resolve(initialText) 
+    const textPromise = initialText
+        ? Promise.resolve(initialText)
         : generateSocialPostText(imageBase64Url, tone, dealershipName, customerName, false, creativeBrief);
 
     const imagePrompt = generateImagePrompt(style, dealershipName, !!logoImagePart, initialText, creativeBrief);
@@ -663,7 +672,7 @@ export const generateSocialPost = async (
     });
 
     const [textResult, imageResponse] = await Promise.all([textPromise, imagePromise]);
-    
+
     let newImageBase64 = '';
     const imageContentPart = imageResponse.candidates?.[0]?.content?.parts[0];
     if (imageContentPart && imageContentPart.inlineData) {
@@ -689,7 +698,7 @@ const generateVideoPrompt = (style: VideoStyle, options: VideoRequestOptions): s
             : 'Design the animation with smooth, cinematic pacing that swells in sync with an ambient score.';
 
     let styleInstruction = "";
-    switch(style) {
+    switch (style) {
         case VideoStyle.EpicReveal:
             styleInstruction = "Theme: 'Epic Reveal'. Animate the image with a very slow, smooth cinematic zoom-in effect, focusing on the car and the happy customers. Add subtle, elegant lens flares that sweep across the screen. Introduce gentle, glowing light rays that emanate from behind the car. The overall mood should be premium, celebratory, and awe-inspiring.";
             break;
@@ -758,7 +767,7 @@ ${soundtrackInstruction}
 ${styleInstruction}`;
 }
 
-const getImageDimensions = (dataUrl: string): Promise<{width: number, height: number}> => {
+const getImageDimensions = (dataUrl: string): Promise<{ width: number, height: number }> => {
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => {
@@ -816,7 +825,7 @@ export const generatePostVideo = async (imageBase64Url: string, style: VideoStyl
             if (!downloadLink) {
                 throw new Error("Video generation succeeded, but no download link was provided.");
             }
-            
+
             // Fetch the video as a blob and create a local URL.
             // This avoids needing the API key on the client-side for the video src tag.
             let downloadUrl: string;
@@ -857,7 +866,7 @@ export const generatePostVideo = async (imageBase64Url: string, style: VideoStyl
             throw new Error(`Video generation failed: ${errorMessage}`);
         }
     }
-    
+
     // This should not be reached if logic is correct, but is a fallback.
     throw new Error("Video generation failed after multiple retries.");
 }
