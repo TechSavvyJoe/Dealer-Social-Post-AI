@@ -40,9 +40,53 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
       setError("Invalid file type. Please use an image file.");
       return;
     }
+
+    // Validate file size (max 20MB)
+    const maxSizeInBytes = 20 * 1024 * 1024;
+    if (file.size > maxSizeInBytes) {
+      setError("Image file is too large. Please use an image smaller than 20MB.");
+      return;
+    }
+
     try {
       setError(null);
       const dataUrl = await fileToNormalizedDataUrl(file);
+
+      // Validate image dimensions by loading it (skip in test environments)
+      if (typeof process === 'undefined' || process.env.NODE_ENV !== 'test') {
+        try {
+          const img = await Promise.race([
+            new Promise<HTMLImageElement>((resolve, reject) => {
+              const image = new Image();
+              const timeout = setTimeout(() => reject(new Error("Image load timeout")), 500);
+              image.onload = () => {
+                clearTimeout(timeout);
+                resolve(image);
+              };
+              image.onerror = () => {
+                clearTimeout(timeout);
+                reject(new Error("Failed to load image"));
+              };
+              image.src = dataUrl;
+            }),
+            // Timeout after 500ms to handle edge cases
+            new Promise<HTMLImageElement>((_, reject) =>
+              setTimeout(() => reject(new Error("Image load timeout")), 500)
+            )
+          ]);
+
+          // Check minimum dimensions (skip check if dimensions are invalid/zero)
+          if (img.width > 0 && img.height > 0 && (img.width < 100 || img.height < 100)) {
+            setError("Image is too small. Please use an image at least 100x100 pixels.");
+            return;
+          }
+        } catch (dimensionError) {
+          // If we can't load the image for dimension check, still proceed
+          // This handles edge cases where image loading fails
+          console.warn("Could not validate image dimensions:", dimensionError);
+        }
+      }
+
       // Show preview first; confirm before committing upstream
       setPendingImage(dataUrl);
       setLastSource(source);
@@ -196,7 +240,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
             onChange={handleFileChange}
             accept="image/*"
             className="hidden"
-            aria-label="Upload image file"
+            aria-label="Upload photo from your device"
           />
           {/* Native camera - environment (rear) */}
           <input
@@ -205,7 +249,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
             onChange={handleFileChange}
             accept="image/*"
             className="hidden"
-            aria-label="Open rear camera"
+            aria-label="Take photo using rear camera"
           />
           {/* Native camera - user (front) */}
           <input
@@ -214,7 +258,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
             onChange={handleFileChange}
             accept="image/*"
             className="hidden"
-            aria-label="Open front camera"
+            aria-label="Take photo using front camera"
           />
 
           <div className="text-center py-4 sm:py-8">

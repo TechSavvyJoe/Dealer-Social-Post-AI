@@ -210,14 +210,13 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   const [aiFlavor, setAiFlavor] = useState(AI_FLAVORS[0].id);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
 
+  // Consolidate state initialization to prevent cascading re-renders
   useEffect(() => {
     setStyle(defaultStyle);
-  }, [defaultStyle]);
-
-  useEffect(() => {
     setTone(defaultTone);
-  }, [defaultTone]);
+  }, [defaultStyle, defaultTone]);
 
+  // Notify parent of changes
   useEffect(() => {
     onStyleToneChange(style, tone);
   }, [style, tone, onStyleToneChange]);
@@ -557,7 +556,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 whileHover={{ scale: 1.02 }}
                 transition={{ type: 'spring', stiffness: 400, damping: 25 }}
               >
-                <img src={imageSrc} alt="Captured reference" className="h-full w-full object-cover aspect-square" />
+                <img src={imageSrc} alt="User-captured photo for social media post generation" className="h-full w-full object-cover aspect-square" />
               </motion.div>
 
               {/* Style Playbook */}

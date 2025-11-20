@@ -68,7 +68,7 @@ const fetchAndCacheDealers = (): Promise<Dealer[]> => {
         return dealersPromise;
     }
 
-    dealersPromise = new Promise(async (resolve, reject) => {
+    dealersPromise = (async () => {
         try {
             // Use no-cache to ensure we get the latest sheet version on app load
             const response = await fetch(GOOGLE_SHEET_URL, { cache: 'no-store' });
@@ -78,12 +78,12 @@ const fetchAndCacheDealers = (): Promise<Dealer[]> => {
             const csvText = await response.text();
             const dealers = parseCsv(csvText);
             cachedDealers = dealers;
-            resolve(dealers);
+            return dealers;
         } catch (error) {
             console.error('Error fetching or parsing dealers:', error);
-            reject(new Error('Could not load dealer list from the source.'));
+            throw new Error('Could not load dealer list from the source.');
         }
-    });
+    })();
 
     return dealersPromise;
 };

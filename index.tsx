@@ -4,6 +4,7 @@ import ReactDOM from 'react-dom/client';
 import { QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import { getQueryClient } from './services/queryClient';
+import { ToastProvider } from './components/ui/Toast';
 
 const ReactQueryDevtools = React.lazy(() =>
   import('@tanstack/react-query-devtools').then((mod) => ({ default: mod.ReactQueryDevtools }))
@@ -18,12 +19,14 @@ const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
     <QueryClientProvider client={getQueryClient()}>
-      <App />
-      {import.meta.env.DEV && (
-        <Suspense fallback={null}>
-          <ReactQueryDevtools initialIsOpen={false} />
-        </Suspense>
-      )}
+      <ToastProvider>
+        <App />
+        {import.meta.env.DEV && (
+          <Suspense fallback={null}>
+            <ReactQueryDevtools initialIsOpen={false} />
+          </Suspense>
+        )}
+      </ToastProvider>
     </QueryClientProvider>
   </React.StrictMode>
 );

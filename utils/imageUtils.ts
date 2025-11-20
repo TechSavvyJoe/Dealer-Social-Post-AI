@@ -225,56 +225,56 @@ const findImageUrlInHtml = (html: string): string | null => {
  * @param url The URL of the image to fetch.
  * @returns A Promise that resolves to the data URL string representation of the image.
  */
-export const urlToDataUrl = (url: string): Promise<string> => {
-  return new Promise(async (resolve, reject) => {
-    try {
-      let imageUrl = url;
+export const urlToDataUrl = async (url: string): Promise<string> => {
+  try {
+    let imageUrl = url;
 
-      // If the URL is an Imgur page (e.g., imgur.com/a/xyz) instead of a direct image link (i.imgur.com/xyz.jpg),
-      // we need to fetch the page's HTML and find the actual image URL.
-      if (url.includes('imgur.com/') && !url.includes('i.imgur.com/')) {
-        try {
-          // Use a public CORS proxy to get around browser restrictions for fetching HTML from another domain.
-          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-          const pageResponse = await fetch(proxyUrl);
-          
-          if (pageResponse.ok) {
-            const htmlText = await pageResponse.text();
-            const directImageUrl = findImageUrlInHtml(htmlText);
-            if (directImageUrl) {
-              imageUrl = directImageUrl; // We found the direct link!
-            }
+    // If the URL is an Imgur page (e.g., imgur.com/a/xyz) instead of a direct image link (i.imgur.com/xyz.jpg),
+    // we need to fetch the page's HTML and find the actual image URL.
+    if (url.includes('imgur.com/') && !url.includes('i.imgur.com/')) {
+      try {
+        // Use a public CORS proxy to get around browser restrictions for fetching HTML from another domain.
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+        const pageResponse = await fetch(proxyUrl);
+
+        if (pageResponse.ok) {
+          const htmlText = await pageResponse.text();
+          const directImageUrl = findImageUrlInHtml(htmlText);
+          if (directImageUrl) {
+            imageUrl = directImageUrl; // We found the direct link!
           }
-        } catch (proxyError) {
-          // If the proxy fails, we'll just try the original URL and hope for the best.
-          console.warn(`Could not resolve Imgur page via proxy for ${url}. Attempting direct fetch.`, proxyError);
         }
+      } catch (proxyError) {
+        // If the proxy fails, we'll just try the original URL and hope for the best.
+        console.warn(`Could not resolve Imgur page via proxy for ${url}. Attempting direct fetch.`, proxyError);
       }
+    }
 
-      // Fetch the final image URL (either the original or the one we resolved).
-      // Direct image hosts like i.imgur.com usually have CORS headers that allow this fetch.
-      const response = await fetch(imageUrl);
+    // Fetch the final image URL (either the original or the one we resolved).
+    // Direct image hosts like i.imgur.com usually have CORS headers that allow this fetch.
+    const response = await fetch(imageUrl);
 
-      if (!response.ok) {
-        throw new Error(`Network response was not ok for URL: ${imageUrl}`);
-      }
-      const blob = await response.blob();
+    if (!response.ok) {
+      throw new Error(`Network response was not ok for URL: ${imageUrl}`);
+    }
+    const blob = await response.blob();
 
-      // Verify that what we downloaded is actually an image file.
-      if (!blob.type.startsWith('image/')) {
-        reject(new Error(`The link provided does not point to a direct image. Content type found: ${blob.type}. Please use a link ending in .jpg, .png, etc.`));
-        return;
-      }
+    // Verify that what we downloaded is actually an image file.
+    if (!blob.type.startsWith('image/')) {
+      throw new Error(`The link provided does not point to a direct image. Content type found: ${blob.type}. Please use a link ending in .jpg, .png, etc.`);
+    }
 
+    // Convert blob to data URL
+    return new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => {
         resolve(reader.result as string);
       };
       reader.onerror = (error) => reject(error);
       reader.readAsDataURL(blob);
-    } catch (error) {
-      console.error(`Error fetching URL to convert to data URL for '${url}':`, error);
-      reject(new Error(`Failed to load image from URL. Please check the link and your network connection.`));
-    }
-  });
+    });
+  } catch (error) {
+    console.error(`Error fetching URL to convert to data URL for '${url}':`, error);
+    throw new Error(`Failed to load image from URL. Please check the link and your network connection.`);
+  }
 };

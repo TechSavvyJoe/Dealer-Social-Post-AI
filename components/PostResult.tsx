@@ -371,15 +371,16 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
             </div>
 
             <div className="w-full space-y-3">
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
                 <motion.button
                   onClick={() => { triggerHapticFeedback(); handleImageAction(onRegenerateImage); }}
                   disabled={isImageLoading || !!videoUrl}
                   className={cn(
-                    "flex flex-col items-center justify-center gap-2",
+                    "flex flex-col items-center justify-center gap-1 sm:gap-2",
                     "bg-white/10 border border-white/20 text-surface-50 font-bold",
-                    "py-3 px-4 rounded-xl transition-all duration-300",
-                    "text-xs sm:text-sm aspect-square",
+                    "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300",
+                    "text-[10px] sm:text-xs md:text-sm",
+                    "min-h-[80px] sm:aspect-square",
                     "hover:bg-white/20 hover:border-white/30",
                     "disabled:opacity-50 disabled:cursor-not-allowed"
                   )}
@@ -394,10 +395,11 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                   onClick={() => { triggerHapticFeedback(); setIsImageEditing(!isImageEditing); }}
                   disabled={isImageLoading || !!videoUrl}
                   className={cn(
-                    "flex flex-col items-center justify-center gap-2",
+                    "flex flex-col items-center justify-center gap-1 sm:gap-2",
                     "bg-gradient-to-r from-sky-500 to-primary-500 text-surface-50 font-bold",
-                    "py-3 px-4 rounded-xl transition-all duration-300",
-                    "text-xs sm:text-sm aspect-square",
+                    "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300",
+                    "text-[10px] sm:text-xs md:text-sm",
+                    "min-h-[80px] sm:aspect-square",
                     "shadow-lg hover:shadow-glow-primary",
                     "disabled:opacity-50 disabled:cursor-not-allowed"
                   )}
@@ -412,10 +414,11 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                   onClick={() => { triggerHapticFeedback(); setIsFunModeDirectorOpen(true); }}
                   disabled={isImageLoading || !!videoUrl}
                   className={cn(
-                    "flex flex-col items-center justify-center gap-2",
+                    "flex flex-col items-center justify-center gap-1 sm:gap-2",
                     "bg-gradient-to-r from-purple-500 to-pink-500 text-surface-50 font-bold",
-                    "py-3 px-4 rounded-xl transition-all duration-300",
-                    "text-xs sm:text-sm aspect-square",
+                    "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300",
+                    "text-[10px] sm:text-xs md:text-sm",
+                    "min-h-[80px] sm:aspect-square",
                     "shadow-lg hover:shadow-[0_0_25px_rgba(168,85,247,0.5)]",
                     "disabled:opacity-50 disabled:cursor-not-allowed"
                   )}
