@@ -36,20 +36,16 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
   };
 
   const processFile = useCallback(async (file: File, source: 'upload' | 'camera-mobile') => {
-    console.log('[DEBUG] processFile called with:', { fileName: file.name, fileType: file.type, source });
     if (!file.type.startsWith('image/')) {
       setError("Invalid file type. Please use an image file.");
       return;
     }
     try {
       setError(null);
-      console.log('[DEBUG] About to process image file...');
       const dataUrl = await fileToNormalizedDataUrl(file);
-      console.log('[DEBUG] dataUrl generated, length:', dataUrl.length);
       // Show preview first; confirm before committing upstream
       setPendingImage(dataUrl);
       setLastSource(source);
-      console.log('[DEBUG] pendingImage and lastSource set');
     } catch (err) {
       console.error("Error reading file:", err);
       setError("Could not read the selected image file. Please try again.");
@@ -102,15 +98,12 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
     };
 
     const handleWindowDrop = (e: DragEvent) => {
-      console.log('[DEBUG] handleWindowDrop triggered');
       e.preventDefault();
       e.stopPropagation();
       setIsDraggingOver(false);
 
       const file = e.dataTransfer?.files?.[0];
-      console.log('[DEBUG] File from drop:', file);
       if (file) {
-        console.log('[DEBUG] Calling processFile...');
         processFile(file, 'upload');
       }
     };
