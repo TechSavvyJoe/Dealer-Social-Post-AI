@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Icon } from './Icons';
 import { fileToNormalizedDataUrl } from '../utils/imageUtils';
 import { WebcamCapture } from './WebcamCapture';
@@ -35,22 +35,26 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
     event.target.value = "";
   };
 
-  const processFile = async (file: File, source: 'upload' | 'camera-mobile') => {
+  const processFile = useCallback(async (file: File, source: 'upload' | 'camera-mobile') => {
+    console.log('[DEBUG] processFile called with:', { fileName: file.name, fileType: file.type, source });
     if (!file.type.startsWith('image/')) {
       setError("Invalid file type. Please use an image file.");
       return;
     }
     try {
       setError(null);
+      console.log('[DEBUG] About to process image file...');
       const dataUrl = await fileToNormalizedDataUrl(file);
+      console.log('[DEBUG] dataUrl generated, length:', dataUrl.length);
       // Show preview first; confirm before committing upstream
       setPendingImage(dataUrl);
       setLastSource(source);
+      console.log('[DEBUG] pendingImage and lastSource set');
     } catch (err) {
       console.error("Error reading file:", err);
       setError("Could not read the selected image file. Please try again.");
     }
-  };
+  }, []);
 
   const handleOpenCamera = () => {
     triggerHapticFeedback();
@@ -98,12 +102,15 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
     };
 
     const handleWindowDrop = (e: DragEvent) => {
+      console.log('[DEBUG] handleWindowDrop triggered');
       e.preventDefault();
       e.stopPropagation();
       setIsDraggingOver(false);
 
       const file = e.dataTransfer?.files?.[0];
+      console.log('[DEBUG] File from drop:', file);
       if (file) {
+        console.log('[DEBUG] Calling processFile...');
         processFile(file, 'upload');
       }
     };
@@ -119,7 +126,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
       window.removeEventListener('dragleave', handleWindowDragLeave);
       window.removeEventListener('drop', handleWindowDrop);
     };
-  }, []);
+  }, [processFile]);
 
   if (error) {
     return (
@@ -176,77 +183,79 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
   }
 
   return (
-    <div
-      className={`relative w-full max-w-2xl mx-auto p-2 sm:p-4 bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 transition-all duration-300 ${isDraggingOver ? 'border-indigo-400 scale-105' : 'border-white/20'
-        }`}
-    >
-      {isDraggingOver && (
-        <div className="absolute inset-0 bg-indigo-600/50 rounded-2xl flex items-center justify-center pointer-events-none z-10">
-          <div className="text-center">
-            <Icon type="upload" className="w-16 h-16 text-white mx-auto animate-bounce" />
-            <p className="mt-2 text-2xl font-bold text-white">Drop Image Here</p>
+    <>
+      <div
+        className={`relative w-full max-w-2xl mx-auto p-2 sm:p-4 bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 transition-all duration-300 ${isDraggingOver ? 'border-indigo-400 scale-105' : 'border-white/20'
+          }`}
+      >
+        {isDraggingOver && (
+          <div className="absolute inset-0 bg-indigo-600/50 rounded-2xl flex items-center justify-center pointer-events-none z-10">
+            <div className="text-center">
+              <Icon type="upload" className="w-16 h-16 text-white mx-auto animate-bounce" />
+              <p className="mt-2 text-2xl font-bold text-white">Drop Image Here</p>
+            </div>
           </div>
-        </div>
-      )}
-      <div className="relative border-2 border-dashed border-white/20 rounded-xl p-4 sm:p-8 transition-colors duration-300">
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileChange}
-          accept="image/*"
-          className="hidden"
-          aria-label="Upload image file"
-        />
-        {/* Native camera - environment (rear) */}
-        <input
-          type="file"
-          ref={cameraEnvInputRef}
-          onChange={handleFileChange}
-          accept="image/*"
-          className="hidden"
-          aria-label="Open rear camera"
-        />
-        {/* Native camera - user (front) */}
-        <input
-          type="file"
-          ref={cameraUserInputRef}
-          onChange={handleFileChange}
-          accept="image/*"
-          className="hidden"
-          aria-label="Open front camera"
-        />
+        )}
+        <div className="relative border-2 border-dashed border-white/20 rounded-xl p-4 sm:p-8 transition-colors duration-300">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            accept="image/*"
+            className="hidden"
+            aria-label="Upload image file"
+          />
+          {/* Native camera - environment (rear) */}
+          <input
+            type="file"
+            ref={cameraEnvInputRef}
+            onChange={handleFileChange}
+            accept="image/*"
+            className="hidden"
+            aria-label="Open rear camera"
+          />
+          {/* Native camera - user (front) */}
+          <input
+            type="file"
+            ref={cameraUserInputRef}
+            onChange={handleFileChange}
+            accept="image/*"
+            className="hidden"
+            aria-label="Open front camera"
+          />
 
-        <div className="text-center py-4 sm:py-8">
-          <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Add a Photo</h2>
-          <p className="text-indigo-300 mb-6 sm:mb-8 text-sm sm:text-base">Capture a moment, upload a file, or drag & drop.</p>
-          <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
-            {/* Facing selection */}
-            <div className="flex items-center gap-2 bg-white/5 border border-white/15 rounded-full px-2 py-1">
-              <button
-                type="button"
-                onClick={() => { triggerHapticFeedback(); setCaptureFacing('environment'); }}
-                className={`px-3 py-1 rounded-full text-sm ${captureFacing === 'environment' ? 'bg-white/20 text-white' : 'text-white/80 hover:text-white'}`}
-                aria-label="Use rear camera"
-              >
-                Rear
+          <div className="text-center py-4 sm:py-8">
+            <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Add a Photo</h2>
+            <p className="text-indigo-300 mb-6 sm:mb-8 text-sm sm:text-base">Capture a moment, upload a file, or drag & drop.</p>
+            <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
+              {/* Facing selection */}
+              <div className="flex items-center gap-2 bg-white/5 border border-white/15 rounded-full px-2 py-1">
+                <button
+                  type="button"
+                  onClick={() => { triggerHapticFeedback(); setCaptureFacing('environment'); }}
+                  className={`px-3 py-1 rounded-full text-sm ${captureFacing === 'environment' ? 'bg-white/20 text-white' : 'text-white/80 hover:text-white'}`}
+                  aria-label="Use rear camera"
+                >
+                  Rear
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { triggerHapticFeedback(); setCaptureFacing('user'); }}
+                  className={`px-3 py-1 rounded-full text-sm ${captureFacing === 'user' ? 'bg-white/20 text-white' : 'text-white/80 hover:text-white'}`}
+                  aria-label="Use front camera"
+                >
+                  Front
+                </button>
+              </div>
+              <button onClick={handleOpenCamera} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-6 rounded-full hover:scale-105 transition-all duration-300 shadow-lg">
+                <Icon type="camera" className="w-6 sm:w-7 h-6 sm:h-7" />
+                <span className="text-base sm:text-lg">Open Camera</span>
               </button>
-              <button
-                type="button"
-                onClick={() => { triggerHapticFeedback(); setCaptureFacing('user'); }}
-                className={`px-3 py-1 rounded-full text-sm ${captureFacing === 'user' ? 'bg-white/20 text-white' : 'text-white/80 hover:text-white'}`}
-                aria-label="Use front camera"
-              >
-                Front
+              <button onClick={handleUploadPhoto} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-white/10 border border-white/20 text-white font-bold py-3 px-6 rounded-full hover:bg-white/20 hover:scale-105 transition-all duration-300 shadow-lg">
+                <Icon type="upload" className="w-6 sm:w-7 h-6 sm:h-7" />
+                <span className="text-base sm:text-lg">Upload Photo</span>
               </button>
             </div>
-            <button onClick={handleOpenCamera} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-6 rounded-full hover:scale-105 transition-all duration-300 shadow-lg">
-              <Icon type="camera" className="w-6 sm:w-7 h-6 sm:h-7" />
-              <span className="text-base sm:text-lg">Open Camera</span>
-            </button>
-            <button onClick={handleUploadPhoto} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-white/10 border border-white/20 text-white font-bold py-3 px-6 rounded-full hover:bg-white/20 hover:scale-105 transition-all duration-300 shadow-lg">
-              <Icon type="upload" className="w-6 sm:w-7 h-6 sm:h-7" />
-              <span className="text-base sm:text-lg">Upload Photo</span>
-            </button>
           </div>
         </div>
       </div>
@@ -278,6 +287,6 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
           }
         }}
       />
-    </div >
+    </>
   );
 };
