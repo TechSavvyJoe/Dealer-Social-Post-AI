@@ -50,15 +50,15 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({ isOpen, on
       aria-label="Image Preview"
     >
       <div
-        className="relative max-w-5xl w-full max-h-[95vh] flex flex-col items-center justify-center"
+        className="relative max-w-5xl w-full flex flex-col items-center justify-center gap-6 max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
         <img
           src={imageSrc}
           alt="Captured preview"
-          className="object-contain w-auto h-auto max-w-full max-h-[75vh] rounded-lg shadow-2xl"
+          className="object-contain w-auto h-auto max-w-full max-h-[65vh] rounded-lg shadow-2xl"
         />
-        <div className="mt-6 flex gap-4">
+        <div className="flex gap-4">
           <button
             onClick={() => { triggerHapticFeedback(); (onRetake ?? onClose)(); }}
             className="px-5 py-2.5 rounded-full bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-colors shadow focus:outline-none focus:ring-2 focus:ring-white/40"
