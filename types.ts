@@ -79,5 +79,8 @@ export interface User {
 
 export interface VideoRequestOptions {
   durationSeconds: number;
-  soundtrack: 'none' | 'celebration' | 'cinematic';
+  soundtrack: 'none' | 'celebration' | 'cinematic' | 'anthemic' | 'funk';
+  aspectPreference: 'auto' | '16:9' | '9:16' | '1:1';
+  resolution: '720p' | '1080p';
+  pacing: 'cinematic' | 'snappy';
 }

@@ -71,7 +71,11 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
     style: VideoStyle;
     status: 'queued' | 'processing' | 'completed' | 'failed';
     duration: number;
-    soundtrack: string;
+    soundtrack: VideoRequestOptions['soundtrack'];
+    aspectPreference: VideoRequestOptions['aspectPreference'];
+    resolution: VideoRequestOptions['resolution'];
+    pacing: VideoRequestOptions['pacing'];
+    createdAt: string;
     url?: string;
     error?: string;
   }>>([]);
@@ -271,8 +275,7 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
     setIsTextEditing(false); // Close modal after action completes
   };
 
-  const handleGenerateVideo = async (style: VideoStyle, options: VideoRequestOptions) => {
-    setIsVideoDirectorOpen(false);
+  const startVideoJob = async (style: VideoStyle, options: VideoRequestOptions, existingJobId?: string) => {
     setIsVideoLoading(true);
 
     const messages = [
@@ -285,21 +288,60 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
       setVideoLoadingMessage(messages[messageIndex]);
     }, 4000);
 
-    const jobId = `video-${Date.now()}`;
-    setVideoJobs(prev => [...prev, { id: jobId, style, status: 'processing', duration: options.durationSeconds, soundtrack: options.soundtrack }]);
+    const jobId = existingJobId || `video-${Date.now()}`;
+    if (!existingJobId) {
+      setVideoJobs(prev => [
+        ...prev,
+        {
+          id: jobId,
+          style,
+          status: 'queued',
+          duration: options.durationSeconds,
+          soundtrack: options.soundtrack,
+          aspectPreference: options.aspectPreference,
+          resolution: options.resolution,
+          pacing: options.pacing,
+          createdAt: new Date().toISOString(),
+        }
+      ]);
+    }
+
+    // Mark job as processing
+    setVideoJobs(prev => prev.map(job => job.id === jobId ? { ...job, status: 'processing', error: undefined } : job));
 
     try {
       const url = await onGenerateVideo(style, options);
-      setVideoUrl(url);
+      setVideoUrl((prev) => prev || url); // auto-open the first available video
       setVideoJobs(prev => prev.map(job => job.id === jobId ? { ...job, status: 'completed', url } : job));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       setVideoJobs(prev => prev.map(job => job.id === jobId ? { ...job, status: 'failed', error: message } : job));
-      throw error;
     } finally {
       setIsVideoLoading(false);
       clearInterval(intervalId);
     }
+  };
+
+  const handleGenerateVideo = async (style: VideoStyle, options: VideoRequestOptions) => {
+    setIsVideoDirectorOpen(false);
+    await startVideoJob(style, options);
+  };
+
+  const handleRetryVideo = async (jobId: string) => {
+    const job = videoJobs.find((j) => j.id === jobId);
+    if (!job) return;
+    const options: VideoRequestOptions = {
+      durationSeconds: job.duration,
+      soundtrack: job.soundtrack,
+      aspectPreference: job.aspectPreference,
+      resolution: job.resolution,
+      pacing: job.pacing,
+    };
+    await startVideoJob(job.style, options, jobId);
+  };
+
+  const handleRemoveVideoJob = (jobId: string) => {
+    setVideoJobs((prev) => prev.filter((job) => job.id !== jobId));
   };
 
 
@@ -534,28 +576,49 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                       >
                         <div className="flex flex-col">
                           <span className="font-semibold text-surface-50">{job.style}</span>
-                          <span className="text-primary-200/70">{job.duration}s · {job.soundtrack === 'none' ? 'No soundtrack' : job.soundtrack}</span>
+                          <span className="text-primary-200/70">
+                            {job.duration}s ·
+                            {' '}{job.soundtrack === 'none' ? 'No soundtrack' : job.soundtrack} ·
+                            {' '}{job.aspectPreference === 'auto' ? 'auto' : job.aspectPreference} · {job.resolution} · {job.pacing}
+                          </span>
                         </div>
-                        <div className="flex items-center gap-2">
-                          {job.status === 'completed' && <Badge variant="success">Ready</Badge>}
-                          {job.status === 'processing' && <Badge variant="info">Rendering</Badge>}
-                          {job.status === 'queued' && <Badge variant="neutral">Queued</Badge>}
-                          {job.status === 'failed' && <Badge variant="warning">Failed</Badge>}
-                          {job.url && (
-                            <button
-                              onClick={() => setVideoUrl(job.url || null)}
-                              className="text-[10px] font-semibold uppercase tracking-wide text-primary-200 hover:text-surface-50 transition-colors"
-                            >
-                              Preview
-                            </button>
-                          )}
-                        </div>
-                        {job.error && <span className="text-[10px] text-warning-200">{job.error}</span>}
-                      </motion.li>
-                    ))}
-                  </ul>
-                </motion.div>
-              )}
+                    <div className="flex items-center gap-2">
+                      {job.status === 'completed' && <Badge variant="success">Ready</Badge>}
+                      {job.status === 'processing' && <Badge variant="info">Rendering</Badge>}
+                      {job.status === 'queued' && <Badge variant="neutral">Queued</Badge>}
+                      {job.status === 'failed' && <Badge variant="warning">Failed</Badge>}
+                      {job.url && (
+                        <button
+                          onClick={() => setVideoUrl(job.url || null)}
+                          className="text-[10px] font-semibold uppercase tracking-wide text-primary-200 hover:text-surface-50 transition-colors"
+                        >
+                          Preview
+                        </button>
+                      )}
+                      {job.status === 'failed' && (
+                        <button
+                          onClick={() => handleRetryVideo(job.id)}
+                          className="text-[10px] font-semibold uppercase tracking-wide text-amber-200 hover:text-amber-50 transition-colors"
+                        >
+                          Retry
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleRemoveVideoJob(job.id)}
+                        className="text-[10px] font-semibold uppercase tracking-wide text-surface-200/70 hover:text-surface-50 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className="flex flex-col gap-1 text-[10px] text-warning-200">
+                      {job.error && <span>{job.error}</span>}
+                      <span className="text-indigo-100/70">Started {new Date(job.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                  </motion.li>
+                ))}
+              </ul>
+            </motion.div>
+          )}
             </div>
           </div>
 
