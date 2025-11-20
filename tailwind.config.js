@@ -403,5 +403,44 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    function ({ addUtilities, theme }) {
+      const utilities = {
+        '.glass': {
+          backgroundColor: 'rgba(255, 255, 255, 0.05)',
+          backdropFilter: 'blur(16px)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+        },
+        '.glass-dark': {
+          backgroundColor: 'rgba(15, 23, 42, 0.6)',
+          backdropFilter: 'blur(16px)',
+          border: '1px solid rgba(255, 255, 255, 0.05)',
+        },
+        '.glass-card': {
+          backgroundColor: 'rgba(30, 41, 59, 0.4)',
+          backdropFilter: 'blur(12px)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+        },
+        '.text-glow': {
+          textShadow: '0 0 10px rgba(255, 255, 255, 0.5)',
+        },
+        '.text-glow-primary': {
+          textShadow: `0 0 20px ${theme('colors.primary.500')}`,
+        },
+      }
+      addUtilities(utilities)
+    },
+    // Animation delay plugin
+    function ({ matchUtilities, theme }) {
+      matchUtilities(
+        {
+          'animation-delay': (value) => ({
+            'animation-delay': value,
+          }),
+        },
+        { values: theme('transitionDelay') }
+      )
+    },
+  ],
 }

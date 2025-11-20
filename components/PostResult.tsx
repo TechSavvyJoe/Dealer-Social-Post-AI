@@ -81,6 +81,9 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
   }>>([]);
 
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const imageBusy = isImageLoading || isVideoLoading;
+  const textBusy = isTextLoading;
 
   useEffect(() => {
     setEditedText(post.text);
@@ -209,6 +212,7 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
     triggerHapticFeedback();
     const textToCopy = editedText;
     const textForShareAPI = textToCopy.replace(/(\r\n|\n|\r)/gm, " ").replace(/\s+/g, ' ').trim();
+    setIsSharing(true);
 
     let copySuccess = false;
     if (navigator.clipboard) {
@@ -249,6 +253,8 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
         console.error("Sharing failed:", error);
         alert("Could not open the share dialog, but the post text has been copied to your clipboard!");
       }
+    } finally {
+      setIsSharing(false);
     }
   };
 
@@ -416,9 +422,9 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
                 <motion.button
                   onClick={() => { triggerHapticFeedback(); handleImageAction(onRegenerateImage); }}
-                  disabled={isImageLoading || !!videoUrl}
+                  disabled={imageBusy || !!videoUrl}
                   className={cn(
-                    "flex flex-col items-center justify-center gap-1 sm:gap-2",
+                    "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden",
                     "bg-white/10 border border-white/20 text-surface-50 font-bold",
                     "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300",
                     "text-[10px] sm:text-xs md:text-sm",
@@ -426,18 +432,19 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                     "hover:bg-white/20 hover:border-white/30",
                     "disabled:opacity-50 disabled:cursor-not-allowed"
                   )}
-                  whileHover={{ scale: 1.05, y: -2 }}
-                  whileTap={{ scale: 0.95 }}
+                  whileHover={{ scale: imageBusy ? 1 : 1.05, y: imageBusy ? 0 : -2 }}
+                  whileTap={{ scale: imageBusy ? 1 : 0.95 }}
                 >
-                  <RefreshCw className="w-5 h-5" />
-                  <span>Regenerate</span>
+                  <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
+                  {imageBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCw className="w-5 h-5" />}
+                  <span>{imageBusy ? 'Working...' : 'Regenerate'}</span>
                 </motion.button>
 
                 <motion.button
                   onClick={() => { triggerHapticFeedback(); setIsImageEditing(!isImageEditing); }}
-                  disabled={isImageLoading || !!videoUrl}
+                  disabled={imageBusy || !!videoUrl}
                   className={cn(
-                    "flex flex-col items-center justify-center gap-1 sm:gap-2",
+                    "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden",
                     "bg-gradient-to-r from-sky-500 to-primary-500 text-surface-50 font-bold",
                     "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300",
                     "text-[10px] sm:text-xs md:text-sm",
@@ -448,15 +455,16 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                   whileHover={{ scale: 1.05, y: -2 }}
                   whileTap={{ scale: 0.95 }}
                 >
-                  <Edit3 className="w-5 h-5" />
-                  <span>{isImageEditing ? 'Cancel' : 'AI Image Edit'}</span>
+                  <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
+                  {imageBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Edit3 className="w-5 h-5" />}
+                  <span>{imageBusy ? 'Working...' : (isImageEditing ? 'Cancel' : 'AI Image Edit')}</span>
                 </motion.button>
 
                 <motion.button
                   onClick={() => { triggerHapticFeedback(); setIsFunModeDirectorOpen(true); }}
-                  disabled={isImageLoading || !!videoUrl}
+                  disabled={imageBusy || !!videoUrl}
                   className={cn(
-                    "flex flex-col items-center justify-center gap-1 sm:gap-2",
+                    "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden",
                     "bg-gradient-to-r from-purple-500 to-pink-500 text-surface-50 font-bold",
                     "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300",
                     "text-[10px] sm:text-xs md:text-sm",
@@ -467,48 +475,53 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                   whileHover={{ scale: 1.05, y: -2 }}
                   whileTap={{ scale: 0.95 }}
                 >
-                  <Sparkles className="w-5 h-5" />
-                  <span>Fun Mode</span>
+                  <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
+                  {imageBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
+                  <span>{imageBusy ? 'Working...' : 'Fun Mode'}</span>
                 </motion.button>
 
                 <motion.button
                   onClick={handleSave}
+                  disabled={imageBusy}
                   className={cn(
-                    "flex flex-col items-center justify-center gap-2",
+                    "flex flex-col items-center justify-center gap-2 relative overflow-hidden",
                     "bg-gradient-to-r from-success-500 to-emerald-600 text-surface-50 font-bold",
                     "py-3 px-4 rounded-xl transition-all duration-300",
                     "text-xs sm:text-sm aspect-square",
-                    "shadow-lg hover:shadow-glow-success"
+                    "shadow-lg hover:shadow-glow-success",
+                    imageBusy && "opacity-70 cursor-not-allowed"
                   )}
-                  whileHover={{ scale: 1.05, y: -2 }}
-                  whileTap={{ scale: 0.95 }}
+                  whileHover={{ scale: imageBusy ? 1 : 1.05, y: imageBusy ? 0 : -2 }}
+                  whileTap={{ scale: imageBusy ? 1 : 0.95 }}
                 >
-                  <Download className="w-5 h-5" />
-                  <span>Save {videoUrl ? 'Video' : 'Image'}</span>
+                  <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
+                  {imageBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
+                  <span>{imageBusy ? 'Working...' : `Save ${videoUrl ? 'Video' : 'Image'}`}</span>
                 </motion.button>
 
                 <motion.button
                   onClick={() => { triggerHapticFeedback(); setIsVideoDirectorOpen(true); }}
-                  disabled={isImageLoading || isVideoLoading}
+                  disabled={imageBusy || isVideoLoading}
                   className={cn(
-                    "flex flex-col items-center justify-center gap-2",
+                    "flex flex-col items-center justify-center gap-2 relative overflow-hidden",
                     "bg-gradient-to-r from-primary-500 to-secondary-600 text-surface-50 font-bold",
                     "py-3 px-4 rounded-xl transition-all duration-300",
                     "text-xs sm:text-sm aspect-square",
                     "shadow-lg hover:shadow-glow-primary",
                     "disabled:opacity-50 disabled:cursor-not-allowed"
                   )}
-                  whileHover={{ scale: 1.05, y: -2 }}
-                  whileTap={{ scale: 0.95 }}
+                  whileHover={{ scale: isVideoLoading ? 1 : 1.05, y: isVideoLoading ? 0 : -2 }}
+                  whileTap={{ scale: isVideoLoading ? 1 : 0.95 }}
                 >
-                  <Film className="w-5 h-5" />
-                  <span>{videoUrl ? 'New Video' : 'Animate with AI'}</span>
+                  <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
+                  <Film className={cn("w-5 h-5", isVideoLoading && "animate-spin")} />
+                  <span>{isVideoLoading ? 'Rendering…' : videoUrl ? 'New Video' : 'Animate with AI'}</span>
                 </motion.button>
 
                 <motion.button
                   onClick={() => { triggerHapticFeedback(); onStartOver(); }}
                   className={cn(
-                    "flex flex-col items-center justify-center gap-2",
+                    "flex flex-col items-center justify-center gap-2 relative overflow-hidden",
                     "bg-white/10 border border-white/20 text-surface-50 font-bold",
                     "py-3 px-4 rounded-xl transition-all duration-300",
                     "text-xs sm:text-sm aspect-square",
@@ -517,6 +530,7 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                   whileHover={{ scale: 1.05, y: -2 }}
                   whileTap={{ scale: 0.95 }}
                 >
+                  <span className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
                   <RotateCcw className="w-5 h-5" />
                   <span>Create Another</span>
                 </motion.button>
@@ -688,51 +702,59 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
 
                 <motion.button
                   onClick={() => { triggerHapticFeedback(); handleTextAction(onRegenerateText); }}
+                  disabled={textBusy}
                   className={cn(
                     "flex items-center justify-center gap-1",
                     "bg-white/10 border border-white/20 text-surface-50 font-medium",
                     "py-2 px-2 rounded-lg transition-all duration-300 text-xs",
                     "hover:bg-white/20 hover:border-white/30",
-                    "col-span-2"
+                    "col-span-2",
+                    textBusy && "opacity-70 cursor-not-allowed"
                   )}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
+                  whileHover={{ scale: textBusy ? 1 : 1.02 }}
+                  whileTap={{ scale: textBusy ? 1 : 0.98 }}
                 >
-                  <RefreshCw className="w-3 h-3" />
-                  <span>Regenerate</span>
+                  {textBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                  <span>{textBusy ? 'Updating…' : 'Regenerate'}</span>
                 </motion.button>
               </div>
 
               <motion.button
                 onClick={() => { triggerHapticFeedback(); setIsTextEditing(true); }}
+                disabled={textBusy}
                 className={cn(
-                  "w-full flex items-center justify-center gap-2",
+                  "w-full flex items-center justify-center gap-2 relative overflow-hidden",
                   "bg-gradient-to-r from-sky-500 to-primary-500 text-surface-50 font-bold",
                   "py-2 px-4 rounded-xl transition-all duration-300 text-sm",
-                  "shadow-lg hover:shadow-glow-primary"
+                  "shadow-lg hover:shadow-glow-primary",
+                  textBusy && "opacity-70 cursor-not-allowed"
                 )}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+                whileHover={{ scale: textBusy ? 1 : 1.02 }}
+                whileTap={{ scale: textBusy ? 1 : 0.98 }}
               >
-                <Edit3 className="w-4 h-4" />
-                <span>Edit with AI</span>
+                <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
+                {textBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Edit3 className="w-4 h-4" />}
+                <span>{textBusy ? 'Updating…' : 'Edit with AI'}</span>
               </motion.button>
             </div>
             <div className="border-t border-white/10 my-4"></div>
             <div className="space-y-3">
               <motion.button
                 onClick={handleShare}
+                disabled={isSharing}
                 className={cn(
-                  "w-full flex items-center justify-center gap-2",
+                  "w-full flex items-center justify-center gap-2 relative overflow-hidden",
                   "bg-gradient-to-r from-teal-500 to-cyan-500 text-surface-50 font-bold",
                   "py-3 px-4 rounded-xl transition-all duration-300",
-                  "shadow-lg hover:shadow-[0_0_25px_rgba(20,184,166,0.5)]"
+                  "shadow-lg hover:shadow-[0_0_25px_rgba(20,184,166,0.5)]",
+                  isSharing && "opacity-70 cursor-not-allowed"
                 )}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+                whileHover={{ scale: isSharing ? 1 : 1.02 }}
+                whileTap={{ scale: isSharing ? 1 : 0.98 }}
               >
-                <Share2 className="w-5 h-5" />
-                <span>Share Post</span>
+                <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
+                {isSharing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Share2 className="w-5 h-5" />}
+                <span>{isSharing ? 'Opening share…' : 'Share Post'}</span>
               </motion.button>
 
               <motion.button

@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Settings, LogOut } from 'lucide-react';
+import { Settings, LogOut, Keyboard } from 'lucide-react';
 import { Dealer } from '../types';
 import { triggerHapticFeedback } from '../utils/haptics';
 import { Badge } from './ui/Badge';
@@ -94,12 +94,21 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
 
+          {/* Keyboard hint */}
+          <div className="hidden lg:flex items-center gap-1 text-[11px] text-surface-300 px-2 py-1 rounded-lg border border-white/10 bg-white/5">
+            <Keyboard className="w-3.5 h-3.5" />
+            <span className="uppercase tracking-wide">Settings</span>
+            <kbd className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] leading-none border border-white/15">Ctrl/Cmd + ,</kbd>
+          </div>
+
           {/* Settings Button */}
           <Button
             variant="tinted"
             size="sm"
             leftIcon={<Settings />}
             onClick={handleOpenSettings}
+            title="Open settings (Ctrl/Cmd + ,)"
+            aria-keyshortcuts="Meta+, Control+,"
           >
             <span className="hidden sm:inline">Settings</span>
           </Button>
@@ -111,6 +120,8 @@ export const Header: React.FC<HeaderProps> = ({
             leftIcon={<LogOut />}
             onClick={handleLogout}
             className="hover:bg-error-500/20 hover:border-error-500/50 hover:text-error-300"
+            title="Logout (Shift + L)"
+            aria-keyshortcuts="Shift+L"
           >
             <span className="hidden sm:inline">Logout</span>
           </Button>
