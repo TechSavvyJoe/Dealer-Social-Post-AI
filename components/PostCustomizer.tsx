@@ -22,7 +22,7 @@ import { cn } from '../utils/classNames';
 
 interface PostCustomizerProps {
   imageSrc: string;
-  onGenerate: (style: StyleOption, tone: ToneOption, customerName: string, customText?: string, creativeBrief?: string) => void;
+  onGenerate: (style: StyleOption, tone: ToneOption, customerName: string, customText?: string, creativeBrief?: string) => Promise<void> | void;
   onBack: () => void;
   dealershipName: string;
   defaultStyle: StyleOption;
@@ -31,6 +31,7 @@ interface PostCustomizerProps {
   isApiKeyConfigured: boolean;
   onOpenSettings: () => void;
   isDesktopLayout: boolean;
+  isGenerating?: boolean;
 }
 
 interface StyleGuideMeta {
@@ -200,6 +201,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   isApiKeyConfigured,
   onOpenSettings,
   isDesktopLayout,
+  isGenerating = false,
 }) => {
   const [customerName, setCustomerName] = useState('');
   const [style, setStyle] = useState<StyleOption>(defaultStyle);
@@ -209,11 +211,16 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiFlavor, setAiFlavor] = useState(AI_FLAVORS[0].id);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
+  const [lastSavedStyle, setLastSavedStyle] = useState<StyleOption>(defaultStyle);
+  const [lastSavedTone, setLastSavedTone] = useState<ToneOption>(defaultTone);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Consolidate state initialization to prevent cascading re-renders
   useEffect(() => {
     setStyle(defaultStyle);
     setTone(defaultTone);
+    setLastSavedStyle(defaultStyle);
+    setLastSavedTone(defaultTone);
   }, [defaultStyle, defaultTone]);
 
   // Notify parent of changes
@@ -237,7 +244,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
   const selectedStyleGuide = STYLE_GUIDES[style];
 
-  const handleGenerate = useCallback(() => {
+  const handleGenerate = useCallback(async () => {
     triggerHapticFeedback();
     let preparedText: string | undefined;
     let creativeBrief: string | undefined;
@@ -275,8 +282,18 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         .join('\n\n') || undefined;
     }
 
-    onGenerate(style, tone, customerName, preparedText, creativeBrief);
+    setIsSubmitting(true);
+    try {
+      await onGenerate(style, tone, customerName, preparedText, creativeBrief);
+      setLastSavedStyle(style);
+      setLastSavedTone(tone);
+    } finally {
+      setIsSubmitting(false);
+    }
   }, [captionSource, tone, style, customerName, customMessage, dealershipName, onGenerate, selectedTemplateId, templateOptions, aiPrompt, aiFlavor, selectedStyleGuide]);
+
+  const showPromptWarning = captionSource === 'prompted' && !aiPrompt.trim();
+  const isBusy = isGenerating || isSubmitting;
 
   return (
     <motion.div
@@ -308,6 +325,18 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         </CardHeader>
 
         <CardContent className="space-y-6">
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
+            <Badge variant="primary" size="sm">{style}</Badge>
+            <Badge variant="success" size="sm">{tone}</Badge>
+            <Badge variant="neutral" size="sm">{captionSource === 'ai' ? 'AI Auto' : captionSource === 'prompted' ? 'AI Remix' : captionSource === 'template' ? 'Template' : 'Custom'}</Badge>
+            <Badge variant={isApiKeyConfigured ? 'success' : 'warning'} size="sm">
+              {isApiKeyConfigured ? 'AI Ready' : 'API Key Needed'}
+            </Badge>
+            {(style !== lastSavedStyle || tone !== lastSavedTone) && (
+              <span className="text-[11px] text-surface-200/80">New look selected · not generated yet</span>
+            )}
+          </div>
+
           <div className={cn('grid gap-6', isDesktopLayout && 'lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]')}>
             {/* Main Content */}
             <div className="space-y-6">
@@ -324,6 +353,19 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h4 className="text-sm font-semibold uppercase tracking-wide text-primary-300">Design Direction</h4>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="tinted"
+                      size="xs"
+                      onClick={() => {
+                        triggerHapticFeedback();
+                        setStyle(defaultStyle);
+                        setTone(defaultTone);
+                      }}
+                    >
+                      Reset to defaults
+                    </Button>
+                  </div>
                 </div>
                 <div className={cn('grid gap-3', isDesktopLayout ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-2')}>
                   {Object.values(StyleOption).map((option) => (
@@ -491,6 +533,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         rows={4}
                         placeholder="e.g., Celebrate how they found their dream off-road rig and shout out the weekend adventures ahead."
                         fullWidth
+                        helperText={showPromptWarning ? 'Add a prompt to enable AI remix.' : undefined}
+                        state={showPromptWarning ? 'error' : 'default'}
                       />
                     </motion.div>
                   )}
@@ -534,16 +578,39 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   >
                     Change photo
                   </Button>
-                  <Button
-                    variant="filled"
-                    size="lg"
-                    leftIcon={<Sparkles />}
-                    rightIcon={<ChevronRight />}
-                    onClick={handleGenerate}
-                    disabled={!isApiKeyConfigured || (captionSource === 'prompted' && !aiPrompt.trim())}
+                  <motion.div
+                    className="relative"
+                    initial={false}
+                    animate={{ opacity: isBusy ? 0.85 : 1, scale: isBusy ? 0.99 : 1 }}
                   >
-                    {isApiKeyConfigured ? 'Generate hero image & caption' : 'Add API key to generate'}
-                  </Button>
+                    <Button
+                      variant="filled"
+                      size="lg"
+                      leftIcon={<Sparkles className={cn(isBusy && 'animate-pulse')} />}
+                      rightIcon={<ChevronRight />}
+                      onClick={handleGenerate}
+                      disabled={!isApiKeyConfigured || showPromptWarning || isBusy}
+                    >
+                      {isApiKeyConfigured
+                        ? showPromptWarning
+                          ? 'Add prompt to generate'
+                          : isBusy
+                            ? 'Generating...'
+                            : 'Generate hero image & caption'
+                        : 'Add API key to generate'}
+                    </Button>
+                    <AnimatePresence>
+                      {isBusy && (
+                        <motion.div
+                          className="absolute inset-0 rounded-xl border border-primary-200/40 pointer-events-none"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                        />
+                      )}
+                    </AnimatePresence>
+                  </motion.div>
                 </div>
               </div>
             </div>

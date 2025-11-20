@@ -4,10 +4,18 @@ import { Dealer } from '../types';
 import * as db from '../services/database';
 import { Icon } from './Icons';
 import { logEvent, logError } from '../utils/telemetry';
+import { motion } from 'framer-motion';
+import { Button } from './ui/Button';
+import { Skeleton } from './ui/Skeleton';
+import { RefreshCw } from 'lucide-react';
 
 const DealerCard: React.FC<{ dealer: Dealer }> = ({ dealer }) => {
   return (
-    <div className="bg-white/5 border border-white/20 rounded-2xl p-4 sm:p-6">
+    <motion.div
+      className="bg-white/5 border border-white/20 rounded-2xl p-4 sm:p-6 hover:border-primary-400/40 transition-all duration-200"
+      whileHover={{ scale: 1.01, y: -2 }}
+      whileTap={{ scale: 0.99 }}
+    >
       <div className="flex justify-between items-start">
         <div className="flex items-center gap-4">
           {dealer.logo ? (
@@ -27,7 +35,7 @@ const DealerCard: React.FC<{ dealer: Dealer }> = ({ dealer }) => {
           <div className="p-2 text-slate-600" title="Deleting disabled"><Icon type="trash" className="w-5 h-5" /></div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };
 
@@ -54,14 +62,26 @@ export const AdminDashboard: React.FC = () => {
     <div className="w-full max-w-4xl mx-auto p-2 sm:p-4 space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
         <h2 className="text-3xl sm:text-4xl font-bold text-white">Admin Dashboard</h2>
-        <button
-          disabled
-          title="Adding is disabled; edit the Google Sheet directly."
-          className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold py-2 px-6 rounded-lg transition-all duration-300 shadow-lg opacity-50 cursor-not-allowed"
-        >
-          <Icon type="plus" className="w-5 h-5" />
-          <span>Add Dealer</span>
-        </button>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            leftIcon={<RefreshCw className="w-4 h-4" />}
+            onClick={() => refetch()}
+            disabled={isPending}
+          >
+            {isPending ? 'Refreshing…' : 'Refresh'}
+          </Button>
+          <Button
+            variant="tinted"
+            size="sm"
+            disabled
+            title="Adding is disabled; edit the Google Sheet directly."
+          >
+            <Icon type="plus" className="w-4 h-4" />
+            <span className="hidden sm:inline">Add Dealer</span>
+          </Button>
+        </div>
       </div>
 
       <div className="text-center text-sm text-slate-400 bg-slate-800/50 p-3 rounded-lg">
@@ -81,11 +101,18 @@ export const AdminDashboard: React.FC = () => {
       )}
 
       {isPending ? (
-        <div className="flex justify-center items-center py-10">
-            <svg className="animate-spin h-8 w-8 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
+        <div className="grid gap-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="bg-white/5 border border-white/10 rounded-2xl p-4 sm:p-6">
+              <div className="flex items-center gap-4">
+                <Skeleton className="w-16 h-16 rounded-lg" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-3 w-24" />
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       ) : (
         <div className="space-y-6">

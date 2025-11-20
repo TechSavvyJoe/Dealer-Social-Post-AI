@@ -7,6 +7,7 @@ interface ProgressBarProps {
     message?: string;
     estimatedTime?: string;
     className?: string;
+    loadingLabel?: string;
     /**
      * Show animated shimmer effect
      */
@@ -22,6 +23,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
     message,
     estimatedTime,
     className = '',
+    loadingLabel = 'Working...',
     showShimmer = true,
     size = 'md',
 }) => {
@@ -54,6 +56,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
                 aria-valuenow={clampedValue}
                 aria-valuemin={0}
                 aria-valuemax={100}
+                aria-label={loadingLabel}
             >
                 <motion.div
                     className="absolute inset-y-0 left-0 bg-gradient-to-r from-primary-500 via-primary-400 to-primary-500 rounded-full"
