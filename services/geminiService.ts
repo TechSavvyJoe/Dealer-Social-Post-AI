@@ -654,9 +654,12 @@ export const generateSocialPost = async (
     }
 
     // Generate text (or use provided template/custom text) and the final image in parallel.
-    const textPromise = initialText
+    const textPromise = (initialText
         ? Promise.resolve(initialText)
-        : generateSocialPostText(imageBase64Url, tone, dealershipName, customerName, false, creativeBrief);
+        : generateSocialPostText(imageBase64Url, tone, dealershipName, customerName, false, creativeBrief)
+    ).catch((error) => {
+        throw new Error(`Failed to generate text content: ${error instanceof Error ? error.message : String(error)}`);
+    });
 
     const imagePrompt = generateImagePrompt(style, dealershipName, !!logoImagePart, initialText, creativeBrief);
     const imageParts: (typeof imagePart | { text: string })[] = [imagePart, { text: imagePrompt }];
@@ -669,6 +672,8 @@ export const generateSocialPost = async (
         model: 'gemini-2.5-flash-image',
         contents: { parts: imageParts },
         config: { responseModalities: [Modality.IMAGE] }
+    }).catch((error) => {
+        throw new Error(`Failed to generate image content: ${error instanceof Error ? error.message : String(error)}`);
     });
 
     const [textResult, imageResponse] = await Promise.all([textPromise, imagePromise]);

@@ -3,6 +3,7 @@ import { motion, type HTMLMotionProps } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 import { cn } from '../../utils/classNames';
 import { triggerHapticFeedback } from '../../utils/haptics';
+import { SPRING_CONFIGS, shouldReduceMotion } from '../../utils/animations';
 
 /**
  * Button variants following Apple's hierarchy:
@@ -11,8 +12,11 @@ import { triggerHapticFeedback } from '../../utils/haptics';
  * - plain: Tertiary action (text only)
  * - outline: Alternative action (bordered)
  * - danger: Destructive action (red)
+ * - gradient-sky: Sky blue gradient (AI/creative features)
+ * - gradient-purple: Purple/pink gradient (special features)
+ * - gradient-teal: Teal/cyan gradient (success actions)
  */
-type Variant = 'filled' | 'tinted' | 'plain' | 'outline' | 'danger';
+type Variant = 'filled' | 'tinted' | 'plain' | 'outline' | 'danger' | 'gradient-sky' | 'gradient-purple' | 'gradient-teal';
 
 /**
  * Size options following Apple HIG (44px minimum touch target)
@@ -85,6 +89,27 @@ const variantStyles: Record<Variant, string> = {
     'hover:from-error-600 hover:to-error-700',
     'active:scale-[0.98]'
   ),
+  'gradient-sky': cn(
+    'bg-gradient-to-r from-sky-500 to-primary-500',
+    'text-white',
+    'shadow-elevation-2',
+    'hover:shadow-elevation-3 hover:brightness-110',
+    'active:scale-[0.98]'
+  ),
+  'gradient-purple': cn(
+    'bg-gradient-to-r from-purple-500 to-pink-500',
+    'text-white',
+    'shadow-elevation-2',
+    'hover:shadow-elevation-3 hover:brightness-110',
+    'active:scale-[0.98]'
+  ),
+  'gradient-teal': cn(
+    'bg-gradient-to-r from-teal-500 to-cyan-500',
+    'text-white',
+    'shadow-elevation-2',
+    'hover:shadow-elevation-3 hover:brightness-110',
+    'active:scale-[0.98]'
+  ),
 };
 
 // Size styles with proper touch targets (Apple HIG: min 44px)
@@ -145,12 +170,11 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         )}
         disabled={disabled || loading}
         onClick={handleClick}
-        whileTap={!disabled && !loading ? { scale: 0.98 } : undefined}
-        whileHover={!disabled && !loading ? { scale: 1.02 } : undefined}
+        whileTap={!disabled && !loading && !shouldReduceMotion() ? { scale: 0.98 } : undefined}
+        whileHover={!disabled && !loading && !shouldReduceMotion() ? { scale: 1.02 } : undefined}
         transition={{
           type: 'spring',
-          stiffness: 400,
-          damping: 25,
+          ...SPRING_CONFIGS.standard,
         }}
         {...rest}
       >
