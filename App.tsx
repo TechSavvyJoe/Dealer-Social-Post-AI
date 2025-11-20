@@ -6,6 +6,8 @@ import { findDealer } from './services/database';
 import { urlToDataUrl } from './utils/imageUtils';
 import { Header } from './components/Header';
 import { SettingsModal } from './components/SettingsModal';
+import { ImageCropModal } from './components/ImageCropModal';
+import { ProgressBar } from './components/ui/ProgressBar';
 import { getGeminiApiKey, setGeminiApiKey, getLastSelections, saveLastSelections } from './utils/settings';
 import { configureGeminiClient, getActiveGeminiApiKey } from './services/geminiClient';
 import { enqueueTask } from './services/requestQueue';
@@ -30,10 +32,10 @@ const API_KEY_REQUIRED_MESSAGE = "Please add your Gemini API key in Settings to 
 type GeminiServiceModule = typeof import('./services/geminiService');
 let geminiServiceModulePromise: Promise<GeminiServiceModule> | null = null;
 const loadGeminiService = (): Promise<GeminiServiceModule> => {
-    if (!geminiServiceModulePromise) {
-        geminiServiceModulePromise = import('./services/geminiService');
-    }
-    return geminiServiceModulePromise;
+  if (!geminiServiceModulePromise) {
+    geminiServiceModulePromise = import('./services/geminiService');
+  }
+  return geminiServiceModulePromise;
 };
 
 const LazyLoginScreen = React.lazy(() => import('./components/LoginScreen').then(mod => ({ default: mod.LoginScreen })));
@@ -84,6 +86,14 @@ const App: React.FC = () => {
     customText?: string;
     creativeBrief?: string;
   } | null>(null);
+
+  // Crop modal state
+  const [cropModalOpen, setCropModalOpen] = useState(false);
+  const [tempImageForCrop, setTempImageForCrop] = useState<string | null>(null);
+
+  // Progress tracking state
+  const [generationProgress, setGenerationProgress] = useState(0);
+  const [progressMessage, setProgressMessage] = useState('');
 
   const persistSession = useCallback((partial: Partial<{ generatedPost: GeneratedPost | null; selectedImage: string | null; step: AppStep }>) => {
     if (!currentDealer) return;
@@ -171,25 +181,25 @@ const App: React.FC = () => {
 
     const storedKey = getGeminiApiKey();
     if (storedKey) {
-        configureGeminiClient(storedKey);
-        setApiKey(storedKey);
-        setHasStoredApiKey(true);
+      configureGeminiClient(storedKey);
+      setApiKey(storedKey);
+      setHasStoredApiKey(true);
     } else {
-        const bootstrapKey = getActiveGeminiApiKey();
-        if (bootstrapKey) {
-            setApiKey(bootstrapKey);
-        }
+      const bootstrapKey = getActiveGeminiApiKey();
+      if (bootstrapKey) {
+        setApiKey(bootstrapKey);
+      }
     }
 
     const { lastStyle, lastTone } = getLastSelections();
     if (lastStyle) {
-        setPreferredStyle(lastStyle);
+      setPreferredStyle(lastStyle);
     }
     if (lastTone) {
-        setPreferredTone(lastTone);
+      setPreferredTone(lastTone);
     }
 
-  const session = loadSession();
+    const session = loadSession();
     if (session?.dealerId) {
       (async () => {
         try {
@@ -273,76 +283,123 @@ const App: React.FC = () => {
   }, []);
 
   const handleImageSelected = useCallback((image: string) => {
-    setSelectedImage(image);
+    // Show crop modal instead of going directly to customize
+    setTempImageForCrop(image);
+    setCropModalOpen(true);
+  }, []);
+
+  const handleCropConfirm = useCallback((croppedImage: string) => {
+    setSelectedImage(croppedImage);
     setGeneratedPost(null);
     setStep(AppStep.CUSTOMIZE);
     setError(null);
-    persistSession({ selectedImage: image, generatedPost: null, step: AppStep.CUSTOMIZE });
+    setCropModalOpen(false);
+    setTempImageForCrop(null);
+    persistSession({ selectedImage: croppedImage, generatedPost: null, step: AppStep.CUSTOMIZE });
   }, [persistSession]);
+
+  const handleCropCancel = useCallback(() => {
+    setCropModalOpen(false);
+    setTempImageForCrop(null);
+  }, []);
 
   const handleLogin = async (dealerId: string): Promise<boolean> => {
     const dealer = await findDealer(dealerId);
 
     if (dealer) {
-        if (dealer.logo && dealer.logo.startsWith('http')) {
-            try {
-                const logoDataUrl = await urlToDataUrl(dealer.logo);
-                dealer.logo = logoDataUrl;
-            } catch (error) {
-                console.error(`Failed to fetch and convert dealer logo from URL: ${dealer.logo}`, error);
-                dealer.logo = undefined;
-            }
+      if (dealer.logo && dealer.logo.startsWith('http')) {
+        try {
+          const logoDataUrl = await urlToDataUrl(dealer.logo);
+          dealer.logo = logoDataUrl;
+        } catch (error) {
+          console.error(`Failed to fetch and convert dealer logo from URL: ${dealer.logo}`, error);
+          dealer.logo = undefined;
         }
+      }
 
-        setCurrentDealer(dealer);
-        const targetStep = dealer.id === '0000' ? AppStep.ADMIN : AppStep.CAPTURE;
-        setStep(targetStep);
-        setError(null);
-        
-        // Save session with login timestamp for persistence
-        saveSession({
-            dealerId: dealer.id,
-            step: targetStep,
-            loginTimestamp: Date.now()
-        });
-        
-        return true;
+      setCurrentDealer(dealer);
+      const targetStep = dealer.id === '0000' ? AppStep.ADMIN : AppStep.CAPTURE;
+      setStep(targetStep);
+      setError(null);
+
+      // Save session with login timestamp for persistence
+      saveSession({
+        dealerId: dealer.id,
+        step: targetStep,
+        loginTimestamp: Date.now()
+      });
+
+      return true;
     }
     return false;
   };
 
   const handleLogout = () => {
-      triggerHapticFeedback();
-      setCurrentDealer(null);
-      setSelectedImage(null);
-      setGeneratedPost(null);
-      setError(null);
-      setStep(AppStep.LOGIN);
-      clearSession();
+    triggerHapticFeedback();
+    setCurrentDealer(null);
+    setSelectedImage(null);
+    setGeneratedPost(null);
+    setError(null);
+    setStep(AppStep.LOGIN);
+    clearSession();
   };
 
-  const handleGenerate = useCallback(async (style: StyleOption, tone: ToneOption, customerName:string, customText?: string, creativeBrief?: string) => {
+  const handleGenerate = useCallback(async (style: StyleOption, tone: ToneOption, customerName: string, customText?: string, creativeBrief?: string) => {
     if (!selectedImage || !currentDealer) return;
     if (!ensureApiKeyReady()) return;
 
     setStep(AppStep.GENERATING);
     setError(null);
+    setGenerationProgress(0);
+    setProgressMessage('Analyzing your image...');
     setLastGenerationParams({ style, tone, customerName, customText, creativeBrief });
+
+    // Simulate progress for better UX (estimated 8-12 second generation)
+    const progressInterval = setInterval(() => {
+      setGenerationProgress(prev => {
+        if (prev >= 95) return prev; // Cap at 95% until actual completion
+        const increment = Math.random() * 8 + 3; // Random 3-11% increments
+        return Math.min(95, prev + increment);
+      });
+    }, 800);
+
+    // Update message based on progress
+    const messageInterval = setInterval(() => {
+      setGenerationProgress(prev => {
+        if (prev < 30) setProgressMessage('Analyzing your image...');
+        else if (prev < 60) setProgressMessage('Designing your post...');
+        else if (prev < 85) setProgressMessage('Crafting the perfect caption...');
+        else setProgressMessage('Finalizing...');
+        return prev;
+      });
+    }, 2500);
+
     try {
       const { generateSocialPost } = await loadGeminiService();
       const result = await runGeminiTask('ai.generate', () =>
         generateSocialPost(selectedImage, style, tone, currentDealer.name, customerName, currentDealer.logo, customText, creativeBrief)
-      , { style, tone, dealership: currentDealer.name, creativeBrief });
+        , { style, tone, dealership: currentDealer.name, creativeBrief });
+
+      clearInterval(progressInterval);
+      clearInterval(messageInterval);
+      setGenerationProgress(100);
+      setProgressMessage('Complete!');
+
+      // Small delay to show 100% before transitioning
+      await new Promise(resolve => setTimeout(resolve, 300));
+
       setGeneratedPost(result);
       setStep(AppStep.RESULT);
       persistSession({ generatedPost: result, step: AppStep.RESULT });
     } catch (err) {
+      clearInterval(progressInterval);
+      clearInterval(messageInterval);
       const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
       setError(`Failed to generate your post. Please try again. ${errorMessage}`);
       setStep(AppStep.CUSTOMIZE);
     }
   }, [selectedImage, currentDealer, ensureApiKeyReady, persistSession]);
-  
+
   const handleRegenerateImage = useCallback(async () => {
     if (!selectedImage || !lastGenerationParams || !currentDealer) return;
     if (!ensureApiKeyReady()) return;
@@ -356,7 +413,7 @@ const App: React.FC = () => {
           lastGenerationParams.customText || generatedPost?.text,
           lastGenerationParams.creativeBrief
         )
-      , { style: lastGenerationParams.style, tone: lastGenerationParams.tone, dealership: currentDealer.name, creativeBrief: lastGenerationParams.creativeBrief });
+        , { style: lastGenerationParams.style, tone: lastGenerationParams.tone, dealership: currentDealer.name, creativeBrief: lastGenerationParams.creativeBrief });
       setGeneratedPost(result);
       persistSession({ generatedPost: result });
     } catch (err) {
@@ -364,47 +421,46 @@ const App: React.FC = () => {
       setError(`Failed to regenerate image. ${errorMessage}`);
     }
   }, [selectedImage, lastGenerationParams, currentDealer, generatedPost, ensureApiKeyReady, persistSession]);
-  
+
+  const handleFunMode = useCallback(async (styleName?: string) => {
+    if (!selectedImage || !currentDealer) return;
+    if (!ensureApiKeyReady()) return;
+    setError(null);
+    try {
+      const { generateFunSocialPostImage } = await loadGeminiService();
+      const newImage = await runGeminiTask('ai.fun', () =>
+        generateFunSocialPostImage(selectedImage, currentDealer.name, currentDealer.logo, styleName)
+        , { dealership: currentDealer.name, funStyle: styleName || 'random' });
+      const updatedPost = generatedPost ? { ...generatedPost, image: newImage } : null;
+      setGeneratedPost(updatedPost);
+      if (updatedPost) {
+        persistSession({ generatedPost: updatedPost });
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
+      setError(`Failed to generate fun image. ${errorMessage}`);
+    }
+  }, [selectedImage, currentDealer, generatedPost, ensureApiKeyReady, persistSession]);
+
   const handleEditImage = useCallback(async (editPrompt: string) => {
     if (!generatedPost?.image || !editPrompt.trim() || !currentDealer) return;
     if (!ensureApiKeyReady()) return;
     setError(null);
     try {
-        const { editSocialPostImage } = await loadGeminiService();
-        const newImage = await runGeminiTask('ai.edit.image', () =>
-          editSocialPostImage(generatedPost.image, editPrompt, currentDealer.name, currentDealer.logo)
+      const { editSocialPostImage } = await loadGeminiService();
+      const newImage = await runGeminiTask('ai.edit.image', () =>
+        editSocialPostImage(generatedPost.image, editPrompt, currentDealer.name, currentDealer.logo)
         , { dealership: currentDealer.name });
-        const updatedPost = generatedPost ? { ...generatedPost, image: newImage } : null;
-        setGeneratedPost(updatedPost);
-        if (updatedPost) {
-          persistSession({ generatedPost: updatedPost });
-        }
-    } catch(err) {
-        const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-        setError(`Failed to apply image edits. ${errorMessage}`);
+      const updatedPost = generatedPost ? { ...generatedPost, image: newImage } : null;
+      setGeneratedPost(updatedPost);
+      if (updatedPost) {
+        persistSession({ generatedPost: updatedPost });
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
+      setError(`Failed to apply image edits. ${errorMessage}`);
     }
   }, [generatedPost, currentDealer, ensureApiKeyReady, persistSession]);
-
-  const handleFunMode = useCallback(async () => {
-    if (!selectedImage || !currentDealer) return;
-    if (!ensureApiKeyReady()) return;
-    setError(null);
-    try {
-        // Use the original selected image for Fun Mode for a clean slate
-        const { generateFunSocialPostImage } = await loadGeminiService();
-        const newImage = await runGeminiTask('ai.funmode.image', () =>
-          generateFunSocialPostImage(selectedImage, currentDealer.name, currentDealer.logo)
-        , { dealership: currentDealer.name });
-        setGeneratedPost(prev => {
-          const updated = prev ? { ...prev, image: newImage } : { image: newImage, text: prev?.text || 'Congratulations!' };
-          persistSession({ generatedPost: updated });
-          return updated;
-        });
-    } catch(err) {
-        const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-        setError(`Failed to generate fun image. ${errorMessage}`);
-    }
-  }, [selectedImage, currentDealer, ensureApiKeyReady, persistSession]);
 
   const handleRegenerateText = useCallback(async () => {
     if (!selectedImage || !lastGenerationParams || !currentDealer) return;
@@ -421,7 +477,7 @@ const App: React.FC = () => {
           true,
           lastGenerationParams.creativeBrief
         )
-      , { tone: lastGenerationParams.tone, dealership: currentDealer.name, creativeBrief: lastGenerationParams.creativeBrief });
+        , { tone: lastGenerationParams.tone, dealership: currentDealer.name, creativeBrief: lastGenerationParams.creativeBrief });
       const updatedPost = generatedPost ? { ...generatedPost, text: newText } : null;
       setGeneratedPost(updatedPost);
       if (updatedPost) {
@@ -445,7 +501,7 @@ const App: React.FC = () => {
           editPrompt,
           lastGenerationParams.tone
         )
-      , { tone: lastGenerationParams.tone, dealership: currentDealer?.name, creativeBrief: lastGenerationParams.creativeBrief });
+        , { tone: lastGenerationParams.tone, dealership: currentDealer?.name, creativeBrief: lastGenerationParams.creativeBrief });
       const updatedPost = generatedPost ? { ...generatedPost, text: newText } : null;
       setGeneratedPost(updatedPost);
       if (updatedPost) {
@@ -459,49 +515,49 @@ const App: React.FC = () => {
 
   const handleGenerateVideo = useCallback(async (style: VideoStyle, options: VideoRequestOptions): Promise<string> => {
     if (!generatedPost?.image) {
-        throw new Error("Cannot generate video without an image.");
+      throw new Error("Cannot generate video without an image.");
     }
     if (!ensureApiKeyReady()) {
-        throw new Error(API_KEY_REQUIRED_MESSAGE);
+      throw new Error(API_KEY_REQUIRED_MESSAGE);
     }
     setError(null);
 
     // Check for API key selection for Veo models, a requirement for video generation.
     // @ts-ignore - aistudio is globally available in this environment
     if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
+      // @ts-ignore
+      const hasKey = await window.aistudio.hasSelectedApiKey();
+      if (!hasKey) {
         // @ts-ignore
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        if (!hasKey) {
-            // @ts-ignore
-            if (typeof window.aistudio.openSelectKey === 'function') {
-                alert("Video generation requires a personal API key due to processing costs. Please select your key.\n\nFor more info on billing, visit: ai.google.dev/gemini-api/docs/billing");
-                // @ts-ignore
-                await window.aistudio.openSelectKey();
-                // After this, we assume the key is selected and proceed. Errors will be caught below.
-            } else {
-                 const errMsg = "Video generation is not available. Could not find key selection utility.";
-                 setError(errMsg);
-                 throw new Error(errMsg);
-            }
+        if (typeof window.aistudio.openSelectKey === 'function') {
+          alert("Video generation requires a personal API key due to processing costs. Please select your key.\n\nFor more info on billing, visit: ai.google.dev/gemini-api/docs/billing");
+          // @ts-ignore
+          await window.aistudio.openSelectKey();
+          // After this, we assume the key is selected and proceed. Errors will be caught below.
+        } else {
+          const errMsg = "Video generation is not available. Could not find key selection utility.";
+          setError(errMsg);
+          throw new Error(errMsg);
         }
+      }
     }
 
     try {
-        const { generatePostVideo } = await loadGeminiService();
-        const videoUrl = await runGeminiTask('ai.generate.video', () =>
-          generatePostVideo(generatedPost.image, style, options)
+      const { generatePostVideo } = await loadGeminiService();
+      const videoUrl = await runGeminiTask('ai.generate.video', () =>
+        generatePostVideo(generatedPost.image, style, options)
         , { style, dealership: currentDealer?.name, duration: options.durationSeconds, soundtrack: options.soundtrack });
-        return videoUrl;
+      return videoUrl;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
       // Handle the specific error for an invalid API key selection.
       if (errorMessage.includes("Requested entity was not found")) {
-         setError("There was an issue with your selected API key. Please try generating the video again.");
-         // @ts-ignore
-         if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
-            // @ts-ignore
-            await window.aistudio.openSelectKey();
-         }
+        setError("There was an issue with your selected API key. Please try generating the video again.");
+        // @ts-ignore
+        if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
+          // @ts-ignore
+          await window.aistudio.openSelectKey();
+        }
       } else if (errorMessage.toLowerCase().includes("overloaded")) {
         setError("The video generation service is very busy right now. We tried a few times, but it's still overloaded. Please try again in a few minutes.");
       } else {
@@ -522,9 +578,9 @@ const App: React.FC = () => {
   }, []);
 
   const handleBackToCapture = useCallback(() => {
-      setSelectedImage(null);
-      setError(null);
-      setStep(AppStep.CAPTURE);
+    setSelectedImage(null);
+    setError(null);
+    setStep(AppStep.CAPTURE);
   }, []);
 
   const suspenseFallback = (label: string) => (
@@ -563,31 +619,31 @@ const App: React.FC = () => {
         );
       case AppStep.CUSTOMIZE:
         const customizerProps = {
-            imageSrc: selectedImage!, 
-            onGenerate: handleGenerate, 
-            onBack: handleBackToCapture, 
-            dealershipName: currentDealer!.name,
-            defaultStyle: preferredStyle,
-            defaultTone: preferredTone,
-            onStyleToneChange: handleStyleToneChange,
-            isApiKeyConfigured,
-            onOpenSettings: () => setIsSettingsOpen(true),
-            isDesktopLayout,
+          imageSrc: selectedImage!,
+          onGenerate: handleGenerate,
+          onBack: handleBackToCapture,
+          dealershipName: currentDealer!.name,
+          defaultStyle: preferredStyle,
+          defaultTone: preferredTone,
+          onStyleToneChange: handleStyleToneChange,
+          isApiKeyConfigured,
+          onOpenSettings: () => setIsSettingsOpen(true),
+          isDesktopLayout,
         };
         if (error) {
-            return (
-              <div className="w-full max-w-screen-2xl mx-auto text-center p-4">
-                <div className="mb-4 bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg flex items-center justify-center gap-2">
-                  <Icon type="error" className="w-5 h-5"/>
-                  <span>{error}</span>
-                </div>
-                 { selectedImage && (
-                   <Suspense fallback={suspenseFallback('Loading customizer')}>
-                     <LazyPostCustomizer {...customizerProps} />
-                   </Suspense>
-                 ) }
+          return (
+            <div className="w-full max-w-screen-2xl mx-auto text-center p-4">
+              <div className="mb-4 bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg flex items-center justify-center gap-2">
+                <Icon type="error" className="w-5 h-5" />
+                <span>{error}</span>
               </div>
-            );
+              {selectedImage && (
+                <Suspense fallback={suspenseFallback('Loading customizer')}>
+                  <LazyPostCustomizer {...customizerProps} />
+                </Suspense>
+              )}
+            </div>
+          );
         }
         return selectedImage ? (
           <Suspense fallback={suspenseFallback('Loading customizer')}>
@@ -596,15 +652,17 @@ const App: React.FC = () => {
         ) : null;
       case AppStep.GENERATING:
         return (
-          <div className="text-center p-8 flex flex-col items-center justify-center h-full">
+          <div className="text-center p-8 flex flex-col items-center justify-center h-full max-w-md mx-auto">
             <svg className="animate-spin h-20 w-20 text-indigo-400 mb-8" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <h2 className="text-3xl font-bold text-white mb-4 animate-pulse">Crafting Your Masterpiece...</h2>
-            <p className="text-indigo-300 text-lg transition-opacity duration-500 h-6">
-              {loadingMessages[loadingMessageIndex]}
-            </p>
+            <h2 className="text-3xl font-bold text-white mb-6 animate-pulse">Crafting Your Masterpiece...</h2>
+            <ProgressBar
+              value={generationProgress}
+              message={progressMessage}
+              className="w-full"
+            />
           </div>
         );
       case AppStep.RESULT:
@@ -640,7 +698,7 @@ const App: React.FC = () => {
 
   return (
     <>
-  <main className="h-screen w-full text-slate-100 flex flex-col overflow-hidden">
+      <main className="h-screen w-full text-slate-100 flex flex-col overflow-hidden">
         {currentDealer && (
           <Header
             dealer={currentDealer}
@@ -664,6 +722,14 @@ const App: React.FC = () => {
         onSave={handleSettingsSave}
         compactMode={compactMode}
         onToggleCompactMode={(val) => { setCompactMode(val); saveSession({ compactMode: val }); }}
+      />
+
+      {/* Crop Modal */}
+      <ImageCropModal
+        isOpen={cropModalOpen}
+        imageSrc={tempImageForCrop || ''}
+        onConfirm={handleCropConfirm}
+        onCancel={handleCropCancel}
       />
     </>
   );
