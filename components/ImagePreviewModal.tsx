@@ -43,40 +43,52 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({ isOpen, on
 
   return (
     <div
-      className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in"
+      className="fixed inset-0 bg-black/95 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in"
       onClick={handleClose}
       role="dialog"
       aria-modal="true"
       aria-label="Image Preview"
     >
       <div
-        className="relative max-w-5xl w-full flex flex-col items-center justify-center gap-6 max-h-[90vh]"
+        className="relative max-w-5xl w-full flex flex-col items-center justify-center gap-8 max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
-        <img
-          src={imageSrc}
-          alt="Captured preview"
-          className="object-contain w-auto h-auto max-w-full max-h-[65vh] rounded-lg shadow-2xl"
-        />
+        {/* Image Preview - Enhanced visibility with better background */}
+        <div className="relative bg-black rounded-xl p-4 shadow-2xl">
+          <img
+            src={imageSrc}
+            alt="Captured preview"
+            className="object-contain w-auto h-auto max-w-full max-h-[60vh] rounded-lg"
+          />
+        </div>
+
+        {/* Action Buttons - Enhanced visibility */}
         <div className="flex gap-4">
           <button
             onClick={() => { triggerHapticFeedback(); (onRetake ?? onClose)(); }}
-            className="px-5 py-2.5 rounded-full bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-colors shadow focus:outline-none focus:ring-2 focus:ring-white/40"
+            className="px-8 py-4 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold text-lg
+                     transition-all shadow-lg hover:shadow-xl border border-white/20 hover:border-white/30
+                     min-w-[160px] focus:outline-none focus:ring-2 focus:ring-white/40"
           >
-            Retake
+            Retake Photo
           </button>
           {onConfirm && (
             <button
               onClick={() => { triggerHapticFeedback(); onConfirm(); }}
-              className="px-5 py-2.5 rounded-full bg-primary-500 text-white font-semibold shadow-lg hover:bg-primary-400 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-300"
+              className="px-8 py-4 rounded-xl bg-primary-500 hover:bg-primary-400 text-white font-bold text-lg
+                       shadow-2xl transition-all hover:shadow-primary-500/50 hover:scale-105
+                       min-w-[160px] focus:outline-none focus:ring-2 focus:ring-primary-300"
             >
               {confirmLabel}
             </button>
           )}
         </div>
+
+        {/* Close Button */}
         <button
           onClick={handleClose}
-          className="absolute top-2 right-2 text-white bg-black/50 rounded-full p-2 hover:bg-black/75 transition-colors focus:outline-none focus:ring-2 focus:ring-white"
+          className="absolute top-2 right-2 text-white bg-black/60 rounded-full p-3 hover:bg-black/80 
+                   transition-colors focus:outline-none focus:ring-2 focus:ring-white shadow-lg"
           aria-label="Close preview"
         >
           <Icon type="close" className="w-7 h-7" />
