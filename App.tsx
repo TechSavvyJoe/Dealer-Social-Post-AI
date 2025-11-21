@@ -1,20 +1,18 @@
-import React, { useState, useCallback, useEffect } from 'react';
-import { AppStep, StyleOption, ToneOption, VideoStyle, VideoRequestOptions } from './types';
-import { useAppStore } from './stores/appStore';
+import React, { useState, useEffect, useCallback } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import { Header } from './components/Header';
+import { MainContent } from './components/MainContent';
 import { SettingsModal } from './components/SettingsModal';
 import { ImageCropModal } from './components/ImageCropModal';
-import { ProgressSteps } from './components/ProgressSteps';
-import { saveLastSelections } from './utils/settings';
-import { logEvent } from './utils/telemetry';
+import { VideoDirectorModal } from './components/VideoDirectorModal';
+import { ToastProvider, useToast } from './components/ui/Toast';
+import { useAppStore } from './stores/appStore';
 import { useLayoutMode } from './hooks/useLayoutMode';
 import { useGemini } from './hooks/useGemini';
-import { BackgroundPattern } from './components/BackgroundPattern';
-import { MainContent } from './components/MainContent';
-import { API_KEY_REQUIRED_MESSAGE } from './utils/constants';
-import { useToast } from './components/ui/Toast';
+import { AppStep, StyleOption, ToneOption, VideoStyle, VideoRequestOptions } from './types';
+import { logEvent } from './utils/telemetry';
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const { error: toastError } = useToast();
   // Global State
   const { 
@@ -25,9 +23,8 @@ const App: React.FC = () => {
   } = useAppStore();
 
   // Local UI State
-  const [displayedStep, setDisplayedStep] = useState(step);
-  const [animationClass, setAnimationClass] = useState('animate-fade-in');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isVideoDirectorOpen, setIsVideoDirectorOpen] = useState(false);
   
   // Generation State
   const [generationProgress, setGenerationProgress] = useState(0);
@@ -36,7 +33,7 @@ const App: React.FC = () => {
   // Crop Modal State
   const [cropModalOpen, setCropModalOpen] = useState(false);
   const [tempImageForCrop, setTempImageForCrop] = useState<string | null>(null);
-
+  
   // Last Params (for regeneration)
   const [lastGenerationParams, setLastGenerationParams] = useState<{
     style: StyleOption;
@@ -64,28 +61,15 @@ const App: React.FC = () => {
     restoreSession();
   }, [restoreSession]);
 
-  // Step Animation
-  useEffect(() => {
-    if (step !== displayedStep) {
-      setAnimationClass('animate-fade-out');
-      const timer = setTimeout(() => {
-        setDisplayedStep(step);
-        setAnimationClass('animate-fade-in');
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [step, displayedStep]);
-
   // Handlers
   const handleLogin = async (dealerId: string) => {
     const success = await login(dealerId);
     if (!success) setError("Invalid dealer ID");
     return success;
   };
-
+  
   const handleStyleToneChange = useCallback((style: StyleOption, tone: ToneOption) => {
     setPreferences({ preferredStyle: style, preferredTone: tone });
-    saveLastSelections(style, tone);
   }, [setPreferences]);
 
   const handleImageSelected = useCallback((image: string) => {
@@ -114,11 +98,20 @@ const App: React.FC = () => {
 
     // Progress Simulation
     const progressInterval = setInterval(() => {
-      setGenerationProgress(prev => Math.min(95, prev + (Math.random() * 8 + 3)));
+      setGenerationProgress(prev => {
+        if (prev >= 90) return prev;
+        return prev + (Math.random() * 5 + 2);
+      });
     }, 800);
 
     try {
       const { generateSocialPost } = await loadGeminiService();
+      
+      // Update messages based on progress
+      setTimeout(() => setProgressMessage('Consulting the style guide...'), 2000);
+      setTimeout(() => setProgressMessage('Crafting the perfect caption...'), 4500);
+      setTimeout(() => setProgressMessage('Applying final polish...'), 7000);
+
       const result = await runGeminiTask('ai.generate', () =>
         generateSocialPost(selectedImage, style, tone, currentDealer.name, customerName, currentDealer.logo, customText, creativeBrief)
       );
@@ -126,7 +119,7 @@ const App: React.FC = () => {
       clearInterval(progressInterval);
       setGenerationProgress(100);
       setProgressMessage('Complete!');
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       setGeneratedPost(result);
       setStep(AppStep.RESULT);
@@ -138,7 +131,7 @@ const App: React.FC = () => {
       toastError(fullMsg);
       setStep(AppStep.CUSTOMIZE);
     }
-  }, [selectedImage, currentDealer, ensureApiKeyReady, runGeminiTask, setStep, setError, setGeneratedPost, loadGeminiService]);
+  }, [selectedImage, currentDealer, ensureApiKeyReady, runGeminiTask, setStep, setError, setGeneratedPost, loadGeminiService, toastError]);
 
   const handleRegenerateImage = useCallback(async () => {
     if (!selectedImage || !lastGenerationParams || !currentDealer) return;
@@ -160,7 +153,7 @@ const App: React.FC = () => {
       setError(msg);
       toastError(msg);
     }
-  }, [selectedImage, lastGenerationParams, currentDealer, generatedPost, ensureApiKeyReady, runGeminiTask, setGeneratedPost, setError, loadGeminiService]);
+  }, [selectedImage, lastGenerationParams, currentDealer, generatedPost, ensureApiKeyReady, runGeminiTask, setGeneratedPost, setError, loadGeminiService, toastError]);
 
   const handleFunMode = useCallback(async (styleName?: string) => {
     if (!selectedImage || !currentDealer) return;
@@ -177,7 +170,7 @@ const App: React.FC = () => {
       setError(msg);
       toastError(msg);
     }
-  }, [selectedImage, currentDealer, generatedPost, ensureApiKeyReady, runGeminiTask, setGeneratedPost, setError, loadGeminiService]);
+  }, [selectedImage, currentDealer, generatedPost, ensureApiKeyReady, runGeminiTask, setGeneratedPost, setError, loadGeminiService, toastError]);
 
   const handleEditImage = useCallback(async (editPrompt: string) => {
     if (!generatedPost?.image || !editPrompt.trim() || !currentDealer) return;
@@ -194,7 +187,7 @@ const App: React.FC = () => {
       setError(msg);
       toastError(msg);
     }
-  }, [generatedPost, currentDealer, ensureApiKeyReady, runGeminiTask, setGeneratedPost, setError, loadGeminiService]);
+  }, [generatedPost, currentDealer, ensureApiKeyReady, runGeminiTask, setGeneratedPost, setError, loadGeminiService, toastError]);
 
   const handleRegenerateText = useCallback(async () => {
     if (!selectedImage || !lastGenerationParams || !currentDealer) return;
@@ -214,143 +207,116 @@ const App: React.FC = () => {
       setError(msg);
       toastError(msg);
     }
-  }, [selectedImage, lastGenerationParams, currentDealer, ensureApiKeyReady, generatedPost, runGeminiTask, setGeneratedPost, setError, loadGeminiService]);
+  }, [selectedImage, lastGenerationParams, currentDealer, generatedPost, ensureApiKeyReady, runGeminiTask, setGeneratedPost, setError, loadGeminiService, toastError]);
 
   const handleEditText = useCallback(async (editPrompt: string) => {
-    if (!generatedPost?.text || !editPrompt.trim() || !lastGenerationParams) return;
+    if (!generatedPost?.text || !editPrompt.trim()) return;
     if (!ensureApiKeyReady()) return;
     setError(null);
     try {
       const { editSocialPostText } = await loadGeminiService();
+      const tone = lastGenerationParams?.tone || preferredTone;
       const newText = await runGeminiTask('ai.edit.text', () =>
-        editSocialPostText(generatedPost.text, editPrompt, lastGenerationParams.tone)
+        editSocialPostText(generatedPost.text, editPrompt, tone)
       );
       if (generatedPost) setGeneratedPost({ ...generatedPost, text: newText });
     } catch (err) {
-      const msg = `Failed to edit text. ${err instanceof Error ? err.message : String(err)}`;
+      const msg = `Failed to apply text edits. ${err instanceof Error ? err.message : String(err)}`;
       setError(msg);
       toastError(msg);
     }
-  }, [generatedPost, lastGenerationParams, ensureApiKeyReady, runGeminiTask, setGeneratedPost, setError, loadGeminiService]);
+  }, [generatedPost, lastGenerationParams, preferredTone, ensureApiKeyReady, runGeminiTask, setGeneratedPost, setError, loadGeminiService, toastError]);
 
   const handleGenerateVideo = useCallback(async (style: VideoStyle, options: VideoRequestOptions): Promise<string> => {
-    if (!generatedPost?.image) throw new Error("Cannot generate video without an image.");
-    if (!ensureApiKeyReady()) throw new Error(API_KEY_REQUIRED_MESSAGE);
-    setError(null);
-
-
-    if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
-
-      const hasKey = await window.aistudio.hasSelectedApiKey();
-      if (!hasKey) {
-
-        if (typeof window.aistudio.openSelectKey === 'function') {
-          alert("Video generation requires a personal API key due to processing costs. Please select your key.");
-
-          await window.aistudio.openSelectKey();
-        } else {
-          throw new Error("Video generation is not available. Could not find key selection utility.");
-        }
-      }
-    }
-
+    if (!generatedPost?.image) throw new Error("No image available for video generation");
+    if (!ensureApiKeyReady()) throw new Error("API Key not configured");
+    
     try {
       const { generatePostVideo } = await loadGeminiService();
       return await runGeminiTask('ai.generate.video', () =>
         generatePostVideo(generatedPost.image, style, options)
       );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      if (msg.includes("Requested entity was not found")) {
-        setError("Issue with selected API key. Please try again.");
-        toastError("Issue with selected API key. Please try again.");
-
-        if (window.aistudio?.openSelectKey) await window.aistudio.openSelectKey();
-      } else {
-        const errorMsg = `Failed to generate video. ${msg.replace('Video generation failed: ', '')}`;
-        setError(errorMsg);
-        toastError(errorMsg);
-      }
+      const msg = `Failed to generate video. ${err instanceof Error ? err.message : String(err)}`;
+      toastError(msg);
       throw err;
     }
-  }, [generatedPost, ensureApiKeyReady, runGeminiTask, setError, loadGeminiService]);
-
-  // Layout Helpers
-  const isCenteredStep = displayedStep === AppStep.LOGIN || displayedStep === AppStep.GENERATING;
-  const layoutFlexClass = isCenteredStep ? 'justify-center' : 'justify-start';
-  const layoutPadding = isCenteredStep
-    ? (isDesktopLayout ? (compactMode ? 'py-4' : 'py-8') : 'py-10')
-    : (isDesktopLayout ? (compactMode ? 'py-3' : 'py-6') : 'pt-8 pb-16');
-  const layoutGap = isDesktopLayout ? (compactMode ? 'gap-4' : 'gap-6') : 'gap-6';
+  }, [generatedPost, ensureApiKeyReady, runGeminiTask, loadGeminiService, toastError]);
 
   return (
-    <>
-      <main className="h-screen w-full bg-surface-950 text-surface-50 flex flex-col overflow-hidden relative selection:bg-primary-500/30 selection:text-primary-100">
-        <BackgroundPattern />
+    <div className="min-h-screen bg-slate-950 text-slate-50 font-sans selection:bg-indigo-500/30">
+      {currentDealer && (
+        <Header 
+          dealer={currentDealer} 
+          onLogout={() => logout()} 
+          onShowSettings={() => setIsSettingsOpen(true)}
+          isApiKeyConfigured={isApiKeyConfigured}
+        />
+      )}
 
-        {currentDealer && (
-          <div className="relative z-10">
-            <Header
-              dealer={currentDealer}
-              onLogout={logout}
-              onShowSettings={() => setIsSettingsOpen(true)}
-              isApiKeyConfigured={isApiKeyConfigured}
-            />
-          </div>
-        )}
-        
-        <div className={`relative z-10 w-full flex flex-col flex-grow overflow-hidden px-4 sm:px-6 lg:px-10 ${animationClass}`}>
-          <div className={`w-full max-w-screen-2xl mx-auto flex-1 min-h-0 flex flex-col overflow-auto scrollbar-hide ${layoutGap} ${layoutFlexClass} ${layoutPadding}`}>
-            {displayedStep !== AppStep.ADMIN && displayedStep !== AppStep.LOGIN && <ProgressSteps activeStep={displayedStep} />}
-            
-            <MainContent 
-              displayedStep={displayedStep}
-              step={step}
-              currentDealer={currentDealer}
-              selectedImage={selectedImage}
-              generatedPost={generatedPost}
-              error={error}
-              preferredStyle={preferredStyle}
-              preferredTone={preferredTone}
-              isApiKeyConfigured={isApiKeyConfigured}
-              isDesktopLayout={isDesktopLayout}
-              generationProgress={generationProgress}
-              progressMessage={progressMessage}
-              onLogin={handleLogin}
-              onShowSettings={() => setIsSettingsOpen(true)}
-              onImageSelected={handleImageSelected}
-              onReset={reset}
-              onGenerate={handleGenerate}
-              onBackToCapture={() => setStep(AppStep.CAPTURE)}
-              onStyleToneChange={handleStyleToneChange}
-              onRegenerateImage={handleRegenerateImage}
-              onEditImage={handleEditImage}
-              onRegenerateText={handleRegenerateText}
-              onEditText={handleEditText}
-              onFunMode={handleFunMode}
-              onGenerateVideo={handleGenerateVideo}
-            />
-          </div>
-        </div>
+      <main className={`transition-all duration-500 ease-in-out ${compactMode ? 'pt-16' : 'pt-24'} pb-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto h-[calc(100vh-4rem)]`}>
+        <AnimatePresence mode="wait">
+          <MainContent
+            key="main-content"
+            displayedStep={step}
+            step={step}
+            currentDealer={currentDealer}
+            selectedImage={selectedImage}
+            generatedPost={generatedPost}
+            error={error}
+            preferredStyle={preferredStyle}
+            preferredTone={preferredTone}
+            isApiKeyConfigured={isApiKeyConfigured}
+            isDesktopLayout={isDesktopLayout}
+            generationProgress={generationProgress}
+            progressMessage={progressMessage}
+            onLogin={handleLogin}
+            onImageSelected={handleImageSelected}
+            onReset={reset}
+            onGenerate={handleGenerate}
+            onBackToCapture={() => setStep(AppStep.CAPTURE)}
+            onStyleToneChange={handleStyleToneChange}
+            onRegenerateImage={handleRegenerateImage}
+            onEditImage={handleEditImage}
+            onRegenerateText={handleRegenerateText}
+            onEditText={handleEditText}
+            onFunMode={handleFunMode}
+            onGenerateVideo={handleGenerateVideo}
+          />
+        </AnimatePresence>
       </main>
 
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        initialApiKey={apiKey ?? ''}
-        defaultRemember={hasStoredApiKey}
+        apiKey={apiKey || ''}
         onSave={handleSettingsSave}
-        compactMode={compactMode}
-        onToggleCompactMode={(val) => setPreferences({ compactMode: val })}
       />
 
       <ImageCropModal
         isOpen={cropModalOpen}
-        imageSrc={tempImageForCrop || ''}
+        onClose={() => setCropModalOpen(false)}
+        imageSrc={tempImageForCrop}
         onConfirm={handleCropConfirm}
-        onCancel={() => { setCropModalOpen(false); setTempImageForCrop(null); }}
       />
-    </>
+      
+      <VideoDirectorModal
+        isOpen={isVideoDirectorOpen}
+        onClose={() => setIsVideoDirectorOpen(false)}
+        onSelectStyle={(style, options) => {
+           // This is handled inside PostResult usually, but if we needed a global modal:
+           setIsVideoDirectorOpen(false);
+        }}
+      />
+    </div>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
   );
 };
 
