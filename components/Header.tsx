@@ -8,7 +8,7 @@ import { Button } from './ui/Button';
 import { cn } from '../utils/classNames';
 
 interface HeaderProps {
-  dealer: Dealer;
+  dealer?: Dealer | null;
   onLogout: () => void;
   onShowSettings: () => void;
   isApiKeyConfigured: boolean;
@@ -29,6 +29,11 @@ export const Header: React.FC<HeaderProps> = ({
     triggerHapticFeedback();
     onShowSettings();
   };
+
+  // Defensive check - should not render if dealer is undefined
+  if (!dealer) {
+    return null;
+  }
 
   return (
     <motion.header
