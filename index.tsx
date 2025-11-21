@@ -5,6 +5,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import { getQueryClient } from './services/queryClient';
 import { ToastProvider } from './components/ui/Toast';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const ReactQueryDevtools = React.lazy(() =>
   import('@tanstack/react-query-devtools').then((mod) => ({ default: mod.ReactQueryDevtools }))
@@ -20,7 +21,9 @@ root.render(
   <React.StrictMode>
     <QueryClientProvider client={getQueryClient()}>
       <ToastProvider>
-        <App />
+        <ErrorBoundary>
+          <App />
+        </ErrorBoundary>
         {import.meta.env.DEV && (
           <Suspense fallback={null}>
             <ReactQueryDevtools initialIsOpen={false} />

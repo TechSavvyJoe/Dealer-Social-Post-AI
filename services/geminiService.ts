@@ -458,7 +458,7 @@ The final output must be a single, high-resolution, fully-composed image in the 
 
     const client = getGeminiClient();
     const imageResponse = await client.models.generateContent({
-        model: 'gemini-2.5-flash-image',
+        model: 'gemini-3-pro-image-preview',
         contents: { parts: imageParts },
         config: {
             responseModalities: [Modality.IMAGE],
@@ -538,7 +538,7 @@ ${criticalRulesForEditing}
 
     const client = getGeminiClient();
     const imageResponse = await client.models.generateContent({
-        model: 'gemini-2.5-flash-image',
+        model: 'gemini-3-pro-image-preview',
         contents: {
             parts: imageParts,
         },
@@ -577,7 +577,7 @@ export const generateSocialPostText = async (
 
     const client = getGeminiClient();
     const textResponse = await client.models.generateContent({
-        model: 'gemini-2.5-pro',
+        model: 'gemini-3-pro-preview',
         contents: { parts: [imagePart, { text: textPrompt }] }
     });
 
@@ -609,7 +609,7 @@ export const editSocialPostText = async (
 
     const client = getGeminiClient();
     const textResponse = await client.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3-pro-preview',
         contents: prompt
     });
 
@@ -669,7 +669,7 @@ export const generateSocialPost = async (
 
     const client = getGeminiClient();
     const imagePromise = client.models.generateContent({
-        model: 'gemini-2.5-flash-image',
+        model: 'gemini-3-pro-image-preview',
         contents: { parts: imageParts },
         config: { responseModalities: [Modality.IMAGE] }
     }).catch((error) => {
@@ -826,7 +826,7 @@ export const generatePostVideo = async (imageBase64Url: string, style: VideoStyl
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             let operation: GenerateVideosOperation = await videoAi.models.generateVideos({
-                model: 'veo-3.1-fast-generate-preview',
+                model: 'veo-3.1-generate-preview',
                 prompt: prompt,
                 image: image,
                 config: {
