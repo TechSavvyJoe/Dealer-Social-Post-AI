@@ -1,0 +1,162 @@
+import React, { Suspense } from 'react';
+import { AppStep, GeneratedPost, StyleOption, ToneOption, VideoStyle, VideoRequestOptions, Dealer } from '../types';
+import { Icon } from './Icons';
+import { ProgressBar } from './ui/ProgressBar';
+
+// Lazy load components
+const LazyLoginScreen = React.lazy(() => import('./LoginScreen').then(mod => ({ default: mod.LoginScreen })));
+const LazyAdminDashboard = React.lazy(() => import('./AdminDashboard').then(mod => ({ default: mod.AdminDashboard })));
+const LazyImageInput = React.lazy(() => import('./CameraCapture').then(mod => ({ default: mod.ImageInput })));
+const LazyPostCustomizer = React.lazy(() => import('./PostCustomizer').then(mod => ({ default: mod.PostCustomizer })));
+const LazyPostResult = React.lazy(() => import('./PostResult').then(mod => ({ default: mod.PostResult })));
+
+interface MainContentProps {
+  displayedStep: AppStep;
+  step: AppStep;
+  currentDealer: Dealer | null;
+  selectedImage: string | null;
+  generatedPost: GeneratedPost | null;
+  error: string | null;
+  preferredStyle: StyleOption;
+  preferredTone: ToneOption;
+  isApiKeyConfigured: boolean;
+  isDesktopLayout: boolean;
+  generationProgress: number;
+  progressMessage: string;
+  
+  // Handlers
+  onLogin: (dealerId: string) => Promise<boolean>;
+  onShowSettings: () => void;
+  onImageSelected: (image: string) => void;
+  onReset: () => void;
+  onGenerate: (style: StyleOption, tone: ToneOption, customerName: string, customText?: string, creativeBrief?: string) => Promise<void>;
+  onBackToCapture: () => void;
+  onStyleToneChange: (style: StyleOption, tone: ToneOption) => void;
+  onRegenerateImage: () => Promise<void>;
+  onEditImage: (prompt: string) => Promise<void>;
+  onRegenerateText: () => Promise<void>;
+  onEditText: (prompt: string) => Promise<void>;
+  onFunMode: (styleName?: string) => Promise<void>;
+  onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
+}
+
+export const MainContent: React.FC<MainContentProps> = ({
+  displayedStep,
+  step,
+  currentDealer,
+  selectedImage,
+  generatedPost,
+  error,
+  preferredStyle,
+  preferredTone,
+  isApiKeyConfigured,
+  isDesktopLayout,
+  generationProgress,
+  progressMessage,
+  onLogin,
+  onShowSettings,
+  onImageSelected,
+  onReset,
+  onGenerate,
+  onBackToCapture,
+  onStyleToneChange,
+  onRegenerateImage,
+  onEditImage,
+  onRegenerateText,
+  onEditText,
+  onFunMode,
+  onGenerateVideo
+}) => {
+
+  const suspenseFallback = (label: string) => (
+    <div className="flex min-h-[200px] w-full flex-col items-center justify-center gap-4 text-primary-300" role="status">
+      <div className="relative w-12 h-12">
+        <div className="absolute inset-0 rounded-full border-4 border-primary-500/30"></div>
+        <div className="absolute inset-0 rounded-full border-4 border-primary-500 border-t-transparent animate-spin"></div>
+      </div>
+      <span className="text-xs font-semibold uppercase tracking-[0.2em] text-primary-300/70 animate-pulse">{label}</span>
+    </div>
+  );
+
+  switch (displayedStep) {
+    case AppStep.LOGIN:
+      return (
+        <Suspense fallback={suspenseFallback('Loading login')}>
+          <LazyLoginScreen
+            onLogin={onLogin}
+            onShowSettings={onShowSettings}
+            isApiKeyConfigured={isApiKeyConfigured}
+          />
+        </Suspense>
+      );
+    case AppStep.ADMIN:
+      return <Suspense fallback={suspenseFallback('Loading admin')}><LazyAdminDashboard /></Suspense>;
+    case AppStep.CAPTURE:
+      return (
+        <Suspense fallback={suspenseFallback('Preparing camera')}>
+          <LazyImageInput onImageSelected={onImageSelected} onClose={onReset} />
+        </Suspense>
+      );
+    case AppStep.CUSTOMIZE:
+      const customizerProps = {
+        imageSrc: selectedImage!,
+        onGenerate: onGenerate,
+        onBack: onBackToCapture,
+        dealershipName: currentDealer!.name,
+        defaultStyle: preferredStyle,
+        defaultTone: preferredTone,
+        onStyleToneChange: onStyleToneChange,
+        isApiKeyConfigured,
+        onOpenSettings: onShowSettings,
+        isDesktopLayout,
+        isGenerating: step === AppStep.GENERATING,
+      };
+      if (error) {
+        return (
+          <div className="w-full max-w-screen-2xl mx-auto text-center p-4">
+            <div className="mb-4 bg-error/10 border border-error/30 text-error px-4 py-3 rounded-xl flex items-center justify-center gap-2 backdrop-blur-sm">
+              <Icon type="error" className="w-5 h-5" />
+              <span>{error}</span>
+            </div>
+            {selectedImage && <Suspense fallback={suspenseFallback('Loading')}><LazyPostCustomizer {...customizerProps} /></Suspense>}
+          </div>
+        );
+      }
+      return selectedImage ? <Suspense fallback={suspenseFallback('Loading')}><LazyPostCustomizer {...customizerProps} /></Suspense> : null;
+    case AppStep.GENERATING:
+      return (
+        <div className="text-center p-8 flex flex-col items-center justify-center h-full max-w-md mx-auto">
+          <div className="relative w-24 h-24 mb-8">
+            <div className="absolute inset-0 rounded-full border-4 border-primary-500/20"></div>
+            <div className="absolute inset-0 rounded-full border-4 border-primary-500 border-t-transparent animate-spin"></div>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Icon type="sparkles" className="w-8 h-8 text-primary-400 animate-pulse" />
+            </div>
+          </div>
+          <h2 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary-400 to-secondary-400 mb-6 animate-pulse">
+            Crafting Your Masterpiece...
+          </h2>
+          <ProgressBar value={generationProgress} message={progressMessage} loadingLabel="Generating" className="w-full" />
+        </div>
+      );
+    case AppStep.RESULT:
+      return generatedPost ? (
+        <Suspense fallback={suspenseFallback('Loading results')}>
+          <LazyPostResult
+            post={generatedPost}
+            onStartOver={onReset}
+            onRegenerateImage={onRegenerateImage}
+            onEditImage={onEditImage}
+            onRegenerateText={onRegenerateText}
+            onEditText={onEditText}
+            onFunMode={onFunMode}
+            onGenerateVideo={onGenerateVideo}
+            error={error}
+            isDesktopLayout={isDesktopLayout}
+          />
+        </Suspense>
+      ) : null;
+    default:
+      return null;
+  }
+};

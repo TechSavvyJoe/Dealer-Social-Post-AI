@@ -124,20 +124,16 @@ export const getDealers = async (): Promise<Dealer[]> => {
 
 // --- Data Mutation Functions (Read-Only) ---
 
-const readOnlyError = () => {
+const readOnlyError = (): never => {
     throw new Error('This action is disabled. The app is connected to a read-only Google Sheet database.');
 };
 
 export const addDealer = (dealer: Dealer): Dealer => {
     readOnlyError();
-    // @ts-ignore
-    return;
 };
 
 export const updateDealer = (dealer: Dealer): Dealer => {
     readOnlyError();
-    // @ts-ignore
-    return;
 };
 
 export const deleteDealer = (dealerId: string): void => {
