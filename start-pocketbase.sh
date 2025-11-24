@@ -46,7 +46,7 @@ if [ ! -f "./pocketbase" ]; then
     ARCH=$(uname -m)
 
     # Set PocketBase version
-    PB_VERSION="0.23.6"
+    PB_VERSION="0.22.21"
 
     # Map architecture names
     case "$ARCH" in
