@@ -7,7 +7,7 @@
 // Handler for POST requests
 routerAdd("POST", "/api/proxy/:path(*)", (c) => {
     const GOOGLE_API_URL_BASE = "https://generativelanguage.googleapis.com/";
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = os.getenv("GEMINI_API_KEY");
 
     if (!apiKey) {
         console.error("GEMINI_API_KEY environment variable is not set.");
@@ -48,7 +48,7 @@ routerAdd("POST", "/api/proxy/:path(*)", (c) => {
 // Handler for GET requests (for polling operations like video status)
 routerAdd("GET", "/api/proxy/:path(*)", (c) => {
     const GOOGLE_API_URL_BASE = "https://generativelanguage.googleapis.com/";
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = os.getenv("GEMINI_API_KEY");
 
     if (!apiKey) {
         console.error("GEMINI_API_KEY environment variable is not set.");
