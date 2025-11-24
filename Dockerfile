@@ -28,4 +28,4 @@ COPY pb_hooks /pb/pb_hooks
 EXPOSE 8090
 
 # Start PocketBase with hooks enabled
-CMD ["/pb/pocketbase", "serve", "--http=0.0.0.0:8090", "--hooksDir=/pb/pb_hooks"]
+CMD ["/pb/pocketbase", "serve", "--http=0.0.0.0:8090", "--hooksDir=/pb/pb_hooks", "--dir=/pb/pb_data"]
