@@ -8,6 +8,10 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        fs: {
+          // Exclude PocketBase binary and data from being watched
+          deny: ['**/pocketbase', '**/pb_data/**', '**/pb_migrations/**']
+        }
       },
       plugins: [react()],
       define: {
@@ -18,6 +22,10 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
+      },
+      // Exclude PocketBase files from optimization
+      optimizeDeps: {
+        exclude: ['pocketbase']
       }
     };
 });

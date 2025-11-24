@@ -134,7 +134,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return false;
     } catch (err) {
-      console.error("Login failed", err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      logError("app.login.failed", { message: errorMessage, dealerId });
+      set({ error: "Login failed. Please check the dealer code and try again." });
       return false;
     }
   },

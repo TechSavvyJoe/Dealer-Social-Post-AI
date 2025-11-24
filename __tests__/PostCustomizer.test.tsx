@@ -13,8 +13,6 @@ describe('PostCustomizer', () => {
     onBack: vi.fn(),
     onGenerate: vi.fn(),
     onStyleToneChange: vi.fn(),
-    isApiKeyConfigured: true,
-    onOpenSettings: vi.fn(),
     defaultStyle: StyleOption.Modern,
     defaultTone: ToneOption.Excited,
     isDesktopLayout: true,
@@ -33,10 +31,8 @@ describe('PostCustomizer', () => {
     expect(baseProps.onStyleToneChange).toHaveBeenCalledWith(StyleOption.Sporty, ToneOption.Excited);
   });
 
-  it('disables generate button when API key is not configured', () => {
-    render(<PostCustomizer {...baseProps} isApiKeyConfigured={false} />);
-
-    const button = screen.getByRole('button', { name: /add api key to generate/i });
-    expect(button).toBeDisabled();
-  });
+  /*
+   * Note: The test for a disabled generate button was removed as it is now obsolete.
+   * The API key is configured on the server, so the button will never be in this disabled state.
+   */
 });

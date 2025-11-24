@@ -248,7 +248,7 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
-        console.log('User cancelled the share dialog.');
+        // User cancelled the share dialog, do nothing.
       } else {
         console.error("Sharing failed:", error);
         alert("Could not open the share dialog, but the post text has been copied to your clipboard!");

@@ -22,3 +22,15 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# PocketBase
+pocketbase
+pocketbase.zip
+pb_data/
+pb_migrations/
+.genkit/

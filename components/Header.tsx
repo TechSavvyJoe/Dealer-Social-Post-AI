@@ -11,14 +11,12 @@ interface HeaderProps {
   dealer?: Dealer | null;
   onLogout: () => void;
   onShowSettings: () => void;
-  isApiKeyConfigured: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   dealer,
   onLogout,
-  onShowSettings,
-  isApiKeyConfigured
+  onShowSettings
 }) => {
   const handleLogout = () => {
     triggerHapticFeedback();
@@ -87,17 +85,7 @@ export const Header: React.FC<HeaderProps> = ({
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.2, duration: 0.4 }}
         >
-          {/* API Status Badge */}
-          <div className="hidden sm:block">
-            {!isApiKeyConfigured && (
-              <Badge
-                variant="warning"
-                dot
-              >
-                Add API Key
-              </Badge>
-            )}
-          </div>
+          {/* API Status Badge removed, no longer needed */}
 
           {/* Keyboard hint */}
           <div className="hidden lg:flex items-center gap-1 text-[11px] text-surface-300 px-2 py-1 rounded-lg border border-white/10 bg-white/5">

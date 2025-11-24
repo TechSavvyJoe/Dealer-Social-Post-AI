@@ -15,53 +15,33 @@ const loadGeminiService = (): Promise<GeminiServiceModule> => {
   return geminiServiceModulePromise;
 };
 
-export const useGemini = (
-  // The setError and setIsSettingsOpen props are kept for compatibility,
-  // though they are no longer used for API key validation.
-  setError: (error: string | null) => void,
-  setIsSettingsOpen: (isOpen: boolean) => void
-) => {
-
+export const useGemini = () => {
   // The API is always considered configured because the key is on the server.
   const isApiKeyConfigured = true;
 
-  // This check is now simplified to always return true.
-  const ensureApiKeyReady = useCallback(() => {
-    return true;
-  }, []);
-
-  const runGeminiTask = useCallback(async <T,>(name: string, task: () => Promise<T>, metadata?: Record<string, unknown>) => {
-    logEvent(`${name}.start`, metadata);
-    try {
-      const result = await enqueueTask(task);
-      logEvent(`${name}.success`, metadata);
-      return result;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logError(`${name}.failure`, { ...metadata, message });
-      throw error;
-    }
-  }, []);
-
-  // This function is now a no-op but is kept for compatibility.
-  const handleSettingsSave = useCallback(() => {
-    setIsSettingsOpen(false);
-    setError(null);
-  }, [setError, setIsSettingsOpen]);
+  const runGeminiTask = useCallback(
+    async <T,>(
+      name: string,
+      task: () => Promise<T>,
+      metadata?: Record<string, unknown>
+    ) => {
+      logEvent(`${name}.start`, metadata);
+      try {
+        const result = await enqueueTask(task);
+        logEvent(`${name}.success`, metadata);
+        return result;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logError(`${name}.failure`, { ...metadata, message });
+        throw error;
+      }
+    },
+    []
+  );
 
   return {
-    // These values are now constants as the key is server-side.
-    apiKey: 'CONFIGURED_ON_SERVER',
-    hasStoredApiKey: true,
-    isApiKeyConfigured: true,
-    
-    // Core functionality remains
-    ensureApiKeyReady,
+    isApiKeyConfigured,
     runGeminiTask,
     loadGeminiService,
-    handleSettingsSave,
-
-    // This is a no-op, kept for compatibility.
-    setApiKey: () => {},
   };
 };
