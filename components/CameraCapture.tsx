@@ -20,16 +20,14 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
   const [showWebcam, setShowWebcam] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const cameraEnvInputRef = useRef<HTMLInputElement>(null);
-  const cameraUserInputRef = useRef<HTMLInputElement>(null);
-  const [captureFacing, setCaptureFacing] = useState<'environment' | 'user'>('environment');
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [lastSource, setLastSource] = useState<'upload' | 'camera-mobile' | 'camera-webcam' | null>(null);
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      const source: 'upload' | 'camera-mobile' = (event.target === cameraEnvInputRef.current || event.target === cameraUserInputRef.current) ? 'camera-mobile' : 'upload';
+      const source: 'upload' | 'camera-mobile' = (event.target === cameraInputRef.current) ? 'camera-mobile' : 'upload';
       processFile(file, source);
     }
     event.target.value = "";
@@ -99,12 +97,9 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
   const handleOpenCamera = () => {
     triggerHapticFeedback();
     if (isMobileDevice()) {
-      if (captureFacing === 'environment' && cameraEnvInputRef.current) {
-        cameraEnvInputRef.current.setAttribute('capture', 'environment');
-        cameraEnvInputRef.current.click();
-      } else if (captureFacing === 'user' && cameraUserInputRef.current) {
-        cameraUserInputRef.current.setAttribute('capture', 'user');
-        cameraUserInputRef.current.click();
+      // Open native camera with full controls - user can switch cameras within the app
+      if (cameraInputRef.current) {
+        cameraInputRef.current.click();
       }
     } else {
       setShowWebcam(true);
@@ -242,48 +237,21 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
             className="hidden"
             aria-label="Upload photo from your device"
           />
-          {/* Native camera - environment (rear) */}
+          {/* Native camera with full controls */}
           <input
             type="file"
-            ref={cameraEnvInputRef}
+            ref={cameraInputRef}
             onChange={handleFileChange}
             accept="image/*"
+            capture="environment"
             className="hidden"
-            aria-label="Take photo using rear camera"
-          />
-          {/* Native camera - user (front) */}
-          <input
-            type="file"
-            ref={cameraUserInputRef}
-            onChange={handleFileChange}
-            accept="image/*"
-            className="hidden"
-            aria-label="Take photo using front camera"
+            aria-label="Take photo using device camera"
           />
 
           <div className="text-center py-4 sm:py-8">
             <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Add a Photo</h2>
             <p className="text-indigo-300 mb-6 sm:mb-8 text-sm sm:text-base">Capture a moment, upload a file, or drag & drop.</p>
             <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
-              {/* Facing selection */}
-              <div className="flex items-center gap-2 bg-white/5 border border-white/15 rounded-full px-2 py-1">
-                <button
-                  type="button"
-                  onClick={() => { triggerHapticFeedback(); setCaptureFacing('environment'); }}
-                  className={`px-3 py-1 rounded-full text-sm ${captureFacing === 'environment' ? 'bg-white/20 text-white' : 'text-white/80 hover:text-white'}`}
-                  aria-label="Use rear camera"
-                >
-                  Rear
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { triggerHapticFeedback(); setCaptureFacing('user'); }}
-                  className={`px-3 py-1 rounded-full text-sm ${captureFacing === 'user' ? 'bg-white/20 text-white' : 'text-white/80 hover:text-white'}`}
-                  aria-label="Use front camera"
-                >
-                  Front
-                </button>
-              </div>
               <button onClick={handleOpenCamera} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-6 rounded-full hover:scale-105 transition-all duration-300 shadow-lg">
                 <Icon type="camera" className="w-6 sm:w-7 h-6 sm:h-7" />
                 <span className="text-base sm:text-lg">Open Camera</span>
