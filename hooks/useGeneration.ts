@@ -1,0 +1,191 @@
+import { useCallback, useState } from 'react';
+import { useAppStore } from '../stores/appStore';
+import { useGemini } from './useGemini';
+import { StyleOption, ToneOption, VideoStyle, VideoRequestOptions, AppStep } from '../types';
+import { useToast } from '../components/ui/Toast';
+
+export const useGeneration = () => {
+  const { toastError } = useToast();
+  const {
+    currentDealer,
+    selectedImage,
+    generatedPost,
+    preferredTone,
+    setGeneratedPost,
+    setError,
+    setStep,
+  } = useAppStore();
+
+  const { runGeminiTask, loadGeminiService } = useGemini();
+
+  const [lastGenerationParams, setLastGenerationParams] = useState<{
+    style: StyleOption;
+    tone: ToneOption;
+    customerName: string;
+    customText?: string;
+    creativeBrief?: string;
+  } | null>(null);
+
+  const [generationProgress, setGenerationProgress] = useState(0);
+  const [progressMessage, setProgressMessage] = useState('');
+
+  const handleGenerate = useCallback(async (style: StyleOption, tone: ToneOption, customerName: string, customText?: string, creativeBrief?: string) => {
+    if (!selectedImage || !currentDealer) return;
+
+    setStep(AppStep.GENERATING);
+    setError(null);
+    setGenerationProgress(0);
+    setProgressMessage('Analyzing your image...');
+    setLastGenerationParams({ style, tone, customerName, customText, creativeBrief });
+
+    const progressInterval = setInterval(() => {
+      setGenerationProgress(prev => {
+        if (prev >= 90) return prev;
+        return prev + (Math.random() * 5 + 2);
+      });
+    }, 800);
+
+    try {
+      const { generateSocialPost } = await loadGeminiService();
+      
+      setTimeout(() => setProgressMessage('Consulting the style guide...'), 2000);
+      setTimeout(() => setProgressMessage('Crafting the perfect caption...'), 4500);
+      setTimeout(() => setProgressMessage('Applying final polish...'), 7000);
+
+      const result = await runGeminiTask('ai.generate', () =>
+        generateSocialPost(selectedImage, style, tone, currentDealer.name, customerName, currentDealer.logo, customText, creativeBrief)
+      );
+
+      clearInterval(progressInterval);
+      setGenerationProgress(100);
+      setProgressMessage('Complete!');
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      setGeneratedPost(result);
+      setStep(AppStep.RESULT);
+    } catch (err) {
+      clearInterval(progressInterval);
+      const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
+      const fullMsg = `Failed to generate your post. ${errorMessage}`;
+      setError(fullMsg);
+      toastError(fullMsg);
+      setStep(AppStep.CUSTOMIZE);
+    }
+  }, [selectedImage, currentDealer, runGeminiTask, setStep, setError, setGeneratedPost, loadGeminiService, toastError]);
+
+  const handleRegenerateImage = useCallback(async () => {
+    if (!selectedImage || !lastGenerationParams || !currentDealer) return;
+    setError(null);
+    try {
+      const { generateSocialPost } = await loadGeminiService();
+      const result = await runGeminiTask('ai.regenerate.image', () =>
+        generateSocialPost(
+          selectedImage, lastGenerationParams.style, lastGenerationParams.tone,
+          currentDealer.name, lastGenerationParams.customerName, currentDealer.logo,
+          lastGenerationParams.customText || generatedPost?.text,
+          lastGenerationParams.creativeBrief
+        )
+      );
+      setGeneratedPost(result);
+    } catch (err) {
+      const msg = `Failed to regenerate image. ${err instanceof Error ? err.message : String(err)}`;
+      setError(msg);
+      toastError(msg);
+    }
+  }, [selectedImage, lastGenerationParams, currentDealer, generatedPost, runGeminiTask, setGeneratedPost, setError, loadGeminiService, toastError]);
+
+  const handleFunMode = useCallback(async (styleName?: string) => {
+    if (!selectedImage || !currentDealer) return;
+    setError(null);
+    try {
+      const { generateFunSocialPostImage } = await loadGeminiService();
+      const newImage = await runGeminiTask('ai.fun', () =>
+        generateFunSocialPostImage(selectedImage, currentDealer.name, currentDealer.logo, styleName)
+      );
+      if (generatedPost) setGeneratedPost({ ...generatedPost, image: newImage });
+    } catch (err) {
+      const msg = `Failed to generate fun image. ${err instanceof Error ? err.message : String(err)}`;
+      setError(msg);
+      toastError(msg);
+    }
+  }, [selectedImage, currentDealer, generatedPost, runGeminiTask, setGeneratedPost, setError, loadGeminiService, toastError]);
+
+  const handleEditImage = useCallback(async (editPrompt: string) => {
+    if (!generatedPost?.image || !editPrompt.trim() || !currentDealer) return;
+    setError(null);
+    try {
+      const { editSocialPostImage } = await loadGeminiService();
+      const newImage = await runGeminiTask('ai.edit.image', () =>
+        editSocialPostImage(generatedPost.image, editPrompt, currentDealer.name, currentDealer.logo)
+      );
+      if (generatedPost) setGeneratedPost({ ...generatedPost, image: newImage });
+    } catch (err) {
+      const msg = `Failed to apply image edits. ${err instanceof Error ? err.message : String(err)}`;
+      setError(msg);
+      toastError(msg);
+    }
+  }, [generatedPost, currentDealer, runGeminiTask, setGeneratedPost, setError, loadGeminiService, toastError]);
+
+  const handleRegenerateText = useCallback(async () => {
+    if (!selectedImage || !lastGenerationParams || !currentDealer) return;
+    setError(null);
+    try {
+      const { generateSocialPostText } = await loadGeminiService();
+      const newText = await runGeminiTask('ai.regenerate.text', () =>
+        generateSocialPostText(
+          selectedImage, lastGenerationParams.tone, currentDealer.name,
+          lastGenerationParams.customerName, true, lastGenerationParams.creativeBrief
+        )
+      );
+      if (generatedPost) setGeneratedPost({ ...generatedPost, text: newText });
+    } catch (err) {
+      const msg = `Failed to regenerate text. ${err instanceof Error ? err.message : String(err)}`;
+      setError(msg);
+      toastError(msg);
+    }
+  }, [selectedImage, lastGenerationParams, currentDealer, generatedPost, runGeminiTask, setGeneratedPost, setError, loadGeminiService, toastError]);
+
+  const handleEditText = useCallback(async (editPrompt: string) => {
+    if (!generatedPost?.text || !editPrompt.trim()) return;
+    setError(null);
+    try {
+      const { editSocialPostText } = await loadGeminiService();
+      const tone = lastGenerationParams?.tone || preferredTone;
+      const newText = await runGeminiTask('ai.edit.text', () =>
+        editSocialPostText(generatedPost.text, editPrompt, tone)
+      );
+      if (generatedPost) setGeneratedPost({ ...generatedPost, text: newText });
+    } catch (err) {
+      const msg = `Failed to apply text edits. ${err instanceof Error ? err.message : String(err)}`;
+      setError(msg);
+      toastError(msg);
+    }
+  }, [generatedPost, lastGenerationParams, preferredTone, runGeminiTask, setGeneratedPost, setError, loadGeminiService, toastError]);
+
+  const handleGenerateVideo = useCallback(async (style: VideoStyle, options: VideoRequestOptions): Promise<string> => {
+    if (!generatedPost?.image) throw new Error("No image available for video generation");
+    
+    try {
+      const { generatePostVideo } = await loadGeminiService();
+      return await runGeminiTask('ai.generate.video', () =>
+        generatePostVideo(generatedPost.image, style, options)
+      );
+    } catch (err) {
+      const msg = `Failed to generate video. ${err instanceof Error ? err.message : String(err)}`;
+      toastError(msg);
+      throw err;
+    }
+  }, [generatedPost, runGeminiTask, loadGeminiService, toastError]);
+
+  return {
+    generationProgress,
+    progressMessage,
+    handleGenerate,
+    handleRegenerateImage,
+    handleFunMode,
+    handleEditImage,
+    handleRegenerateText,
+    handleEditText,
+    handleGenerateVideo,
+  };
+};

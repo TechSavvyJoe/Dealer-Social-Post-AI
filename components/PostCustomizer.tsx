@@ -28,8 +28,6 @@ interface PostCustomizerProps {
   defaultStyle: StyleOption;
   defaultTone: ToneOption;
   onStyleToneChange: (style: StyleOption, tone: ToneOption) => void;
-  isApiKeyConfigured: boolean;
-  onOpenSettings: () => void;
   isDesktopLayout: boolean;
   isGenerating?: boolean;
 }
@@ -198,8 +196,6 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   defaultStyle,
   defaultTone,
   onStyleToneChange,
-  isApiKeyConfigured,
-  onOpenSettings,
   isDesktopLayout,
   isGenerating = false,
 }) => {
@@ -329,8 +325,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             <Badge variant="primary" size="sm">{style}</Badge>
             <Badge variant="success" size="sm">{tone}</Badge>
             <Badge variant="neutral" size="sm">{captionSource === 'ai' ? 'AI Auto' : captionSource === 'prompted' ? 'AI Remix' : captionSource === 'template' ? 'Template' : 'Custom'}</Badge>
-            <Badge variant={isApiKeyConfigured ? 'success' : 'warning'} size="sm">
-              {isApiKeyConfigured ? 'AI Ready' : 'API Key Needed'}
+            <Badge variant="success" size="sm">
+              AI Ready
             </Badge>
             {(style !== lastSavedStyle || tone !== lastSavedTone) && (
               <span className="text-[11px] text-surface-200/80">New look selected · not generated yet</span>
@@ -540,31 +536,6 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   )}
                 </AnimatePresence>
 
-                {/* API Key Warning */}
-                {!isApiKeyConfigured && (
-                  <motion.div
-                    className="rounded-xl border border-warning-400/30 bg-warning-500/10 px-4 py-3 text-sm flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                  >
-                    <span className="flex items-center gap-2 font-semibold text-warning-300">
-                      <AlertCircle className="h-4 w-4" />
-                      Add your Gemini API key to turn on generation.
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      leftIcon={<Settings />}
-                      onClick={() => {
-                        triggerHapticFeedback();
-                        onOpenSettings();
-                      }}
-                    >
-                      Open Settings
-                    </Button>
-                  </motion.div>
-                )}
-
                 {/* Action Buttons */}
                 <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between pt-2">
                   <Button
@@ -589,15 +560,13 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       leftIcon={<Sparkles className={cn(isBusy && 'animate-pulse')} />}
                       rightIcon={<ChevronRight />}
                       onClick={handleGenerate}
-                      disabled={!isApiKeyConfigured || showPromptWarning || isBusy}
+                      disabled={showPromptWarning || isBusy}
                     >
-                      {isApiKeyConfigured
-                        ? showPromptWarning
+                      {showPromptWarning
                           ? 'Add prompt to generate'
                           : isBusy
                             ? 'Generating...'
-                            : 'Generate hero image & caption'
-                        : 'Add API key to generate'}
+                            : 'Generate hero image & caption'}
                     </Button>
                     <AnimatePresence>
                       {isBusy && (

@@ -21,14 +21,12 @@ interface MainContentProps {
   error: string | null;
   preferredStyle: StyleOption;
   preferredTone: ToneOption;
-  isApiKeyConfigured: boolean;
   isDesktopLayout: boolean;
   generationProgress: number;
   progressMessage: string;
   
   // Handlers
   onLogin: (dealerId: string) => Promise<boolean>;
-  onShowSettings: () => void;
   onImageSelected: (image: string) => void;
   onReset: () => void;
   onGenerate: (style: StyleOption, tone: ToneOption, customerName: string, customText?: string, creativeBrief?: string) => Promise<void>;
@@ -51,12 +49,10 @@ export const MainContent: React.FC<MainContentProps> = ({
   error,
   preferredStyle,
   preferredTone,
-  isApiKeyConfigured,
   isDesktopLayout,
   generationProgress,
   progressMessage,
   onLogin,
-  onShowSettings,
   onImageSelected,
   onReset,
   onGenerate,
@@ -87,8 +83,6 @@ export const MainContent: React.FC<MainContentProps> = ({
           <Suspense fallback={suspenseFallback('Loading login')}>
             <LazyLoginScreen
               onLogin={onLogin}
-              onShowSettings={onShowSettings}
-              isApiKeyConfigured={isApiKeyConfigured}
             />
           </Suspense>
         );
@@ -109,8 +103,6 @@ export const MainContent: React.FC<MainContentProps> = ({
           defaultStyle: preferredStyle,
           defaultTone: preferredTone,
           onStyleToneChange: onStyleToneChange,
-          isApiKeyConfigured,
-          onOpenSettings: onShowSettings,
           isDesktopLayout,
           isGenerating: step === AppStep.GENERATING,
         };

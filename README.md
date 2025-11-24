@@ -8,25 +8,52 @@ This contains everything you need to run your app locally.
 
 View your app in AI Studio: https://ai.studio/apps/drive/1oUQItN2xAWstwviAV2sxEz_GXnXp2MId
 
-## Run Locally
+## Quick Start
 
-**Prerequisites:**  Node.js
+**Prerequisites:** Node.js 18+
 
+1. **Install dependencies:**
+   ```bash
+   npm install
+   ```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+2. **Get your Gemini API key:**
+   - Visit [Google AI Studio](https://aistudio.google.com/app/apikey)
+   - Create and copy your API key
 
-### Configuring the Gemini API key
+3. **Configure your API key:**
+   - Edit `.env.local` file in the project root
+   - Set `GEMINI_API_KEY=your-actual-api-key`
 
-The app now provides two ways to connect your Gemini API key:
+4. **Start the app:**
+   ```bash
+   npm run dev:full
+   ```
+   This starts both the PocketBase backend (port 8090) and Vite frontend (port 5173).
 
-- **Environment variable (recommended for deployments):** create an `.env.local` file with `GEMINI_API_KEY=your-key` before starting the dev server.
-- **In-app Settings:** from the login screen or the signed-in header, open **Settings → Gemini API Key** to paste a key directly in the UI. You can optionally store the key locally on the current device.
+5. **Open your browser:**
+   - Frontend: http://localhost:5173
+   - PocketBase Admin: http://localhost:8090/_/
 
-Leaving the field blank and saving will remove the current key, which is helpful when rotating credentials.
+📖 **For detailed setup instructions, troubleshooting, and more, see [SETUP.md](SETUP.md)**
+
+## Troubleshooting
+
+If you see an error like "Failed to generate image content" or "Something went wrong while processing your request":
+
+1. Make sure your `GEMINI_API_KEY` is set in `.env.local`
+2. Restart PocketBase completely
+3. See [SETUP.md](SETUP.md) for detailed troubleshooting steps
+
+### Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev:full` | Start both backend and frontend (recommended) |
+| `npm run start:backend` | Start PocketBase backend only |
+| `npm run dev` | Start Vite frontend only |
+| `npm run build` | Build for production |
+| `npm run test` | Run tests |
 
 ## Develop & Test
 

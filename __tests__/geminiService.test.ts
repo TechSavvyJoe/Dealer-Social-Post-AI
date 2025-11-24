@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-console.log("TEST FILE IS RUNNING");
 import { generateSocialPost, generatePostVideo } from '../services/geminiService';
 import { StyleOption, ToneOption, VideoStyle } from '../types';
 
@@ -39,7 +38,6 @@ vi.mock('../utils/imageUtils', () => ({
 describe('GeminiService Model Verification', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    import('fs').then(fs => fs.writeFileSync('test_result.txt', 'TEST RAN'));
     
     // Setup default successful responses
     mockGenerateContent.mockResolvedValue({

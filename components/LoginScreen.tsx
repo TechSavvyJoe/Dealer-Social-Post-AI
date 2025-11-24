@@ -10,14 +10,10 @@ import { cn } from '../utils/classNames';
 
 interface LoginScreenProps {
   onLogin: (dealerId: string) => Promise<boolean>;
-  onShowSettings?: () => void;
-  isApiKeyConfigured?: boolean;
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({
   onLogin,
-  onShowSettings,
-  isApiKeyConfigured = false
 }) => {
   const [dealerCode, setDealerCode] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -106,25 +102,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                   Enter Dealer Code
                 </motion.h1>
 
-                {/* API Key Warning */}
-                {!isApiKeyConfigured && (
-                  <motion.div
-                    className={cn(
-                      'bg-warning-500/10 border border-warning-400/30',
-                      'text-warning-300 px-4 py-3 rounded-xl',
-                      'text-sm flex items-start gap-3'
-                    )}
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: 0.2 }}
-                  >
-                    <Settings className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                    <span className="leading-relaxed">
-                      Add your Gemini API key to unlock AI-powered post creation.
-                    </span>
-                  </motion.div>
-                )}
-
                 {/* PIN Dots */}
                 <div className="flex justify-center gap-4 py-4">
                   {[...Array(4)].map((_, i) => (
@@ -158,26 +135,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                   transition={{ delay: 0.4 }}
                 >
                   <Dialpad onKeyPress={handleDialpadKeyPress} />
-                </motion.div>
-
-                {/* Settings Button */}
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.5 }}
-                >
-                  <Button
-                    variant="plain"
-                    size="sm"
-                    leftIcon={<Settings />}
-                    onClick={() => {
-                      triggerHapticFeedback();
-                      onShowSettings?.();
-                    }}
-                    className="w-full"
-                  >
-                    {isApiKeyConfigured ? 'Manage API Key' : 'Add API Key'}
-                  </Button>
                 </motion.div>
               </motion.div>
             )}
