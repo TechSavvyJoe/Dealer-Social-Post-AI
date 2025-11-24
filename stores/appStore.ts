@@ -1,8 +1,14 @@
-import { create } from 'zustand';
-import { AppStep, Dealer, GeneratedPost, StyleOption, ToneOption } from '../types';
-import { loadSession, saveSession, clearSession } from '../utils/persistence';
-import { findDealer } from '../services/database';
-import { logEvent, logError } from '../utils/telemetry';
+import { create } from "zustand";
+import {
+  AppStep,
+  Dealer,
+  GeneratedPost,
+  StyleOption,
+  ToneOption,
+} from "../types";
+import { loadSession, saveSession, clearSession } from "../utils/persistence";
+import { findDealer } from "../services/database";
+import { logEvent, logError } from "../utils/telemetry";
 
 interface AppState {
   // Core State
@@ -11,20 +17,26 @@ interface AppState {
   selectedImage: string | null;
   generatedPost: GeneratedPost | null;
   error: string | null;
-  
+
   // Preferences
   preferredStyle: StyleOption;
   preferredTone: ToneOption;
   compactMode: boolean;
-  
+
   // Actions
   setStep: (step: AppStep) => void;
   setCurrentDealer: (dealer: Dealer | null) => void;
   setSelectedImage: (image: string | null) => void;
   setGeneratedPost: (post: GeneratedPost | null) => void;
   setError: (error: string | null) => void;
-  setPreferences: (prefs: Partial<{ preferredStyle: StyleOption; preferredTone: ToneOption; compactMode: boolean }>) => void;
-  
+  setPreferences: (
+    prefs: Partial<{
+      preferredStyle: StyleOption;
+      preferredTone: ToneOption;
+      compactMode: boolean;
+    }>
+  ) => void;
+
   // Complex Actions
   login: (dealerId: string) => Promise<boolean>;
   logout: () => void;
@@ -46,17 +58,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ step });
     const { currentDealer, generatedPost, selectedImage } = get();
     if (currentDealer) {
-      saveSession({ step, dealerId: currentDealer.id, generatedPost: generatedPost || undefined, selectedImage: selectedImage || undefined });
+      saveSession({
+        step,
+        dealerId: currentDealer.id,
+        generatedPost: generatedPost || undefined,
+        selectedImage: selectedImage || undefined,
+      });
     }
   },
 
   setCurrentDealer: (dealer) => set({ currentDealer: dealer }),
-  
+
   setSelectedImage: (image) => {
     set({ selectedImage: image });
     const { currentDealer, step, generatedPost } = get();
     if (currentDealer) {
-      saveSession({ selectedImage: image || undefined, dealerId: currentDealer.id, step, generatedPost: generatedPost || undefined });
+      saveSession({
+        selectedImage: image || undefined,
+        dealerId: currentDealer.id,
+        step,
+        generatedPost: generatedPost || undefined,
+      });
     }
   },
 
@@ -64,7 +86,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ generatedPost: post });
     const { currentDealer, step, selectedImage } = get();
     if (currentDealer) {
-      saveSession({ generatedPost: post || undefined, dealerId: currentDealer.id, step, selectedImage: selectedImage || undefined });
+      saveSession({
+        generatedPost: post || undefined,
+        dealerId: currentDealer.id,
+        step,
+        selectedImage: selectedImage || undefined,
+      });
     }
   },
 
@@ -86,21 +113,23 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (dealer) {
         // Handle logo URL conversion if needed (logic moved from App.tsx)
         // For now assuming findDealer handles it or it's fine
-        
-        const targetStep = dealer.id === '0000' ? AppStep.ADMIN : AppStep.CAPTURE;
-        
-        set({ 
-          currentDealer: dealer, 
-          step: targetStep, 
-          error: null 
+
+        // Check if this is an admin login by dealer code (not ID)
+        const targetStep =
+          dealer.code === "0000" ? AppStep.ADMIN : AppStep.CAPTURE;
+
+        set({
+          currentDealer: dealer,
+          step: targetStep,
+          error: null,
         });
 
         saveSession({
           dealerId: dealer.id,
           step: targetStep,
-          loginTimestamp: Date.now()
+          loginTimestamp: Date.now(),
         });
-        
+
         return true;
       }
       return false;
@@ -116,7 +145,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedImage: null,
       generatedPost: null,
       error: null,
-      step: AppStep.LOGIN
+      step: AppStep.LOGIN,
     });
     clearSession();
   },
@@ -126,7 +155,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       generatedPost: null,
       selectedImage: null,
       error: null,
-      step: AppStep.CAPTURE
+      step: AppStep.CAPTURE,
     });
     // Don't clear session entirely, just reset flow
     const { currentDealer } = get();
@@ -145,19 +174,26 @@ export const useAppStore = create<AppState>((set, get) => ({
             currentDealer: dealer,
             selectedImage: session.selectedImage || null,
             generatedPost: session.generatedPost || null,
-            step: (typeof session.step === 'number' ? session.step : (session.generatedPost ? AppStep.RESULT : AppStep.CAPTURE)) as AppStep,
-            compactMode: session.compactMode ?? false
+            step: (typeof session.step === "number"
+              ? session.step
+              : session.generatedPost
+              ? AppStep.RESULT
+              : AppStep.CAPTURE) as AppStep,
+            compactMode: session.compactMode ?? false,
           });
-          logEvent('app.session.restored', { step: session.step, dealer: dealer.id });
+          logEvent("app.session.restored", {
+            step: session.step,
+            dealer: dealer.id,
+          });
         } else {
           clearSession();
         }
       } catch (error) {
         clearSession();
-        logError('app.session.restoreFailed', { message: String(error) });
+        logError("app.session.restoreFailed", { message: String(error) });
       }
     } else if (session?.compactMode !== undefined) {
       set({ compactMode: session.compactMode });
     }
-  }
+  },
 }));
