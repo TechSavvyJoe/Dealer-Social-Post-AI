@@ -289,8 +289,8 @@ const AppContent: React.FC = () => {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        apiKey={apiKey || ''}
-        onSave={handleSettingsSave}
+        compactMode={compactMode}
+        onToggleCompactMode={(value) => setPreferences({ compactMode: value })}
       />
 
       <ImageCropModal

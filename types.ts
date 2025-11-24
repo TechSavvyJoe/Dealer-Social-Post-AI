@@ -68,6 +68,7 @@ export interface Dealer {
   id: string; // unique identifier
   name: string;
   logo?: string; // base64 data URL
+  code?: string; // 4-digit login code (optional, for admin display)
 }
 
 // FIX: Added User interface to resolve import error in UserModal.tsx.
@@ -79,8 +80,8 @@ export interface User {
 
 export interface VideoRequestOptions {
   durationSeconds: number;
-  soundtrack: 'none' | 'celebration' | 'cinematic' | 'anthemic' | 'funk';
-  aspectPreference: 'auto' | '16:9' | '9:16' | '1:1';
-  resolution: '720p' | '1080p';
-  pacing: 'cinematic' | 'snappy';
+  soundtrack: "none" | "celebration" | "cinematic" | "anthemic" | "funk";
+  aspectPreference: "auto" | "16:9" | "9:16" | "1:1";
+  resolution: "720p" | "1080p";
+  pacing: "cinematic" | "snappy";
 }
