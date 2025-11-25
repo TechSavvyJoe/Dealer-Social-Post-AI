@@ -1,13 +1,14 @@
-import React from 'react';
-import { AnimatePresence } from 'framer-motion';
-import { Header } from './components/Header';
-import { MainContent } from './components/MainContent';
-import { SettingsModal } from './components/SettingsModal';
-import { ImageCropModal } from './components/ImageCropModal';
-import { VideoDirectorModal } from './components/VideoDirectorModal';
-import { ToastProvider } from './components/ui/Toast';
-import { useAppController } from './hooks/useAppController';
-import { AppStep } from './types';
+// Cache bust: 1
+import React from "react";
+import { AnimatePresence } from "framer-motion";
+import { Header } from "./components/Header";
+import { MainContent } from "./components/MainContent";
+import { SettingsModal } from "./components/SettingsModal";
+import { ImageCropModal } from "./components/ImageCropModal";
+import { VideoDirectorModal } from "./components/VideoDirectorModal";
+import { ToastProvider } from "./components/ui/Toast";
+import { useAppController } from "./hooks/useAppController";
+import { AppStep } from "./types";
 
 const AppContent: React.FC = () => {
   const {
@@ -49,14 +50,18 @@ const AppContent: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 font-sans selection:bg-indigo-500/30">
       {currentDealer && (
-        <Header 
-          dealer={currentDealer} 
-          onLogout={() => logout()} 
+        <Header
+          dealer={currentDealer}
+          onLogout={() => logout()}
           onShowSettings={() => setIsSettingsOpen(true)}
         />
       )}
 
-      <main className={`transition-all duration-500 ease-in-out ${compactMode ? 'pt-16' : 'pt-24'} pb-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto h-[calc(100vh-4rem)]`}>
+      <main
+        className={`transition-all duration-500 ease-in-out ${
+          compactMode ? "pt-16" : "pt-24"
+        } pb-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto h-[calc(100vh-4rem)]`}
+      >
         <AnimatePresence mode="wait">
           <MainContent
             key="main-content"
@@ -100,13 +105,13 @@ const AppContent: React.FC = () => {
         imageSrc={tempImageForCrop}
         onConfirm={handleCropConfirm}
       />
-      
+
       <VideoDirectorModal
         isOpen={isVideoDirectorOpen}
         onClose={() => setIsVideoDirectorOpen(false)}
         onSelectStyle={(style, options) => {
-           // This is handled inside PostResult usually, but if we needed a global modal:
-           setIsVideoDirectorOpen(false);
+          // This is handled inside PostResult usually, but if we needed a global modal:
+          setIsVideoDirectorOpen(false);
         }}
       />
     </div>

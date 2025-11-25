@@ -16,7 +16,7 @@ async function listDealers() {
     console.log(`Found ${records.length} dealers:`);
     records.forEach((r) => {
       console.log(
-        `- Name: ${r.name}, ID: ${r.id}, Code: ${r.code}, Logo: ${r.logo}, LogoFile: ${r.logo_file}`
+        `- Name: ${r.name}, ID: ${r.id}, Code: ${r.code}, Logo: ${r.logo}`
       );
     });
   } catch (error) {
