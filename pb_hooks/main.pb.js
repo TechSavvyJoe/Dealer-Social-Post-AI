@@ -3,7 +3,7 @@
  * It allows the frontend to send requests to a path like `/api/proxy/v1beta/models/gemini-pro:generateContent`,
  * and the hook will forward the request to the Google API with the secret API key.
  */
-routerAdd("GET,POST", "/api/proxy/:path(*)", (c) => {
+const proxyHandler = (c) => {
   const GOOGLE_API_URL_BASE = "https://generativelanguage.googleapis.com/";
   const apiKey = $os.getenv("GEMINI_API_KEY");
 
@@ -12,13 +12,29 @@ routerAdd("GET,POST", "/api/proxy/:path(*)", (c) => {
     return c.json(500, { error: "API key is not configured on the server." });
   }
 
-  const path = c.pathParams.path;
+  let path = c.pathParams.path;
+
+  // Fallback: manual extraction if wildcard param fails
+  if (!path) {
+    const fullPath = c.request().url.path;
+    if (fullPath.startsWith("/api/proxy/")) {
+      path = fullPath.substring("/api/proxy/".length);
+    }
+  }
+
+  console.log(
+    `[Proxy] Request: ${c.request().method} ${
+      c.request().url.path
+    }, Path param: ${c.pathParams.path}, Extracted: ${path}`
+  );
+
   if (!path) {
     return c.json(400, { error: "Missing Gemini API path." });
   }
 
   const requestInfo = $apis.requestInfo(c);
   const targetUrl = `${GOOGLE_API_URL_BASE}${path}?key=${apiKey}`;
+  console.log(`[Proxy] Forwarding to: ${targetUrl.replace(apiKey, "HIDDEN")}`);
 
   try {
     const res = $http.send({
@@ -27,31 +43,25 @@ routerAdd("GET,POST", "/api/proxy/:path(*)", (c) => {
       body:
         requestInfo.method === "POST" ? JSON.stringify(requestInfo.data) : "",
       headers: { "Content-Type": "application/json" },
-      timeout: 300, // 5 minutes for complex/long-running operations
+      timeout: 300, // 5 minutes
     });
 
-    Object.entries(res.headers).forEach(([key, value]) => {
-      if (
-        ["content-encoding", "transfer-encoding", "content-length"].includes(
-          key.toLowerCase()
-        )
-      )
-        return;
-      c.res.header().set(key, value);
-    });
-    c.res.setStatusCode(res.statusCode);
-    return c.res.send(res.raw);
+    console.log(`[Proxy] Upstream status: ${res.statusCode}`);
+
+    // Skip header forwarding for now to avoid API issues
+    return c.json(res.statusCode, res.json || { raw: res.raw });
   } catch (err) {
-    console.error(
-      `Error proxying ${requestInfo.method} request to Gemini:`,
-      err
-    );
+    console.error(`[Proxy] Error:`, err);
     return c.json(500, {
       error: `Failed to proxy ${requestInfo.method} request to Gemini API.`,
       details: err.toString(),
     });
   }
-});
+};
+
+// Register routes separately
+routerAdd("GET", "/api/proxy/:path(*)", proxyHandler);
+routerAdd("POST", "/api/proxy/:path(*)", proxyHandler);
 
 routerAdd("POST", "/api/telemetry", (c) => {
   try {
