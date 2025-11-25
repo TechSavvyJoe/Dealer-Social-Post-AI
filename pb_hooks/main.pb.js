@@ -5,7 +5,7 @@
  */
 routerAdd("GET,POST", "/api/proxy/:path(*)", (c) => {
   const GOOGLE_API_URL_BASE = "https://generativelanguage.googleapis.com/";
-  const apiKey = os.getenv("GEMINI_API_KEY");
+  const apiKey = $os.getenv("GEMINI_API_KEY");
 
   if (!apiKey) {
     console.error("GEMINI_API_KEY environment variable is not set.");
@@ -68,28 +68,65 @@ routerAdd("POST", "/api/telemetry", (c) => {
 });
 
 routerAdd("GET", "/api/debug/models", (c) => {
-  const apiKey = os.getenv("GEMINI_API_KEY");
-  if (!apiKey) return c.json(500, { error: "No API key" });
+  try {
+    const apiKey = $os.getenv("GEMINI_API_KEY");
+    if (!apiKey) return c.json(500, { error: "No API key" });
 
-  const versions = ["v1beta", "v1alpha"];
-  const results = {};
+    const versions = ["v1beta", "v1alpha"];
+    const results = {};
 
-  for (const v of versions) {
-    try {
-      const res = $http.send({
-        url: `https://generativelanguage.googleapis.com/${v}/models?key=${apiKey}`,
-        method: "GET",
-        timeout: 5,
-      });
-      if (res.statusCode === 200) {
-        results[v] = res.json;
-      } else {
-        results[v] = { error: res.statusCode, body: res.raw };
+    for (const v of versions) {
+      try {
+        const res = $http.send({
+          url: `https://generativelanguage.googleapis.com/${v}/models?key=${apiKey}`,
+          method: "GET",
+          timeout: 10,
+        });
+        // Try to parse JSON, fallback to raw string
+        try {
+          results[v] = res.json;
+        } catch (e) {
+          results[v] = { raw: res.raw, parseError: e.toString() };
+        }
+      } catch (e) {
+        results[v] = { requestError: e.toString() };
       }
-    } catch (e) {
-      results[v] = { error: e.toString() };
     }
-  }
 
-  return c.json(200, results);
+    return c.json(200, results);
+  } catch (err) {
+    return c.json(500, { error: "Handler failed", details: err.toString() });
+  }
+});
+
+routerAdd("GET", "/api/debug/generate", (c) => {
+  try {
+    const apiKey = $os.getenv("GEMINI_API_KEY");
+    const model = c.queryParam("model") || "gemini-1.5-pro";
+    const version = c.queryParam("version") || "v1beta";
+
+    const res = $http.send({
+      url: `https://generativelanguage.googleapis.com/${version}/models/${model}:generateContent?key=${apiKey}`,
+      method: "POST",
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: "Hello" }] }],
+      }),
+      headers: { "Content-Type": "application/json" },
+      timeout: 10,
+    });
+
+    // Handle response body safely
+    let body = res.raw;
+    try {
+      body = res.json;
+    } catch (e) {}
+
+    return c.json(res.statusCode, {
+      statusCode: res.statusCode,
+      body: body,
+      headers: res.headers,
+    });
+  } catch (err) {
+    return c.json(500, { error: err.toString() });
+  }
 });
