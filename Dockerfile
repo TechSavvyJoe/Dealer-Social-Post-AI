@@ -7,13 +7,15 @@ COPY . .
 RUN npm run build
 
 # Stage 2: Setup PocketBase
-FROM alpine:latest
+FROM ubuntu:latest
 
-ARG PB_VERSION=0.22.21
+ARG PB_VERSION=0.22.22
 
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y \
     unzip \
-    ca-certificates
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Download and unzip PocketBase
 ADD https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip /tmp/pb.zip
@@ -28,4 +30,8 @@ COPY pb_hooks /pb/pb_hooks
 EXPOSE 8090
 
 # Start PocketBase with hooks enabled
-CMD ["/pb/pocketbase", "serve", "--http=0.0.0.0:8090", "--hooksDir=/pb/pb_hooks", "--dir=/pb/pb_data"]
+COPY entrypoint.sh /pb/entrypoint.sh
+RUN chmod +x /pb/entrypoint.sh
+
+# Start PocketBase with hooks enabled
+CMD ["/pb/entrypoint.sh"]
