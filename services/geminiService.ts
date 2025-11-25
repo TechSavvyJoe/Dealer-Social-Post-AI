@@ -99,7 +99,7 @@ export const generateFunSocialPostImage = async (
   const imageResponse = await client.models.generateContent({
     model: "gemini-1.5-pro",
     contents: { parts: imageParts },
-    config: {
+    generationConfig: {
       responseModalities: [Modality.IMAGE],
     },
   });
@@ -148,7 +148,7 @@ export const editSocialPostImage = async (
     contents: {
       parts: imageParts,
     },
-    config: {
+    generationConfig: {
       responseModalities: [Modality.IMAGE],
     },
   });
@@ -292,7 +292,7 @@ export const generateSocialPost = async (
     .generateContent({
       model: "gemini-3-pro-image-preview",
       contents: { parts: imageParts },
-      config: { responseModalities: [Modality.IMAGE] },
+      generationConfig: { responseModalities: [Modality.IMAGE] },
     })
     .catch((error) => {
       throw new Error(
