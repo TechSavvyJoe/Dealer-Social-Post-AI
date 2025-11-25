@@ -55,12 +55,41 @@ routerAdd("GET,POST", "/api/proxy/:path(*)", (c) => {
 
 routerAdd("POST", "/api/telemetry", (c) => {
   try {
-    const data = c.request().json();
-    // Log to server console for now
-    console.log("[Telemetry]", JSON.stringify(data));
+    // Read body as text first to avoid JSON parsing errors on empty body
+    const rawBody = $apis.requestInfo(c).data;
+    // Log to server console
+    console.log("[Telemetry]", JSON.stringify(rawBody));
     return c.json(200, { success: true });
   } catch (err) {
     console.error("Telemetry error:", err);
-    return c.json(500, { error: "Failed to process telemetry" });
+    // Return 200 even on error to prevent client noise, but log the error
+    return c.json(200, { success: false, error: err.toString() });
   }
+});
+
+routerAdd("GET", "/api/debug/models", (c) => {
+  const apiKey = os.getenv("GEMINI_API_KEY");
+  if (!apiKey) return c.json(500, { error: "No API key" });
+
+  const versions = ["v1beta", "v1alpha"];
+  const results = {};
+
+  for (const v of versions) {
+    try {
+      const res = $http.send({
+        url: `https://generativelanguage.googleapis.com/${v}/models?key=${apiKey}`,
+        method: "GET",
+        timeout: 5,
+      });
+      if (res.statusCode === 200) {
+        results[v] = res.json;
+      } else {
+        results[v] = { error: res.statusCode, body: res.raw };
+      }
+    } catch (e) {
+      results[v] = { error: e.toString() };
+    }
+  }
+
+  return c.json(200, results);
 });
