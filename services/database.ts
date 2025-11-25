@@ -22,9 +22,10 @@ export const getAllDealers = async (): Promise<Dealer[]> => {
 
     return records.map((record) => {
       // Check if there is an uploaded file
-      const logoUrl = record.logo_file
-        ? pb.files.getUrl(record, record.logo_file)
-        : record.logo;
+      const logoUrl =
+        record.logo && !record.logo.startsWith("http")
+          ? pb.files.getUrl(record, record.logo)
+          : record.logo;
 
       return {
         id: record.id,
@@ -52,9 +53,10 @@ export const findDealer = async (
     const record = await pb
       .collection(COLLECTION_NAME)
       .getFirstListItem(`code="${dealerCode}"`);
-    const logoUrl = record.logo_file
-      ? pb.files.getUrl(record, record.logo_file)
-      : record.logo;
+    const logoUrl =
+      record.logo && !record.logo.startsWith("http")
+        ? pb.files.getUrl(record, record.logo)
+        : record.logo;
 
     return {
       id: record.id,
@@ -87,9 +89,10 @@ export const addDealer = async (
 ): Promise<Dealer> => {
   try {
     const record = await pb.collection(COLLECTION_NAME).create(dealer);
-    const logoUrl = record.logo_file
-      ? pb.files.getUrl(record, record.logo_file)
-      : record.logo;
+    const logoUrl =
+      record.logo && !record.logo.startsWith("http")
+        ? pb.files.getUrl(record, record.logo)
+        : record.logo;
 
     return {
       id: record.id,
@@ -109,9 +112,10 @@ export const updateDealer = async (dealer: Dealer): Promise<Dealer> => {
       name: dealer.name,
       logo: dealer.logo,
     });
-    const logoUrl = record.logo_file
-      ? pb.files.getUrl(record, record.logo_file)
-      : record.logo;
+    const logoUrl =
+      record.logo && !record.logo.startsWith("http")
+        ? pb.files.getUrl(record, record.logo)
+        : record.logo;
 
     return {
       id: record.id,
@@ -136,9 +140,10 @@ export const addDealerWithFile = async (
   try {
     const record = await pb.collection(COLLECTION_NAME).create(formData);
 
-    const logoUrl = record.logo_file
-      ? pb.files.getUrl(record, record.logo_file)
-      : record.logo;
+    const logoUrl =
+      record.logo && !record.logo.startsWith("http")
+        ? pb.files.getUrl(record, record.logo)
+        : record.logo;
 
     return {
       id: record.id,
