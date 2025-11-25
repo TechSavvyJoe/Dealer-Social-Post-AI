@@ -97,7 +97,7 @@ export const generateFunSocialPostImage = async (
 
   const client = getGeminiClient();
   const imageResponse = await client.models.generateContent({
-    model: "gemini-1.5-pro",
+    model: "gemini-3-pro-preview",
     contents: { parts: imageParts },
     generationConfig: {
       responseModalities: [Modality.IMAGE],
@@ -144,7 +144,7 @@ export const editSocialPostImage = async (
 
   const client = getGeminiClient();
   const imageResponse = await client.models.generateContent({
-    model: "gemini-1.5-pro",
+    model: "gemini-3-pro-preview",
     contents: {
       parts: imageParts,
     },
@@ -189,7 +189,7 @@ export const generateSocialPostText = async (
 
   const client = getGeminiClient();
   const textResponse = await client.models.generateContent({
-    model: "gemini-1.5-pro",
+    model: "gemini-3-pro-preview",
     contents: { parts: [imagePart, { text: textPrompt }] },
   });
 
@@ -209,7 +209,7 @@ export const editSocialPostText = async (
 
   const client = getGeminiClient();
   const textResponse = await client.models.generateContent({
-    model: "gemini-1.5-pro",
+    model: "gemini-3-pro-preview",
     contents: { parts: [{ text: prompt }] },
   });
 

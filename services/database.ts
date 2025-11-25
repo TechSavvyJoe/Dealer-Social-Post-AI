@@ -24,7 +24,7 @@ export const getAllDealers = async (): Promise<Dealer[]> => {
       // Check if there is an uploaded file
       const logoUrl =
         record.logo && !record.logo.startsWith("http")
-          ? pb.files.getUrl(record, record.logo)
+          ? pb.files.getURL(record, record.logo)
           : record.logo;
 
       return {
@@ -55,7 +55,7 @@ export const findDealer = async (
       .getFirstListItem(`code="${dealerCode}"`);
     const logoUrl =
       record.logo && !record.logo.startsWith("http")
-        ? pb.files.getUrl(record, record.logo)
+        ? pb.files.getURL(record, record.logo)
         : record.logo;
 
     return {
@@ -91,7 +91,7 @@ export const addDealer = async (
     const record = await pb.collection(COLLECTION_NAME).create(dealer);
     const logoUrl =
       record.logo && !record.logo.startsWith("http")
-        ? pb.files.getUrl(record, record.logo)
+        ? pb.files.getURL(record, record.logo)
         : record.logo;
 
     return {
@@ -114,7 +114,7 @@ export const updateDealer = async (dealer: Dealer): Promise<Dealer> => {
     });
     const logoUrl =
       record.logo && !record.logo.startsWith("http")
-        ? pb.files.getUrl(record, record.logo)
+        ? pb.files.getURL(record, record.logo)
         : record.logo;
 
     return {
@@ -142,7 +142,7 @@ export const addDealerWithFile = async (
 
     const logoUrl =
       record.logo && !record.logo.startsWith("http")
-        ? pb.files.getUrl(record, record.logo)
+        ? pb.files.getURL(record, record.logo)
         : record.logo;
 
     return {
