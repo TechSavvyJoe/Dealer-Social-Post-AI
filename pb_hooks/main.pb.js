@@ -22,52 +22,61 @@ const proxyHandler = (c) => {
     }
   }
 
-  console.log(
-    `[Proxy] Request: ${c.request().method} ${
-      c.request().url.path
-    }, Path param: ${c.pathParams.path}, Extracted: ${path}`
-  );
-
   if (!path) {
     return c.json(400, { error: "Missing Gemini API path." });
   }
 
   const requestInfo = $apis.requestInfo(c);
-  // Fix: Check if path already has query params before appending key
-  const separator = path.includes("?") ? "&" : "?";
-  const targetUrl = `${GOOGLE_API_URL_BASE}${path}${separator}key=${apiKey}`;
 
-  console.log(`[Proxy] Forwarding to: ${targetUrl.replace(apiKey, "HIDDEN")}`);
+  // Build target URL, preserve incoming query params, and append API key.
+  const target = new URL(path, GOOGLE_API_URL_BASE);
+  const query = requestInfo.query || {};
+  Object.entries(query).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      value.forEach((v) => target.searchParams.append(key, String(v)));
+    } else if (value !== undefined && value !== null) {
+      target.searchParams.append(key, String(value));
+    }
+  });
+  target.searchParams.set("key", apiKey);
+
+  console.log(
+    `[Proxy] ${requestInfo.method} ${target.toString().replace(apiKey, "HIDDEN")}`
+  );
 
   try {
     const res = $http.send({
-      url: targetUrl,
+      url: target.toString(),
       method: requestInfo.method,
       body:
-        requestInfo.method === "POST" ? JSON.stringify(requestInfo.data) : "",
+        requestInfo.method === "POST" && requestInfo.data
+          ? JSON.stringify(requestInfo.data)
+          : "",
       headers: { "Content-Type": "application/json" },
-      timeout: 120, // 120 seconds
+      timeout: 300000, // 5 minutes
     });
 
     console.log(`[Proxy] Upstream status: ${res.statusCode}`);
 
-    // Fix: Do not force JSON response for everything.
-    // If the response is JSON, return it as JSON.
-    // Otherwise, return the raw body (e.g. for binary downloads).
-    // Note: $http.send in PocketBase returns 'raw' as string.
-    // For binary, this might still be problematic if not handled as bytes,
-    // but avoiding c.json() wrapper is the first step.
+    const clientResponse = c.response();
+    clientResponse.status = res.statusCode;
 
-    const contentType =
-      res.headers["Content-Type"] || res.headers["content-type"] || "";
-
-    if (contentType.includes("application/json")) {
-      return c.json(res.statusCode, res.json || { raw: res.raw });
-    } else {
-      // Forward the raw body and content type for non-JSON (e.g. video/image)
-      c.response().header().set("Content-Type", contentType);
-      return c.string(res.statusCode, res.raw);
+    // Forward headers for downstream consumers (e.g., content-type).
+    if (res.headers) {
+      Object.entries(res.headers).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          clientResponse.header(key, String(value));
+        }
+      });
     }
+
+    const body =
+      res.body ??
+      res.raw ??
+      (res.json ? JSON.stringify(res.json) : "");
+
+    clientResponse.body = body;
+    return clientResponse;
   } catch (err) {
     console.error(`[Proxy] Error:`, err);
     return c.json(500, {

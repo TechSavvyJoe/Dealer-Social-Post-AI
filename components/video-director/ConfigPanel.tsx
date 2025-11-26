@@ -45,7 +45,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ values, onChange }) =>
 
         <div className="rounded-xl border border-white/10 bg-slate-900/80 p-4">
           <h3 className="text-sm font-semibold text-white mb-3">Soundtrack</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-1 gap-2">
+          <div className="grid grid-cols-1 gap-2">
             {soundtracks.map(({ value, label, description }) => (
               <button
                 key={value}
@@ -65,7 +65,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ values, onChange }) =>
 
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-xl border border-white/10 bg-slate-900/80 p-4">
-          <h3 className="text-sm font-semibold text-white mb-3">Aspect & framing</h3>
+          <h3 className="text-sm font-semibold text-white mb-3">Aspect</h3>
           <div className="flex flex-col gap-2">
             {aspectRatios.map(({ value, label, description }) => (
               <button
@@ -103,7 +103,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ values, onChange }) =>
         </div>
 
         <div className="rounded-xl border border-white/10 bg-slate-900/80 p-4">
-          <h3 className="text-sm font-semibold text-white mb-3">Motion pacing</h3>
+          <h3 className="text-sm font-semibold text-white mb-3">Motion</h3>
           <div className="flex flex-col gap-2">
             {pacingOptions.map(({ value, label, description }) => (
               <button

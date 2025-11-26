@@ -78,14 +78,17 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
             alt="Preview"
             className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-2xl"
           />
-        </div>
+                </div>
 
-        {/* Action Buttons - Enhanced visibility */}
-        <div className="px-6 py-6 bg-surface-800/80 border-t border-white/20">
-          <div className="flex gap-4 justify-center">
-            <button
-              onClick={handleRetake}
-              className="px-8 py-4 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold text-lg
+                {/* Action Buttons - Enhanced visibility */}
+                <div className="px-6 py-6 bg-surface-800/80 border-t border-white/20">
+                    <p className="text-center text-surface-300 text-sm mb-4">
+                        Confirm this photo or retake; cropping is not applied in this preview.
+                    </p>
+                    <div className="flex gap-4 justify-center">
+                        <button
+                            onClick={handleRetake}
+                            className="px-8 py-4 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold text-lg
                                      transition-all shadow-lg hover:shadow-xl border border-white/20 hover:border-white/30
                                      min-w-[160px]"
             >

@@ -4,16 +4,12 @@ import { IconProps } from '../Icons';
 export const durations = [
   { value: 4, label: '4 seconds', description: 'Perfect for looping stories and reels.' },
   { value: 6, label: '6 seconds', description: 'Adds room for dramatic reveals.' },
-  { value: 8, label: '8 seconds', description: 'Balanced length for social + ads.' },
-  { value: 10, label: '10 seconds', description: 'More space for cinematic pacing.' },
 ];
 
 export const soundtracks: Array<{ value: VideoRequestOptions['soundtrack']; label: string; description: string }> = [
-  { value: 'none', label: 'No soundtrack', description: 'Silence — bring your own vibe.' },
   { value: 'celebration', label: 'Celebration beat', description: 'Upbeat claps and synth pulses.' },
   { value: 'cinematic', label: 'Cinematic swell', description: 'Ambient pads with a smooth rise.' },
-  { value: 'anthemic', label: 'Anthemic hype', description: 'Modern stadium drums and buildups.' },
-  { value: 'funk', label: 'Funky groove', description: 'Bass-forward groove with swagger.' },
+  { value: 'none', label: 'No soundtrack', description: 'Silence — bring your own vibe.' },
 ];
 
 export const styles: { style: VideoStyle; icon: IconProps['type']; description: string }[] = [
@@ -41,9 +37,8 @@ export const styles: { style: VideoStyle; icon: IconProps['type']; description: 
 
 export const aspectRatios: Array<{ value: VideoRequestOptions['aspectPreference']; label: string; description: string }> = [
   { value: 'auto', label: 'Match photo', description: 'Auto-detect landscape or vertical.' },
-  { value: '16:9', label: 'Widescreen 16:9', description: 'Best for YouTube & horizontal ads.' },
-  { value: '9:16', label: 'Vertical 9:16', description: 'Ideal for Reels, Shorts, and TikTok.' },
-  { value: '1:1', label: 'Square 1:1', description: 'Great for grid posts and feeds.' },
+  { value: '9:16', label: 'Vertical', description: 'Ideal for Reels, Shorts, and TikTok.' },
+  { value: '16:9', label: 'Widescreen', description: 'Best for YouTube & horizontal ads.' },
 ];
 
 export const resolutions: Array<{ value: VideoRequestOptions['resolution']; label: string; description: string }> = [
@@ -59,17 +54,12 @@ export const pacingOptions: Array<{ value: VideoRequestOptions['pacing']; label:
 export const presets = [
   {
     label: 'Story mode',
-    description: '9:16 · 6s · snappy · celebration · 1080p',
+    description: '9:16 · 6s · celebration · snappy',
     values: { durationSeconds: 6, soundtrack: 'celebration' as const, aspectPreference: '9:16' as const, resolution: '1080p' as const, pacing: 'snappy' as const },
   },
   {
-    label: 'Hero ad',
-    description: '16:9 · 10s · cinematic · anthemic · 1080p',
-    values: { durationSeconds: 10, soundtrack: 'anthemic' as const, aspectPreference: '16:9' as const, resolution: '1080p' as const, pacing: 'cinematic' as const },
-  },
-  {
-    label: 'Square feed',
-    description: '1:1 · 8s · funk · cinematic · 720p',
-    values: { durationSeconds: 8, soundtrack: 'funk' as const, aspectPreference: '1:1' as const, resolution: '720p' as const, pacing: 'cinematic' as const },
+    label: 'Hero widescreen',
+    description: '16:9 · 6s · cinematic · 1080p',
+    values: { durationSeconds: 6, soundtrack: 'cinematic' as const, aspectPreference: '16:9' as const, resolution: '1080p' as const, pacing: 'cinematic' as const },
   },
 ];

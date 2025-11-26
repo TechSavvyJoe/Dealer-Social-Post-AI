@@ -4,7 +4,6 @@ import ReactDOM from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { getQueryClient } from "./services/queryClient";
-import { ToastProvider } from "./components/ui/Toast";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 // Auto-reload on chunk load failure (e.g. after deployment)
@@ -27,16 +26,14 @@ const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
     <QueryClientProvider client={getQueryClient()}>
-      <ToastProvider>
-        <ErrorBoundary>
-          <App />
-        </ErrorBoundary>
-        {import.meta.env.DEV && (
-          <Suspense fallback={null}>
-            <ReactQueryDevtools initialIsOpen={false} />
-          </Suspense>
-        )}
-      </ToastProvider>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+      {import.meta.env.DEV && (
+        <Suspense fallback={null}>
+          <ReactQueryDevtools initialIsOpen={false} />
+        </Suspense>
+      )}
     </QueryClientProvider>
   </React.StrictMode>
 );
