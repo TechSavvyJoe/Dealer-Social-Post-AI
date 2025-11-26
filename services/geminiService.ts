@@ -1,5 +1,5 @@
 // FIX: Replaced 'GenerateVideosOperationResponse' with the correct 'GenerateVideosOperation' type.
-import { GoogleGenAI, Modality, GenerateVideosOperation } from "@google/genai";
+import { GoogleGenAI, GenerateVideosOperation } from "@google/genai";
 import { parseDataUrl, urlToDataUrl } from "../utils/imageUtils";
 import {
   StyleOption,
@@ -100,7 +100,7 @@ export const generateFunSocialPostImage = async (
     model: "gemini-3-pro-preview",
     contents: { parts: imageParts },
     generationConfig: {
-      responseModalities: [Modality.IMAGE],
+      responseModalities: ["IMAGE" as any],
     },
   });
 
@@ -149,7 +149,7 @@ export const editSocialPostImage = async (
       parts: imageParts,
     },
     generationConfig: {
-      responseModalities: [Modality.IMAGE],
+      responseModalities: ["IMAGE" as any],
     },
   });
 
@@ -292,7 +292,7 @@ export const generateSocialPost = async (
     .generateContent({
       model: "gemini-3-pro-image-preview",
       contents: { parts: imageParts },
-      generationConfig: { responseModalities: [Modality.IMAGE] },
+      generationConfig: { responseModalities: ["IMAGE" as any] },
     })
     .catch((error) => {
       throw new Error(
@@ -377,9 +377,9 @@ export const generatePostVideo = async (
       while (!operation.done) {
         await new Promise((resolve) => setTimeout(resolve, 10000)); // Poll every 10 seconds
         // Cast to any to bypass strict type check on the mock client return
-        operation = await videoAi.operations.getVideosOperation({
+        operation = (await videoAi.operations.getVideosOperation({
           operation: operation as any,
-        });
+        })) as any;
       }
 
       if (operation.error) {
@@ -414,29 +414,39 @@ export const generatePostVideo = async (
       // We can use the proxy to fetch the video content.
 
       const downloadUrl = downloadLink;
-      // We'll use our proxy's fetchFromProxy to get the blob, but fetchFromProxy expects a path relative to API.
-      // The downloadLink is a full URL.
-      // We need to use a new method or modify fetchFromProxy to handle full URLs if we want to use the server key.
-      // OR, we can use the `requireGeminiApiKey` if we decide to expose it, but we said we wouldn't.
-      // Let's use a temporary workaround: The mock client doesn't expose a generic "fetch with key" method.
-      // I will use a direct fetch for now, assuming the link might work, OR I need to fix this properly.
-      // Actually, the error `Cannot find name 'apiKey'` confirms `apiKey` is gone.
-      // Let's comment out the key appending for now and see if the link works (it might be pre-signed).
-      // If not, we'll need to add a proxy endpoint for video downloads.
+      let finalVideoUrl = downloadUrl;
 
-      // const url = new URL(downloadLink);
-      // url.searchParams.set("key", apiKey);
-      // downloadUrl = url.toString();
+      // If the URL is a Google API URL, we need to proxy it to attach the key
+      if (downloadUrl.includes("generativelanguage.googleapis.com")) {
+        try {
+          // Extract the path part (e.g., v1beta/files/...)
+          const urlObj = new URL(downloadUrl);
+          const path = urlObj.pathname.substring(1); // Remove leading slash
 
-      const response = await fetch(downloadUrl);
-      if (!response.ok) {
-        const errorBody = await response.text();
-        throw new Error(
-          `Failed to download the generated video. Status: ${response.status}. Body: ${errorBody}`
-        );
+          // Use the proxy client to fetch the video blob
+          const client = getGeminiClient();
+          // We need a way to fetch a blob via the proxy.
+          // The current fetchFromProxy returns JSON or text.
+          // We'll need to use a direct fetch to the proxy endpoint.
+
+          const response = await fetch(`/api/proxy/${path}`);
+          if (!response.ok) throw new Error("Failed to fetch video via proxy");
+          const blob = await response.blob();
+          finalVideoUrl = URL.createObjectURL(blob);
+        } catch (e) {
+          console.error("Failed to proxy video download:", e);
+          // Fallback to direct link (might fail if key is required)
+        }
+      } else {
+        // Try fetching directly if it's not a google API url (unlikely for Veo)
+        const response = await fetch(downloadUrl);
+        if (response.ok) {
+          const blob = await response.blob();
+          finalVideoUrl = URL.createObjectURL(blob);
+        }
       }
-      const videoBlob = await response.blob();
-      return URL.createObjectURL(videoBlob); // Success, exit function
+
+      return finalVideoUrl;
     } catch (error) {
       const errorMessage = (() => {
         if (error instanceof Error) return error.message;
