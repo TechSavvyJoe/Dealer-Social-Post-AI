@@ -45,13 +45,39 @@ class MockGeminiClient {
             rawResponse.candidates?.[0]?.content?.parts?.[0]?.text || "",
         };
       },
-      generateVideos: (params: { model: string; [key: string]: any }) => {
-        const version = "v1alpha"; // Fallback to v1alpha if v1beta fails (user reported 404 on v1beta)
-        return fetchFromProxy(
-          "POST",
-          `${version}/models/${params.model}:generateVideos`,
-          params
-        );
+      generateVideos: async (params: { model: string; [key: string]: any }) => {
+        // Try known API permutations: prefer v1beta and the plural endpoint, but
+        // fall back to v1alpha or the singular endpoint if the service returns 404.
+        const candidates = [
+          { version: "v1beta", method: "generateVideos" },
+          { version: "v1alpha", method: "generateVideos" },
+          { version: "v1beta", method: "generateVideo" },
+          { version: "v1alpha", method: "generateVideo" },
+        ];
+
+        let lastError: unknown;
+        for (const candidate of candidates) {
+          try {
+            return await fetchFromProxy(
+              "POST",
+              `${candidate.version}/models/${params.model}:${candidate.method}`,
+              params
+            );
+          } catch (error) {
+            lastError = error;
+            const msg =
+              error instanceof Error ? error.message.toLowerCase() : String(error);
+            // Only continue on 404/not found; otherwise bubble up immediately.
+            if (!msg.includes("404") && !msg.includes("not found")) {
+              throw error;
+            }
+          }
+        }
+
+        // All attempts failed; surface the last error.
+        throw lastError instanceof Error
+          ? lastError
+          : new Error("Failed to generate video via Gemini API.");
       },
     };
   }
@@ -60,8 +86,35 @@ class MockGeminiClient {
     return {
       getVideosOperation: async (params: { operation: { name: string } }) => {
         const operationName = params.operation.name;
-        const response = await fetchFromProxy("GET", `${operationName}`, {});
-        return new MockVideoOperation(response);
+        if (!operationName) {
+          throw new Error("Missing operation name for video polling.");
+        }
+
+        // Ensure the path includes an API version prefix for the proxy. If the
+        // operation name doesn't include a version, try v1beta then v1alpha.
+        const normalized = operationName.replace(/^\/+/, "");
+        const candidates = normalized.startsWith("v1")
+          ? [normalized]
+          : [`v1beta/${normalized}`, `v1alpha/${normalized}`];
+
+        let lastError: unknown;
+        for (const candidate of candidates) {
+          try {
+            const response = await fetchFromProxy("GET", candidate, {});
+            return new MockVideoOperation(response);
+          } catch (error) {
+            lastError = error;
+            const msg =
+              error instanceof Error ? error.message.toLowerCase() : String(error);
+            if (!msg.includes("404") && !msg.includes("not found")) {
+              throw error;
+            }
+          }
+        }
+
+        throw lastError instanceof Error
+          ? lastError
+          : new Error("Failed to poll video operation status.");
       },
     };
   }
