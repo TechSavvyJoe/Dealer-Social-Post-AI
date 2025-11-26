@@ -46,7 +46,7 @@ class MockGeminiClient {
         };
       },
       generateVideos: (params: { model: string; [key: string]: any }) => {
-        const version = "v1beta"; // Try v1beta for Veo
+        const version = "v1alpha"; // Fallback to v1alpha if v1beta fails (user reported 404 on v1beta)
         return fetchFromProxy(
           "POST",
           `${version}/models/${params.model}:generateVideos`,

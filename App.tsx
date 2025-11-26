@@ -119,11 +119,7 @@ const AppContent: React.FC = () => {
 };
 
 const App: React.FC = () => {
-  return (
-    <ToastProvider>
-      <AppContent />
-    </ToastProvider>
-  );
+  return <AppContent />;
 };
 
 export default App;

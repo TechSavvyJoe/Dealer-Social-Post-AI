@@ -33,7 +33,10 @@ const proxyHandler = (c) => {
   }
 
   const requestInfo = $apis.requestInfo(c);
-  const targetUrl = `${GOOGLE_API_URL_BASE}${path}?key=${apiKey}`;
+  // Fix: Check if path already has query params before appending key
+  const separator = path.includes("?") ? "&" : "?";
+  const targetUrl = `${GOOGLE_API_URL_BASE}${path}${separator}key=${apiKey}`;
+
   console.log(`[Proxy] Forwarding to: ${targetUrl.replace(apiKey, "HIDDEN")}`);
 
   try {
@@ -43,13 +46,28 @@ const proxyHandler = (c) => {
       body:
         requestInfo.method === "POST" ? JSON.stringify(requestInfo.data) : "",
       headers: { "Content-Type": "application/json" },
-      timeout: 300, // 5 minutes
+      timeout: 120, // 120 seconds
     });
 
     console.log(`[Proxy] Upstream status: ${res.statusCode}`);
 
-    // Skip header forwarding for now to avoid API issues
-    return c.json(res.statusCode, res.json || { raw: res.raw });
+    // Fix: Do not force JSON response for everything.
+    // If the response is JSON, return it as JSON.
+    // Otherwise, return the raw body (e.g. for binary downloads).
+    // Note: $http.send in PocketBase returns 'raw' as string.
+    // For binary, this might still be problematic if not handled as bytes,
+    // but avoiding c.json() wrapper is the first step.
+
+    const contentType =
+      res.headers["Content-Type"] || res.headers["content-type"] || "";
+
+    if (contentType.includes("application/json")) {
+      return c.json(res.statusCode, res.json || { raw: res.raw });
+    } else {
+      // Forward the raw body and content type for non-JSON (e.g. video/image)
+      c.response().header().set("Content-Type", contentType);
+      return c.string(res.statusCode, res.raw);
+    }
   } catch (err) {
     console.error(`[Proxy] Error:`, err);
     return c.json(500, {

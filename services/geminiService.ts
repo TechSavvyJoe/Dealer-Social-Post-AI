@@ -419,16 +419,11 @@ export const generatePostVideo = async (
       // If the URL is a Google API URL, we need to proxy it to attach the key
       if (downloadUrl.includes("generativelanguage.googleapis.com")) {
         try {
-          // Extract the path part (e.g., v1beta/files/...)
+          // Extract the path part (e.g., v1beta/files/...) including query params
           const urlObj = new URL(downloadUrl);
-          const path = urlObj.pathname.substring(1); // Remove leading slash
+          const path = urlObj.pathname.substring(1) + urlObj.search; // Preserve query params like ?alt=media
 
           // Use the proxy client to fetch the video blob
-          const client = getGeminiClient();
-          // We need a way to fetch a blob via the proxy.
-          // The current fetchFromProxy returns JSON or text.
-          // We'll need to use a direct fetch to the proxy endpoint.
-
           const response = await fetch(`/api/proxy/${path}`);
           if (!response.ok) throw new Error("Failed to fetch video via proxy");
           const blob = await response.blob();

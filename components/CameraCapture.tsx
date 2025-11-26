@@ -1,9 +1,9 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Icon } from './Icons';
-import { fileToNormalizedDataUrl } from '../utils/imageUtils';
-import { WebcamCapture } from './WebcamCapture';
-import { triggerHapticFeedback } from '../utils/haptics';
-import { ImagePreviewModal } from './ImagePreviewModal';
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import { Icon } from "./Icons";
+import { fileToNormalizedDataUrl } from "../utils/imageUtils";
+import { WebcamCapture } from "./WebcamCapture";
+import { triggerHapticFeedback } from "../utils/haptics";
+import { ImagePreviewModal } from "./ImagePreviewModal";
 
 interface ImageInputProps {
   onImageSelected: (imageSrc: string) => void;
@@ -11,9 +11,10 @@ interface ImageInputProps {
 }
 
 const isMobileDevice = () => {
-  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent
+  );
 };
-
 
 export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
   const [error, setError] = useState<string | null>(null);
@@ -22,77 +23,99 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [pendingImage, setPendingImage] = useState<string | null>(null);
-  const [lastSource, setLastSource] = useState<'upload' | 'camera-mobile' | 'camera-webcam' | null>(null);
+  const [lastSource, setLastSource] = useState<
+    "upload" | "camera-mobile" | "camera-webcam" | null
+  >(null);
 
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const file = event.target.files?.[0];
     if (file) {
-      const source: 'upload' | 'camera-mobile' = (event.target === cameraInputRef.current) ? 'camera-mobile' : 'upload';
+      const source: "upload" | "camera-mobile" =
+        event.target === cameraInputRef.current ? "camera-mobile" : "upload";
       processFile(file, source);
     }
     event.target.value = "";
   };
 
-  const processFile = useCallback(async (file: File, source: 'upload' | 'camera-mobile') => {
-    if (!file.type.startsWith('image/')) {
-      setError("Invalid file type. Please use an image file.");
-      return;
-    }
-
-    // Validate file size (max 20MB)
-    const maxSizeInBytes = 20 * 1024 * 1024;
-    if (file.size > maxSizeInBytes) {
-      setError("Image file is too large. Please use an image smaller than 20MB.");
-      return;
-    }
-
-    try {
-      setError(null);
-      const dataUrl = await fileToNormalizedDataUrl(file);
-
-      // Validate image dimensions by loading it (skip in test environments)
-      if (typeof process === 'undefined' || process.env.NODE_ENV !== 'test') {
-        try {
-          const img = await Promise.race([
-            new Promise<HTMLImageElement>((resolve, reject) => {
-              const image = new Image();
-              const timeout = setTimeout(() => reject(new Error("Image load timeout")), 500);
-              image.onload = () => {
-                clearTimeout(timeout);
-                resolve(image);
-              };
-              image.onerror = () => {
-                clearTimeout(timeout);
-                reject(new Error("Failed to load image"));
-              };
-              image.src = dataUrl;
-            }),
-            // Timeout after 500ms to handle edge cases
-            new Promise<HTMLImageElement>((_, reject) =>
-              setTimeout(() => reject(new Error("Image load timeout")), 500)
-            )
-          ]);
-
-          // Check minimum dimensions (skip check if dimensions are invalid/zero)
-          if (img.width > 0 && img.height > 0 && (img.width < 100 || img.height < 100)) {
-            setError("Image is too small. Please use an image at least 100x100 pixels.");
-            return;
-          }
-        } catch (dimensionError) {
-          // If we can't load the image for dimension check, still proceed
-          // This handles edge cases where image loading fails
-          console.warn("Could not validate image dimensions:", dimensionError);
-        }
+  const processFile = useCallback(
+    async (file: File, source: "upload" | "camera-mobile") => {
+      if (!file.type.startsWith("image/")) {
+        setError("Invalid file type. Please use an image file.");
+        return;
       }
 
-      // Show preview first; confirm before committing upstream
-      setPendingImage(dataUrl);
-      setLastSource(source);
-    } catch (err) {
-      console.error("Error reading file:", err);
-      setError("Could not read the selected image file. Please try again.");
-    }
-  }, []);
+      // Validate file size (max 20MB)
+      const maxSizeInBytes = 20 * 1024 * 1024;
+      if (file.size > maxSizeInBytes) {
+        setError(
+          "Image file is too large. Please use an image smaller than 20MB."
+        );
+        return;
+      }
+
+      try {
+        setError(null);
+        const dataUrl = await fileToNormalizedDataUrl(file);
+
+        // Validate image dimensions by loading it (skip in test environments)
+        if (typeof process === "undefined" || process.env.NODE_ENV !== "test") {
+          try {
+            const img = await Promise.race([
+              new Promise<HTMLImageElement>((resolve, reject) => {
+                const image = new Image();
+                const timeout = setTimeout(
+                  () => reject(new Error("Image load timeout")),
+                  500
+                );
+                image.onload = () => {
+                  clearTimeout(timeout);
+                  resolve(image);
+                };
+                image.onerror = () => {
+                  clearTimeout(timeout);
+                  reject(new Error("Failed to load image"));
+                };
+                image.src = dataUrl;
+              }),
+              // Timeout after 500ms to handle edge cases
+              new Promise<HTMLImageElement>((_, reject) =>
+                setTimeout(() => reject(new Error("Image load timeout")), 500)
+              ),
+            ]);
+
+            // Check minimum dimensions (skip check if dimensions are invalid/zero)
+            if (
+              img.width > 0 &&
+              img.height > 0 &&
+              (img.width < 100 || img.height < 100)
+            ) {
+              setError(
+                "Image is too small. Please use an image at least 100x100 pixels."
+              );
+              return;
+            }
+          } catch (dimensionError) {
+            // If we can't load the image for dimension check, still proceed
+            // This handles edge cases where image loading fails
+            console.warn(
+              "Could not validate image dimensions:",
+              dimensionError
+            );
+          }
+        }
+
+        // Show preview first; confirm before committing upstream
+        setPendingImage(dataUrl);
+        setLastSource(source);
+      } catch (err) {
+        console.error("Error reading file:", err);
+        setError("Could not read the selected image file. Please try again.");
+      }
+    },
+    []
+  );
 
   const handleOpenCamera = () => {
     triggerHapticFeedback();
@@ -109,7 +132,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
   const handleUploadPhoto = () => {
     triggerHapticFeedback();
     fileInputRef.current?.click();
-  }
+  };
 
   useEffect(() => {
     const handleWindowDragOver = (e: DragEvent) => {
@@ -143,20 +166,20 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
 
       const file = e.dataTransfer?.files?.[0];
       if (file) {
-        processFile(file, 'upload');
+        processFile(file, "upload");
       }
     };
 
-    window.addEventListener('dragover', handleWindowDragOver);
-    window.addEventListener('dragenter', handleWindowDragEnter);
-    window.addEventListener('dragleave', handleWindowDragLeave);
-    window.addEventListener('drop', handleWindowDrop);
+    window.addEventListener("dragover", handleWindowDragOver);
+    window.addEventListener("dragenter", handleWindowDragEnter);
+    window.addEventListener("dragleave", handleWindowDragLeave);
+    window.addEventListener("drop", handleWindowDrop);
 
     return () => {
-      window.removeEventListener('dragover', handleWindowDragOver);
-      window.removeEventListener('dragenter', handleWindowDragEnter);
-      window.removeEventListener('dragleave', handleWindowDragLeave);
-      window.removeEventListener('drop', handleWindowDrop);
+      window.removeEventListener("dragover", handleWindowDragOver);
+      window.removeEventListener("dragenter", handleWindowDragEnter);
+      window.removeEventListener("dragleave", handleWindowDragLeave);
+      window.removeEventListener("drop", handleWindowDrop);
     };
   }, [processFile]);
 
@@ -165,7 +188,13 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
       <div className="w-full h-full flex flex-col items-center justify-center bg-red-900/50 border border-red-700 text-red-300 p-8 text-center rounded-2xl">
         <Icon type="error" className="w-16 h-16 text-red-400 mb-4" />
         <p className="text-red-300 text-lg">{error}</p>
-        <button onClick={() => { triggerHapticFeedback(); setError(null); }} className="mt-6 bg-indigo-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-indigo-500 transition-colors">
+        <button
+          onClick={() => {
+            triggerHapticFeedback();
+            setError(null);
+          }}
+          className="mt-6 bg-indigo-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-indigo-500 transition-colors"
+        >
           Try Again
         </button>
       </div>
@@ -179,14 +208,17 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
           onImageSelected={(imageSrc) => {
             setShowWebcam(false);
             setPendingImage(imageSrc);
-            setLastSource('camera-webcam');
+            setLastSource("camera-webcam");
           }}
           onClose={() => setShowWebcam(false)}
         />
         <ImagePreviewModal
           isOpen={Boolean(pendingImage)}
-          imageSrc={pendingImage || ''}
-          onClose={() => { setPendingImage(null); setLastSource(null); }}
+          imageSrc={pendingImage || ""}
+          onClose={() => {
+            setPendingImage(null);
+            setLastSource(null);
+          }}
           onConfirm={() => {
             if (pendingImage) {
               onImageSelected(pendingImage);
@@ -196,13 +228,13 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
           }}
           confirmLabel="Use Photo"
           onRetake={() => {
-            if (lastSource === 'camera-webcam') {
+            if (lastSource === "camera-webcam") {
               setPendingImage(null);
               setShowWebcam(true);
-            } else if (lastSource === 'camera-mobile') {
+            } else if (lastSource === "camera-mobile") {
               setPendingImage(null);
               handleOpenCamera();
-            } else if (lastSource === 'upload') {
+            } else if (lastSource === "upload") {
               setPendingImage(null);
               fileInputRef.current?.click();
             } else {
@@ -217,17 +249,33 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
   return (
     <>
       <div
-        className={`relative w-full max-w-2xl mx-auto p-2 sm:p-4 bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 transition-all duration-300 ${isDraggingOver ? 'border-indigo-400 scale-105' : 'border-white/20'
-          }`}
+        className={`relative w-full max-w-2xl mx-auto p-2 sm:p-4 bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 transition-all duration-300 ${
+          isDraggingOver ? "border-indigo-400 scale-105" : "border-white/20"
+        }`}
       >
         {isDraggingOver && (
           <div className="absolute inset-0 bg-indigo-600/50 rounded-2xl flex items-center justify-center pointer-events-none z-10">
             <div className="text-center">
-              <Icon type="upload" className="w-16 h-16 text-white mx-auto animate-bounce" />
-              <p className="mt-2 text-2xl font-bold text-white">Drop Image Here</p>
+              <Icon
+                type="upload"
+                className="w-16 h-16 text-white mx-auto animate-bounce"
+              />
+              <p className="mt-2 text-2xl font-bold text-white">
+                Drop Image Here
+              </p>
             </div>
           </div>
         )}
+        <button
+          onClick={() => {
+            triggerHapticFeedback();
+            onClose();
+          }}
+          className="absolute top-2 right-2 sm:top-4 sm:right-4 p-2 text-white/50 hover:text-white transition-colors z-20 rounded-full hover:bg-white/10"
+          aria-label="Close"
+        >
+          <Icon type="close" className="w-6 h-6" />
+        </button>
         <div className="relative border-2 border-dashed border-white/20 rounded-xl p-4 sm:p-8 transition-colors duration-300">
           <input
             type="file"
@@ -249,14 +297,24 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
           />
 
           <div className="text-center py-4 sm:py-8">
-            <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Add a Photo</h2>
-            <p className="text-indigo-300 mb-6 sm:mb-8 text-sm sm:text-base">Capture a moment, upload a file, or drag & drop.</p>
+            <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">
+              Add a Photo
+            </h2>
+            <p className="text-indigo-300 mb-6 sm:mb-8 text-sm sm:text-base">
+              Capture a moment, upload a file, or drag & drop.
+            </p>
             <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
-              <button onClick={handleOpenCamera} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-6 rounded-full hover:scale-105 transition-all duration-300 shadow-lg">
+              <button
+                onClick={handleOpenCamera}
+                className="w-full sm:w-auto flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-6 rounded-full hover:scale-105 transition-all duration-300 shadow-lg"
+              >
                 <Icon type="camera" className="w-6 sm:w-7 h-6 sm:h-7" />
                 <span className="text-base sm:text-lg">Open Camera</span>
               </button>
-              <button onClick={handleUploadPhoto} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-white/10 border border-white/20 text-white font-bold py-3 px-6 rounded-full hover:bg-white/20 hover:scale-105 transition-all duration-300 shadow-lg">
+              <button
+                onClick={handleUploadPhoto}
+                className="w-full sm:w-auto flex items-center justify-center gap-3 bg-white/10 border border-white/20 text-white font-bold py-3 px-6 rounded-full hover:bg-white/20 hover:scale-105 transition-all duration-300 shadow-lg"
+              >
                 <Icon type="upload" className="w-6 sm:w-7 h-6 sm:h-7" />
                 <span className="text-base sm:text-lg">Upload Photo</span>
               </button>
@@ -267,8 +325,11 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
       {/* Preview modal for mobile/native or upload flow */}
       <ImagePreviewModal
         isOpen={Boolean(pendingImage)}
-        imageSrc={pendingImage || ''}
-        onClose={() => { setPendingImage(null); setLastSource(null); }}
+        imageSrc={pendingImage || ""}
+        onClose={() => {
+          setPendingImage(null);
+          setLastSource(null);
+        }}
         onConfirm={() => {
           if (pendingImage) {
             onImageSelected(pendingImage);
@@ -278,13 +339,13 @@ export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
         }}
         confirmLabel="Use Photo"
         onRetake={() => {
-          if (lastSource === 'camera-webcam') {
+          if (lastSource === "camera-webcam") {
             setPendingImage(null);
             setShowWebcam(true);
-          } else if (lastSource === 'camera-mobile') {
+          } else if (lastSource === "camera-mobile") {
             setPendingImage(null);
             handleOpenCamera();
-          } else if (lastSource === 'upload') {
+          } else if (lastSource === "upload") {
             setPendingImage(null);
             fileInputRef.current?.click();
           } else {
