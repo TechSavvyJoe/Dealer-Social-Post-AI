@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { getQueryClient } from "./services/queryClient";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { ToastProvider } from "./components/ui/Toast";
 
 // Auto-reload on chunk load failure (e.g. after deployment)
 window.addEventListener("vite:preloadError", (event) => {
@@ -26,9 +27,11 @@ const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
     <QueryClientProvider client={getQueryClient()}>
-      <ErrorBoundary>
-        <App />
-      </ErrorBoundary>
+      <ToastProvider>
+        <ErrorBoundary>
+          <App />
+        </ErrorBoundary>
+      </ToastProvider>
       {import.meta.env.DEV && (
         <Suspense fallback={null}>
           <ReactQueryDevtools initialIsOpen={false} />
