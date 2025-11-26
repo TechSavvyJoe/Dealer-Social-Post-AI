@@ -193,7 +193,7 @@ export const generateSocialPostText = async (
     contents: { parts: [imagePart, { text: textPrompt }] },
   });
 
-  const text = cleanGeneratedText(textResponse.text);
+  const text = cleanGeneratedText(textResponse.text());
   if (!text) {
     throw new Error("Failed to generate post text from AI.");
   }
@@ -213,7 +213,7 @@ export const editSocialPostText = async (
     contents: { parts: [{ text: prompt }] },
   });
 
-  const text = cleanGeneratedText(textResponse.text);
+  const text = cleanGeneratedText(textResponse.text());
   if (!text) {
     throw new Error("Failed to edit post text with AI.");
   }
