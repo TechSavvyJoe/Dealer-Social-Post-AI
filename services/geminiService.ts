@@ -97,7 +97,8 @@ export const generateFunSocialPostImage = async (
 
   const client = getGeminiClient();
   const imageResponse = await client.models.generateContent({
-    model: "gemini-3-pro-preview",
+    // Use the image-capable Gemini model; the text-only preview model won't return inlineData.
+    model: "gemini-3-pro-image-preview",
     contents: { parts: imageParts },
     generationConfig: {
       responseModalities: ["IMAGE" as any],
@@ -144,7 +145,8 @@ export const editSocialPostImage = async (
 
   const client = getGeminiClient();
   const imageResponse = await client.models.generateContent({
-    model: "gemini-3-pro-preview",
+    // Use image-capable model so we actually receive inline image data back.
+    model: "gemini-3-pro-image-preview",
     contents: {
       parts: imageParts,
     },
