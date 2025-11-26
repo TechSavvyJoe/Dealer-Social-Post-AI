@@ -342,9 +342,8 @@ export const generatePostVideo = async (
   style: VideoStyle,
   options: VideoRequestOptions
 ): Promise<string> => {
-  const apiKey = requireGeminiApiKey();
-  // Always create a fresh client so we respect any runtime key change.
-  const videoAi = new GoogleGenAI({ apiKey });
+  // Use the proxied client instead of the direct SDK client
+  const videoAi = getGeminiClient();
 
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
