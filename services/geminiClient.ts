@@ -46,7 +46,7 @@ class MockGeminiClient {
         };
       },
       generateVideos: (params: { model: string; [key: string]: any }) => {
-        const version = params.model.includes("veo") ? "v1alpha" : "v1beta";
+        const version = "v1beta"; // Try v1beta for Veo
         return fetchFromProxy(
           "POST",
           `${version}/models/${params.model}:generateVideos`,
