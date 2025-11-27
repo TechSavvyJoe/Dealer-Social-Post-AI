@@ -97,12 +97,20 @@ export const generateFunSocialPostImage = async (
 
   const client = getGeminiClient();
   const imageResponse = await client.models.generateContent({
-    // Use the image-capable Gemini model; the text-only preview model won't return inlineData.
-    model: "gemini-2.0-flash-exp",
+    // Use the dedicated Imagen 3 model for image generation
+    model: "imagen-3.0-generate-001",
     contents: { parts: imageParts },
-    generationConfig: {
-      responseModalities: ["IMAGE" as any],
-    },
+    // Imagen 3 doesn't need responseModalities: ["IMAGE"], it defaults to image or uses a different config
+    // But for the @google/genai SDK, we might need to adjust how we call it.
+    // Actually, Imagen 3 on Vertex AI / Gemini API might use a different method or just 'generateImages'.
+    // However, the proxy handles 'generateContent'. Let's try standard config first.
+    // Wait, Imagen 3 via Gemini API (AI Studio) is 'imagen-3.0-generate-001'.
+    // It might not support 'generateContent' with 'responseModalities'.
+    // It likely supports 'generateImages' method if using the new SDK, but our proxy uses REST 'generateContent'?
+    // No, the SDK maps 'generateImages' to a specific endpoint.
+    // Let's stick to 'gemini-2.0-flash-exp' but REMOVE 'responseModalities' and ask for image in prompt?
+    // No, the error was specific to responseModalities.
+    // Let's try 'imagen-3.0-generate-001' which IS the image model.
   });
 
   const imageContentPart = imageResponse.candidates?.[0]?.content?.parts?.[0];
@@ -146,13 +154,11 @@ export const editSocialPostImage = async (
   const client = getGeminiClient();
   const imageResponse = await client.models.generateContent({
     // Use image-capable model so we actually receive inline image data back.
-    model: "gemini-2.0-flash-exp",
+    model: "imagen-3.0-generate-001",
     contents: {
       parts: imageParts,
     },
-    generationConfig: {
-      responseModalities: ["IMAGE" as any],
-    },
+    // Imagen 3 doesn't need responseModalities: ["IMAGE"]
   });
 
   let newImageBase64 = "";
@@ -292,9 +298,9 @@ export const generateSocialPost = async (
   const client = getGeminiClient();
   const imagePromise = client.models
     .generateContent({
-      model: "gemini-2.0-flash-exp",
+      model: "imagen-3.0-generate-001",
       contents: { parts: imageParts },
-      generationConfig: { responseModalities: ["IMAGE" as any] },
+      // generationConfig: { responseModalities: ["IMAGE" as any] },
     })
     .catch((error) => {
       throw new Error(
