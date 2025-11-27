@@ -1,5 +1,3 @@
-// FIX: Replaced 'GenerateVideosOperationResponse' with the correct 'GenerateVideosOperation' type.
-import { GoogleGenAI, GenerateVideosOperation } from "@google/genai";
 import { parseDataUrl, urlToDataUrl } from "../utils/imageUtils";
 import {
   StyleOption,
@@ -7,7 +5,6 @@ import {
   VideoStyle,
   VideoRequestOptions,
 } from "../types";
-import { getGeminiClient, requireGeminiApiKey } from "./geminiClient";
 import {
   generateImagePrompt,
   generateTextPrompt,
@@ -345,13 +342,16 @@ export const generatePostVideo = async (
   style: VideoStyle,
   options: VideoRequestOptions
 ): Promise<string> => {
-  requireGeminiApiKey();
-  // Use the proxied client instead of the direct SDK client
-  const videoAi = getGeminiClient();
+  // Use Vertex AI Veo via the proxy
+  const vertexModel =
+    (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_VEO_MODEL) ||
+    (typeof process !== "undefined" && process.env?.VITE_VEO_MODEL) ||
+    "veo-3.1-generate-001";
+
+  const vertexPath = `vertex/v1beta1/projects/gen-lang-client-0994987899/locations/us-central1/publishers/google/models/${vertexModel}:predict`;
 
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
-  const image = { imageBytes: base64Data, mimeType };
   const prompt = generateVideoPrompt(style, options);
 
   const { width, height } = await getImageDimensions(imageBase64Url);
@@ -361,159 +361,100 @@ export const generatePostVideo = async (
     options.aspectPreference === "auto"
       ? derivedAspect
       : options.aspectPreference;
-  const resolution = options.resolution || "720p";
 
-  const envModel =
-    (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_VEO_MODEL) ||
-    (typeof process !== "undefined" && process.env?.VITE_VEO_MODEL);
+  const body = {
+    instances: [
+      {
+        prompt,
+        image: { bytesBase64Encoded: base64Data, mimeType },
+      },
+    ],
+    parameters: {
+      sampleCount: 1,
+      videoLength: `${options.durationSeconds || 6}s`,
+      aspectRatio,
+      resolution: options.resolution || "720p",
+    },
+  };
 
-  const modelCandidates = envModel
-    ? [envModel]
-    : [
-        // Preferred current models
-        "veo-3.1-generate-001",
-        "veo-3.1",
-      ];
+  let lastError: any = null;
 
-  const maxRetries = 3;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      let operation: GenerateVideosOperation | null = null;
-      let lastModelError: unknown;
+      const response = await fetch(`/api/proxy/${vertexPath}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
 
-      for (const model of modelCandidates) {
-        try {
-          operation = (await videoAi.models.generateVideos({
-            model,
-            prompt: prompt,
-            image: image,
-            config: {
-              numberOfVideos: 1,
-              resolution,
-              aspectRatio: aspectRatio,
-            },
-          })) as any;
-          break; // success for this model, exit model loop
-        } catch (modelError) {
-          lastModelError = modelError;
-          const msg =
-            modelError instanceof Error
-              ? modelError.message.toLowerCase()
-              : String(modelError);
-          if (msg.includes("404") || msg.includes("not found")) {
-            // If this was an env override, fail fast with guidance.
-            if (envModel) {
-              throw new Error(
-                `Video model '${envModel}' is not exposed by the proxy (404). Update the proxy to allow this model or change VITE_VEO_MODEL to a supported model.`
-              );
-            }
-            // Otherwise try the next candidate.
-            continue;
-          }
-          throw modelError;
-        }
-      }
-
-      if (!operation) {
-        throw lastModelError || new Error("All video models returned 404. The proxy likely does not expose any Veo models.");
-      }
-
-      while (!operation.done) {
-        await new Promise((resolve) => setTimeout(resolve, 10000)); // Poll every 10 seconds
-        // Cast to any to bypass strict type check on the mock client return
-        operation = (await videoAi.operations.getVideosOperation({
-          operation: operation as any,
-        })) as any;
-      }
-
-      if (operation.error) {
-        const message =
-          typeof operation.error === "object" &&
-          operation.error !== null &&
-          "message" in operation.error
-            ? String(
-                (operation.error as { message?: unknown }).message ??
-                  "Video generation failed without an error message."
-              )
-            : "Video generation failed without an error message.";
-        throw new Error(message);
-      }
-
-      const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
-
-      if (!downloadLink) {
+      if (!response.ok) {
+        const text = await response.text();
         throw new Error(
-          "Video generation succeeded, but no download link was provided."
+          `Proxy request failed (${response.status}): ${text || response.statusText}`
         );
       }
 
-      // Fetch the video as a blob and create a local URL.
-      // The proxy handles the key, so we don't need to append it here for the downloadUrl
-      // if the proxy handles the download. However, the downloadLink is likely a direct Google URL.
-      // Since we can't expose the key, we should proxy the download too, or if the link is public/signed.
-      // Actually, for Veo, the link usually requires the key.
-      // Since we don't have the key on the client, we need to use a proxy endpoint for this too.
-      // For now, let's assume the proxy client handles this or we need a workaround.
-      // WAIT: The previous code used `apiKey` which is now gone.
-      // We can use the proxy to fetch the video content.
+      const json = await response.json();
+      const prediction =
+        json?.predictions?.[0] ||
+        json?.prediction ||
+        (Array.isArray(json) ? json[0] : null);
 
-      const downloadUrl = downloadLink;
-      let finalVideoUrl = downloadUrl;
+      if (!prediction) {
+        throw new Error("No prediction returned from Veo.");
+      }
 
-      // If the URL is a Google API URL, we need to proxy it to attach the key
-      if (downloadUrl.includes("generativelanguage.googleapis.com")) {
+      const base64Video =
+        prediction.byteStream ||
+        prediction.byteContent ||
+        prediction.bytesBase64Encoded ||
+        prediction.videoBytes;
+      const uri =
+        prediction.videoUri ||
+        prediction.outputUri ||
+        prediction.uri ||
+        prediction.mediaUri;
+
+      if (base64Video) {
+        const bytes = atob(base64Video);
+        const arr = new Uint8Array(bytes.length);
+        for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+        const blob = new Blob([arr], { type: "video/mp4" });
+        return URL.createObjectURL(blob);
+      }
+
+      if (uri) {
         try {
-          // Extract the path part (e.g., v1beta/files/...) including query params
-          const urlObj = new URL(downloadUrl);
-          const path = urlObj.pathname.substring(1) + urlObj.search; // Preserve query params like ?alt=media
-
-          // Use the proxy client to fetch the video blob
-          const response = await fetch(`/api/proxy/${path}`);
-          if (!response.ok) throw new Error("Failed to fetch video via proxy");
-          const blob = await response.blob();
-          finalVideoUrl = URL.createObjectURL(blob);
-        } catch (e) {
-          console.error("Failed to proxy video download:", e);
-          // Fallback to direct link (might fail if key is required)
+          const proxied = await fetch(uri);
+          if (proxied.ok) {
+            const blob = await proxied.blob();
+            return URL.createObjectURL(blob);
+          }
+        } catch (err) {
+          // fall back to returning uri
         }
-      } else {
-        // Try fetching directly if it's not a google API url (unlikely for Veo)
-        const response = await fetch(downloadUrl);
-        if (response.ok) {
-          const blob = await response.blob();
-          finalVideoUrl = URL.createObjectURL(blob);
-        }
+        return uri;
       }
 
-      return finalVideoUrl;
+      throw new Error("No video content returned from Veo.");
     } catch (error) {
+      lastError = error;
       const normalized = normalizeError(error);
-      const errorMessage = normalized.message;
-
-      if (normalized.kind === "model_unavailable" && attempt < maxRetries) {
-        console.warn(
-          `Attempt ${attempt} failed: Model unavailable. Retrying in ${
-            attempt * 5
-          } seconds...`
-        );
+      if (normalized.kind === "model_unavailable" && attempt < 3) {
         await sleep(attempt * 5000);
         continue;
       }
-
-      if (normalized.kind === "network" && attempt < maxRetries) {
+      if (normalized.kind === "network" && attempt < 3) {
         await sleep(attempt * 3000);
         continue;
       }
-
-      // This was the last attempt, or it's a non-retryable error. Re-throw it.
       throw new Error(
-        `Video generation failed: ${errorMessage} ${recoveryHint(
-          normalized
-        )} If this keeps happening, the backend proxy may not expose Veo models; ensure your proxy supports Veo (e.g., veo-3.1) or set VITE_VEO_MODEL to a supported model.`
+        `Video generation failed: ${normalized.message} ${recoveryHint(normalized)}`
       );
     }
   }
 
-  // This should not be reached if logic is correct, but is a fallback.
-  throw new Error("Video generation failed after multiple retries.");
+  throw new Error(
+    `Video generation failed after retries: ${lastError instanceof Error ? lastError.message : String(lastError)}`
+  );
 };
