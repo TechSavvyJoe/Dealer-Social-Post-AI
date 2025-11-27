@@ -46,6 +46,9 @@ export const normalizeError = (error: unknown): NormalizedError => {
 
   if (lower.includes("network") || lower.includes("failed to fetch") || lower.includes("offline")) {
     kind = "network";
+  } else if (lower.includes("404") || lower.includes("not found")) {
+    kind = "model_unavailable";
+    retryable = false;
   } else if (lower.includes("timeout") || lower.includes("timed out") || lower.includes("abort")) {
     kind = "timeout";
   } else if (lower.includes("quota") || lower.includes("429")) {

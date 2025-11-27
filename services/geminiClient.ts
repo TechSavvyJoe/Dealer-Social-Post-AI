@@ -50,13 +50,12 @@ class MockGeminiClient {
         };
       },
       generateVideos: async (params: { model: string; [key: string]: any }) => {
-        // Try known API permutations: prefer v1beta and the plural endpoint, but
-        // fall back to v1alpha or the singular endpoint if the service returns 404.
+        // Try known API permutations: prefer v1beta, fall back to v1alpha.
+        // We intentionally skip the singular generateVideo variant to avoid
+        // spamming the proxy with duplicate calls when models are unavailable.
         const candidates = [
           { version: "v1beta", method: "generateVideos" },
           { version: "v1alpha", method: "generateVideos" },
-          { version: "v1beta", method: "generateVideo" },
-          { version: "v1alpha", method: "generateVideo" },
         ];
 
         let lastError: unknown;

@@ -363,18 +363,17 @@ export const generatePostVideo = async (
       : options.aspectPreference;
   const resolution = options.resolution || "720p";
 
-  const modelCandidates = [
-    // Preferred current models
-    "veo-3.1-generate-001",
-    "veo-3.1-generate-preview",
-    "veo-3.1",
-    // Older / alt identifiers
-    "veo-3.0-generate-001",
-    "veo-3.0",
-    "veo-2.2",
-    "veo-2.1",
-    "veo-1.5",
-  ];
+  const envModel =
+    (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_VEO_MODEL) ||
+    (typeof process !== "undefined" && process.env?.VITE_VEO_MODEL);
+
+  const modelCandidates = envModel
+    ? [envModel]
+    : [
+        // Preferred current models
+        "veo-3.1-generate-001",
+        "veo-3.1",
+      ];
 
   const maxRetries = 3;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -401,15 +400,22 @@ export const generatePostVideo = async (
             modelError instanceof Error
               ? modelError.message.toLowerCase()
               : String(modelError);
-          // try next model only on 404/not found
-          if (!msg.includes("404") && !msg.includes("not found")) {
-            throw modelError;
+          if (msg.includes("404") || msg.includes("not found")) {
+            // If this was an env override, fail fast with guidance.
+            if (envModel) {
+              throw new Error(
+                `Video model '${envModel}' is not exposed by the proxy (404). Update the proxy to allow this model or change VITE_VEO_MODEL to a supported model.`
+              );
+            }
+            // Otherwise try the next candidate.
+            continue;
           }
+          throw modelError;
         }
       }
 
       if (!operation) {
-        throw lastModelError || new Error("All video models returned 404.");
+        throw lastModelError || new Error("All video models returned 404. The proxy likely does not expose any Veo models.");
       }
 
       while (!operation.done) {
@@ -503,7 +509,7 @@ export const generatePostVideo = async (
       throw new Error(
         `Video generation failed: ${errorMessage} ${recoveryHint(
           normalized
-        )} If this keeps happening, the backend proxy may not expose Veo models; ensure your proxy supports the latest Veo endpoints.`
+        )} If this keeps happening, the backend proxy may not expose Veo models; ensure your proxy supports Veo (e.g., veo-3.1) or set VITE_VEO_MODEL to a supported model.`
       );
     }
   }
