@@ -98,7 +98,7 @@ export const generateFunSocialPostImage = async (
   const client = getGeminiClient();
   const imageResponse = await client.models.generateContent({
     // Use the image-capable Gemini model; the text-only preview model won't return inlineData.
-    model: "gemini-3-pro-image-preview",
+    model: "gemini-2.0-flash-exp",
     contents: { parts: imageParts },
     generationConfig: {
       responseModalities: ["IMAGE" as any],
@@ -146,7 +146,7 @@ export const editSocialPostImage = async (
   const client = getGeminiClient();
   const imageResponse = await client.models.generateContent({
     // Use image-capable model so we actually receive inline image data back.
-    model: "gemini-3-pro-image-preview",
+    model: "gemini-2.0-flash-exp",
     contents: {
       parts: imageParts,
     },
@@ -191,7 +191,7 @@ export const generateSocialPostText = async (
 
   const client = getGeminiClient();
   const textResponse = await client.models.generateContent({
-    model: "gemini-3-pro-preview",
+    model: "gemini-2.0-flash-exp",
     contents: { parts: [imagePart, { text: textPrompt }] },
   });
 
@@ -211,7 +211,7 @@ export const editSocialPostText = async (
 
   const client = getGeminiClient();
   const textResponse = await client.models.generateContent({
-    model: "gemini-3-pro-preview",
+    model: "gemini-2.0-flash-exp",
     contents: { parts: [{ text: prompt }] },
   });
 
@@ -292,7 +292,7 @@ export const generateSocialPost = async (
   const client = getGeminiClient();
   const imagePromise = client.models
     .generateContent({
-      model: "gemini-3-pro-image-preview",
+      model: "gemini-2.0-flash-exp",
       contents: { parts: imageParts },
       generationConfig: { responseModalities: ["IMAGE" as any] },
     })
@@ -366,7 +366,7 @@ export const generatePostVideo = async (
     try {
       let operation: GenerateVideosOperation =
         (await videoAi.models.generateVideos({
-          model: "veo-3.1-generate-preview",
+          model: "veo-2.0-generate-preview",
           prompt: prompt,
           image: image,
           config: {
