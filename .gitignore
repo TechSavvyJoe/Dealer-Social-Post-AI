@@ -33,3 +33,12 @@ pocketbase
 pocketbase.zip
 pb_data/
 .genkit/
+
+# Sensitive keys and credentials
+key.json
+vertex_key.json
+pb_hooks/vertex_key.json
+pb_hooks/jwt_*.txt
+pb_hooks/jwt_*.pem
+pb_hooks/jwt_*.bin
+pb_hooks/test_vertex_auth.pb.js

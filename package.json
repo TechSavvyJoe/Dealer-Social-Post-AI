@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:api-keys": "node scripts/test_api_keys.js",
     "sync:prod": "node scripts/sync_prod_to_local.js"
   },
   "dependencies": {

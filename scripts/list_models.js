@@ -1,29 +1,39 @@
-const https = require("https");
-const fs = require("fs");
+import fetch from "node-fetch";
+import fs from "fs";
 
-const checkEndpoint = (version) => {
-  return new Promise((resolve) => {
-    const url = `https://dealer-social-post-ai-production.fly.dev/api/proxy/${version}/models?key=ignored`;
-    https
-      .get(url, (res) => {
-        let data = "";
-        res.on("data", (chunk) => (data += chunk));
-        res.on("end", () => {
-          resolve({ version, status: res.statusCode, data });
+const API_KEY = process.env.GEMINI_API_KEY;
+if (!API_KEY) {
+  console.error("Error: GEMINI_API_KEY is not set.");
+  process.exit(1);
+}
+
+async function listModels(version) {
+  const url = `https://generativelanguage.googleapis.com/${version}/models?key=${API_KEY}`;
+  console.log(`\n--- Listing Models (${version}) ---`);
+  try {
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (resp.ok) {
+      if (data.models) {
+        data.models.forEach((m) => {
+          console.log(
+            `- ${m.name} [${m.supportedGenerationMethods?.join(", ")}]`
+          );
         });
-      })
-      .on("error", (e) => {
-        resolve({ version, error: e.message });
-      });
-  });
-};
+      } else {
+        console.log("No models found.");
+      }
+    } else {
+      console.log(`Error ${resp.status}: ${data.error?.message}`);
+    }
+  } catch (e) {
+    console.error("Network error:", e);
+  }
+}
 
 async function run() {
-  const v1beta = await checkEndpoint("v1beta");
-  const v1alpha = await checkEndpoint("v1alpha");
-
-  const output = JSON.stringify({ v1beta, v1alpha }, null, 2);
-  fs.writeFileSync("models_list.txt", output);
+  await listModels("v1beta");
+  await listModels("v1alpha");
 }
 
 run();

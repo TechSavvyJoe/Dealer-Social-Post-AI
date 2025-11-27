@@ -17,13 +17,14 @@ View your app in AI Studio: https://ai.studio/apps/drive/1oUQItN2xAWstwviAV2sxEz
    npm install
    ```
 
-2. **Get your Gemini API key:**
-   - Visit [Google AI Studio](https://aistudio.google.com/app/apikey)
-   - Create and copy your API key
+2. **Get your API keys:**
+   - **Gemini API:** Visit [Google AI Studio](https://aistudio.google.com/app/apikey)
+   - **Vertex AI (optional):** For advanced features like Veo video generation
 
-3. **Configure your API key:**
+3. **Configure your API keys:**
    - Edit `.env.local` file in the project root
    - Set `GEMINI_API_KEY=your-actual-api-key`
+   - (Optional) Set `VERTEX_API_KEY=your-vertex-api-key` for advanced features
 
 4. **Start the app:**
    ```bash
@@ -35,7 +36,8 @@ View your app in AI Studio: https://ai.studio/apps/drive/1oUQItN2xAWstwviAV2sxEz
    - Frontend: http://localhost:5173
    - PocketBase Admin: http://localhost:8090/_/
 
-📖 **For detailed setup instructions, troubleshooting, and more, see [SETUP.md](SETUP.md)**
+📖 **For detailed setup instructions, see [SETUP.md](SETUP.md)**
+🚀 **For Vertex AI setup and advanced features, see [VERTEX_AI_SETUP.md](VERTEX_AI_SETUP.md)**
 
 ## Troubleshooting
 

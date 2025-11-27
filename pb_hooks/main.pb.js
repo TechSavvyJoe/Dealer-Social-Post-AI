@@ -1,16 +1,16 @@
 /**
- * This hook file creates a generic proxy for the Google Gemini API.
- * It allows the frontend to send requests to a path like `/api/proxy/v1beta/models/gemini-pro:generateContent`,
- * and the hook will forward the request to the Google API with the secret API key.
+ * This hook file creates a generic proxy for the Google Gemini API and Vertex AI.
+ * It allows the frontend to send requests to paths like:
+ * - `/api/proxy/v1beta/models/gemini-pro:generateContent` (Gemini API)
+ * - `/api/proxy/vertex/v1beta1/projects/{PROJECT_ID}/locations/{LOCATION}/...` (Vertex AI)
+ * and the hook will forward the request to the appropriate Google API with the secret API key.
  */
 const proxyHandler = (c) => {
-  const GOOGLE_API_URL_BASE = "https://generativelanguage.googleapis.com/";
-  const apiKey = $os.getenv("GEMINI_API_KEY");
+  const GEMINI_API_URL_BASE = "https://generativelanguage.googleapis.com/";
+  const VERTEX_AI_URL_BASE = "https://{LOCATION}-aiplatform.googleapis.com/";
 
-  if (!apiKey) {
-    console.error("GEMINI_API_KEY environment variable is not set.");
-    return c.json(500, { error: "API key is not configured on the server." });
-  }
+  const geminiApiKey = $os.getenv("GEMINI_API_KEY");
+  const vertexApiKey = $os.getenv("VERTEX_API_KEY");
 
   let path = c.pathParams.path;
 
@@ -27,19 +27,53 @@ const proxyHandler = (c) => {
 
     if (!path) {
       return c.json(400, {
-        error: "Missing Gemini API path.",
+        error: "Missing API path.",
         debug: "Path extraction failed",
       });
     }
 
-    // Build target URL, preserve incoming query params, and append API key.
+    // Detect if this is a Vertex AI request or Gemini API request
+    const isVertexAI = path.startsWith("vertex/");
+    let apiKey, baseUrl;
+
+    if (isVertexAI) {
+      // Vertex AI endpoint
+      if (!vertexApiKey) {
+        console.error("VERTEX_API_KEY environment variable is not set.");
+        return c.json(500, {
+          error: "Vertex AI API key is not configured on the server.",
+        });
+      }
+      apiKey = vertexApiKey;
+
+      // Extract location from path (e.g., vertex/v1beta1/projects/PROJECT/locations/us-central1/...)
+      const pathParts = path.split("/");
+      let location = "us-central1"; // default
+      const locationIndex = pathParts.indexOf("locations");
+      if (locationIndex !== -1 && pathParts.length > locationIndex + 1) {
+        location = pathParts[locationIndex + 1];
+      }
+
+      baseUrl = VERTEX_AI_URL_BASE.replace("{LOCATION}", location);
+      // Remove "vertex/" prefix from path
+      path = path.substring(7); // Remove "vertex/"
+    } else {
+      // Gemini API endpoint
+      if (!geminiApiKey) {
+        console.error("GEMINI_API_KEY environment variable is not set.");
+        return c.json(500, {
+          error: "Gemini API key is not configured on the server.",
+        });
+      }
+      apiKey = geminiApiKey;
+      baseUrl = GEMINI_API_URL_BASE;
+    }
+
     // Build target URL, preserve incoming query params, and append API key.
     // Note: PocketBase JS environment might not have URL class, so we use string manipulation.
-    const baseUrl = GOOGLE_API_URL_BASE.endsWith("/")
-      ? GOOGLE_API_URL_BASE
-      : GOOGLE_API_URL_BASE + "/";
+    const finalBaseUrl = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
     const cleanPath = path.startsWith("/") ? path.substring(1) : path;
-    let targetUrl = baseUrl + cleanPath;
+    let targetUrl = finalBaseUrl + cleanPath;
 
     const queryParts = [];
     const query = requestInfo.query || {};
@@ -61,8 +95,12 @@ const proxyHandler = (c) => {
     const separator = targetUrl.includes("?") ? "&" : "?";
     targetUrl += separator + queryParts.join("&");
 
+    const apiType = isVertexAI ? "Vertex AI" : "Gemini API";
     console.log(
-      `[Proxy] ${requestInfo.method} ${targetUrl.replace(apiKey, "HIDDEN")}`
+      `[Proxy ${apiType}] ${requestInfo.method} ${targetUrl.replace(
+        apiKey,
+        "HIDDEN"
+      )}`
     );
 
     const res = $http.send({
@@ -97,12 +135,14 @@ const proxyHandler = (c) => {
       return c.string(res.statusCode, body);
     }
   } catch (err) {
-    console.error(`[Proxy] Error:`, err);
+    const apiType = path && path.startsWith("vertex/") ? "Vertex AI" : "Gemini API";
+    console.error(`[Proxy ${apiType}] Error:`, err);
     return c.json(500, {
-      error: `Failed to proxy request to Gemini API.`,
+      error: `Failed to proxy request to ${apiType}.`,
       details: err.toString(),
       path: path,
-      apiKeyConfigured: !!apiKey,
+      geminiApiKeyConfigured: !!geminiApiKey,
+      vertexApiKeyConfigured: !!vertexApiKey,
     });
   }
 };
