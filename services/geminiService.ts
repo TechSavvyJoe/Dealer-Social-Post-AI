@@ -101,7 +101,7 @@ export const generateFunSocialPostImage = async (
     model: "gemini-3-pro-image-preview",
     contents: { parts: imageParts },
     generationConfig: {
-      responseModalities: ["IMAGE" as any],
+      responseModalities: ["TEXT" as any, "IMAGE" as any],
     },
   });
 
@@ -151,7 +151,7 @@ export const editSocialPostImage = async (
       parts: imageParts,
     },
     generationConfig: {
-      responseModalities: ["IMAGE" as any],
+      responseModalities: ["TEXT" as any, "IMAGE" as any],
     },
   });
 
@@ -294,7 +294,7 @@ export const generateSocialPost = async (
     .generateContent({
       model: "gemini-3-pro-image-preview",
       contents: { parts: imageParts },
-      generationConfig: { responseModalities: ["IMAGE" as any] },
+      generationConfig: { responseModalities: ["TEXT" as any, "IMAGE" as any] },
     })
     .catch((error) => {
       throw new Error(
@@ -366,7 +366,7 @@ export const generatePostVideo = async (
     try {
       let operation: GenerateVideosOperation =
         (await videoAi.models.generateVideos({
-          model: "veo-3.1-generate-001",
+          model: "veo-3.1-generate-preview",
           prompt: prompt,
           image: image,
           config: {

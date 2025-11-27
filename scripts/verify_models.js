@@ -7,32 +7,40 @@ if (!API_KEY) {
 }
 
 const models = [
-  "gemini-3-pro",
-  "imagen-4.0-generate",
-  "veo-3.0-generate",
-  "gemini-2.5-pro",
-  "gemini-2.5-flash",
-  "imagen-3.0-generate-001",
+  "veo-3.1-generate-001",
+  "veo-3.1-generate-preview",
+  "gemini-3-pro-image-preview",
+  "gemini-2.5-flash-image",
 ];
 
 async function testModel(model) {
-  // Try v1beta for standard models
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}?key=${API_KEY}`;
+  // Try v1beta as that's where we found things before
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${API_KEY}`;
+
+  // Payload with TEXT and IMAGE modalities as per guide
+  const payload = {
+    contents: [{ parts: [{ text: "Generate a drawing of a cat." }] }],
+    generationConfig: {
+      // Note: REST API usually uses generationConfig, SDK might map 'config' to this
+      responseModalities: ["TEXT", "IMAGE"],
+    },
+  };
+
+  console.log(`\n--- Testing ${model} (v1beta) ---`);
   try {
-    const resp = await fetch(url);
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
     const data = await resp.json();
     if (resp.ok) {
-      console.log(`✅ ${model}: AVAILABLE`);
-      // console.log(JSON.stringify(data, null, 2));
+      console.log("✅ Success!");
     } else {
-      console.log(
-        `❌ ${model}: ${resp.status} - ${
-          data.error?.message || resp.statusText
-        }`
-      );
+      console.log(`❌ Error ${resp.status}: ${data.error?.message}`);
     }
   } catch (e) {
-    console.log(`❌ ${model}: Network Error - ${e.message}`);
+    console.log("Network Error:", e.message);
   }
 }
 
