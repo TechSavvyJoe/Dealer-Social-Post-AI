@@ -6,7 +6,13 @@ import { Button } from "./ui/Button";
 import { StyleGrid } from "./video-director/StyleGrid";
 import { PresetSelector } from "./video-director/PresetSelector";
 import { ConfigPanel } from "./video-director/ConfigPanel";
-import { durations, presets } from "./video-director/constants";
+import {
+  defaultResolution,
+  durations,
+  presets,
+  soundtracks,
+  styles as videoStyles,
+} from "./video-director/constants";
 
 interface VideoDirectorModalProps {
   isOpen: boolean;
@@ -21,11 +27,11 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({
 }) => {
   const [duration, setDuration] = useState<number>(durations[1].value);
   const [soundtrack, setSoundtrack] =
-    useState<VideoRequestOptions["soundtrack"]>("celebration");
+    useState<VideoRequestOptions["soundtrack"]>("cinematic");
   const [aspectPreference, setAspectPreference] =
     useState<VideoRequestOptions["aspectPreference"]>("auto");
   const [resolution, setResolution] =
-    useState<VideoRequestOptions["resolution"]>("1080p");
+    useState<VideoRequestOptions["resolution"]>(defaultResolution);
   const [pacing, setPacing] =
     useState<VideoRequestOptions["pacing"]>("cinematic");
   useEffect(() => {
@@ -51,12 +57,12 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({
   };
 
   const selectionSummary = useMemo(() => {
-    return `${duration}s · ${
-      soundtrack === "none" ? "no soundtrack" : soundtrack
-    } · ${
+    const soundtrackLabel =
+      soundtracks.find((s) => s.value === soundtrack)?.label || soundtrack;
+    return `${duration}s · ${soundtrackLabel} · ${
       aspectPreference === "auto" ? "auto aspect" : aspectPreference
-    } · ${resolution} · ${pacing}`;
-  }, [duration, soundtrack, aspectPreference, resolution, pacing]);
+    } · ${pacing === "snappy" ? "snappy motion" : "cinematic motion"}`;
+  }, [duration, soundtrack, aspectPreference, pacing]);
 
   const handleConfigChange = (key: string, value: any) => {
     switch (key) {
@@ -68,9 +74,6 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({
         break;
       case "aspectPreference":
         setAspectPreference(value);
-        break;
-      case "resolution":
-        setResolution(value);
         break;
       case "pacing":
         setPacing(value);
@@ -84,6 +87,30 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({
     setAspectPreference(values.aspectPreference);
     setResolution(values.resolution);
     setPacing(values.pacing);
+  };
+
+  const quickPreset =
+    presets.find((preset) => preset.badge === "Recommended") || presets[0];
+  const quickStyle = videoStyles.find((style) => style.recommended) || videoStyles[0];
+
+  const handleQuickGenerate = () => {
+    const values = quickPreset?.values;
+    const style = quickStyle?.style;
+    if (!values || !style) return;
+
+    setDuration(values.durationSeconds);
+    setSoundtrack(values.soundtrack);
+    setAspectPreference(values.aspectPreference);
+    setResolution(values.resolution);
+    setPacing(values.pacing);
+
+    onSelectStyle(style, {
+      durationSeconds: values.durationSeconds,
+      soundtrack: values.soundtrack,
+      aspectPreference: values.aspectPreference,
+      resolution: values.resolution,
+      pacing: values.pacing,
+    });
   };
 
   return (
@@ -127,6 +154,15 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({
               </div>
 
               <div className="flex items-center gap-4">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="hidden sm:inline-flex items-center gap-2"
+                  onClick={handleQuickGenerate}
+                >
+                  <Icon type="zap" className="w-4 h-4" />
+                  Quick Generate
+                </Button>
                 <div className="hidden sm:flex items-center gap-2 text-[11px] text-indigo-100/80 bg-white/5 px-3 py-1.5 rounded-full border border-white/10">
                   <Icon type="info" className="w-3.5 h-3.5 text-indigo-300" />
                   <span className="font-medium">{selectionSummary}</span>
@@ -174,26 +210,25 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({
                         size="sm"
                         className="h-6 text-[10px] px-2 text-indigo-300/70 hover:text-white"
                         onClick={() => {
-                          setDuration(durations[1].value);
-                          setSoundtrack("celebration");
-                          setAspectPreference("auto");
-                          setResolution("1080p");
-                          setPacing("cinematic");
-                        }}
-                      >
-                        Reset
-                      </Button>
-                    </div>
-                    <ConfigPanel
-                      values={{
-                        duration,
-                        soundtrack,
-                        aspectPreference,
-                        resolution,
-                        pacing,
-                      }}
-                      onChange={handleConfigChange}
-                    />
+                      setDuration(durations[1].value);
+                      setSoundtrack("cinematic");
+                      setAspectPreference("auto");
+                      setResolution(defaultResolution);
+                      setPacing("cinematic");
+                    }}
+                  >
+                    Reset
+                  </Button>
+                </div>
+                <ConfigPanel
+                  values={{
+                    duration,
+                    soundtrack,
+                    aspectPreference,
+                    pacing,
+                  }}
+                  onChange={handleConfigChange}
+                />
                   </div>
                 </div>
               </div>
@@ -201,13 +236,24 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({
               {/* Right Panel: Style Grid (Scrollable) */}
               <div className="flex-1 flex flex-col bg-slate-950/30">
                 <div className="p-6 h-full flex flex-col">
-                  <div className="mb-4">
-                    <h3 className="text-lg font-bold text-white mb-1">
-                      Select a Style
-                    </h3>
-                    <p className="text-sm text-indigo-200/60">
-                      Choose the visual theme for your video generation.
-                    </p>
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-4">
+                    <div>
+                      <h3 className="text-lg font-bold text-white mb-1">
+                        Select a Style
+                      </h3>
+                      <p className="text-sm text-indigo-200/60">
+                        Choose the visual theme for your video generation.
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="md:inline-flex"
+                      onClick={handleQuickGenerate}
+                    >
+                      <Icon type="zap" className="w-4 h-4 mr-2" />
+                      Quick Generate
+                    </Button>
                   </div>
 
                   <div className="flex-1 min-h-0">

@@ -67,6 +67,10 @@ After enhancing the photo, you will add text elements based on the provided inst
 *   **3D & REALISM:** When appropriate for the style, render the main text as a bold, chunky, 3D object that casts realistic shadows and reflects the scene's lighting.
 ${watermarkInstruction}
 
+**SUBJECT PRESERVATION — NEVER REPLACE PEOPLE OR THE CAR**
+*   You must keep every person and the car from the input photo present and recognizable. Do not swap, remove, or redraw them as different people or vehicles.
+*   Never crop out faces or the car. Preserve their body positions and proportions; enhancements must keep the original subjects intact.
+
 **Step 3: HUMAN SAFETY VERIFICATION**
 *   Re-run the segmentation / detection pass from **RULE #3** on the finished composition. If ANY margin is violated or an overlap is detected, reposition the offending element and repeat this step until full compliance is achieved.
 
@@ -304,6 +308,51 @@ export const funStyles = [
     { id: 'illuminated', name: "Illuminated Manuscript", prompt: "Recreate the scene as a medieval illuminated manuscript page, with ornate, decorative borders, gold leaf details, and elegant calligraphy." },
 ];
 
+export type FunStyleMeta = {
+    id: string;
+    name: string;
+    prompt: string;
+    category: string;
+    popular?: boolean;
+    tags?: string[];
+};
+
+const funStyleMetaMap: Record<string, { category: string; popular?: boolean; tags?: string[] }> = {};
+const addCategory = (ids: string[], category: string, popular = false, tags?: string[]) => {
+    ids.forEach((id) => {
+        funStyleMetaMap[id] = { category, popular, tags };
+    });
+};
+
+addCategory(['superhero', 'anime', 'pixar', 'gta', 'simpsons', 'southpark', 'timburton'], 'Pop Culture', true);
+addCategory(['vintage', '8bit', 'artdeco', 'popart', 'tiedye', '80strapper', 'solarized', 'tintype'], 'Retro & Nostalgia');
+addCategory(['impressionist', 'watercolor', 'ukiyoe', 'artnouveau', 'pointillism', 'surrealist', 'cubist', 'romanmosaic', 'mayancodex', 'victorianetching'], 'Fine Art');
+addCategory(['blueprint', 'chalkboard', 'papercraft', 'risograph', 'banknote', 'infographic', 'stickerbomb', 'newspaper', 'anaglyph'], 'Graphic & Print', false);
+addCategory(['cyberpunk', 'vaporwave', 'neonnoir', 'hologram', 'circuitboard', 'holographic'], 'Futuristic & Tech', true);
+addCategory(['claymation', 'lego', 'papercraft', 'lowpoly', 'storybook'], 'Whimsy & Storybook', true);
+addCategory(['knitted', 'crossstitch', 'sandsculpture', 'icesculpture', 'topiary', 'woodcarving', 'carved', 'cavepainting'], 'Textures & Materials');
+addCategory(['fantasy', 'nauticalchart', 'constellation', 'spygadget', 'roadtrip'], 'World & Maps');
+addCategory(['steampunk', 'graffiti', 'tribal', 'heavymetal', 'shadowpuppet', 'rorschach'], 'Experimental & Bold');
+
+const deriveFallbackCategory = (id: string): string => {
+    if (id.includes('punk') || id.includes('cyber') || id.includes('tech')) return 'Futuristic & Tech';
+    if (id.includes('retro') || id.includes('vintage')) return 'Retro & Nostalgia';
+    if (id.includes('map') || id.includes('chart')) return 'World & Maps';
+    return 'Artistic Remix';
+};
+
+export const funStyleCatalog: FunStyleMeta[] = funStyles.map((style) => {
+    const meta = funStyleMetaMap[style.id] || { category: deriveFallbackCategory(style.id) };
+    return {
+        ...style,
+        category: meta.category,
+        popular: meta.popular,
+        tags: meta.tags || [meta.category],
+    };
+});
+
+export const funStyleCategories = Array.from(new Set(funStyleCatalog.map((style) => style.category)));
+
 export const generateFunPrompt = (
     dealershipName: string,
     logoBase64Url?: string,
@@ -374,6 +423,7 @@ ${criticalRules}
 1.  **Analyze Original Photo:** Identify the people, their poses, clothing, and key features. Identify the car's model and color.
 2.  **Apply Assigned Style:** Radically redraw and reimagine the ENTIRE scene based on the assigned style description above.
 3.  **PRESERVE LIKENESS:** This is CRITICAL. The transformed people MUST be clearly recognizable as the individuals from the original photo. Capture their hair style, facial structure, and general appearance, but render them completely in the new style. The car must also be recognizable. The result should be a fun caricature, not a generic character.
+4.  **DO NOT OMIT SUBJECTS:** Every person and the car from the reference photo must remain visible in the final artwork. No replacements or removals.
 
 **Phase 3: STYLIZED TEXT & BRANDING**
 1.  **Integrate Text Creatively:** You MUST add the following text to the image, styled to PERFECTLY match the artistic theme:
@@ -421,6 +471,9 @@ export const editImagePrompt = (
 
 ${criticalRulesForEditing}
 
+**SUBJECT PRESERVATION — NEVER REPLACE PEOPLE OR THE CAR**
+*   Keep all people and the vehicle exactly as they appear. Do not remove, swap, or morph them. Do not crop out faces or the car.
+
     **USER'S EDIT REQUEST:** "${editPrompt}"
 
     **YOUR TASK:**
@@ -455,7 +508,7 @@ export const editTextPrompt = (
 };
 
 export const generateVideoPrompt = (style: VideoStyle, options: VideoRequestOptions): string => {
-    const coreInstruction = `You are an AI motion graphics artist. You are given a static image of a person or people celebrating their new car. Your task is to transform this image into a short, dynamic video clip that runs for approximately ${options.durationSeconds} seconds. Do not change the subjects in the image; only add animation and effects based on the chosen theme. Keep the framing clean and avoid cutting off the car or people.`;
+    const coreInstruction = `You are an AI motion graphics artist. You are given a static image of a person or people celebrating their new car. Your task is to transform this image into a short, dynamic video clip that runs for approximately ${options.durationSeconds} seconds. Do not change or remove the subjects in the image; only add animation and effects based on the chosen theme. Keep the framing clean and avoid cutting off the car or people.`;
 
     const soundtrackInstruction = options.soundtrack === 'none'
         ? 'No background audio is required; focus on crisp visuals that can loop cleanly without sound.'

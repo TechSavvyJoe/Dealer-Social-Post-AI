@@ -16,6 +16,7 @@ import {
   editTextPrompt,
   generateVideoPrompt,
 } from "./promptConfig";
+import { normalizeError, recoveryHint } from "../utils/errorHandler";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -344,6 +345,7 @@ export const generatePostVideo = async (
   style: VideoStyle,
   options: VideoRequestOptions
 ): Promise<string> => {
+  requireGeminiApiKey();
   // Use the proxied client instead of the direct SDK client
   const videoAi = getGeminiClient();
 
@@ -445,22 +447,12 @@ export const generatePostVideo = async (
 
       return finalVideoUrl;
     } catch (error) {
-      const errorMessage = (() => {
-        if (error instanceof Error) return error.message;
-        if (typeof error === "string") return error;
-        try {
-          return JSON.stringify(error);
-        } catch {
-          return "Unknown error occurred.";
-        }
-      })();
+      const normalized = normalizeError(error);
+      const errorMessage = normalized.message;
 
-      if (
-        errorMessage.toLowerCase().includes("overloaded") &&
-        attempt < maxRetries
-      ) {
+      if (normalized.kind === "model_unavailable" && attempt < maxRetries) {
         console.warn(
-          `Attempt ${attempt} failed: Model overloaded. Retrying in ${
+          `Attempt ${attempt} failed: Model unavailable. Retrying in ${
             attempt * 5
           } seconds...`
         );
@@ -468,8 +460,15 @@ export const generatePostVideo = async (
         continue;
       }
 
+      if (normalized.kind === "network" && attempt < maxRetries) {
+        await sleep(attempt * 3000);
+        continue;
+      }
+
       // This was the last attempt, or it's a non-retryable error. Re-throw it.
-      throw new Error(`Video generation failed: ${errorMessage}`);
+      throw new Error(
+        `Video generation failed: ${errorMessage} ${recoveryHint(normalized)}`
+      );
     }
   }
 

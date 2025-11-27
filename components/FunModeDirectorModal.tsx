@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Sparkles, Shuffle, X } from 'lucide-react';
+import { Sparkles, Shuffle, Star, X, Search, Clock3 } from 'lucide-react';
 import { triggerHapticFeedback } from '../utils/haptics';
+import { funStyleCatalog, funStyleCategories } from '../services/promptConfig';
 
 interface FunModeDirectorModalProps {
     isOpen: boolean;
@@ -9,111 +10,72 @@ interface FunModeDirectorModalProps {
     onSelectStyle: (styleName: string) => void;
 }
 
-// Popular fun styles for user selection
-const FEATURED_FUN_STYLES = [
-    {
-        id: 'lego',
-        name: 'LEGO Brick Creation',
-        description: 'Transform into a LEGO masterpiece with minifigures',
-        emoji: '🧱',
-        gradient: 'from-yellow-500 to-red-500'
-    },
-    {
-        id: 'superhero',
-        name: 'Superhero Comic Book',
-        description: 'Classic comic book style with bold lines and halftone dots',
-        emoji: '💥',
-        gradient: 'from-blue-500 to-purple-600'
-    },
-    {
-        id: 'anime',
-        name: 'Japanese Anime',
-        description: 'Vibrant anime scene with expressive characters',
-        emoji: '⚡',
-        gradient: 'from-pink-500 to-violet-600'
-    },
-    {
-        id: 'pixar',
-        name: '3D Animated Movie',
-        description: 'Pixar-style 3D animation with warm, magical lighting',
-        emoji: '✨',
-        gradient: 'from-cyan-500 to-blue-600'
-    },
-    {
-        id: 'gta',
-        name: 'Grand Theft Auto',
-        description: 'Iconic GTA loading screen art style',
-        emoji: '🎮',
-        gradient: 'from-orange-500 to-red-600'
-    },
-    {
-        id: 'popart',
-        name: 'Pop Art (Warhol)',
-        description: 'Bold colors and screen-printed texture',
-        emoji: '🎨',
-        gradient: 'from-fuchsia-500 to-pink-600'
-    },
-    {
-        id: 'claymation',
-        name: 'Claymation Stop-Motion',
-        description: 'Tangible clay texture with finger-printed details',
-        emoji: '🎬',
-        gradient: 'from-amber-500 to-orange-600'
-    },
-    {
-        id: 'vintage',
-        name: 'Vintage 1930s Cartoon',
-        description: 'Rubber hose animation style in black and white',
-        emoji: '📽️',
-        gradient: 'from-gray-500 to-gray-700'
-    },
-    {
-        id: 'cyberpunk',
-        name: 'Cyberpunk Neon Noir',
-        description: 'Futuristic cityscape with neon lights and rain',
-        emoji: '🌃',
-        gradient: 'from-purple-600 to-cyan-500'
-    },
-    {
-        id: 'impressionist',
-        name: 'Impressionist Painting',
-        description: 'Monet-style oil painting with visible brushstrokes',
-        emoji: '🖼️',
-        gradient: 'from-green-500 to-blue-500'
-    },
-    {
-        id: 'graffiti',
-        name: 'Street Art Graffiti',
-        description: 'Vibrant mural with spray paint textures',
-        emoji: '🎪',
-        gradient: 'from-rose-500 to-orange-500'
-    },
-    {
-        id: '8bit',
-        name: '8-Bit Pixel Art',
-        description: 'Classic Nintendo-style pixelated graphics',
-        emoji: '👾',
-        gradient: 'from-indigo-500 to-purple-600'
-    }
-];
-
 export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
     isOpen,
     onClose,
     onSelectStyle,
 }) => {
     const [selectedStyle, setSelectedStyle] = useState<string | null>(null);
-
-    // Randomize which styles to show each time
-    const displayedStyles = useMemo(() => {
-        const shuffled = [...FEATURED_FUN_STYLES].sort(() => Math.random() - 0.5);
-        return shuffled.slice(0, 9); // Show 9 random styles in a 3x3 grid
-    }, [isOpen]);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [category, setCategory] = useState<string>('All');
+    const [favorites, setFavorites] = useState<string[]>([]);
+    const [recent, setRecent] = useState<string[]>([]);
 
     const handleStyleSelect = (styleId: string) => {
         setSelectedStyle(styleId);
+        setRecent((prev) => {
+            const next = [styleId, ...prev.filter((id) => id !== styleId)].slice(0, 6);
+            localStorage.setItem('fun-mode-recent', JSON.stringify(next));
+            return next;
+        });
         triggerHapticFeedback();
     };
+
+    useEffect(() => {
+        try {
+            const savedFavorites = localStorage.getItem('fun-mode-favorites');
+            if (savedFavorites) setFavorites(JSON.parse(savedFavorites));
+            const savedRecent = localStorage.getItem('fun-mode-recent');
+            if (savedRecent) setRecent(JSON.parse(savedRecent));
+        } catch {
+            // ignore parse errors
+        }
+    }, [isOpen]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('fun-mode-favorites', JSON.stringify(favorites));
+        } catch {
+            // ignore storage errors
+        }
+    }, [favorites]);
+
+    const toggleFavorite = (id: string) => {
+        setFavorites((prev) => {
+            const exists = prev.includes(id);
+            return exists ? prev.filter((item) => item !== id) : [...prev, id];
+        });
+    };
+
+    const filteredStyles = useMemo(() => {
+        return funStyleCatalog.filter((style) => {
+            const matchesCategory =
+                category === 'All'
+                    ? true
+                    : category === 'Favorites'
+                        ? favorites.includes(style.id)
+                        : category === 'Popular'
+                            ? !!style.popular
+                            : style.category === category;
+            const q = searchQuery.trim().toLowerCase();
+            const matchesSearch =
+                !q ||
+                style.name.toLowerCase().includes(q) ||
+                style.prompt.toLowerCase().includes(q) ||
+                style.tags?.some((tag) => tag.toLowerCase().includes(q));
+            return matchesCategory && matchesSearch;
+        });
+    }, [category, searchQuery, favorites]);
 
     const handleConfirm = () => {
         if (selectedStyle) {
@@ -123,8 +85,11 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
     };
 
     const handleSurpriseMe = () => {
-        onSelectStyle('random');
-        setSelectedStyle(null);
+        const pool = filteredStyles.length ? filteredStyles : funStyleCatalog;
+        const choice = pool[Math.floor(Math.random() * pool.length)];
+        triggerHapticFeedback();
+        onSelectStyle(choice.id);
+        setSelectedStyle(choice.id);
     };
 
     if (!isOpen) return null;
@@ -163,30 +128,111 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
                 </div>
 
                 {/* Style Grid */}
-                <div className="p-6 max-h-[60vh] overflow-y-auto">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {displayedStyles.map((style) => (
-                            <motion.button
-                                key={style.id}
-                                onClick={() => handleStyleSelect(style.id)}
-                                className={`p-4 rounded-xl border-2 transition-all text-left ${selectedStyle === style.id
-                                    ? 'border-primary-400 bg-primary-500/20 scale-[1.02]'
-                                    : 'border-white/10 bg-white/5 hover:border-white/30 hover:bg-white/10'
+                <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4">
+                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                        <div className="flex flex-wrap gap-2">
+                            {['All', 'Popular', 'Favorites', ...funStyleCategories].map((cat) => (
+                                <button
+                                    key={cat}
+                                    onClick={() => setCategory(cat)}
+                                    className={`text-xs px-3 py-1.5 rounded-full border transition ${
+                                        category === cat
+                                            ? 'border-primary-400 bg-primary-500/20 text-white'
+                                            : 'border-white/15 text-white/70 hover:border-primary-300/60'
                                     }`}
-                                whileHover={{ scale: 1.02 }}
-                                whileTap={{ scale: 0.98 }}
-                            >
-                                <div className={`text-4xl mb-2 bg-gradient-to-br ${style.gradient} bg-clip-text text-transparent font-bold`}>
-                                    {style.emoji}
-                                </div>
-                                <h3 className="text-white font-semibold text-sm mb-1">
-                                    {style.name}
-                                </h3>
-                                <p className="text-white/60 text-xs leading-relaxed">
-                                    {style.description}
-                                </p>
-                            </motion.button>
-                        ))}
+                                >
+                                    {cat}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="relative w-full lg:w-80">
+                            <Search className="w-4 h-4 text-white/60 absolute left-3 top-1/2 -translate-y-1/2" />
+                            <input
+                                className="w-full bg-white/5 border border-white/10 rounded-lg pl-10 pr-3 py-2 text-sm text-white placeholder:text-white/50 focus:outline-none focus:ring-2 focus:ring-primary-400"
+                                placeholder="Search styles or keywords"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    {recent.length > 0 && (
+                        <div className="flex items-center gap-2 text-xs text-white/70">
+                            <Clock3 className="w-4 h-4" />
+                            <span>Recent:</span>
+                            <div className="flex gap-1 flex-wrap">
+                                {recent.map((id) => {
+                                    const style = funStyleCatalog.find((s) => s.id === id);
+                                    if (!style) return null;
+                                    return (
+                                        <button
+                                            key={id}
+                                            onClick={() => handleStyleSelect(id)}
+                                            className={`px-2 py-1 rounded-full border text-[11px] ${
+                                                selectedStyle === id ? 'border-primary-400 text-white' : 'border-white/20 text-white/70 hover:border-primary-300'
+                                            }`}
+                                        >
+                                            {style.name}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {filteredStyles.map((style) => {
+                            const promptPreview = style.prompt.split('. ')[0];
+                            const isFavorite = favorites.includes(style.id);
+                            return (
+                                <motion.button
+                                    key={style.id}
+                                    onClick={() => handleStyleSelect(style.id)}
+                                    className={`relative p-4 rounded-xl border-2 transition-all text-left ${
+                                        selectedStyle === style.id
+                                            ? 'border-primary-400 bg-primary-500/20 scale-[1.01]'
+                                            : 'border-white/10 bg-white/5 hover:border-white/30 hover:bg-white/10'
+                                    }`}
+                                    whileHover={{ scale: 1.01 }}
+                                    whileTap={{ scale: 0.98 }}
+                                >
+                                    <div className="flex items-start justify-between gap-2 mb-2">
+                                        <div>
+                                            <h3 className="text-white font-semibold text-sm mb-1">
+                                                {style.name}
+                                            </h3>
+                                            <p className="text-[11px] text-white/60">{style.category}</p>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            {style.popular && (
+                                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-200 border border-amber-400/40">
+                                                    Staff Pick
+                                                </span>
+                                            )}
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    toggleFavorite(style.id);
+                                                }}
+                                                className={`p-1 rounded-full border ${
+                                                    isFavorite ? 'border-yellow-300/70 bg-yellow-400/10 text-yellow-200' : 'border-white/20 text-white/60 hover:border-yellow-200/60'
+                                                }`}
+                                                aria-label="Toggle favorite"
+                                            >
+                                                <Star className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <p className="text-white/70 text-xs leading-relaxed line-clamp-3">{promptPreview}</p>
+                                </motion.button>
+                            );
+                        })}
+                        {filteredStyles.length === 0 && (
+                            <div className="col-span-full text-center text-sm text-white/60 py-6">
+                                No styles found. Try another search or category.
+                            </div>
+                        )}
                     </div>
                 </div>
 

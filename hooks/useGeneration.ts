@@ -3,6 +3,7 @@ import { useAppStore } from '../stores/appStore';
 import { useGemini } from './useGemini';
 import { StyleOption, ToneOption, VideoStyle, VideoRequestOptions, AppStep } from '../types';
 import { useToast } from '../components/ui/Toast';
+import { normalizeError, recoveryHint } from '../utils/errorHandler';
 
 export const useGeneration = () => {
   const { toastError } = useToast();
@@ -65,8 +66,8 @@ export const useGeneration = () => {
       setStep(AppStep.RESULT);
     } catch (err) {
       clearInterval(progressInterval);
-      const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-      const fullMsg = `Failed to generate your post. ${errorMessage}`;
+      const normalized = normalizeError(err);
+      const fullMsg = `Failed to generate your post. ${normalized.message} ${recoveryHint(normalized)}`;
       setError(fullMsg);
       toastError(fullMsg);
       setStep(AppStep.CUSTOMIZE);
@@ -88,7 +89,8 @@ export const useGeneration = () => {
       );
       setGeneratedPost(result);
     } catch (err) {
-      const msg = `Failed to regenerate image. ${err instanceof Error ? err.message : String(err)}`;
+      const normalized = normalizeError(err);
+      const msg = `Failed to regenerate image. ${normalized.message} ${recoveryHint(normalized)}`;
       setError(msg);
       toastError(msg);
     }
@@ -104,7 +106,8 @@ export const useGeneration = () => {
       );
       if (generatedPost) setGeneratedPost({ ...generatedPost, image: newImage });
     } catch (err) {
-      const msg = `Failed to generate fun image. ${err instanceof Error ? err.message : String(err)}`;
+      const normalized = normalizeError(err);
+      const msg = `Failed to generate fun image. ${normalized.message} ${recoveryHint(normalized)}`;
       setError(msg);
       toastError(msg);
     }
@@ -120,7 +123,8 @@ export const useGeneration = () => {
       );
       if (generatedPost) setGeneratedPost({ ...generatedPost, image: newImage });
     } catch (err) {
-      const msg = `Failed to apply image edits. ${err instanceof Error ? err.message : String(err)}`;
+      const normalized = normalizeError(err);
+      const msg = `Failed to apply image edits. ${normalized.message} ${recoveryHint(normalized)}`;
       setError(msg);
       toastError(msg);
     }
@@ -139,7 +143,8 @@ export const useGeneration = () => {
       );
       if (generatedPost) setGeneratedPost({ ...generatedPost, text: newText });
     } catch (err) {
-      const msg = `Failed to regenerate text. ${err instanceof Error ? err.message : String(err)}`;
+      const normalized = normalizeError(err);
+      const msg = `Failed to regenerate text. ${normalized.message} ${recoveryHint(normalized)}`;
       setError(msg);
       toastError(msg);
     }
@@ -171,9 +176,10 @@ export const useGeneration = () => {
         generatePostVideo(generatedPost.image, style, options)
       );
     } catch (err) {
-      const msg = `Failed to generate video. ${err instanceof Error ? err.message : String(err)}`;
+      const normalized = normalizeError(err);
+      const msg = `Failed to generate video. ${normalized.message} ${recoveryHint(normalized)}`;
       toastError(msg);
-      throw err;
+      throw normalized;
     }
   }, [generatedPost, runGeminiTask, loadGeminiService, toastError]);
 

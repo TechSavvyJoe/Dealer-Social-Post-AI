@@ -24,6 +24,8 @@ import { VideoDirectorModal } from './VideoDirectorModal';
 import { FunModeDirectorModal } from './FunModeDirectorModal';
 import { Badge } from './ui/Badge';
 import { cn } from '../utils/classNames';
+import { ProgressBar } from './ui/ProgressBar';
+import { normalizeError, recoveryHint } from '../utils/errorHandler';
 
 interface PostResultProps {
   post: GeneratedPost;
@@ -38,10 +40,15 @@ interface PostResultProps {
   isDesktopLayout: boolean;
 }
 
-const LoadingOverlay: React.FC<{ message: string }> = React.memo(({ message }) => (
-  <div className="absolute inset-0 bg-surface-900/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-lg z-10">
+const LoadingOverlay: React.FC<{ message: string; progress?: number }> = React.memo(({ message, progress }) => (
+  <div className="absolute inset-0 bg-surface-900/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-lg z-10 px-4">
     <Loader2 className="h-12 w-12 text-primary-400 animate-spin mb-4" />
-    <p className="text-surface-50 font-semibold animate-pulse">{message}</p>
+    <p className="text-surface-50 font-semibold animate-pulse mb-2 text-center">{message}</p>
+    {typeof progress === 'number' && progress > 0 && (
+      <div className="w-full max-w-sm">
+        <ProgressBar value={progress} />
+      </div>
+    )}
   </div>
 ));
 
@@ -52,6 +59,8 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
   const [isImageEditing, setIsImageEditing] = useState(false);
   const [imageEditPrompt, setImageEditPrompt] = useState('');
   const [isImageLoading, setIsImageLoading] = useState(false);
+  const [imageLoadingMessage, setImageLoadingMessage] = useState('Updating Image...');
+  const [imageLoadingProgress, setImageLoadingProgress] = useState(0);
 
   const [editedText, setEditedText] = useState(post.text);
   const [isTextEditing, setIsTextEditing] = useState(false);
@@ -258,12 +267,29 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
     }
   };
 
-  const handleImageAction = async (action: () => Promise<void>) => {
+  const handleImageAction = async (action: () => Promise<void>, messages: string[] = ["Updating image...", "Polishing details...", "Almost there..."]) => {
     setIsImageLoading(true);
+    setImageLoadingMessage(messages[0] || "Updating Image...");
+    setImageLoadingProgress(8);
+
+    let messageIndex = 0;
+    const intervalId = setInterval(() => {
+      messageIndex = (messageIndex + 1) % messages.length;
+      setImageLoadingMessage(messages[messageIndex] || "Working...");
+      setImageLoadingProgress((prev) => Math.min(prev + 12, 90));
+    }, 1200);
+
     try {
-      await action();
+      const result = await action();
+      setImageLoadingProgress(100);
+      setImageLoadingMessage("Complete");
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      return result;
     } finally {
+      clearInterval(intervalId);
       setIsImageLoading(false);
+      setImageLoadingProgress(0);
+      setImageLoadingMessage("Updating Image...");
     }
   };
 
@@ -288,8 +314,10 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
       "Setting up the virtual studio...", "Directing the AI animator...", "Adding special effects...", "Rendering the final cut...", "This can take a minute or two...",
     ];
     let messageIndex = 0;
+    let allowRotation = true;
     setVideoLoadingMessage(messages[messageIndex]);
     const intervalId = setInterval(() => {
+      if (!allowRotation) return;
       messageIndex = (messageIndex + 1) % messages.length;
       setVideoLoadingMessage(messages[messageIndex]);
     }, 4000);
@@ -315,13 +343,40 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
     // Mark job as processing
     setVideoJobs(prev => prev.map(job => job.id === jobId ? { ...job, status: 'processing', error: undefined } : job));
 
+    const maxAttempts = 3;
+    const runAttempt = async (attempt: number): Promise<void> => {
+      try {
+        const url = await onGenerateVideo(style, options);
+        setVideoUrl((prev) => prev || url); // auto-open the first available video
+        setVideoJobs(prev => prev.map(job => job.id === jobId ? { ...job, status: 'completed', url } : job));
+      } catch (error) {
+        const normalized = normalizeError(error);
+        const retryDelay = attempt < maxAttempts && normalized.retryable ? attempt * 8000 : 0;
+        const attemptMessage = `Attempt ${attempt} failed: ${normalized.message}`;
+
+        if (retryDelay > 0) {
+          allowRotation = false;
+          setVideoLoadingMessage(`${attemptMessage}. Retrying in ${retryDelay / 1000}s...`);
+          setVideoJobs(prev => prev.map(job => job.id === jobId ? { ...job, status: 'queued', error: attemptMessage } : job));
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          allowRotation = true;
+          setVideoLoadingMessage(messages[0]);
+          messageIndex = 0;
+          return runAttempt(attempt + 1);
+        }
+
+        const finalMessage = `${attemptMessage}. ${recoveryHint(normalized)}`;
+        allowRotation = false;
+        setVideoLoadingMessage(finalMessage);
+        setVideoJobs(prev => prev.map(job => job.id === jobId ? { ...job, status: 'failed', error: finalMessage } : job));
+        throw normalized;
+      }
+    };
+
     try {
-      const url = await onGenerateVideo(style, options);
-      setVideoUrl((prev) => prev || url); // auto-open the first available video
-      setVideoJobs(prev => prev.map(job => job.id === jobId ? { ...job, status: 'completed', url } : job));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      setVideoJobs(prev => prev.map(job => job.id === jobId ? { ...job, status: 'failed', error: message } : job));
+      await runAttempt(1);
+    } catch (err) {
+      // Failure is already recorded in job state; no additional action needed here.
     } finally {
       setIsVideoLoading(false);
       clearInterval(intervalId);
@@ -375,7 +430,14 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
         onClose={() => setIsFunModeDirectorOpen(false)}
         onSelectStyle={(styleName) => {
           setIsFunModeDirectorOpen(false);
-          handleImageAction(() => onFunMode(styleName));
+          handleImageAction(
+            () => onFunMode(styleName),
+            [
+              "Queuing Fun Mode style...",
+              "Illustrating with your photo reference...",
+              "Polishing colors and details...",
+            ]
+          );
         }}
       />
       <motion.div
@@ -407,7 +469,12 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
 
           <div className="flex flex-col items-center bg-white/5 p-4 rounded-2xl shadow-2xl space-y-4">
             <div className="relative w-full">
-              {(isImageLoading || isVideoLoading) && <LoadingOverlay message={isVideoLoading ? videoLoadingMessage : "Updating Image..."} />}
+              {(isImageLoading || isVideoLoading) && (
+                <LoadingOverlay
+                  message={isVideoLoading ? videoLoadingMessage : imageLoadingMessage}
+                  progress={isVideoLoading ? undefined : imageLoadingProgress}
+                />
+              )}
 
               {videoUrl ? (
                 <video src={videoUrl} controls autoPlay loop muted className="rounded-xl shadow-2xl w-full object-contain" />
@@ -421,7 +488,14 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
             <div className="w-full space-y-3">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
                 <motion.button
-                  onClick={() => { triggerHapticFeedback(); handleImageAction(onRegenerateImage); }}
+                  onClick={() => {
+                    triggerHapticFeedback();
+                    handleImageAction(onRegenerateImage, [
+                      "Refreshing with your chosen style...",
+                      "Balancing lighting and color...",
+                      "Finishing touches...",
+                    ]);
+                  }}
                   disabled={imageBusy || !!videoUrl}
                   className={cn(
                     "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden",
@@ -552,7 +626,17 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                       rows={2}
                     />
                     <motion.button
-                      onClick={() => { triggerHapticFeedback(); handleImageAction(() => onEditImage(imageEditPrompt)).then(() => setIsImageEditing(false)); }}
+                      onClick={() => {
+                        triggerHapticFeedback();
+                        handleImageAction(
+                          () => onEditImage(imageEditPrompt),
+                          [
+                            "Applying your edit request...",
+                            "Re-rendering safely around people and cars...",
+                            "Finalizing the updated image...",
+                          ]
+                        ).then(() => setIsImageEditing(false));
+                      }}
                       disabled={!imageEditPrompt.trim()}
                       className={cn(
                         "w-full bg-gradient-to-r from-primary-500 to-secondary-600",

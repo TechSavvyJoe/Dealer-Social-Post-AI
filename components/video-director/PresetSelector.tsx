@@ -30,7 +30,7 @@ export const PresetSelector: React.FC<PresetSelectorProps> = ({ currentValues, o
   return (
     <div className="flex flex-col gap-2 mb-5">
       <h3 className="text-sm font-semibold text-white">Presets</h3>
-      <div className="grid gap-2 sm:grid-cols-3">
+      <div className="grid gap-2 sm:grid-cols-2">
         {presets.map((preset) => (
           <button
             key={preset.label}
@@ -39,11 +39,18 @@ export const PresetSelector: React.FC<PresetSelectorProps> = ({ currentValues, o
               onSelect(preset.values);
             }}
             className={cn(
-              "rounded-xl border border-white/15 bg-slate-900/70 hover:border-primary-400/60 hover:bg-primary-500/10 transition-all text-left px-3 py-2",
+              "rounded-xl border border-white/15 bg-slate-900/70 hover:border-primary-400/60 hover:bg-primary-500/10 transition-all text-left px-3 py-3",
               matchesPreset(preset) && "border-primary-400 bg-primary-500/10 shadow-[0_0_0_1px_rgba(129,140,248,0.35)]"
             )}
           >
-            <div className="text-sm font-semibold text-white">{preset.label}</div>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <div className="text-sm font-semibold text-white">{preset.label}</div>
+              {(preset.badge || preset.platform) && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary-500/20 text-primary-200 border border-primary-400/40">
+                  {preset.badge || preset.platform}
+                </span>
+              )}
+            </div>
             <div className="text-[11px] text-indigo-100/80">{preset.description}</div>
           </button>
         ))}

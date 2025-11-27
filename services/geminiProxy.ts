@@ -1,3 +1,5 @@
+import { normalizeError } from "../utils/errorHandler";
+
 /**
  * A wrapper for the fetch API to communicate with our backend proxy for Gemini.
  * @param method 'GET' or 'POST'
@@ -10,6 +12,10 @@ export async function fetchFromProxy(
   path: string,
   body: any
 ) {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    throw normalizeError(new Error("Offline: please reconnect to the internet."));
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 second timeout
 
@@ -55,6 +61,6 @@ export async function fetchFromProxy(
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error(`Request to ${path} timed out after 90 seconds.`);
     }
-    throw error;
+    throw normalizeError(error);
   }
 }
