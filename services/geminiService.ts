@@ -364,9 +364,16 @@ export const generatePostVideo = async (
   const resolution = options.resolution || "720p";
 
   const modelCandidates = [
+    // Preferred current models
     "veo-3.1-generate-001",
     "veo-3.1-generate-preview",
+    "veo-3.1",
+    // Older / alt identifiers
     "veo-3.0-generate-001",
+    "veo-3.0",
+    "veo-2.2",
+    "veo-2.1",
+    "veo-1.5",
   ];
 
   const maxRetries = 3;
@@ -494,7 +501,9 @@ export const generatePostVideo = async (
 
       // This was the last attempt, or it's a non-retryable error. Re-throw it.
       throw new Error(
-        `Video generation failed: ${errorMessage} ${recoveryHint(normalized)}`
+        `Video generation failed: ${errorMessage} ${recoveryHint(
+          normalized
+        )} If this keeps happening, the backend proxy may not expose Veo models; ensure your proxy supports the latest Veo endpoints.`
       );
     }
   }
