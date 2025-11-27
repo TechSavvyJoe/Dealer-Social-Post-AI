@@ -27,11 +27,11 @@ class MockGeminiClient {
       }) => {
         // The SDK's `generateContent` returns a response with a `text()` method.
         // The raw API response is what our proxy will return. We need to wrap it.
-        // Route preview models and latest Gemini models to v1alpha
+        // Route preview models and latest Gemini models to v1alpha, BUT keep gemini-2.0-flash-exp on v1beta
         const version =
-          params.model.includes("gemini-3") ||
-          params.model.includes("gemini-2") ||
-          params.model.includes("preview")
+          (params.model.includes("gemini-3") ||
+            params.model.includes("preview")) &&
+          !params.model.includes("gemini-2.0-flash-exp")
             ? "v1alpha"
             : "v1beta";
         const rawResponse = await fetchFromProxy(
@@ -66,7 +66,9 @@ class MockGeminiClient {
           } catch (error) {
             lastError = error;
             const msg =
-              error instanceof Error ? error.message.toLowerCase() : String(error);
+              error instanceof Error
+                ? error.message.toLowerCase()
+                : String(error);
             // Only continue on 404/not found; otherwise bubble up immediately.
             if (!msg.includes("404") && !msg.includes("not found")) {
               throw error;
@@ -105,7 +107,9 @@ class MockGeminiClient {
           } catch (error) {
             lastError = error;
             const msg =
-              error instanceof Error ? error.message.toLowerCase() : String(error);
+              error instanceof Error
+                ? error.message.toLowerCase()
+                : String(error);
             if (!msg.includes("404") && !msg.includes("not found")) {
               throw error;
             }
