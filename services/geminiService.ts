@@ -366,7 +366,7 @@ export const generatePostVideo = async (
     try {
       let operation: GenerateVideosOperation =
         (await videoAi.models.generateVideos({
-          model: "veo-2.0-generate-preview",
+          model: "veo-2.0-generate-001",
           prompt: prompt,
           image: image,
           config: {
