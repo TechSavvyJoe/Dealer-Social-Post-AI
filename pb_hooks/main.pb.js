@@ -14,39 +14,59 @@ const proxyHandler = (c) => {
 
   let path = c.pathParams.path;
 
-  // Fallback: manual extraction if wildcard param fails
-  if (!path) {
-    const fullPath = c.request().url.path;
-    if (fullPath.startsWith("/api/proxy/")) {
-      path = fullPath.substring("/api/proxy/".length);
-    }
-  }
-
-  if (!path) {
-    return c.json(400, { error: "Missing Gemini API path." });
-  }
-
-  const requestInfo = $apis.requestInfo(c);
-
-  // Build target URL, preserve incoming query params, and append API key.
-  const target = new URL(path, GOOGLE_API_URL_BASE);
-  const query = requestInfo.query || {};
-  Object.entries(query).forEach(([key, value]) => {
-    if (Array.isArray(value)) {
-      value.forEach((v) => target.searchParams.append(key, String(v)));
-    } else if (value !== undefined && value !== null) {
-      target.searchParams.append(key, String(value));
-    }
-  });
-  target.searchParams.set("key", apiKey);
-
-  console.log(
-    `[Proxy] ${requestInfo.method} ${target.toString().replace(apiKey, "HIDDEN")}`
-  );
-
   try {
+    const requestInfo = $apis.requestInfo(c);
+
+    // Fallback: manual extraction if wildcard param fails
+    if (!path) {
+      const fullPath = c.request().url.path;
+      if (fullPath.startsWith("/api/proxy/")) {
+        path = fullPath.substring("/api/proxy/".length);
+      }
+    }
+
+    if (!path) {
+      return c.json(400, {
+        error: "Missing Gemini API path.",
+        debug: "Path extraction failed",
+      });
+    }
+
+    // Build target URL, preserve incoming query params, and append API key.
+    // Build target URL, preserve incoming query params, and append API key.
+    // Note: PocketBase JS environment might not have URL class, so we use string manipulation.
+    const baseUrl = GOOGLE_API_URL_BASE.endsWith("/")
+      ? GOOGLE_API_URL_BASE
+      : GOOGLE_API_URL_BASE + "/";
+    const cleanPath = path.startsWith("/") ? path.substring(1) : path;
+    let targetUrl = baseUrl + cleanPath;
+
+    const queryParts = [];
+    const query = requestInfo.query || {};
+    Object.entries(query).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach((v) =>
+          queryParts.push(
+            `${encodeURIComponent(key)}=${encodeURIComponent(String(v))}`
+          )
+        );
+      } else if (value !== undefined && value !== null) {
+        queryParts.push(
+          `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`
+        );
+      }
+    });
+    queryParts.push(`key=${apiKey}`);
+
+    const separator = targetUrl.includes("?") ? "&" : "?";
+    targetUrl += separator + queryParts.join("&");
+
+    console.log(
+      `[Proxy] ${requestInfo.method} ${targetUrl.replace(apiKey, "HIDDEN")}`
+    );
+
     const res = $http.send({
-      url: target.toString(),
+      url: targetUrl,
       method: requestInfo.method,
       body:
         requestInfo.method === "POST" && requestInfo.data
@@ -58,30 +78,31 @@ const proxyHandler = (c) => {
 
     console.log(`[Proxy] Upstream status: ${res.statusCode}`);
 
-    const clientResponse = c.response();
-    clientResponse.status = res.statusCode;
-
     // Forward headers for downstream consumers (e.g., content-type).
     if (res.headers) {
       Object.entries(res.headers).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
-          clientResponse.header(key, String(value));
+          c.response().header(key, String(value));
         }
       });
     }
 
     const body =
-      res.body ??
-      res.raw ??
-      (res.json ? JSON.stringify(res.json) : "");
+      res.body ?? res.raw ?? (res.json ? JSON.stringify(res.json) : "");
 
-    clientResponse.body = body;
-    return clientResponse;
+    try {
+      const jsonBody = JSON.parse(body);
+      return c.json(res.statusCode, jsonBody);
+    } catch (e) {
+      return c.string(res.statusCode, body);
+    }
   } catch (err) {
     console.error(`[Proxy] Error:`, err);
     return c.json(500, {
-      error: `Failed to proxy ${requestInfo.method} request to Gemini API.`,
+      error: `Failed to proxy request to Gemini API.`,
       details: err.toString(),
+      path: path,
+      apiKeyConfigured: !!apiKey,
     });
   }
 };
