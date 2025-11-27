@@ -97,9 +97,12 @@ export const generateFunSocialPostImage = async (
 
   const client = getGeminiClient();
   const imageResponse = await client.models.generateContent({
-    // Revert to Gemini 2.5 Flash as Imagen 4/3 are 404 unavailable
-    model: "gemini-2.5-flash",
+    // Use the verified available Gemini 3 image model
+    model: "gemini-3-pro-image-preview",
     contents: { parts: imageParts },
+    generationConfig: {
+      responseModalities: ["IMAGE" as any],
+    },
   });
 
   const imageContentPart = imageResponse.candidates?.[0]?.content?.parts?.[0];
@@ -142,10 +145,13 @@ export const editSocialPostImage = async (
 
   const client = getGeminiClient();
   const imageResponse = await client.models.generateContent({
-    // Revert to Gemini 2.5 Flash as Imagen 4/3 are 404 unavailable
-    model: "gemini-2.5-flash",
+    // Use verified available Gemini 3 image model
+    model: "gemini-3-pro-image-preview",
     contents: {
       parts: imageParts,
+    },
+    generationConfig: {
+      responseModalities: ["IMAGE" as any],
     },
   });
 
@@ -185,7 +191,7 @@ export const generateSocialPostText = async (
 
   const client = getGeminiClient();
   const textResponse = await client.models.generateContent({
-    model: "gemini-2.5-pro",
+    model: "gemini-3-pro-preview",
     contents: { parts: [imagePart, { text: textPrompt }] },
   });
 
@@ -205,7 +211,7 @@ export const editSocialPostText = async (
 
   const client = getGeminiClient();
   const textResponse = await client.models.generateContent({
-    model: "gemini-2.5-pro",
+    model: "gemini-3-pro-preview",
     contents: { parts: [{ text: prompt }] },
   });
 
@@ -286,8 +292,9 @@ export const generateSocialPost = async (
   const client = getGeminiClient();
   const imagePromise = client.models
     .generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3-pro-image-preview",
       contents: { parts: imageParts },
+      generationConfig: { responseModalities: ["IMAGE" as any] },
     })
     .catch((error) => {
       throw new Error(

@@ -12,7 +12,7 @@ async function listModels() {
     const resp = await fetch(url);
     const data = await resp.json();
     if (resp.ok) {
-      console.log("✅ Available Models:");
+      console.log("✅ Available Models (v1beta):");
       data.models.forEach((m) => {
         console.log(`- ${m.name} (${m.supportedGenerationMethods.join(", ")})`);
       });
