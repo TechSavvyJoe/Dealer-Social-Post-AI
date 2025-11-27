@@ -363,20 +363,47 @@ export const generatePostVideo = async (
       : options.aspectPreference;
   const resolution = options.resolution || "720p";
 
+  const modelCandidates = [
+    "veo-3.1-generate-001",
+    "veo-3.1-generate-preview",
+    "veo-3.0-generate-001",
+  ];
+
   const maxRetries = 3;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      let operation: GenerateVideosOperation =
-        (await videoAi.models.generateVideos({
-          model: "veo-3.1-generate-preview",
-          prompt: prompt,
-          image: image,
-          config: {
-            numberOfVideos: 1,
-            resolution,
-            aspectRatio: aspectRatio,
-          },
-        })) as any;
+      let operation: GenerateVideosOperation | null = null;
+      let lastModelError: unknown;
+
+      for (const model of modelCandidates) {
+        try {
+          operation = (await videoAi.models.generateVideos({
+            model,
+            prompt: prompt,
+            image: image,
+            config: {
+              numberOfVideos: 1,
+              resolution,
+              aspectRatio: aspectRatio,
+            },
+          })) as any;
+          break; // success for this model, exit model loop
+        } catch (modelError) {
+          lastModelError = modelError;
+          const msg =
+            modelError instanceof Error
+              ? modelError.message.toLowerCase()
+              : String(modelError);
+          // try next model only on 404/not found
+          if (!msg.includes("404") && !msg.includes("not found")) {
+            throw modelError;
+          }
+        }
+      }
+
+      if (!operation) {
+        throw lastModelError || new Error("All video models returned 404.");
+      }
 
       while (!operation.done) {
         await new Promise((resolve) => setTimeout(resolve, 10000)); // Poll every 10 seconds
