@@ -37,19 +37,7 @@ migrate(
             pattern: "^[0-9]{4}$",
           },
         },
-        {
-          system: false,
-          id: "logo_field",
-          name: "logo",
-          type: "url",
-          required: false,
-          presentable: false,
-          unique: false,
-          options: {
-            exceptDomains: [],
-            onlyDomains: [],
-          },
-        },
+
         {
           system: false,
           id: "logo_field",
