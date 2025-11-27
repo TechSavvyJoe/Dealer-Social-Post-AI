@@ -7,14 +7,16 @@ if (!API_KEY) {
 }
 
 const models = [
-  "gemini-2.0-flash-exp",
-  "gemini-3-pro-preview",
-  "gemini-3-pro-image-preview",
-  "veo-2.0-generate-preview",
-  "veo-2.0-generate-001",
+  "gemini-3-pro",
+  "imagen-4.0-generate",
+  "veo-3.0-generate",
+  "gemini-2.5-pro",
+  "gemini-2.5-flash",
+  "imagen-3.0-generate-001",
 ];
 
 async function testModel(model) {
+  // Try v1beta for standard models
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}?key=${API_KEY}`;
   try {
     const resp = await fetch(url);
