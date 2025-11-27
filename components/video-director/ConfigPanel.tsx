@@ -22,103 +22,110 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ values, onChange }) =>
   };
 
   return (
-    <div className="space-y-5">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-xl border border-white/10 bg-slate-900/80 p-4">
-          <h3 className="text-sm font-semibold text-white mb-3">Clip duration</h3>
-          <div className="grid grid-cols-2 gap-2">
-            {durations.map(({ value, label, description }) => (
+    <div className="space-y-4">
+      {/* Duration - Compact inline */}
+      <div className="space-y-2">
+        <h3 className="text-xs font-semibold text-white/80">Duration</h3>
+        <div className="flex gap-2">
+          {durations.map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={() => handleChange('duration', value)}
+              className={cn(
+                'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all',
+                values.duration === value
+                  ? 'border-indigo-400 bg-indigo-500/30 text-white'
+                  : 'border-white/10 bg-slate-900/50 text-indigo-100/80 hover:border-indigo-400/50'
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Aspect - Compact inline */}
+      <div className="space-y-2">
+        <h3 className="text-xs font-semibold text-white/80">Aspect</h3>
+        <div className="flex gap-2">
+          {aspectRatios.map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={() => handleChange('aspectPreference', value)}
+              className={cn(
+                'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all',
+                values.aspectPreference === value
+                  ? 'border-sky-400 bg-sky-500/30 text-white'
+                  : 'border-white/10 bg-slate-900/50 text-indigo-100/80 hover:border-sky-400/50'
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Quality row - Resolution + Pacing */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-2">
+          <h3 className="text-xs font-semibold text-white/80">Quality</h3>
+          <div className="flex flex-col gap-1.5">
+            {resolutions.map(({ value, label }) => (
               <button
                 key={value}
-                onClick={() => handleChange('duration', value)}
+                onClick={() => handleChange('resolution', value)}
                 className={cn(
-                  'flex flex-col rounded-lg border px-3 py-2 text-left transition-all',
-                  values.duration === value ? 'border-indigo-400 bg-indigo-500/30 text-white' : 'border-white/15 bg-slate-900/70 text-indigo-100 hover:border-indigo-400/50'
+                  'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
+                  values.resolution === value
+                    ? 'border-fuchsia-400 bg-fuchsia-500/30 text-white'
+                    : 'border-white/10 bg-slate-900/50 text-indigo-100/80 hover:border-fuchsia-400/50'
                 )}
               >
-                <span className="text-sm font-semibold">{label}</span>
-                <span className="text-xs text-indigo-100/70">{description}</span>
+                {label}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="rounded-xl border border-white/10 bg-slate-900/80 p-4">
-          <h3 className="text-sm font-semibold text-white mb-3">Soundtrack</h3>
-          <div className="grid grid-cols-1 gap-2">
-            {soundtracks.map(({ value, label, description }) => (
+        <div className="space-y-2">
+          <h3 className="text-xs font-semibold text-white/80">Motion</h3>
+          <div className="flex flex-col gap-1.5">
+            {pacingOptions.map(({ value, label }) => (
               <button
                 key={value}
-                onClick={() => handleChange('soundtrack', value)}
+                onClick={() => handleChange('pacing', value)}
                 className={cn(
-                  'flex flex-col rounded-lg border px-3 py-2 text-left transition-all',
-                  values.soundtrack === value ? 'border-emerald-400 bg-emerald-500/25 text-white' : 'border-white/15 bg-slate-900/70 text-indigo-100 hover:border-emerald-400/40'
+                  'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
+                  values.pacing === value
+                    ? 'border-amber-400 bg-amber-500/30 text-white'
+                    : 'border-white/10 bg-slate-900/50 text-indigo-100/80 hover:border-amber-400/50'
                 )}
               >
-                <span className="text-sm font-semibold">{label}</span>
-                <span className="text-xs text-indigo-100/70">{description}</span>
+                {label}
               </button>
             ))}
           </div>
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-white/10 bg-slate-900/80 p-4">
-          <h3 className="text-sm font-semibold text-white mb-3">Aspect</h3>
-          <div className="flex flex-col gap-2">
-            {aspectRatios.map(({ value, label, description }) => (
-              <button
-                key={value}
-                onClick={() => handleChange('aspectPreference', value)}
-                className={cn(
-                  'flex flex-col rounded-lg border px-3 py-2 text-left transition-all',
-                  values.aspectPreference === value ? 'border-sky-400 bg-sky-500/25 text-white' : 'border-white/15 bg-slate-900/70 text-indigo-100 hover:border-sky-400/40'
-                )}
-              >
-                <span className="text-sm font-semibold">{label}</span>
-                <span className="text-xs text-indigo-100/70">{description}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-white/10 bg-slate-900/80 p-4">
-          <h3 className="text-sm font-semibold text-white mb-3">Resolution</h3>
-          <div className="flex flex-col gap-2">
-            {resolutions.map(({ value, label, description }) => (
-              <button
-                key={value}
-                onClick={() => handleChange('resolution', value)}
-                className={cn(
-                  'flex flex-col rounded-lg border px-3 py-2 text-left transition-all',
-                  values.resolution === value ? 'border-fuchsia-400 bg-fuchsia-500/25 text-white' : 'border-white/15 bg-slate-900/70 text-indigo-100 hover:border-fuchsia-400/40'
-                )}
-              >
-                <span className="text-sm font-semibold">{label}</span>
-                <span className="text-xs text-indigo-100/70">{description}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-white/10 bg-slate-900/80 p-4">
-          <h3 className="text-sm font-semibold text-white mb-3">Motion</h3>
-          <div className="flex flex-col gap-2">
-            {pacingOptions.map(({ value, label, description }) => (
-              <button
-                key={value}
-                onClick={() => handleChange('pacing', value)}
-                className={cn(
-                  'flex flex-col rounded-lg border px-3 py-2 text-left transition-all',
-                  values.pacing === value ? 'border-amber-400 bg-amber-500/25 text-white' : 'border-white/15 bg-slate-900/70 text-indigo-100 hover:border-amber-400/40'
-                )}
-              >
-                <span className="text-sm font-semibold">{label}</span>
-                <span className="text-xs text-indigo-100/70">{description}</span>
-              </button>
-            ))}
-          </div>
+      {/* Soundtrack - Full width */}
+      <div className="space-y-2">
+        <h3 className="text-xs font-semibold text-white/80">Soundtrack</h3>
+        <div className="flex gap-2">
+          {soundtracks.map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={() => handleChange('soundtrack', value)}
+              className={cn(
+                'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all',
+                values.soundtrack === value
+                  ? 'border-emerald-400 bg-emerald-500/30 text-white'
+                  : 'border-white/10 bg-slate-900/50 text-indigo-100/80 hover:border-emerald-400/50'
+              )}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
     </div>

@@ -2,14 +2,14 @@ import { VideoStyle, VideoRequestOptions } from '../../types';
 import { IconProps } from '../Icons';
 
 export const durations = [
-  { value: 4, label: '4 seconds', description: 'Perfect for looping stories and reels.' },
-  { value: 6, label: '6 seconds', description: 'Adds room for dramatic reveals.' },
+  { value: 4, label: '4s', description: 'Perfect for looping stories and reels.' },
+  { value: 6, label: '6s', description: 'Adds room for dramatic reveals.' },
 ];
 
 export const soundtracks: Array<{ value: VideoRequestOptions['soundtrack']; label: string; description: string }> = [
-  { value: 'celebration', label: 'Celebration beat', description: 'Upbeat claps and synth pulses.' },
-  { value: 'cinematic', label: 'Cinematic swell', description: 'Ambient pads with a smooth rise.' },
-  { value: 'none', label: 'No soundtrack', description: 'Silence — bring your own vibe.' },
+  { value: 'celebration', label: 'Celebration', description: 'Upbeat claps and synth pulses.' },
+  { value: 'cinematic', label: 'Cinematic', description: 'Ambient pads with a smooth rise.' },
+  { value: 'none', label: 'None', description: 'Silence — bring your own vibe.' },
 ];
 
 export const styles: { style: VideoStyle; icon: IconProps['type']; description: string }[] = [
@@ -36,9 +36,9 @@ export const styles: { style: VideoStyle; icon: IconProps['type']; description: 
 ];
 
 export const aspectRatios: Array<{ value: VideoRequestOptions['aspectPreference']; label: string; description: string }> = [
-  { value: 'auto', label: 'Match photo', description: 'Auto-detect landscape or vertical.' },
-  { value: '9:16', label: 'Vertical', description: 'Ideal for Reels, Shorts, and TikTok.' },
-  { value: '16:9', label: 'Widescreen', description: 'Best for YouTube & horizontal ads.' },
+  { value: 'auto', label: 'Auto', description: 'Auto-detect landscape or vertical.' },
+  { value: '9:16', label: '9:16', description: 'Ideal for Reels, Shorts, and TikTok.' },
+  { value: '16:9', label: '16:9', description: 'Best for YouTube & horizontal ads.' },
 ];
 
 export const resolutions: Array<{ value: VideoRequestOptions['resolution']; label: string; description: string }> = [

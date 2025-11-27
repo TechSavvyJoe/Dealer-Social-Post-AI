@@ -28,8 +28,6 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({
     useState<VideoRequestOptions["resolution"]>("1080p");
   const [pacing, setPacing] =
     useState<VideoRequestOptions["pacing"]>("cinematic");
-  const [showAdvanced, setShowAdvanced] = useState(false);
-
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -146,29 +144,13 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({
             {/* Content - Split Pane */}
             <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
               {/* Left Panel: Config (Scrollable) */}
-              <div className="w-full lg:w-[400px] xl:w-[450px] flex flex-col border-r border-white/10 bg-slate-900/30 overflow-y-auto custom-scrollbar">
-                <div className="p-6 space-y-8">
+              <div className="w-full lg:w-[340px] flex flex-col border-r border-white/10 bg-slate-900/30 overflow-y-auto custom-scrollbar">
+                <div className="p-5 space-y-5">
                   {/* Presets */}
                   <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-300/80">
-                        Quick Presets
-                      </h3>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 text-[10px] px-2 text-indigo-300 hover:text-white"
-                        onClick={() => {
-                          setDuration(durations[1].value);
-                          setSoundtrack("celebration");
-                          setAspectPreference("auto");
-                          setResolution("1080p");
-                          setPacing("cinematic");
-                        }}
-                      >
-                        Reset Default
-                      </Button>
-                    </div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-300/80 mb-3">
+                      Presets
+                    </h3>
                     <PresetSelector
                       currentValues={{
                         duration,
@@ -181,47 +163,37 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = ({
                     />
                   </div>
 
-                  {/* Advanced Settings Toggle */}
-                  <div className="pt-4 border-t border-white/5">
-                    <button
-                      onClick={() => setShowAdvanced(!showAdvanced)}
-                      className="flex items-center gap-2 text-sm font-medium text-indigo-300 hover:text-white transition-colors w-full"
-                    >
-                      <span>
-                        {showAdvanced
-                          ? "Hide Advanced Settings"
-                          : "Show Advanced Settings"}
-                      </span>
-                      <Icon
-                        type={showAdvanced ? "close" : "settings"}
-                        className="w-4 h-4 opacity-70"
-                      />
-                    </button>
-
-                    <AnimatePresence>
-                      {showAdvanced && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.2 }}
-                          className="overflow-hidden"
-                        >
-                          <div className="pt-4">
-                            <ConfigPanel
-                              values={{
-                                duration,
-                                soundtrack,
-                                aspectPreference,
-                                resolution,
-                                pacing,
-                              }}
-                              onChange={handleConfigChange}
-                            />
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                  {/* Settings */}
+                  <div className="pt-3 border-t border-white/5">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-300/80">
+                        Settings
+                      </h3>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-[10px] px-2 text-indigo-300/70 hover:text-white"
+                        onClick={() => {
+                          setDuration(durations[1].value);
+                          setSoundtrack("celebration");
+                          setAspectPreference("auto");
+                          setResolution("1080p");
+                          setPacing("cinematic");
+                        }}
+                      >
+                        Reset
+                      </Button>
+                    </div>
+                    <ConfigPanel
+                      values={{
+                        duration,
+                        soundtrack,
+                        aspectPreference,
+                        resolution,
+                        pacing,
+                      }}
+                      onChange={handleConfigChange}
+                    />
                   </div>
                 </div>
               </div>
