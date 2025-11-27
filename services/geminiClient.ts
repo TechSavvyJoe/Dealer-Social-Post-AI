@@ -34,7 +34,8 @@ class MockGeminiClient {
           !params.model.includes("gemini-2.0-flash-exp") &&
           !params.model.includes("gemini-2.5-flash") &&
           !params.model.includes("gemini-3-pro-image-preview") &&
-          !params.model.includes("gemini-3-pro-preview")
+          !params.model.includes("gemini-3-pro-preview") &&
+          !params.model.includes("veo-3.1")
             ? "v1alpha"
             : "v1beta";
         const rawResponse = await fetchFromProxy(

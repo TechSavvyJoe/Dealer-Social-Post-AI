@@ -3,31 +3,26 @@ console.log("TEST FILE IS RUNNING");
 import { generateSocialPost, generatePostVideo } from './geminiService';
 import { StyleOption, ToneOption, VideoStyle } from '../types';
 
-// Mock the GoogleGenAI SDK
-const mockGenerateContent = vi.fn();
-const mockGenerateVideos = vi.fn();
-const mockGetVideosOperation = vi.fn();
-
-vi.mock('@google/genai', () => {
+// Hoist the mocks so they can be used in the mock factory
+const { mockGenerateContent, mockGenerateVideos, mockGetVideosOperation } = vi.hoisted(() => {
   return {
-    GoogleGenAI: vi.fn().mockImplementation(() => ({
-      models: {
-        generateContent: mockGenerateContent,
-        generateVideos: mockGenerateVideos,
-      },
-      operations: {
-        getVideosOperation: mockGetVideosOperation
-      }
-    })),
-    Modality: {
-      IMAGE: 'IMAGE'
-    }
+    mockGenerateContent: vi.fn(),
+    mockGenerateVideos: vi.fn(),
+    mockGetVideosOperation: vi.fn(),
   };
 });
 
 // Mock dependencies
 vi.mock('./geminiClient', () => ({
-  getGeminiClient: () => new (require('@google/genai').GoogleGenAI)(),
+  getGeminiClient: () => ({
+    models: {
+      generateContent: mockGenerateContent,
+      generateVideos: mockGenerateVideos,
+    },
+    operations: {
+      getVideosOperation: mockGetVideosOperation
+    }
+  }),
   requireGeminiApiKey: () => 'fake-api-key',
 }));
 
@@ -39,11 +34,10 @@ vi.mock('../utils/imageUtils', () => ({
 describe('GeminiService Model Verification', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    import('fs').then(fs => fs.writeFileSync('test_result.txt', 'TEST RAN'));
     
     // Setup default successful responses
     mockGenerateContent.mockResolvedValue({
-      text: 'Generated text',
+      text: () => 'Generated text', // Fix: generateContent response has a text() method in SDK
       candidates: [{
         content: {
           parts: [{
@@ -62,9 +56,6 @@ describe('GeminiService Model Verification', () => {
   });
 
   it('should use gemini-3-pro-preview for text generation', async () => {
-    // We need to trigger a call that uses generateSocialPostText internally or directly call it if exported
-    // generateSocialPost calls generateSocialPostText internally
-    
     await generateSocialPost(
       'data:image/jpeg;base64,fake',
       StyleOption.Modern,
@@ -72,9 +63,6 @@ describe('GeminiService Model Verification', () => {
       'Test Dealer'
     );
 
-    // Check the calls to generateContent
-    // generateSocialPost makes two calls: one for text, one for image
-    
     // Find the text generation call
     const textCall = mockGenerateContent.mock.calls.find(call => 
       call[0].model === 'gemini-3-pro-preview'
@@ -101,7 +89,7 @@ describe('GeminiService Model Verification', () => {
     expect(imageCall[0].model).toBe('gemini-3-pro-image-preview');
   });
 
-  it('should use veo-3.1-generate-preview for video generation', async () => {
+  it('should use veo-3.1-generate-001 for video generation', async () => {
     // Mock fetch for video download
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -127,7 +115,7 @@ describe('GeminiService Model Verification', () => {
     );
 
     expect(mockGenerateVideos).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'veo-3.1-generate-preview'
+      model: 'veo-3.1-generate-001'
     }));
   });
 });
