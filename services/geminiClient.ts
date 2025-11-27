@@ -27,17 +27,12 @@ class MockGeminiClient {
       }) => {
         // The SDK's `generateContent` returns a response with a `text()` method.
         // The raw API response is what our proxy will return. We need to wrap it.
-        // Route preview models and latest Gemini models to v1alpha, BUT keep gemini-2.0-flash-exp, gemini-2.5-flash, and bleeding edge models on v1beta
+        // Route preview models and latest Gemini models to v1alpha, BUT keep gemini-2.0-flash-exp and gemini-2.5-flash on v1beta
         const version =
           (params.model.includes("gemini-3") ||
-            params.model.includes("imagen-4") ||
-            params.model.includes("veo-3") ||
             params.model.includes("preview")) &&
           !params.model.includes("gemini-2.0-flash-exp") &&
-          !params.model.includes("gemini-2.5-flash") &&
-          !params.model.includes("gemini-3-pro") &&
-          !params.model.includes("imagen-4.0-generate") &&
-          !params.model.includes("veo-3.0-generate")
+          !params.model.includes("gemini-2.5-flash")
             ? "v1alpha"
             : "v1beta";
         const rawResponse = await fetchFromProxy(

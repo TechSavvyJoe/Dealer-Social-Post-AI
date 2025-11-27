@@ -97,8 +97,8 @@ export const generateFunSocialPostImage = async (
 
   const client = getGeminiClient();
   const imageResponse = await client.models.generateContent({
-    // Use the absolute latest Imagen model as requested
-    model: "imagen-4.0-generate",
+    // Revert to Gemini 2.5 Flash as Imagen 4/3 are 404 unavailable
+    model: "gemini-2.5-flash",
     contents: { parts: imageParts },
   });
 
@@ -142,8 +142,8 @@ export const editSocialPostImage = async (
 
   const client = getGeminiClient();
   const imageResponse = await client.models.generateContent({
-    // Use image-capable model so we actually receive inline image data back.
-    model: "imagen-4.0-generate",
+    // Revert to Gemini 2.5 Flash as Imagen 4/3 are 404 unavailable
+    model: "gemini-2.5-flash",
     contents: {
       parts: imageParts,
     },
@@ -185,7 +185,7 @@ export const generateSocialPostText = async (
 
   const client = getGeminiClient();
   const textResponse = await client.models.generateContent({
-    model: "gemini-3-pro",
+    model: "gemini-2.5-pro",
     contents: { parts: [imagePart, { text: textPrompt }] },
   });
 
@@ -205,7 +205,7 @@ export const editSocialPostText = async (
 
   const client = getGeminiClient();
   const textResponse = await client.models.generateContent({
-    model: "gemini-3-pro",
+    model: "gemini-2.5-pro",
     contents: { parts: [{ text: prompt }] },
   });
 
@@ -286,7 +286,7 @@ export const generateSocialPost = async (
   const client = getGeminiClient();
   const imagePromise = client.models
     .generateContent({
-      model: "imagen-4.0-generate",
+      model: "gemini-2.5-flash",
       contents: { parts: imageParts },
     })
     .catch((error) => {
@@ -359,7 +359,7 @@ export const generatePostVideo = async (
     try {
       let operation: GenerateVideosOperation =
         (await videoAi.models.generateVideos({
-          model: "veo-3.0-generate",
+          model: "veo-2.0-generate-001",
           prompt: prompt,
           image: image,
           config: {
