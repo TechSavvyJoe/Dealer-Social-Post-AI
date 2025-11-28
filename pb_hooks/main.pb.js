@@ -142,12 +142,16 @@ const proxyHandler = (c) => {
               // Ignore chmod errors
             }
 
+            // Detect OpenSSL path (Docker/Linux vs macOS)
+            const opensslBin = $os.cmd("which", "openssl").run()
+              ? "openssl"
+              : "/opt/homebrew/bin/openssl";
+
             // Step 1: Sign
-            // Back to Homebrew openssl, try to use file path
             const signCmd = $os.cmd(
               "sh",
               "-c",
-              `/opt/homebrew/bin/openssl dgst -sha256 -sign "${tempKey}" -out "${tempSig}" "${tempToken}" 2>&1 || true`
+              `${opensslBin} dgst -sha256 -sign "${tempKey}" -out "${tempSig}" "${tempToken}" 2>&1 || true`
             );
             const signOut = signCmd.output();
 
@@ -168,7 +172,7 @@ const proxyHandler = (c) => {
             const b64Cmd = $os.cmd(
               "sh",
               "-c",
-              `/opt/homebrew/bin/openssl base64 -in "${tempSig}"`
+              `${opensslBin} base64 -in "${tempSig}"`
             );
             const b64 = b64Cmd.output();
 
@@ -180,7 +184,7 @@ const proxyHandler = (c) => {
               .replace(/=+$/, "");
 
             const jwt = `${unsignedToken}.${encodedSig}`;
-            console.log("[Auth] Generated JWT:", jwt);
+            // console.log("[Auth] Generated JWT:", jwt); // REMOVED FOR SECURITY
 
             // Exchange for Access Token
             const tokenResp = $http.send({
@@ -191,8 +195,15 @@ const proxyHandler = (c) => {
             });
 
             if (tokenResp.statusCode !== 200) {
-              console.log("[Auth] Token Exchange Error Body:", tokenResp.raw);
-              throw new Error(`Token exchange failed: ${tokenResp.raw}`);
+              console.log(
+                "[Auth] Token Exchange Failed. Status:",
+                tokenResp.statusCode
+              );
+              // Do not log raw body if it contains sensitive info, but usually error body is safe.
+              // However, to be safe, we'll just log the status and throw.
+              throw new Error(
+                `Token exchange failed with status ${tokenResp.statusCode}`
+              );
             }
 
             const tokenData = tokenResp.json;

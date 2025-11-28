@@ -32,11 +32,27 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
   const handleConfirm = async () => {
     triggerHapticFeedback();
 
-    // If we have the image source, just pass it through
-    // No cropping or processing needed
-    if (imageSrc) {
-      onConfirm(imageSrc);
-    }
+    if (!imageSrc || !imageRef.current) return;
+
+    // Create a canvas to crop/resize the image if needed
+    // For now, we'll just draw the image to a canvas to ensure it's a valid data URL
+    // and potentially resize it to a reasonable max dimension (e.g. 1080p)
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    const img = imageRef.current;
+
+    if (!ctx) return;
+
+    // Set canvas dimensions to match image natural dimensions
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+
+    // Draw image
+    ctx.drawImage(img, 0, 0);
+
+    // Get data URL (JPEG for smaller size)
+    const croppedImage = canvas.toDataURL("image/jpeg", 0.9);
+    onConfirm(croppedImage);
   };
 
   const handleRetake = () => {
@@ -78,17 +94,18 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
             alt="Preview"
             className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-2xl"
           />
-                </div>
+        </div>
 
-                {/* Action Buttons - Enhanced visibility */}
-                <div className="px-6 py-6 bg-surface-800/80 border-t border-white/20">
-                    <p className="text-center text-surface-300 text-sm mb-4">
-                        Confirm this photo or retake; cropping is not applied in this preview.
-                    </p>
-                    <div className="flex gap-4 justify-center">
-                        <button
-                            onClick={handleRetake}
-                            className="px-8 py-4 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold text-lg
+        {/* Action Buttons - Enhanced visibility */}
+        <div className="px-6 py-6 bg-surface-800/80 border-t border-white/20">
+          <p className="text-center text-surface-300 text-sm mb-4">
+            Confirm this photo or retake; cropping is not applied in this
+            preview.
+          </p>
+          <div className="flex gap-4 justify-center">
+            <button
+              onClick={handleRetake}
+              className="px-8 py-4 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold text-lg
                                      transition-all shadow-lg hover:shadow-xl border border-white/20 hover:border-white/30
                                      min-w-[160px]"
             >

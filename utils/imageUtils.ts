@@ -1,5 +1,3 @@
-
-
 /**
  * Converts a data URL string into a Blob object.
  * This is useful for file operations, such as creating a File object for uploading or sharing.
@@ -20,11 +18,11 @@ export const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
  * @throws An error if the data URL format is invalid.
  */
 export const parseDataUrl = (dataUrl: string) => {
-    const match = dataUrl.match(/^data:(.+);base64,(.+)$/);
-    if (!match) {
-        throw new Error("Invalid data URL");
-    }
-    return { mimeType: match[1], data: match[2] };
+  const match = dataUrl.match(/^data:(.+);base64,(.+)$/);
+  if (!match) {
+    throw new Error("Invalid data URL");
+  }
+  return { mimeType: match[1], data: match[2] };
 };
 
 /**
@@ -48,7 +46,7 @@ export const fileToDataUrl = (file: File): Promise<string> => {
  */
 export const getJpegExifOrientation = (file: File): Promise<number> => {
   return new Promise((resolve) => {
-    if (file.type !== 'image/jpeg') {
+    if (file.type !== "image/jpeg") {
       resolve(1);
       return;
     }
@@ -56,7 +54,7 @@ export const getJpegExifOrientation = (file: File): Promise<number> => {
     reader.onload = () => {
       const view = new DataView(reader.result as ArrayBuffer);
       // JPEG starts with 0xFFD8
-      if (view.getUint16(0, false) !== 0xFFD8) {
+      if (view.getUint16(0, false) !== 0xffd8) {
         resolve(1);
         return;
       }
@@ -65,43 +63,46 @@ export const getJpegExifOrientation = (file: File): Promise<number> => {
       while (offset < length) {
         const marker = view.getUint16(offset, false);
         offset += 2;
-        if (marker === 0xFFE1) { // APP1
+        if (marker === 0xffe1) {
+          // APP1
           const segmentLength = view.getUint16(offset, false);
           offset += 2;
           // Check for Exif header ("Exif\0\0")
-            if (
-              view.getUint32(offset, false) === 0x45786966 && // 'Exif'
-              view.getUint16(offset + 4, false) === 0x0000
-            ) {
-              let tiffOffset = offset + 6;
-              const endianness = view.getUint16(tiffOffset, false);
-              const littleEndian = endianness === 0x4949; // 'II'
-              if (!littleEndian && endianness !== 0x4D4D) { // 'MM'
-                resolve(1);
-                return;
-              }
-              // Validate TIFF magic number 0x002A
-              if (view.getUint16(tiffOffset + 2, littleEndian) !== 0x002A) {
-                resolve(1);
-                return;
-              }
-              const firstIFDOffset = view.getUint32(tiffOffset + 4, littleEndian);
-              let ifdOffset = tiffOffset + firstIFDOffset;
-              const entries = view.getUint16(ifdOffset, littleEndian);
-              for (let i = 0; i < entries; i++) {
-                const entryOffset = ifdOffset + 2 + i * 12;
-                const tag = view.getUint16(entryOffset, littleEndian);
-                if (tag === 0x0112) { // Orientation tag
-                  const valueOffset = entryOffset + 8;
-                  const orientation = view.getUint16(valueOffset, littleEndian);
-                  resolve(orientation);
-                  return;
-                }
-              }
+          if (
+            view.getUint32(offset, false) === 0x45786966 && // 'Exif'
+            view.getUint16(offset + 4, false) === 0x0000
+          ) {
+            let tiffOffset = offset + 6;
+            const endianness = view.getUint16(tiffOffset, false);
+            const littleEndian = endianness === 0x4949; // 'II'
+            if (!littleEndian && endianness !== 0x4d4d) {
+              // 'MM'
               resolve(1);
               return;
             }
-        } else if ((marker & 0xFF00) !== 0xFF00) {
+            // Validate TIFF magic number 0x002A
+            if (view.getUint16(tiffOffset + 2, littleEndian) !== 0x002a) {
+              resolve(1);
+              return;
+            }
+            const firstIFDOffset = view.getUint32(tiffOffset + 4, littleEndian);
+            let ifdOffset = tiffOffset + firstIFDOffset;
+            const entries = view.getUint16(ifdOffset, littleEndian);
+            for (let i = 0; i < entries; i++) {
+              const entryOffset = ifdOffset + 2 + i * 12;
+              const tag = view.getUint16(entryOffset, littleEndian);
+              if (tag === 0x0112) {
+                // Orientation tag
+                const valueOffset = entryOffset + 8;
+                const orientation = view.getUint16(valueOffset, littleEndian);
+                resolve(orientation);
+                return;
+              }
+            }
+            resolve(1);
+            return;
+          }
+        } else if ((marker & 0xff00) !== 0xff00) {
           // Invalid marker
           break;
         } else {
@@ -131,7 +132,7 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
     orientation = 1;
   }
   // If orientation is 1 and not JPEG, just return original
-  if (orientation === 1 && file.type !== 'image/jpeg') {
+  if (orientation === 1 && file.type !== "image/jpeg") {
     return originalDataUrl; // Already no EXIF orientation or not JPEG
   }
   // Load image into canvas and apply transforms
@@ -141,8 +142,8 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
     i.onerror = reject;
     i.src = originalDataUrl;
   });
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
   if (!ctx) {
     return originalDataUrl;
   }
@@ -193,7 +194,7 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
   }
   ctx.drawImage(img, 0, 0);
   // Re-encode as JPEG (or original type if not JPEG) stripping EXIF metadata.
-  const mimeType = file.type === 'image/jpeg' ? 'image/jpeg' : file.type;
+  const mimeType = file.type === "image/jpeg" ? "image/jpeg" : file.type;
   return canvas.toDataURL(mimeType, 0.92);
 };
 
@@ -203,20 +204,21 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
  * @returns The found image URL or null.
  */
 const findImageUrlInHtml = (html: string): string | null => {
-    // Look for <meta property="og:image" content="URL">
-    const ogImageMatch = html.match(/<meta\s+(?:name|property)="og:image"\s+content="([^"]+)"/);
-    if (ogImageMatch && ogImageMatch[1]) {
-        // Clean up potential tracking parameters
-        return ogImageMatch[1].split('?')[0];
-    }
-    // Fallback to <link rel="image_src" href="URL">
-    const imageSrcMatch = html.match(/<link\s+rel="image_src"\s+href="([^"]+)"/);
-    if (imageSrcMatch && imageSrcMatch[1]) {
-        return imageSrcMatch[1].split('?')[0];
-    }
-    return null;
+  // Look for <meta property="og:image" content="URL">
+  const ogImageMatch = html.match(
+    /<meta\s+(?:name|property)="og:image"\s+content="([^"]+)"/
+  );
+  if (ogImageMatch && ogImageMatch[1]) {
+    // Clean up potential tracking parameters
+    return ogImageMatch[1].split("?")[0];
+  }
+  // Fallback to <link rel="image_src" href="URL">
+  const imageSrcMatch = html.match(/<link\s+rel="image_src"\s+href="([^"]+)"/);
+  if (imageSrcMatch && imageSrcMatch[1]) {
+    return imageSrcMatch[1].split("?")[0];
+  }
+  return null;
 };
-
 
 /**
  * Fetches an image from a URL and converts it into a data URL string.
@@ -231,23 +233,26 @@ export const urlToDataUrl = async (url: string): Promise<string> => {
 
     // If the URL is an Imgur page (e.g., imgur.com/a/xyz) instead of a direct image link (i.imgur.com/xyz.jpg),
     // we need to fetch the page's HTML and find the actual image URL.
-    if (url.includes('imgur.com/') && !url.includes('i.imgur.com/')) {
-      try {
-        // Use a public CORS proxy to get around browser restrictions for fetching HTML from another domain.
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-        const pageResponse = await fetch(proxyUrl);
+    // Use our own secure local proxy instead of allorigins.win
+    // This avoids leaking user IP to third parties and ensures consistent behavior
+    const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
 
-        if (pageResponse.ok) {
-          const htmlText = await pageResponse.text();
-          const directImageUrl = findImageUrlInHtml(htmlText);
-          if (directImageUrl) {
-            imageUrl = directImageUrl; // We found the direct link!
-          }
-        }
-      } catch (proxyError) {
-        // If the proxy fails, we'll just try the original URL and hope for the best.
-        console.warn(`Could not resolve Imgur page via proxy for ${url}. Attempting direct fetch.`, proxyError);
+    try {
+      const response = await fetch(proxyUrl);
+      if (response.ok) {
+        const blob = await response.blob();
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
       }
+    } catch (e) {
+      console.warn(
+        "Local proxy failed, falling back to direct fetch (might fail CORS)",
+        e
+      );
     }
 
     // Fetch the final image URL (either the original or the one we resolved).
@@ -260,8 +265,10 @@ export const urlToDataUrl = async (url: string): Promise<string> => {
     const blob = await response.blob();
 
     // Verify that what we downloaded is actually an image file.
-    if (!blob.type.startsWith('image/')) {
-      throw new Error(`The link provided does not point to a direct image. Content type found: ${blob.type}. Please use a link ending in .jpg, .png, etc.`);
+    if (!blob.type.startsWith("image/")) {
+      throw new Error(
+        `The link provided does not point to a direct image. Content type found: ${blob.type}. Please use a link ending in .jpg, .png, etc.`
+      );
     }
 
     // Convert blob to data URL
@@ -274,7 +281,12 @@ export const urlToDataUrl = async (url: string): Promise<string> => {
       reader.readAsDataURL(blob);
     });
   } catch (error) {
-    console.error(`Error fetching URL to convert to data URL for '${url}':`, error);
-    throw new Error(`Failed to load image from URL. Please check the link and your network connection.`);
+    console.error(
+      `Error fetching URL to convert to data URL for '${url}':`,
+      error
+    );
+    throw new Error(
+      `Failed to load image from URL. Please check the link and your network connection.`
+    );
   }
 };

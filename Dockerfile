@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     ca-certificates \
     curl \
+    openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and unzip PocketBase
@@ -26,6 +27,9 @@ COPY --from=frontend-builder /app/dist /pb/pb_public
 
 # Copy the PocketBase hooks
 COPY pb_hooks /pb/pb_hooks
+
+# Copy migrations
+COPY pb_migrations /pb/pb_migrations
 
 EXPOSE 8090
 

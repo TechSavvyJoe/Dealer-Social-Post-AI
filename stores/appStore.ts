@@ -100,9 +100,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPreferences: (prefs) => {
     set((state) => {
       const newState = { ...state, ...prefs };
-      if (prefs.compactMode !== undefined) {
-        saveSession({ compactMode: prefs.compactMode });
-      }
+      saveSession({
+        compactMode: newState.compactMode,
+        preferredStyle: newState.preferredStyle,
+        preferredTone: newState.preferredTone,
+      });
       return newState;
     });
   },
@@ -136,7 +138,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       logError("app.login.failed", { message: errorMessage, dealerId });
-      set({ error: "Login failed. Please check the dealer code and try again." });
+      set({
+        error: "Login failed. Please check the dealer code and try again.",
+      });
       return false;
     }
   },
@@ -194,8 +198,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         clearSession();
         logError("app.session.restoreFailed", { message: String(error) });
       }
-    } else if (session?.compactMode !== undefined) {
-      set({ compactMode: session.compactMode });
+    } else {
+      // Restore standalone preferences if no full session
+      if (session?.compactMode !== undefined) {
+        set({ compactMode: session.compactMode });
+      }
+      if (session?.preferredStyle) {
+        set({ preferredStyle: session.preferredStyle as StyleOption });
+      }
+      if (session?.preferredTone) {
+        set({ preferredTone: session.preferredTone as ToneOption });
+      }
     }
   },
 }));
