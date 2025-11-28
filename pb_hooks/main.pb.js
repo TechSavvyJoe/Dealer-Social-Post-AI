@@ -5,12 +5,18 @@
  * - `/api/proxy/vertex/v1beta1/projects/{PROJECT_ID}/locations/{LOCATION}/...` (Vertex AI)
  * and the hook will forward the request to the appropriate Google API with the secret API key.
  */
+// Global token cache
+let cachedAccessToken = null;
+let tokenExpiry = 0;
+
+// getVertexAccessToken moved inside proxyHandler for scope safety
+
 const proxyHandler = (c) => {
   const GEMINI_API_URL_BASE = "https://generativelanguage.googleapis.com/";
   const VERTEX_AI_URL_BASE = "https://{LOCATION}-aiplatform.googleapis.com/";
 
   const geminiApiKey = $os.getenv("GEMINI_API_KEY");
-  const vertexApiKey = $os.getenv("VERTEX_API_KEY");
+  // Vertex API Key no longer used, we use Service Account
 
   let path = c.pathParams.path;
 
@@ -34,17 +40,186 @@ const proxyHandler = (c) => {
 
     // Detect if this is a Vertex AI request or Gemini API request
     const isVertexAI = path.startsWith("vertex/");
-    let apiKey, baseUrl;
+    let baseUrl;
+    let authHeader = {};
+    let queryParamsToAdd = [];
 
     if (isVertexAI) {
-      // Vertex AI endpoint
-      if (!vertexApiKey) {
-        console.error("VERTEX_API_KEY environment variable is not set.");
+      // Vertex AI endpoint -> Use Service Account Auth
+      try {
+        // Helper function to get token (defined inside to ensure scope availability)
+        // Note: Caching is disabled for now to avoid scope issues. Token is fetched per request.
+        const getVertexAccessToken = () => {
+          const now = Math.floor(Date.now() / 1000);
+
+          const keyPath = `${__hooks}/vertex_key.json`;
+          // Read key file
+          const rawKey = $os.readFile(keyPath);
+          const keyStr = String.fromCharCode.apply(null, rawKey);
+          const serviceAccount = JSON.parse(keyStr);
+
+          // Create JWT
+          const header = {
+            alg: "RS256",
+            typ: "JWT",
+            kid: serviceAccount.private_key_id,
+          };
+
+          const claims = {
+            iss: serviceAccount.client_email,
+            sub: serviceAccount.client_email,
+            aud: "https://oauth2.googleapis.com/token",
+            iat: now,
+            exp: now + 3600,
+            scope: "https://www.googleapis.com/auth/cloud-platform",
+          };
+
+          // Pure JS Base64 URL Encode
+          const base64UrlEncode = (str) => {
+            const chars =
+              "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+            let output = "";
+            let i = 0;
+
+            // Convert string to byte array (assuming UTF-8/ASCII)
+            // For simple JSON, charCodeAt is fine.
+            // If we had multi-byte chars, we'd need TextEncoder, but Goja might not have it.
+            // Since header/claims are ASCII JSON, this is safe.
+
+            while (i < str.length) {
+              let chr1 = str.charCodeAt(i++);
+              let chr2 = str.charCodeAt(i++);
+              let chr3 = str.charCodeAt(i++);
+
+              let enc1 = chr1 >> 2;
+              let enc2 = ((chr1 & 3) << 4) | (chr2 >> 4);
+              let enc3 = ((chr2 & 15) << 2) | (chr3 >> 6);
+              let enc4 = chr3 & 63;
+
+              if (isNaN(chr2)) {
+                enc3 = enc4 = 64;
+              } else if (isNaN(chr3)) {
+                enc4 = 64;
+              }
+
+              output =
+                output +
+                chars.charAt(enc1) +
+                chars.charAt(enc2) +
+                chars.charAt(enc3) +
+                chars.charAt(enc4);
+            }
+
+            return output
+              .replace(/\+/g, "-")
+              .replace(/\//g, "_")
+              .replace(/=+$/, "");
+          };
+
+          // Sign JWT
+          const tempDir = `${__hooks}/../temp`;
+          const tempKey = `${tempDir}/temp_key_${now}.pem`;
+          const tempToken = `${tempDir}/temp_token_${now}.txt`;
+          const tempSig = `${tempDir}/temp_sig_${now}.bin`;
+
+          try {
+            const encodedHeader = base64UrlEncode(JSON.stringify(header));
+            const encodedClaims = base64UrlEncode(JSON.stringify(claims));
+            const unsignedToken = `${encodedHeader}.${encodedClaims}`;
+
+            let keyContent = serviceAccount.private_key;
+            if (!keyContent.endsWith("\n")) keyContent += "\n";
+            $os.writeFile(tempKey, keyContent);
+            $os.writeFile(tempToken, unsignedToken);
+
+            // Debug: check file size
+            const tokenStat = $os.cmd("ls", "-l", tempToken).output();
+            // Ensure permissions are readable using /bin/chmod
+            try {
+              $os.cmd("/bin/chmod", "644", tempKey).output();
+              $os.cmd("/bin/chmod", "644", tempToken).output();
+            } catch (e) {
+              // Ignore chmod errors
+            }
+
+            // Step 1: Sign
+            // Back to Homebrew openssl, try to use file path
+            const signCmd = $os.cmd(
+              "sh",
+              "-c",
+              `/opt/homebrew/bin/openssl dgst -sha256 -sign "${tempKey}" -out "${tempSig}" "${tempToken}" 2>&1 || true`
+            );
+            const signOut = signCmd.output();
+
+            // Check if output contains error messages
+            if (signOut && signOut.length > 0) {
+              const outStr = String.fromCharCode.apply(null, signOut);
+              if (
+                outStr.includes("error") ||
+                outStr.includes("Error") ||
+                outStr.includes("Usage") ||
+                outStr.includes("Permission denied")
+              ) {
+                throw new Error(`OpenSSL Error: ${outStr}`);
+              }
+            }
+
+            // Step 2: Base64 encode signature
+            const b64Cmd = $os.cmd(
+              "sh",
+              "-c",
+              `/opt/homebrew/bin/openssl base64 -in "${tempSig}"`
+            );
+            const b64 = b64Cmd.output();
+
+            let base64Sig = String.fromCharCode.apply(null, b64);
+            base64Sig = base64Sig.replace(/\s/g, "");
+            const encodedSig = base64Sig
+              .replace(/\+/g, "-")
+              .replace(/\//g, "_")
+              .replace(/=+$/, "");
+
+            const jwt = `${unsignedToken}.${encodedSig}`;
+            console.log("[Auth] Generated JWT:", jwt);
+
+            // Exchange for Access Token
+            const tokenResp = $http.send({
+              url: "https://oauth2.googleapis.com/token",
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+            });
+
+            if (tokenResp.statusCode !== 200) {
+              console.log("[Auth] Token Exchange Error Body:", tokenResp.raw);
+              throw new Error(`Token exchange failed: ${tokenResp.raw}`);
+            }
+
+            const tokenData = tokenResp.json;
+            console.log("[Auth] Successfully acquired Vertex AI Access Token");
+            return tokenData.access_token;
+          } catch (err) {
+            console.log("[Auth] Signing failed:", err);
+            // Try to read stderr from the command if possible?
+            // Unfortunately err object might not have it directly if it's a Go error.
+            // But we can try to log more context.
+            throw err;
+          } finally {
+            $os.remove(tempKey);
+            $os.remove(tempToken);
+            $os.remove(tempSig);
+          }
+        };
+
+        const accessToken = getVertexAccessToken();
+        authHeader = { Authorization: `Bearer ${accessToken}` };
+      } catch (e) {
+        console.error("Failed to get Vertex Access Token:", e);
         return c.json(500, {
-          error: "Vertex AI API key is not configured on the server.",
+          error: "Authentication failed for Vertex AI",
+          details: e.toString(),
         });
       }
-      apiKey = vertexApiKey;
 
       // Extract location from path (e.g., vertex/v1beta1/projects/PROJECT/locations/us-central1/...)
       const pathParts = path.split("/");
@@ -58,19 +233,18 @@ const proxyHandler = (c) => {
       // Remove "vertex/" prefix from path
       path = path.substring(7); // Remove "vertex/"
     } else {
-      // Gemini API endpoint
+      // Gemini API endpoint -> Use API Key
       if (!geminiApiKey) {
         console.error("GEMINI_API_KEY environment variable is not set.");
         return c.json(500, {
           error: "Gemini API key is not configured on the server.",
         });
       }
-      apiKey = geminiApiKey;
       baseUrl = GEMINI_API_URL_BASE;
+      queryParamsToAdd.push(`key=${geminiApiKey}`);
     }
 
-    // Build target URL, preserve incoming query params, and append API key.
-    // Note: PocketBase JS environment might not have URL class, so we use string manipulation.
+    // Build target URL, preserve incoming query params
     const finalBaseUrl = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
     const cleanPath = path.startsWith("/") ? path.substring(1) : path;
     let targetUrl = finalBaseUrl + cleanPath;
@@ -78,6 +252,9 @@ const proxyHandler = (c) => {
     const queryParts = [];
     const query = requestInfo.query || {};
     Object.entries(query).forEach(([key, value]) => {
+      // Skip 'key' param if passed from client (shouldn't be, but just in case)
+      if (key === "key") return;
+
       if (Array.isArray(value)) {
         value.forEach((v) =>
           queryParts.push(
@@ -90,16 +267,20 @@ const proxyHandler = (c) => {
         );
       }
     });
-    queryParts.push(`key=${apiKey}`);
 
-    const separator = targetUrl.includes("?") ? "&" : "?";
-    targetUrl += separator + queryParts.join("&");
+    // Add our auth params (API Key for Gemini)
+    queryParamsToAdd.forEach((p) => queryParts.push(p));
+
+    if (queryParts.length > 0) {
+      const separator = targetUrl.includes("?") ? "&" : "?";
+      targetUrl += separator + queryParts.join("&");
+    }
 
     const apiType = isVertexAI ? "Vertex AI" : "Gemini API";
     console.log(
       `[Proxy ${apiType}] ${requestInfo.method} ${targetUrl.replace(
-        apiKey,
-        "HIDDEN"
+        /key=[^&]+/,
+        "key=HIDDEN"
       )}`
     );
 
@@ -110,7 +291,10 @@ const proxyHandler = (c) => {
         requestInfo.method === "POST" && requestInfo.data
           ? JSON.stringify(requestInfo.data)
           : "",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeader,
+      },
       timeout: 300000, // 5 minutes
     });
 
@@ -135,14 +319,13 @@ const proxyHandler = (c) => {
       return c.string(res.statusCode, body);
     }
   } catch (err) {
-    const apiType = path && path.startsWith("vertex/") ? "Vertex AI" : "Gemini API";
+    const apiType =
+      path && path.startsWith("vertex/") ? "Vertex AI" : "Gemini API";
     console.error(`[Proxy ${apiType}] Error:`, err);
     return c.json(500, {
       error: `Failed to proxy request to ${apiType}.`,
       details: err.toString(),
       path: path,
-      geminiApiKeyConfigured: !!geminiApiKey,
-      vertexApiKeyConfigured: !!vertexApiKey,
     });
   }
 };

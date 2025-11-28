@@ -14,6 +14,7 @@ import {
   generateVideoPrompt,
 } from "./promptConfig";
 import { normalizeError, recoveryHint } from "../utils/errorHandler";
+import { getGeminiClient } from "./geminiClient";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

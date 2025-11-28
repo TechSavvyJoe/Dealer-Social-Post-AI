@@ -3,7 +3,7 @@ import fetch from "node-fetch";
 const API_KEY = process.env.VERTEX_API_KEY;
 const PROJECT_ID = "gen-lang-client-0994987899";
 const LOCATION = "us-central1";
-const MODEL = "veo-3.1-generate-001"; // Updated to latest Veo model
+const MODEL_ID = "veo-2.0-generate-001";
 
 if (!API_KEY) {
   console.error("Error: VERTEX_API_KEY is not set.");
@@ -13,9 +13,9 @@ if (!API_KEY) {
 
 async function testVertexVeo() {
   // Vertex AI Endpoint for Prediction
-  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${MODEL}:predict?key=${API_KEY}`;
+  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${MODEL_ID}:predict?key=${API_KEY}`;
 
-  console.log(`\n--- Testing Vertex AI: ${MODEL} ---`);
+  console.log(`\n--- Testing Vertex AI: ${MODEL_ID} ---`);
   console.log(`URL: ${url.replace(API_KEY, "HIDDEN")}`);
 
   const payload = {
