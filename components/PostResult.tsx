@@ -663,7 +663,7 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                     <span className="text-xs font-semibold uppercase tracking-wide text-surface-50">Video queue</span>
                     <span className="text-[10px] text-primary-200/70">{videoJobs.filter(job => job.status === 'processing').length} active</span>
                   </div>
-                  <ul className="space-y-2">
+                  <ul className="space-y-2" role="list" aria-label="Video queue list">
                     {videoJobs.map(job => (
                       <motion.li
                         key={job.id}
@@ -680,41 +680,41 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                             {' '}{job.aspectPreference === 'auto' ? 'auto' : job.aspectPreference} · {job.resolution} · {job.pacing}
                           </span>
                         </div>
-                    <div className="flex items-center gap-2">
-                      {job.status === 'completed' && <Badge variant="success">Ready</Badge>}
-                      {job.status === 'processing' && <Badge variant="info">Rendering</Badge>}
-                      {job.status === 'queued' && <Badge variant="neutral">Queued</Badge>}
-                      {job.status === 'failed' && <Badge variant="warning">Failed</Badge>}
-                      {job.url && (
-                        <button
-                          onClick={() => setVideoUrl(job.url || null)}
-                          className="text-[10px] font-semibold uppercase tracking-wide text-primary-200 hover:text-surface-50 transition-colors"
-                        >
-                          Preview
-                        </button>
-                      )}
-                      {job.status === 'failed' && (
-                        <button
-                          onClick={() => handleRetryVideo(job.id)}
-                          className="text-[10px] font-semibold uppercase tracking-wide text-amber-200 hover:text-amber-50 transition-colors"
-                        >
-                          Retry
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleRemoveVideoJob(job.id)}
-                        className="text-[10px] font-semibold uppercase tracking-wide text-surface-200/70 hover:text-surface-50 transition-colors"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                    <div className="flex flex-col gap-1 text-[10px] text-warning-200">
-                      {job.error && <span>{job.error}</span>}
-                      <span className="text-indigo-100/70">Started {new Date(job.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    </div>
-                  </motion.li>
-                ))}
-              </ul>
+                        <div className="flex items-center gap-2">
+                          {job.status === 'completed' && <Badge variant="success">Ready</Badge>}
+                          {job.status === 'processing' && <Badge variant="info">Rendering</Badge>}
+                          {job.status === 'queued' && <Badge variant="neutral">Queued</Badge>}
+                          {job.status === 'failed' && <Badge variant="warning">Failed</Badge>}
+                          {job.url && (
+                            <button
+                              onClick={() => setVideoUrl(job.url || null)}
+                              className="text-[10px] font-semibold uppercase tracking-wide text-primary-200 hover:text-surface-50 transition-colors"
+                            >
+                              Preview
+                            </button>
+                          )}
+                          {job.status === 'failed' && (
+                            <button
+                              onClick={() => handleRetryVideo(job.id)}
+                              className="text-[10px] font-semibold uppercase tracking-wide text-amber-200 hover:text-amber-50 transition-colors"
+                            >
+                              Retry
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleRemoveVideoJob(job.id)}
+                            className="text-[10px] font-semibold uppercase tracking-wide text-surface-200/70 hover:text-surface-50 transition-colors"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <div className="flex flex-col gap-1 text-[10px] text-warning-200">
+                          {job.error && <span>{job.error}</span>}
+                          <span className="text-indigo-100/70">Started {new Date(job.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                      </motion.li>
+                    ))}
+                  </ul>
             </motion.div>
           )}
             </div>
@@ -736,6 +736,7 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                 </div>
               )}
               <textarea
+                aria-label="Generated social post text"
                 value={editedText}
                 onChange={(e) => handleTextChange(e.target.value)}
                 disabled={isTextLoading}

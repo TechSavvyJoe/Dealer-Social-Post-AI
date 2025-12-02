@@ -186,8 +186,8 @@ const StyleCard: React.FC<StyleCardProps> = ({ option, current, onSelect }) => {
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: idx * 0.05 }}
             >
-              <span className="mt-1 block h-1 w-1 rounded-full bg-primary-400"></span>
-              <span>{point}</span>
+              <span className="mt-1 block h-1 w-1 rounded-full bg-primary-400" aria-hidden="true"></span>
+              {point}
             </motion.li>
           ))}
         </ul>
@@ -597,10 +597,12 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       exit={{ opacity: 0, height: 0 }}
                       className="flex flex-col gap-2"
                     >
-                      <label className="text-xs font-semibold uppercase tracking-wide text-primary-300">
+                      <label htmlFor="template-select" className="text-xs font-semibold uppercase tracking-wide text-primary-300">
                         Template
                       </label>
                       <select
+                        id="template-select"
+                        aria-label="Select template"
                         className={cn(
                           "rounded-xl border-2 border-surface-700",
                           "bg-surface-900/60 px-4 py-3 text-sm text-surface-50",

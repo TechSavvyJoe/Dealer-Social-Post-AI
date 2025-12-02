@@ -121,7 +121,7 @@ export const AdminDashboard: React.FC = () => {
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formState.name.trim() || !formState.code.trim()) return;
     if (formState.code.length !== 4) {
@@ -137,28 +137,25 @@ export const AdminDashboard: React.FC = () => {
     if (formState.logoFile) {
       formData.append("logo", formState.logoFile);
     } else if (formState.logoUrl.trim()) {
-      // If it's a URL, we might need to handle it differently depending on backend.
-      // PocketBase expects a file. If we send a string, it might be ignored or treated as text.
-      // Ideally, we should fetch the URL and convert to Blob, but for now let's assume
-      // the backend (or a hook) handles URL strings if supported, or we just send it.
-      // Wait, the finding says "submitting a URL silently fails".
-      // So we MUST fetch it if it's a URL? Or just warn the user?
-      // Let's try to fetch it if it's a URL and append as blob.
+      // Fetch URL and convert to Blob for PocketBase file upload
       try {
-        // Note: This might fail due to CORS if not proxied.
-        // But let's assume the user provides a valid accessible URL.
-        // Actually, let's just append it and hope a hook handles it,
-        // OR (better) tell the user to upload a file if URL fails.
-        // For now, I'll leave it as is but add a comment, or try to fetch.
-        // The finding implies we should fix it.
-        // I'll add a TODO or just rely on file upload being primary.
-        // Actually, I'll remove the URL input if it's broken?
-        // No, I'll just append it. If PB doesn't support it, it won't work.
-        formData.append("logo_url", formState.logoUrl.trim()); // Maybe use a different field?
-        // Or just append 'logo' and let PB ignore it if it's not a file.
-        formData.append("logo", formState.logoUrl.trim());
-      } catch (e) {
-        console.error("Failed to process logo URL", e);
+        const response = await fetch(formState.logoUrl.trim());
+        if (!response.ok) {
+          throw new Error(`Failed to fetch image: ${response.statusText}`);
+        }
+        const blob = await response.blob();
+        if (!blob.type.startsWith("image/")) {
+          throw new Error("URL does not point to a valid image");
+        }
+        // Extract filename from URL or use a default
+        const urlParts = formState.logoUrl.trim().split("/");
+        const filename = urlParts[urlParts.length - 1]?.split("?")[0] || "logo.png";
+        const file = new File([blob], filename, { type: blob.type });
+        formData.append("logo", file);
+      } catch (err) {
+        console.error("Failed to fetch logo from URL:", err);
+        alert("Could not load image from URL. Please upload a file instead, or ensure the URL is accessible (some URLs may be blocked by CORS).");
+        return;
       }
     }
     addMutation.mutate(formData);

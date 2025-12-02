@@ -6,8 +6,7 @@
  */
 export const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
   const res = await fetch(dataUrl);
-  const blob = await res.blob();
-  return blob;
+  return await res.blob();
 };
 
 /**
