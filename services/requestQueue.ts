@@ -13,7 +13,7 @@ const DEFAULT_OPTIONS: Required<QueueOptions> = {
 let active = false;
 const queue: Array<{
   task: Task<unknown>;
-  resolve: (value: unknown) => void;
+  resolve: (value: any) => void;
   reject: (reason?: unknown) => void;
   options: Required<QueueOptions>;
 }> = [];
@@ -50,7 +50,10 @@ const runNext = async () => {
   }
 };
 
-export const enqueueTask = <T>(task: Task<T>, opts?: QueueOptions): Promise<T> => {
+export const enqueueTask = <T>(
+  task: Task<T>,
+  opts?: QueueOptions
+): Promise<T> => {
   const options: Required<QueueOptions> = {
     maxRetries: opts?.maxRetries ?? DEFAULT_OPTIONS.maxRetries,
     delayMs: opts?.delayMs ?? DEFAULT_OPTIONS.delayMs,

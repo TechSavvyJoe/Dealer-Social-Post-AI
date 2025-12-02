@@ -306,7 +306,9 @@ export const AdminDashboard: React.FC = () => {
       )}
       {isPending ? (
         <div className="grid gap-4">
-          <Skeleton className="h-24 w-full" count={3} />
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-24 w-full" />
         </div>
       ) : (
         <div className="space-y-4">

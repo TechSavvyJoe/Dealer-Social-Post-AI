@@ -16,7 +16,10 @@ const isMobileDevice = () => {
   );
 };
 
-export const ImageInput: React.FC<ImageInputProps> = ({ onImageSelected }) => {
+export const ImageInput: React.FC<ImageInputProps> = ({
+  onImageSelected,
+  onClose,
+}) => {
   const [error, setError] = useState<string | null>(null);
   const [showWebcam, setShowWebcam] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);

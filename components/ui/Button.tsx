@@ -1,9 +1,9 @@
-import React from 'react';
-import { motion, type HTMLMotionProps } from 'framer-motion';
-import { Loader2 } from 'lucide-react';
-import { cn } from '../../utils/classNames';
-import { triggerHapticFeedback } from '../../utils/haptics';
-import { SPRING_CONFIGS, shouldReduceMotion } from '../../utils/animations';
+import React from "react";
+import { motion, type HTMLMotionProps } from "framer-motion";
+import { Loader2 } from "lucide-react";
+import { cn } from "../../utils/classNames";
+import { triggerHapticFeedback } from "../../utils/haptics";
+import { SPRING_CONFIGS, shouldReduceMotion } from "../../utils/animations";
 
 /**
  * Button variants following Apple's hierarchy:
@@ -16,14 +16,25 @@ import { SPRING_CONFIGS, shouldReduceMotion } from '../../utils/animations';
  * - gradient-purple: Purple/pink gradient (special features)
  * - gradient-teal: Teal/cyan gradient (success actions)
  */
-type Variant = 'filled' | 'tinted' | 'plain' | 'outline' | 'danger' | 'gradient-sky' | 'gradient-purple' | 'gradient-teal';
+type Variant =
+  | "filled"
+  | "tinted"
+  | "plain"
+  | "outline"
+  | "danger"
+  | "gradient-sky"
+  | "gradient-purple"
+  | "gradient-teal"
+  | "primary"
+  | "secondary"
+  | "ghost";
 
 /**
  * Size options following Apple HIG (44px minimum touch target)
  */
-type Size = 'sm' | 'md' | 'lg';
+type Size = "sm" | "md" | "lg" | "icon" | "xs";
 
-interface ButtonProps extends Omit<HTMLMotionProps<'button'>, 'size'> {
+interface ButtonProps extends Omit<HTMLMotionProps<"button">, "size"> {
   /** Button style variant */
   variant?: Variant;
   /** Button size */
@@ -42,81 +53,107 @@ interface ButtonProps extends Omit<HTMLMotionProps<'button'>, 'size'> {
 
 // Base styles - accessibility and layout
 const baseStyles = cn(
-  'inline-flex items-center justify-center gap-2',
-  'font-semibold tracking-tight',
-  'rounded-xl',
-  'transition-all duration-200 ease-apple',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950',
-  'disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none',
-  'select-none touch-manipulation',
-  'will-change-transform'
+  "inline-flex items-center justify-center gap-2",
+  "font-semibold tracking-tight",
+  "rounded-xl",
+  "transition-all duration-200 ease-apple",
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950",
+  "disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none",
+  "select-none touch-manipulation",
+  "will-change-transform"
 );
 
 // Variant styles with Apple-inspired colors
 const variantStyles: Record<Variant, string> = {
   filled: cn(
-    'bg-gradient-to-b from-primary-500 to-primary-600',
-    'text-white',
-    'shadow-elevation-2',
-    'hover:shadow-elevation-3 hover:shadow-glow-primary',
-    'hover:from-primary-600 hover:to-primary-700',
-    'active:scale-[0.98]'
+    "bg-gradient-to-b from-primary-500 to-primary-600",
+    "text-white",
+    "shadow-elevation-2",
+    "hover:shadow-elevation-3 hover:shadow-glow-primary",
+    "hover:from-primary-600 hover:to-primary-700",
+    "active:scale-[0.98]"
+  ),
+  primary: cn(
+    // Alias for filled
+    "bg-gradient-to-b from-primary-500 to-primary-600",
+    "text-white",
+    "shadow-elevation-2",
+    "hover:shadow-elevation-3 hover:shadow-glow-primary",
+    "hover:from-primary-600 hover:to-primary-700",
+    "active:scale-[0.98]"
   ),
   tinted: cn(
-    'bg-primary-500/15',
-    'text-primary-400',
-    'border border-primary-500/20',
-    'hover:bg-primary-500/25 hover:border-primary-500/30',
-    'active:scale-[0.98]'
+    "bg-primary-500/15",
+    "text-primary-400",
+    "border border-primary-500/20",
+    "hover:bg-primary-500/25 hover:border-primary-500/30",
+    "active:scale-[0.98]"
+  ),
+  secondary: cn(
+    // Alias for tinted
+    "bg-primary-500/15",
+    "text-primary-400",
+    "border border-primary-500/20",
+    "hover:bg-primary-500/25 hover:border-primary-500/30",
+    "active:scale-[0.98]"
   ),
   plain: cn(
-    'text-primary-400',
-    'hover:bg-primary-500/10',
-    'active:bg-primary-500/15',
-    'active:scale-[0.98]'
+    "text-primary-400",
+    "hover:bg-primary-500/10",
+    "active:bg-primary-500/15",
+    "active:scale-[0.98]"
+  ),
+  ghost: cn(
+    // Alias for plain
+    "text-primary-400",
+    "hover:bg-primary-500/10",
+    "active:bg-primary-500/15",
+    "active:scale-[0.98]"
   ),
   outline: cn(
-    'border-2 border-surface-700',
-    'text-surface-100',
-    'hover:border-surface-600 hover:bg-surface-800/50',
-    'active:scale-[0.98]'
+    "border-2 border-surface-700",
+    "text-surface-100",
+    "hover:border-surface-600 hover:bg-surface-800/50",
+    "active:scale-[0.98]"
   ),
   danger: cn(
-    'bg-gradient-to-b from-error-500 to-error-600',
-    'text-white',
-    'shadow-elevation-2',
-    'hover:shadow-elevation-3 hover:shadow-glow-error',
-    'hover:from-error-600 hover:to-error-700',
-    'active:scale-[0.98]'
+    "bg-gradient-to-b from-error-500 to-error-600",
+    "text-white",
+    "shadow-elevation-2",
+    "hover:shadow-elevation-3 hover:shadow-glow-error",
+    "hover:from-error-600 hover:to-error-700",
+    "active:scale-[0.98]"
   ),
-  'gradient-sky': cn(
-    'bg-gradient-to-r from-sky-500 to-primary-500',
-    'text-white',
-    'shadow-elevation-2',
-    'hover:shadow-elevation-3 hover:brightness-110',
-    'active:scale-[0.98]'
+  "gradient-sky": cn(
+    "bg-gradient-to-r from-sky-500 to-primary-500",
+    "text-white",
+    "shadow-elevation-2",
+    "hover:shadow-elevation-3 hover:brightness-110",
+    "active:scale-[0.98]"
   ),
-  'gradient-purple': cn(
-    'bg-gradient-to-r from-purple-500 to-pink-500',
-    'text-white',
-    'shadow-elevation-2',
-    'hover:shadow-elevation-3 hover:brightness-110',
-    'active:scale-[0.98]'
+  "gradient-purple": cn(
+    "bg-gradient-to-r from-purple-500 to-pink-500",
+    "text-white",
+    "shadow-elevation-2",
+    "hover:shadow-elevation-3 hover:brightness-110",
+    "active:scale-[0.98]"
   ),
-  'gradient-teal': cn(
-    'bg-gradient-to-r from-teal-500 to-cyan-500',
-    'text-white',
-    'shadow-elevation-2',
-    'hover:shadow-elevation-3 hover:brightness-110',
-    'active:scale-[0.98]'
+  "gradient-teal": cn(
+    "bg-gradient-to-r from-teal-500 to-cyan-500",
+    "text-white",
+    "shadow-elevation-2",
+    "hover:shadow-elevation-3 hover:brightness-110",
+    "active:scale-[0.98]"
   ),
 };
 
 // Size styles with proper touch targets (Apple HIG: min 44px)
 const sizeStyles: Record<Size, string> = {
-  sm: 'text-sm px-4 py-2 min-h-[36px]',
-  md: 'text-base px-5 py-2.5 min-h-[44px]',
-  lg: 'text-lg px-6 py-3 min-h-[52px]',
+  xs: "text-xs px-3 py-1.5 min-h-[32px]",
+  sm: "text-sm px-4 py-2 min-h-[36px]",
+  md: "text-base px-5 py-2.5 min-h-[44px]",
+  lg: "text-lg px-6 py-3 min-h-[52px]",
+  icon: "p-2 min-h-[44px] min-w-[44px]",
 };
 
 /**
@@ -136,8 +173,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   (
     {
       className,
-      variant = 'filled',
-      size = 'md',
+      variant = "filled",
+      size = "md",
       loading = false,
       leftIcon,
       rightIcon,
@@ -165,15 +202,23 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           baseStyles,
           variantStyles[variant],
           sizeStyles[size],
-          fullWidth && 'w-full',
+          fullWidth && "w-full",
           className
         )}
         disabled={disabled || loading}
         onClick={handleClick}
-        whileTap={!disabled && !loading && !shouldReduceMotion() ? { scale: 0.98 } : undefined}
-        whileHover={!disabled && !loading && !shouldReduceMotion() ? { scale: 1.02 } : undefined}
+        whileTap={
+          !disabled && !loading && !shouldReduceMotion()
+            ? { scale: 0.98 }
+            : undefined
+        }
+        whileHover={
+          !disabled && !loading && !shouldReduceMotion()
+            ? { scale: 1.02 }
+            : undefined
+        }
         transition={{
-          type: 'spring',
+          type: "spring",
           ...SPRING_CONFIGS.standard,
         }}
         {...rest}
@@ -182,10 +227,10 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         {loading && (
           <Loader2
             className={cn(
-              'animate-spin',
-              size === 'sm' && 'h-4 w-4',
-              size === 'md' && 'h-5 w-5',
-              size === 'lg' && 'h-6 w-6'
+              "animate-spin",
+              size === "sm" && "h-4 w-4",
+              size === "md" && "h-5 w-5",
+              size === "lg" && "h-6 w-6"
             )}
             aria-hidden="true"
           />
@@ -195,10 +240,10 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         {!loading && leftIcon && (
           <span
             className={cn(
-              'inline-flex shrink-0',
-              size === 'sm' && '[&>svg]:h-4 [&>svg]:w-4',
-              size === 'md' && '[&>svg]:h-5 [&>svg]:w-5',
-              size === 'lg' && '[&>svg]:h-6 [&>svg]:w-6'
+              "inline-flex shrink-0",
+              size === "sm" && "[&>svg]:h-4 [&>svg]:w-4",
+              size === "md" && "[&>svg]:h-5 [&>svg]:w-5",
+              size === "lg" && "[&>svg]:h-6 [&>svg]:w-6"
             )}
             aria-hidden="true"
           >
@@ -207,16 +252,18 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         )}
 
         {/* Button text */}
-        <span className={cn(loading && 'opacity-0')}>{children}</span>
+        <motion.span className={cn(loading && "opacity-0")}>
+          {children}
+        </motion.span>
 
         {/* Right icon */}
         {!loading && rightIcon && (
           <span
             className={cn(
-              'inline-flex shrink-0',
-              size === 'sm' && '[&>svg]:h-4 [&>svg]:w-4',
-              size === 'md' && '[&>svg]:h-5 [&>svg]:w-5',
-              size === 'lg' && '[&>svg]:h-6 [&>svg]:w-6'
+              "inline-flex shrink-0",
+              size === "sm" && "[&>svg]:h-4 [&>svg]:w-4",
+              size === "md" && "[&>svg]:h-5 [&>svg]:w-5",
+              size === "lg" && "[&>svg]:h-6 [&>svg]:w-6"
             )}
             aria-hidden="true"
           >
@@ -228,4 +275,4 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   }
 );
 
-Button.displayName = 'Button';
+Button.displayName = "Button";
