@@ -103,18 +103,25 @@ describe("GeminiService Model Verification", () => {
     }
   });
 
-  it("should use veo-3.0-generate-001 for video generation", async () => {
-    // Mock fetch for both the predict call and potential polling
+  it("should use veo-2.0-generate-001 for video generation via Gemini API", async () => {
+    // Mock fetch for the Gemini API video generation call
     global.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({
-          done: true,
-          response: {
-            generatedVideos: [
-              { video: { uri: "http://fake-video-url.com/video.mp4" } },
-            ],
-          },
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    fileData: {
+                      fileUri: "http://fake-video-url.com/video.mp4"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
         }),
       });
     global.URL.createObjectURL = vi.fn().mockReturnValue("blob:fake-video-url");
@@ -142,9 +149,9 @@ describe("GeminiService Model Verification", () => {
       }
     );
 
-    // Verify fetch was called with the correct Veo model path
+    // Verify fetch was called with the correct Veo model path via Gemini API
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("veo-3.0-generate-001"),
+      expect.stringContaining("veo-2.0-generate-001"),
       expect.any(Object)
     );
   });

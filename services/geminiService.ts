@@ -359,16 +359,9 @@ export const generatePostVideo = async (
   style: VideoStyle,
   options: VideoRequestOptions
 ): Promise<string> => {
-  // Use Vertex AI Veo via the proxy
-  const vertexModel =
-    (typeof import.meta !== "undefined" &&
-      (import.meta as any).env?.VITE_VEO_MODEL) ||
-    (typeof process !== "undefined" && process.env?.VITE_VEO_MODEL) ||
-    "veo-3.0-generate-001";
-
-  const PROJECT_ID = "gen-lang-client-0994987899";
-  const LOCATION = "us-central1";
-
+  // Use Google AI Studio's Veo model via Gemini API
+  const veoModel = "veo-2.0-generate-001";
+  
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
   const prompt = generateVideoPrompt(style, options);
@@ -381,33 +374,41 @@ export const generatePostVideo = async (
       ? derivedAspect
       : options.aspectPreference;
 
-  // Veo expects duration as an integer (seconds), not a string
   const durationSeconds = options.durationSeconds || 6;
 
+  // Use the Gemini API format for video generation
   const body = {
-    instances: [
+    contents: [
       {
-        prompt,
-        image: { bytesBase64Encoded: base64Data, mimeType },
-      },
+        parts: [
+          {
+            inlineData: {
+              mimeType,
+              data: base64Data
+            }
+          },
+          {
+            text: prompt
+          }
+        ]
+      }
     ],
-    parameters: {
-      aspectRatio,
-      sampleCount: 1,
-      durationSeconds,
-    },
+    generationConfig: {
+      responseModalities: ["VIDEO"],
+      videoDurationSeconds: durationSeconds
+    }
   };
 
   let lastError: any = null;
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      // Step 1: Start the video generation (returns a Long Running Operation)
-      const predictPath = `vertex/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${vertexModel}:predict`;
+      console.log(`[VideoGen] Starting video generation with Gemini API (${veoModel}), attempt ${attempt}`);
       
-      console.log(`[VideoGen] Starting video generation with ${vertexModel}, attempt ${attempt}`);
+      // Use the Gemini API proxy endpoint
+      const apiPath = `v1beta/models/${veoModel}:generateContent`;
       
-      const response = await fetch(`/api/proxy/${predictPath}`, {
+      const response = await fetch(`/api/proxy/${apiPath}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -415,43 +416,68 @@ export const generatePostVideo = async (
 
       if (!response.ok) {
         const text = await response.text();
-        console.error(`[VideoGen] Predict request failed:`, text);
+        console.error(`[VideoGen] Request failed:`, text);
+        
+        // Check for specific error types
+        if (response.status === 503 || text.includes("overloaded")) {
+          console.log(`[VideoGen] Service overloaded, will retry...`);
+          await sleep(attempt * 5000);
+          continue;
+        }
+        
         throw new Error(
-          `Proxy request failed (${response.status}): ${
-            text || response.statusText
-          }`
+          `Video generation failed (${response.status}): ${text || response.statusText}`
         );
       }
 
       const json = await response.json();
-      console.log(`[VideoGen] Predict response:`, JSON.stringify(json).substring(0, 500));
+      console.log(`[VideoGen] Response received:`, JSON.stringify(json).substring(0, 500));
 
-      // Check if this is a Long Running Operation (LRO)
-      const operationName = json?.name || json?.metadata?.name;
+      // Check if this is an async operation that needs polling
+      const operationName = json?.name;
+      if (operationName && json?.done === false) {
+        console.log(`[VideoGen] Got async operation, polling: ${operationName}`);
+        return await pollGeminiVideoOperation(operationName, 300000); // 5 minute timeout for video
+      }
+
+      // Try to extract video from response
+      const candidates = json?.candidates;
+      if (candidates && candidates.length > 0) {
+        const parts = candidates[0]?.content?.parts;
+        if (parts && parts.length > 0) {
+          for (const part of parts) {
+            // Check for inline video data
+            if (part.inlineData?.mimeType?.startsWith("video/")) {
+              console.log(`[VideoGen] Got inline video data`);
+              return createVideoBlobUrl(part.inlineData.data);
+            }
+            // Check for file URI
+            if (part.fileData?.fileUri) {
+              console.log(`[VideoGen] Got file URI: ${part.fileData.fileUri}`);
+              return part.fileData.fileUri;
+            }
+            // Check for video URI directly
+            if (part.videoMetadata?.uri || part.uri) {
+              const uri = part.videoMetadata?.uri || part.uri;
+              console.log(`[VideoGen] Got video URI: ${uri}`);
+              return uri;
+            }
+          }
+        }
+      }
+
+      // Check for generatedVideos format
+      if (json?.generatedVideos || json?.videos) {
+        return extractVideoFromResponse(json);
+      }
+
+      // Check predictions format (fallback)
+      if (json?.predictions?.[0]) {
+        return extractVideoFromPrediction(json.predictions[0]);
+      }
+
+      throw new Error("No video content found in response. The model may not support video generation with the current configuration.");
       
-      if (operationName && !json.done) {
-        // Step 2: Poll the operation until completion
-        console.log(`[VideoGen] Got LRO, polling operation: ${operationName}`);
-        return await pollVideoOperation(operationName, 180000); // 3 minute timeout
-      }
-
-      // If the response is already complete (done: true) or has direct video data
-      if (json.done === true || json.response || json.predictions) {
-        const result = json.response || json;
-        return extractVideoFromResponse(result);
-      }
-
-      // Try to extract video directly from predictions (fallback)
-      const prediction =
-        json?.predictions?.[0] ||
-        json?.prediction ||
-        (Array.isArray(json) ? json[0] : null);
-
-      if (prediction) {
-        return extractVideoFromPrediction(prediction);
-      }
-
-      throw new Error("No video operation or content returned from Veo.");
     } catch (error) {
       lastError = error;
       const normalized = normalizeError(error);
@@ -465,11 +491,13 @@ export const generatePostVideo = async (
         await sleep(attempt * 3000);
         continue;
       }
-      throw new Error(
-        `Video generation failed: ${normalized.message} ${recoveryHint(
-          normalized
-        )}`
-      );
+      
+      // On last attempt, throw the error
+      if (attempt >= 3) {
+        throw new Error(
+          `Video generation failed: ${normalized.message} ${recoveryHint(normalized)}`
+        );
+      }
     }
   }
 
@@ -481,27 +509,25 @@ export const generatePostVideo = async (
 };
 
 /**
- * Polls a Vertex AI Long Running Operation until it completes
+ * Polls a Gemini API async operation until it completes
  */
-const pollVideoOperation = async (
+const pollGeminiVideoOperation = async (
   operationName: string,
-  timeoutMs: number = 180000
+  timeoutMs: number = 300000
 ): Promise<string> => {
   const startTime = Date.now();
-  const pollInterval = 5000; // Poll every 5 seconds
+  const pollInterval = 5000;
   
-  // Clean up operation name - remove leading slashes and ensure proper format
+  // Clean up operation name
   let cleanOpName = operationName.replace(/^\/+/, "");
   
-  // If it doesn't start with projects/, it might need the full path
-  if (!cleanOpName.startsWith("projects/")) {
-    // Try to construct the path if we just have the operation ID
-    cleanOpName = `projects/gen-lang-client-0994987899/locations/us-central1/operations/${cleanOpName}`;
-  }
-
   while (Date.now() - startTime < timeoutMs) {
     try {
-      const pollPath = `vertex/v1/${cleanOpName}`;
+      // Poll using the operations endpoint
+      const pollPath = cleanOpName.startsWith("operations/") 
+        ? `v1beta/${cleanOpName}`
+        : `v1beta/operations/${cleanOpName}`;
+        
       console.log(`[VideoGen] Polling operation: ${pollPath}`);
       
       const response = await fetch(`/api/proxy/${pollPath}`, {
@@ -511,8 +537,7 @@ const pollVideoOperation = async (
 
       if (!response.ok) {
         const text = await response.text();
-        console.error(`[VideoGen] Poll request failed:`, text);
-        // Don't throw on poll failures, just retry
+        console.error(`[VideoGen] Poll failed:`, text);
         await sleep(pollInterval);
         continue;
       }
@@ -526,22 +551,38 @@ const pollVideoOperation = async (
         }
         
         if (operation.response) {
-          return extractVideoFromResponse(operation.response);
+          // Try to extract video from the response
+          const resp = operation.response;
+          
+          // Check candidates
+          if (resp.candidates?.[0]?.content?.parts) {
+            for (const part of resp.candidates[0].content.parts) {
+              if (part.inlineData?.data) {
+                return createVideoBlobUrl(part.inlineData.data);
+              }
+              if (part.fileData?.fileUri) {
+                return part.fileData.fileUri;
+              }
+            }
+          }
+          
+          // Check generatedVideos
+          if (resp.generatedVideos) {
+            return extractVideoFromResponse(resp);
+          }
         }
         
-        throw new Error("Operation completed but no response found.");
+        throw new Error("Operation completed but no video found in response.");
       }
 
-      // Not done yet, wait and poll again
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       console.log(`[VideoGen] Still processing... (${elapsed}s elapsed)`);
       await sleep(pollInterval);
+      
     } catch (error) {
-      // If it's our thrown error, re-throw it
       if (error instanceof Error && error.message.includes("Video generation failed:")) {
         throw error;
       }
-      // Otherwise, log and continue polling
       console.error(`[VideoGen] Poll error (will retry):`, error);
       await sleep(pollInterval);
     }

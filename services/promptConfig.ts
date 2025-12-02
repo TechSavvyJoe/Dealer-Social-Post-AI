@@ -49,24 +49,53 @@ Translate this into visual storytelling decisions (color palette, typography, su
 `
         : '';
 
-    const coreInstruction = `Act as a world-class graphic designer with an infallible eye for composition. Your mission is to EDIT the provided photo by enhancing it and adding text overlays. You have been provided a primary photo of a customer and their car. You may also have been provided a second image which is a company logo.
+    const coreInstruction = `Act as a world-class photo editor and graphic designer. Your ONLY mission is to ENHANCE the provided photo and add text overlays to it. You have been given a primary photo of REAL customers with their REAL car. You may also have a second image which is a company logo.
 
-**ABSOLUTE PRIORITY — PHOTO EDITING, NOT GENERATION**
-*   **THIS IS AN EDITING TASK, NOT A GENERATION TASK.** You are editing an existing photo, NOT creating a new image from scratch.
-*   **THE INPUT PHOTO IS SACRED:** The people and car in the provided photo are REAL customers. You MUST preserve their exact appearance, poses, clothing, faces, hair, and the actual car they purchased.
-*   **ZERO TOLERANCE FOR REPLACEMENT:** If the output contains different people, a different car, or a different background than the input photo, it is a COMPLETE TASK FAILURE. The AI must edit the pixels of the original image, not generate new subjects.
+#####################################################################
+# ABSOLUTE PRIORITY #1 — THIS IS PHOTO EDITING, NOT IMAGE GENERATION #
+#####################################################################
+
+**⚠️ CRITICAL UNDERSTANDING — READ THIS CAREFULLY:**
+*   You are a PHOTO EDITOR, not an image generator.
+*   The input photo shows REAL PEOPLE who actually bought a REAL CAR.
+*   Your job is to make the EXISTING photo look better and add text — that's it.
+*   You are NOT creating artwork. You are NOT reimagining the scene. You are EDITING A PHOTOGRAPH.
+
+**🚫 ABSOLUTE PROHIBITIONS (VIOLATION = COMPLETE FAILURE):**
+*   DO NOT generate new people. The faces in the output MUST be the EXACT same faces from the input.
+*   DO NOT generate a new car. The vehicle MUST be the EXACT same make, model, and color.
+*   DO NOT generate a new background. The setting MUST be the EXACT same location.
+*   DO NOT replace, swap, redraw, reimagine, or artistically interpret the subjects.
+*   If your output shows ANYONE other than the exact people in the input photo, YOU HAVE FAILED.
+*   If your output shows ANY vehicle other than the exact car in the input photo, YOU HAVE FAILED.
+
+**✅ WHAT YOU MUST DO:**
+*   Start with the input photo as your canvas.
+*   Apply color correction, brightness, contrast, and lighting improvements to THE SAME PHOTO.
+*   Add text overlays in safe areas away from people.
+*   The final result should look like a professionally edited version of the ORIGINAL photo.
 
 ${criticalRules}
 ${creativeBriefInstruction}
 
 You must follow this process:
 
-**Step 1: PHOTO ENHANCEMENT (EDIT THE ORIGINAL — DO NOT REPLACE IT)**
-Apply professional-grade enhancements to THE SAME image you were given. The people and car must remain EXACTLY the same — same faces, same poses, same vehicle, same background.
-*   **BRIGHTEN & ENHANCE:** Increase the overall brightness and vibrancy of the EXISTING photo.
-*   **FLATTERING LIGHTING:** Balance lighting on the EXISTING subjects. Eliminate harsh shadows.
-*   **COLOR GRADING & POLISH:** Apply color grading to the EXISTING photo. Add sharpening to existing details.
-*   **VERIFY:** After enhancement, the people should still be the EXACT same individuals with the SAME faces, clothing, and poses. The car should be the EXACT same vehicle. If they are not, you have failed.
+**Step 1: PHOTO ENHANCEMENT (EDIT THE ORIGINAL PHOTO — DO NOT CREATE A NEW ONE)**
+
+⚠️ IMPORTANT: Work on THE ACTUAL INPUT PHOTO. Do not generate a new image.
+
+Apply these enhancements to the EXISTING photograph:
+*   **BRIGHTEN & ENHANCE:** Increase brightness and vibrancy of the ORIGINAL photo's pixels.
+*   **FLATTERING LIGHTING:** Improve lighting on the EXISTING subjects (the REAL people in the photo).
+*   **COLOR GRADING:** Apply color correction to the ORIGINAL photo.
+*   **SHARPENING:** Enhance details that are already in the photo.
+
+**🔍 SELF-CHECK AFTER ENHANCEMENT:**
+Look at the faces in your output. Ask yourself:
+- "Are these the EXACT same people from the input photo?"
+- "Is this the EXACT same car from the input photo?"
+- "Is this the EXACT same background/location?"
+If the answer to ANY of these is "no" or "I'm not sure", you have generated a new image instead of editing. START OVER and edit the original photo.
 
 **Step 2: INTELLIGENT TEXT OVERLAY (Restricted to Safe Zones)**
 After enhancing the photo, you will add text elements based on the provided instructions.
@@ -75,11 +104,26 @@ After enhancing the photo, you will add text elements based on the provided inst
 *   **3D & REALISM:** When appropriate for the style, render the main text as a bold, chunky, 3D object that casts realistic shadows and reflects the scene's lighting.
 ${watermarkInstruction}
 
-**SUBJECT PRESERVATION — NEVER REPLACE PEOPLE OR THE CAR (CRITICAL)**
-*   The people in the output MUST be the EXACT same individuals from the input photo — same faces, same hair, same clothing, same poses.
-*   The car in the output MUST be the EXACT same vehicle from the input photo — same make, model, color, and position.
-*   The background MUST be the same location from the input photo.
-*   You are EDITING the photo, not RECREATING it. Any replacement of subjects is an unrecoverable failure.
+########################################################
+# SUBJECT PRESERVATION — ABSOLUTELY NON-NEGOTIABLE #
+########################################################
+
+**THE PEOPLE:**
+*   The faces in your output MUST match the faces in the input EXACTLY.
+*   Same person, same facial features, same hair, same clothing, same pose.
+*   These are REAL customers. Replacing them with different people is unacceptable.
+
+**THE CAR:**
+*   The vehicle in your output MUST be the EXACT same car from the input.
+*   Same make, same model, same color, same angle, same position.
+*   This is the car the customer ACTUALLY purchased. Do not replace it.
+
+**THE BACKGROUND:**
+*   The setting/location MUST be the same as the input photo.
+*   Do not place the subjects in a different environment.
+
+**FINAL WARNING:**
+If your output contains ANY person, vehicle, or location that differs from the input photo, it is an automatic and complete failure. You must EDIT the existing photo, not generate a new scene.
 
 **Step 3: HUMAN SAFETY VERIFICATION**
 *   Re-run the segmentation / detection pass from **RULE #3** on the finished composition. If ANY margin is violated or an overlap is detected, reposition the offending element and repeat this step until full compliance is achieved.
@@ -199,15 +243,41 @@ Reflect this direction in the imagery you describe, the emotion you convey, and 
 `
         : '';
 
-    return `You are an expert social media copywriter and viral marketing strategist for a car dealership. Your task is to write a short, vibrant, and highly engaging caption for the provided photo that will stop people from scrolling.
+    return `You are an elite social media copywriter and viral marketing strategist specializing in automotive dealership content. Your mission is to craft an irresistible, scroll-stopping caption for the provided customer photo.
 
-**ABSOLUTE, NON-NEGOTIABLE REQUIREMENTS:**
-1.  **DEEP IMAGE ANALYSIS:** This is your most important task. Meticulously analyze the provided photo to identify:
-    *   **The Car:** Analyze the vehicle with extreme care. **Accuracy is your top priority.** If, and only if, you can identify the **exact make and model with over 99% certainty**, you may mention it (e.g., "this awesome Ford Mustang"). **If you have ANY uncertainty**, DO NOT guess the make or model. Instead, fall back to describing its certain characteristics, such as its **type** (e.g., "their new family-ready SUV", "this sleek sports car"), its **color** ("this stunning red truck"), or a general catchy phrase ("this beautiful new ride"). A correct generic description is infinitely better than an incorrect specific one.
-    *   **The scene's vibe:** Is it a family, a solo adventurer, a first-time car owner? Is the background urban, suburban, sunny, etc.?
-2.  **GENERATE A COMPLETE POST:** You MUST write a complete social media post (2-4 sentences), NOT just hashtags or a single sentence.
-3.  **USE EMOJIS:** You MUST strategically use 2-4 relevant emojis to add personality and visual appeal.
-4.  **FORMAT:** Your entire response must ONLY be the social media post text itself. Do not include preambles like "Here is your post...".
+###############################################
+# ABSOLUTE, NON-NEGOTIABLE REQUIREMENTS #
+###############################################
+
+**1. METICULOUS IMAGE ANALYSIS (CRITICAL):**
+Before writing ANYTHING, study the photo intensely:
+
+*   **THE CAR — BE EXTREMELY CAREFUL:**
+    - Can you identify the EXACT make AND model with 99%+ certainty? (Look at badges, grille design, body shape, distinctive features)
+    - If YES and you are CERTAIN: Mention it specifically (e.g., "this stunning Ford F-150")
+    - If NO or ANY doubt: Use SAFE descriptions only:
+      • Vehicle TYPE: "their new SUV", "this sporty sedan", "their family truck"
+      • Vehicle COLOR: "this beautiful blue ride", "their stunning white vehicle"
+      • General phrases: "their new wheels", "this gorgeous new car"
+    - ⚠️ WRONG CAR IDENTIFICATION IS WORSE THAN BEING GENERIC. When in doubt, go generic.
+
+*   **THE PEOPLE & SCENE:**
+    - How many people? Family with kids? Couple? Individual?
+    - What's the vibe? Excited? Professional? Casual?
+    - Setting? Showroom? Outdoor lot? Urban? Suburban?
+
+**2. WRITE A COMPLETE, ENGAGING POST:**
+*   2-4 sentences that tell a micro-story
+*   Must have a hook, a story element, and a call-to-action
+*   NOT just hashtags. NOT just one sentence.
+
+**3. STRATEGIC EMOJI USAGE:**
+*   Include 2-4 relevant emojis (🚗 🎉 🔑 ⭐ 🏆 etc.)
+*   Place them naturally within or around the text
+
+**4. OUTPUT FORMAT:**
+*   Return ONLY the post text — no preambles like "Here's your post" or "Sure!"
+*   Ready to copy-paste directly to social media
 
 **POST STRUCTURE:**
 1.  **The Hook:** Start with a high-energy, scroll-stopping opening line. Congratulate the customer. ${nameInfo} Avoid generic intros like "Congratulations"—invent something memorable.
@@ -483,12 +553,22 @@ export const editImagePrompt = (
         ? `A dealership logo has been provided as a second image. It is a CRITICAL REQUIREMENT to ensure this logo is present and tastefully placed in a corner of the final edited image. Do not distort it. If the logo was missing from the original image, you MUST add it now. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.**`
         : `The dealership name is '${dealershipName}'. If a text watermark with this name was on the original image, ensure it remains or is tastefully reapplied.`;
 
-    return `Act as a world-class photo editor and graphic designer. You have been provided an image that was previously generated for a social media post. The user wants you to make specific edits.
+    return `You are a professional photo editor. The user has provided an image and wants you to make SPECIFIC edits to it.
+
+#############################################
+# CRITICAL: EDIT THE IMAGE, DON'T REPLACE IT #
+#############################################
+
+**YOUR ROLE:** Make targeted edits to the PROVIDED image.
+**NOT YOUR ROLE:** Generate a new image or replace the subjects.
 
 ${criticalRulesForEditing}
 
-**SUBJECT PRESERVATION — NEVER REPLACE PEOPLE OR THE CAR**
-*   Keep all people and the vehicle exactly as they appear. Do not remove, swap, or morph them. Do not crop out faces or the car.
+**🚫 ABSOLUTE PROHIBITION — SUBJECT PRESERVATION:**
+*   The people in the image MUST remain the EXACT same people — same faces, same poses.
+*   The car MUST remain the EXACT same vehicle — same make, model, color.
+*   DO NOT replace, swap, redraw, or reimagine ANY subjects.
+*   If your edit results in different people or a different car, YOU HAVE FAILED.
 
     **USER'S EDIT REQUEST:** "${editPrompt}"
 
@@ -508,23 +588,43 @@ export const editTextPrompt = (
     editPrompt: string,
     tone: ToneOption
 ): string => {
-    return `You are an expert social media copy editor. A user has provided text for a post and an edit request.
-    
-    **Original Text:**
-    "${originalText}"
+    return `You are an expert social media copy editor for an automotive dealership.
 
-    **User's Edit Request:**
-    "${editPrompt}"
+**ORIGINAL TEXT:**
+"${originalText}"
 
-    **Tone to maintain:**
-    ${tone}
+**USER'S EDIT REQUEST:**
+"${editPrompt}"
 
-    **Your task:**
-    Rewrite the original text to incorporate the user's request while maintaining the specified tone. The output MUST be only the new, edited text, ready to be copied and pasted. Do not include any preamble.`;
+**REQUIRED TONE:**
+${tone}
+
+**YOUR TASK:**
+1. Apply the user's requested changes to the original text
+2. Maintain the specified tone throughout
+3. Keep the result suitable for social media (concise, engaging)
+4. Preserve any hashtags unless the user specifically asked to change them
+
+**OUTPUT FORMAT:**
+- Return ONLY the edited text
+- No preambles ("Here's the edited version...", "Sure!")
+- Ready to copy-paste directly
+
+Write the edited post now:`;
 };
 
 export const generateVideoPrompt = (style: VideoStyle, options: VideoRequestOptions): string => {
-    const coreInstruction = `You are an AI motion graphics artist. You are given a static image of a person or people celebrating their new car. Your task is to transform this image into a short, dynamic video clip that runs for approximately ${options.durationSeconds} seconds. Do not change or remove the subjects in the image; only add animation and effects based on the chosen theme. Keep the framing clean and avoid cutting off the car or people.`;
+    const coreInstruction = `You are an expert AI video animator specializing in creating dynamic motion from static images.
+
+**YOUR MISSION:**
+Transform the provided static photograph into a ${options.durationSeconds}-second animated video clip.
+
+**CRITICAL REQUIREMENTS:**
+1. **PRESERVE THE SUBJECTS:** The people and car in the image MUST remain exactly as they appear. Do NOT replace, alter, or remove them.
+2. **ADD MOTION & EFFECTS:** Animate the scene with the specified theme/style. Add visual effects, camera movements, particles, or overlays as appropriate.
+3. **MAINTAIN FRAMING:** Keep the car and all people fully visible throughout the video. Do not crop or cut off important subjects.
+4. **SMOOTH ANIMATION:** Create fluid, professional-quality motion that feels polished and intentional.
+5. **LOOP-FRIENDLY:** If possible, design the animation to loop seamlessly.`;
 
     const soundtrackInstruction = options.soundtrack === 'none'
         ? 'No background audio is required; focus on crisp visuals that can loop cleanly without sound.'
