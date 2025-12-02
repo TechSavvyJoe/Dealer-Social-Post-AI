@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, memo } from "react";
 import { Icon } from "./Icons";
 import { fileToNormalizedDataUrl } from "../utils/imageUtils";
 import { WebcamCapture } from "./WebcamCapture";
@@ -16,13 +16,14 @@ const isMobileDevice = () => {
   );
 };
 
-export const ImageInput: React.FC<ImageInputProps> = ({
+export const ImageInput: React.FC<ImageInputProps> = memo(({
   onImageSelected,
   onClose,
 }) => {
   const [error, setError] = useState<string | null>(null);
   const [showWebcam, setShowWebcam] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [pendingImage, setPendingImage] = useState<string | null>(null);
@@ -60,61 +61,19 @@ export const ImageInput: React.FC<ImageInputProps> = ({
 
       try {
         setError(null);
+        setIsProcessing(true);
+        
+        // Process and normalize orientation - this handles EXIF rotation
         const dataUrl = await fileToNormalizedDataUrl(file);
 
-        // Validate image dimensions by loading it (skip in test environments)
-        if (typeof process === "undefined" || process.env.NODE_ENV !== "test") {
-          try {
-            const img = await Promise.race([
-              new Promise<HTMLImageElement>((resolve, reject) => {
-                const image = new Image();
-                const timeout = setTimeout(
-                  () => reject(new Error("Image load timeout")),
-                  500
-                );
-                image.onload = () => {
-                  clearTimeout(timeout);
-                  resolve(image);
-                };
-                image.onerror = () => {
-                  clearTimeout(timeout);
-                  reject(new Error("Failed to load image"));
-                };
-                image.src = dataUrl;
-              }),
-              // Timeout after 500ms to handle edge cases
-              new Promise<HTMLImageElement>((_, reject) =>
-                setTimeout(() => reject(new Error("Image load timeout")), 500)
-              ),
-            ]);
-
-            // Check minimum dimensions (skip check if dimensions are invalid/zero)
-            if (
-              img.width > 0 &&
-              img.height > 0 &&
-              (img.width < 100 || img.height < 100)
-            ) {
-              setError(
-                "Image is too small. Please use an image at least 100x100 pixels."
-              );
-              return;
-            }
-          } catch (dimensionError) {
-            // If we can't load the image for dimension check, still proceed
-            // This handles edge cases where image loading fails
-            console.warn(
-              "Could not validate image dimensions:",
-              dimensionError
-            );
-          }
-        }
-
-        // Show preview first; confirm before committing upstream
+        // Show preview - skip dimension validation for speed
         setPendingImage(dataUrl);
         setLastSource(source);
       } catch (err) {
         console.error("Error reading file:", err);
         setError("Could not read the selected image file. Please try again.");
+      } finally {
+        setIsProcessing(false);
       }
     },
     []
@@ -252,18 +211,28 @@ export const ImageInput: React.FC<ImageInputProps> = ({
   return (
     <>
       <div
-        className={`relative w-full max-w-2xl mx-auto p-2 sm:p-4 bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/20 transition-all duration-300 ${
-          isDraggingOver ? "border-indigo-400 scale-105" : "border-white/20"
+        className={`relative w-full max-w-2xl mx-auto p-2 sm:p-4 mt-4 sm:mt-0 bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border transition-all duration-150 ${
+          isDraggingOver ? "border-indigo-400 scale-[1.02]" : "border-white/20"
         }`}
       >
+        {/* Processing overlay */}
+        {isProcessing && (
+          <div className="absolute inset-0 bg-black/60 rounded-2xl flex items-center justify-center z-20">
+            <div className="text-center">
+              <div className="w-10 h-10 border-3 border-white/30 border-t-white rounded-full animate-spin mx-auto" />
+              <p className="mt-3 text-white font-medium">Processing...</p>
+            </div>
+          </div>
+        )}
+        
         {isDraggingOver && (
           <div className="absolute inset-0 bg-indigo-600/50 rounded-2xl flex items-center justify-center pointer-events-none z-10">
             <div className="text-center">
               <Icon
                 type="upload"
-                className="w-16 h-16 text-white mx-auto animate-bounce"
+                className="w-12 h-12 text-white mx-auto"
               />
-              <p className="mt-2 text-2xl font-bold text-white">
+              <p className="mt-2 text-xl font-bold text-white">
                 Drop Image Here
               </p>
             </div>
@@ -274,12 +243,12 @@ export const ImageInput: React.FC<ImageInputProps> = ({
             triggerHapticFeedback();
             onClose();
           }}
-          className="absolute top-2 right-2 sm:top-4 sm:right-4 p-2 text-white/50 hover:text-white transition-colors z-20 rounded-full hover:bg-white/10"
+          className="absolute top-2 right-2 sm:top-4 sm:right-4 p-2 text-white/50 hover:text-white transition-colors z-20 rounded-full hover:bg-white/10 touch-manipulation"
           aria-label="Close"
         >
           <Icon type="close" className="w-6 h-6" />
         </button>
-        <div className="relative border-2 border-dashed border-white/20 rounded-xl p-4 sm:p-8 transition-colors duration-300">
+        <div className="relative border-2 border-dashed border-white/20 rounded-xl p-4 sm:p-6">
           <input
             type="file"
             ref={fileInputRef}
@@ -288,7 +257,7 @@ export const ImageInput: React.FC<ImageInputProps> = ({
             className="hidden"
             aria-label="Upload photo from your device"
           />
-          {/* Native camera with full controls */}
+          {/* Native camera - uses device's full camera capabilities */}
           <input
             type="file"
             ref={cameraInputRef}
@@ -299,27 +268,33 @@ export const ImageInput: React.FC<ImageInputProps> = ({
             aria-label="Take photo using device camera"
           />
 
-          <div className="text-center py-4 sm:py-8">
-            <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">
+          <div className="text-center py-4 sm:py-6">
+            <h2 className="text-xl sm:text-2xl font-bold text-white mb-1">
               Add a Photo
             </h2>
-            <p className="text-indigo-300 mb-6 sm:mb-8 text-sm sm:text-base">
-              Capture a moment, upload a file, or drag & drop.
+            <p className="text-indigo-300/80 mb-5 text-sm">
+              Take a photo or upload from your gallery
             </p>
-            <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
+            <div className="flex flex-col sm:flex-row justify-center items-center gap-3">
               <button
                 onClick={handleOpenCamera}
-                className="w-full sm:w-auto flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 px-6 rounded-full hover:scale-105 transition-all duration-300 shadow-lg"
+                disabled={isProcessing}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 
+                         text-white font-semibold py-3.5 px-6 rounded-xl transition-all shadow-lg
+                         active:scale-95 touch-manipulation disabled:opacity-50"
               >
-                <Icon type="camera" className="w-6 sm:w-7 h-6 sm:h-7" />
-                <span className="text-base sm:text-lg">Open Camera</span>
+                <Icon type="camera" className="w-5 h-5" />
+                <span>Take Photo</span>
               </button>
               <button
                 onClick={handleUploadPhoto}
-                className="w-full sm:w-auto flex items-center justify-center gap-3 bg-white/10 border border-white/20 text-white font-bold py-3 px-6 rounded-full hover:bg-white/20 hover:scale-105 transition-all duration-300 shadow-lg"
+                disabled={isProcessing}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-white/10 border border-white/20 
+                         text-white font-semibold py-3.5 px-6 rounded-xl transition-all
+                         hover:bg-white/15 active:scale-95 touch-manipulation disabled:opacity-50"
               >
-                <Icon type="upload" className="w-6 sm:w-7 h-6 sm:h-7" />
-                <span className="text-base sm:text-lg">Upload Photo</span>
+                <Icon type="upload" className="w-5 h-5" />
+                <span>Upload</span>
               </button>
             </div>
           </div>
@@ -358,4 +333,4 @@ export const ImageInput: React.FC<ImageInputProps> = ({
       />
     </>
   );
-};
+});

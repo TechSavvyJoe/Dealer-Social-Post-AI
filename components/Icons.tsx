@@ -40,7 +40,8 @@ export interface IconProps {
     | "cpu-chip"
     | "map"
     | "ruler"
-    | "info";
+    | "info"
+    | "chevron-down";
   className?: string;
 }
 
@@ -677,6 +678,23 @@ export const Icon: React.FC<IconProps> = React.memo(
               strokeLinecap="round"
               strokeLinejoin="round"
               d="M15 6h5v5M9 18H4v-5"
+            />
+          </svg>
+        );
+      case "chevron-down":
+        return (
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className={className}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M19 9l-7 7-7-7"
             />
           </svg>
         );

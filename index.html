@@ -52,14 +52,15 @@
   /* Mobile/Tablet specific styles */
   @media (max-width: 768px) {
     body {
-      padding: 0;
+      /* Keep safe-area inset for notch on mobile */
+      padding: max(env(safe-area-inset-top, 0px), 0.75rem) 0 max(env(safe-area-inset-bottom, 0px), 0.5rem) 0;
     }
     .app-container {
       border-radius: 0;
       border: none;
       box-shadow: none;
-      min-height: 100vh;
-      min-height: 100dvh;
+      min-height: calc(100vh - max(env(safe-area-inset-top, 0px), 0.75rem) - max(env(safe-area-inset-bottom, 0px), 0.5rem));
+      min-height: calc(100dvh - max(env(safe-area-inset-top, 0px), 0.75rem) - max(env(safe-area-inset-bottom, 0px), 0.5rem));
     }
   }
 

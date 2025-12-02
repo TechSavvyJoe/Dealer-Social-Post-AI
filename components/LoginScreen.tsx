@@ -53,7 +53,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
   return (
     <motion.div
-      className="w-full max-w-sm mx-auto flex flex-col items-center justify-center p-4"
+      className="w-full max-w-sm mx-auto flex flex-col items-center justify-center p-4 pt-[max(env(safe-area-inset-top),2rem)] sm:pt-4"
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
@@ -64,7 +64,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2, duration: 0.5 }}
       >
-        <Logo className="w-full max-w-xs h-auto mx-auto mb-10" />
+        <Logo className="w-full max-w-xs h-auto mx-auto mb-6 sm:mb-10" />
       </motion.div>
 
       {/* Login Card */}

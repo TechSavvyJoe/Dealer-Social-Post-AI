@@ -119,10 +119,42 @@ export const getJpegExifOrientation = (file: File): Promise<number> => {
 
 /**
  * Generates a new oriented (and EXIF metadata stripped) data URL from an image File.
- * For JPEG files, applies EXIF orientation. For other formats, simply returns a re-encoded data URL.
+ * For JPEG files, applies EXIF orientation. For other formats, uses createImageBitmap
+ * which automatically handles orientation in modern browsers.
+ * 
+ * This ensures photos taken in portrait/landscape are displayed correctly regardless
+ * of how the camera saved them.
  */
 export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
-  // Get original data URL first (needed to load image contents)
+  // Modern browsers (Chrome 81+, Safari 15+, Firefox 98+) support createImageBitmap
+  // with automatic orientation handling via imageOrientation option
+  if (typeof createImageBitmap !== 'undefined') {
+    try {
+      // Create bitmap with automatic orientation correction
+      const bitmap = await createImageBitmap(file, {
+        imageOrientation: 'from-image', // Respect EXIF orientation
+      });
+      
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const ctx = canvas.getContext('2d');
+      
+      if (ctx) {
+        ctx.drawImage(bitmap, 0, 0);
+        bitmap.close(); // Free memory
+        
+        // Use high quality for photos
+        const mimeType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+        return canvas.toDataURL(mimeType, 0.92);
+      }
+      bitmap.close();
+    } catch (e) {
+      console.warn('createImageBitmap failed, falling back to manual EXIF handling:', e);
+    }
+  }
+
+  // Fallback for older browsers: manual EXIF orientation handling
   const originalDataUrl = await fileToDataUrl(file);
   let orientation = 1;
   try {
@@ -130,10 +162,12 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
   } catch {
     orientation = 1;
   }
+  
   // If orientation is 1 and not JPEG, just return original
   if (orientation === 1 && file.type !== "image/jpeg") {
-    return originalDataUrl; // Already no EXIF orientation or not JPEG
+    return originalDataUrl;
   }
+  
   // Load image into canvas and apply transforms
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const i = new Image();
@@ -141,12 +175,15 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
     i.onerror = reject;
     i.src = originalDataUrl;
   });
+  
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
   if (!ctx) {
     return originalDataUrl;
   }
+  
   const { width, height } = img;
+  
   // Set canvas size depending on rotation
   if (orientation > 4 && orientation < 9) {
     canvas.width = height;
@@ -155,6 +192,7 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
     canvas.width = width;
     canvas.height = height;
   }
+  
   // Apply orientation transforms
   switch (orientation) {
     case 2: // Flip horizontal
@@ -188,11 +226,10 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
       ctx.translate(-width, 0);
       break;
     default:
-      // Orientation 1, no transform
       break;
   }
+  
   ctx.drawImage(img, 0, 0);
-  // Re-encode as JPEG (or original type if not JPEG) stripping EXIF metadata.
   const mimeType = file.type === "image/jpeg" ? "image/jpeg" : file.type;
   return canvas.toDataURL(mimeType, 0.92);
 };

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState, memo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
@@ -6,9 +6,7 @@ import {
   FileText,
   Check,
   Camera,
-  Settings,
   ChevronRight,
-  AlertCircle,
 } from "lucide-react";
 import { StyleOption, ToneOption } from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
