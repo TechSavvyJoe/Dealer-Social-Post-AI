@@ -7,7 +7,7 @@ import {
   ToneOption,
 } from "../types";
 import { loadSession, saveSession, clearSession } from "../utils/persistence";
-import { findDealer } from "../services/database";
+import { findDealer, findDealerById } from "../services/database";
 import { logEvent, logError } from "../utils/telemetry";
 
 interface AppState {
@@ -174,7 +174,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const session = loadSession();
     if (session?.dealerId) {
       try {
-        const dealer = await findDealer(session.dealerId);
+        // Use findDealerById since we store the record ID, not the code
+        const dealer = await findDealerById(session.dealerId);
         if (dealer) {
           set({
             currentDealer: dealer,

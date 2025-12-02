@@ -71,6 +71,33 @@ export const findDealer = async (
 };
 
 /**
+ * Finds a dealer by their PocketBase record ID.
+ * @param dealerId The PocketBase record ID of the dealer.
+ * @returns A promise resolving to the Dealer object or undefined if not found.
+ */
+export const findDealerById = async (
+  dealerId: string
+): Promise<Dealer | undefined> => {
+  try {
+    const record = await pb.collection(COLLECTION_NAME).getOne(dealerId);
+    const logoUrl =
+      record.logo && !record.logo.startsWith("http")
+        ? pb.files.getURL(record, record.logo)
+        : record.logo;
+
+    return {
+      id: record.id,
+      name: record.name,
+      logo: logoUrl,
+      code: record.code,
+    };
+  } catch (error) {
+    // PocketBase throws 404 if not found
+    return undefined;
+  }
+};
+
+/**
  * Gets a list of dealers for display (e.g., in the admin panel).
  * Excludes the Admin user if it exists as a special record (or handle logic here).
  * @returns A promise resolving to an array of Dealer objects.
