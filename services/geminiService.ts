@@ -194,7 +194,15 @@ export const generateSocialPostText = async (
     contents: { parts: [imagePart, { text: textPrompt }] },
   });
 
-  const text = cleanGeneratedText(textResponse.text());
+  // Safely extract text with proper error handling
+  let rawText = "";
+  try {
+    rawText =
+      typeof textResponse.text === "function" ? textResponse.text() : "";
+  } catch (e) {
+    throw new Error("Failed to extract text from AI response.");
+  }
+  const text = cleanGeneratedText(rawText);
   if (!text) {
     throw new Error("Failed to generate post text from AI.");
   }
@@ -214,7 +222,15 @@ export const editSocialPostText = async (
     contents: { parts: [{ text: prompt }] },
   });
 
-  const text = cleanGeneratedText(textResponse.text());
+  // Safely extract text with proper error handling
+  let rawText = "";
+  try {
+    rawText =
+      typeof textResponse.text === "function" ? textResponse.text() : "";
+  } catch (e) {
+    throw new Error("Failed to extract text from AI response.");
+  }
+  const text = cleanGeneratedText(rawText);
   if (!text) {
     throw new Error("Failed to edit post text with AI.");
   }
@@ -345,7 +361,8 @@ export const generatePostVideo = async (
 ): Promise<string> => {
   // Use Vertex AI Veo via the proxy
   const vertexModel =
-    (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_VEO_MODEL) ||
+    (typeof import.meta !== "undefined" &&
+      (import.meta as any).env?.VITE_VEO_MODEL) ||
     (typeof process !== "undefined" && process.env?.VITE_VEO_MODEL) ||
     "veo-3.1-generate-001";
 
@@ -391,7 +408,9 @@ export const generatePostVideo = async (
       if (!response.ok) {
         const text = await response.text();
         throw new Error(
-          `Proxy request failed (${response.status}): ${text || response.statusText}`
+          `Proxy request failed (${response.status}): ${
+            text || response.statusText
+          }`
         );
       }
 
@@ -450,12 +469,16 @@ export const generatePostVideo = async (
         continue;
       }
       throw new Error(
-        `Video generation failed: ${normalized.message} ${recoveryHint(normalized)}`
+        `Video generation failed: ${normalized.message} ${recoveryHint(
+          normalized
+        )}`
       );
     }
   }
 
   throw new Error(
-    `Video generation failed after retries: ${lastError instanceof Error ? lastError.message : String(lastError)}`
+    `Video generation failed after retries: ${
+      lastError instanceof Error ? lastError.message : String(lastError)
+    }`
   );
 };

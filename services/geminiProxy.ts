@@ -13,11 +13,13 @@ export async function fetchFromProxy(
   body: any
 ) {
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    throw normalizeError(new Error("Offline: please reconnect to the internet."));
+    throw normalizeError(
+      new Error("Offline: please reconnect to the internet.")
+    );
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 second timeout
+  const timeoutId = setTimeout(() => controller.abort(), 180000); // 180 second timeout (3 minutes)
 
   try {
     const response = await fetch(`/api/proxy/${path}`, {
@@ -59,7 +61,7 @@ export async function fetchFromProxy(
   } catch (error) {
     clearTimeout(timeoutId);
     if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(`Request to ${path} timed out after 90 seconds.`);
+      throw new Error(`Request to ${path} timed out after 180 seconds.`);
     }
     throw normalizeError(error);
   }
