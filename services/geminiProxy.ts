@@ -22,6 +22,7 @@ export async function fetchFromProxy(
   const timeoutId = setTimeout(() => controller.abort(), 180000); // 180 second timeout (3 minutes)
 
   try {
+    console.log(`[GeminiProxy] Requesting ${method} ${path}`);
     const response = await fetch(`/api/proxy/${path}`, {
       method: method,
       headers: {
@@ -31,6 +32,7 @@ export async function fetchFromProxy(
       body: method === "POST" ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
+    console.log(`[GeminiProxy] Response ${response.status} for ${path}`);
     clearTimeout(timeoutId);
 
     const responseText = await response.text();

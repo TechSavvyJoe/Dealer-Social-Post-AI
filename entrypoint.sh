@@ -2,6 +2,20 @@
 
 # Start PocketBase in background
 echo "Starting PocketBase in background..."
+
+# Inject Vertex AI Credentials if provided
+if [ -n "$VERTEX_SERVICE_ACCOUNT_JSON" ]; then
+    echo "Injecting Vertex AI credentials..."
+    echo "$VERTEX_SERVICE_ACCOUNT_JSON" > /pb/pb_hooks/vertex_key.json
+    chmod 600 /pb/pb_hooks/vertex_key.json
+else
+    echo "WARNING: VERTEX_SERVICE_ACCOUNT_JSON not set. Video generation will fail."
+fi
+
+# Create temp directory for signing operations
+mkdir -p /pb/temp
+chmod 777 /pb/temp
+
 /pb/pocketbase serve --http=0.0.0.0:8090 --hooksDir=/pb/pb_hooks --dir=/pb/pb_data &
 PB_PID=$!
 

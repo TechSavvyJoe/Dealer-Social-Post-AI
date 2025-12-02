@@ -52,11 +52,29 @@ const proxyHandler = (c) => {
         const getVertexAccessToken = () => {
           const now = Math.floor(Date.now() / 1000);
 
-          const keyPath = `${__hooks}/vertex_key.json`;
-          // Read key file
-          const rawKey = $os.readFile(keyPath);
-          const keyStr = String.fromCharCode.apply(null, rawKey);
-          const serviceAccount = JSON.parse(keyStr);
+          let serviceAccount;
+          const envKey = $os.getenv("VERTEX_SERVICE_ACCOUNT_JSON");
+
+          if (envKey) {
+            try {
+              serviceAccount = JSON.parse(envKey);
+            } catch (e) {
+              throw new Error(
+                "Failed to parse VERTEX_SERVICE_ACCOUNT_JSON: " + e.toString()
+              );
+            }
+          } else {
+            const keyPath = `${__hooks}/vertex_key.json`;
+            // Read key file
+            if (!$os.getFile(keyPath).exists()) {
+              throw new Error(
+                "Vertex credentials not found. Set VERTEX_SERVICE_ACCOUNT_JSON env var or create vertex_key.json"
+              );
+            }
+            const rawKey = $os.readFile(keyPath);
+            const keyStr = String.fromCharCode.apply(null, rawKey);
+            serviceAccount = JSON.parse(keyStr);
+          }
 
           // Create JWT
           const header = {

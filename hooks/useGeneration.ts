@@ -60,23 +60,68 @@ export const useGeneration = () => {
 
       const progressInterval = setInterval(() => {
         setGenerationProgress((prev) => {
-          if (prev >= 90) return prev;
-          return prev + (Math.random() * 5 + 2);
+          // Asymptotic approach to 95%
+          if (prev >= 95) return prev;
+          const remaining = 95 - prev;
+          // Slow down significantly as we get closer
+          const increment = Math.max(
+            0.1,
+            remaining * 0.05 * (Math.random() + 0.5)
+          );
+          return prev + increment;
         });
       }, 800);
+
+      // Keep track of timeouts to clear them
+      const timeouts: NodeJS.Timeout[] = [];
 
       try {
         const { generateSocialPost } = await loadGeminiService();
 
-        setTimeout(
-          () => setProgressMessage("Consulting the style guide..."),
-          2000
+        timeouts.push(
+          setTimeout(
+            () => setProgressMessage("Consulting the style guide..."),
+            2000
+          )
         );
-        setTimeout(
-          () => setProgressMessage("Crafting the perfect caption..."),
-          4500
+        timeouts.push(
+          setTimeout(
+            () => setProgressMessage("Crafting the perfect caption..."),
+            4500
+          )
         );
-        setTimeout(() => setProgressMessage("Applying final polish..."), 7000);
+        timeouts.push(
+          setTimeout(() => setProgressMessage("Applying final polish..."), 7000)
+        );
+
+        // Add messages for longer waits
+        timeouts.push(
+          setTimeout(
+            () =>
+              setProgressMessage(
+                "AI is thinking hard... this might take a moment."
+              ),
+            15000
+          )
+        );
+        timeouts.push(
+          setTimeout(
+            () =>
+              setProgressMessage(
+                "Still working... generating high-quality content."
+              ),
+            30000
+          )
+        );
+        timeouts.push(
+          setTimeout(
+            () => setProgressMessage("Almost there! Thanks for your patience."),
+            60000
+          )
+        );
+        timeouts.push(
+          setTimeout(() => setProgressMessage("Finalizing your post..."), 90000)
+        );
 
         const result = await runGeminiTask("ai.generate", () =>
           generateSocialPost(
@@ -92,6 +137,7 @@ export const useGeneration = () => {
         );
 
         clearInterval(progressInterval);
+        timeouts.forEach(clearTimeout);
         setGenerationProgress(100);
         setProgressMessage("Complete!");
         await new Promise((resolve) => setTimeout(resolve, 500));
@@ -100,6 +146,7 @@ export const useGeneration = () => {
         setStep(AppStep.RESULT);
       } catch (err) {
         clearInterval(progressInterval);
+        timeouts.forEach(clearTimeout);
         const normalized = normalizeError(err);
         const fullMsg = `Failed to generate your post. ${
           normalized.message
