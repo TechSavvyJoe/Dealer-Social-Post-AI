@@ -33,11 +33,13 @@ export const generateImagePrompt = (
         ? `*   **MANDATORY LOGO PLACEMENT:** A second image has been provided—this is the dealership's logo. It is a CRITICAL REQUIREMENT that you place this logo as a small, tasteful watermark in a lower corner of the final image, inside a Safe Zone. Do not distort it. Do NOT use the dealership name as a text watermark if the logo image is present. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.**`
         : `*   **WATERMARK:** The dealership name, '${dealershipName}', MUST be used as a text watermark. Use the *exact* spelling provided and place it tastefully in a lower corner within a Safe Zone.`;
 
-    const varietyInstruction = `**CRITICAL CREATIVE MANDATE: VIRAL-WORTHY DESIGN.** Your goal is not just to make a post, but to create a visually stunning, one-of-a-kind piece of art that stops people from scrolling. For this specific generation, you MUST create a completely unique and fresh design. Do not default to a standard template. You are a creative director, so be bold! Experiment with the following elements within the chosen style guide below:
-- **Font Artistry:** Choose a unique pair of complementary fonts that make a statement. Don't just place text; treat it like a design element itself.
-- **Harmonious Color Palette:** Select a dynamic color palette. You MUST derive the primary colors from the car, the background scene, or the customer's clothing to create a professional, harmonious, and striking design.
-- **Dynamic Layout:** Experiment with unconventional layouts. Consider angled text, text that wraps around parts of the car (without touching people), stacked words, or integrating text with the scene's lines, while ALWAYS staying in the Safe Zones.
-- **High-Impact Text Effects:** Apply a unique and tasteful text effect that makes the text 'pop'. Examples include a vibrant neon glow, a realistic 3D metallic sheen, a bold graphic drop shadow, an elegant outline, or text that appears to be part of the environment itself. The goal is to make every post look like a custom, high-end design.`;
+    const varietyInstruction = `**CREATIVE TEXT & STYLING MANDATE (WHILE PRESERVING THE ORIGINAL PHOTO)**
+Your goal is to add visually stunning text and styling to the EXISTING photo. The people, car, and background stay EXACTLY the same — only the text overlays, color grading, and enhancements change. Experiment with:
+- **Font Artistry:** Choose a unique pair of complementary fonts that make a statement.
+- **Harmonious Color Palette:** Select a dynamic color palette derived from the car, the background scene, or the customer's clothing.
+- **Dynamic Layout:** Experiment with text layouts — angled text, stacked words, or integrating text with the scene's lines, while ALWAYS staying in the Safe Zones.
+- **High-Impact Text Effects:** Apply text effects that make the text 'pop' — neon glow, metallic sheen, drop shadow, elegant outline. The goal is to make every post look like a custom, high-end design.
+- **REMEMBER:** You are adding overlays to the ORIGINAL photo. The actual people and car must remain unchanged.`;
 
     const creativeBriefInstruction = creativeBrief
         ? `
@@ -47,18 +49,24 @@ Translate this into visual storytelling decisions (color palette, typography, su
 `
         : '';
 
-    const coreInstruction = `Act as a world-class graphic designer with an infallible eye for composition. Your mission is to create a viral-worthy social media post by enhancing a photo and adding text overlays. You have been provided a primary photo of a customer and their car. You may also have been provided a second image which is a company logo.
+    const coreInstruction = `Act as a world-class graphic designer with an infallible eye for composition. Your mission is to EDIT the provided photo by enhancing it and adding text overlays. You have been provided a primary photo of a customer and their car. You may also have been provided a second image which is a company logo.
+
+**ABSOLUTE PRIORITY — PHOTO EDITING, NOT GENERATION**
+*   **THIS IS AN EDITING TASK, NOT A GENERATION TASK.** You are editing an existing photo, NOT creating a new image from scratch.
+*   **THE INPUT PHOTO IS SACRED:** The people and car in the provided photo are REAL customers. You MUST preserve their exact appearance, poses, clothing, faces, hair, and the actual car they purchased.
+*   **ZERO TOLERANCE FOR REPLACEMENT:** If the output contains different people, a different car, or a different background than the input photo, it is a COMPLETE TASK FAILURE. The AI must edit the pixels of the original image, not generate new subjects.
 
 ${criticalRules}
 ${creativeBriefInstruction}
 
 You must follow this process:
 
-**Step 1: PHOTO ENHANCEMENT**
-Perform a full, professional-grade photo enhancement on the original image to make it significantly brighter, more vibrant, and visually appealing.
-*   **BRIGHTEN & ENHANCE:** Significantly increase the overall brightness and vibrancy. The goal is a bright, clear, and eye-catching image that pops.
-*   **FLATTERING LIGHTING:** Intelligently balance lighting. Eliminate harsh shadows on people and the car, adding a soft 'fill light' effect for a professional studio look.
-*   **COLOR GRADING & POLISH:** Apply a rich, appealing color grade. Add a final touch of sharpening to make details crisp and clear.
+**Step 1: PHOTO ENHANCEMENT (EDIT THE ORIGINAL — DO NOT REPLACE IT)**
+Apply professional-grade enhancements to THE SAME image you were given. The people and car must remain EXACTLY the same — same faces, same poses, same vehicle, same background.
+*   **BRIGHTEN & ENHANCE:** Increase the overall brightness and vibrancy of the EXISTING photo.
+*   **FLATTERING LIGHTING:** Balance lighting on the EXISTING subjects. Eliminate harsh shadows.
+*   **COLOR GRADING & POLISH:** Apply color grading to the EXISTING photo. Add sharpening to existing details.
+*   **VERIFY:** After enhancement, the people should still be the EXACT same individuals with the SAME faces, clothing, and poses. The car should be the EXACT same vehicle. If they are not, you have failed.
 
 **Step 2: INTELLIGENT TEXT OVERLAY (Restricted to Safe Zones)**
 After enhancing the photo, you will add text elements based on the provided instructions.
@@ -67,16 +75,24 @@ After enhancing the photo, you will add text elements based on the provided inst
 *   **3D & REALISM:** When appropriate for the style, render the main text as a bold, chunky, 3D object that casts realistic shadows and reflects the scene's lighting.
 ${watermarkInstruction}
 
-**SUBJECT PRESERVATION — NEVER REPLACE PEOPLE OR THE CAR**
-*   You must keep every person and the car from the input photo present and recognizable. Do not swap, remove, or redraw them as different people or vehicles.
-*   Never crop out faces or the car. Preserve their body positions and proportions; enhancements must keep the original subjects intact.
+**SUBJECT PRESERVATION — NEVER REPLACE PEOPLE OR THE CAR (CRITICAL)**
+*   The people in the output MUST be the EXACT same individuals from the input photo — same faces, same hair, same clothing, same poses.
+*   The car in the output MUST be the EXACT same vehicle from the input photo — same make, model, color, and position.
+*   The background MUST be the same location from the input photo.
+*   You are EDITING the photo, not RECREATING it. Any replacement of subjects is an unrecoverable failure.
 
 **Step 3: HUMAN SAFETY VERIFICATION**
 *   Re-run the segmentation / detection pass from **RULE #3** on the finished composition. If ANY margin is violated or an overlap is detected, reposition the offending element and repeat this step until full compliance is achieved.
 
-**Step 4: FINAL COMPLIANCE REVIEW**
+**Step 4: SUBJECT IDENTITY VERIFICATION (CRITICAL)**
+*   Compare the faces in your output to the faces in the input photo. They MUST be the SAME people.
+*   Compare the car in your output to the car in the input. It MUST be the SAME vehicle (same make, model, color).
+*   Compare the background. It MUST be the SAME location.
+*   If ANY of these are different, you have generated a new image instead of editing the original. This is a FAILURE. Start over and EDIT the original photo.
+
+**Step 5: FINAL COMPLIANCE REVIEW**
 *   Confirm that all text, logos, and decorations remain inside the image boundaries, respect the required margins, and look intentional.
-*   If a violation is discovered, adjust the layout and repeat Steps 2-3 before delivering the final image.`;
+*   If a violation is discovered, adjust the layout and repeat Steps 2-4 before delivering the final image.`;
 
     let textInstruction = '';
     if (customMessage && customMessage.trim()) {
