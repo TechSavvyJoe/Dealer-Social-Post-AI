@@ -1,6 +1,19 @@
 /// <reference path="../pb_data/types.d.ts" />
 migrate(
   (db) => {
+    const dao = new Dao(db);
+    
+    // Check if collection already exists
+    try {
+      const existing = dao.findCollectionByNameOrId("dealers");
+      if (existing) {
+        console.log("dealers collection already exists, skipping creation");
+        return;
+      }
+    } catch (e) {
+      // Collection doesn't exist, proceed with creation
+    }
+
     const collection = new Collection({
       id: "dealers_collection",
       created: "2024-11-24 22:00:00.000Z",
@@ -70,12 +83,17 @@ migrate(
       options: {},
     });
 
-    return Dao(db).saveCollection(collection);
+    return dao.saveCollection(collection);
   },
   (db) => {
     const dao = new Dao(db);
-    const collection = dao.findCollectionByNameOrId("dealers_collection");
-
-    return dao.deleteCollection(collection);
+    try {
+      const collection = dao.findCollectionByNameOrId("dealers_collection");
+      if (collection) {
+        return dao.deleteCollection(collection);
+      }
+    } catch (e) {
+      // Collection doesn't exist, nothing to delete
+    }
   }
 );

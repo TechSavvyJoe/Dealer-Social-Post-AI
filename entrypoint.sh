@@ -16,7 +16,7 @@ fi
 mkdir -p /pb/temp
 chmod 777 /pb/temp
 
-/pb/pocketbase serve --http=0.0.0.0:8090 --hooksDir=/pb/pb_hooks --dir=/pb/pb_data &
+/pb/pocketbase serve --http=0.0.0.0:8090 --hooksDir=/pb/pb_hooks --migrationsDir=/pb/pb_migrations --dir=/pb/pb_data &
 PB_PID=$!
 
 # Wait for it to be ready
