@@ -1,11 +1,11 @@
-import React from 'react';
-import { motion } from 'framer-motion';
-import { Settings, LogOut } from 'lucide-react';
-import { Dealer } from '../types';
-import { triggerHapticFeedback } from '../utils/haptics';
-import { Badge } from './ui/Badge';
-import { Button } from './ui/Button';
-import { cn } from '../utils/classNames';
+import React from "react";
+import { motion } from "framer-motion";
+import { Settings, LogOut } from "lucide-react";
+import { Dealer } from "../types";
+import { triggerHapticFeedback } from "../utils/haptics";
+import { Badge } from "./ui/Badge";
+import { Button } from "./ui/Button";
+import { cn } from "../utils/classNames";
 
 interface HeaderProps {
   dealer?: Dealer | null;
@@ -16,7 +16,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   dealer,
   onLogout,
-  onShowSettings
+  onShowSettings,
 }) => {
   const handleLogout = () => {
     triggerHapticFeedback();
@@ -36,10 +36,10 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <motion.header
       className={cn(
-        'w-full z-40',
-        'bg-surface-900/80 backdrop-blur-xl',
-        'border-b border-white/10',
-        'shadow-elevation-2'
+        "w-full z-40",
+        "bg-surface-900/80 backdrop-blur-xl",
+        "border-b border-white/10",
+        "shadow-elevation-2"
       )}
       initial={{ y: -20, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
@@ -64,10 +64,10 @@ export const Header: React.FC<HeaderProps> = ({
           ) : (
             <div
               className={cn(
-                'w-10 h-10 rounded-xl flex items-center justify-center',
-                'font-bold text-white text-xl',
-                'bg-gradient-to-br from-primary-500 to-secondary-600',
-                'shadow-elevation-2'
+                "w-10 h-10 rounded-xl flex items-center justify-center",
+                "font-bold text-white text-xl",
+                "bg-gradient-to-br from-primary-500 to-secondary-600",
+                "shadow-elevation-2"
               )}
             >
               {dealer.name.charAt(0)}
@@ -93,7 +93,7 @@ export const Header: React.FC<HeaderProps> = ({
             size="sm"
             leftIcon={<Settings />}
             onClick={handleOpenSettings}
-            title="Open settings (Ctrl/Cmd + ,)"
+            title="Open settings"
             aria-keyshortcuts="Meta+, Control+,"
           >
             <span className="hidden sm:inline">Settings</span>
@@ -106,7 +106,7 @@ export const Header: React.FC<HeaderProps> = ({
             leftIcon={<LogOut />}
             onClick={handleLogout}
             className="hover:bg-error-500/20 hover:border-error-500/50 hover:text-error-300"
-            title="Logout (Shift + L)"
+            title="Logout"
             aria-keyshortcuts="Shift+L"
           >
             <span className="hidden sm:inline">Logout</span>
