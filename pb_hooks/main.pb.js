@@ -11,6 +11,32 @@ let tokenExpiry = 0;
 
 // getVertexAccessToken moved inside proxyHandler for scope safety
 
+const isPrivateHost = (host) => {
+  // Basic private/bogon IP detection to reduce SSRF risk
+  if (host === "localhost") return true;
+  return (
+    /^(\d{1,3}\.){3}\d{1,3}$/.test(host) &&
+    /^(10\.|127\.|0\.0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(host)
+  );
+};
+
+const isAllowedProxyPath = (path) => {
+  // Strict allowlist of upstream endpoints; reject arbitrary forwarding
+  const geminiPatterns = [
+    /^v1beta\/models\/[^/]+:generateContent$/,
+    /^v1beta\/models\/[^/]+:generateImages$/,
+    /^v1beta\/models\/[^/]+:generateVideos$/,
+    /^v1beta\/operations\/.+$/,
+  ];
+  const vertexPatterns = [
+    /^vertex\/v1beta1\/projects\/[^/]+\/locations\/[^/]+\/publishers\/google\/models\/[^/]+:(generateContent|predict|generateVideos|generateImages)$/,
+    /^vertex\/v1beta1\/operations\/.+$/,
+    /^vertex\/v1\/projects\/[^/]+\/locations\/[^/]+\/publishers\/google\/models\/[^/]+:predict$/,
+  ];
+
+  return [...geminiPatterns, ...vertexPatterns].some((re) => re.test(path));
+};
+
 const proxyHandler = (c) => {
   const GEMINI_API_URL_BASE = "https://generativelanguage.googleapis.com/";
   const VERTEX_AI_URL_BASE = "https://{LOCATION}-aiplatform.googleapis.com/";
@@ -18,10 +44,22 @@ const proxyHandler = (c) => {
   const geminiApiKey = $os.getenv("GEMINI_API_KEY");
   // Vertex API Key no longer used, we use Service Account
 
+  const proxyAccessToken = $os.getenv("PROXY_ACCESS_TOKEN") || "";
+
   let path = c.pathParams.path;
 
   try {
     const requestInfo = $apis.requestInfo(c);
+
+    // Require shared token for all proxy calls to avoid unauthenticated use
+    const incomingToken =
+      (requestInfo.headers && requestInfo.headers["x-proxy-token"]) ||
+      (requestInfo.headers && requestInfo.headers["X-Proxy-Token"]);
+    if (!proxyAccessToken || incomingToken !== proxyAccessToken) {
+      return c.json(401, {
+        error: "Unauthorized proxy request",
+      });
+    }
 
     // Fallback: manual extraction if wildcard param fails
     if (!path) {
@@ -38,6 +76,12 @@ const proxyHandler = (c) => {
       });
     }
 
+    if (!isAllowedProxyPath(path)) {
+      return c.json(403, {
+        error: "Proxy path not allowed",
+      });
+    }
+
     // Detect if this is a Vertex AI request or Gemini API request
     const isVertexAI = path.startsWith("vertex/");
     let baseUrl;
@@ -51,6 +95,11 @@ const proxyHandler = (c) => {
         // Note: Caching is disabled for now to avoid scope issues. Token is fetched per request.
         const getVertexAccessToken = () => {
           const now = Math.floor(Date.now() / 1000);
+
+          // Reuse cached token when still valid
+          if (cachedAccessToken && tokenExpiry - 60 > now) {
+            return cachedAccessToken;
+          }
 
           let serviceAccount;
           const envKey = $os.getenv("VERTEX_SERVICE_ACCOUNT_JSON");
@@ -173,39 +222,40 @@ const proxyHandler = (c) => {
           const tempToken = `${tempDir}/temp_token_${now}.txt`;
           const tempSig = `${tempDir}/temp_sig_${now}.bin`;
 
-          // Helper to safely remove files (ignore errors if file doesn't exist)
-          const safeRemove = (path) => {
+            // Helper to safely remove files (ignore errors if file doesn't exist)
+            const safeRemove = (path) => {
+              try {
+                $os.remove(path);
+              } catch (e) {
+                /* ignore */
+              }
+            };
+
             try {
-              $os.remove(path);
-            } catch (e) {
-              /* ignore */
-            }
-          };
+              // Ensure temp directory exists using full path with restrictive perms
+              try {
+                $os.cmd("/bin/mkdir", "-p", tempDir).output();
+                $os.cmd("/bin/chmod", "700", tempDir).output();
+              } catch (e) {
+                // Directory may already exist, ignore
+              }
 
-          try {
-            // Ensure temp directory exists using full path
-            try {
-              $os.cmd("/bin/mkdir", "-p", tempDir).output();
-            } catch (e) {
-              // Directory may already exist, ignore
-            }
+              const encodedHeader = base64UrlEncode(JSON.stringify(header));
+              const encodedClaims = base64UrlEncode(JSON.stringify(claims));
+              const unsignedToken = `${encodedHeader}.${encodedClaims}`;
 
-            const encodedHeader = base64UrlEncode(JSON.stringify(header));
-            const encodedClaims = base64UrlEncode(JSON.stringify(claims));
-            const unsignedToken = `${encodedHeader}.${encodedClaims}`;
+              let keyContent = serviceAccount.private_key;
+              if (!keyContent.endsWith("\n")) keyContent += "\n";
+              $os.writeFile(tempKey, keyContent);
+              $os.writeFile(tempToken, unsignedToken);
 
-            let keyContent = serviceAccount.private_key;
-            if (!keyContent.endsWith("\n")) keyContent += "\n";
-            $os.writeFile(tempKey, keyContent);
-            $os.writeFile(tempToken, unsignedToken);
-
-            // Ensure permissions are readable
-            try {
-              $os.cmd("/bin/chmod", "644", tempKey).output();
-              $os.cmd("/bin/chmod", "644", tempToken).output();
-            } catch (e) {
-              // Ignore chmod errors
-            }
+              // Ensure permissions are readable
+              try {
+                $os.cmd("/bin/chmod", "600", tempKey).output();
+                $os.cmd("/bin/chmod", "600", tempToken).output();
+              } catch (e) {
+                // Ignore chmod errors
+              }
 
             // Use /usr/bin/openssl on Linux/Docker, fallback to other paths
             let opensslBin = "/usr/bin/openssl";
@@ -278,7 +328,9 @@ const proxyHandler = (c) => {
 
             const tokenData = tokenResp.json;
             console.log("[Auth] Successfully acquired Vertex AI Access Token");
-            return tokenData.access_token;
+            cachedAccessToken = tokenData.access_token;
+            tokenExpiry = now + (tokenData.expires_in || 3600);
+            return cachedAccessToken;
           } catch (err) {
             console.log("[Auth] Signing failed:", err);
             // Try to read stderr from the command if possible?
@@ -418,8 +470,29 @@ routerAdd("POST", "/api/proxy/:path(*)", proxyHandler);
 
 routerAdd("GET", "/api/proxy-image", (c) => {
   const url = c.queryParam("url");
+  const requestInfo = $apis.requestInfo(c);
+  const proxyAccessToken = $os.getenv("PROXY_ACCESS_TOKEN") || "";
+  const incomingToken =
+    (requestInfo.headers && requestInfo.headers["x-proxy-token"]) ||
+    (requestInfo.headers && requestInfo.headers["X-Proxy-Token"]);
+  if (!proxyAccessToken || incomingToken !== proxyAccessToken) {
+    return c.json(401, { error: "Unauthorized proxy request" });
+  }
+
   if (!url) {
     return c.json(400, { error: "Missing url parameter" });
+  }
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") {
+      return c.json(400, { error: "Only https URLs are allowed" });
+    }
+    if (isPrivateHost(parsed.hostname)) {
+      return c.json(400, { error: "Private/loopback hosts are not allowed" });
+    }
+  } catch (e) {
+    return c.json(400, { error: "Invalid url parameter" });
   }
 
   try {

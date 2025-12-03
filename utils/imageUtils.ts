@@ -274,7 +274,14 @@ export const urlToDataUrl = async (url: string): Promise<string> => {
     const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
 
     try {
-      const response = await fetch(proxyUrl);
+      const proxyHeaders =
+        typeof import.meta !== "undefined" &&
+        (import.meta as any).env?.VITE_PROXY_ACCESS_TOKEN
+          ? { "X-Proxy-Token": (import.meta as any).env.VITE_PROXY_ACCESS_TOKEN }
+          : undefined;
+      const response = await fetch(proxyUrl, {
+        headers: proxyHeaders,
+      });
       if (response.ok) {
         const blob = await response.blob();
         return new Promise((resolve, reject) => {

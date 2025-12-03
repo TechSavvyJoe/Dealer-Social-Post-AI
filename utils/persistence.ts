@@ -1,5 +1,6 @@
 const STORAGE_KEY = "dealer-social-post-ai.session";
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const MAX_STORED_IMAGE_BYTES = 500_000; // ~0.5MB safety cap per image
 
 interface PersistedState {
   generatedPost?: {
@@ -51,15 +52,45 @@ export const loadSession = (): PersistedState | null => {
 export const saveSession = (state: PersistedState) => {
   if (typeof window === "undefined") return;
   try {
+    const pruneImages = (session: PersistedState): PersistedState => {
+      const next: PersistedState = { ...session };
+      if (
+        next.generatedPost?.image &&
+        next.generatedPost.image.length > MAX_STORED_IMAGE_BYTES
+      ) {
+        next.generatedPost = { ...next.generatedPost, image: undefined as any };
+      }
+      if (
+        next.selectedImage &&
+        next.selectedImage.length > MAX_STORED_IMAGE_BYTES
+      ) {
+        next.selectedImage = undefined;
+      }
+      return next;
+    };
+
     // Preserve the login timestamp if it exists, or set it if this is a new login
     const existingSession = loadSessionRaw();
-    const sessionWithTimestamp: PersistedState = {
+    const sessionWithTimestamp: PersistedState = pruneImages({
       ...(existingSession ?? {}),
       ...state,
       loginTimestamp:
         state.loginTimestamp ?? existingSession?.loginTimestamp ?? Date.now(),
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessionWithTimestamp));
+    });
+
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(sessionWithTimestamp));
+    } catch (err) {
+      // On quota errors, retry without bulky images
+      const slimmed = pruneImages({
+        ...sessionWithTimestamp,
+        generatedPost: sessionWithTimestamp.generatedPost
+          ? { text: sessionWithTimestamp.generatedPost.text }
+          : undefined,
+        selectedImage: undefined,
+      });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(slimmed));
+    }
   } catch {
     // ignore storage failures
   }

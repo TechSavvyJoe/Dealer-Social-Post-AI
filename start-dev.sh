@@ -17,11 +17,13 @@ if [ ! -f .env.local ]; then
 # Gemini API Key
 # Get your API key from: https://aistudio.google.com/app/apikey
 GEMINI_API_KEY=your-api-key-here
+VITE_PROXY_ACCESS_TOKEN=dev-proxy-token
 
 # Instructions:
 # 1. Replace 'your-api-key-here' with your actual Gemini API key
-# 2. Save this file
-# 3. Restart this script
+# 2. Replace 'dev-proxy-token' with a secret string (frontend & PocketBase must match)
+# 3. Save this file
+# 4. Restart this script
 #
 # Note: This file is git-ignored and will not be committed to version control
 EOF

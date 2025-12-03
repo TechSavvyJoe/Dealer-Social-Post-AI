@@ -16,9 +16,9 @@ else
     echo "Video generation may fail if Vertex AI is required."
 fi
 
-# Create temp directory for signing operations
+# Create temp directory for signing operations with restrictive perms
 mkdir -p /pb/temp
-chmod 777 /pb/temp
+chmod 700 /pb/temp
 
 /pb/pocketbase serve --http=0.0.0.0:8090 --hooksDir=/pb/pb_hooks --migrationsDir=/pb/pb_migrations --dir=/pb/pb_data &
 PB_PID=$!
@@ -27,11 +27,15 @@ PB_PID=$!
 echo "Waiting for PocketBase to start..."
 sleep 10
 
-# Create admin account via API
-echo "Creating admin account via API..."
-curl -X POST "http://127.0.0.1:8090/api/admins" \
-  -H "Content-Type: application/json" \
-  -d "{\"email\":\"${ADMIN_EMAIL}\", \"password\":\"${ADMIN_PASSWORD}\", \"passwordConfirm\":\"${ADMIN_PASSWORD}\"}" || echo "Admin creation failed or already exists"
+# Create admin account via API when credentials are provided
+if [ -n "$ADMIN_EMAIL" ] && [ -n "$ADMIN_PASSWORD" ]; then
+  echo "Creating admin account via API..."
+  curl -X POST "http://127.0.0.1:8090/api/admins" \
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"${ADMIN_EMAIL}\", \"password\":\"${ADMIN_PASSWORD}\", \"passwordConfirm\":\"${ADMIN_PASSWORD}\"}" || echo "Admin creation failed or already exists"
+else
+  echo "Skipping admin creation; ADMIN_EMAIL or ADMIN_PASSWORD not set."
+fi
 
 # Wait for the server process
 wait $PB_PID

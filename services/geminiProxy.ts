@@ -23,10 +23,12 @@ export async function fetchFromProxy(
 
   try {
     console.log(`[GeminiProxy] Requesting ${method} ${path}`);
+    const proxyToken = import.meta.env.VITE_PROXY_ACCESS_TOKEN;
     const response = await fetch(`/api/proxy/${path}`, {
       method: method,
       headers: {
         "Content-Type": "application/json",
+        ...(proxyToken ? { "X-Proxy-Token": proxyToken } : {}),
       },
       // Only include body for POST requests
       body: method === "POST" ? JSON.stringify(body) : undefined,

@@ -137,9 +137,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         // Handle logo URL conversion if needed (logic moved from App.tsx)
         // For now assuming findDealer handles it or it's fine
 
-        // Check if this is an admin login by dealer code (not ID)
+        // Optional admin code is configured via VITE_ADMIN_CODE to avoid hardcoded backdoors
+        const configuredAdminCode =
+          typeof import.meta !== "undefined"
+            ? (import.meta as any).env?.VITE_ADMIN_CODE
+            : undefined;
         const targetStep =
-          dealer.code === "0000" ? AppStep.ADMIN : AppStep.CAPTURE;
+          configuredAdminCode && dealer.code === configuredAdminCode
+            ? AppStep.ADMIN
+            : AppStep.CAPTURE;
 
         set({
           currentDealer: dealer,

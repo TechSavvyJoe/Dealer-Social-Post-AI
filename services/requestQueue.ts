@@ -3,11 +3,13 @@ type Task<T> = () => Promise<T>;
 interface QueueOptions {
   maxRetries?: number;
   delayMs?: number;
+  timeoutMs?: number;
 }
 
 const DEFAULT_OPTIONS: Required<QueueOptions> = {
   maxRetries: 2,
   delayMs: 750,
+  timeoutMs: 300000, // 5 minutes safety timeout to match proxy
 };
 
 let active = false;
@@ -31,7 +33,21 @@ const runNext = async () => {
   let attempt = 0;
   while (attempt <= options.maxRetries) {
     try {
-      const result = await task();
+      const result = await new Promise((resolveTask, rejectTask) => {
+        const timer = setTimeout(
+          () => rejectTask(new Error("Task timed out")),
+          options.timeoutMs
+        );
+        task()
+          .then((value) => {
+            clearTimeout(timer);
+            resolveTask(value);
+          })
+          .catch((err) => {
+            clearTimeout(timer);
+            rejectTask(err);
+          });
+      });
       resolve(result);
       active = false;
       await runNext();
@@ -57,6 +73,7 @@ export const enqueueTask = <T>(
   const options: Required<QueueOptions> = {
     maxRetries: opts?.maxRetries ?? DEFAULT_OPTIONS.maxRetries,
     delayMs: opts?.delayMs ?? DEFAULT_OPTIONS.delayMs,
+    timeoutMs: opts?.timeoutMs ?? DEFAULT_OPTIONS.timeoutMs,
   };
 
   return new Promise<T>((resolve, reject) => {
