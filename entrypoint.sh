@@ -28,14 +28,8 @@ chmod 700 /pb/temp
 chmod +x /pb/pocketbase
 ls -l /pb/pocketbase
 
-# Ensure data directory is writable
-echo "Current user: $(whoami)"
-echo "Fixing permissions for /pb/pb_data..."
-chown -R root:root /pb/pb_data
-chmod 777 /pb/pb_data
-rm -f /pb/pb_data/data.db-wal /pb/pb_data/data.db-shm
-ls -la /pb/pb_data
-
+# Start PocketBase in foreground
+echo "Starting PocketBase..."
 # Start PocketBase in foreground
 echo "Starting PocketBase..."
 /pb/pocketbase serve --http=0.0.0.0:8090 --hooksDir=/pb/pb_hooks --migrationsDir=/pb/pb_migrations --dir=/pb/pb_data
