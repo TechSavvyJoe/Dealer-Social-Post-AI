@@ -20,8 +20,12 @@ fi
 mkdir -p /pb/temp
 chmod 700 /pb/temp
 
+# Ensure PocketBase is executable
+chmod +x /pb/pocketbase
+
 /pb/pocketbase serve --http=0.0.0.0:8090 --hooksDir=/pb/pb_hooks --migrationsDir=/pb/pb_migrations --dir=/pb/pb_data &
 PB_PID=$!
+echo "PocketBase started with PID $PB_PID"
 
 # Wait for it to be ready
 echo "Waiting for PocketBase to start..."
