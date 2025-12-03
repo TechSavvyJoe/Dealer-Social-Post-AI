@@ -1,4 +1,8 @@
 #!/bin/sh
+set -x
+
+# Debug: List files
+ls -la /pb
 
 # Start PocketBase in background
 echo "Starting PocketBase in background..."
@@ -22,24 +26,16 @@ chmod 700 /pb/temp
 
 # Ensure PocketBase is executable
 chmod +x /pb/pocketbase
+ls -l /pb/pocketbase
 
-/pb/pocketbase serve --http=0.0.0.0:8090 --hooksDir=/pb/pb_hooks --migrationsDir=/pb/pb_migrations --dir=/pb/pb_data &
-PB_PID=$!
-echo "PocketBase started with PID $PB_PID"
+# Ensure data directory is writable
+echo "Current user: $(whoami)"
+echo "Fixing permissions for /pb/pb_data..."
+chown -R root:root /pb/pb_data
+chmod 777 /pb/pb_data
+rm -f /pb/pb_data/data.db-wal /pb/pb_data/data.db-shm
+ls -la /pb/pb_data
 
-# Wait for it to be ready
-echo "Waiting for PocketBase to start..."
-sleep 10
-
-# Create admin account via API when credentials are provided
-if [ -n "$ADMIN_EMAIL" ] && [ -n "$ADMIN_PASSWORD" ]; then
-  echo "Creating admin account via API..."
-  curl -X POST "http://127.0.0.1:8090/api/admins" \
-    -H "Content-Type: application/json" \
-    -d "{\"email\":\"${ADMIN_EMAIL}\", \"password\":\"${ADMIN_PASSWORD}\", \"passwordConfirm\":\"${ADMIN_PASSWORD}\"}" || echo "Admin creation failed or already exists"
-else
-  echo "Skipping admin creation; ADMIN_EMAIL or ADMIN_PASSWORD not set."
-fi
-
-# Wait for the server process
-wait $PB_PID
+# Start PocketBase in foreground
+echo "Starting PocketBase..."
+/pb/pocketbase serve --http=0.0.0.0:8090 --hooksDir=/pb/pb_hooks --migrationsDir=/pb/pb_migrations --dir=/pb/pb_data
