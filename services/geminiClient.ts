@@ -60,15 +60,9 @@ class MockGeminiClient {
         }
         
         // Standard Gemini API path
-        // Route preview models and latest Gemini models to v1alpha, BUT keep gemini-2.0-flash-exp, gemini-2.5-flash, and verified gemini-3 models on v1beta
-        const version =
-          (params.model.includes("gemini-3") ||
-            params.model.includes("preview")) &&
-          !params.model.includes("gemini-2.0-flash-exp") &&
-          !params.model.includes("gemini-2.5-flash") &&
-          !params.model.includes("veo-3.1")
-            ? "v1alpha"
-            : "v1beta";
+        // All Gemini models should use v1beta endpoint per official docs
+        // https://ai.google.dev/gemini-api/docs/image-generation
+        const version = "v1beta";
         const rawResponse = await fetchFromProxy(
           "POST",
           `${version}/models/${params.model}:generateContent`,

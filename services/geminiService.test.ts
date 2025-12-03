@@ -94,12 +94,12 @@ describe("GeminiService Model Verification", () => {
 
     // Find the image generation call
     const imageCall = mockGenerateContent.mock.calls.find(
-      (call) => call[0].model === "gemini-3-pro-image"
+      (call) => call[0].model === "gemini-3-pro-image-preview"
     );
 
     expect(imageCall).toBeDefined();
     if (imageCall) {
-      expect(imageCall[0].model).toBe("gemini-3-pro-image");
+      expect(imageCall[0].model).toBe("gemini-3-pro-image-preview");
     }
   });
 
