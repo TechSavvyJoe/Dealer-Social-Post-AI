@@ -378,6 +378,9 @@ export const generatePostVideo = async (
 
   // Veo 3.1 supports 4, 6, or 8 seconds
   const durationSeconds = options.durationSeconds || 8;
+  
+  // Determine if audio should be enabled (any soundtrack other than "none")
+  const includeAudio = options.soundtrack !== "none";
 
   // Veo 3.1 uses the generateVideos endpoint with a different format
   const body = {
@@ -391,8 +394,8 @@ export const generatePostVideo = async (
       numberOfVideos: 1,
       durationSeconds: durationSeconds,
       personGeneration: "allow_adult", // Required for image-to-video
-      // Enable audio generation for Veo 3.1
-      includeAudio: options.includeMusic !== false
+      // Enable audio generation for Veo 3.1 when soundtrack is not "none"
+      includeAudio: includeAudio
     },
     prompt: prompt
   };
@@ -402,7 +405,7 @@ export const generatePostVideo = async (
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       console.log(`[VideoGen] Starting video generation with ${veoModel}, attempt ${attempt}`);
-      console.log(`[VideoGen] Config: ${durationSeconds}s, ${aspectRatio}, audio: ${options.includeMusic !== false}`);
+      console.log(`[VideoGen] Config: ${durationSeconds}s, ${aspectRatio}, audio: ${includeAudio}, soundtrack: ${options.soundtrack}`);
       
       // Use the generateVideos endpoint for Veo 3.x
       const apiPath = `v1beta/models/${veoModel}:generateVideos`;
