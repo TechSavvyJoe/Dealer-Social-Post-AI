@@ -207,7 +207,13 @@ export const useAppStore = create<AppState>((set, get) => ({
           set({
             currentDealer: dealer,
             selectedImage: session.selectedImage || null,
-            generatedPost: session.generatedPost || null,
+            generatedPost:
+              session.generatedPost && session.generatedPost.image
+                ? {
+                    image: session.generatedPost.image,
+                    text: session.generatedPost.text,
+                  }
+                : null,
             generationParams: (session.generationParams ||
               null) as GenerationParams | null, // Load generationParams
             step: (typeof session.step === "number"

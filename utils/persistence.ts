@@ -4,7 +4,7 @@ const MAX_STORED_IMAGE_BYTES = 500_000; // ~0.5MB safety cap per image
 
 interface PersistedState {
   generatedPost?: {
-    image: string;
+    image?: string;
     text: string;
   };
   selectedImage?: string;
