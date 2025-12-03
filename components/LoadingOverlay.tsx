@@ -30,7 +30,7 @@ export const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ progress, messag
   const displayMessage = message || LOADING_MESSAGES[currentMessageIndex];
 
   return (
-    <div className="flex flex-col items-center justify-center w-full h-full min-h-[400px] max-w-md mx-auto p-8">
+    <div className="flex-1 flex flex-col items-center justify-center w-full max-w-md mx-auto p-8">
       <div className="relative w-24 h-24 mb-8">
         {/* Outer pulsing ring */}
         <motion.div

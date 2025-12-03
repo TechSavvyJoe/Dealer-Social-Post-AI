@@ -64,16 +64,40 @@ const proxyHandler = (c) => {
               );
             }
           } else {
-            const keyPath = `${__hooks}/vertex_key.json`;
-            // Read key file
-            if (!$os.getFile(keyPath).exists()) {
-              throw new Error(
-                "Vertex credentials not found. Set VERTEX_SERVICE_ACCOUNT_JSON env var or create vertex_key.json"
-              );
+            // Try to construct from individual env vars (Fly.io secrets)
+            const privateKey = $os.getenv("private_key");
+            const clientEmail = $os.getenv("client_email");
+            const privateKeyId = $os.getenv("private_key_id");
+            const projectId = $os.getenv("project_id");
+            
+            if (privateKey && clientEmail && privateKeyId) {
+              serviceAccount = {
+                type: $os.getenv("type") || "service_account",
+                project_id: projectId,
+                private_key_id: privateKeyId,
+                private_key: privateKey,
+                client_email: clientEmail,
+                client_id: $os.getenv("client_id") || "",
+                auth_uri: $os.getenv("auth_uri") || "https://accounts.google.com/o/oauth2/auth",
+                token_uri: $os.getenv("token_uri") || "https://oauth2.googleapis.com/token",
+                auth_provider_x509_cert_url: $os.getenv("auth_provider_x509_cert_url") || "https://www.googleapis.com/oauth2/v1/certs",
+                client_x509_cert_url: $os.getenv("client_x509_cert_url") || "",
+                universe_domain: $os.getenv("universe_domain") || "googleapis.com"
+              };
+              console.log("[Vertex] Constructed service account from individual env vars");
+            } else {
+              // Fall back to file
+              const keyPath = `${__hooks}/vertex_key.json`;
+              // Read key file
+              if (!$os.getFile(keyPath).exists()) {
+                throw new Error(
+                  "Vertex credentials not found. Set VERTEX_SERVICE_ACCOUNT_JSON env var, individual service account fields, or create vertex_key.json"
+                );
+              }
+              const rawKey = $os.readFile(keyPath);
+              const keyStr = String.fromCharCode.apply(null, rawKey);
+              serviceAccount = JSON.parse(keyStr);
             }
-            const rawKey = $os.readFile(keyPath);
-            const keyStr = String.fromCharCode.apply(null, rawKey);
-            serviceAccount = JSON.parse(keyStr);
           }
 
           // Create JWT

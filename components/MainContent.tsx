@@ -160,7 +160,7 @@ export const MainContent: React.FC<MainContentProps> = ({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
       transition={{ duration: 0.3, ease: "easeOut" }}
-      className="w-full h-full"
+      className="w-full flex-1 flex flex-col"
     >
       {stepContent()}
     </motion.div>

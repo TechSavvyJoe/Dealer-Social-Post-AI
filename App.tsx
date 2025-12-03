@@ -58,9 +58,9 @@ const AppContent: React.FC = () => {
       )}
 
       <main
-        className={`transition-all duration-500 ease-in-out ${
-          compactMode ? "pt-20 sm:pt-16" : "pt-28 sm:pt-24"
-        } pb-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto min-h-[calc(100vh-4rem)]`}
+        className={`flex-1 flex flex-col transition-all duration-300 ease-in-out ${
+          compactMode ? "pt-4 sm:pt-6" : "pt-6 sm:pt-8"
+        } pb-4 sm:pb-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto w-full`}
       >
         <AnimatePresence mode="wait">
           <MainContent

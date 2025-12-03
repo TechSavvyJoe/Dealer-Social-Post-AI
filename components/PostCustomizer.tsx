@@ -365,6 +365,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   const isBusy = isGenerating || isSubmitting;
 
   return (
+    <div className="flex-1 flex items-start justify-center py-4 sm:py-6">
     <motion.div
       className="w-full max-w-6xl mx-auto px-1 sm:px-0"
       initial={{ opacity: 0, y: 20 }}
@@ -775,5 +776,6 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         </CardContent>
       </Card>
     </motion.div>
+    </div>
   );
 };

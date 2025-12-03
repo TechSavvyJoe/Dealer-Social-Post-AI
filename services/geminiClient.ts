@@ -4,6 +4,19 @@ import { fetchFromProxy } from "./geminiProxy";
 // It ensures that all API calls are routed through our secure backend proxy,
 // so the API key never leaves the server.
 
+// Models that require Vertex AI (OAuth) instead of API key auth
+const VERTEX_ONLY_MODELS = [
+  'gemini-3-pro-image-preview',
+  'gemini-3-pro-preview',
+  'imagen-3',
+  'imagen-3.0-generate-002',
+];
+
+// Helper to determine if model needs Vertex AI
+const needsVertexAI = (model: string): boolean => {
+  return VERTEX_ONLY_MODELS.some(m => model.includes(m));
+};
+
 class MockVideoOperation {
   name: string;
   done: boolean;
@@ -25,16 +38,33 @@ class MockGeminiClient {
         model: string;
         [key: string]: any;
       }) => {
-        // The SDK's `generateContent` returns a response with a `text()` method.
-        // The raw API response is what our proxy will return. We need to wrap it.
+        // Check if model requires Vertex AI
+        if (needsVertexAI(params.model)) {
+          // Route through Vertex AI
+          const projectId = 'gen-lang-client-0994987899'; // From your service account
+          const location = 'us-central1';
+          const vertexPath = `vertex/v1beta1/projects/${projectId}/locations/${location}/publishers/google/models/${params.model}:generateContent`;
+          
+          // Transform request format for Vertex AI
+          const vertexBody = {
+            contents: params.contents ? (Array.isArray(params.contents) ? params.contents : [params.contents]) : [],
+            generationConfig: params.generationConfig,
+          };
+          
+          const rawResponse = await fetchFromProxy('POST', vertexPath, vertexBody);
+          return {
+            ...rawResponse,
+            text: () => rawResponse.candidates?.[0]?.content?.parts?.[0]?.text || '',
+          };
+        }
+        
+        // Standard Gemini API path
         // Route preview models and latest Gemini models to v1alpha, BUT keep gemini-2.0-flash-exp, gemini-2.5-flash, and verified gemini-3 models on v1beta
         const version =
           (params.model.includes("gemini-3") ||
             params.model.includes("preview")) &&
           !params.model.includes("gemini-2.0-flash-exp") &&
           !params.model.includes("gemini-2.5-flash") &&
-          !params.model.includes("gemini-3-pro-image-preview") &&
-          !params.model.includes("gemini-3-pro-preview") &&
           !params.model.includes("veo-3.1")
             ? "v1alpha"
             : "v1beta";

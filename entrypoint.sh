@@ -5,11 +5,15 @@ echo "Starting PocketBase in background..."
 
 # Inject Vertex AI Credentials if provided
 if [ -n "$VERTEX_SERVICE_ACCOUNT_JSON" ]; then
-    echo "Injecting Vertex AI credentials..."
+    echo "Injecting Vertex AI credentials from VERTEX_SERVICE_ACCOUNT_JSON..."
     echo "$VERTEX_SERVICE_ACCOUNT_JSON" > /pb/pb_hooks/vertex_key.json
     chmod 600 /pb/pb_hooks/vertex_key.json
+elif [ -n "$private_key" ] && [ -n "$client_email" ]; then
+    echo "Vertex AI credentials detected via individual env vars (private_key, client_email, etc.)"
+    echo "Service account will be constructed at runtime."
 else
-    echo "WARNING: VERTEX_SERVICE_ACCOUNT_JSON not set. Video generation will fail."
+    echo "WARNING: VERTEX_SERVICE_ACCOUNT_JSON not set and individual credentials not found."
+    echo "Video generation may fail if Vertex AI is required."
 fi
 
 # Create temp directory for signing operations

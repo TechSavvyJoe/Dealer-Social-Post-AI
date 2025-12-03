@@ -36,18 +36,16 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <motion.header
       className={cn(
-        'w-full sticky top-0 z-40',
-        'bg-surface-900/60 backdrop-blur-xl',
+        'w-full z-40',
+        'bg-surface-900/80 backdrop-blur-xl',
         'border-b border-white/10',
-        'shadow-elevation-2',
-        // Add safe-area padding for mobile notch
-        'pt-[max(env(safe-area-inset-top),0.5rem)]'
+        'shadow-elevation-2'
       )}
-      initial={{ y: -100, opacity: 0 }}
+      initial={{ y: -20, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
-      transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+      transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
     >
-      <div className="mx-auto flex w-full max-w-screen-2xl items-center justify-between px-4 py-4 sm:px-6 sm:py-3 lg:px-10">
+      <div className="mx-auto flex w-full max-w-screen-2xl items-center justify-between px-4 py-3 sm:px-6 lg:px-10">
         {/* Dealer Info */}
         <motion.div
           className="flex items-center gap-3"

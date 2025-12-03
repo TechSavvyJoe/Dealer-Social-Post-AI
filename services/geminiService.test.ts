@@ -103,25 +103,30 @@ describe("GeminiService Model Verification", () => {
     }
   });
 
-  it("should use veo-2.0-generate-001 for video generation via Gemini API", async () => {
-    // Mock fetch for the Gemini API video generation call
+  it("should use veo-3.1-generate-preview for video generation via Gemini API", async () => {
+    // Mock fetch for the Gemini API video generation call - Veo 3.1 returns an operation
     global.fetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({
-          candidates: [
-            {
-              content: {
-                parts: [
-                  {
-                    fileData: {
-                      fileUri: "http://fake-video-url.com/video.mp4"
-                    }
-                  }
-                ]
+          name: "operations/test-operation-123",
+          done: false
+        }),
+      })
+      // Second call is the polling
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          done: true,
+          response: {
+            generatedVideos: [
+              {
+                video: {
+                  uri: "http://fake-video-url.com/video.mp4"
+                }
               }
-            }
-          ]
+            ]
+          }
         }),
       });
     global.URL.createObjectURL = vi.fn().mockReturnValue("blob:fake-video-url");
@@ -141,7 +146,7 @@ describe("GeminiService Model Verification", () => {
       "data:image/jpeg;base64,fake",
       VideoStyle.EpicReveal,
       {
-        durationSeconds: 5,
+        durationSeconds: 8,
         aspectPreference: "auto",
         resolution: "720p",
         soundtrack: "none",
@@ -149,9 +154,13 @@ describe("GeminiService Model Verification", () => {
       }
     );
 
-    // Verify fetch was called with the correct Veo model path via Gemini API
+    // Verify fetch was called with the correct Veo 3.1 model path via generateVideos endpoint
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("veo-2.0-generate-001"),
+      expect.stringContaining("veo-3.1-generate-preview"),
+      expect.any(Object)
+    );
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("generateVideos"),
       expect.any(Object)
     );
   });

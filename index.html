@@ -20,47 +20,73 @@
 </script>
 <style>
   /* Critical above-the-fold styles */
+  :root {
+    /* CSS custom properties for safe areas - easier to use throughout */
+    --sat: env(safe-area-inset-top, 0px);
+    --sar: env(safe-area-inset-right, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+    /* Minimum top spacing for notch devices - 44px is Apple's recommended touch target */
+    --header-safe-top: max(var(--sat), 12px);
+  }
+
+  html {
+    /* Ensure proper sizing on mobile */
+    height: 100%;
+    height: -webkit-fill-available;
+  }
+
   body {
     margin: 0;
     overflow-x: hidden;
-    padding: env(safe-area-inset-top, 1rem) env(safe-area-inset-right, 1rem) env(safe-area-inset-bottom, 1rem) env(safe-area-inset-left, 1rem);
+    /* On mobile, let the app handle safe areas internally for better control */
+    padding: 0;
+    min-height: 100%;
+    min-height: -webkit-fill-available;
   }
 
   .app-container {
     width: 100%;
-    min-height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
-    min-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    min-height: 100vh;
+    min-height: 100dvh;
     background-color: #020617;
-    border-radius: 1.5rem;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow:
-      0 0 60px rgba(59, 130, 246, 0.15),
-      0 20px 40px rgba(0, 0, 0, 0.3);
     overflow: hidden;
     position: relative;
     display: flex;
     flex-direction: column;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   #root {
     flex: 1;
     display: flex;
     flex-direction: column;
+    /* Apply safe-area padding to the root container */
+    padding-top: var(--header-safe-top);
+    padding-bottom: max(var(--sab), 8px);
+    padding-left: var(--sal);
+    padding-right: var(--sar);
   }
 
-  /* Mobile/Tablet specific styles */
-  @media (max-width: 768px) {
+  /* Desktop styles - add decorative container */
+  @media (min-width: 769px) {
     body {
-      /* Keep safe-area inset for notch on mobile */
-      padding: max(env(safe-area-inset-top, 0px), 0.75rem) 0 max(env(safe-area-inset-bottom, 0px), 0.5rem) 0;
+      padding: clamp(1rem, 2vw, 2rem);
     }
     .app-container {
-      border-radius: 0;
-      border: none;
-      box-shadow: none;
-      min-height: calc(100vh - max(env(safe-area-inset-top, 0px), 0.75rem) - max(env(safe-area-inset-bottom, 0px), 0.5rem));
-      min-height: calc(100dvh - max(env(safe-area-inset-top, 0px), 0.75rem) - max(env(safe-area-inset-bottom, 0px), 0.5rem));
+      border-radius: 1.5rem;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow:
+        0 0 60px rgba(59, 130, 246, 0.15),
+        0 20px 40px rgba(0, 0, 0, 0.3);
+      min-height: calc(100vh - clamp(2rem, 4vw, 4rem));
+      min-height: calc(100dvh - clamp(2rem, 4vw, 4rem));
+    }
+    #root {
+      /* Desktop doesn't need safe-area padding */
+      padding-top: 0;
+      padding-bottom: 0;
+      padding-left: 0;
+      padding-right: 0;
     }
   }
 

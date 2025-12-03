@@ -210,11 +210,12 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({
 
   return (
     <>
-      <div
-        className={`relative w-full max-w-2xl mx-auto p-2 sm:p-4 mt-4 sm:mt-0 bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border transition-all duration-150 ${
-          isDraggingOver ? "border-indigo-400 scale-[1.02]" : "border-white/20"
-        }`}
-      >
+      <div className="flex-1 flex items-center justify-center px-4 py-6">
+        <div
+          className={`relative w-full max-w-2xl p-2 sm:p-4 bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border transition-all duration-150 ${
+            isDraggingOver ? "border-indigo-400 scale-[1.02]" : "border-white/20"
+          }`}
+        >
         {/* Processing overlay */}
         {isProcessing && (
           <div className="absolute inset-0 bg-black/60 rounded-2xl flex items-center justify-center z-20">
@@ -298,6 +299,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({
               </button>
             </div>
           </div>
+        </div>
         </div>
       </div>
       {/* Preview modal for mobile/native or upload flow */}

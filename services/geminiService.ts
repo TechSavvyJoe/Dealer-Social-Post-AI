@@ -359,8 +359,8 @@ export const generatePostVideo = async (
   style: VideoStyle,
   options: VideoRequestOptions
 ): Promise<string> => {
-  // Use Google AI Studio's Veo model via Gemini API
-  const veoModel = "veo-2.0-generate-001";
+  // Use Veo 3.1 - Google's best video generation model with native audio
+  const veoModel = "veo-3.1-generate-preview";
   
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
@@ -368,45 +368,44 @@ export const generatePostVideo = async (
 
   const { width, height } = await getImageDimensions(imageBase64Url);
   const derivedAspect =
-    width === height ? "1:1" : width > height ? "16:9" : "9:16";
+    width === height ? "16:9" : width > height ? "16:9" : "9:16"; // Veo 3.1 only supports 16:9 and 9:16
   const aspectRatio =
     options.aspectPreference === "auto"
       ? derivedAspect
-      : options.aspectPreference;
+      : options.aspectPreference === "1:1" 
+        ? "16:9" // Convert 1:1 to 16:9 for Veo 3.1
+        : options.aspectPreference;
 
-  const durationSeconds = options.durationSeconds || 6;
+  // Veo 3.1 supports 4, 6, or 8 seconds
+  const durationSeconds = options.durationSeconds || 8;
 
-  // Use the Gemini API format for video generation
+  // Veo 3.1 uses the generateVideos endpoint with a different format
   const body = {
-    contents: [
-      {
-        parts: [
-          {
-            inlineData: {
-              mimeType,
-              data: base64Data
-            }
-          },
-          {
-            text: prompt
-          }
-        ]
-      }
-    ],
+    model: `models/${veoModel}`,
+    image: {
+      imageBytes: base64Data,
+      mimeType: mimeType
+    },
     generationConfig: {
-      responseModalities: ["VIDEO"],
-      videoDurationSeconds: durationSeconds
-    }
+      aspectRatio: aspectRatio,
+      numberOfVideos: 1,
+      durationSeconds: durationSeconds,
+      personGeneration: "allow_adult", // Required for image-to-video
+      // Enable audio generation for Veo 3.1
+      includeAudio: options.includeMusic !== false
+    },
+    prompt: prompt
   };
 
   let lastError: any = null;
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      console.log(`[VideoGen] Starting video generation with Gemini API (${veoModel}), attempt ${attempt}`);
+      console.log(`[VideoGen] Starting video generation with ${veoModel}, attempt ${attempt}`);
+      console.log(`[VideoGen] Config: ${durationSeconds}s, ${aspectRatio}, audio: ${options.includeMusic !== false}`);
       
-      // Use the Gemini API proxy endpoint
-      const apiPath = `v1beta/models/${veoModel}:generateContent`;
+      // Use the generateVideos endpoint for Veo 3.x
+      const apiPath = `v1beta/models/${veoModel}:generateVideos`;
       
       const response = await fetch(`/api/proxy/${apiPath}`, {
         method: "POST",
@@ -433,11 +432,16 @@ export const generatePostVideo = async (
       const json = await response.json();
       console.log(`[VideoGen] Response received:`, JSON.stringify(json).substring(0, 500));
 
-      // Check if this is an async operation that needs polling
+      // Veo 3.1 returns an async operation that needs polling
       const operationName = json?.name;
-      if (operationName && json?.done === false) {
+      if (operationName) {
         console.log(`[VideoGen] Got async operation, polling: ${operationName}`);
-        return await pollGeminiVideoOperation(operationName, 300000); // 5 minute timeout for video
+        return await pollGeminiVideoOperation(operationName, 360000); // 6 minute timeout for Veo 3.1
+      }
+
+      // Check for immediate response (unlikely but handle it)
+      if (json?.generatedVideos?.[0]) {
+        return extractVideoFromResponse(json);
       }
 
       // Try to extract video from response
