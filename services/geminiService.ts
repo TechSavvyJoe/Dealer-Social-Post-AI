@@ -96,8 +96,8 @@ export const generateFunSocialPostImage = async (
 
   const client = getGeminiClient();
   const imageResponse = await client.models.generateContent({
-    // Use gemini-2.0-flash-exp for faster image generation
-    model: "gemini-2.0-flash-exp",
+    // Use gemini-3-pro-image for best quality image generation
+    model: "gemini-3-pro-image-preview",
     contents: { parts: imageParts },
     generationConfig: {
       responseModalities: ["TEXT" as any, "IMAGE" as any],
@@ -144,8 +144,8 @@ export const editSocialPostImage = async (
 
   const client = getGeminiClient();
   const imageResponse = await client.models.generateContent({
-    // Use gemini-2.0-flash-exp for faster image editing
-    model: "gemini-2.0-flash-exp",
+    // Use gemini-3-pro-image for best quality image editing
+    model: "gemini-3-pro-image-preview",
     contents: {
       parts: imageParts,
     },
@@ -309,7 +309,7 @@ export const generateSocialPost = async (
   const client = getGeminiClient();
   const imagePromise = client.models
     .generateContent({
-      model: "gemini-2.0-flash-exp",
+      model: "gemini-3-pro-image-preview",
       contents: { parts: imageParts },
       generationConfig: { responseModalities: ["TEXT" as any, "IMAGE" as any] },
     })

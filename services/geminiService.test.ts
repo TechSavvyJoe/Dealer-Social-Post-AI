@@ -84,7 +84,7 @@ describe("GeminiService Model Verification", () => {
     }
   });
 
-  it("should use gemini-2.0-flash-exp for image generation", async () => {
+  it("should use gemini-3-pro-image for image generation", async () => {
     await generateSocialPost(
       "data:image/jpeg;base64,fake",
       StyleOption.Modern,
@@ -94,12 +94,12 @@ describe("GeminiService Model Verification", () => {
 
     // Find the image generation call
     const imageCall = mockGenerateContent.mock.calls.find(
-      (call) => call[0].model === "gemini-2.0-flash-exp"
+      (call) => call[0].model === "gemini-3-pro-image-preview"
     );
 
     expect(imageCall).toBeDefined();
     if (imageCall) {
-      expect(imageCall[0].model).toBe("gemini-2.0-flash-exp");
+      expect(imageCall[0].model).toBe("gemini-3-pro-image-preview");
     }
   });
 
