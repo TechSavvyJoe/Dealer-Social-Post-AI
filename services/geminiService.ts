@@ -96,8 +96,8 @@ export const generateFunSocialPostImage = async (
 
   const client = getGeminiClient();
   const imageResponse = await client.models.generateContent({
-    // Use the verified available Gemini 3 image model
-    model: "gemini-3-pro-image-preview",
+    // Use gemini-3-pro-image for best quality image generation
+    model: "gemini-3-pro-image",
     contents: { parts: imageParts },
     generationConfig: {
       responseModalities: ["TEXT" as any, "IMAGE" as any],
@@ -144,8 +144,8 @@ export const editSocialPostImage = async (
 
   const client = getGeminiClient();
   const imageResponse = await client.models.generateContent({
-    // Use verified available Gemini 3 image model
-    model: "gemini-3-pro-image-preview",
+    // Use gemini-3-pro-image for best quality image editing
+    model: "gemini-3-pro-image",
     contents: {
       parts: imageParts,
     },
@@ -190,7 +190,8 @@ export const generateSocialPostText = async (
 
   const client = getGeminiClient();
   const textResponse = await client.models.generateContent({
-    model: "gemini-3-pro-preview",
+    // gemini-2.5-flash: Fast, high-quality text generation (1K RPM vs 150 RPM for pro)
+    model: "gemini-2.5-flash",
     contents: { parts: [imagePart, { text: textPrompt }] },
   });
 
@@ -218,7 +219,8 @@ export const editSocialPostText = async (
 
   const client = getGeminiClient();
   const textResponse = await client.models.generateContent({
-    model: "gemini-3-pro-preview",
+    // gemini-2.5-flash: Fast text editing
+    model: "gemini-2.5-flash",
     contents: { parts: [{ text: prompt }] },
   });
 
@@ -307,7 +309,7 @@ export const generateSocialPost = async (
   const client = getGeminiClient();
   const imagePromise = client.models
     .generateContent({
-      model: "gemini-3-pro-image-preview",
+      model: "gemini-3-pro-image",
       contents: { parts: imageParts },
       generationConfig: { responseModalities: ["TEXT" as any, "IMAGE" as any] },
     })

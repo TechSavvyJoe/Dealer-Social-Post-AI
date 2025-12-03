@@ -5,11 +5,12 @@ import { fetchFromProxy } from "./geminiProxy";
 // so the API key never leaves the server.
 
 // Models that require Vertex AI (OAuth) instead of API key auth
+// Note: Only Imagen and Veo models truly require Vertex AI
+// Gemini models work with API key auth
 const VERTEX_ONLY_MODELS = [
-  'gemini-3-pro-image-preview',
-  'gemini-3-pro-preview',
   'imagen-3',
   'imagen-3.0-generate-002',
+  'veo-3.1-generate-preview',
 ];
 
 // Helper to determine if model needs Vertex AI
@@ -77,6 +78,41 @@ class MockGeminiClient {
           ...rawResponse,
           text: () =>
             rawResponse.candidates?.[0]?.content?.parts?.[0]?.text || "",
+        };
+      },
+      // Imagen 3 image generation via Vertex AI predict endpoint
+      generateImages: async (params: {
+        model: string;
+        prompt: string;
+        config?: {
+          numberOfImages?: number;
+          aspectRatio?: string;
+          outputMimeType?: string;
+        };
+      }) => {
+        const projectId = 'gen-lang-client-0994987899';
+        const location = 'us-central1';
+        const model = params.model || 'imagen-3.0-generate-002';
+        const vertexPath = `vertex/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:predict`;
+        
+        const vertexBody = {
+          instances: [{ prompt: params.prompt }],
+          parameters: {
+            sampleCount: params.config?.numberOfImages || 1,
+            aspectRatio: params.config?.aspectRatio || '1:1',
+            outputMimeType: params.config?.outputMimeType || 'image/png',
+          },
+        };
+        
+        const rawResponse = await fetchFromProxy('POST', vertexPath, vertexBody);
+        
+        // Transform response to match expected format
+        const predictions = rawResponse.predictions || [];
+        return {
+          images: predictions.map((pred: any) => ({
+            mimeType: pred.mimeType || 'image/png',
+            data: pred.bytesBase64Encoded,
+          })),
         };
       },
       generateVideos: async (params: { model: string; [key: string]: any }) => {

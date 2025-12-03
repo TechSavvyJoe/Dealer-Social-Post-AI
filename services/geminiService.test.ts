@@ -65,7 +65,7 @@ describe("GeminiService Model Verification", () => {
     });
   });
 
-  it("should use gemini-3-pro-preview for text generation", async () => {
+  it("should use gemini-2.5-flash for text generation", async () => {
     await generateSocialPost(
       "data:image/jpeg;base64,fake",
       StyleOption.Modern,
@@ -75,16 +75,16 @@ describe("GeminiService Model Verification", () => {
 
     // Find the text generation call
     const textCall = mockGenerateContent.mock.calls.find(
-      (call) => call[0].model === "gemini-3-pro-preview"
+      (call) => call[0].model === "gemini-2.5-flash"
     );
 
     expect(textCall).toBeDefined();
     if (textCall) {
-      expect(textCall[0].model).toBe("gemini-3-pro-preview");
+      expect(textCall[0].model).toBe("gemini-2.5-flash");
     }
   });
 
-  it("should use gemini-3-pro-image-preview for image generation", async () => {
+  it("should use gemini-3-pro-image for image generation", async () => {
     await generateSocialPost(
       "data:image/jpeg;base64,fake",
       StyleOption.Modern,
@@ -94,12 +94,12 @@ describe("GeminiService Model Verification", () => {
 
     // Find the image generation call
     const imageCall = mockGenerateContent.mock.calls.find(
-      (call) => call[0].model === "gemini-3-pro-image-preview"
+      (call) => call[0].model === "gemini-3-pro-image"
     );
 
     expect(imageCall).toBeDefined();
     if (imageCall) {
-      expect(imageCall[0].model).toBe("gemini-3-pro-image-preview");
+      expect(imageCall[0].model).toBe("gemini-3-pro-image");
     }
   });
 
