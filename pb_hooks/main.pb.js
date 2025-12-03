@@ -164,7 +164,19 @@ const proxyHandler = (c) => {
           const tempToken = `${tempDir}/temp_token_${now}.txt`;
           const tempSig = `${tempDir}/temp_sig_${now}.bin`;
 
+          // Helper to safely remove files (ignore errors if file doesn't exist)
+          const safeRemove = (path) => {
+            try { $os.remove(path); } catch (e) { /* ignore */ }
+          };
+
           try {
+            // Ensure temp directory exists
+            try {
+              $os.cmd("mkdir", "-p", tempDir).output();
+            } catch (e) {
+              // Directory may already exist, ignore
+            }
+
             const encodedHeader = base64UrlEncode(JSON.stringify(header));
             const encodedClaims = base64UrlEncode(JSON.stringify(claims));
             const unsignedToken = `${encodedHeader}.${encodedClaims}`;
@@ -258,9 +270,10 @@ const proxyHandler = (c) => {
             // But we can try to log more context.
             throw err;
           } finally {
-            $os.remove(tempKey);
-            $os.remove(tempToken);
-            $os.remove(tempSig);
+            // Safely clean up temp files (ignore errors if files don't exist)
+            safeRemove(tempKey);
+            safeRemove(tempToken);
+            safeRemove(tempSig);
           }
         };
 
