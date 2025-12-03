@@ -170,9 +170,9 @@ const proxyHandler = (c) => {
           };
 
           try {
-            // Ensure temp directory exists
+            // Ensure temp directory exists using full path
             try {
-              $os.cmd("mkdir", "-p", tempDir).output();
+              $os.cmd("/bin/mkdir", "-p", tempDir).output();
             } catch (e) {
               // Directory may already exist, ignore
             }
@@ -186,9 +186,7 @@ const proxyHandler = (c) => {
             $os.writeFile(tempKey, keyContent);
             $os.writeFile(tempToken, unsignedToken);
 
-            // Debug: check file size
-            const tokenStat = $os.cmd("ls", "-l", tempToken).output();
-            // Ensure permissions are readable using /bin/chmod
+            // Ensure permissions are readable
             try {
               $os.cmd("/bin/chmod", "644", tempKey).output();
               $os.cmd("/bin/chmod", "644", tempToken).output();
@@ -196,16 +194,21 @@ const proxyHandler = (c) => {
               // Ignore chmod errors
             }
 
-            // Detect OpenSSL path (Docker/Linux vs macOS)
-            const opensslBin = $os.cmd("which", "openssl").run()
-              ? "openssl"
-              : "/opt/homebrew/bin/openssl";
+            // Use /usr/bin/openssl on Linux/Docker, fallback to other paths
+            let opensslBin = "/usr/bin/openssl";
+            try {
+              // Test if openssl exists at the expected path
+              $os.cmd("/bin/sh", "-c", `test -x ${opensslBin}`).output();
+            } catch (e) {
+              // Try alternate paths
+              opensslBin = "openssl"; // fallback to PATH
+            }
 
-            // Step 1: Sign
+            // Step 1: Sign using sh with full path
             const signCmd = $os.cmd(
-              "sh",
+              "/bin/sh",
               "-c",
-              `${opensslBin} dgst -sha256 -sign "${tempKey}" -out "${tempSig}" "${tempToken}" 2>&1 || true`
+              `${opensslBin} dgst -sha256 -sign "${tempKey}" -out "${tempSig}" "${tempToken}" 2>&1`
             );
             const signOut = signCmd.output();
 
@@ -224,7 +227,7 @@ const proxyHandler = (c) => {
 
             // Step 2: Base64 encode signature
             const b64Cmd = $os.cmd(
-              "sh",
+              "/bin/sh",
               "-c",
               `${opensslBin} base64 -in "${tempSig}"`
             );
