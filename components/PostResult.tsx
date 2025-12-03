@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   RefreshCw,
   Edit3,
@@ -13,19 +13,19 @@ import {
   AlertCircle,
   Loader2,
   Undo2,
-  Redo2
-} from 'lucide-react';
-import { GeneratedPost, VideoStyle, VideoRequestOptions } from '../types';
-import { dataUrlToBlob } from '../utils/imageUtils';
-import { ImagePreviewModal } from './ImagePreviewModal';
-import { triggerHapticFeedback } from '../utils/haptics';
-import { EditTextModal } from './EditTextModal';
-import { VideoDirectorModal } from './VideoDirectorModal';
-import { FunModeDirectorModal } from './FunModeDirectorModal';
-import { Badge } from './ui/Badge';
-import { cn } from '../utils/classNames';
-import { ProgressBar } from './ui/ProgressBar';
-import { normalizeError, recoveryHint } from '../utils/errorHandler';
+  Redo2,
+} from "lucide-react";
+import { GeneratedPost, VideoStyle, VideoRequestOptions } from "../types";
+import { dataUrlToBlob } from "../utils/imageUtils";
+import { ImagePreviewModal } from "./ImagePreviewModal";
+import { triggerHapticFeedback } from "../utils/haptics";
+import { EditTextModal } from "./EditTextModal";
+import { VideoDirectorModal } from "./VideoDirectorModal";
+import { FunModeDirectorModal } from "./FunModeDirectorModal";
+import { Badge } from "./ui/Badge";
+import { cn } from "../utils/classNames";
+import { ProgressBar } from "./ui/ProgressBar";
+import { normalizeError, recoveryHint } from "../utils/errorHandler";
 
 interface PostResultProps {
   post: GeneratedPost;
@@ -35,31 +35,48 @@ interface PostResultProps {
   onRegenerateText: () => Promise<void>;
   onEditText: (prompt: string) => Promise<void>;
   onFunMode: (styleName?: string) => Promise<void>;
-  onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
+  onGenerateVideo: (
+    style: VideoStyle,
+    options: VideoRequestOptions
+  ) => Promise<string>;
   error?: string | null;
   isDesktopLayout: boolean;
 }
 
-const LoadingOverlay: React.FC<{ message: string; progress?: number }> = React.memo(({ message, progress }) => (
-  <div className="absolute inset-0 bg-surface-900/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-lg z-10 px-4">
-    <Loader2 className="h-12 w-12 text-primary-400 animate-spin mb-4" />
-    <p className="text-surface-50 font-semibold animate-pulse mb-2 text-center">{message}</p>
-    {typeof progress === 'number' && progress > 0 && (
-      <div className="w-full max-w-sm">
-        <ProgressBar value={progress} />
-      </div>
-    )}
-  </div>
-));
+const LoadingOverlay: React.FC<{ message: string; progress?: number }> =
+  React.memo(({ message, progress }) => (
+    <div className="absolute inset-0 bg-surface-900/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-lg z-10 px-4">
+      <Loader2 className="h-12 w-12 text-primary-400 animate-spin mb-4" />
+      <p className="text-surface-50 font-semibold animate-pulse mb-2 text-center">
+        {message}
+      </p>
+      {typeof progress === "number" && progress > 0 && (
+        <div className="w-full max-w-sm">
+          <ProgressBar value={progress} />
+        </div>
+      )}
+    </div>
+  ));
 
-
-export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onRegenerateImage, onEditImage, onRegenerateText, onEditText, onFunMode, onGenerateVideo, error, isDesktopLayout }) => {
+export const PostResult: React.FC<PostResultProps> = ({
+  post,
+  onStartOver,
+  onRegenerateImage,
+  onEditImage,
+  onRegenerateText,
+  onEditText,
+  onFunMode,
+  onGenerateVideo,
+  error,
+  isDesktopLayout,
+}) => {
   const [copied, setCopied] = useState(false);
 
   const [isImageEditing, setIsImageEditing] = useState(false);
-  const [imageEditPrompt, setImageEditPrompt] = useState('');
+  const [imageEditPrompt, setImageEditPrompt] = useState("");
   const [isImageLoading, setIsImageLoading] = useState(false);
-  const [imageLoadingMessage, setImageLoadingMessage] = useState('Updating Image...');
+  const [imageLoadingMessage, setImageLoadingMessage] =
+    useState("Updating Image...");
   const [imageLoadingProgress, setImageLoadingProgress] = useState(0);
 
   const [editedText, setEditedText] = useState(post.text);
@@ -74,20 +91,22 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
   const [isFunModeDirectorOpen, setIsFunModeDirectorOpen] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isVideoLoading, setIsVideoLoading] = useState(false);
-  const [videoLoadingMessage, setVideoLoadingMessage] = useState('');
-  const [videoJobs, setVideoJobs] = useState<Array<{
-    id: string;
-    style: VideoStyle;
-    status: 'queued' | 'processing' | 'completed' | 'failed';
-    duration: number;
-    soundtrack: VideoRequestOptions['soundtrack'];
-    aspectPreference: VideoRequestOptions['aspectPreference'];
-    resolution: VideoRequestOptions['resolution'];
-    pacing: VideoRequestOptions['pacing'];
-    createdAt: string;
-    url?: string;
-    error?: string;
-  }>>([]);
+  const [videoLoadingMessage, setVideoLoadingMessage] = useState("");
+  const [videoJobs, setVideoJobs] = useState<
+    Array<{
+      id: string;
+      style: VideoStyle;
+      status: "queued" | "processing" | "completed" | "failed";
+      duration: number;
+      soundtrack: VideoRequestOptions["soundtrack"];
+      aspectPreference: VideoRequestOptions["aspectPreference"];
+      resolution: VideoRequestOptions["resolution"];
+      pacing: VideoRequestOptions["pacing"];
+      createdAt: string;
+      url?: string;
+      error?: string;
+    }>
+  >([]);
 
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
@@ -103,27 +122,33 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
   // Keyboard shortcuts for undo/redo
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
         e.preventDefault();
         handleUndo();
-      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+      } else if (
+        (e.ctrlKey || e.metaKey) &&
+        (e.key === "y" || (e.key === "z" && e.shiftKey))
+      ) {
         e.preventDefault();
         handleRedo();
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [historyIndex, textHistory]);
 
-  const handleTextChange = useCallback((newText: string) => {
-    setEditedText(newText);
-    // Add to history, removing any future history if we're not at the end
-    const newHistory = textHistory.slice(0, historyIndex + 1);
-    newHistory.push(newText);
-    setTextHistory(newHistory);
-    setHistoryIndex(newHistory.length - 1);
-  }, [historyIndex, textHistory]);
+  const handleTextChange = useCallback(
+    (newText: string) => {
+      setEditedText(newText);
+      // Add to history, removing any future history if we're not at the end
+      const newHistory = textHistory.slice(0, historyIndex + 1);
+      newHistory.push(newText);
+      setTextHistory(newHistory);
+      setHistoryIndex(newHistory.length - 1);
+    },
+    [historyIndex, textHistory]
+  );
 
   const handleUndo = useCallback(() => {
     if (historyIndex > 0) {
@@ -148,7 +173,7 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
     // This runs when the component unmounts or when videoUrl changes.
     const currentVideoUrl = videoUrl;
     return () => {
-      if (currentVideoUrl && currentVideoUrl.startsWith('blob:')) {
+      if (currentVideoUrl && currentVideoUrl.startsWith("blob:")) {
         URL.revokeObjectURL(currentVideoUrl);
       }
     };
@@ -161,14 +186,14 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
 
   const handleSave = async () => {
     triggerHapticFeedback();
-    const link = document.createElement('a');
+    const link = document.createElement("a");
 
     if (videoUrl) {
       link.href = videoUrl;
-      link.download = 'social-media-video.mp4';
+      link.download = "social-media-video.mp4";
     } else {
       link.href = post.image;
-      link.download = 'social-media-post.jpg';
+      link.download = "social-media-post.jpg";
     }
 
     document.body.appendChild(link);
@@ -220,7 +245,7 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
   const handleShare = async () => {
     triggerHapticFeedback();
     const textToCopy = editedText;
-    const textForShareAPI = textToCopy.replace(/(\r\n|\n|\r)/gm, " ").replace(/\s+/g, ' ').trim();
+    const textForShareAPI = textToCopy.trim();
     setIsSharing(true);
 
     let copySuccess = false;
@@ -228,7 +253,9 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
       try {
         await navigator.clipboard.writeText(textToCopy);
         copySuccess = true;
-      } catch (err) { copySuccess = synchronousCopy(textToCopy); }
+      } catch (err) {
+        copySuccess = synchronousCopy(textToCopy);
+      }
     } else {
       copySuccess = synchronousCopy(textToCopy);
     }
@@ -241,7 +268,9 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
     try {
       const mediaUrl = videoUrl || post.image;
       const mediaBlob = await (await fetch(mediaUrl)).blob();
-      const fileName = videoUrl ? "social-media-video.mp4" : "social-media-post.jpg";
+      const fileName = videoUrl
+        ? "social-media-video.mp4"
+        : "social-media-post.jpg";
       const file = new File([mediaBlob], fileName, { type: mediaBlob.type });
 
       const shareData = {
@@ -253,21 +282,32 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
       if (navigator.share && navigator.canShare(shareData)) {
         await navigator.share(shareData);
       } else {
-        alert("Web Share is not supported on your device, but the post text has been copied to your clipboard!");
+        alert(
+          "Web Share is not supported on your device, but the post text has been copied to your clipboard!"
+        );
       }
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
+      if (error instanceof DOMException && error.name === "AbortError") {
         // User cancelled the share dialog, do nothing.
       } else {
         console.error("Sharing failed:", error);
-        alert("Could not open the share dialog, but the post text has been copied to your clipboard!");
+        alert(
+          "Could not open the share dialog, but the post text has been copied to your clipboard!"
+        );
       }
     } finally {
       setIsSharing(false);
     }
   };
 
-  const handleImageAction = async (action: () => Promise<void>, messages: string[] = ["Updating image...", "Polishing details...", "Almost there..."]) => {
+  const handleImageAction = async (
+    action: () => Promise<void>,
+    messages: string[] = [
+      "Updating image...",
+      "Polishing details...",
+      "Almost there...",
+    ]
+  ) => {
     setIsImageLoading(true);
     setImageLoadingMessage(messages[0] || "Updating Image...");
     setImageLoadingProgress(8);
@@ -307,11 +347,19 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
     setIsTextEditing(false); // Close modal after action completes
   };
 
-  const startVideoJob = async (style: VideoStyle, options: VideoRequestOptions, existingJobId?: string) => {
+  const startVideoJob = async (
+    style: VideoStyle,
+    options: VideoRequestOptions,
+    existingJobId?: string
+  ) => {
     setIsVideoLoading(true);
 
     const messages = [
-      "Setting up the virtual studio...", "Directing the AI animator...", "Adding special effects...", "Rendering the final cut...", "This can take a minute or two...",
+      "Setting up the virtual studio...",
+      "Directing the AI animator...",
+      "Adding special effects...",
+      "Rendering the final cut...",
+      "This can take a minute or two...",
     ];
     let messageIndex = 0;
     let allowRotation = true;
@@ -324,41 +372,60 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
 
     const jobId = existingJobId || `video-${Date.now()}`;
     if (!existingJobId) {
-      setVideoJobs(prev => [
+      setVideoJobs((prev) => [
         ...prev,
         {
           id: jobId,
           style,
-          status: 'queued',
+          status: "queued",
           duration: options.durationSeconds,
           soundtrack: options.soundtrack,
           aspectPreference: options.aspectPreference,
           resolution: options.resolution,
           pacing: options.pacing,
           createdAt: new Date().toISOString(),
-        }
+        },
       ]);
     }
 
     // Mark job as processing
-    setVideoJobs(prev => prev.map(job => job.id === jobId ? { ...job, status: 'processing', error: undefined } : job));
+    setVideoJobs((prev) =>
+      prev.map((job) =>
+        job.id === jobId
+          ? { ...job, status: "processing", error: undefined }
+          : job
+      )
+    );
 
     const maxAttempts = 3;
     const runAttempt = async (attempt: number): Promise<void> => {
       try {
         const url = await onGenerateVideo(style, options);
         setVideoUrl((prev) => prev || url); // auto-open the first available video
-        setVideoJobs(prev => prev.map(job => job.id === jobId ? { ...job, status: 'completed', url } : job));
+        setVideoJobs((prev) =>
+          prev.map((job) =>
+            job.id === jobId ? { ...job, status: "completed", url } : job
+          )
+        );
       } catch (error) {
         const normalized = normalizeError(error);
-        const retryDelay = attempt < maxAttempts && normalized.retryable ? attempt * 8000 : 0;
+        const retryDelay =
+          attempt < maxAttempts && normalized.retryable ? attempt * 8000 : 0;
         const attemptMessage = `Attempt ${attempt} failed: ${normalized.message}`;
 
         if (retryDelay > 0) {
           allowRotation = false;
-          setVideoLoadingMessage(`${attemptMessage}. Retrying in ${retryDelay / 1000}s...`);
-          setVideoJobs(prev => prev.map(job => job.id === jobId ? { ...job, status: 'queued', error: attemptMessage } : job));
-          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          setVideoLoadingMessage(
+            `${attemptMessage}. Retrying in ${retryDelay / 1000}s...`
+          );
+          setVideoJobs((prev) =>
+            prev.map((job) =>
+              job.id === jobId
+                ? { ...job, status: "queued", error: attemptMessage }
+                : job
+            )
+          );
+          await new Promise((resolve) => setTimeout(resolve, retryDelay));
           allowRotation = true;
           setVideoLoadingMessage(messages[0]);
           messageIndex = 0;
@@ -368,7 +435,13 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
         const finalMessage = `${attemptMessage}. ${recoveryHint(normalized)}`;
         allowRotation = false;
         setVideoLoadingMessage(finalMessage);
-        setVideoJobs(prev => prev.map(job => job.id === jobId ? { ...job, status: 'failed', error: finalMessage } : job));
+        setVideoJobs((prev) =>
+          prev.map((job) =>
+            job.id === jobId
+              ? { ...job, status: "failed", error: finalMessage }
+              : job
+          )
+        );
         throw normalized;
       }
     };
@@ -383,7 +456,10 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
     }
   };
 
-  const handleGenerateVideo = async (style: VideoStyle, options: VideoRequestOptions) => {
+  const handleGenerateVideo = async (
+    style: VideoStyle,
+    options: VideoRequestOptions
+  ) => {
     setIsVideoDirectorOpen(false);
     await startVideoJob(style, options);
   };
@@ -404,7 +480,6 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
   const handleRemoveVideoJob = (jobId: string) => {
     setVideoJobs((prev) => prev.filter((job) => job.id !== jobId));
   };
-
 
   return (
     <>
@@ -465,22 +540,47 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
             <span>{error}</span>
           </motion.div>
         )}
-        <div className={`grid w-full ${isDesktopLayout ? 'grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-8' : 'grid-cols-1 gap-6'}`}>
-
+        <div
+          className={`grid w-full ${
+            isDesktopLayout
+              ? "grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-8"
+              : "grid-cols-1 gap-6"
+          }`}
+        >
           <div className="flex flex-col items-center bg-white/5 p-4 rounded-2xl shadow-2xl space-y-4">
             <div className="relative w-full">
               {(isImageLoading || isVideoLoading) && (
                 <LoadingOverlay
-                  message={isVideoLoading ? videoLoadingMessage : imageLoadingMessage}
+                  message={
+                    isVideoLoading ? videoLoadingMessage : imageLoadingMessage
+                  }
                   progress={isVideoLoading ? undefined : imageLoadingProgress}
                 />
               )}
 
               {videoUrl ? (
-                <video src={videoUrl} controls autoPlay loop muted className="rounded-xl shadow-2xl w-full object-contain" />
+                <video
+                  src={videoUrl}
+                  controls
+                  autoPlay
+                  loop
+                  muted
+                  className="rounded-xl shadow-2xl w-full object-contain"
+                />
               ) : (
-                <button onClick={() => { triggerHapticFeedback(); setIsPreviewOpen(true); }} className="w-full block rounded-xl overflow-hidden focus:outline-none focus:ring-4 focus:ring-primary-500/50 transition-all hover:ring-2 hover:ring-primary-400/30" aria-label="Enlarge image">
-                  <img src={post.image} alt="Generated social media post" className="rounded-xl shadow-2xl w-full object-contain" />
+                <button
+                  onClick={() => {
+                    triggerHapticFeedback();
+                    setIsPreviewOpen(true);
+                  }}
+                  className="w-full block rounded-xl overflow-hidden focus:outline-none focus:ring-4 focus:ring-primary-500/50 transition-all hover:ring-2 hover:ring-primary-400/30"
+                  aria-label="Enlarge image"
+                >
+                  <img
+                    src={post.image}
+                    alt="Generated social media post"
+                    className="rounded-xl shadow-2xl w-full object-contain"
+                  />
                 </button>
               )}
             </div>
@@ -506,16 +606,26 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                     "hover:bg-white/20 hover:border-white/30",
                     "disabled:opacity-50 disabled:cursor-not-allowed"
                   )}
-                  whileHover={{ scale: imageBusy ? 1 : 1.05, y: imageBusy ? 0 : -2 }}
+                  whileHover={{
+                    scale: imageBusy ? 1 : 1.05,
+                    y: imageBusy ? 0 : -2,
+                  }}
                   whileTap={{ scale: imageBusy ? 1 : 0.95 }}
                 >
                   <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                  {imageBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <RefreshCw className="w-5 h-5" />}
-                  <span>{imageBusy ? 'Working...' : 'Regenerate'}</span>
+                  {imageBusy ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-5 h-5" />
+                  )}
+                  <span>{imageBusy ? "Working..." : "Regenerate"}</span>
                 </motion.button>
 
                 <motion.button
-                  onClick={() => { triggerHapticFeedback(); setIsImageEditing(!isImageEditing); }}
+                  onClick={() => {
+                    triggerHapticFeedback();
+                    setIsImageEditing(!isImageEditing);
+                  }}
                   disabled={imageBusy || !!videoUrl}
                   className={cn(
                     "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden",
@@ -530,12 +640,25 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                   whileTap={{ scale: 0.95 }}
                 >
                   <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                  {imageBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Edit3 className="w-5 h-5" />}
-                  <span>{imageBusy ? 'Working...' : (isImageEditing ? 'Cancel' : 'AI Image Edit')}</span>
+                  {imageBusy ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Edit3 className="w-5 h-5" />
+                  )}
+                  <span>
+                    {imageBusy
+                      ? "Working..."
+                      : isImageEditing
+                      ? "Cancel"
+                      : "AI Image Edit"}
+                  </span>
                 </motion.button>
 
                 <motion.button
-                  onClick={() => { triggerHapticFeedback(); setIsFunModeDirectorOpen(true); }}
+                  onClick={() => {
+                    triggerHapticFeedback();
+                    setIsFunModeDirectorOpen(true);
+                  }}
                   disabled={imageBusy || !!videoUrl}
                   className={cn(
                     "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden",
@@ -550,8 +673,12 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                   whileTap={{ scale: 0.95 }}
                 >
                   <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                  {imageBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-                  <span>{imageBusy ? 'Working...' : 'Fun Mode'}</span>
+                  {imageBusy ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-5 h-5" />
+                  )}
+                  <span>{imageBusy ? "Working..." : "Fun Mode"}</span>
                 </motion.button>
 
                 <motion.button
@@ -565,16 +692,30 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                     "shadow-lg hover:shadow-glow-success",
                     imageBusy && "opacity-70 cursor-not-allowed"
                   )}
-                  whileHover={{ scale: imageBusy ? 1 : 1.05, y: imageBusy ? 0 : -2 }}
+                  whileHover={{
+                    scale: imageBusy ? 1 : 1.05,
+                    y: imageBusy ? 0 : -2,
+                  }}
                   whileTap={{ scale: imageBusy ? 1 : 0.95 }}
                 >
                   <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                  {imageBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
-                  <span>{imageBusy ? 'Working...' : `Save ${videoUrl ? 'Video' : 'Image'}`}</span>
+                  {imageBusy ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Download className="w-5 h-5" />
+                  )}
+                  <span>
+                    {imageBusy
+                      ? "Working..."
+                      : `Save ${videoUrl ? "Video" : "Image"}`}
+                  </span>
                 </motion.button>
 
                 <motion.button
-                  onClick={() => { triggerHapticFeedback(); setIsVideoDirectorOpen(true); }}
+                  onClick={() => {
+                    triggerHapticFeedback();
+                    setIsVideoDirectorOpen(true);
+                  }}
                   disabled={imageBusy || isVideoLoading}
                   className={cn(
                     "flex flex-col items-center justify-center gap-2 relative overflow-hidden",
@@ -584,16 +725,30 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                     "shadow-lg hover:shadow-glow-primary",
                     "disabled:opacity-50 disabled:cursor-not-allowed"
                   )}
-                  whileHover={{ scale: isVideoLoading ? 1 : 1.05, y: isVideoLoading ? 0 : -2 }}
+                  whileHover={{
+                    scale: isVideoLoading ? 1 : 1.05,
+                    y: isVideoLoading ? 0 : -2,
+                  }}
                   whileTap={{ scale: isVideoLoading ? 1 : 0.95 }}
                 >
                   <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                  <Film className={cn("w-5 h-5", isVideoLoading && "animate-spin")} />
-                  <span>{isVideoLoading ? 'Rendering…' : videoUrl ? 'New Video' : 'Animate with AI'}</span>
+                  <Film
+                    className={cn("w-5 h-5", isVideoLoading && "animate-spin")}
+                  />
+                  <span>
+                    {isVideoLoading
+                      ? "Rendering…"
+                      : videoUrl
+                      ? "New Video"
+                      : "Animate with AI"}
+                  </span>
                 </motion.button>
 
                 <motion.button
-                  onClick={() => { triggerHapticFeedback(); onStartOver(); }}
+                  onClick={() => {
+                    triggerHapticFeedback();
+                    onStartOver();
+                  }}
                   className={cn(
                     "flex flex-col items-center justify-center gap-2 relative overflow-hidden",
                     "bg-white/10 border border-white/20 text-surface-50 font-bold",
@@ -614,7 +769,7 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                   <motion.div
                     className="space-y-2 p-3 bg-surface-800/50 rounded-xl border border-white/10"
                     initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
+                    animate={{ opacity: 1, height: "auto" }}
                     exit={{ opacity: 0, height: 0 }}
                     transition={{ duration: 0.3 }}
                   >
@@ -660,11 +815,23 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                   transition={{ duration: 0.3 }}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-surface-50">Video queue</span>
-                    <span className="text-[10px] text-primary-200/70">{videoJobs.filter(job => job.status === 'processing').length} active</span>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-surface-50">
+                      Video queue
+                    </span>
+                    <span className="text-[10px] text-primary-200/70">
+                      {
+                        videoJobs.filter((job) => job.status === "processing")
+                          .length
+                      }{" "}
+                      active
+                    </span>
                   </div>
-                  <ul className="space-y-2" role="list" aria-label="Video queue list">
-                    {videoJobs.map(job => (
+                  <ul
+                    className="space-y-2"
+                    role="list"
+                    aria-label="Video queue list"
+                  >
+                    {videoJobs.map((job) => (
                       <motion.li
                         key={job.id}
                         className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-surface-900/40 px-3 py-2 text-xs"
@@ -673,18 +840,34 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                         transition={{ duration: 0.2 }}
                       >
                         <div className="flex flex-col">
-                          <span className="font-semibold text-surface-50">{job.style}</span>
+                          <span className="font-semibold text-surface-50">
+                            {job.style}
+                          </span>
                           <span className="text-primary-200/70">
-                            {job.duration}s ·
-                            {' '}{job.soundtrack === 'none' ? 'No soundtrack' : job.soundtrack} ·
-                            {' '}{job.aspectPreference === 'auto' ? 'auto' : job.aspectPreference} · {job.resolution} · {job.pacing}
+                            {job.duration}s ·{" "}
+                            {job.soundtrack === "none"
+                              ? "No soundtrack"
+                              : job.soundtrack}{" "}
+                            ·{" "}
+                            {job.aspectPreference === "auto"
+                              ? "auto"
+                              : job.aspectPreference}{" "}
+                            · {job.resolution} · {job.pacing}
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
-                          {job.status === 'completed' && <Badge variant="success">Ready</Badge>}
-                          {job.status === 'processing' && <Badge variant="info">Rendering</Badge>}
-                          {job.status === 'queued' && <Badge variant="neutral">Queued</Badge>}
-                          {job.status === 'failed' && <Badge variant="warning">Failed</Badge>}
+                          {job.status === "completed" && (
+                            <Badge variant="success">Ready</Badge>
+                          )}
+                          {job.status === "processing" && (
+                            <Badge variant="info">Rendering</Badge>
+                          )}
+                          {job.status === "queued" && (
+                            <Badge variant="neutral">Queued</Badge>
+                          )}
+                          {job.status === "failed" && (
+                            <Badge variant="warning">Failed</Badge>
+                          )}
                           {job.url && (
                             <button
                               onClick={() => setVideoUrl(job.url || null)}
@@ -693,7 +876,7 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                               Preview
                             </button>
                           )}
-                          {job.status === 'failed' && (
+                          {job.status === "failed" && (
                             <button
                               onClick={() => handleRetryVideo(job.id)}
                               className="text-[10px] font-semibold uppercase tracking-wide text-amber-200 hover:text-amber-50 transition-colors"
@@ -710,13 +893,19 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                         </div>
                         <div className="flex flex-col gap-1 text-[10px] text-warning-200">
                           {job.error && <span>{job.error}</span>}
-                          <span className="text-indigo-100/70">Started {new Date(job.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          <span className="text-indigo-100/70">
+                            Started{" "}
+                            {new Date(job.createdAt).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </span>
                         </div>
                       </motion.li>
                     ))}
                   </ul>
-            </motion.div>
-          )}
+                </motion.div>
+              )}
             </div>
           </div>
 
@@ -726,7 +915,9 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.2, duration: 0.4 }}
           >
-            <h3 className="text-xl font-semibold mb-3 text-surface-50">Generated Social Post</h3>
+            <h3 className="text-xl font-semibold mb-3 text-surface-50">
+              Generated Social Post
+            </h3>
             <div className="relative mb-4">
               {isTextLoading && <LoadingOverlay message="Updating Text..." />}
               {editedText !== post.text && (
@@ -778,15 +969,22 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                     "hover:bg-white/20 hover:border-white/30",
                     "disabled:opacity-30 disabled:cursor-not-allowed"
                   )}
-                  whileHover={{ scale: historyIndex < textHistory.length - 1 ? 1.05 : 1 }}
-                  whileTap={{ scale: historyIndex < textHistory.length - 1 ? 0.95 : 1 }}
+                  whileHover={{
+                    scale: historyIndex < textHistory.length - 1 ? 1.05 : 1,
+                  }}
+                  whileTap={{
+                    scale: historyIndex < textHistory.length - 1 ? 0.95 : 1,
+                  }}
                   title="Redo (Ctrl+Y)"
                 >
                   <Redo2 className="w-3 h-3" />
                 </motion.button>
 
                 <motion.button
-                  onClick={() => { triggerHapticFeedback(); handleTextAction(onRegenerateText); }}
+                  onClick={() => {
+                    triggerHapticFeedback();
+                    handleTextAction(onRegenerateText);
+                  }}
                   disabled={textBusy}
                   className={cn(
                     "flex items-center justify-center gap-1",
@@ -799,13 +997,20 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                   whileHover={{ scale: textBusy ? 1 : 1.02 }}
                   whileTap={{ scale: textBusy ? 1 : 0.98 }}
                 >
-                  {textBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                  <span>{textBusy ? 'Updating…' : 'Regenerate'}</span>
+                  {textBusy ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-3 h-3" />
+                  )}
+                  <span>{textBusy ? "Updating…" : "Regenerate"}</span>
                 </motion.button>
               </div>
 
               <motion.button
-                onClick={() => { triggerHapticFeedback(); setIsTextEditing(true); }}
+                onClick={() => {
+                  triggerHapticFeedback();
+                  setIsTextEditing(true);
+                }}
                 disabled={textBusy}
                 className={cn(
                   "w-full flex items-center justify-center gap-2 relative overflow-hidden",
@@ -818,8 +1023,12 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                 whileTap={{ scale: textBusy ? 1 : 0.98 }}
               >
                 <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                {textBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Edit3 className="w-4 h-4" />}
-                <span>{textBusy ? 'Updating…' : 'Edit with AI'}</span>
+                {textBusy ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Edit3 className="w-4 h-4" />
+                )}
+                <span>{textBusy ? "Updating…" : "Edit with AI"}</span>
               </motion.button>
             </div>
             <div className="border-t border-white/10 my-4"></div>
@@ -838,8 +1047,12 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                 whileTap={{ scale: isSharing ? 1 : 0.98 }}
               >
                 <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                {isSharing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Share2 className="w-5 h-5" />}
-                <span>{isSharing ? 'Opening share…' : 'Share Post'}</span>
+                {isSharing ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Share2 className="w-5 h-5" />
+                )}
+                <span>{isSharing ? "Opening share…" : "Share Post"}</span>
               </motion.button>
 
               <motion.button
@@ -853,8 +1066,12 @@ export const PostResult: React.FC<PostResultProps> = ({ post, onStartOver, onReg
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
               >
-                {copied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
-                <span>{copied ? 'Copied!' : 'Copy Text Only'}</span>
+                {copied ? (
+                  <Check className="w-5 h-5" />
+                ) : (
+                  <Copy className="w-5 h-5" />
+                )}
+                <span>{copied ? "Copied!" : "Copy Text Only"}</span>
               </motion.button>
             </div>
           </motion.div>

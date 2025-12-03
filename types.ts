@@ -85,3 +85,11 @@ export interface VideoRequestOptions {
   resolution: "720p" | "1080p";
   pacing: "cinematic" | "snappy";
 }
+
+export interface GenerationParams {
+  style: StyleOption;
+  tone: ToneOption;
+  customerName: string;
+  customText?: string;
+  creativeBrief?: string;
+}

@@ -13,6 +13,13 @@ interface PersistedState {
   compactMode?: boolean;
   preferredStyle?: string;
   preferredTone?: string;
+  generationParams?: {
+    style: string;
+    tone: string;
+    customerName: string;
+    customText?: string;
+    creativeBrief?: string;
+  };
 }
 
 export const loadSession = (): PersistedState | null => {

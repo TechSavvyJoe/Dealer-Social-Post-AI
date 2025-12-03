@@ -123,6 +123,39 @@ class MockGeminiClient {
         };
       },
       generateVideos: async (params: { model: string; [key: string]: any }) => {
+        // Check if model requires Vertex AI (e.g. Veo)
+        if (needsVertexAI(params.model)) {
+          const projectId = "gen-lang-client-0994987899";
+          const location = "us-central1";
+          const vertexPath = `vertex/v1beta1/projects/${projectId}/locations/${location}/publishers/google/models/${params.model}:predict`;
+
+          // Transform request format for Vertex AI
+          // Veo expects { instances: [...], parameters: ... } structure for predict endpoint
+          const vertexBody = {
+            instances: [
+              {
+                prompt: params.prompt, // Veo might use 'prompt' or other fields depending on exact model version
+              },
+            ],
+            parameters: {
+              sampleCount: 1,
+              videoLengthSeconds: params.video_length_seconds || 6,
+              aspectRatio: params.aspect_ratio || "16:9",
+              // Add other parameters as needed
+            },
+          };
+
+          // However, the current implementation in geminiService sends a specific body structure
+          // that matches the Gemini API. Let's try to adapt it or use the correct Vertex endpoint.
+          // If the model is veo-3.1-generate-preview, it might be available via the standard generateVideos method
+          // but strictly on Vertex AI.
+
+          // Let's try the standard generateVideos path but routed through Vertex
+          const vertexGeneratePath = `vertex/v1beta1/projects/${projectId}/locations/${location}/publishers/google/models/${params.model}:generateVideos`;
+
+          return await fetchFromProxy("POST", vertexGeneratePath, params);
+        }
+
         // Try known API permutations: prefer v1beta, fall back to v1alpha.
         // We intentionally skip the singular generateVideo variant to avoid
         // spamming the proxy with duplicate calls when models are unavailable.

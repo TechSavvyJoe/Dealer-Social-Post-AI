@@ -5,6 +5,7 @@ import {
   GeneratedPost,
   StyleOption,
   ToneOption,
+  GenerationParams,
 } from "../types";
 import { loadSession, saveSession, clearSession } from "../utils/persistence";
 import { findDealer, findDealerById } from "../services/database";
@@ -16,6 +17,7 @@ interface AppState {
   currentDealer: Dealer | null;
   selectedImage: string | null;
   generatedPost: GeneratedPost | null;
+  generationParams: GenerationParams | null;
   error: string | null;
 
   // Preferences
@@ -28,6 +30,7 @@ interface AppState {
   setCurrentDealer: (dealer: Dealer | null) => void;
   setSelectedImage: (image: string | null) => void;
   setGeneratedPost: (post: GeneratedPost | null) => void;
+  setGenerationParams: (params: GenerationParams | null) => void;
   setError: (error: string | null) => void;
   setPreferences: (
     prefs: Partial<{
@@ -49,6 +52,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   currentDealer: null,
   selectedImage: null,
   generatedPost: null,
+  generationParams: null,
   error: null,
   preferredStyle: StyleOption.Modern,
   preferredTone: ToneOption.Excited,
@@ -63,6 +67,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         dealerId: currentDealer.id,
         generatedPost: generatedPost || undefined,
         selectedImage: selectedImage || undefined,
+        generationParams: get().generationParams || undefined,
       });
     }
   },
@@ -78,6 +83,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         dealerId: currentDealer.id,
         step,
         generatedPost: generatedPost || undefined,
+        generationParams: get().generationParams || undefined,
       });
     }
   },
@@ -91,6 +97,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         dealerId: currentDealer.id,
         step,
         selectedImage: selectedImage || undefined,
+        generationParams: get().generationParams || undefined,
+      });
+    }
+  },
+
+  setGenerationParams: (params) => {
+    set({ generationParams: params });
+    const { currentDealer, step, selectedImage, generatedPost } = get();
+    if (currentDealer) {
+      saveSession({
+        generationParams: params || undefined,
+        dealerId: currentDealer.id,
+        step,
+        selectedImage: selectedImage || undefined,
+        generatedPost: generatedPost || undefined,
       });
     }
   },
@@ -181,6 +202,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             currentDealer: dealer,
             selectedImage: session.selectedImage || null,
             generatedPost: session.generatedPost || null,
+            generationParams: (session.generationParams ||
+              null) as GenerationParams | null, // Load generationParams
             step: (typeof session.step === "number"
               ? session.step
               : session.generatedPost

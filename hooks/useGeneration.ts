@@ -17,21 +17,17 @@ export const useGeneration = () => {
     currentDealer,
     selectedImage,
     generatedPost,
+    generationParams,
     preferredTone,
     setGeneratedPost,
+    setGenerationParams,
     setError,
     setStep,
   } = useAppStore();
 
   const { runGeminiTask, loadGeminiService } = useGemini();
 
-  const [lastGenerationParams, setLastGenerationParams] = useState<{
-    style: StyleOption;
-    tone: ToneOption;
-    customerName: string;
-    customText?: string;
-    creativeBrief?: string;
-  } | null>(null);
+  // Removed local lastGenerationParams state in favor of store persistence
 
   const [generationProgress, setGenerationProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState("");
@@ -50,7 +46,7 @@ export const useGeneration = () => {
       setError(null);
       setGenerationProgress(0);
       setProgressMessage("Analyzing your image...");
-      setLastGenerationParams({
+      setGenerationParams({
         style,
         tone,
         customerName,
@@ -169,20 +165,20 @@ export const useGeneration = () => {
   );
 
   const handleRegenerateImage = useCallback(async () => {
-    if (!selectedImage || !lastGenerationParams || !currentDealer) return;
+    if (!selectedImage || !generationParams || !currentDealer) return;
     setError(null);
     try {
       const { generateSocialPost } = await loadGeminiService();
       const result = await runGeminiTask("ai.regenerate.image", () =>
         generateSocialPost(
           selectedImage,
-          lastGenerationParams.style,
-          lastGenerationParams.tone,
+          generationParams.style,
+          generationParams.tone,
           currentDealer.name,
-          lastGenerationParams.customerName,
+          generationParams.customerName,
           currentDealer.logo,
-          lastGenerationParams.customText || generatedPost?.text,
-          lastGenerationParams.creativeBrief
+          generationParams.customText || generatedPost?.text,
+          generationParams.creativeBrief
         )
       );
       setGeneratedPost(result);
@@ -196,7 +192,7 @@ export const useGeneration = () => {
     }
   }, [
     selectedImage,
-    lastGenerationParams,
+    generationParams,
     currentDealer,
     generatedPost,
     runGeminiTask,
@@ -280,18 +276,18 @@ export const useGeneration = () => {
   );
 
   const handleRegenerateText = useCallback(async () => {
-    if (!selectedImage || !lastGenerationParams || !currentDealer) return;
+    if (!selectedImage || !generationParams || !currentDealer) return;
     setError(null);
     try {
       const { generateSocialPostText } = await loadGeminiService();
       const newText = await runGeminiTask("ai.regenerate.text", () =>
         generateSocialPostText(
           selectedImage,
-          lastGenerationParams.tone,
+          generationParams.tone,
           currentDealer.name,
-          lastGenerationParams.customerName,
+          generationParams.customerName,
           true,
-          lastGenerationParams.creativeBrief
+          generationParams.creativeBrief
         )
       );
       if (generatedPost) setGeneratedPost({ ...generatedPost, text: newText });
@@ -305,7 +301,7 @@ export const useGeneration = () => {
     }
   }, [
     selectedImage,
-    lastGenerationParams,
+    generationParams,
     currentDealer,
     generatedPost,
     runGeminiTask,
@@ -321,7 +317,7 @@ export const useGeneration = () => {
       setError(null);
       try {
         const { editSocialPostText } = await loadGeminiService();
-        const tone = lastGenerationParams?.tone || preferredTone;
+        const tone = generationParams?.tone || preferredTone;
         const newText = await runGeminiTask("ai.edit.text", () =>
           editSocialPostText(generatedPost.text, editPrompt, tone)
         );
@@ -337,7 +333,7 @@ export const useGeneration = () => {
     },
     [
       generatedPost,
-      lastGenerationParams,
+      generationParams,
       preferredTone,
       runGeminiTask,
       setGeneratedPost,
