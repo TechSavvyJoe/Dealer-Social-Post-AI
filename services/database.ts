@@ -3,7 +3,9 @@ import { Dealer } from "../types";
 
 // Initialize PocketBase
 // In production (served by PB), this is relative. In dev, it might need to be localhost:8090
-const PB_URL = import.meta.env.VITE_POCKETBASE_URL || "/";
+const PB_URL = import.meta.env.PROD
+  ? "/"
+  : import.meta.env.VITE_POCKETBASE_URL || "/";
 export const pb = new PocketBase(PB_URL);
 
 export const COLLECTION_NAME = "dealers";
