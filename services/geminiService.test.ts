@@ -84,7 +84,7 @@ describe("GeminiService Model Verification", () => {
     }
   });
 
-  it("should use gemini-3-pro-image for image generation", async () => {
+  it("should use gemini-2.0-flash-exp for image generation", async () => {
     await generateSocialPost(
       "data:image/jpeg;base64,fake",
       StyleOption.Modern,
@@ -94,40 +94,43 @@ describe("GeminiService Model Verification", () => {
 
     // Find the image generation call
     const imageCall = mockGenerateContent.mock.calls.find(
-      (call) => call[0].model === "gemini-3-pro-image-preview"
+      (call) => call[0].model === "gemini-2.0-flash-exp"
     );
 
     expect(imageCall).toBeDefined();
     if (imageCall) {
-      expect(imageCall[0].model).toBe("gemini-3-pro-image-preview");
+      expect(imageCall[0].model).toBe("gemini-2.0-flash-exp");
     }
   });
 
   it("should use veo-3.1-generate-preview for video generation via Gemini API", async () => {
     // Mock fetch for the Gemini API video generation call - Veo 3.1 returns an operation
-    global.fetch = vi.fn()
+    global.fetch = vi
+      .fn()
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve({
-          name: "operations/test-operation-123",
-          done: false
-        }),
+        json: () =>
+          Promise.resolve({
+            name: "operations/test-operation-123",
+            done: false,
+          }),
       })
       // Second call is the polling
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve({
-          done: true,
-          response: {
-            generatedVideos: [
-              {
-                video: {
-                  uri: "http://fake-video-url.com/video.mp4"
-                }
-              }
-            ]
-          }
-        }),
+        json: () =>
+          Promise.resolve({
+            done: true,
+            response: {
+              generatedVideos: [
+                {
+                  video: {
+                    uri: "http://fake-video-url.com/video.mp4",
+                  },
+                },
+              ],
+            },
+          }),
       });
     global.URL.createObjectURL = vi.fn().mockReturnValue("blob:fake-video-url");
 

@@ -19,7 +19,7 @@ export async function fetchFromProxy(
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 180000); // 180 second timeout (3 minutes)
+  const timeoutId = setTimeout(() => controller.abort(), 300000); // 300 second timeout (5 minutes)
 
   try {
     console.log(`[GeminiProxy] Requesting ${method} ${path}`);

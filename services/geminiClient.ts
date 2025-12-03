@@ -8,14 +8,14 @@ import { fetchFromProxy } from "./geminiProxy";
 // Note: Only Imagen and Veo models truly require Vertex AI
 // Gemini models work with API key auth
 const VERTEX_ONLY_MODELS = [
-  'imagen-3',
-  'imagen-3.0-generate-002',
-  'veo-3.1-generate-preview',
+  "imagen-3",
+  "imagen-3.0-generate-002",
+  "veo-3.1-generate-preview",
 ];
 
 // Helper to determine if model needs Vertex AI
 const needsVertexAI = (model: string): boolean => {
-  return VERTEX_ONLY_MODELS.some(m => model.includes(m));
+  return VERTEX_ONLY_MODELS.some((m) => model.includes(m));
 };
 
 class MockVideoOperation {
@@ -42,23 +42,32 @@ class MockGeminiClient {
         // Check if model requires Vertex AI
         if (needsVertexAI(params.model)) {
           // Route through Vertex AI
-          const projectId = 'gen-lang-client-0994987899'; // From your service account
-          const location = 'us-central1';
+          const projectId = "gen-lang-client-0994987899"; // From your service account
+          const location = "us-central1";
           const vertexPath = `vertex/v1beta1/projects/${projectId}/locations/${location}/publishers/google/models/${params.model}:generateContent`;
-          
+
           // Transform request format for Vertex AI
           const vertexBody = {
-            contents: params.contents ? (Array.isArray(params.contents) ? params.contents : [params.contents]) : [],
+            contents: params.contents
+              ? Array.isArray(params.contents)
+                ? params.contents
+                : [params.contents]
+              : [],
             generationConfig: params.generationConfig,
           };
-          
-          const rawResponse = await fetchFromProxy('POST', vertexPath, vertexBody);
+
+          const rawResponse = await fetchFromProxy(
+            "POST",
+            vertexPath,
+            vertexBody
+          );
           return {
             ...rawResponse,
-            text: () => rawResponse.candidates?.[0]?.content?.parts?.[0]?.text || '',
+            text: () =>
+              rawResponse.candidates?.[0]?.content?.parts?.[0]?.text || "",
           };
         }
-        
+
         // Standard Gemini API path
         // All Gemini models should use v1beta endpoint per official docs
         // https://ai.google.dev/gemini-api/docs/image-generation
@@ -84,27 +93,31 @@ class MockGeminiClient {
           outputMimeType?: string;
         };
       }) => {
-        const projectId = 'gen-lang-client-0994987899';
-        const location = 'us-central1';
-        const model = params.model || 'imagen-3.0-generate-002';
+        const projectId = "gen-lang-client-0994987899";
+        const location = "us-central1";
+        const model = params.model || "imagen-3.0-generate-002";
         const vertexPath = `vertex/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:predict`;
-        
+
         const vertexBody = {
           instances: [{ prompt: params.prompt }],
           parameters: {
             sampleCount: params.config?.numberOfImages || 1,
-            aspectRatio: params.config?.aspectRatio || '1:1',
-            outputMimeType: params.config?.outputMimeType || 'image/png',
+            aspectRatio: params.config?.aspectRatio || "1:1",
+            outputMimeType: params.config?.outputMimeType || "image/png",
           },
         };
-        
-        const rawResponse = await fetchFromProxy('POST', vertexPath, vertexBody);
-        
+
+        const rawResponse = await fetchFromProxy(
+          "POST",
+          vertexPath,
+          vertexBody
+        );
+
         // Transform response to match expected format
         const predictions = rawResponse.predictions || [];
         return {
           images: predictions.map((pred: any) => ({
-            mimeType: pred.mimeType || 'image/png',
+            mimeType: pred.mimeType || "image/png",
             data: pred.bytesBase64Encoded,
           })),
         };
@@ -123,7 +136,7 @@ class MockGeminiClient {
           try {
             return await fetchFromProxy(
               "POST",
-              `${candidate.version}/models/${params.model}:${candidate.method}`,
+              `${candidate.version}/models/${params.model}%3A${candidate.method}`,
               params
             );
           } catch (error) {

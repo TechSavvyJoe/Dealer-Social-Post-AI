@@ -69,7 +69,7 @@ const proxyHandler = (c) => {
             const clientEmail = $os.getenv("client_email");
             const privateKeyId = $os.getenv("private_key_id");
             const projectId = $os.getenv("project_id");
-            
+
             if (privateKey && clientEmail && privateKeyId) {
               serviceAccount = {
                 type: $os.getenv("type") || "service_account",
@@ -78,13 +78,22 @@ const proxyHandler = (c) => {
                 private_key: privateKey,
                 client_email: clientEmail,
                 client_id: $os.getenv("client_id") || "",
-                auth_uri: $os.getenv("auth_uri") || "https://accounts.google.com/o/oauth2/auth",
-                token_uri: $os.getenv("token_uri") || "https://oauth2.googleapis.com/token",
-                auth_provider_x509_cert_url: $os.getenv("auth_provider_x509_cert_url") || "https://www.googleapis.com/oauth2/v1/certs",
+                auth_uri:
+                  $os.getenv("auth_uri") ||
+                  "https://accounts.google.com/o/oauth2/auth",
+                token_uri:
+                  $os.getenv("token_uri") ||
+                  "https://oauth2.googleapis.com/token",
+                auth_provider_x509_cert_url:
+                  $os.getenv("auth_provider_x509_cert_url") ||
+                  "https://www.googleapis.com/oauth2/v1/certs",
                 client_x509_cert_url: $os.getenv("client_x509_cert_url") || "",
-                universe_domain: $os.getenv("universe_domain") || "googleapis.com"
+                universe_domain:
+                  $os.getenv("universe_domain") || "googleapis.com",
               };
-              console.log("[Vertex] Constructed service account from individual env vars");
+              console.log(
+                "[Vertex] Constructed service account from individual env vars"
+              );
             } else {
               // Fall back to file
               const keyPath = `${__hooks}/vertex_key.json`;
@@ -166,7 +175,11 @@ const proxyHandler = (c) => {
 
           // Helper to safely remove files (ignore errors if file doesn't exist)
           const safeRemove = (path) => {
-            try { $os.remove(path); } catch (e) { /* ignore */ }
+            try {
+              $os.remove(path);
+            } catch (e) {
+              /* ignore */
+            }
           };
 
           try {
@@ -402,6 +415,34 @@ const proxyHandler = (c) => {
 // Register routes separately
 routerAdd("GET", "/api/proxy/:path(*)", proxyHandler);
 routerAdd("POST", "/api/proxy/:path(*)", proxyHandler);
+
+routerAdd("GET", "/api/proxy-image", (c) => {
+  const url = c.queryParam("url");
+  if (!url) {
+    return c.json(400, { error: "Missing url parameter" });
+  }
+
+  try {
+    const res = $http.send({
+      url: url,
+      method: "GET",
+      timeout: 30, // 30 seconds timeout for image fetch
+    });
+
+    if (res.statusCode >= 400) {
+      return c.json(res.statusCode, { error: "Failed to fetch image" });
+    }
+
+    const contentType =
+      res.headers["Content-Type"] || "application/octet-stream";
+
+    // Return the raw image data
+    // Note: res.raw is the byte slice of the body
+    return c.blob(res.statusCode, contentType, res.raw);
+  } catch (err) {
+    return c.json(500, { error: "Proxy failed: " + err.toString() });
+  }
+});
 
 routerAdd("POST", "/api/telemetry", (c) => {
   try {
