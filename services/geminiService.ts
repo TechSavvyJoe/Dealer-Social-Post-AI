@@ -384,14 +384,18 @@ export const generatePostVideo = async (
   // Determine if audio should be enabled (any soundtrack other than "none")
   const includeAudio = options.soundtrack !== "none";
 
-  // Veo 3.1 uses the generateVideos endpoint with a different format
+  // Veo 3.1 uses the predictLongRunning endpoint with instances/parameters format
   const body = {
-    model: `models/${veoModel}`,
-    image: {
-      imageBytes: base64Data,
-      mimeType: mimeType,
-    },
-    generationConfig: {
+    instances: [
+      {
+        prompt: prompt,
+        image: {
+          bytesBase64Encoded: base64Data,
+          mimeType: mimeType,
+        },
+      },
+    ],
+    parameters: {
       aspectRatio: aspectRatio,
       numberOfVideos: 1,
       durationSeconds: durationSeconds,
@@ -399,7 +403,6 @@ export const generatePostVideo = async (
       // Enable audio generation for Veo 3.1 when soundtrack is not "none"
       includeAudio: includeAudio,
     },
-    prompt: prompt,
   };
 
   let lastError: any = null;
@@ -413,8 +416,8 @@ export const generatePostVideo = async (
         `[VideoGen] Config: ${durationSeconds}s, ${aspectRatio}, audio: ${includeAudio}, soundtrack: ${options.soundtrack}`
       );
 
-      // Use the generateVideos endpoint for Veo 3.x
-      const apiPath = `v1beta/models/${veoModel}:generateVideos`;
+      // Use the predictLongRunning endpoint for Veo 3.x
+      const apiPath = `v1beta/models/${veoModel}:predictLongRunning`;
       const proxyToken = import.meta.env.VITE_PROXY_ACCESS_TOKEN;
 
       const response = await fetch(`/api/proxy/${apiPath}`, {
@@ -548,15 +551,25 @@ const pollGeminiVideoOperation = async (
   const startTime = Date.now();
   const pollInterval = 5000;
 
-  // Clean up operation name
+  // Clean up operation name - remove leading slashes
   let cleanOpName = operationName.replace(/^\/+/, "");
 
   while (Date.now() - startTime < timeoutMs) {
     try {
-      // Poll using the operations endpoint
-      const pollPath = cleanOpName.startsWith("operations/")
-        ? `v1beta/${cleanOpName}`
-        : `v1beta/operations/${cleanOpName}`;
+      // The operation name format is "models/{model}/operations/{opId}"
+      // We need to poll at v1beta/{operationName}
+      let pollPath: string;
+      
+      if (cleanOpName.startsWith("models/")) {
+        // New format: models/veo-3.1-generate-preview/operations/xxx
+        pollPath = `v1beta/${cleanOpName}`;
+      } else if (cleanOpName.startsWith("operations/")) {
+        // Old format: operations/xxx
+        pollPath = `v1beta/${cleanOpName}`;
+      } else {
+        // Bare operation ID
+        pollPath = `v1beta/operations/${cleanOpName}`;
+      }
 
       console.log(`[VideoGen] Polling operation: ${pollPath}`);
       const proxyToken = import.meta.env.VITE_PROXY_ACCESS_TOKEN;
@@ -579,7 +592,7 @@ const pollGeminiVideoOperation = async (
       const operation = await response.json();
       console.log(
         `[VideoGen] Operation status:`,
-        JSON.stringify(operation).substring(0, 300)
+        JSON.stringify(operation).substring(0, 500)
       );
 
       if (operation.done === true) {
@@ -594,6 +607,13 @@ const pollGeminiVideoOperation = async (
         if (operation.response) {
           // Try to extract video from the response
           const resp = operation.response;
+          
+          // Check generateVideoResponse format (from predictLongRunning)
+          if (resp.generateVideoResponse?.generatedSamples?.[0]?.video?.uri) {
+            const videoUri = resp.generateVideoResponse.generatedSamples[0].video.uri;
+            console.log(`[VideoGen] Got video URI from generateVideoResponse: ${videoUri}`);
+            return videoUri;
+          }
 
           // Check candidates
           if (resp.candidates?.[0]?.content?.parts) {

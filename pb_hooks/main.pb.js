@@ -26,10 +26,12 @@ const proxyHandler = (c) => {
       /^v1beta\/models\/[^/]+:generateContent$/,
       /^v1beta\/models\/[^/]+:generateImages$/,
       /^v1beta\/models\/[^/]+:generateVideos$/,
+      /^v1beta\/models\/[^/]+:predictLongRunning$/,
       /^v1beta\/operations\/.+$/,
+      /^v1beta\/models\/[^/]+\/operations\/.+$/,  // New format for operation polling
     ];
     const vertexPatterns = [
-      /^vertex\/v1beta1\/projects\/[^/]+\/locations\/[^/]+\/publishers\/google\/models\/[^/]+:(generateContent|predict|generateVideos|generateImages)$/,
+      /^vertex\/v1beta1\/projects\/[^/]+\/locations\/[^/]+\/publishers\/google\/models\/[^/]+:(generateContent|predict|generateVideos|generateImages|predictLongRunning)$/,
       /^vertex\/v1beta1\/operations\/.+$/,
       /^vertex\/v1\/projects\/[^/]+\/locations\/[^/]+\/publishers\/google\/models\/[^/]+:predict$/,
     ];
