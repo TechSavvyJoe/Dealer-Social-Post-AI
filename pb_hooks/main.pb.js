@@ -50,13 +50,21 @@ const proxyHandler = (c) => {
 
   try {
     const requestInfo = $apis.requestInfo(c);
+    const headers = requestInfo.headers || {};
+    
+    // Debug: log all headers
+    console.log("[Proxy] All headers:", JSON.stringify(headers));
 
     // Require shared token for all proxy calls to avoid unauthenticated use
+    // Try multiple header name formats
     const incomingToken = (
-      (requestInfo.headers && requestInfo.headers["x-proxy-token"]) ||
-      (requestInfo.headers && requestInfo.headers["X-Proxy-Token"]) ||
+      headers["x-proxy-token"] ||
+      headers["X-Proxy-Token"] ||
+      headers["X-PROXY-TOKEN"] ||
+      c.request().header.get("X-Proxy-Token") ||
+      c.request().header.get("x-proxy-token") ||
       ""
-    ).trim();
+    ).toString().trim();
     
     // Debug logging for token issues
     console.log("[Proxy] Token check - env token length:", proxyAccessToken.length);
