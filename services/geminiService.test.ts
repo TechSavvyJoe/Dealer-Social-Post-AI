@@ -157,13 +157,13 @@ describe("GeminiService Model Verification", () => {
       }
     );
 
-    // Verify fetch was called with the correct Veo 3.1 model path via generateVideos endpoint
+    // Verify fetch was called with the correct Veo 3.1 model path via predictLongRunning endpoint
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining("veo-3.1-generate-preview"),
       expect.any(Object)
     );
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("generateVideos"),
+      expect.stringContaining("predictLongRunning"),
       expect.any(Object)
     );
   });
