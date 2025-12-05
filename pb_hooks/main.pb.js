@@ -12,7 +12,7 @@ let tokenExpiry = 0;
 // Rate limiting configuration
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute window
 const RATE_LIMIT_MAX_REQUESTS = 30; // 30 requests per window
-const rateLimitStore = new Map(); // token -> { count, windowStart }
+var rateLimitStore = new Map(); // token -> { count, windowStart }
 
 // Helper functions are defined inside proxyHandler for PocketBase JSVM compatibility
 
@@ -515,6 +515,7 @@ routerAdd("GET", "/api/proxy-image", (c) => {
   const incomingToken =
     (requestInfo.headers && requestInfo.headers["x-proxy-token"]) ||
     (requestInfo.headers && requestInfo.headers["X-Proxy-Token"]);
+
   if (!proxyAccessToken || incomingToken !== proxyAccessToken) {
     return c.json(401, { error: "Unauthorized proxy request" });
   }
@@ -528,6 +529,18 @@ routerAdd("GET", "/api/proxy-image", (c) => {
     if (parsed.protocol !== "https:") {
       return c.json(400, { error: "Only https URLs are allowed" });
     }
+
+    // Helper for SSRF protection (duplicated here for scope safety)
+    const isPrivateHostLocal = (host) => {
+      if (host === "localhost") return true;
+      return (
+        /^(\d{1,3}\.){3}\d{1,3}$/.test(host) &&
+        /^(10\.|127\.|0\.0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(
+          host
+        )
+      );
+    };
+
     if (isPrivateHostLocal(parsed.hostname)) {
       return c.json(400, { error: "Private/loopback hosts are not allowed" });
     }
