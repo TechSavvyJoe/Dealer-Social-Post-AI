@@ -1,8 +1,8 @@
-@import '@fontsource/inter/400.css';
-@import '@fontsource/inter/500.css';
-@import '@fontsource/inter/600.css';
-@import '@fontsource/inter/700.css';
-@import '@fontsource/inter/800.css';
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+@import "@fontsource/inter/800.css";
 
 @tailwind base;
 @tailwind components;
@@ -35,6 +35,11 @@
 
     /* Spacing */
     --spacing-touch-target: 2.75rem; /* 44px - Apple HIG minimum */
+
+    /* Premium gradient colors */
+    --gradient-start: rgba(59, 130, 246, 0.15);
+    --gradient-mid: rgba(147, 51, 234, 0.1);
+    --gradient-end: rgba(236, 72, 153, 0.08);
   }
 
   /* Smooth scroll behavior */
@@ -57,25 +62,102 @@
     }
   }
 
-  /* Base body styles */
+  /* Base body styles with premium background */
   body {
     @apply bg-surface-950 text-surface-50 font-sans;
     @apply selection:bg-primary-500/30 selection:text-primary-100;
     min-height: 100vh;
     min-height: 100dvh;
-    background-image: 
-      linear-gradient(to bottom, rgba(2, 6, 23, 0.8), rgba(2, 6, 23, 0.95)),
-      radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.15), transparent 50%),
-      linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-    background-size: 100% 100%, 100% 100%, 50px 50px, 50px 50px;
-    background-attachment: fixed;
+    overflow-x: hidden;
+    position: relative;
+  }
+
+  /* Premium layered background */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: 
+      /* Primary ambient glow */ radial-gradient(
+        ellipse 80% 50% at 50% -20%,
+        var(--gradient-start),
+        transparent 50%
+      ),
+      /* Secondary accent glow */
+        radial-gradient(
+          ellipse 60% 40% at 80% 20%,
+          var(--gradient-mid),
+          transparent 40%
+        ),
+      /* Tertiary accent */
+        radial-gradient(
+          ellipse 40% 30% at 20% 80%,
+          var(--gradient-end),
+          transparent 35%
+        ),
+      /* Subtle grid pattern */
+        linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 100% 100%, 60px 60px, 60px 60px;
+    z-index: -2;
+    pointer-events: none;
+    animation: ambient-pulse 20s ease-in-out infinite;
+  }
+
+  /* Floating particles layer */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: radial-gradient(
+        circle at 20% 30%,
+        rgba(59, 130, 246, 0.03) 0%,
+        transparent 20%
+      ),
+      radial-gradient(
+        circle at 80% 70%,
+        rgba(147, 51, 234, 0.03) 0%,
+        transparent 20%
+      ),
+      radial-gradient(
+        circle at 50% 50%,
+        rgba(34, 197, 94, 0.02) 0%,
+        transparent 30%
+      );
+    z-index: -1;
+    pointer-events: none;
+    animation: particles-float 30s ease-in-out infinite alternate;
+  }
+
+  @keyframes ambient-pulse {
+    0%,
+    100% {
+      opacity: 1;
+      filter: brightness(1);
+    }
+    50% {
+      opacity: 0.9;
+      filter: brightness(1.1);
+    }
+  }
+
+  @keyframes particles-float {
+    0% {
+      transform: translateY(0) scale(1);
+    }
+    50% {
+      transform: translateY(-20px) scale(1.02);
+    }
+    100% {
+      transform: translateY(10px) scale(0.98);
+    }
   }
 
   /* Improved focus visibility (accessibility) */
   *:focus-visible {
-    @apply outline-none ring-2 ring-primary-500 ring-offset-2 ring-offset-surface-950;
+    @apply outline-none ring-2 ring-primary-500/70 ring-offset-2 ring-offset-surface-950;
     @apply rounded-lg;
+    transition: box-shadow 0.2s ease;
   }
 
   /* Better default for buttons and inputs */
@@ -84,52 +166,70 @@
   textarea,
   select {
     @apply font-sans;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
   /* Remove spinner from number inputs */
-  input[type='number']::-webkit-inner-spin-button,
-  input[type='number']::-webkit-outer-spin-button {
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
     -webkit-appearance: none;
     margin: 0;
   }
 
-  input[type='number'] {
+  input[type="number"] {
     -moz-appearance: textfield;
   }
 
-  /* Improved scrollbar styling (WebKit browsers) */
+  /* Premium scrollbar styling */
   ::-webkit-scrollbar {
-    width: 12px;
-    height: 12px;
+    width: 10px;
+    height: 10px;
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-surface-900;
+    @apply bg-transparent;
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-surface-700 rounded-xl;
+    @apply bg-surface-700/50 rounded-full;
+    border: 3px solid transparent;
+    background-clip: padding-box;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-surface-600;
+    @apply bg-surface-600/70;
   }
 
-  /* Headings */
-  h1, h2, h3, h4, h5, h6 {
+  /* Corner styling */
+  ::-webkit-scrollbar-corner {
+    @apply bg-transparent;
+  }
+
+  /* Headings with refined typography */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     @apply font-semibold tracking-tight;
+    font-feature-settings: "ss01", "ss02", "cv01";
+    text-wrap: balance;
   }
 
   h1 {
     @apply text-4xl md:text-5xl;
+    letter-spacing: -0.03em;
   }
 
   h2 {
     @apply text-3xl md:text-4xl;
+    letter-spacing: -0.025em;
   }
 
   h3 {
     @apply text-2xl md:text-3xl;
+    letter-spacing: -0.02em;
   }
 
   h4 {
@@ -144,18 +244,21 @@
     @apply text-base md:text-lg;
   }
 
-  /* Links */
+  /* Links with smooth transitions */
   a {
     @apply text-primary-400 hover:text-primary-300 transition-colors duration-200;
+    text-decoration-skip-ink: auto;
   }
 
   /* Code blocks */
   code {
-    @apply font-mono text-sm bg-surface-800 px-1.5 py-0.5 rounded;
+    @apply font-mono text-sm bg-surface-800/80 px-1.5 py-0.5 rounded;
+    font-feature-settings: "calt" 0;
   }
 
   pre {
-    @apply font-mono text-sm bg-surface-800 p-4 rounded-xl overflow-x-auto;
+    @apply font-mono text-sm bg-surface-800/60 p-4 rounded-2xl overflow-x-auto;
+    backdrop-filter: blur(8px);
   }
 
   pre code {
@@ -165,10 +268,22 @@
   /* Better image rendering */
   img {
     @apply max-w-full h-auto;
+    image-rendering: -webkit-optimize-contrast;
   }
 
   svg {
     @apply inline-block;
+  }
+
+  /* Placeholder styling */
+  ::placeholder {
+    @apply text-surface-500;
+    opacity: 1;
+  }
+
+  /* Selection styling */
+  ::selection {
+    @apply bg-primary-500/30 text-primary-50;
   }
 }
 
@@ -220,7 +335,8 @@
   }
 
   @keyframes gradient-shift {
-    0%, 100% {
+    0%,
+    100% {
       background-position: 0% 50%;
     }
     50% {

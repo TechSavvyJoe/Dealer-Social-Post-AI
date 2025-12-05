@@ -1,6 +1,8 @@
-import React, { useEffect, memo } from 'react';
-import { Icon } from './Icons';
-import { triggerHapticFeedback } from '../utils/haptics';
+import React, { useEffect, memo } from "react";
+import { Icon } from "./Icons";
+import { triggerHapticFeedback } from "../utils/haptics";
+import { Modal } from "./ui/Modal";
+import { Button } from "./ui/Button";
 
 interface ImagePreviewModalProps {
   isOpen: boolean;
@@ -11,95 +13,64 @@ interface ImagePreviewModalProps {
   confirmLabel?: string;
 }
 
-export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = memo(({ 
-  isOpen, 
-  onClose, 
-  imageSrc, 
-  onConfirm, 
-  onRetake, 
-  confirmLabel = 'Use Photo' 
-}) => {
-  const handleClose = () => {
-    triggerHapticFeedback();
-    onClose();
-  };
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose();
-      }
+export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = memo(
+  ({
+    isOpen,
+    onClose,
+    imageSrc,
+    onConfirm,
+    onRetake,
+    confirmLabel = "Use Photo",
+  }) => {
+    const handleClose = () => {
+      triggerHapticFeedback();
+      onClose();
     };
 
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-      window.addEventListener('keydown', handleKeyDown);
-    } else {
-      document.body.style.overflow = 'auto';
-    }
-
-    return () => {
-      document.body.style.overflow = 'auto';
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isOpen, onClose]);
-
-  if (!isOpen) {
-    return null;
-  }
-
-  return (
-    <div
-      className="fixed inset-0 bg-black/95 flex items-center justify-center z-50 p-4"
-      onClick={handleClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Image Preview"
-    >
-      <div
-        className="relative w-full max-w-2xl flex flex-col items-center justify-center gap-6"
-        onClick={(e) => e.stopPropagation()}
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={handleClose}
+        size="xl"
+        className="bg-black/90 border-white/10 p-0 overflow-hidden"
+        showCloseButton={true}
+        title="Review Photo"
+        footer={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => {
+                triggerHapticFeedback();
+                (onRetake ?? handleClose)();
+              }}
+              className="flex-1"
+            >
+              Retake
+            </Button>
+            {onConfirm && (
+              <Button
+                variant="primary"
+                onClick={() => {
+                  triggerHapticFeedback();
+                  onConfirm();
+                }}
+                className="flex-1"
+              >
+                {confirmLabel}
+              </Button>
+            )}
+          </>
+        }
       >
-        {/* Close Button - Top right */}
-        <button
-          onClick={handleClose}
-          className="absolute -top-2 -right-2 sm:top-0 sm:right-0 text-white bg-black/60 rounded-full p-2 
-                   hover:bg-black/80 transition-colors z-10 touch-manipulation"
-          aria-label="Close preview"
-        >
-          <Icon type="close" className="w-6 h-6" />
-        </button>
-
-        {/* Image Preview - Respects natural orientation */}
-        <div className="relative bg-black rounded-xl overflow-hidden shadow-2xl w-full">
+        <div className="flex items-center justify-center p-4 min-h-[50vh]">
           <img
             src={imageSrc}
             alt="Captured preview"
-            className="w-full h-auto max-h-[65vh] object-contain"
-            style={{ imageOrientation: 'from-image' }}
+            className="w-full h-auto max-h-[60vh] object-contain rounded-lg shadow-2xl"
+            style={{ imageOrientation: "from-image" }}
           />
         </div>
-
-        {/* Action Buttons - Larger touch targets */}
-        <div className="flex gap-3 w-full max-w-md">
-          <button
-            onClick={() => { triggerHapticFeedback(); (onRetake ?? onClose)(); }}
-            className="flex-1 px-6 py-4 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold
-                     transition-all border border-white/20 touch-manipulation active:scale-95"
-          >
-            Retake
-          </button>
-          {onConfirm && (
-            <button
-              onClick={() => { triggerHapticFeedback(); onConfirm(); }}
-              className="flex-1 px-6 py-4 rounded-xl bg-primary-500 hover:bg-primary-400 text-white font-semibold
-                       shadow-lg transition-all touch-manipulation active:scale-95"
-            >
-              {confirmLabel}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-});
+      </Modal>
+    );
+  }
+);

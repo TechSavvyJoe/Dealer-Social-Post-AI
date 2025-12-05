@@ -3,13 +3,14 @@ import { AnimatePresence, motion } from "framer-motion";
 import { VideoStyle, VideoRequestOptions } from "../types";
 import { Icon } from "./Icons";
 import { triggerHapticFeedback } from "../utils/haptics";
+import { Modal } from "./ui/Modal";
 import {
   defaultResolution,
   styles as videoStyles,
 } from "./video-director/constants";
 
 // Get top recommended styles for quick selection
-const QUICK_STYLES = videoStyles.filter(s => s.recommended).slice(0, 4);
+const QUICK_STYLES = videoStyles.filter((s) => s.recommended).slice(0, 4);
 const ALL_STYLES = videoStyles.slice(0, 8); // Show first 8 styles for "More" section
 
 interface VideoDirectorModalProps {
@@ -19,160 +20,145 @@ interface VideoDirectorModalProps {
 }
 
 // Memoized style button for performance
-const StyleButton = memo(({ 
-  style, 
-  icon, 
-  description, 
-  isRecommended,
-  onSelect 
-}: { 
-  style: VideoStyle; 
-  icon: string; 
-  description: string;
-  isRecommended?: boolean;
-  onSelect: (style: VideoStyle) => void;
-}) => (
-  <button
-    onClick={() => {
-      triggerHapticFeedback();
-      onSelect(style);
-    }}
-    className="group relative flex flex-col items-center p-4 sm:p-5 bg-white/5 hover:bg-indigo-500/20 
+const StyleButton = memo(
+  ({
+    style,
+    icon,
+    description,
+    isRecommended,
+    onSelect,
+  }: {
+    style: VideoStyle;
+    icon: string;
+    description: string;
+    isRecommended?: boolean;
+    onSelect: (style: VideoStyle) => void;
+  }) => (
+    <button
+      onClick={() => {
+        triggerHapticFeedback();
+        onSelect(style);
+      }}
+      className="group relative flex flex-col items-center p-4 sm:p-5 bg-white/5 hover:bg-indigo-500/20 
                border border-white/10 hover:border-indigo-400 rounded-2xl transition-all duration-150
-               active:scale-95 touch-manipulation"
-  >
-    {isRecommended && (
-      <span className="absolute -top-2 -right-2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/30 text-emerald-300 border border-emerald-400/40">
-        ★
+               active:scale-95 touch-manipulation w-full h-full"
+    >
+      {isRecommended && (
+        <span className="absolute -top-2 -right-2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/30 text-emerald-300 border border-emerald-400/40">
+          ★
+        </span>
+      )}
+      <Icon
+        type={icon as any}
+        className="w-10 h-10 sm:w-12 sm:h-12 text-indigo-400 group-hover:text-indigo-300 transition-colors"
+      />
+      <span className="mt-2 font-semibold text-white text-sm text-center">
+        {style}
       </span>
-    )}
-    <Icon type={icon as any} className="w-10 h-10 sm:w-12 sm:h-12 text-indigo-400 group-hover:text-indigo-300 transition-colors" />
-    <span className="mt-2 font-semibold text-white text-sm text-center">{style}</span>
-    <span className="mt-1 text-[11px] text-white/60 text-center line-clamp-1">{description}</span>
-  </button>
-));
+      <span className="mt-1 text-[11px] text-white/60 text-center line-clamp-1">
+        {description}
+      </span>
+    </button>
+  )
+);
 
-export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(({
-  isOpen,
-  onClose,
-  onSelectStyle,
-}) => {
-  const [showMore, setShowMore] = useState(false);
+export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
+  ({ isOpen, onClose, onSelectStyle }) => {
+    const [showMore, setShowMore] = useState(false);
 
-  // Escape key handler
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+    // Default options for quick generation
+    const defaultOptions: VideoRequestOptions = {
+      durationSeconds: 6,
+      soundtrack: "cinematic",
+      aspectPreference: "9:16",
+      resolution: defaultResolution,
+      pacing: "snappy",
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
 
-  // Default options for quick generation
-  const defaultOptions: VideoRequestOptions = {
-    durationSeconds: 6,
-    soundtrack: "cinematic",
-    aspectPreference: "9:16",
-    resolution: defaultResolution,
-    pacing: "snappy",
-  };
+    const handleStyleSelect = useCallback(
+      (style: VideoStyle) => {
+        onSelectStyle(style, defaultOptions);
+      },
+      [onSelectStyle]
+    );
 
-  const handleStyleSelect = useCallback((style: VideoStyle) => {
-    onSelectStyle(style, defaultOptions);
-  }, [onSelectStyle]);
-
-  if (!isOpen) return null;
-
-  return (
-    <AnimatePresence>
-      <motion.div
-        className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-        onClick={onClose}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="video-director-title"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.15 }}
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        size="lg"
+        className="bg-slate-900 border-white/10"
+        showCloseButton={false} // Custom header below
       >
-        <motion.div
-          className="w-full max-w-lg bg-slate-900/95 border border-white/15 rounded-2xl shadow-2xl overflow-hidden"
-          onClick={(e) => e.stopPropagation()}
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.95 }}
-          transition={{ duration: 0.15 }}
-        >
-          {/* Simple Header */}
-          <div className="flex justify-between items-center p-4 border-b border-white/10">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-indigo-500/20 rounded-lg">
-                <Icon type="movie" className="w-5 h-5 text-indigo-400" />
-              </div>
-              <div>
-                <h2 id="video-director-title" className="text-lg font-bold text-white">
-                  Create Video
-                </h2>
-                <p className="text-xs text-white/60">Tap a style to generate</p>
-              </div>
+        {/* Custom Header within Modal Body for specific styling */}
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-indigo-500/20 rounded-lg">
+              <Icon type="movie" className="w-5 h-5 text-indigo-400" />
             </div>
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/60 hover:text-white touch-manipulation"
-              aria-label="Close"
-            >
-              <Icon type="close" className="w-6 h-6" />
-            </button>
-          </div>
-
-          {/* Recommended Styles - Main Section */}
-          <div className="p-4">
-            <p className="text-xs font-semibold text-indigo-300/80 uppercase tracking-wide mb-3">
-              Recommended
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              {QUICK_STYLES.map(({ style, icon, description }) => (
-                <StyleButton
-                  key={style}
-                  style={style}
-                  icon={icon}
-                  description={description}
-                  isRecommended
-                  onSelect={handleStyleSelect}
-                />
-              ))}
+            <div>
+              <h2 className="text-lg font-bold text-white">Create Video</h2>
+              <p className="text-xs text-white/60">Tap a style to generate</p>
             </div>
           </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/60 hover:text-white touch-manipulation"
+            aria-label="Close"
+          >
+            <Icon type="close" className="w-6 h-6" />
+          </button>
+        </div>
 
-          {/* More Styles - Collapsible */}
-          <div className="border-t border-white/10">
-            <button
-              onClick={() => {
-                triggerHapticFeedback();
-                setShowMore(!showMore);
-              }}
-              className="w-full px-4 py-3 flex items-center justify-between text-sm text-white/70 hover:text-white hover:bg-white/5 transition-colors touch-manipulation"
-            >
-              <span>{showMore ? 'Hide' : 'Show'} more styles</span>
-              <Icon 
-                type="chevron-down" 
-                className={`w-5 h-5 transition-transform duration-200 ${showMore ? 'rotate-180' : ''}`} 
+        {/* Recommended Styles - Main Section */}
+        <div className="mb-4">
+          <p className="text-xs font-semibold text-indigo-300/80 uppercase tracking-wide mb-3">
+            Recommended
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            {QUICK_STYLES.map(({ style, icon, description }) => (
+              <StyleButton
+                key={style}
+                style={style}
+                icon={icon}
+                description={description}
+                isRecommended
+                onSelect={handleStyleSelect}
               />
-            </button>
-            
-            <AnimatePresence>
-              {showMore && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="overflow-hidden"
-                >
-                  <div className="p-4 pt-0 grid grid-cols-2 gap-3 max-h-[40vh] overflow-y-auto">
-                    {ALL_STYLES.filter(s => !s.recommended).map(({ style, icon, description }) => (
+            ))}
+          </div>
+        </div>
+
+        {/* More Styles - Collapsible */}
+        <div className="border-t border-white/10 pt-2">
+          <button
+            onClick={() => {
+              triggerHapticFeedback();
+              setShowMore(!showMore);
+            }}
+            className="w-full px-2 py-3 flex items-center justify-between text-sm text-white/70 hover:text-white hover:bg-white/5 transition-colors touch-manipulation rounded-lg"
+          >
+            <span>{showMore ? "Hide" : "Show"} more styles</span>
+            <Icon
+              type="chevron-down"
+              className={`w-5 h-5 transition-transform duration-200 ${
+                showMore ? "rotate-180" : ""
+              }`}
+            />
+          </button>
+
+          <AnimatePresence>
+            {showMore && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="pt-2 pb-2 grid grid-cols-2 gap-3">
+                  {ALL_STYLES.filter((s) => !s.recommended).map(
+                    ({ style, icon, description }) => (
                       <StyleButton
                         key={style}
                         style={style}
@@ -180,21 +166,21 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(({
                         description={description}
                         onSelect={handleStyleSelect}
                       />
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+                    )
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
-          {/* Footer hint */}
-          <div className="px-4 py-3 bg-white/5 border-t border-white/10">
-            <p className="text-xs text-center text-white/50">
-              Videos are 6 seconds • Optimized for Instagram Reels
-            </p>
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
-  );
-});
+        {/* Footer hint */}
+        <div className="mt-6 pt-4 border-t border-white/10">
+          <p className="text-xs text-center text-white/50">
+            Videos are 6 seconds • Optimized for Instagram Reels
+          </p>
+        </div>
+      </Modal>
+    );
+  }
+);

@@ -15,6 +15,8 @@ import {
   Undo2,
   Redo2,
 } from "lucide-react";
+import confetti from "canvas-confetti";
+import { Tooltip } from "./ui/Tooltip";
 import { GeneratedPost, VideoStyle, VideoRequestOptions } from "../types";
 import { dataUrlToBlob } from "../utils/imageUtils";
 import { ImagePreviewModal } from "./ImagePreviewModal";
@@ -199,6 +201,14 @@ export const PostResult: React.FC<PostResultProps> = ({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+
+    // Trigger confetti
+    confetti({
+      particleCount: 100,
+      spread: 70,
+      origin: { y: 0.6 },
+      colors: ["#38bdf8", "#818cf8", "#c084fc", "#e879f9"],
+    });
   };
 
   const synchronousCopy = (text: string): boolean => {
@@ -239,6 +249,12 @@ export const PostResult: React.FC<PostResultProps> = ({
     if (success) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+      confetti({
+        particleCount: 50,
+        spread: 50,
+        origin: { y: 0.7 },
+        gravity: 1.2,
+      });
     }
   };
 
@@ -531,7 +547,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         </motion.h2>
         {error && (
           <motion.div
-            className="mb-4 bg-error-900/50 border border-error-700 text-error-300 px-4 py-3 rounded-xl flex items-center justify-center gap-2"
+            className="mb-4 bg-error-900/50 border border-error-700 text-error-300 px-4 py-3 rounded-xl flex items-center justify-center gap-2 backdrop-blur-sm"
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.3 }}
@@ -587,162 +603,175 @@ export const PostResult: React.FC<PostResultProps> = ({
 
             <div className="w-full space-y-3">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
-                <motion.button
-                  onClick={() => {
-                    triggerHapticFeedback();
-                    handleImageAction(onRegenerateImage, [
-                      "Refreshing with your chosen style...",
-                      "Balancing lighting and color...",
-                      "Finishing touches...",
-                    ]);
-                  }}
-                  disabled={imageBusy || !!videoUrl}
-                  className={cn(
-                    "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden",
-                    "bg-white/10 border border-white/20 text-surface-50 font-bold",
-                    "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300",
-                    "text-[10px] sm:text-xs md:text-sm",
-                    "min-h-[80px] sm:aspect-square",
-                    "hover:bg-white/20 hover:border-white/30",
-                    "disabled:opacity-50 disabled:cursor-not-allowed"
-                  )}
-                  whileHover={{
-                    scale: imageBusy ? 1 : 1.05,
-                    y: imageBusy ? 0 : -2,
-                  }}
-                  whileTap={{ scale: imageBusy ? 1 : 0.95 }}
-                >
-                  <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                  {imageBusy ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="w-5 h-5" />
-                  )}
-                  <span>{imageBusy ? "Working..." : "Regenerate"}</span>
-                </motion.button>
+                <Tooltip label="Get a new version" side="top">
+                  <motion.button
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      handleImageAction(onRegenerateImage, [
+                        "Refreshing with your chosen style...",
+                        "Balancing lighting and color...",
+                        "Finishing touches...",
+                      ]);
+                    }}
+                    disabled={imageBusy || !!videoUrl}
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden",
+                      "bg-white/10 border border-white/20 text-surface-50 font-bold",
+                      "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300",
+                      "text-[10px] sm:text-xs md:text-sm",
+                      "min-h-[80px] sm:aspect-square",
+                      "hover:bg-white/20 hover:border-white/30",
+                      "disabled:opacity-50 disabled:cursor-not-allowed w-full"
+                    )}
+                    whileHover={{
+                      scale: imageBusy ? 1 : 1.05,
+                      y: imageBusy ? 0 : -2,
+                    }}
+                    whileTap={{ scale: imageBusy ? 1 : 0.95 }}
+                  >
+                    <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
+                    {imageBusy ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-5 h-5" />
+                    )}
+                    <span>{imageBusy ? "Working..." : "Regenerate"}</span>
+                  </motion.button>
+                </Tooltip>
 
-                <motion.button
-                  onClick={() => {
-                    triggerHapticFeedback();
-                    setIsImageEditing(!isImageEditing);
-                  }}
-                  disabled={imageBusy || !!videoUrl}
-                  className={cn(
-                    "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden",
-                    "bg-gradient-to-r from-sky-500 to-primary-500 text-surface-50 font-bold",
-                    "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300",
-                    "text-[10px] sm:text-xs md:text-sm",
-                    "min-h-[80px] sm:aspect-square",
-                    "shadow-lg hover:shadow-glow-primary",
-                    "disabled:opacity-50 disabled:cursor-not-allowed"
-                  )}
-                  whileHover={{ scale: 1.05, y: -2 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                  {imageBusy ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <Edit3 className="w-5 h-5" />
-                  )}
-                  <span>
-                    {imageBusy
-                      ? "Working..."
-                      : isImageEditing
-                      ? "Cancel"
-                      : "AI Image Edit"}
-                  </span>
-                </motion.button>
+                <Tooltip label="Change specific details" side="top">
+                  <motion.button
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setIsImageEditing(!isImageEditing);
+                    }}
+                    disabled={imageBusy || !!videoUrl}
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden",
+                      "bg-gradient-to-r from-sky-500 to-primary-500 text-surface-50 font-bold",
+                      "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300",
+                      "text-[10px] sm:text-xs md:text-sm",
+                      "min-h-[80px] sm:aspect-square",
+                      "shadow-lg hover:shadow-glow-primary",
+                      "disabled:opacity-50 disabled:cursor-not-allowed w-full"
+                    )}
+                    whileHover={{ scale: 1.05, y: -2 }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
+                    {imageBusy ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Edit3 className="w-5 h-5" />
+                    )}
+                    <span>
+                      {imageBusy
+                        ? "Working..."
+                        : isImageEditing
+                        ? "Cancel"
+                        : "AI Image Edit"}
+                    </span>
+                  </motion.button>
+                </Tooltip>
 
-                <motion.button
-                  onClick={() => {
-                    triggerHapticFeedback();
-                    setIsFunModeDirectorOpen(true);
-                  }}
-                  disabled={imageBusy || !!videoUrl}
-                  className={cn(
-                    "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden",
-                    "bg-gradient-to-r from-purple-500 to-pink-500 text-surface-50 font-bold",
-                    "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300",
-                    "text-[10px] sm:text-xs md:text-sm",
-                    "min-h-[80px] sm:aspect-square",
-                    "shadow-lg hover:shadow-[0_0_25px_rgba(168,85,247,0.5)]",
-                    "disabled:opacity-50 disabled:cursor-not-allowed"
-                  )}
-                  whileHover={{ scale: 1.05, y: -2 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                  {imageBusy ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <Sparkles className="w-5 h-5" />
-                  )}
-                  <span>{imageBusy ? "Working..." : "Fun Mode"}</span>
-                </motion.button>
+                <Tooltip label="Artistic transformations" side="top">
+                  <motion.button
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setIsFunModeDirectorOpen(true);
+                    }}
+                    disabled={imageBusy || !!videoUrl}
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden",
+                      "bg-gradient-to-r from-purple-500 to-pink-500 text-surface-50 font-bold",
+                      "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300",
+                      "text-[10px] sm:text-xs md:text-sm",
+                      "min-h-[80px] sm:aspect-square",
+                      "shadow-lg hover:shadow-[0_0_25px_rgba(168,85,247,0.5)]",
+                      "disabled:opacity-50 disabled:cursor-not-allowed w-full"
+                    )}
+                    whileHover={{ scale: 1.05, y: -2 }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
+                    {imageBusy ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-5 h-5" />
+                    )}
+                    <span>{imageBusy ? "Working..." : "Fun Mode"}</span>
+                  </motion.button>
+                </Tooltip>
 
-                <motion.button
-                  onClick={handleSave}
-                  disabled={imageBusy}
-                  className={cn(
-                    "flex flex-col items-center justify-center gap-2 relative overflow-hidden",
-                    "bg-gradient-to-r from-success-500 to-emerald-600 text-surface-50 font-bold",
-                    "py-3 px-4 rounded-xl transition-all duration-300",
-                    "text-xs sm:text-sm aspect-square",
-                    "shadow-lg hover:shadow-glow-success",
-                    imageBusy && "opacity-70 cursor-not-allowed"
-                  )}
-                  whileHover={{
-                    scale: imageBusy ? 1 : 1.05,
-                    y: imageBusy ? 0 : -2,
-                  }}
-                  whileTap={{ scale: imageBusy ? 1 : 0.95 }}
-                >
-                  <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                  {imageBusy ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <Download className="w-5 h-5" />
-                  )}
-                  <span>
-                    {imageBusy
-                      ? "Working..."
-                      : `Save ${videoUrl ? "Video" : "Image"}`}
-                  </span>
-                </motion.button>
+                <Tooltip label="Download to your device" side="top">
+                  <motion.button
+                    onClick={handleSave}
+                    disabled={imageBusy}
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-2 relative overflow-hidden",
+                      "bg-gradient-to-r from-success-500 to-emerald-600 text-surface-50 font-bold",
+                      "py-3 px-4 rounded-xl transition-all duration-300",
+                      "text-xs sm:text-sm aspect-square",
+                      "shadow-lg hover:shadow-glow-success",
+                      imageBusy && "opacity-70 cursor-not-allowed w-full"
+                    )}
+                    whileHover={{
+                      scale: imageBusy ? 1 : 1.05,
+                      y: imageBusy ? 0 : -2,
+                    }}
+                    whileTap={{ scale: imageBusy ? 1 : 0.95 }}
+                  >
+                    <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
+                    {imageBusy ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Download className="w-5 h-5" />
+                    )}
+                    <span>
+                      {imageBusy
+                        ? "Working..."
+                        : `Save ${videoUrl ? "Video" : "Image"}`}
+                    </span>
+                  </motion.button>
+                </Tooltip>
 
-                <motion.button
-                  onClick={() => {
-                    triggerHapticFeedback();
-                    setIsVideoDirectorOpen(true);
-                  }}
-                  disabled={imageBusy || isVideoLoading}
-                  className={cn(
-                    "flex flex-col items-center justify-center gap-2 relative overflow-hidden",
-                    "bg-gradient-to-r from-primary-500 to-secondary-600 text-surface-50 font-bold",
-                    "py-3 px-4 rounded-xl transition-all duration-300",
-                    "text-xs sm:text-sm aspect-square",
-                    "shadow-lg hover:shadow-glow-primary",
-                    "disabled:opacity-50 disabled:cursor-not-allowed"
-                  )}
-                  whileHover={{
-                    scale: isVideoLoading ? 1 : 1.05,
-                    y: isVideoLoading ? 0 : -2,
-                  }}
-                  whileTap={{ scale: isVideoLoading ? 1 : 0.95 }}
-                >
-                  <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                  <Film
-                    className={cn("w-5 h-5", isVideoLoading && "animate-spin")}
-                  />
-                  <span>
-                    {isVideoLoading
-                      ? "Rendering…"
-                      : videoUrl
-                      ? "New Video"
-                      : "Animate with AI"}
-                  </span>
-                </motion.button>
+                <Tooltip label="Turn your image into a video" side="top">
+                  <motion.button
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setIsVideoDirectorOpen(true);
+                    }}
+                    disabled={imageBusy || isVideoLoading}
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-2 relative overflow-hidden",
+                      "bg-gradient-to-r from-primary-500 to-secondary-600 text-surface-50 font-bold",
+                      "py-3 px-4 rounded-xl transition-all duration-300",
+                      "text-xs sm:text-sm aspect-square",
+                      "shadow-lg hover:shadow-glow-primary",
+                      "disabled:opacity-50 disabled:cursor-not-allowed w-full"
+                    )}
+                    whileHover={{
+                      scale: isVideoLoading ? 1 : 1.05,
+                      y: isVideoLoading ? 0 : -2,
+                    }}
+                    whileTap={{ scale: isVideoLoading ? 1 : 0.95 }}
+                  >
+                    <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
+                    <Film
+                      className={cn(
+                        "w-5 h-5",
+                        isVideoLoading && "animate-spin"
+                      )}
+                    />
+                    <span>
+                      {isVideoLoading
+                        ? "Rendering…"
+                        : videoUrl
+                        ? "New Video"
+                        : "Animate with AI"}
+                    </span>
+                  </motion.button>
+                </Tooltip>
 
                 <motion.button
                   onClick={() => {

@@ -1,16 +1,35 @@
-import React, { Suspense } from 'react';
-import { motion } from 'framer-motion';
-import { AppStep, GeneratedPost, StyleOption, ToneOption, VideoStyle, VideoRequestOptions, Dealer } from '../types';
-import { Icon } from './Icons';
-import { LoadingOverlay } from './LoadingOverlay';
-import { Button } from './ui/Button';
+import React, { Suspense } from "react";
+import { motion } from "framer-motion";
+import {
+  AppStep,
+  GeneratedPost,
+  StyleOption,
+  ToneOption,
+  VideoStyle,
+  VideoRequestOptions,
+  Dealer,
+} from "../types";
+import { Icon } from "./Icons";
+import { LoadingOverlay } from "./LoadingOverlay";
+import { Button } from "./ui/Button";
+import { Shimmer } from "./ui/Shimmer";
 
 // Lazy load components
-const LazyLoginScreen = React.lazy(() => import('./LoginScreen').then(mod => ({ default: mod.LoginScreen })));
-const LazyAdminDashboard = React.lazy(() => import('./AdminDashboard').then(mod => ({ default: mod.AdminDashboard })));
-const LazyImageInput = React.lazy(() => import('./CameraCapture').then(mod => ({ default: mod.ImageInput })));
-const LazyPostCustomizer = React.lazy(() => import('./PostCustomizer').then(mod => ({ default: mod.PostCustomizer })));
-const LazyPostResult = React.lazy(() => import('./PostResult').then(mod => ({ default: mod.PostResult })));
+const LazyLoginScreen = React.lazy(() =>
+  import("./LoginScreen").then((mod) => ({ default: mod.LoginScreen }))
+);
+const LazyAdminDashboard = React.lazy(() =>
+  import("./AdminDashboard").then((mod) => ({ default: mod.AdminDashboard }))
+);
+const LazyImageInput = React.lazy(() =>
+  import("./CameraCapture").then((mod) => ({ default: mod.ImageInput }))
+);
+const LazyPostCustomizer = React.lazy(() =>
+  import("./PostCustomizer").then((mod) => ({ default: mod.PostCustomizer }))
+);
+const LazyPostResult = React.lazy(() =>
+  import("./PostResult").then((mod) => ({ default: mod.PostResult }))
+);
 
 interface MainContentProps {
   displayedStep: AppStep;
@@ -24,12 +43,18 @@ interface MainContentProps {
   isDesktopLayout: boolean;
   generationProgress: number;
   progressMessage: string;
-  
+
   // Handlers
   onLogin: (dealerId: string) => Promise<boolean>;
   onImageSelected: (image: string) => void;
   onReset: () => void;
-  onGenerate: (style: StyleOption, tone: ToneOption, customerName: string, customText?: string, creativeBrief?: string) => Promise<void>;
+  onGenerate: (
+    style: StyleOption,
+    tone: ToneOption,
+    customerName: string,
+    customText?: string,
+    creativeBrief?: string
+  ) => Promise<void>;
   onBackToCapture: () => void;
   onStyleToneChange: (style: StyleOption, tone: ToneOption) => void;
   onRegenerateImage: () => Promise<void>;
@@ -37,7 +62,10 @@ interface MainContentProps {
   onRegenerateText: () => Promise<void>;
   onEditText: (prompt: string) => Promise<void>;
   onFunMode: (styleName?: string) => Promise<void>;
-  onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
+  onGenerateVideo: (
+    style: VideoStyle,
+    options: VideoRequestOptions
+  ) => Promise<string>;
 }
 
 export const MainContent: React.FC<MainContentProps> = ({
@@ -63,16 +91,27 @@ export const MainContent: React.FC<MainContentProps> = ({
   onRegenerateText,
   onEditText,
   onFunMode,
-  onGenerateVideo
+  onGenerateVideo,
 }) => {
-
   const suspenseFallback = (label: string) => (
-    <div className="flex min-h-[200px] w-full flex-col items-center justify-center gap-4 text-primary-300" role="status">
-      <div className="relative w-12 h-12">
-        <div className="absolute inset-0 rounded-full border-4 border-primary-500/30"></div>
-        <div className="absolute inset-0 rounded-full border-4 border-primary-500 border-t-transparent animate-spin"></div>
+    <div
+      className="w-full max-w-2xl mx-auto p-4 flex flex-col items-center justify-center min-h-[50vh] space-y-6"
+      role="status"
+    >
+      <div className="w-full space-y-4">
+        <Shimmer className="w-full h-64 rounded-2xl" />
+        <div className="space-y-2">
+          <Shimmer className="w-3/4 h-8 rounded-lg" />
+          <Shimmer className="w-1/2 h-4 rounded-lg" />
+        </div>
+        <div className="grid grid-cols-2 gap-4 pt-4">
+          <Shimmer className="h-24 rounded-xl" />
+          <Shimmer className="h-24 rounded-xl" />
+        </div>
       </div>
-      <span className="text-xs font-semibold uppercase tracking-[0.2em] text-primary-300/70 animate-pulse">{label}</span>
+      <span className="text-xs font-semibold uppercase tracking-[0.2em] text-primary-300/70 animate-pulse">
+        {label}
+      </span>
     </div>
   );
 
@@ -80,18 +119,23 @@ export const MainContent: React.FC<MainContentProps> = ({
     switch (displayedStep) {
       case AppStep.LOGIN:
         return (
-          <Suspense fallback={suspenseFallback('Loading login')}>
-            <LazyLoginScreen
-              onLogin={onLogin}
-            />
+          <Suspense fallback={suspenseFallback("Loading login")}>
+            <LazyLoginScreen onLogin={onLogin} />
           </Suspense>
         );
       case AppStep.ADMIN:
-        return <Suspense fallback={suspenseFallback('Loading admin')}><LazyAdminDashboard /></Suspense>;
+        return (
+          <Suspense fallback={suspenseFallback("Loading admin")}>
+            <LazyAdminDashboard />
+          </Suspense>
+        );
       case AppStep.CAPTURE:
         return (
-          <Suspense fallback={suspenseFallback('Preparing camera')}>
-            <LazyImageInput onImageSelected={onImageSelected} onClose={onReset} />
+          <Suspense fallback={suspenseFallback("Preparing camera")}>
+            <LazyImageInput
+              onImageSelected={onImageSelected}
+              onClose={onReset}
+            />
           </Suspense>
         );
       case AppStep.CUSTOMIZE:
@@ -106,11 +150,11 @@ export const MainContent: React.FC<MainContentProps> = ({
           isDesktopLayout,
           isGenerating: step === AppStep.GENERATING,
         };
-        
+
         if (error) {
           return (
             <div className="w-full max-w-screen-2xl mx-auto p-4 flex flex-col items-center justify-center min-h-[50vh]">
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="bg-error/10 border border-error/30 p-6 rounded-2xl max-w-md w-full text-center backdrop-blur-md"
@@ -118,22 +162,40 @@ export const MainContent: React.FC<MainContentProps> = ({
                 <div className="w-12 h-12 bg-error/20 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Icon type="error" className="w-6 h-6 text-error" />
                 </div>
-                <h3 className="text-lg font-bold text-white mb-2">Something went wrong</h3>
+                <h3 className="text-lg font-bold text-white mb-2">
+                  Something went wrong
+                </h3>
                 <p className="text-error-200 mb-6">{error}</p>
                 <div className="flex gap-3 justify-center">
-                  <Button variant="outline" onClick={onReset}>Start Over</Button>
-                  <Button variant="primary" onClick={() => window.location.reload()}>Reload App</Button>
+                  <Button variant="outline" onClick={onReset}>
+                    Start Over
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() => window.location.reload()}
+                  >
+                    Reload App
+                  </Button>
                 </div>
               </motion.div>
             </div>
           );
         }
-        return selectedImage ? <Suspense fallback={suspenseFallback('Loading')}><LazyPostCustomizer {...customizerProps} /></Suspense> : null;
+        return selectedImage ? (
+          <Suspense fallback={suspenseFallback("Loading")}>
+            <LazyPostCustomizer {...customizerProps} />
+          </Suspense>
+        ) : null;
       case AppStep.GENERATING:
-        return <LoadingOverlay progress={generationProgress} message={progressMessage} />;
+        return (
+          <LoadingOverlay
+            progress={generationProgress}
+            message={progressMessage}
+          />
+        );
       case AppStep.RESULT:
         return generatedPost ? (
-          <Suspense fallback={suspenseFallback('Loading results')}>
+          <Suspense fallback={suspenseFallback("Loading results")}>
             <LazyPostResult
               post={generatedPost}
               onStartOver={onReset}

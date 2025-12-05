@@ -12,6 +12,7 @@ import {
 import { StyleOption, ToneOption } from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Button } from "./ui/Button";
+import { FAB } from "./ui/FAB";
 import {
   Card,
   CardContent,
@@ -80,6 +81,27 @@ const TONE_INFO: Record<ToneOption, { emoji: string; short: string }> = {
   [ToneOption.Humorous]: { emoji: "😄", short: "Fun & clever" },
   [ToneOption.Inspirational]: { emoji: "🌟", short: "Uplifting & forward" },
   [ToneOption.Promotional]: { emoji: "📣", short: "CTA-focused" },
+};
+
+const TypewriterText: React.FC<{ text: string }> = ({ text }) => {
+  const [displayedText, setDisplayedText] = useState("");
+
+  useEffect(() => {
+    let index = 0;
+    setDisplayedText("");
+    // Small delay before starting to type to allow for "clearing" feel
+    const timeout = setTimeout(() => {
+      const intervalId = setInterval(() => {
+        setDisplayedText((prev) => text.slice(0, index + 1));
+        index++;
+        if (index === text.length) clearInterval(intervalId);
+      }, 15); // Typing speed
+      return () => clearInterval(intervalId);
+    }, 100);
+    return () => clearTimeout(timeout);
+  }, [text]);
+
+  return <span>{displayedText}</span>;
 };
 
 type CaptionSource = "ai" | "custom";
@@ -153,12 +175,18 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
-        <Card elevation={2}>
-          <CardHeader className="pb-3">
+        <Card
+          elevation={2}
+          className="relative overflow-hidden border-white/10"
+        >
+          {/* Ambient background glow for card */}
+          <div className="absolute inset-0 bg-gradient-to-br from-primary-500/5 via-transparent to-transparent pointer-events-none" />
+
+          <CardHeader className="pb-3 relative">
             <div className="flex items-center gap-3">
               {/* Compact image preview */}
               <motion.div
-                className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border border-white/20 flex-shrink-0"
+                className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border border-white/20 flex-shrink-0 shadow-lg"
                 whileHover={{ scale: 1.05 }}
               >
                 <img
@@ -189,7 +217,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             </div>
           </CardHeader>
 
-          <CardContent className="space-y-4 pt-0">
+          <CardContent className="space-y-5 pt-0 relative">
             {/* Customer Name - Compact */}
             <Input
               label="Customer's name (optional)"
@@ -197,13 +225,19 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               onChange={(e) => setCustomerName(e.target.value)}
               placeholder="First name"
               fullWidth
+              className="bg-white/5 border-white/10 focus:border-primary-400 focus:bg-white/10 transition-colors"
             />
 
             {/* Style Selection - Simplified Grid */}
             <div className="space-y-2">
-              <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
-                Design Style
-              </label>
+              <div className="flex justify-between items-baseline">
+                <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+                  Design Style
+                </label>
+                <span className="text-[10px] text-surface-400 opacity-60">
+                  Select one
+                </span>
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 {Object.values(StyleOption).map((option) => {
                   const info = STYLE_INFO[option];
@@ -216,24 +250,51 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         setStyle(option);
                       }}
                       className={cn(
-                        "flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-all",
+                        "relative flex items-center gap-2 rounded-xl border px-3 py-3 text-left transition-all overflow-hidden",
                         isActive
-                          ? "border-primary-400 bg-primary-500/20 shadow-lg shadow-primary-500/20"
-                          : "border-white/10 bg-white/5 hover:border-primary-400/50 hover:bg-white/10"
+                          ? "border-primary-400 bg-primary-500/20 shadow-[0_0_15px_-3px_rgba(56,189,248,0.3)]"
+                          : "border-white/10 bg-white/5 hover:border-primary-400/30 hover:bg-white/10"
                       )}
-                      whileTap={{ scale: 0.97 }}
+                      whileTap={{ scale: 0.98 }}
                     >
-                      <span className="text-lg">{info.emoji}</span>
-                      <div className="flex-1 min-w-0">
+                      {isActive && (
+                        <motion.div
+                          layoutId="activeStyleGlow"
+                          className="absolute inset-0 bg-primary-400/10"
+                          initial={false}
+                          transition={{ duration: 0.3 }}
+                        />
+                      )}
+                      <span className="text-2xl relative z-10">
+                        {info.emoji}
+                      </span>
+                      <div className="flex-1 min-w-0 relative z-10">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-sm font-medium text-surface-50 truncate">
+                          <span
+                            className={cn(
+                              "text-sm font-semibold truncate transition-colors",
+                              isActive ? "text-primary-100" : "text-surface-50"
+                            )}
+                          >
                             {option.split(" ")[0]}
                           </span>
                           {isActive && (
-                            <Check className="h-3.5 w-3.5 text-primary-400 flex-shrink-0" />
+                            <motion.div
+                              initial={{ scale: 0 }}
+                              animate={{ scale: 1 }}
+                            >
+                              <Check className="h-3.5 w-3.5 text-primary-400 flex-shrink-0" />
+                            </motion.div>
                           )}
                         </div>
-                        <span className="text-[11px] text-surface-400 block truncate">
+                        <span
+                          className={cn(
+                            "text-[11px] block truncate transition-colors",
+                            isActive
+                              ? "text-primary-200/80"
+                              : "text-surface-400"
+                          )}
+                        >
                           {info.desc}
                         </span>
                       </div>
@@ -248,7 +309,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
                 Tone
               </label>
-              <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-hide">
+              <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 custom-scrollbar">
                 {Object.values(ToneOption).map((option) => {
                   const info = TONE_INFO[option];
                   const isActive = option === tone;
@@ -260,18 +321,18 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         setTone(option);
                       }}
                       className={cn(
-                        "flex items-center gap-1.5 rounded-full border px-3 py-1.5 whitespace-nowrap transition-all flex-shrink-0",
+                        "relative flex items-center gap-1.5 rounded-full border px-4 py-2 whitespace-nowrap transition-all flex-shrink-0",
                         isActive
-                          ? "border-success-400 bg-success-500/20"
-                          : "border-white/10 bg-white/5 hover:border-success-400/50"
+                          ? "border-success-400 bg-success-500/20 shadow-[0_0_10px_-2px_rgba(74,222,128,0.3)]"
+                          : "border-white/10 bg-white/5 hover:border-success-400/30 hover:bg-white/10"
                       )}
                       whileTap={{ scale: 0.95 }}
                     >
                       <span className="text-sm">{info.emoji}</span>
                       <span
                         className={cn(
-                          "text-xs font-medium",
-                          isActive ? "text-success-300" : "text-surface-300"
+                          "text-xs font-semibold",
+                          isActive ? "text-success-100" : "text-surface-300"
                         )}
                       >
                         {option}
@@ -287,28 +348,36 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
                 Caption
               </label>
-              <div className="flex gap-2">
+              <div className="flex gap-2 bg-surface-950/30 p-1 rounded-xl border border-white/5">
                 <Button
-                  variant={captionSource === "ai" ? "filled" : "tinted"}
+                  variant={captionSource === "ai" ? "filled" : "ghost"}
                   size="sm"
                   leftIcon={<Sparkles className="h-3.5 w-3.5" />}
                   onClick={() => {
                     triggerHapticFeedback();
                     setCaptionSource("ai");
                   }}
-                  className="flex-1"
+                  className={cn(
+                    "flex-1 rounded-lg",
+                    captionSource !== "ai" &&
+                      "text-surface-400 hover:text-surface-200"
+                  )}
                 >
                   AI Magic
                 </Button>
                 <Button
-                  variant={captionSource === "custom" ? "filled" : "tinted"}
+                  variant={captionSource === "custom" ? "filled" : "ghost"}
                   size="sm"
                   leftIcon={<Edit3 className="h-3.5 w-3.5" />}
                   onClick={() => {
                     triggerHapticFeedback();
                     setCaptionSource("custom");
                   }}
-                  className="flex-1"
+                  className={cn(
+                    "flex-1 rounded-lg",
+                    captionSource !== "custom" &&
+                      "text-surface-400 hover:text-surface-200"
+                  )}
                 >
                   Write My Own
                 </Button>
@@ -331,6 +400,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                     rows={3}
                     placeholder="Write your caption here..."
                     fullWidth
+                    className="bg-white/5 border-white/10 focus:border-primary-400"
                   />
                 </motion.div>
               )}
@@ -343,15 +413,17 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   triggerHapticFeedback();
                   setShowAdvanced(!showAdvanced);
                 }}
-                className="flex items-center gap-2 text-xs text-surface-400 hover:text-surface-200 transition-colors w-full"
+                className="flex items-center gap-2 text-xs text-surface-400 hover:text-surface-200 transition-colors w-full group"
               >
                 <ChevronDown
                   className={cn(
-                    "h-3.5 w-3.5 transition-transform",
+                    "h-3.5 w-3.5 transition-transform group-hover:text-primary-400",
                     showAdvanced && "rotate-180"
                   )}
                 />
-                <span>Advanced options</span>
+                <span className="group-hover:text-primary-400 transition-colors">
+                  Advanced options
+                </span>
               </button>
 
               <AnimatePresence>
@@ -404,12 +476,15 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                     </div>
 
                     {/* Style Preview */}
-                    <div className="rounded-xl border border-primary-400/20 bg-primary-500/10 px-3 py-2">
-                      <div className="text-[10px] uppercase tracking-wide text-primary-300 mb-1">
-                        AI will create
+                    <div className="rounded-xl border border-primary-400/20 bg-primary-500/10 px-4 py-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Sparkles className="w-3 h-3 text-primary-300" />
+                        <div className="text-[10px] uppercase tracking-wide text-primary-300 font-semibold">
+                          AI Instruction
+                        </div>
                       </div>
-                      <p className="text-xs text-surface-200">
-                        {STYLE_INFO[style].aiHint}
+                      <p className="text-xs text-surface-200 leading-relaxed font-mono">
+                        <TypewriterText text={STYLE_INFO[style].aiHint} />
                       </p>
                     </div>
                   </motion.div>
@@ -418,19 +493,34 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             </div>
 
             {/* Generate Button - Full Width & Prominent */}
-            <div className="flex flex-col gap-2 pt-2">
+            <div className="flex flex-col gap-3 pt-2">
               <Button
                 variant="filled"
                 size="lg"
                 leftIcon={
                   <Sparkles className={cn(isBusy && "animate-pulse")} />
                 }
-                rightIcon={<ChevronRight />}
+                rightIcon={!isBusy && <ChevronRight />}
                 onClick={handleGenerate}
                 disabled={isBusy}
                 fullWidth
+                className="relative overflow-hidden shadow-lg shadow-primary-500/20 h-14 text-base"
               >
-                {isBusy ? "Creating your post..." : "Generate Post"}
+                {isBusy && (
+                  <motion.div
+                    className="absolute inset-0 bg-white/20"
+                    initial={{ x: "-100%" }}
+                    animate={{ x: "100%" }}
+                    transition={{
+                      repeat: Infinity,
+                      duration: 1.5,
+                      ease: "linear",
+                    }}
+                  />
+                )}
+                <span className="relative z-10">
+                  {isBusy ? "Creating your post..." : "Generate Post"}
+                </span>
               </Button>
               <Button
                 variant="plain"
@@ -441,6 +531,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   onBack();
                 }}
                 fullWidth
+                className="text-surface-400 hover:text-surface-200"
               >
                 Change photo
               </Button>
@@ -448,6 +539,19 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           </CardContent>
         </Card>
       </motion.div>
+
+      {/* Mobile FAB for quick generation */}
+      {!isDesktopLayout && (
+        <FAB
+          onClick={handleGenerate}
+          show={!isBusy}
+          mainIcon={
+            isBusy ? <Sparkles className="animate-spin" /> : <Sparkles />
+          }
+          position="bottom-right"
+          className="sm:hidden"
+        />
+      )}
     </div>
   );
 };
