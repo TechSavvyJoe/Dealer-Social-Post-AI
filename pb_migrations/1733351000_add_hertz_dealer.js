@@ -23,10 +23,12 @@ migrate(
       // Not found, proceed with creation
     }
 
+    // Note: Logo should be uploaded via Admin Dashboard since PocketBase file fields
+    // require actual file uploads, not URL strings
     const record = new Record(collection, {
       name: "Hertz Car Sales",
       code: "0001",
-      logo: "https://www.hertzcarbuying.com/content/dam/hertz-car-sales/images/logos/hertz-car-sales-logo.svg",
+      logo: "", // Upload logo via Admin Dashboard
     });
 
     dao.saveRecord(record);
