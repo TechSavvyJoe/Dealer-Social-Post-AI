@@ -159,6 +159,36 @@ export const updateDealer = async (dealer: Dealer): Promise<Dealer> => {
 };
 
 /**
+ * Updates an existing dealer with support for file uploads.
+ * @param dealerId The ID of the dealer to update.
+ * @param formData The FormData object containing updated dealer data.
+ * @returns A promise resolving to the updated Dealer object.
+ */
+export const updateDealerWithFile = async (
+  dealerId: string,
+  formData: FormData
+): Promise<Dealer> => {
+  try {
+    const record = await pb.collection(COLLECTION_NAME).update(dealerId, formData);
+
+    const logoUrl =
+      record.logo && !record.logo.startsWith("http")
+        ? pb.files.getURL(record, record.logo)
+        : record.logo;
+
+    return {
+      id: record.id,
+      name: record.name,
+      logo: logoUrl,
+      code: record.code,
+    };
+  } catch (error) {
+    console.error("Error updating dealer with file:", error);
+    throw error;
+  }
+};
+
+/**
  * Creates a new dealer with support for file uploads.
  * @param formData The FormData object containing dealer data.
  * @returns A promise resolving to the newly created Dealer object.

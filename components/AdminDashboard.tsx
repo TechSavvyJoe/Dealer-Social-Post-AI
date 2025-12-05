@@ -7,13 +7,14 @@ import { logEvent, logError } from "../utils/telemetry";
 import { motion } from "framer-motion";
 import { Button } from "./ui/Button";
 import { Skeleton } from "./ui/Skeleton";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Pencil } from "lucide-react";
 
 const DealerCard: React.FC<{
   dealer: Dealer;
   onDelete: (id: string) => void;
+  onEdit: (dealer: Dealer) => void;
   isDeleting: boolean;
-}> = ({ dealer, onDelete, isDeleting }) => {
+}> = ({ dealer, onDelete, onEdit, isDeleting }) => {
   const isAdminDealer = dealer.code === "0000";
 
   return (
@@ -53,6 +54,14 @@ const DealerCard: React.FC<{
         </div>
         <div className="flex gap-2">
           <Button
+            variant="outline"
+            size="icon"
+            onClick={() => onEdit(dealer)}
+            title="Edit Dealer"
+          >
+            <Pencil className="w-5 h-5" />
+          </Button>
+          <Button
             variant="danger"
             size="icon"
             onClick={() => onDelete(dealer.id)}
@@ -78,6 +87,7 @@ export const AdminDashboard: React.FC = () => {
     logoFile: null as File | null,
   });
   const [showForm, setShowForm] = useState(false);
+  const [editingDealer, setEditingDealer] = useState<Dealer | null>(null);
 
   // --- DATA FETCHING ---
   const { data, error, isPending, refetch } = useQuery({
@@ -90,8 +100,16 @@ export const AdminDashboard: React.FC = () => {
     mutationFn: db.addDealerWithFile,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dealers"] });
-      setFormState({ name: "", code: "", logoUrl: "", logoFile: null });
-      setShowForm(false);
+      resetForm();
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ dealerId, formData }: { dealerId: string; formData: FormData }) =>
+      db.updateDealerWithFile(dealerId, formData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["dealers"] });
+      resetForm();
     },
   });
 
@@ -102,10 +120,28 @@ export const AdminDashboard: React.FC = () => {
     },
   });
 
+  // --- HELPERS ---
+  const resetForm = () => {
+    setFormState({ name: "", code: "", logoUrl: "", logoFile: null });
+    setShowForm(false);
+    setEditingDealer(null);
+  };
+
+  const handleEditDealer = (dealer: Dealer) => {
+    setEditingDealer(dealer);
+    setFormState({
+      name: dealer.name,
+      code: dealer.code || "",
+      logoUrl: "",
+      logoFile: null,
+    });
+    setShowForm(true);
+  };
+
   // --- HANDLERS ---
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    // Only allow 4 digits for code field
+    // Only allow 4 digits for code field (and don't allow editing code when updating)
     if (name === "code" && (value.length > 4 || !/^\d*$/.test(value))) {
       return;
     }
@@ -123,15 +159,22 @@ export const AdminDashboard: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formState.name.trim() || !formState.code.trim()) return;
-    if (formState.code.length !== 4) {
+    if (!formState.name.trim()) return;
+    
+    // For new dealers, code is required
+    if (!editingDealer && !formState.code.trim()) return;
+    if (!editingDealer && formState.code.length !== 4) {
       alert("Dealer code must be exactly 4 digits");
       return;
     }
 
     const formData = new FormData();
     formData.append("name", formState.name.trim());
-    formData.append("code", formState.code.trim());
+    
+    // Only include code for new dealers (code cannot be changed)
+    if (!editingDealer) {
+      formData.append("code", formState.code.trim());
+    }
 
     // Prioritize file upload, fallback to URL
     if (formState.logoFile) {
@@ -158,7 +201,12 @@ export const AdminDashboard: React.FC = () => {
         return;
       }
     }
-    addMutation.mutate(formData);
+    
+    if (editingDealer) {
+      updateMutation.mutate({ dealerId: editingDealer.id, formData });
+    } else {
+      addMutation.mutate(formData);
+    }
   };
 
   const dealers = data ?? [];
@@ -182,7 +230,13 @@ export const AdminDashboard: React.FC = () => {
           <Button
             variant="primary"
             size="sm"
-            onClick={() => setShowForm(!showForm)}
+            onClick={() => {
+              if (showForm) {
+                resetForm();
+              } else {
+                setShowForm(true);
+              }
+            }}
             leftIcon={<Icon type="plus" className="w-4 h-4" />}
           >
             {showForm ? "Cancel" : "Add Dealer"}
@@ -190,7 +244,7 @@ export const AdminDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Add Dealer Form */}
+      {/* Add/Edit Dealer Form */}
       {showForm && (
         <motion.div
           initial={{ opacity: 0, y: -20 }}
@@ -198,7 +252,18 @@ export const AdminDashboard: React.FC = () => {
           className="bg-slate-800 p-6 rounded-lg"
         >
           <form onSubmit={handleSubmit} className="space-y-4">
-            <h3 className="text-xl font-semibold mb-2">New Dealer</h3>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xl font-semibold">
+                {editingDealer ? `Edit: ${editingDealer.name}` : "New Dealer"}
+              </h3>
+              {editingDealer?.logo && (
+                <img
+                  src={editingDealer.logo}
+                  alt="Current logo"
+                  className="w-12 h-12 object-contain rounded bg-white/10 p-1"
+                />
+              )}
+            </div>
             <div>
               <label
                 htmlFor="name"
@@ -221,9 +286,9 @@ export const AdminDashboard: React.FC = () => {
                 htmlFor="code"
                 className="block text-sm font-medium text-slate-300"
               >
-                Dealer Code (4 digits) *
+                Dealer Code (4 digits) {!editingDealer && "*"}
                 <span className="text-xs text-slate-400 ml-2">
-                  Used for login (e.g., 5555, 6666)
+                  {editingDealer ? "(Cannot be changed)" : "Used for login (e.g., 5555, 6666)"}
                 </span>
               </label>
               <input
@@ -232,11 +297,12 @@ export const AdminDashboard: React.FC = () => {
                 type="text"
                 value={formState.code}
                 onChange={handleInputChange}
-                required
+                required={!editingDealer}
+                disabled={!!editingDealer}
                 maxLength={4}
                 pattern="\d{4}"
                 placeholder="e.g., 5555"
-                className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 text-white font-mono text-lg tracking-wider"
+                className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 text-white font-mono text-lg tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
             <div>
@@ -262,7 +328,7 @@ export const AdminDashboard: React.FC = () => {
                 htmlFor="logoFile"
                 className="block text-sm font-medium text-slate-300"
               >
-                Upload Logo
+                Upload Logo {editingDealer && "(replaces current)"}
               </label>
               <input
                 id="logoFile"
@@ -277,20 +343,26 @@ export const AdminDashboard: React.FC = () => {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setShowForm(false)}
+                onClick={resetForm}
               >
                 Cancel
               </Button>
               <Button
                 type="submit"
                 variant="primary"
-                disabled={addMutation.isPending}
+                disabled={addMutation.isPending || updateMutation.isPending}
               >
-                {addMutation.isPending ? "Saving..." : "Save Dealer"}
+                {(addMutation.isPending || updateMutation.isPending) 
+                  ? "Saving..." 
+                  : editingDealer 
+                    ? "Update Dealer" 
+                    : "Save Dealer"}
               </Button>
             </div>
-            {addMutation.isError && (
-              <p className="text-red-400">Error: {addMutation.error.message}</p>
+            {(addMutation.isError || updateMutation.isError) && (
+              <p className="text-red-400">
+                Error: {(addMutation.error || updateMutation.error)?.message}
+              </p>
             )}
           </form>
         </motion.div>
@@ -314,6 +386,7 @@ export const AdminDashboard: React.FC = () => {
               key={dealer.id}
               dealer={dealer}
               onDelete={deleteMutation.mutate}
+              onEdit={handleEditDealer}
               isDeleting={
                 deleteMutation.isPending &&
                 deleteMutation.variables === dealer.id
