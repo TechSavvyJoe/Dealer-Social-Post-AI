@@ -5,18 +5,17 @@
  * - `/api/proxy/vertex/v1beta1/projects/{PROJECT_ID}/locations/{LOCATION}/...` (Vertex AI)
  * and the hook will forward the request to the appropriate Google API with the secret API key.
  */
-// Global token cache
-let cachedAccessToken = null;
-let tokenExpiry = 0;
+// Global token cache - using simple object for PocketBase JSVM compatibility
+var _tokenCache = { token: null, expiry: 0 };
 
-// Rate limiting configuration
-const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute window
-const RATE_LIMIT_MAX_REQUESTS = 30; // 30 requests per window
-var rateLimitStore = new Map(); // token -> { count, windowStart }
-
-// Helper functions are defined inside proxyHandler for PocketBase JSVM compatibility
+// Rate limiting - using simple object instead of Map for PocketBase JSVM compatibility
+var _rateLimitData = {};
 
 const proxyHandler = (c) => {
+  // Rate limit configuration - defined inside handler for scope safety
+  const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute window
+  const RATE_LIMIT_MAX_REQUESTS = 30; // 30 requests per window
+
   const GEMINI_API_URL_BASE = "https://generativelanguage.googleapis.com/";
   const VERTEX_AI_URL_BASE = "https://{LOCATION}-aiplatform.googleapis.com/";
 
@@ -117,12 +116,14 @@ const proxyHandler = (c) => {
     // Rate limiting check
     const now = Date.now();
     const rateLimitKey = incomingToken.substring(0, 16); // Use partial token as key
-    let rateData = rateLimitStore.get(rateLimitKey);
+
+    // Use the global object instead of Map
+    let rateData = _rateLimitData[rateLimitKey];
 
     if (!rateData || now - rateData.windowStart > RATE_LIMIT_WINDOW_MS) {
       // Start new window
       rateData = { count: 1, windowStart: now };
-      rateLimitStore.set(rateLimitKey, rateData);
+      _rateLimitData[rateLimitKey] = rateData;
     } else {
       rateData.count++;
       if (rateData.count > RATE_LIMIT_MAX_REQUESTS) {
