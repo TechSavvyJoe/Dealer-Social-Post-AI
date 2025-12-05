@@ -1,6 +1,11 @@
 # Stage 1: Build the Frontend
 FROM node:18.20-alpine AS frontend-builder
 WORKDIR /app
+
+# Set build-time environment variables for Vite
+ARG VITE_ADMIN_CODE=0000
+ENV VITE_ADMIN_CODE=${VITE_ADMIN_CODE}
+
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
