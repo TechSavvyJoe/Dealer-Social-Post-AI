@@ -1,5 +1,5 @@
 /// <reference path="../pb_data/types.d.ts" />
-// Migration to fix Hertz Car Sales logo
+// Migration to fix Hertz Car Sales logo - use self-hosted logo
 migrate((app) => {
     const collection = app.findCollectionByNameOrId("dealers")
     
@@ -7,18 +7,19 @@ migrate((app) => {
     const hertzDealer = app.findFirstRecordByData("dealers", "code", "0001")
     
     if (hertzDealer) {
-        // Update with a working Hertz logo (using a reliable CDN source)
-        hertzDealer.set("logo", "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7a/Hertz_logo.svg/200px-Hertz_logo.svg.png")
+        // Update with self-hosted logo (served from public folder)
+        // The logo is accessible at /logos/hertz-car-sales.png relative to the app domain
+        hertzDealer.set("logo", "/logos/hertz-car-sales.png")
         app.save(hertzDealer)
-        console.log("Updated Hertz Car Sales logo")
+        console.log("Updated Hertz Car Sales logo to self-hosted path")
     } else {
         console.log("Hertz dealer not found - skipping logo update")
     }
 }, (app) => {
-    // Revert migration - restore original logo
+    // Revert migration
     const hertzDealer = app.findFirstRecordByData("dealers", "code", "0001")
     if (hertzDealer) {
-        hertzDealer.set("logo", "https://www.hertzcarbuying.com/content/dam/hertz-car-sales/images/logos/hertz-car-sales-logo.svg")
+        hertzDealer.set("logo", "")
         app.save(hertzDealer)
     }
 })
