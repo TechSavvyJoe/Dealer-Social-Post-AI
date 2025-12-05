@@ -9,33 +9,7 @@
 let cachedAccessToken = null;
 let tokenExpiry = 0;
 
-// getVertexAccessToken moved inside proxyHandler for scope safety
-
-const isPrivateHost = (host) => {
-  // Basic private/bogon IP detection to reduce SSRF risk
-  if (host === "localhost") return true;
-  return (
-    /^(\d{1,3}\.){3}\d{1,3}$/.test(host) &&
-    /^(10\.|127\.|0\.0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(host)
-  );
-};
-
-const isAllowedProxyPath = (path) => {
-  // Strict allowlist of upstream endpoints; reject arbitrary forwarding
-  const geminiPatterns = [
-    /^v1beta\/models\/[^/]+:generateContent$/,
-    /^v1beta\/models\/[^/]+:generateImages$/,
-    /^v1beta\/models\/[^/]+:generateVideos$/,
-    /^v1beta\/operations\/.+$/,
-  ];
-  const vertexPatterns = [
-    /^vertex\/v1beta1\/projects\/[^/]+\/locations\/[^/]+\/publishers\/google\/models\/[^/]+:(generateContent|predict|generateVideos|generateImages)$/,
-    /^vertex\/v1beta1\/operations\/.+$/,
-    /^vertex\/v1\/projects\/[^/]+\/locations\/[^/]+\/publishers\/google\/models\/[^/]+:predict$/,
-  ];
-
-  return [...geminiPatterns, ...vertexPatterns].some((re) => re.test(path));
-};
+// Helper functions are defined inside proxyHandler for PocketBase JSVM compatibility
 
 const proxyHandler = (c) => {
   const GEMINI_API_URL_BASE = "https://generativelanguage.googleapis.com/";
@@ -46,40 +20,52 @@ const proxyHandler = (c) => {
 
   const proxyAccessToken = ($os.getenv("PROXY_ACCESS_TOKEN") || "").trim();
 
+  // Helper function moved inside handler for PocketBase JSVM compatibility
+  const isAllowedProxyPathLocal = (path) => {
+    const geminiPatterns = [
+      /^v1beta\/models\/[^/]+:generateContent$/,
+      /^v1beta\/models\/[^/]+:generateImages$/,
+      /^v1beta\/models\/[^/]+:generateVideos$/,
+      /^v1beta\/operations\/.+$/,
+    ];
+    const vertexPatterns = [
+      /^vertex\/v1beta1\/projects\/[^/]+\/locations\/[^/]+\/publishers\/google\/models\/[^/]+:(generateContent|predict|generateVideos|generateImages)$/,
+      /^vertex\/v1beta1\/operations\/.+$/,
+      /^vertex\/v1\/projects\/[^/]+\/locations\/[^/]+\/publishers\/google\/models\/[^/]+:predict$/,
+    ];
+    return [...geminiPatterns, ...vertexPatterns].some((re) => re.test(path));
+  };
+
+  // Helper for SSRF protection
+  const isPrivateHostLocal = (host) => {
+    if (host === "localhost") return true;
+    return (
+      /^(\d{1,3}\.){3}\d{1,3}$/.test(host) &&
+      /^(10\.|127\.|0\.0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(host)
+    );
+  };
+
   let path = c.pathParams.path;
 
   try {
     const requestInfo = $apis.requestInfo(c);
     const headers = requestInfo.headers || {};
-    
-    // Debug: log all headers
-    console.log("[Proxy] All headers:", JSON.stringify(headers));
 
     // Require shared token for all proxy calls to avoid unauthenticated use
-    // Try multiple header name formats
+    // PocketBase normalizes headers to lowercase with underscores, also try c.request().header.get()
     const incomingToken = (
+      headers["x_proxy_token"] ||
       headers["x-proxy-token"] ||
-      headers["X-Proxy-Token"] ||
-      headers["X-PROXY-TOKEN"] ||
       c.request().header.get("X-Proxy-Token") ||
       c.request().header.get("x-proxy-token") ||
       ""
     ).toString().trim();
     
-    // Debug logging for token issues
-    console.log("[Proxy] Token check - env token length:", proxyAccessToken.length);
-    console.log("[Proxy] Token check - incoming token length:", incomingToken.length);
-    console.log("[Proxy] Token check - env token first 10 chars:", proxyAccessToken.substring(0, 10));
-    console.log("[Proxy] Token check - incoming token first 10 chars:", incomingToken.substring(0, 10));
-    
     if (!proxyAccessToken || incomingToken !== proxyAccessToken) {
-      console.log("[Proxy] Token mismatch! proxyAccessToken empty:", !proxyAccessToken, "match:", incomingToken === proxyAccessToken);
       return c.json(401, {
         error: "Unauthorized proxy request",
       });
     }
-    
-    console.log("[Proxy] Token validated successfully");
 
     // Fallback: manual extraction if wildcard param fails
     if (!path) {
@@ -96,7 +82,7 @@ const proxyHandler = (c) => {
       });
     }
 
-    if (!isAllowedProxyPath(path)) {
+    if (!isAllowedProxyPathLocal(path)) {
       return c.json(403, {
         error: "Proxy path not allowed",
       });
@@ -508,7 +494,7 @@ routerAdd("GET", "/api/proxy-image", (c) => {
     if (parsed.protocol !== "https:") {
       return c.json(400, { error: "Only https URLs are allowed" });
     }
-    if (isPrivateHost(parsed.hostname)) {
+    if (isPrivateHostLocal(parsed.hostname)) {
       return c.json(400, { error: "Private/loopback hosts are not allowed" });
     }
   } catch (e) {
