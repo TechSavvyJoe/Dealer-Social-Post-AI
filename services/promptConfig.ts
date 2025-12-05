@@ -1229,27 +1229,51 @@ Transform the provided static photograph into a ${options.durationSeconds}-secon
   switch (style) {
     case VideoStyle.EpicReveal:
       styleInstruction =
-        "Theme: 'Epic Reveal'. Animate the image with a very slow, smooth cinematic zoom-in effect, focusing on the car and the happy customers. Add subtle, elegant lens flares that sweep across the screen. Introduce gentle, glowing light rays that emanate from behind the car. The overall mood should be premium, celebratory, and awe-inspiring.";
+        "Theme: 'Epic Cinematic Reveal'. \n" +
+        "CAMERA MOTION: Perform a slow, majestic DOLLY ZOOM (Hitchcock effect) centered on the car. \n" +
+        "EFFECTS: Add volumetric god-rays beaming down from the sky. As the camera zooms, reveal subtle glowing dust motes floating in the air. \n" +
+        "ATMOSPHERE: High-end luxury commercial, awe-inspiring, premium. \n" +
+        "DETAILS: The car's paint should gleam with moving reflections.";
       break;
     case VideoStyle.PartyTime:
       styleInstruction =
-        "Theme: 'Party Time'. Create a high-energy, celebratory video. Animate colorful, realistic confetti and streamers falling all around the scene. Add a subtle, rhythmic 'pulse' or 'bounce' to the image to give it a fun, party vibe. The motion should be upbeat and exciting.";
+        "Theme: 'Ultimate Celebration'. \n" +
+        "CAMERA MOTION: Dynamic handheld camera movement that slightly bobs to a beat, zooming in and out rhythmically. \n" +
+        "EFFECTS: EXPLOSION of realistic 3D confetti and streamers falling from above. Add a subtle 'camera flash' strobing effect. \n" +
+        "ATMOSPHERE: High-energy party, excitement, joy. \n" +
+        "DETAILS: Make the people appear to be slightly bouncing or vibrating with excitement.";
       break;
     case VideoStyle.VintageFilm:
       styleInstruction =
-        "Theme: 'Vintage Film'. Give the video a nostalgic, retro 8mm or 16mm film look. Add a noticeable film grain overlay, subtle scratches, and dust specks. Create a gentle, slightly unsteady 'camera shake' effect. Incorporate warm-toned light leaks that occasionally flash in from the sides of the frame.";
+        "Theme: 'Nostalgic Super 8mm Film'. \n" +
+        "CAMERA MOTION: Handheld, shaky cam effect with occasional focus hunting. \n" +
+        "EFFECTS: Heavy film grain, cigarette burns, dust scratches, and color flickering. \n" +
+        "ATMOSPHERE: Warm, nostalgic memory, timeless classic. \n" +
+        "DETAILS: Color grade should shift slightly between warm sepias and faded Kodachrome styles.";
       break;
     case VideoStyle.NeonPulse:
       styleInstruction =
-        "Theme: 'Neon Pulse'. Transform the scene with a futuristic, high-tech aesthetic. Trace the main contours of the car and people with thin, glowing neon lines. Make these lines pulse rhythmically with a soft glow. Add a subtle 'glitch' or 'scan line' effect over the video for a digital feel. The mood is cool, modern, and electronic.";
+        "Theme: 'Cyberpunk Neon Pulse'. \n" +
+        "CAMERA MOTION: Smooth, gliding tracking shot moving sideways (truck left to right). \n" +
+        "EFFECTS: Animated glowing NEON OUTLINES tracing the edges of the car and people. The neon lines should pulse and flow like electricity. \n" +
+        "ATMOSPHERE: Futuristic, high-tech, Tron-like aesthetic. \n" +
+        "DETAILS: Add a digital glitch effect that periodically distorts the image slightly.";
       break;
     case VideoStyle.CometStrike:
       styleInstruction =
-        "Theme: 'Comet Strike'. Create a magical and enchanting reveal. Animate a bright, sparkling streak of light, like a comet's tail, that gracefully swoops across the screen, revealing the image as it passes. The comet should leave a trail of glittering particles that gently fade away. The overall feel is magical, wondrous, and special.";
+        "Theme: 'Magical Stardust'. \n" +
+        "CAMERA MOTION: Slow, dreamlike pan upwards. \n" +
+        "EFFECTS: A magical stream of glittering stardust swirls around the car and people, leaving a trail of sparkles. \n" +
+        "ATMOSPHERE: Enchanting, Disney-like magic. \n" +
+        "DETAILS: Soft, blooming light should pulse gently from the center of the image.";
       break;
     case VideoStyle.HappyDance:
       styleInstruction =
-        "Theme: 'Happy Dance'. Your primary task is to isolate the main customer in the photo. Animate them doing a simple, joyful dance in place. This should be a subtle shoulder groove and a gentle sway, capturing a moment of pure happiness. The car and the background should remain completely static to focus all attention on the customer's celebration.";
+        "Theme: 'Playful Bounce'. \n" +
+        "CAMERA MOTION: The camera should snap-zoom in and out to the beat of an imaginary song. \n" +
+        "EFFECTS: Add fun, pop-art style motion lines and shapes (stars, hearts) popping up around the happy customers. \n" +
+        "ATMOSPHERE: Fun, playful, TikTok/Reels style trend. \n" +
+        "DETAILS: Slightly squash-and-stretch the entire image rhythmically to make it feel like it's dancing.";
       break;
     case VideoStyle.JumpingForJoy:
       styleInstruction =
