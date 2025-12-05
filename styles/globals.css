@@ -33,21 +33,43 @@
     --color-border: 51 65 85; /* surface-700 */
     --color-border-light: 30 41 59; /* surface-800 */
 
-    /* Spacing */
+    /* Fluid spacing scale (responsive) */
+    --spacing-xs: clamp(0.5rem, 0.4rem + 0.5vw, 0.75rem);
+    --spacing-sm: clamp(0.75rem, 0.6rem + 0.75vw, 1rem);
+    --spacing-md: clamp(1rem, 0.8rem + 1vw, 1.5rem);
+    --spacing-lg: clamp(1.5rem, 1.2rem + 1.5vw, 2.25rem);
+    --spacing-xl: clamp(2rem, 1.6rem + 2vw, 3rem);
+    --spacing-2xl: clamp(3rem, 2.4rem + 3vw, 4.5rem);
+
+    /* Touch targets */
     --spacing-touch-target: 2.75rem; /* 44px - Apple HIG minimum */
 
     /* Premium gradient colors */
     --gradient-start: rgba(59, 130, 246, 0.15);
     --gradient-mid: rgba(147, 51, 234, 0.1);
     --gradient-end: rgba(236, 72, 153, 0.08);
+
+    /* iOS-style custom easing curves */
+    --ease-ios: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-ios-in: cubic-bezier(0.4, 0, 1, 1);
+    --ease-ios-out: cubic-bezier(0, 0, 0.2, 1);
+    --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  /* Smooth scroll behavior */
+  /* Smooth scroll behavior with advanced typography */
   html {
     scroll-behavior: smooth;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    /* Enable advanced OpenType features */
+    font-feature-settings: 
+      "liga" 1,  /* Standard ligatures */
+      "calt" 1,  /* Contextual alternates */
+      "kern" 1,  /* Kerning */
+      "tnum" 0,  /* Tabular numbers (off by default) */
+      "ss01" 1;  /* Stylistic set 1 (if available) */
   }
 
   /* Respect reduced motion preference */
@@ -579,6 +601,94 @@
 
   .will-change-scroll {
     will-change: scroll-position;
+  }
+
+  /* Shimmer animation for loading states */
+  @keyframes shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  .animate-shimmer {
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+
+  /* Ripple effect for button interactions */
+  .ripple {
+    position: absolute;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.4);
+    transform: scale(0);
+    animation: ripple-animation 600ms ease-out;
+    pointer-events: none;
+  }
+
+  @keyframes ripple-animation {
+    to {
+      transform: scale(2);
+      opacity: 0;
+    }
+  }
+
+  /* Staggered animation utilities */
+  .stagger-1 {
+    animation-delay: 0.1s;
+  }
+  
+  .stagger-2 {
+    animation-delay: 0.2s;
+  }
+  
+  .stagger-3 {
+    animation-delay: 0.3s;
+  }
+
+  /* Entrance animations */
+  @keyframes slide-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes slide-in-down {
+    from {
+      opacity: 0;
+      transform: translateY(-20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .animate-slide-in-up {
+    animation: slide-in-up 0.5s var(--ease-smooth) forwards;
+  }
+
+  .animate-slide-in-down {
+    animation: slide-in-down 0.5s var(--ease-smooth) forwards;
+  }
+
+  .animate-fade-in {
+    animation: fade-in 0.4s var(--ease-ios) forwards;
   }
 }
 

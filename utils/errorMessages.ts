@@ -1,0 +1,133 @@
+/**
+ * User-friendly error messages with actionable suggestions
+ * Transforms technical errors into helpful guidance
+ */
+
+interface ErrorMessage {
+  title: string;
+  description: string;
+  action?: string;
+  actionLabel?: string;
+}
+
+const ERROR_MESSAGES: Record<string, ErrorMessage> = {
+  // Network errors
+  NETWORK_ERROR: {
+    title: "Connection Issue",
+    description:
+      "Unable to connect to the server. Please check your internet connection.",
+    action: "retry",
+    actionLabel: "Try Again",
+  },
+  TIMEOUT: {
+    title: "Request Timed Out",
+    description:
+      "The server is taking too long to respond. This might be due to high traffic.",
+    action: "retry",
+    actionLabel: "Retry",
+  },
+
+  // Authentication errors
+  AUTH_INVALID: {
+    title: "Invalid Dealer Code",
+    description:
+      "The code you entered doesn't match our records. Please check and try again.",
+    action: "input",
+    actionLabel: "Enter Code",
+  },
+  AUTH_EXPIRED: {
+    title: "Session Expired",
+    description: "Your session has expired. Please sign in again to continue.",
+    action: "login",
+    actionLabel: "Sign In",
+  },
+
+  // Generation errors
+  GENERATION_FAILED: {
+    title: "Generation Failed",
+    description:
+      "We couldn't generate your content. Please try again or adjust your settings.",
+    action: "retry",
+    actionLabel: "Try Again",
+  },
+  RATE_LIMITED: {
+    title: "Too Many Requests",
+    description:
+      "You've made too many requests. Please wait a moment before trying again.",
+    action: "wait",
+    actionLabel: "Wait 30s",
+  },
+
+  // Image errors
+  IMAGE_LOAD_FAILED: {
+    title: "Image Load Failed",
+    description:
+      "We couldn't load the image. Please try uploading a different photo.",
+    action: "upload",
+    actionLabel: "Upload New",
+  },
+  IMAGE_TOO_LARGE: {
+    title: "Image Too Large",
+    description: "The image file is too large. Please use an image under 10MB.",
+    action: "upload",
+    actionLabel: "Choose Smaller",
+  },
+
+  // Generic fallback
+  UNKNOWN: {
+    title: "Something Went Wrong",
+    description: "An unexpected error occurred. Please try again.",
+    action: "retry",
+    actionLabel: "Try Again",
+  },
+};
+
+/**
+ * Get user-friendly error message from error
+ */
+export function getErrorMessage(error: unknown): ErrorMessage {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+
+    if (message.includes("network") || message.includes("fetch")) {
+      return ERROR_MESSAGES.NETWORK_ERROR;
+    }
+    if (message.includes("timeout")) {
+      return ERROR_MESSAGES.TIMEOUT;
+    }
+    if (message.includes("invalid") && message.includes("code")) {
+      return ERROR_MESSAGES.AUTH_INVALID;
+    }
+    if (message.includes("expired") || message.includes("401")) {
+      return ERROR_MESSAGES.AUTH_EXPIRED;
+    }
+    if (message.includes("429") || message.includes("rate")) {
+      return ERROR_MESSAGES.RATE_LIMITED;
+    }
+    if (message.includes("generation")) {
+      return ERROR_MESSAGES.GENERATION_FAILED;
+    }
+    if (message.includes("image") && message.includes("load")) {
+      return ERROR_MESSAGES.IMAGE_LOAD_FAILED;
+    }
+    if (message.includes("too large") || message.includes("size")) {
+      return ERROR_MESSAGES.IMAGE_TOO_LARGE;
+    }
+  }
+
+  return ERROR_MESSAGES.UNKNOWN;
+}
+
+/**
+ * Format error for display with optional custom message
+ */
+export function formatErrorForDisplay(
+  error: unknown,
+  customTitle?: string
+): { title: string; description: string } {
+  const errorMessage = getErrorMessage(error);
+  return {
+    title: customTitle || errorMessage.title,
+    description: errorMessage.description,
+  };
+}

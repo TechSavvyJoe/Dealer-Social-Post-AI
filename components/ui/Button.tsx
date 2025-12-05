@@ -57,7 +57,8 @@ const baseStyles = cn(
   "font-semibold tracking-tight",
   "rounded-xl",
   "transition-all duration-200 ease-apple",
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950",
+  "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950",
+  "focus-visible:shadow-[0_0_0_4px_rgba(59,130,246,0.25)]",
   "disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none",
   "select-none touch-manipulation",
   "will-change-transform"

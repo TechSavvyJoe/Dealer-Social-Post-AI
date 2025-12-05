@@ -31,5 +31,32 @@ export default defineConfig(() => {
     optimizeDeps: {
       exclude: ["pocketbase"],
     },
+    build: {
+      // Enable CSS code splitting for better caching
+      cssCodeSplit: true,
+      // Configure manual chunking for optimal caching
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            // Vendor chunk - rarely changes
+            vendor: ["react", "react-dom", "zustand"],
+            // UI library chunk - stable
+            ui: ["framer-motion", "lucide-react"],
+            // AI services chunk
+            ai: ["@google/genai"],
+          },
+        },
+      },
+      // Increase chunk size warning limit (we have large AI models)
+      chunkSizeWarningLimit: 1000,
+      // Enable minification
+      minify: "esbuild" as const,
+      // Source maps for production debugging (disabled for smaller bundle)
+      sourcemap: false,
+    },
+    // CSS optimization
+    css: {
+      devSourcemap: true,
+    },
   };
 });

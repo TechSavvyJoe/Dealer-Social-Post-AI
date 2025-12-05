@@ -245,9 +245,25 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   return (
                     <motion.button
                       key={option}
-                      onClick={() => {
+                      onClick={(e) => {
                         triggerHapticFeedback();
                         setStyle(option);
+
+                        // Ripple effect
+                        const button = e.currentTarget;
+                        const ripple = document.createElement("span");
+                        const rect = button.getBoundingClientRect();
+                        const size = Math.max(rect.width, rect.height);
+                        const x = e.clientX - rect.left - size / 2;
+                        const y = e.clientY - rect.top - size / 2;
+
+                        ripple.style.width = ripple.style.height = `${size}px`;
+                        ripple.style.left = `${x}px`;
+                        ripple.style.top = `${y}px`;
+                        ripple.className = "ripple";
+
+                        button.appendChild(ripple);
+                        setTimeout(() => ripple.remove(), 600);
                       }}
                       className={cn(
                         "relative flex items-center gap-2 rounded-xl border px-3 py-3 text-left transition-all overflow-hidden",
@@ -304,12 +320,12 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               </div>
             </div>
 
-            {/* Tone Selection - Horizontal Scroll on Mobile */}
+            {/* Tone Selection - Horizontal Scroll on Mobile with Snap */}
             <div className="space-y-2">
               <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
                 Tone
               </label>
-              <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 custom-scrollbar">
+              <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 custom-scrollbar scroll-smooth snap-x snap-mandatory">
                 {Object.values(ToneOption).map((option) => {
                   const info = TONE_INFO[option];
                   const isActive = option === tone;
@@ -321,7 +337,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         setTone(option);
                       }}
                       className={cn(
-                        "relative flex items-center gap-1.5 rounded-full border px-4 py-2 whitespace-nowrap transition-all flex-shrink-0",
+                        "relative flex items-center gap-1.5 rounded-full border px-4 py-2 whitespace-nowrap transition-all flex-shrink-0 snap-center",
                         isActive
                           ? "border-success-400 bg-success-500/20 shadow-[0_0_10px_-2px_rgba(74,222,128,0.3)]"
                           : "border-white/10 bg-white/5 hover:border-success-400/30 hover:bg-white/10"

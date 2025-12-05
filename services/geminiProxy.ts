@@ -1,7 +1,13 @@
 import { normalizeError } from "../utils/errorHandler";
+import { retryWithBackoff, isRetryableError } from "../utils/retry";
+import { performanceMonitor } from "../utils/performanceMonitor";
+
+// Request tracking for debugging
+let requestCounter = 0;
 
 /**
  * A wrapper for the fetch API to communicate with our backend proxy for Gemini.
+ * Now includes retry logic, performance monitoring, and enhanced error handling.
  * @param method 'GET' or 'POST'
  * @param path The path for the Google API (e.g., 'v1beta/models/gemini-pro:generateContent')
  * @param body The request body to be sent to the Gemini API.
@@ -18,23 +24,53 @@ export async function fetchFromProxy(
     );
   }
 
+  const requestId = ++requestCounter;
+  const markName = `proxy-${requestId}`;
+  performanceMonitor.mark(`${markName}-start`);
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 300000); // 300 second timeout (5 minutes)
 
   try {
-    console.log(`[GeminiProxy] Requesting ${method} ${path}`);
+    console.log(`[GeminiProxy] [${requestId}] Requesting ${method} ${path}`);
     const proxyToken = import.meta.env.VITE_PROXY_ACCESS_TOKEN;
-    const response = await fetch(`/api/proxy/${path}`, {
-      method: method,
-      headers: {
-        "Content-Type": "application/json",
-        ...(proxyToken ? { "X-Proxy-Token": proxyToken } : {}),
+
+    // Use retry logic for transient failures
+    const response = await retryWithBackoff(
+      async () => {
+        const res = await fetch(`/api/proxy/${path}`, {
+          method: method,
+          headers: {
+            "Content-Type": "application/json",
+            ...(proxyToken ? { "X-Proxy-Token": proxyToken } : {}),
+          },
+          // Only include body for POST requests
+          body: method === "POST" ? JSON.stringify(body) : undefined,
+          signal: controller.signal,
+        });
+
+        // Retry on 502, 503, 504 errors
+        if (res.status === 502 || res.status === 503 || res.status === 504) {
+          throw new Error(`Server error ${res.status} - retrying...`);
+        }
+
+        return res;
       },
-      // Only include body for POST requests
-      body: method === "POST" ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
-    });
-    console.log(`[GeminiProxy] Response ${response.status} for ${path}`);
+      {
+        maxAttempts: 3,
+        initialDelay: 1000,
+        onRetry: (attempt, error) => {
+          console.warn(
+            `[GeminiProxy] [${requestId}] Retry ${attempt}:`,
+            error.message
+          );
+        },
+      }
+    );
+
+    console.log(
+      `[GeminiProxy] [${requestId}] Response ${response.status} for ${path}`
+    );
     clearTimeout(timeoutId);
 
     const responseText = await response.text();
@@ -56,6 +92,13 @@ export async function fetchFromProxy(
       }
     }
 
+    // Log performance
+    const duration =
+      performanceMonitor.measure(markName, `${markName}-start`) || 0;
+    if (duration > 10000) {
+      console.warn(`[GeminiProxy] [${requestId}] Slow request: ${duration}ms`);
+    }
+
     try {
       return JSON.parse(responseText);
     } catch (e) {
@@ -64,8 +107,10 @@ export async function fetchFromProxy(
     }
   } catch (error) {
     clearTimeout(timeoutId);
+    performanceMonitor.measure(`${markName}-error`, `${markName}-start`);
+
     if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(`Request to ${path} timed out after 180 seconds.`);
+      throw new Error(`Request to ${path} timed out after 300 seconds.`);
     }
     throw normalizeError(error);
   }

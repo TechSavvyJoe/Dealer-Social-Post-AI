@@ -1,5 +1,7 @@
 import PocketBase from "pocketbase";
 import { Dealer } from "../types";
+import { retryWithBackoff, isRetryableError } from "../utils/retry";
+import { getErrorMessage } from "../utils/errorMessages";
 
 // Initialize PocketBase
 // In production (served by PB), this is relative. In dev, it might need to be localhost:8090
@@ -10,17 +12,43 @@ export const pb = new PocketBase(PB_URL);
 
 export const COLLECTION_NAME = "dealers";
 
+// --- Health Check ---
+
+/**
+ * Check if PocketBase connection is healthy
+ */
+export const checkHealth = async (): Promise<boolean> => {
+  try {
+    await pb.health.check();
+    return true;
+  } catch {
+    console.error("[Database] Health check failed");
+    return false;
+  }
+};
+
 // --- Data Access Functions ---
 
 /**
  * Gets a list of all dealers from PocketBase.
+ * Includes retry logic for transient failures.
  * @returns A promise resolving to an array of Dealer objects.
  */
 export const getAllDealers = async (): Promise<Dealer[]> => {
   try {
-    const records = await pb.collection(COLLECTION_NAME).getFullList({
-      sort: "name",
-    });
+    const records = await retryWithBackoff(
+      () => pb.collection(COLLECTION_NAME).getFullList({ sort: "name" }),
+      {
+        maxAttempts: 3,
+        initialDelay: 500,
+        onRetry: (attempt, error) => {
+          console.warn(
+            `[Database] Retry attempt ${attempt} for getAllDealers:`,
+            error.message
+          );
+        },
+      }
+    );
 
     return records.map((record) => {
       // Check if there is an uploaded file
@@ -37,7 +65,8 @@ export const getAllDealers = async (): Promise<Dealer[]> => {
       };
     });
   } catch (error) {
-    console.error("Error fetching dealers from PocketBase:", error);
+    const { title, description } = getErrorMessage(error);
+    console.error(`[Database] ${title}:`, description, error);
     return [];
   }
 };
@@ -169,7 +198,9 @@ export const updateDealerWithFile = async (
   formData: FormData
 ): Promise<Dealer> => {
   try {
-    const record = await pb.collection(COLLECTION_NAME).update(dealerId, formData);
+    const record = await pb
+      .collection(COLLECTION_NAME)
+      .update(dealerId, formData);
 
     const logoUrl =
       record.logo && !record.logo.startsWith("http")
