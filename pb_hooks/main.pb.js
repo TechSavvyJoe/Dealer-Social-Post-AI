@@ -44,7 +44,7 @@ const proxyHandler = (c) => {
   const geminiApiKey = $os.getenv("GEMINI_API_KEY");
   // Vertex API Key no longer used, we use Service Account
 
-  const proxyAccessToken = $os.getenv("PROXY_ACCESS_TOKEN") || "";
+  const proxyAccessToken = ($os.getenv("PROXY_ACCESS_TOKEN") || "").trim();
 
   let path = c.pathParams.path;
 
@@ -52,14 +52,26 @@ const proxyHandler = (c) => {
     const requestInfo = $apis.requestInfo(c);
 
     // Require shared token for all proxy calls to avoid unauthenticated use
-    const incomingToken =
+    const incomingToken = (
       (requestInfo.headers && requestInfo.headers["x-proxy-token"]) ||
-      (requestInfo.headers && requestInfo.headers["X-Proxy-Token"]);
+      (requestInfo.headers && requestInfo.headers["X-Proxy-Token"]) ||
+      ""
+    ).trim();
+    
+    // Debug logging for token issues
+    console.log("[Proxy] Token check - env token length:", proxyAccessToken.length);
+    console.log("[Proxy] Token check - incoming token length:", incomingToken.length);
+    console.log("[Proxy] Token check - env token first 10 chars:", proxyAccessToken.substring(0, 10));
+    console.log("[Proxy] Token check - incoming token first 10 chars:", incomingToken.substring(0, 10));
+    
     if (!proxyAccessToken || incomingToken !== proxyAccessToken) {
+      console.log("[Proxy] Token mismatch! proxyAccessToken empty:", !proxyAccessToken, "match:", incomingToken === proxyAccessToken);
       return c.json(401, {
         error: "Unauthorized proxy request",
       });
     }
+    
+    console.log("[Proxy] Token validated successfully");
 
     // Fallback: manual extraction if wildcard param fails
     if (!path) {
