@@ -18,6 +18,8 @@ FROM ubuntu:22.04
 
 ARG PB_VERSION=0.22.22
 ARG PB_SHA256=""
+# Cache bust arg - change to force rebuild of frontend copy
+ARG CACHE_BUST=1
 
 RUN apt-get update && apt-get install -y \
     unzip \
@@ -29,6 +31,9 @@ RUN apt-get update && apt-get install -y \
 # Download and verify PocketBase
 ADD https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip /tmp/pb.zip
 RUN if [ -n "$PB_SHA256" ]; then echo "${PB_SHA256}  /tmp/pb.zip" | sha256sum -c -; else echo "WARNING: PB_SHA256 not provided; skipping checksum verification."; fi && unzip /tmp/pb.zip -d /pb/
+
+# Force cache invalidation for frontend copy
+RUN echo "Cache bust: ${CACHE_BUST}"
 
 # Copy the built frontend assets to PocketBase's public directory
 COPY --from=frontend-builder /app/dist /pb/pb_public
