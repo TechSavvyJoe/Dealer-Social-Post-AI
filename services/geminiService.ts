@@ -415,10 +415,14 @@ export const generatePostVideo = async (
 
       // Use the generateVideos endpoint for Veo 3.x
       const apiPath = `v1beta/models/${veoModel}:generateVideos`;
+      const proxyToken = import.meta.env.VITE_PROXY_ACCESS_TOKEN;
 
       const response = await fetch(`/api/proxy/${apiPath}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(proxyToken ? { "X-Proxy-Token": proxyToken } : {}),
+        },
         body: JSON.stringify(body),
       });
 
@@ -555,10 +559,14 @@ const pollGeminiVideoOperation = async (
         : `v1beta/operations/${cleanOpName}`;
 
       console.log(`[VideoGen] Polling operation: ${pollPath}`);
+      const proxyToken = import.meta.env.VITE_PROXY_ACCESS_TOKEN;
 
       const response = await fetch(`/api/proxy/${pollPath}`, {
         method: "GET",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(proxyToken ? { "X-Proxy-Token": proxyToken } : {}),
+        },
       });
 
       if (!response.ok) {
