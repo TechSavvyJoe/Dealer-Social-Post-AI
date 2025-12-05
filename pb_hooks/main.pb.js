@@ -55,7 +55,42 @@ const proxyHandler = (c) => {
     );
   };
 
-  let path = c.pathParams.path;
+  let path = null;
+
+  // Multiple methods to extract path for PocketBase JSVM compatibility
+  try {
+    // Method 1: Direct pathParams
+    if (c.pathParams && c.pathParams.path) {
+      path = c.pathParams.path;
+    }
+  } catch (e) {
+    // pathParams may not be available
+  }
+
+  // Method 2: Get from URL path directly
+  if (!path) {
+    try {
+      const fullPath = c.request().url.path || c.request().url.pathname;
+      if (fullPath && fullPath.startsWith("/api/proxy/")) {
+        path = fullPath.substring("/api/proxy/".length);
+      }
+    } catch (e) {
+      // URL parsing may fail
+    }
+  }
+
+  // Method 3: Get from raw URL string
+  if (!path) {
+    try {
+      const urlStr = c.request().url.string();
+      const match = urlStr.match(/\/api\/proxy\/(.+)/);
+      if (match) {
+        path = match[1];
+      }
+    } catch (e) {
+      // URL string() may not be available
+    }
+  }
 
   try {
     const requestInfo = $apis.requestInfo(c);
@@ -101,18 +136,13 @@ const proxyHandler = (c) => {
       }
     }
 
-    // Fallback: manual extraction if wildcard param fails
     if (!path) {
-      const fullPath = c.request().url.path;
-      if (fullPath.startsWith("/api/proxy/")) {
-        path = fullPath.substring("/api/proxy/".length);
-      }
-    }
-
-    if (!path) {
+      console.log("[Proxy] Path extraction failed. Request details:", {
+        pathParams: c.pathParams,
+      });
       return c.json(400, {
         error: "Missing API path.",
-        debug: "Path extraction failed",
+        debug: "Path extraction failed from all methods",
       });
     }
 
