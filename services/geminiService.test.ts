@@ -103,7 +103,7 @@ describe("GeminiService Model Verification", () => {
     }
   });
 
-  it("should use veo-3.1-fast-generate-preview for video generation via Gemini API", async () => {
+  it("should use veo-3.1-generate-preview for video generation via Gemini API", async () => {
     // Mock fetch for the Gemini API video generation call - Veo 3.1 returns an operation
     global.fetch = vi
       .fn()
@@ -122,15 +122,23 @@ describe("GeminiService Model Verification", () => {
           Promise.resolve({
             done: true,
             response: {
-              generatedVideos: [
-                {
-                  video: {
-                    uri: "http://fake-video-url.com/video.mp4",
+              generateVideoResponse: {
+                generatedSamples: [
+                  {
+                    video: {
+                      uri: "http://fake-video-url.com/video.mp4",
+                    },
                   },
-                },
-              ],
+                ],
+              },
             },
           }),
+      })
+      // Third call is fetching the video
+      .mockResolvedValueOnce({
+        ok: true,
+        blob: () =>
+          Promise.resolve(new Blob(["fake-video-data"], { type: "video/mp4" })),
       });
     global.URL.createObjectURL = vi.fn().mockReturnValue("blob:fake-video-url");
 
@@ -157,9 +165,9 @@ describe("GeminiService Model Verification", () => {
       }
     );
 
-    // Verify fetch was called with the correct Veo 3.1 Fast model path via predictLongRunning endpoint
+    // Verify fetch was called with the correct Veo 3.1 model path via predictLongRunning endpoint
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("veo-3.1-fast-generate-preview"),
+      expect.stringContaining("veo-3.1-generate-preview"),
       expect.any(Object)
     );
     expect(global.fetch).toHaveBeenCalledWith(

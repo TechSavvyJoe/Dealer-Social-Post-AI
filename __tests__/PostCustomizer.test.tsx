@@ -1,15 +1,15 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import React from 'react';
-import { vi } from 'vitest';
-import { PostCustomizer } from '../components/PostCustomizer';
-import { StyleOption, ToneOption } from '../types';
+import { fireEvent, render, screen } from "@testing-library/react";
+import React from "react";
+import { vi } from "vitest";
+import { PostCustomizer } from "../components/PostCustomizer";
+import { StyleOption, ToneOption } from "../types";
 
 Object.assign(global.navigator, { vibrate: vi.fn() });
 
-describe('PostCustomizer', () => {
+describe("PostCustomizer", () => {
   const baseProps = {
-    imageSrc: 'data:image/png;base64,xyz',
-    dealershipName: 'Test Motors',
+    imageSrc: "data:image/png;base64,xyz",
+    dealershipName: "Test Motors",
     onBack: vi.fn(),
     onGenerate: vi.fn(),
     onStyleToneChange: vi.fn(),
@@ -22,13 +22,17 @@ describe('PostCustomizer', () => {
     vi.resetAllMocks();
   });
 
-  it('invokes onStyleToneChange when selecting a new style', () => {
+  it("invokes onStyleToneChange when selecting a new style", () => {
     render(<PostCustomizer {...baseProps} />);
 
-    const sportyCard = screen.getByText(StyleOption.Sporty);
+    // Find by the simplified label "Sporty" (not the full enum value "Sporty & Dynamic")
+    const sportyCard = screen.getByText("Sporty");
     fireEvent.click(sportyCard);
 
-    expect(baseProps.onStyleToneChange).toHaveBeenCalledWith(StyleOption.Sporty, ToneOption.Excited);
+    expect(baseProps.onStyleToneChange).toHaveBeenCalledWith(
+      StyleOption.Sporty,
+      ToneOption.Excited
+    );
   });
 
   /*

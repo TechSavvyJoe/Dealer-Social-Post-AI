@@ -9,6 +9,11 @@
 let cachedAccessToken = null;
 let tokenExpiry = 0;
 
+// Rate limiting configuration
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute window
+const RATE_LIMIT_MAX_REQUESTS = 30; // 30 requests per window
+const rateLimitStore = new Map(); // token -> { count, windowStart }
+
 // Helper functions are defined inside proxyHandler for PocketBase JSVM compatibility
 
 const proxyHandler = (c) => {
@@ -28,7 +33,8 @@ const proxyHandler = (c) => {
       /^v1beta\/models\/[^/]+:generateVideos$/,
       /^v1beta\/models\/[^/]+:predictLongRunning$/,
       /^v1beta\/operations\/.+$/,
-      /^v1beta\/models\/[^/]+\/operations\/.+$/,  // New format for operation polling
+      /^v1beta\/models\/[^/]+\/operations\/.+$/, // New format for operation polling
+      /^v1beta\/files\/.+$/, // For downloading generated video files
     ];
     const vertexPatterns = [
       /^vertex\/v1beta1\/projects\/[^/]+\/locations\/[^/]+\/publishers\/google\/models\/[^/]+:(generateContent|predict|generateVideos|generateImages|predictLongRunning)$/,
@@ -43,7 +49,9 @@ const proxyHandler = (c) => {
     if (host === "localhost") return true;
     return (
       /^(\d{1,3}\.){3}\d{1,3}$/.test(host) &&
-      /^(10\.|127\.|0\.0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(host)
+      /^(10\.|127\.|0\.0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(
+        host
+      )
     );
   };
 
@@ -61,12 +69,36 @@ const proxyHandler = (c) => {
       c.request().header.get("X-Proxy-Token") ||
       c.request().header.get("x-proxy-token") ||
       ""
-    ).toString().trim();
-    
+    )
+      .toString()
+      .trim();
+
     if (!proxyAccessToken || incomingToken !== proxyAccessToken) {
       return c.json(401, {
         error: "Unauthorized proxy request",
       });
+    }
+
+    // Rate limiting check
+    const now = Date.now();
+    const rateLimitKey = incomingToken.substring(0, 16); // Use partial token as key
+    let rateData = rateLimitStore.get(rateLimitKey);
+
+    if (!rateData || now - rateData.windowStart > RATE_LIMIT_WINDOW_MS) {
+      // Start new window
+      rateData = { count: 1, windowStart: now };
+      rateLimitStore.set(rateLimitKey, rateData);
+    } else {
+      rateData.count++;
+      if (rateData.count > RATE_LIMIT_MAX_REQUESTS) {
+        console.log(`[Proxy] Rate limit exceeded for token ${rateLimitKey}...`);
+        return c.json(429, {
+          error: "Rate limit exceeded. Please slow down your requests.",
+          retryAfter: Math.ceil(
+            (rateData.windowStart + RATE_LIMIT_WINDOW_MS - now) / 1000
+          ),
+        });
+      }
     }
 
     // Fallback: manual extraction if wildcard param fails
@@ -230,40 +262,40 @@ const proxyHandler = (c) => {
           const tempToken = `${tempDir}/temp_token_${now}.txt`;
           const tempSig = `${tempDir}/temp_sig_${now}.bin`;
 
-            // Helper to safely remove files (ignore errors if file doesn't exist)
-            const safeRemove = (path) => {
-              try {
-                $os.remove(path);
-              } catch (e) {
-                /* ignore */
-              }
-            };
-
+          // Helper to safely remove files (ignore errors if file doesn't exist)
+          const safeRemove = (path) => {
             try {
-              // Ensure temp directory exists using full path with restrictive perms
-              try {
-                $os.cmd("/bin/mkdir", "-p", tempDir).output();
-                $os.cmd("/bin/chmod", "700", tempDir).output();
-              } catch (e) {
-                // Directory may already exist, ignore
-              }
+              $os.remove(path);
+            } catch (e) {
+              /* ignore */
+            }
+          };
 
-              const encodedHeader = base64UrlEncode(JSON.stringify(header));
-              const encodedClaims = base64UrlEncode(JSON.stringify(claims));
-              const unsignedToken = `${encodedHeader}.${encodedClaims}`;
+          try {
+            // Ensure temp directory exists using full path with restrictive perms
+            try {
+              $os.cmd("/bin/mkdir", "-p", tempDir).output();
+              $os.cmd("/bin/chmod", "700", tempDir).output();
+            } catch (e) {
+              // Directory may already exist, ignore
+            }
 
-              let keyContent = serviceAccount.private_key;
-              if (!keyContent.endsWith("\n")) keyContent += "\n";
-              $os.writeFile(tempKey, keyContent);
-              $os.writeFile(tempToken, unsignedToken);
+            const encodedHeader = base64UrlEncode(JSON.stringify(header));
+            const encodedClaims = base64UrlEncode(JSON.stringify(claims));
+            const unsignedToken = `${encodedHeader}.${encodedClaims}`;
 
-              // Ensure permissions are readable
-              try {
-                $os.cmd("/bin/chmod", "600", tempKey).output();
-                $os.cmd("/bin/chmod", "600", tempToken).output();
-              } catch (e) {
-                // Ignore chmod errors
-              }
+            let keyContent = serviceAccount.private_key;
+            if (!keyContent.endsWith("\n")) keyContent += "\n";
+            $os.writeFile(tempKey, keyContent);
+            $os.writeFile(tempToken, unsignedToken);
+
+            // Ensure permissions are readable
+            try {
+              $os.cmd("/bin/chmod", "600", tempKey).output();
+              $os.cmd("/bin/chmod", "600", tempToken).output();
+            } catch (e) {
+              // Ignore chmod errors
+            }
 
             // Use /usr/bin/openssl on Linux/Docker, fallback to other paths
             let opensslBin = "/usr/bin/openssl";

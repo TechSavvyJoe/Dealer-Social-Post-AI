@@ -1,4 +1,3 @@
-// Cache bust: 1
 import React from "react";
 import { AnimatePresence } from "framer-motion";
 import { Header } from "./components/Header";

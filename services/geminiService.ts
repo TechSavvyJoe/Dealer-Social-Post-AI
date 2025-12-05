@@ -356,14 +356,72 @@ const getImageDimensions = (
   });
 };
 
+/**
+ * Fetches video content from a Google API URL through our proxy
+ * This is needed because the video URI requires API key authentication
+ */
+const fetchVideoThroughProxy = async (videoUri: string): Promise<string> => {
+  console.log(`[VideoGen] Fetching video through proxy: ${videoUri}`);
+
+  // If it's already a blob URL, return it directly
+  if (videoUri.startsWith("blob:")) {
+    return videoUri;
+  }
+
+  // If it's a data URL, return it directly
+  if (videoUri.startsWith("data:")) {
+    return videoUri;
+  }
+
+  // For Google API URIs, fetch through our proxy to add auth
+  // The URI format is typically: https://generativelanguage.googleapis.com/v1beta/files/{fileId}:download
+  try {
+    const proxyToken = import.meta.env.VITE_PROXY_ACCESS_TOKEN;
+
+    // Extract the path from the full URL
+    let proxyPath = videoUri;
+    if (videoUri.includes("generativelanguage.googleapis.com/")) {
+      proxyPath = videoUri.split("generativelanguage.googleapis.com/")[1];
+    }
+
+    const response = await fetch(`/api/proxy/${proxyPath}`, {
+      method: "GET",
+      headers: {
+        ...(proxyToken ? { "X-Proxy-Token": proxyToken } : {}),
+      },
+    });
+
+    if (!response.ok) {
+      // If proxy fails, try the direct URI (might work if it's a public/temporary URL)
+      console.log(`[VideoGen] Proxy fetch failed, trying direct URL`);
+      const directResponse = await fetch(videoUri);
+      if (!directResponse.ok) {
+        throw new Error(`Failed to fetch video: ${directResponse.status}`);
+      }
+      const blob = await directResponse.blob();
+      return URL.createObjectURL(blob);
+    }
+
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    console.log(`[VideoGen] Created blob URL: ${blobUrl}`);
+    return blobUrl;
+  } catch (error) {
+    console.error(`[VideoGen] Error fetching video:`, error);
+    // Return the original URI as fallback - browser might be able to handle it
+    return videoUri;
+  }
+};
+
 export const generatePostVideo = async (
   imageBase64Url: string,
   style: VideoStyle,
   options: VideoRequestOptions
 ): Promise<string> => {
-  // Use Veo 3.1 Fast - faster generation, same quality
-  // NOTE: generateAudio is NOT supported in Gemini API (ML Dev), only in Vertex AI
-  const veoModel = "veo-3.1-fast-generate-preview";
+  // Use Veo 3.1 Generate Preview - standard quality with audio
+  // Fast variant: veo-3.1-fast-generate-preview (faster but lower quality)
+  // Standard variant: veo-3.1-generate-preview (higher quality)
+  const veoModel = "veo-3.1-generate-preview";
 
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
@@ -379,11 +437,13 @@ export const generatePostVideo = async (
       ? "16:9" // Convert 1:1 to 16:9 for Veo 3.1
       : options.aspectPreference;
 
-  // Veo 3.1 supports 4, 6, or 8 seconds
-  const durationSeconds = options.durationSeconds || 8;
+  // Veo 3.1 supports 5, 6, or 8 seconds (NOT 4!)
+  let durationSeconds = options.durationSeconds || 8;
+  if (durationSeconds < 5) durationSeconds = 5;
+  if (durationSeconds === 7) durationSeconds = 6;
 
   // Veo 3.1 uses the predictLongRunning endpoint with instances/parameters format
-  // Important: SDK uses "sampleCount" not "numberOfVideos" for Gemini API
+  // Per official docs: https://ai.google.dev/gemini-api/docs/video
   const body = {
     instances: [
       {
@@ -396,9 +456,7 @@ export const generatePostVideo = async (
     ],
     parameters: {
       aspectRatio: aspectRatio,
-      sampleCount: 1, // SDK converts numberOfVideos to sampleCount
-      durationSeconds: durationSeconds,
-      personGeneration: "allow_adult", // Required for image-to-video
+      personGeneration: "allow_adult", // Required for image-to-video with people
     },
   };
 
@@ -409,9 +467,7 @@ export const generatePostVideo = async (
       console.log(
         `[VideoGen] Starting video generation with ${veoModel}, attempt ${attempt}`
       );
-      console.log(
-        `[VideoGen] Config: ${durationSeconds}s, ${aspectRatio}`
-      );
+      console.log(`[VideoGen] Config: ${durationSeconds}s, ${aspectRatio}`);
 
       // Use the predictLongRunning endpoint for Veo 3.x
       const apiPath = `v1beta/models/${veoModel}:predictLongRunning`;
@@ -556,7 +612,7 @@ const pollGeminiVideoOperation = async (
       // The operation name format is "models/{model}/operations/{opId}"
       // We need to poll at v1beta/{operationName}
       let pollPath: string;
-      
+
       if (cleanOpName.startsWith("models/")) {
         // New format: models/veo-3.1-generate-preview/operations/xxx
         pollPath = `v1beta/${cleanOpName}`;
@@ -604,12 +660,29 @@ const pollGeminiVideoOperation = async (
         if (operation.response) {
           // Try to extract video from the response
           const resp = operation.response;
-          
-          // Check generateVideoResponse format (from predictLongRunning)
+          console.log(
+            `[VideoGen] Full response:`,
+            JSON.stringify(resp).substring(0, 1000)
+          );
+
+          // Check generateVideoResponse format (from predictLongRunning) - OFFICIAL FORMAT
           if (resp.generateVideoResponse?.generatedSamples?.[0]?.video?.uri) {
-            const videoUri = resp.generateVideoResponse.generatedSamples[0].video.uri;
-            console.log(`[VideoGen] Got video URI from generateVideoResponse: ${videoUri}`);
-            return videoUri;
+            const videoUri =
+              resp.generateVideoResponse.generatedSamples[0].video.uri;
+            console.log(
+              `[VideoGen] Got video URI from generateVideoResponse: ${videoUri}`
+            );
+            // Download video through proxy to handle auth
+            return await fetchVideoThroughProxy(videoUri);
+          }
+
+          // Alternative format: direct generatedSamples
+          if (resp.generatedSamples?.[0]?.video?.uri) {
+            const videoUri = resp.generatedSamples[0].video.uri;
+            console.log(
+              `[VideoGen] Got video URI from generatedSamples: ${videoUri}`
+            );
+            return await fetchVideoThroughProxy(videoUri);
           }
 
           // Check candidates
@@ -619,7 +692,7 @@ const pollGeminiVideoOperation = async (
                 return createVideoBlobUrl(part.inlineData.data);
               }
               if (part.fileData?.fileUri) {
-                return part.fileData.fileUri;
+                return await fetchVideoThroughProxy(part.fileData.fileUri);
               }
             }
           }

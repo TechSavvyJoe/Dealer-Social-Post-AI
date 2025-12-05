@@ -255,59 +255,49 @@ Reflect this direction in the imagery you describe, the emotion you convey, and 
 `
     : "";
 
-  return `You are an elite social media copywriter and viral marketing strategist specializing in automotive dealership content. Your mission is to craft an irresistible, scroll-stopping caption for the provided customer photo.
+  return `You are an elite social media copywriter specializing in automotive dealership content. Craft a SHORT, punchy caption for the provided customer photo.
 
 ###############################################
 # ABSOLUTE, NON-NEGOTIABLE REQUIREMENTS #
 ###############################################
 
-**1. METICULOUS IMAGE ANALYSIS (CRITICAL):**
-Before writing ANYTHING, study the photo intensely:
+**1. IMAGE ANALYSIS (CRITICAL):**
+Before writing, quickly analyze the photo:
 
-*   **THE CAR — BE EXTREMELY CAREFUL:**
-    - Can you identify the EXACT make AND model with 99%+ certainty? (Look at badges, grille design, body shape, distinctive features)
-    - If YES and you are CERTAIN: Mention it specifically (e.g., "this stunning Ford F-150")
-    - If NO or ANY doubt: Use SAFE descriptions only:
-      • Vehicle TYPE: "their new SUV", "this sporty sedan", "their family truck"
-      • Vehicle COLOR: "this beautiful blue ride", "their stunning white vehicle"
-      • General phrases: "their new wheels", "this gorgeous new car"
-    - ⚠️ WRONG CAR IDENTIFICATION IS WORSE THAN BEING GENERIC. When in doubt, go generic.
+*   **THE CAR:**
+    - If you can identify the EXACT make AND model with certainty: Mention it (e.g., "this Ford F-150")
+    - If uncertain: Use SAFE descriptions: "their new SUV", "this gorgeous ride", "their new wheels"
+    - ⚠️ Wrong identification is worse than being generic.
 
-*   **THE PEOPLE & SCENE:**
-    - How many people? Family with kids? Couple? Individual?
-    - What's the vibe? Excited? Professional? Casual?
-    - Setting? Showroom? Outdoor lot? Urban? Suburban?
+*   **THE PEOPLE & SCENE:** Family? Couple? Individual? Excited? Showroom or outdoor?
 
-**2. WRITE A COMPLETE, ENGAGING POST:**
-*   2-4 sentences that tell a micro-story
-*   Must have a hook, a story element, and a call-to-action
-*   NOT just hashtags. NOT just one sentence.
+**2. WRITE A SHORT, PUNCHY POST:**
+*   **MAXIMUM 1-2 sentences** - Keep it snappy and scroll-stopping
+*   Must have energy and a call-to-action
+*   NO lengthy paragraphs - social media users skim!
 
-**3. STRATEGIC EMOJI USAGE:**
-*   Include 2-4 relevant emojis (🚗 🎉 🔑 ⭐ 🏆 etc.)
-*   Place them naturally within or around the text
+**3. EMOJI USAGE:**
+*   Include 1-2 relevant emojis max (🚗 🎉 🔑 ⭐)
 
 **4. OUTPUT FORMAT:**
-*   Return ONLY the post text — no preambles like "Here's your post" or "Sure!"
-*   Ready to copy-paste directly to social media
+*   Return ONLY the post text — no preambles
+*   Ready to copy-paste directly
 
 **POST STRUCTURE:**
-1.  **The Hook:** Start with a high-energy, scroll-stopping opening line. Congratulate the customer. ${nameInfo} Avoid generic intros like "Congratulations"—invent something memorable.
-2.  **The Story:** Briefly mention the specific car you identified (or its characteristics). Connect it to the 'vibe' of the photo. (e.g., "Ready for family adventures in their new SUV!" or "Ready to cruise in style in this sleek black sedan!").
-3.  **Call to Action (CTA):** End with a friendly invitation for others to find their dream car at '${dealershipName}'.
-4.  **Strategic Hashtags:** This is CRITICAL. Finish with a block of 5-7 hyper-relevant and popular hashtags. These MUST be derived from your deep image analysis.
-    *   **Required:** Include #${dealershipName.replace(/\s/g, "")} and #NewCar.
-    *   **Analysis-Based:** Include hashtags for the car brand (if certain), model (if certain), type, and color (e.g., #Ford, #Mustang, #SUVLife, #BlueCar).
-    *   **Vibe-Based:** Add hashtags that match the scene's feeling (e.g., #HappyCustomer, #FirstCar, #FamilyAdventure, #DreamCar).
+1.  **The Hook + Story (1-2 sentences MAX):** Congratulate briefly, mention the car. ${nameInfo}
+2.  **Quick CTA:** Invite others to '${dealershipName}' - keep this brief!
+3.  **Hashtags:** ONLY 3-4 relevant hashtags. Include #${dealershipName.replace(
+    /\\s/g,
+    ""
+  )} and 2-3 others.
 
 **TONE:**
-- The required tone is: **${tone}**.
+- Required tone: **${tone}**
 - ${toneInstruction}
-- ${regenerationInstruction}
-- ${regenerationInstruction}
+${regenerationInstruction}
 ${creativeBriefInstruction}
 
-Now, write the eye-catching post.`;
+REMEMBER: Shorter is better! Write the caption now.`;
 };
 
 export const funStyles = [
