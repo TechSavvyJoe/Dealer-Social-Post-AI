@@ -103,7 +103,7 @@ describe("GeminiService Model Verification", () => {
     }
   });
 
-  it("should use veo-3.1-generate-preview for video generation via Gemini API", async () => {
+  it("should use veo-3.1-fast-generate-preview for video generation via Gemini API", async () => {
     // Mock fetch for the Gemini API video generation call - Veo 3.1 returns an operation
     global.fetch = vi
       .fn()
@@ -157,9 +157,9 @@ describe("GeminiService Model Verification", () => {
       }
     );
 
-    // Verify fetch was called with the correct Veo 3.1 model path via predictLongRunning endpoint
+    // Verify fetch was called with the correct Veo 3.1 Fast model path via predictLongRunning endpoint
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("veo-3.1-generate-preview"),
+      expect.stringContaining("veo-3.1-fast-generate-preview"),
       expect.any(Object)
     );
     expect(global.fetch).toHaveBeenCalledWith(

@@ -361,8 +361,9 @@ export const generatePostVideo = async (
   style: VideoStyle,
   options: VideoRequestOptions
 ): Promise<string> => {
-  // Use Veo 3.1 - Google's best video generation model with native audio
-  const veoModel = "veo-3.1-generate-preview";
+  // Use Veo 3.1 Fast - faster generation, same quality
+  // NOTE: generateAudio is NOT supported in Gemini API (ML Dev), only in Vertex AI
+  const veoModel = "veo-3.1-fast-generate-preview";
 
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
@@ -381,10 +382,8 @@ export const generatePostVideo = async (
   // Veo 3.1 supports 4, 6, or 8 seconds
   const durationSeconds = options.durationSeconds || 8;
 
-  // Determine if audio should be enabled (any soundtrack other than "none")
-  const includeAudio = options.soundtrack !== "none";
-
   // Veo 3.1 uses the predictLongRunning endpoint with instances/parameters format
+  // Important: SDK uses "sampleCount" not "numberOfVideos" for Gemini API
   const body = {
     instances: [
       {
@@ -397,11 +396,9 @@ export const generatePostVideo = async (
     ],
     parameters: {
       aspectRatio: aspectRatio,
-      numberOfVideos: 1,
+      sampleCount: 1, // SDK converts numberOfVideos to sampleCount
       durationSeconds: durationSeconds,
       personGeneration: "allow_adult", // Required for image-to-video
-      // Enable audio generation for Veo 3.1 when soundtrack is not "none"
-      includeAudio: includeAudio,
     },
   };
 
@@ -413,7 +410,7 @@ export const generatePostVideo = async (
         `[VideoGen] Starting video generation with ${veoModel}, attempt ${attempt}`
       );
       console.log(
-        `[VideoGen] Config: ${durationSeconds}s, ${aspectRatio}, audio: ${includeAudio}, soundtrack: ${options.soundtrack}`
+        `[VideoGen] Config: ${durationSeconds}s, ${aspectRatio}`
       );
 
       // Use the predictLongRunning endpoint for Veo 3.x
