@@ -37,14 +37,13 @@ export default defineConfig(() => {
       // Configure manual chunking for optimal caching
       rollupOptions: {
         output: {
-          manualChunks: {
-            // Vendor chunk - rarely changes
-            vendor: ["react", "react-dom", "zustand"],
-            // UI library chunk - stable
-            ui: ["framer-motion", "lucide-react"],
-            // AI services chunk
-            ai: ["@google/genai"],
-          },
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('react') || id.includes('zustand')) return 'vendor';
+              if (id.includes('framer-motion') || id.includes('lucide-react')) return 'ui';
+              if (id.includes('@google/genai')) return 'ai';
+            }
+          }
         },
       },
       // Increase chunk size warning limit (we have large AI models)

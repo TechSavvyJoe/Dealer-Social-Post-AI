@@ -1,12 +1,6 @@
 # Stage 1: Build the Frontend
-FROM node:18.20-alpine AS frontend-builder
+FROM node:22-alpine AS frontend-builder
 WORKDIR /app
-
-# Set build-time environment variables for Vite
-ARG VITE_ADMIN_CODE=0000
-ARG VITE_PROXY_ACCESS_TOKEN=208ade967fb8f2418b470f47f1d125c2318b56edba17c750c08361631de80288
-ENV VITE_ADMIN_CODE=${VITE_ADMIN_CODE}
-ENV VITE_PROXY_ACCESS_TOKEN=${VITE_PROXY_ACCESS_TOKEN}
 
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -16,8 +10,8 @@ RUN npm run build
 # Stage 2: Setup PocketBase
 FROM ubuntu:22.04
 
-ARG PB_VERSION=0.22.22
-ARG PB_SHA256=""
+ARG PB_VERSION=0.38.0
+ARG PB_SHA256="66396ed5efec837aa8d2addc009894968a5f4fb7cb2b0ea57db6105cb91b095d"
 # Cache bust arg - change to force rebuild of frontend copy
 ARG CACHE_BUST=1
 

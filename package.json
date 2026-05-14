@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "dev": "vite",
@@ -20,16 +20,16 @@
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
-    "@google/genai": "^1.28.0",
+    "@google/genai": "^2.2.0",
     "@tanstack/react-query": "^5.90.6",
     "@tanstack/react-query-devtools": "^5.90.2",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
     "framer-motion": "^12.23.24",
-    "lucide-react": "^0.552.0",
-    "pocketbase": "^0.22.1",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
+    "lucide-react": "^1.16.0",
+    "pocketbase": "^0.26.9",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
     "tailwind-merge": "^3.3.1",
     "zustand": "^5.0.8"
   },
@@ -46,8 +46,8 @@
     "jsdom": "^27.1.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.18",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0",
-    "vitest": "^4.0.7"
+    "typescript": "^6.0.3",
+    "vite": "^8.0.13",
+    "vitest": "4.1"
   }
 }
