@@ -15,6 +15,8 @@ import {
 } from "./promptConfig";
 import { normalizeError, recoveryHint } from "../utils/errorHandler";
 import { getGeminiClient } from "./geminiClient";
+import { getModel } from "../utils/modelConfig";
+import { GeminiVideoOperationSchema } from "../utils/schemas";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -421,7 +423,7 @@ export const generatePostVideo = async (
   // Use Veo 3.1 Generate Preview - standard quality with audio
   // Fast variant: veo-3.1-fast-generate-preview (faster but lower quality)
   // Standard variant: veo-3.1-generate-preview (higher quality)
-  const veoModel = "veo-3.1-generate-preview";
+  const veoModel = getModel('video');
 
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
@@ -602,7 +604,8 @@ const pollGeminiVideoOperation = async (
   timeoutMs: number = 300000
 ): Promise<string> => {
   const startTime = Date.now();
-  const pollInterval = 5000;
+  let pollInterval = 5000;
+  const maxPollInterval = 30000;
 
   // Clean up operation name - remove leading slashes
   let cleanOpName = operationName.replace(/^\/+/, "");
@@ -639,10 +642,13 @@ const pollGeminiVideoOperation = async (
         const text = await response.text();
         console.error(`[VideoGen] Poll failed:`, text);
         await sleep(pollInterval);
+        pollInterval = Math.min(pollInterval * 1.5, maxPollInterval);
         continue;
       }
 
-      const operation = await response.json();
+      const rawOperation = await response.json();
+      const operation = GeminiVideoOperationSchema.parse(rawOperation);
+      
       console.log(
         `[VideoGen] Operation status:`,
         JSON.stringify(operation).substring(0, 500)
@@ -707,8 +713,9 @@ const pollGeminiVideoOperation = async (
       }
 
       const elapsed = Math.round((Date.now() - startTime) / 1000);
-      console.log(`[VideoGen] Still processing... (${elapsed}s elapsed)`);
+      console.log(`[VideoGen] Still processing... (${elapsed}s elapsed). Next poll in ${pollInterval/1000}s`);
       await sleep(pollInterval);
+      pollInterval = Math.min(pollInterval * 1.5, maxPollInterval);
     } catch (error) {
       if (
         error instanceof Error &&
@@ -716,8 +723,9 @@ const pollGeminiVideoOperation = async (
       ) {
         throw error;
       }
-      console.error(`[VideoGen] Poll error (will retry):`, error);
+      console.error(`[VideoGen] Poll error (will retry in ${pollInterval/1000}s):`, error);
       await sleep(pollInterval);
+      pollInterval = Math.min(pollInterval * 1.5, maxPollInterval);
     }
   }
 

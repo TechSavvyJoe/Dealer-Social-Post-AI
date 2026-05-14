@@ -1,6 +1,7 @@
 import { normalizeError } from "../utils/errorHandler";
 import { retryWithBackoff, isRetryableError } from "../utils/retry";
 import { performanceMonitor } from "../utils/performanceMonitor";
+import { withCircuitBreaker } from "../utils/circuitBreaker";
 
 // Request tracking for debugging
 let requestCounter = 0;
@@ -31,47 +32,54 @@ export async function fetchFromProxy(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 300000); // 300 second timeout (5 minutes)
 
-  try {
-    console.log(`[GeminiProxy] [${requestId}] Requesting ${method} ${path}`);
-    const proxyToken = import.meta.env.VITE_PROXY_ACCESS_TOKEN;
+    try {
+      console.log(`[GeminiProxy] [${requestId}] Requesting ${method} ${path}`);
+      const proxyToken = import.meta.env.VITE_PROXY_ACCESS_TOKEN;
 
-    // Use retry logic for transient failures
-    const response = await retryWithBackoff(
-      async () => {
-        const res = await fetch(`/api/proxy/${path}`, {
-          method: method,
-          headers: {
-            "Content-Type": "application/json",
-            ...(proxyToken ? { "X-Proxy-Token": proxyToken } : {}),
+      // Group paths by service type for circuit breaking (e.g. gemini-text, imagen, veo)
+      let serviceKey = "gemini-api";
+      if (path.includes("imagen")) serviceKey = "imagen-api";
+      else if (path.includes("veo") || path.includes("video")) serviceKey = "veo-api";
+
+      // Use retry logic for transient failures, wrapped in a circuit breaker for sustained failures
+      const response = await withCircuitBreaker(serviceKey, async () => {
+        return await retryWithBackoff(
+          async () => {
+            const res = await fetch(`/api/proxy/${path}`, {
+              method: method,
+              headers: {
+                "Content-Type": "application/json",
+                ...(proxyToken ? { "X-Proxy-Token": proxyToken } : {}),
+              },
+              // Only include body for POST requests
+              body: method === "POST" ? JSON.stringify(body) : undefined,
+              signal: controller.signal,
+            });
+
+            // Retry on 502, 503, 504 errors
+            if (res.status === 502 || res.status === 503 || res.status === 504) {
+              throw new Error(`Server error ${res.status} - retrying...`);
+            }
+
+            return res;
           },
-          // Only include body for POST requests
-          body: method === "POST" ? JSON.stringify(body) : undefined,
-          signal: controller.signal,
-        });
+          {
+            maxAttempts: 3,
+            initialDelay: 1000,
+            onRetry: (attempt, error) => {
+              console.warn(
+                `[GeminiProxy] [${requestId}] Retry ${attempt}:`,
+                error.message
+              );
+            },
+          }
+        );
+      });
 
-        // Retry on 502, 503, 504 errors
-        if (res.status === 502 || res.status === 503 || res.status === 504) {
-          throw new Error(`Server error ${res.status} - retrying...`);
-        }
-
-        return res;
-      },
-      {
-        maxAttempts: 3,
-        initialDelay: 1000,
-        onRetry: (attempt, error) => {
-          console.warn(
-            `[GeminiProxy] [${requestId}] Retry ${attempt}:`,
-            error.message
-          );
-        },
-      }
-    );
-
-    console.log(
-      `[GeminiProxy] [${requestId}] Response ${response.status} for ${path}`
-    );
-    clearTimeout(timeoutId);
+      console.log(
+        `[GeminiProxy] [${requestId}] Response ${response.status} for ${path}`
+      );
+      clearTimeout(timeoutId);
 
     const responseText = await response.text();
 

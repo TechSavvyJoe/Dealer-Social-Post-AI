@@ -1,4 +1,5 @@
 import { fetchFromProxy } from "./geminiProxy";
+import { MODELS } from "../utils/modelConfig";
 
 // This is a mock/proxy implementation that mimics the @google/genai SDK
 // It ensures that all API calls are routed through our secure backend proxy,
@@ -9,8 +10,8 @@ import { fetchFromProxy } from "./geminiProxy";
 // Gemini models work with API key auth
 const VERTEX_ONLY_MODELS = [
   "imagen-3",
-  "imagen-3.0-generate-002",
-  "veo-3.1-generate-preview",
+  MODELS.imagen.primary,
+  MODELS.video.primary,
 ];
 
 // Helper to determine if model needs Vertex AI

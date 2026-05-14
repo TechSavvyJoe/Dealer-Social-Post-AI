@@ -601,3 +601,71 @@ routerAdd("POST", "/api/telemetry", (c) => {
     return c.json(200, { success: false, error: err.toString() });
   }
 });
+
+// Session Endpoints (HttpOnly Cookie-based Authentication)
+routerAdd("POST", "/api/app/session", (c) => {
+  const body = $apis.requestInfo(c).data;
+  const dealerCode = body.dealerCode;
+  
+  if (!dealerCode) {
+    return c.json(400, { error: "Dealer code is required" });
+  }
+
+  try {
+    const record = $app.dao().findFirstRecordByData("dealers", "code", dealerCode);
+    
+    // Set HttpOnly cookie
+    c.response().header().add("Set-Cookie", `dealer_session=${record.id}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800`);
+
+    let logoUrl = record.getString("logo");
+    if (logoUrl && !logoUrl.startsWith("http")) {
+       logoUrl = `/api/files/dealers/${record.id}/${logoUrl}`;
+    }
+
+    return c.json(200, { 
+      dealer: {
+        id: record.id,
+        name: record.getString("name"),
+        code: record.getString("code"),
+        logo: logoUrl
+      } 
+    });
+  } catch (err) {
+    return c.json(401, { error: "Invalid dealer code" });
+  }
+});
+
+routerAdd("GET", "/api/app/session", (c) => {
+  const cookieHeader = c.request().header.get("Cookie") || "";
+  const match = cookieHeader.match(/dealer_session=([^;]+)/);
+  if (!match) {
+    return c.json(401, { error: "No active session" });
+  }
+
+  const dealerId = match[1];
+
+  try {
+    const record = $app.dao().findRecordById("dealers", dealerId);
+    
+    let logoUrl = record.getString("logo");
+    if (logoUrl && !logoUrl.startsWith("http")) {
+       logoUrl = `/api/files/dealers/${record.id}/${logoUrl}`;
+    }
+
+    return c.json(200, { 
+      dealer: {
+        id: record.id,
+        name: record.getString("name"),
+        code: record.getString("code"),
+        logo: logoUrl
+      } 
+    });
+  } catch (err) {
+    return c.json(401, { error: "Invalid session" });
+  }
+});
+
+routerAdd("DELETE", "/api/app/session", (c) => {
+  c.response().header().add("Set-Cookie", "dealer_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0");
+  return c.json(200, { success: true });
+});

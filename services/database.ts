@@ -2,6 +2,7 @@ import PocketBase from "pocketbase";
 import { Dealer } from "../types";
 import { retryWithBackoff, isRetryableError } from "../utils/retry";
 import { getErrorMessage } from "../utils/errorMessages";
+import { DealerRecordSchema } from "../utils/schemas";
 
 // Initialize PocketBase
 // In production (served by PB), this is relative. In dev, it might need to be localhost:8090
@@ -50,18 +51,21 @@ export const getAllDealers = async (): Promise<Dealer[]> => {
       }
     );
 
-    return records.map((record) => {
+    return records.map((rawRecord) => {
+      // Validate at runtime
+      const record = DealerRecordSchema.parse(rawRecord);
+
       // Check if there is an uploaded file
       const logoUrl =
         record.logo && !record.logo.startsWith("http")
-          ? pb.files.getURL(record, record.logo)
+          ? pb.files.getURL(rawRecord, record.logo)
           : record.logo;
 
       return {
         id: record.id,
         name: record.name,
-        logo: logoUrl,
-        code: record.code,
+        logo: logoUrl || undefined,
+        code: record.code || "",
       };
     });
   } catch (error) {
@@ -81,19 +85,22 @@ export const findDealer = async (
 ): Promise<Dealer | undefined> => {
   try {
     // Search for dealer by code field instead of ID
-    const record = await pb
+    const rawRecord = await pb
       .collection(COLLECTION_NAME)
       .getFirstListItem(`code="${dealerCode}"`);
+      
+    const record = DealerRecordSchema.parse(rawRecord);
+
     const logoUrl =
       record.logo && !record.logo.startsWith("http")
-        ? pb.files.getURL(record, record.logo)
+        ? pb.files.getURL(rawRecord, record.logo)
         : record.logo;
 
     return {
       id: record.id,
       name: record.name,
-      logo: logoUrl,
-      code: record.code,
+      logo: logoUrl || undefined,
+      code: record.code || "",
     };
   } catch (error) {
     // PocketBase throws 404 if not found
@@ -110,17 +117,19 @@ export const findDealerById = async (
   dealerId: string
 ): Promise<Dealer | undefined> => {
   try {
-    const record = await pb.collection(COLLECTION_NAME).getOne(dealerId);
+    const rawRecord = await pb.collection(COLLECTION_NAME).getOne(dealerId);
+    const record = DealerRecordSchema.parse(rawRecord);
+
     const logoUrl =
       record.logo && !record.logo.startsWith("http")
-        ? pb.files.getURL(record, record.logo)
+        ? pb.files.getURL(rawRecord, record.logo)
         : record.logo;
 
     return {
       id: record.id,
       name: record.name,
-      logo: logoUrl,
-      code: record.code,
+      logo: logoUrl || undefined,
+      code: record.code || "",
     };
   } catch (error) {
     // PocketBase throws 404 if not found

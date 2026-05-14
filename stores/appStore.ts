@@ -8,7 +8,7 @@ import {
   GenerationParams,
 } from "../types";
 import { loadSession, saveSession, clearSession } from "../utils/persistence";
-import { findDealer, findDealerById } from "../services/database";
+// Removed duplicate import
 import { logEvent, logError } from "../utils/telemetry";
 
 interface AppState {
@@ -130,13 +130,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
-  login: async (dealerId: string) => {
+  login: async (dealerCode: string) => {
     try {
-      const dealer = await findDealer(dealerId);
-      if (dealer) {
-        // Handle logo URL conversion if needed (logic moved from App.tsx)
-        // For now assuming findDealer handles it or it's fine
+      const res = await fetch("/api/app/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dealerCode })
+      });
 
+      if (!res.ok) {
+        throw new Error("Invalid dealer code");
+      }
+
+      const { dealer } = await res.json();
+      
+      if (dealer) {
         // Optional admin code is configured via VITE_ADMIN_CODE to avoid hardcoded backdoors
         const configuredAdminCode =
           typeof import.meta !== "undefined"
@@ -164,7 +172,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return false;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      logError("app.login.failed", { message: errorMessage, dealerId });
+      logError("app.login.failed", { message: errorMessage, dealerId: dealerCode });
       set({
         error: "Login failed. Please check the dealer code and try again.",
       });
@@ -172,7 +180,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  logout: () => {
+  logout: async () => {
+    try {
+      await fetch("/api/app/session", { method: "DELETE" });
+    } catch (err) {
+      console.error("Logout error", err);
+    }
     set({
       currentDealer: null,
       selectedImage: null,
@@ -199,43 +212,45 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   restoreSession: async () => {
     const session = loadSession();
-    if (session?.dealerId) {
-      try {
-        // Use findDealerById since we store the record ID, not the code
-        const dealer = await findDealerById(session.dealerId);
+    try {
+      const res = await fetch("/api/app/session", { method: "GET" });
+      if (res.ok) {
+        const { dealer } = await res.json();
         if (dealer) {
           set({
             currentDealer: dealer,
-            selectedImage: session.selectedImage || null,
+            selectedImage: session?.selectedImage || null,
             generatedPost:
-              session.generatedPost && session.generatedPost.image
+              session?.generatedPost && session.generatedPost.image
                 ? {
                     image: session.generatedPost.image,
                     text: session.generatedPost.text,
                   }
                 : null,
-            generationParams: (session.generationParams ||
+            generationParams: (session?.generationParams ||
               null) as GenerationParams | null, // Load generationParams
-            step: (typeof session.step === "number"
+            step: (typeof session?.step === "number"
               ? session.step
-              : session.generatedPost
+              : session?.generatedPost
               ? AppStep.RESULT
               : AppStep.CAPTURE) as AppStep,
-            compactMode: session.compactMode ?? false,
+            compactMode: session?.compactMode ?? false,
           });
           logEvent("app.session.restored", {
-            step: session.step,
+            step: session?.step,
             dealer: dealer.id,
           });
-        } else {
-          clearSession();
+          return;
         }
-      } catch (error) {
-        clearSession();
-        logError("app.session.restoreFailed", { message: String(error) });
       }
-    } else {
-      // Restore standalone preferences if no full session
+      // If we fall through, clear session
+      clearSession();
+    } catch (error) {
+      clearSession();
+      logError("app.session.restoreFailed", { message: String(error) });
+    }
+
+    // Restore standalone preferences if no full session
       if (session?.compactMode !== undefined) {
         set({ compactMode: session.compactMode });
       }
@@ -245,6 +260,5 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (session?.preferredTone) {
         set({ preferredTone: session.preferredTone as ToneOption });
       }
-    }
   },
 }));

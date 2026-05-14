@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 console.log("TEST FILE IS RUNNING");
 import { generateSocialPost, generatePostVideo } from "./geminiService";
 import { StyleOption, ToneOption, VideoStyle } from "../types";
+import { MODELS } from "../utils/modelConfig";
 
 // Hoist the mocks so they can be used in the mock factory
 const { mockGenerateContent, mockGenerateVideos, mockGetVideosOperation } =
@@ -167,7 +168,7 @@ describe("GeminiService Model Verification", () => {
 
     // Verify fetch was called with the correct Veo 3.1 model path via predictLongRunning endpoint
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("veo-3.1-generate-preview"),
+      expect.stringContaining(MODELS.video.primary),
       expect.any(Object)
     );
     expect(global.fetch).toHaveBeenCalledWith(
