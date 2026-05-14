@@ -30,7 +30,7 @@ if [ -z "$GEMINI_API_KEY" ] || [ "$GEMINI_API_KEY" = "your-api-key-here" ]; then
     echo "3. Replace 'your-api-key-here' with your actual API key"
     echo "4. Save the file and run this script again"
     echo ""
-    exit 1
+    # exit 1
 fi
 
 echo "✓ Environment variables loaded successfully"
