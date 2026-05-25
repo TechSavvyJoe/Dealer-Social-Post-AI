@@ -616,7 +616,7 @@ routerAdd("POST", "/api/app/session", (c) => {
   }
 
   try {
-    const record = $app.dao().findFirstRecordByData("dealers", "code", dealerCode);
+    const record = $app.findFirstRecordByData("dealers", "code", dealerCode);
     
     // Set HttpOnly cookie
     c.response().header().add("Set-Cookie", `dealer_session=${record.id}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800`);
@@ -649,7 +649,7 @@ routerAdd("GET", "/api/app/session", (c) => {
   const dealerId = match[1];
 
   try {
-    const record = $app.dao().findRecordById("dealers", dealerId);
+    const record = $app.findRecordById("dealers", dealerId);
     
     let logoUrl = record.getString("logo");
     if (logoUrl && !logoUrl.startsWith("http")) {
