@@ -69,7 +69,7 @@ const proxyHandler = (c) => {
   // Method 2: Get from URL path directly
   if (!path) {
     try {
-      const fullPath = c.request().url.path || c.request().url.pathname;
+      const fullPath = c.request.url.path || c.request.url.pathname;
       if (fullPath && fullPath.startsWith("/api/proxy/")) {
         path = fullPath.substring("/api/proxy/".length);
       }
@@ -81,7 +81,7 @@ const proxyHandler = (c) => {
   // Method 3: Get from raw URL string
   if (!path) {
     try {
-      const urlStr = c.request().url.string();
+      const urlStr = c.request.url.string();
       const match = urlStr.match(/\/api\/proxy\/(.+)/);
       if (match) {
         path = match[1];
@@ -100,8 +100,8 @@ const proxyHandler = (c) => {
     const incomingToken = (
       headers["x_proxy_token"] ||
       headers["x-proxy-token"] ||
-      c.request().header.get("X-Proxy-Token") ||
-      c.request().header.get("x-proxy-token") ||
+      c.request.header.get("X-Proxy-Token") ||
+      c.request.header.get("x-proxy-token") ||
       ""
     )
       .toString()
@@ -647,15 +647,15 @@ routerAdd("POST", "/api/app/session", (c) => {
 });
 
 routerAdd("GET", "/api/app/session", (c) => {
-  const cookieHeader = c.request().header.get("Cookie") || "";
-  const match = cookieHeader.match(/dealer_session=([^;]+)/);
-  if (!match) {
-    return c.json(401, { error: "No active session" });
-  }
-
-  const dealerId = match[1];
-
   try {
+    const cookieHeader = c.request.header.get("Cookie") || "";
+    const match = cookieHeader.match(/dealer_session=([^;]+)/);
+    if (!match) {
+      return c.json(401, { error: "No active session" });
+    }
+
+    const dealerId = match[1];
+
     const record = $app.findRecordById("dealers", dealerId);
     
     let logoUrl = record.getString("logo");
