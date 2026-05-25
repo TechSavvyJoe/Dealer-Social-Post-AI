@@ -92,7 +92,7 @@ const proxyHandler = (c) => {
   }
 
   try {
-    const requestInfo = $apis.requestInfo(c);
+    const requestInfo = c.requestInfo();
     const headers = requestInfo.headers || {};
 
     // Require shared token for all proxy calls to avoid unauthenticated use
@@ -480,8 +480,8 @@ const proxyHandler = (c) => {
       url: targetUrl,
       method: requestInfo.method,
       body:
-        requestInfo.method === "POST" && requestInfo.data
-          ? JSON.stringify(requestInfo.data)
+        requestInfo.method === "POST" && requestInfo.body
+          ? JSON.stringify(requestInfo.body)
           : "",
       headers: {
         "Content-Type": "application/json",
@@ -528,7 +528,7 @@ routerAdd("POST", "/api/proxy/:path(*)", proxyHandler);
 
 routerAdd("GET", "/api/proxy-image", (c) => {
   const url = c.queryParam("url");
-  const requestInfo = $apis.requestInfo(c);
+  const requestInfo = c.requestInfo();
   const proxyAccessToken = $os.getenv("PROXY_ACCESS_TOKEN") || "";
   const incomingToken =
     (requestInfo.headers && requestInfo.headers["x-proxy-token"]) ||
@@ -590,8 +590,7 @@ routerAdd("GET", "/api/proxy-image", (c) => {
 
 routerAdd("POST", "/api/telemetry", (c) => {
   try {
-    const rawBody = {};
-    c.bindBody(rawBody);
+    const rawBody = c.requestInfo().body || {};
     // Log to server console
     console.log("[Telemetry]", JSON.stringify(rawBody));
     return c.json(200, { success: true });
@@ -604,9 +603,9 @@ routerAdd("POST", "/api/telemetry", (c) => {
 
 // Session Endpoints (HttpOnly Cookie-based Authentication)
 routerAdd("POST", "/api/app/session", (c) => {
-  const body = {};
+  let body = {};
   try {
-    c.bindBody(body);
+    body = c.requestInfo().body || {};
   } catch (e) {
     console.error("Failed to parse body:", e);
   }
