@@ -618,8 +618,15 @@ routerAdd("POST", "/api/app/session", (c) => {
   try {
     const record = $app.findFirstRecordByData("dealers", "code", dealerCode);
     
-    // Set HttpOnly cookie
-    c.response().header("Set-Cookie", `dealer_session=${record.id}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800`);
+    // Set HttpOnly cookie using the official PocketBase JSVM Cookie class
+    c.setCookie(new Cookie({
+      name: "dealer_session",
+      value: record.id,
+      path: "/",
+      httpOnly: true,
+      secure: true,
+      maxAge: 604800,
+    }));
 
     let logoUrl = record.getString("logo");
     if (logoUrl && !logoUrl.startsWith("http")) {
@@ -635,7 +642,7 @@ routerAdd("POST", "/api/app/session", (c) => {
       } 
     });
   } catch (err) {
-    return c.json(401, { error: "Invalid dealer code" });
+    return c.json(401, { error: "Invalid dealer code", details: err.toString() });
   }
 });
 
@@ -665,11 +672,18 @@ routerAdd("GET", "/api/app/session", (c) => {
       } 
     });
   } catch (err) {
-    return c.json(401, { error: "Invalid session" });
+    return c.json(401, { error: "Invalid session", details: err.toString() });
   }
 });
 
 routerAdd("DELETE", "/api/app/session", (c) => {
-  c.response().header("Set-Cookie", "dealer_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0");
+  c.setCookie(new Cookie({
+    name: "dealer_session",
+    value: "",
+    path: "/",
+    httpOnly: true,
+    secure: true,
+    maxAge: -1,
+  }));
   return c.json(200, { success: true });
 });
