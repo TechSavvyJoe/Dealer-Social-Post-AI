@@ -635,7 +635,7 @@ routerAdd("POST", "/api/app/session", (c) => {
       } 
     });
   } catch (err) {
-    return c.json(401, { error: "Invalid dealer code" });
+    return c.json(401, { error: "Invalid dealer code", details: err.toString() });
   }
 });
 
@@ -665,7 +665,7 @@ routerAdd("GET", "/api/app/session", (c) => {
       } 
     });
   } catch (err) {
-    return c.json(401, { error: "Invalid session" });
+    return c.json(401, { error: "Invalid session", details: err.toString() });
   }
 });
 
