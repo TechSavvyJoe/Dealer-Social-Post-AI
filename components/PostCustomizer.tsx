@@ -24,6 +24,8 @@ import { Badge } from "./ui/Badge";
 import { Input, Textarea } from "./ui/Input";
 import { POST_TEMPLATES } from "./templates";
 import { cn } from "../utils/classNames";
+import { useTouchGestures } from "../hooks/useTouchGestures";
+import { ProgressiveImage } from "./ui/ProgressiveImage";
 
 interface PostCustomizerProps {
   imageSrc: string;
@@ -126,6 +128,20 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  // Swipe right gesture to safely go back to capture screen on mobile
+  const touchHandlers = useTouchGestures({
+    onSwipeRight: () => {
+      triggerHapticFeedback();
+      onBack();
+    }
+  });
+
+  const reactTouchHandlers = {
+    onTouchStart: (e: React.TouchEvent) => touchHandlers.onTouchStart(e.nativeEvent),
+    onTouchMove: (e: React.TouchEvent) => touchHandlers.onTouchMove(e.nativeEvent),
+    onTouchEnd: () => touchHandlers.onTouchEnd(),
+  };
+
   // Sync with defaults
   useEffect(() => {
     setStyle(defaultStyle);
@@ -168,7 +184,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   const isBusy = isGenerating || isSubmitting;
 
   return (
-    <div className="flex-1 flex items-start justify-center py-2 sm:py-4 px-2 sm:px-4">
+    <div className="flex-1 flex items-start justify-center py-2 sm:py-4 px-2 sm:px-4 touch-pan-y" {...reactTouchHandlers}>
       <motion.div
         className="w-full max-w-2xl mx-auto"
         initial={{ opacity: 0, y: 20 }}
@@ -189,7 +205,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border border-white/20 flex-shrink-0 shadow-lg"
                 whileHover={{ scale: 1.05 }}
               >
-                <img
+                <ProgressiveImage
                   src={imageSrc}
                   alt="Preview"
                   className="w-full h-full object-cover"

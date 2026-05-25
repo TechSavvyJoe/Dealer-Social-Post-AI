@@ -25,7 +25,7 @@ export const DealerRecordSchema = PocketBaseRecordSchema.extend({
 
 // Used to strictly validate Veo 3.1 polling response to prevent unstructured JSON crashes
 export const GeminiVideoOperationSchema = z.object({
-  name: z.string(),
+  name: z.string().optional(),
   done: z.boolean().optional(),
   error: z
     .object({

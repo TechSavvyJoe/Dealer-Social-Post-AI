@@ -4,16 +4,17 @@ test.describe('Dealer Social Post AI Flow', () => {
   test('should load the login page and handle invalid login', async ({ page }) => {
     await page.goto('/');
 
-    // Check that we are on the login page
-    await expect(page.locator('text=Dealer Social Post AI').first()).toBeVisible();
-    await expect(page.getByPlaceholder('Enter 4-digit dealer code')).toBeVisible();
+    // Check that we are on the Enter Dealer Code screen
+    await expect(page.locator('text=Enter Dealer Code')).toBeVisible();
 
-    // Try invalid login
-    await page.getByPlaceholder('Enter 4-digit dealer code').fill('9999');
-    await page.getByRole('button', { name: 'Continue' }).click();
+    // Try invalid login by tapping 9-9-9-9 on the security dialpad
+    await page.getByRole('button', { name: '9' }).click();
+    await page.getByRole('button', { name: '9' }).click();
+    await page.getByRole('button', { name: '9' }).click();
+    await page.getByRole('button', { name: '9' }).click();
 
-    // Expect an error message (since 9999 is invalid)
-    await expect(page.locator('text=Login failed')).toBeVisible();
+    // Expect an error message "Dealer code not found." since 9999 is invalid
+    await expect(page.locator('text=Dealer code not found.')).toBeVisible();
   });
 
   // Note: To test the full generation flow, we would need to mock the API or seed the database with a valid dealer.

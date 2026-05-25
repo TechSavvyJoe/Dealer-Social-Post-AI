@@ -18,7 +18,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run dev',
+    command: './pocketbase serve --http=0.0.0.0:8090 --hooksDir=./pb_hooks & npm run dev',
     url: 'http://localhost:5173',
     reuseExistingServer: !process.env.CI,
   },

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   RefreshCw,
@@ -19,15 +19,28 @@ import confetti from "canvas-confetti";
 import { Tooltip } from "./ui/Tooltip";
 import { GeneratedPost, VideoStyle, VideoRequestOptions } from "../types";
 import { dataUrlToBlob } from "../utils/imageUtils";
-import { ImagePreviewModal } from "./ImagePreviewModal";
 import { triggerHapticFeedback } from "../utils/haptics";
-import { EditTextModal } from "./EditTextModal";
-import { VideoDirectorModal } from "./VideoDirectorModal";
-import { FunModeDirectorModal } from "./FunModeDirectorModal";
 import { Badge } from "./ui/Badge";
 import { cn } from "../utils/classNames";
 import { ProgressBar } from "./ui/ProgressBar";
 import { normalizeError, recoveryHint } from "../utils/errorHandler";
+import { ProgressiveImage } from "./ui/ProgressiveImage";
+import { useTouchGestures } from "../hooks/useTouchGestures";
+import { usePullToRefresh } from "../hooks/usePullToRefresh";
+
+// Lazy load modals for performance
+const LazyImagePreviewModal = React.lazy(() =>
+  import("./ImagePreviewModal").then((mod) => ({ default: mod.ImagePreviewModal }))
+);
+const LazyEditTextModal = React.lazy(() =>
+  import("./EditTextModal").then((mod) => ({ default: mod.EditTextModal }))
+);
+const LazyVideoDirectorModal = React.lazy(() =>
+  import("./VideoDirectorModal").then((mod) => ({ default: mod.VideoDirectorModal }))
+);
+const LazyFunModeDirectorModal = React.lazy(() =>
+  import("./FunModeDirectorModal").then((mod) => ({ default: mod.FunModeDirectorModal }))
+);
 
 interface PostResultProps {
   post: GeneratedPost;
@@ -114,6 +127,42 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [isSharing, setIsSharing] = useState(false);
   const imageBusy = isImageLoading || isVideoLoading;
   const textBusy = isTextLoading;
+
+  // Swipe gesture for returning to home/start over on mobile
+  const touchHandlers = useTouchGestures({
+    onSwipeRight: () => {
+      triggerHapticFeedback();
+      onStartOver();
+    }
+  });
+
+  // Pull down gesture to regenerate a new design/post automatically
+  const { pullDistance, shouldRefresh, handlers: pullHandlers } = usePullToRefresh({
+    onRefresh: async () => {
+      triggerHapticFeedback();
+      await handleImageAction(onRegenerateImage, [
+        "Refreshing with your chosen style...",
+        "Balancing lighting and color...",
+        "Finishing touches...",
+      ]);
+    }
+  });
+
+  // Combine both swipe and pull touch handlers safely
+  const combinedTouchHandlers = {
+    onTouchStart: (e: React.TouchEvent) => {
+      touchHandlers.onTouchStart(e.nativeEvent);
+      pullHandlers.onTouchStart(e.nativeEvent);
+    },
+    onTouchMove: (e: React.TouchEvent) => {
+      touchHandlers.onTouchMove(e.nativeEvent);
+      pullHandlers.onTouchMove(e.nativeEvent);
+    },
+    onTouchEnd: (e: React.TouchEvent) => {
+      touchHandlers.onTouchEnd();
+      pullHandlers.onTouchEnd();
+    }
+  };
 
   useEffect(() => {
     setEditedText(post.text);
@@ -499,43 +548,74 @@ export const PostResult: React.FC<PostResultProps> = ({
 
   return (
     <>
-      <ImagePreviewModal
-        isOpen={isPreviewOpen && !videoUrl}
-        onClose={() => setIsPreviewOpen(false)}
-        imageSrc={post.image}
-      />
-      <EditTextModal
-        isOpen={isTextEditing}
-        onClose={() => setIsTextEditing(false)}
-        onSubmit={handleTextEditSubmit}
-        originalText={post.text}
-        isLoading={isTextLoading}
-      />
-      <VideoDirectorModal
-        isOpen={isVideoDirectorOpen}
-        onClose={() => setIsVideoDirectorOpen(false)}
-        onSelectStyle={handleGenerateVideo}
-      />
-      <FunModeDirectorModal
-        isOpen={isFunModeDirectorOpen}
-        onClose={() => setIsFunModeDirectorOpen(false)}
-        onSelectStyle={(styleName) => {
-          setIsFunModeDirectorOpen(false);
-          handleImageAction(
-            () => onFunMode(styleName),
-            [
-              "Queuing Fun Mode style...",
-              "Illustrating with your photo reference...",
-              "Polishing colors and details...",
-            ]
-          );
-        }}
-      />
+      {pullDistance > 0 && (
+        <div 
+          className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center pointer-events-none transition-opacity duration-150"
+          style={{ 
+            transform: `translateY(${Math.min(pullDistance / 2, 40)}px)`,
+            opacity: Math.min(pullDistance / 80, 1)
+          }}
+        >
+          <div className="bg-surface-900/90 border border-white/10 backdrop-blur-md px-4 py-2 rounded-full flex items-center gap-2 shadow-lg">
+            <RefreshCw 
+              className={cn(
+                "w-4 h-4 text-primary-400 transition-transform", 
+                shouldRefresh ? "rotate-180 scale-110 text-success-400 animate-spin" : "rotate-0 scale-100"
+              )} 
+            />
+            <span className="text-xs font-semibold text-surface-200">
+              {shouldRefresh ? "Release to Regenerate" : "Pull down to Regenerate"}
+            </span>
+          </div>
+        </div>
+      )}
+
+      <Suspense fallback={null}>
+        <LazyImagePreviewModal
+          isOpen={isPreviewOpen && !videoUrl}
+          onClose={() => setIsPreviewOpen(false)}
+          imageSrc={post.image}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <LazyEditTextModal
+          isOpen={isTextEditing}
+          onClose={() => setIsTextEditing(false)}
+          onSubmit={handleTextEditSubmit}
+          originalText={post.text}
+          isLoading={isTextLoading}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <LazyVideoDirectorModal
+          isOpen={isVideoDirectorOpen}
+          onClose={() => setIsVideoDirectorOpen(false)}
+          onSelectStyle={handleGenerateVideo}
+        />
+      </Suspense>
+      <Suspense fallback={null}>
+        <LazyFunModeDirectorModal
+          isOpen={isFunModeDirectorOpen}
+          onClose={() => setIsFunModeDirectorOpen(false)}
+          onSelectStyle={(styleName) => {
+            setIsFunModeDirectorOpen(false);
+            handleImageAction(
+              () => onFunMode(styleName),
+              [
+                "Queuing Fun Mode style...",
+                "Illustrating with your photo reference...",
+                "Polishing colors and details...",
+              ]
+            );
+          }}
+        />
+      </Suspense>
       <motion.div
-        className="flex-1 w-full max-w-screen-2xl mx-auto px-1 sm:px-4 md:px-6 py-4 sm:py-6 space-y-6"
+        className="flex-1 w-full max-w-screen-2xl mx-auto px-1 sm:px-4 md:px-6 py-4 sm:py-6 space-y-6 touch-pan-y"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
+        {...combinedTouchHandlers}
       >
         <motion.h2
           className="text-3xl sm:text-4xl font-bold text-center text-surface-50"
@@ -592,7 +672,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                   className="w-full block rounded-xl overflow-hidden focus:outline-none focus:ring-4 focus:ring-primary-500/50 transition-all hover:ring-2 hover:ring-primary-400/30"
                   aria-label="Enlarge image"
                 >
-                  <img
+                  <ProgressiveImage
                     src={post.image}
                     alt="Generated social media post"
                     className="rounded-xl shadow-2xl w-full object-contain"

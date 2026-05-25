@@ -1,13 +1,21 @@
-import React from "react";
+import React, { Suspense } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Header } from "./components/Header";
 import { MainContent } from "./components/MainContent";
-import { SettingsModal } from "./components/SettingsModal";
-import { ImageCropModal } from "./components/ImageCropModal";
-import { VideoDirectorModal } from "./components/VideoDirectorModal";
 import { ToastProvider } from "./components/ui/Toast";
 import { useAppController } from "./hooks/useAppController";
 import { AppStep } from "./types";
+
+// Lazy load heavyweight modals
+const LazySettingsModal = React.lazy(() =>
+  import("./components/SettingsModal").then((mod) => ({ default: mod.SettingsModal }))
+);
+const LazyImageCropModal = React.lazy(() =>
+  import("./components/ImageCropModal").then((mod) => ({ default: mod.ImageCropModal }))
+);
+const LazyVideoDirectorModal = React.lazy(() =>
+  import("./components/VideoDirectorModal").then((mod) => ({ default: mod.VideoDirectorModal }))
+);
 
 const AppContent: React.FC = () => {
   const {
@@ -91,28 +99,34 @@ const AppContent: React.FC = () => {
         </AnimatePresence>
       </main>
 
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        compactMode={compactMode}
-        onToggleCompactMode={(value) => setPreferences({ compactMode: value })}
-      />
+      <Suspense fallback={null}>
+        <LazySettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          compactMode={compactMode}
+          onToggleCompactMode={(value) => setPreferences({ compactMode: value })}
+        />
+      </Suspense>
 
-      <ImageCropModal
-        isOpen={cropModalOpen}
-        onClose={() => setCropModalOpen(false)}
-        imageSrc={tempImageForCrop}
-        onConfirm={handleCropConfirm}
-      />
+      <Suspense fallback={null}>
+        <LazyImageCropModal
+          isOpen={cropModalOpen}
+          onClose={() => setCropModalOpen(false)}
+          imageSrc={tempImageForCrop}
+          onConfirm={handleCropConfirm}
+        />
+      </Suspense>
 
-      <VideoDirectorModal
-        isOpen={isVideoDirectorOpen}
-        onClose={() => setIsVideoDirectorOpen(false)}
-        onSelectStyle={(style, options) => {
-          // This is handled inside PostResult usually, but if we needed a global modal:
-          setIsVideoDirectorOpen(false);
-        }}
-      />
+      <Suspense fallback={null}>
+        <LazyVideoDirectorModal
+          isOpen={isVideoDirectorOpen}
+          onClose={() => setIsVideoDirectorOpen(false)}
+          onSelectStyle={(style, options) => {
+            // This is handled inside PostResult usually, but if we needed a global modal:
+            setIsVideoDirectorOpen(false);
+          }}
+        />
+      </Suspense>
     </div>
   );
 };

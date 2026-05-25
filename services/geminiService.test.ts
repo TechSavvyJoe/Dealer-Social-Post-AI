@@ -121,6 +121,7 @@ describe("GeminiService Model Verification", () => {
         ok: true,
         json: () =>
           Promise.resolve({
+            name: "operations/test-operation-123",
             done: true,
             response: {
               generateVideoResponse: {
