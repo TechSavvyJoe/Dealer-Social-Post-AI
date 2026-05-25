@@ -590,8 +590,8 @@ routerAdd("GET", "/api/proxy-image", (c) => {
 
 routerAdd("POST", "/api/telemetry", (c) => {
   try {
-    // Read body as text first to avoid JSON parsing errors on empty body
-    const rawBody = $apis.requestInfo(c).data;
+    const rawBody = {};
+    c.bindBody(rawBody);
     // Log to server console
     console.log("[Telemetry]", JSON.stringify(rawBody));
     return c.json(200, { success: true });
@@ -604,7 +604,12 @@ routerAdd("POST", "/api/telemetry", (c) => {
 
 // Session Endpoints (HttpOnly Cookie-based Authentication)
 routerAdd("POST", "/api/app/session", (c) => {
-  const body = $apis.requestInfo(c).data;
+  const body = {};
+  try {
+    c.bindBody(body);
+  } catch (e) {
+    console.error("Failed to parse body:", e);
+  }
   const dealerCode = body.dealerCode;
   
   if (!dealerCode) {
