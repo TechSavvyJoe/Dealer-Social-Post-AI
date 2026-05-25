@@ -619,7 +619,7 @@ routerAdd("POST", "/api/app/session", (c) => {
     const record = $app.findFirstRecordByData("dealers", "code", dealerCode);
     
     // Set HttpOnly cookie
-    c.response().header().add("Set-Cookie", `dealer_session=${record.id}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800`);
+    c.response().header("Set-Cookie", `dealer_session=${record.id}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800`);
 
     let logoUrl = record.getString("logo");
     if (logoUrl && !logoUrl.startsWith("http")) {
@@ -635,7 +635,7 @@ routerAdd("POST", "/api/app/session", (c) => {
       } 
     });
   } catch (err) {
-    return c.json(401, { error: "Invalid dealer code", details: err.toString() });
+    return c.json(401, { error: "Invalid dealer code" });
   }
 });
 
@@ -665,11 +665,11 @@ routerAdd("GET", "/api/app/session", (c) => {
       } 
     });
   } catch (err) {
-    return c.json(401, { error: "Invalid session", details: err.toString() });
+    return c.json(401, { error: "Invalid session" });
   }
 });
 
 routerAdd("DELETE", "/api/app/session", (c) => {
-  c.response().header().add("Set-Cookie", "dealer_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0");
+  c.response().header("Set-Cookie", "dealer_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0");
   return c.json(200, { success: true });
 });
