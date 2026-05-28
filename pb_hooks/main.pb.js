@@ -81,7 +81,7 @@ const proxyHandler = (c) => {
   // Method 2: Get from URL path directly
   if (!path) {
     try {
-      const fullPath = c.request().url.path || c.request().url.pathname;
+      const fullPath = c.request.url.path || c.request.url.pathname;
       if (fullPath && fullPath.startsWith("/api/proxy/")) {
         path = fullPath.substring("/api/proxy/".length);
       }
@@ -93,7 +93,7 @@ const proxyHandler = (c) => {
   // Method 3: Get from raw URL string
   if (!path) {
     try {
-      const urlStr = c.request().url.string();
+      const urlStr = c.request.url.string();
       const match = urlStr.match(/\/api\/proxy\/(.+)/);
       if (match) {
         path = match[1];
@@ -532,8 +532,8 @@ const proxyHandler = (c) => {
       url: targetUrl,
       method: requestInfo.method,
       body:
-        requestInfo.method === "POST" && requestInfo.data
-          ? JSON.stringify(requestInfo.data)
+        requestInfo.method === "POST" && requestInfo.body
+          ? JSON.stringify(requestInfo.body)
           : "",
       headers: {
         "Content-Type": "application/json",
@@ -868,8 +868,7 @@ routerAdd("GET", "/api/app/health", (c) => {
 
 routerAdd("POST", "/api/telemetry", (c) => {
   try {
-    // Read body as text first to avoid JSON parsing errors on empty body
-    const rawBody = $apis.requestInfo(c).data;
+    const rawBody = c.requestInfo().body || {};
     // Log to server console
     console.log("[Telemetry]", JSON.stringify(rawBody));
     return c.json(200, { success: true });
@@ -895,6 +894,7 @@ const LOGIN_FAIL_WINDOW_SECONDS = 15 * 60; // 15 min
 const LOGIN_FAIL_THRESHOLD = 10;
 
 routerAdd("POST", "/api/app/session", (c) => {
+<<<<<<< HEAD
   const helpers = require(__hooks + "/helpers.js");
   const ip = helpers.clientIP(c);
   const ua = helpers.userAgent(c);
@@ -928,6 +928,17 @@ routerAdd("POST", "/api/app/session", (c) => {
       userAgent: ua,
       detail: "malformed code",
     });
+=======
+  let body = {};
+  try {
+    body = c.requestInfo().body || {};
+  } catch (e) {
+    console.error("Failed to parse body:", e);
+  }
+  const dealerCode = body.dealerCode;
+  
+  if (!dealerCode) {
+>>>>>>> origin/main
     return c.json(400, { error: "Dealer code is required" });
   }
 
@@ -935,10 +946,24 @@ routerAdd("POST", "/api/app/session", (c) => {
   let role = "salesperson";
 
   try {
+<<<<<<< HEAD
     record = $app.dao().findFirstRecordByData("dealers", "code", dealerCode);
   } catch (_e) {
     /* not found by code */
   }
+=======
+    const record = $app.findFirstRecordByData("dealers", "code", dealerCode);
+    
+    // Set HttpOnly cookie using the official PocketBase JSVM Cookie class
+    c.setCookie(new Cookie({
+      name: "dealer_session",
+      value: record.id,
+      path: "/",
+      httpOnly: true,
+      secure: true,
+      maxAge: 604800,
+    }));
+>>>>>>> origin/main
 
   if (!record) {
     try {
@@ -1032,6 +1057,7 @@ routerAdd("POST", "/api/app/session", (c) => {
 });
 
 routerAdd("GET", "/api/app/session", (c) => {
+<<<<<<< HEAD
   const helpers = require(__hooks + "/helpers.js");
   const token = helpers.readSessionToken(c);
   if (!token) return c.json(401, { error: "No active session" });
@@ -1044,6 +1070,33 @@ routerAdd("GET", "/api/app/session", (c) => {
   try {
     record = $app.dao().findRecordById("dealers", session.getString("dealer"));
   } catch (_e) {
+=======
+  try {
+    const cookieHeader = c.request.header.get("Cookie") || "";
+    const match = cookieHeader.match(/dealer_session=([^;]+)/);
+    if (!match) {
+      return c.json(401, { error: "No active session" });
+    }
+
+    const dealerId = match[1];
+
+    const record = $app.findRecordById("dealers", dealerId);
+    
+    let logoUrl = record.getString("logo");
+    if (logoUrl && !logoUrl.startsWith("http")) {
+       logoUrl = `/api/files/dealers/${record.id}/${logoUrl}`;
+    }
+
+    return c.json(200, { 
+      dealer: {
+        id: record.id,
+        name: record.getString("name"),
+        code: record.getString("code"),
+        logo: logoUrl
+      } 
+    });
+  } catch (err) {
+>>>>>>> origin/main
     return c.json(401, { error: "Invalid session" });
   }
 
@@ -1080,6 +1133,7 @@ routerAdd("GET", "/api/app/session", (c) => {
 });
 
 routerAdd("DELETE", "/api/app/session", (c) => {
+<<<<<<< HEAD
   const helpers = require(__hooks + "/helpers.js");
   // Best-effort: delete the row so the token is permanently dead even if
   // the cookie sticks around somewhere.
@@ -1093,6 +1147,16 @@ routerAdd("DELETE", "/api/app/session", (c) => {
     /* ignore */
   }
   c.response().header().add("Set-Cookie", helpers.buildClearCookie());
+=======
+  c.setCookie(new Cookie({
+    name: "dealer_session",
+    value: "",
+    path: "/",
+    httpOnly: true,
+    secure: true,
+    maxAge: -1,
+  }));
+>>>>>>> origin/main
   return c.json(200, { success: true });
 });
 

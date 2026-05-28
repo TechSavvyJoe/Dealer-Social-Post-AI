@@ -119,6 +119,7 @@ describe("GeminiService model routing", () => {
         ok: true,
         json: () =>
           Promise.resolve({
+            name: "operations/test-operation-123",
             done: true,
             response: {
               generateVideoResponse: {

@@ -199,7 +199,6 @@ export class ErrorBoundary extends Component<Props, State> {
                 {this.state.copied ? "Copied" : "Copy error details"}
               </button>
             </div>
-
             {this.state.error && (
               <details className="mt-6 p-3 bg-black/30 rounded-lg text-left overflow-auto max-h-48">
                 <summary className="text-xs text-surface-400 cursor-pointer select-none">

@@ -222,12 +222,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                                 : "bg-surface-700/80 border border-surface-600"
                             )}
                             animate={{
-                              scale: isFilled ? [1, 1.3, 1] : 1,
+                              scale: isFilled ? 1.25 : 1,
                             }}
                             transition={{
-                              duration: 0.2,
                               type: "spring",
                               stiffness: 500,
+                              damping: 15,
                             }}
                           />
                         </motion.div>
