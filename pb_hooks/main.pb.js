@@ -473,6 +473,15 @@ const proxyHandler = (c) => {
         location = pathParts[locationIndex + 1];
       }
 
+      // SSRF guard: `location` is interpolated directly into the upstream host
+      // (`{LOCATION}-aiplatform.googleapis.com`) AND this request carries a live
+      // GCP OAuth bearer token. A crafted value (e.g. "evil.example#" or one
+      // containing "@") could redirect the authenticated request off-Google and
+      // exfiltrate the token. Pin to the GCP region grammar before use.
+      if (!/^[a-z]+-[a-z]+[0-9]+$/.test(location)) {
+        return c.json(400, { error: "Invalid Vertex AI location" });
+      }
+
       baseUrl = VERTEX_AI_URL_BASE.replace("{LOCATION}", location);
       // Remove "vertex/" prefix from path
       path = path.substring(7); // Remove "vertex/"
@@ -544,11 +553,19 @@ const proxyHandler = (c) => {
 
     console.log(`[Proxy] Upstream status: ${res.statusCode}`);
 
-    // Forward headers for downstream consumers (e.g., content-type).
+    // Forward ONLY Content-Type. Blindly re-emitting every upstream header
+    // (Content-Length / Content-Encoding / Transfer-Encoding / Connection)
+    // corrupts the body we re-encode below, and forwarding upstream
+    // Set-Cookie / Cache-Control can poison the SW/browser cache or leak
+    // upstream cookies onto this authenticated origin.
     if (res.headers) {
       Object.entries(res.headers).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          c.response().header(key, String(value));
+        if (
+          value !== undefined &&
+          value !== null &&
+          String(key).toLowerCase() === "content-type"
+        ) {
+          c.response().header("Content-Type", String(value));
         }
       });
     }
@@ -726,18 +743,40 @@ routerAdd("GET", "/api/proxy-image", (c) => {
       return c.json(400, { error: "Only https URLs are allowed" });
     }
 
-    // Helper for SSRF protection (duplicated here for scope safety)
-    const isPrivateHostLocal = (host) => {
-      if (host === "localhost") return true;
-      return (
-        /^(\d{1,3}\.){3}\d{1,3}$/.test(host) &&
-        /^(10\.|127\.|0\.0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(
-          host
-        )
-      );
+    // SSRF protection. The naive dotted-quad regex used previously missed
+    // IPv6 (::1, fc00::/7, fe80::), the cloud metadata hostname, and non-dotted
+    // numeric IP encodings (http://2130706433, http://0x7f000001,
+    // http://017700000001) that all still resolve to private/loopback targets.
+    const isBlockedHost = (rawHost) => {
+      if (!rawHost) return true;
+      const host = rawHost.toLowerCase();
+      // Internal / loopback / link-local hostnames
+      if (
+        host === "localhost" ||
+        host.endsWith(".localhost") ||
+        host.endsWith(".local") ||
+        host.endsWith(".internal") ||
+        host === "metadata.google.internal"
+      ) {
+        return true;
+      }
+      // Any IPv6 literal — block wholesale (upstreams we proxy are IPv4-reachable)
+      if (host.indexOf(":") !== -1) return true;
+      // Dotted-quad IPv4: block loopback, private, link-local, CGNAT, broadcast
+      if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
+        return (
+          /^(0\.|10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(
+            host
+          ) || host === "255.255.255.255"
+        );
+      }
+      // Non-dotted numeric host forms (decimal/hex/octal) bypass the dotted-quad
+      // check but still resolve to an IP — reject them all.
+      if (/^\d+$/.test(host) || /^0x[0-9a-f]+$/.test(host)) return true;
+      return false;
     };
 
-    if (isPrivateHostLocal(parsed.hostname)) {
+    if (isBlockedHost(parsed.hostname)) {
       return c.json(400, { error: "Private/loopback hosts are not allowed" });
     }
   } catch (e) {
@@ -868,14 +907,26 @@ routerAdd("GET", "/api/app/health", (c) => {
 
 routerAdd("POST", "/api/telemetry", (c) => {
   try {
-    const rawBody = c.requestInfo().body || {};
-    // Log to server console
-    console.log("[Telemetry]", JSON.stringify(rawBody));
+    const helpers = require(__hooks + "/helpers.js");
+    // This endpoint is intentionally unauthenticated (it captures pre-login
+    // client errors), so rate-limit per IP to stop log-injection / disk-fill
+    // abuse: 30 events per IP per minute.
+    const rl = helpers.checkProxyRateLimit(
+      "telemetry:" + helpers.clientIP(c),
+      30,
+      60 * 1000
+    );
+    if (!rl.ok) return c.json(429, { success: false });
+
+    const rawBody = $apis.requestInfo(c).data || {};
+    // Cap how much attacker-controlled text reaches the log stream.
+    const serialized = JSON.stringify(rawBody).slice(0, 2000);
+    console.log("[Telemetry]", serialized);
     return c.json(200, { success: true });
   } catch (err) {
     console.error("Telemetry error:", err);
-    // Return 200 even on error to prevent client noise, but log the error
-    return c.json(200, { success: false, error: err.toString() });
+    // Return 200 even on error to prevent client noise; do not echo details.
+    return c.json(200, { success: false });
   }
 });
 
@@ -895,7 +946,6 @@ routerAdd("POST", "/api/app/session", (c) => {
     const LOGIN_FAIL_WINDOW_SECONDS = 15 * 60; // 15 min
     const LOGIN_FAIL_THRESHOLD = 10;
     
-    console.log("Inside /api/app/session");
     const helpers = require(__hooks + "/helpers.js");
     const ip = helpers.clientIP(c);
     const ua = helpers.userAgent(c);

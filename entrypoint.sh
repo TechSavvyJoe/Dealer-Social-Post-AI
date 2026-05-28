@@ -1,5 +1,9 @@
 #!/bin/sh
-set -x
+# NOTE: do NOT enable `set -x` here. Command tracing would expand and echo the
+# full $VERTEX_SERVICE_ACCOUNT_JSON (incl. the RSA private_key) into the
+# container's stderr / Fly log stream. Use `set -e` so a failed setup step
+# aborts startup instead.
+set -e
 
 # Debug: List files
 ls -la /pb
@@ -10,7 +14,9 @@ echo "Starting PocketBase in background..."
 # Inject Vertex AI Credentials if provided
 if [ -n "$VERTEX_SERVICE_ACCOUNT_JSON" ]; then
     echo "Injecting Vertex AI credentials from VERTEX_SERVICE_ACCOUNT_JSON..."
-    echo "$VERTEX_SERVICE_ACCOUNT_JSON" > /pb/pb_hooks/vertex_key.json
+    # Write the secret without tracing. printf avoids the trailing newline and,
+    # crucially, the value is never echoed to logs.
+    printf '%s' "$VERTEX_SERVICE_ACCOUNT_JSON" > /pb/pb_hooks/vertex_key.json
     chmod 600 /pb/pb_hooks/vertex_key.json
 elif [ -n "$private_key" ] && [ -n "$client_email" ]; then
     echo "Vertex AI credentials detected via individual env vars (private_key, client_email, etc.)"
