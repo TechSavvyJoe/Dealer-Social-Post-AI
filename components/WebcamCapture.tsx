@@ -41,17 +41,23 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, o
     }
   }, []);
 
-  // Effect to initialize and restart the camera when orientation changes
+  // Initialize the camera. Deliberately NOT keyed on `orientation`: a resize
+  // (mobile keyboard, browser chrome show/hide, rotation) fires constantly and
+  // would tear down + re-acquire the camera each time — leaking MediaStreams
+  // (camera light stays on) and flickering the feed. Orientation only affects
+  // the CSS aspect ratio and the best-effort resolution hint, read live below.
   useEffect(() => {
+    let cancelled = false;
+
     const startCamera = async () => {
       cleanupCamera();
-      
+
       try {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
           throw new Error('Webcam access is not supported by your browser.');
         }
 
-        const isPortrait = orientation === 'portrait';
+        const isPortrait = window.innerHeight > window.innerWidth;
         const idealWidth = isPortrait ? 1080 : 1920;
         const idealHeight = isPortrait ? 1920 : 1080;
 
@@ -74,11 +80,19 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, o
         };
         
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        // If the effect was torn down (unmount / flip camera) while the
+        // permission prompt or acquisition was in flight, stop this orphaned
+        // stream rather than leaking its tracks.
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
       } catch (err) {
+        if (cancelled) return;
         console.error("Error accessing webcam:", err);
         let message = "Could not access the webcam.";
         if (err instanceof Error) {
@@ -97,15 +111,21 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, o
     startCamera();
 
     return () => {
+      cancelled = true;
       cleanupCamera();
     };
-  }, [cleanupCamera, orientation, facingMode]);
+  }, [cleanupCamera, facingMode]);
 
   const handleCapture = () => {
     triggerHapticFeedback();
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
       const canvas = canvasRef.current;
+      // Guard against capturing before the first frame is available — otherwise
+      // videoWidth/Height are 0 and we emit an empty 0x0 JPEG as a "photo".
+      if (!video.videoWidth || !video.videoHeight) {
+        return;
+      }
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const context = canvas.getContext('2d');

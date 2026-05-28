@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
@@ -14,6 +14,9 @@ import {
 } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
+import { EmptyState } from "./ui/EmptyState";
+import { ErrorBanner } from "./ui/ErrorBanner";
+import { Skeleton } from "./ui/Skeleton";
 import { PostRecord, ApprovalStatus } from "../services/posts";
 import { useAppStore } from "../stores/appStore";
 import { cn } from "../utils/classNames";
@@ -84,8 +87,12 @@ export const PostHistory: React.FC = () => {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ApprovalStatus | "all">("all");
 
+  // Monotonic request id: toggling `statusFilter` fast can resolve responses
+  // out of order — only the most recent request is allowed to write state.
+  const reqIdRef = useRef(0);
   const load = useCallback(async () => {
     if (!dealer) return;
+    const myId = ++reqIdRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -96,11 +103,12 @@ export const PostHistory: React.FC = () => {
       });
       if (!res.ok) throw new Error(`/api/app/posts ${res.status}`);
       const body = (await res.json()) as { items: PostRecord[] };
-      setItems(body.items || []);
+      if (reqIdRef.current === myId) setItems(body.items || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (reqIdRef.current === myId)
+        setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (reqIdRef.current === myId) setLoading(false);
     }
   }, [dealer, statusFilter]);
 
@@ -159,9 +167,15 @@ export const PostHistory: React.FC = () => {
     const csv = rows
       .map((r) =>
         r
-          .map((cell) =>
-            `"${String(cell).replace(/"/g, '""').replace(/\r?\n/g, " ")}"`
-          )
+          .map((cell) => {
+            let s = String(cell);
+            // CSV formula-injection guard: a cell beginning with = + - @ (or a
+            // control char) is executed as a formula when the export is opened
+            // in Excel/Sheets. These fields are salesperson-controlled free
+            // text, so neutralize with a leading apostrophe.
+            if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+            return `"${s.replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
+          })
           .join(",")
       )
       .join("\n");
@@ -182,7 +196,7 @@ export const PostHistory: React.FC = () => {
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/5 border border-white/15 rounded-2xl p-4 sm:p-6 space-y-4"
+      className="bg-white/5 border border-white/10 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
     >
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
@@ -249,35 +263,52 @@ export const PostHistory: React.FC = () => {
         </div>
       </div>
 
-      {error && (
-        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs flex items-center gap-2">
-          <AlertCircle className="h-4 w-4 text-error-400" />
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner message={error} onRetry={() => void load()} />}
 
       <AnimatePresence mode="wait">
         {loading && items.length === 0 ? (
           <motion.div
             key="loading"
-            className="py-12 flex items-center justify-center text-surface-400 text-sm"
+            className="space-y-2"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            aria-label="Loading post history"
           >
-            <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading history…
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-3 rounded-xl border border-white/10 bg-surface-900/40 px-3 py-3"
+              >
+                <Skeleton variant="rectangular" width={40} height={40} />
+                <div className="flex-1 space-y-2">
+                  <Skeleton width="55%" height={12} />
+                  <Skeleton width="35%" height={10} />
+                </div>
+                <Skeleton width={64} height={20} />
+              </div>
+            ))}
           </motion.div>
         ) : filtered.length === 0 ? (
           <motion.div
             key="empty"
-            className="py-12 text-center text-sm text-surface-400"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            {items.length === 0
-              ? "No posts logged yet for this dealership."
-              : `No matches for "${query}".`}
+            {items.length === 0 ? (
+              <EmptyState
+                icon={History}
+                title="No posts logged yet"
+                description="Posts your team generates for this dealership will show up here, with VIN, salesperson, and approval status."
+              />
+            ) : (
+              <EmptyState
+                icon={Search}
+                title="No matches"
+                description={`Nothing matches “${query}”. Try a different name, VIN, or style.`}
+              />
+            )}
           </motion.div>
         ) : (
           <motion.div

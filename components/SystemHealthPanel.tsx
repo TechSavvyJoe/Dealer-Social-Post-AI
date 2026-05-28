@@ -110,6 +110,7 @@ export const SystemHealthPanel: React.FC = () => {
     setError(null);
     try {
       const res = await fetch("/api/app/health", { credentials: "include" });
+      if (!res.ok) throw new Error(`/api/app/health ${res.status}`);
       const body = (await res.json()) as HealthPayload;
       setData(body);
       setLastChecked(new Date());
@@ -136,7 +137,7 @@ export const SystemHealthPanel: React.FC = () => {
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/5 border border-white/15 rounded-2xl p-4 sm:p-6 space-y-4"
+      className="bg-white/5 border border-white/10 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
     >
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">

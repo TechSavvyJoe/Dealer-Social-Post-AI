@@ -43,6 +43,11 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
 
     if (!ctx) return;
 
+    // Guard against confirming before the <img> has decoded: naturalWidth/
+    // Height are 0 until load, which would export an empty 0x0 image as the
+    // "cropped" result.
+    if (!img.naturalWidth || !img.naturalHeight) return;
+
     // Set canvas dimensions to match image natural dimensions
     canvas.width = img.naturalWidth;
     canvas.height = img.naturalHeight;

@@ -1,8 +1,11 @@
-import React, { useEffect } from "react";
-import { motion, AnimatePresence, PanInfo } from "framer-motion";
+import React, { useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { cn } from "../../utils/classNames";
+
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 interface ModalProps {
   isOpen: boolean;
@@ -27,6 +30,10 @@ export const Modal: React.FC<ModalProps> = ({
   size = "md",
   showCloseButton = true,
 }) => {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const previouslyFocused = useRef<HTMLElement | null>(null);
+  const titleId = React.useId();
+
   // Prevent body scroll when modal is open
   useEffect(() => {
     if (isOpen) {
@@ -39,15 +46,55 @@ export const Modal: React.FC<ModalProps> = ({
     };
   }, [isOpen]);
 
-  // Handle escape key
+  // Move focus into the dialog on open and restore it to the trigger on close.
+  // Without this, keyboard/AT users keep focus on the page behind the dialog.
   useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+    if (!isOpen) return;
+    previouslyFocused.current = document.activeElement as HTMLElement | null;
+    const raf = requestAnimationFrame(() => {
+      const root = contentRef.current;
+      if (!root) return;
+      const first = root.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+      (first ?? root).focus();
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      previouslyFocused.current?.focus?.();
     };
-    if (isOpen) {
-      window.addEventListener("keydown", handleEscape);
-    }
-    return () => window.removeEventListener("keydown", handleEscape);
+  }, [isOpen]);
+
+  // Escape to close + Tab focus trap so focus can't leave the dialog.
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const root = contentRef.current;
+      if (!root) return;
+      const focusables = Array.from(
+        root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+      ).filter((el) => el.offsetParent !== null);
+      if (focusables.length === 0) {
+        e.preventDefault();
+        root.focus();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && (active === first || !root.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !root.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
   }, [isOpen, onClose]);
 
   const sizeClasses = {
@@ -56,15 +103,6 @@ export const Modal: React.FC<ModalProps> = ({
     lg: "max-w-lg",
     xl: "max-w-2xl",
     full: "max-w-full m-4",
-  };
-
-  const handleDragEnd = (
-    event: MouseEvent | TouchEvent | PointerEvent,
-    info: PanInfo
-  ) => {
-    if (info.offset.y > 100) {
-      onClose();
-    }
   };
 
   return createPortal(
@@ -84,6 +122,12 @@ export const Modal: React.FC<ModalProps> = ({
 
           {/* Modal Content */}
           <motion.div
+            ref={contentRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={title ? titleId : undefined}
+            aria-label={title ? undefined : "Dialog"}
+            tabIndex={-1}
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -106,8 +150,7 @@ export const Modal: React.FC<ModalProps> = ({
             {/* Mobile Drag Handle */}
             <div
               className="sm:hidden w-full flex justify-center pt-3 pb-1"
-              onClick={onClose}
-              onTouchEnd={onClose}
+              aria-hidden="true"
             >
               <div className="w-12 h-1.5 bg-surface-700/50 rounded-full" />
             </div>
@@ -117,7 +160,10 @@ export const Modal: React.FC<ModalProps> = ({
               <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
                 <div>
                   {title && (
-                    <h2 className="text-xl font-semibold text-surface-50">
+                    <h2
+                      id={titleId}
+                      className="text-xl font-semibold text-surface-50"
+                    >
                       {title}
                     </h2>
                   )}
@@ -130,6 +176,7 @@ export const Modal: React.FC<ModalProps> = ({
                 {showCloseButton && (
                   <button
                     onClick={onClose}
+                    aria-label="Close dialog"
                     className="p-2 -mr-2 text-surface-400 hover:text-surface-50 hover:bg-white/5 rounded-full transition-colors"
                   >
                     <X className="w-5 h-5" />

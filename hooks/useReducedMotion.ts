@@ -5,7 +5,15 @@ import { useState, useEffect } from "react";
  * Respects the prefers-reduced-motion media query for accessibility
  */
 export const useReducedMotion = (): boolean => {
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  // Lazy-init from the media query so the very first render already respects
+  // the user's preference. Initializing to `false` let motion fire on the
+  // first frame for users who asked for reduced motion.
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");

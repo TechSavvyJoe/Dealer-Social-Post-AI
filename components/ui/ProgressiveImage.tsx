@@ -24,17 +24,31 @@ export const ProgressiveImage: React.FC<ProgressiveImageProps> = ({
   const [isLoading, setIsLoading] = React.useState(true);
 
   React.useEffect(() => {
+    // Guard against setState-after-unmount and out-of-order resolution when
+    // `src` changes mid-load (a slow earlier load must not overwrite a newer
+    // src). `ignored` is flipped in cleanup and the handlers are detached.
+    let ignored = false;
     const img = new Image();
-    img.src = src;
-    
+
     img.onload = () => {
+      if (ignored) return;
       setImageSrc(src);
       setIsLoading(false);
       onLoad?.();
     };
 
     img.onerror = () => {
+      if (ignored) return;
       setIsLoading(false);
+    };
+
+    setIsLoading(true);
+    img.src = src;
+
+    return () => {
+      ignored = true;
+      img.onload = null;
+      img.onerror = null;
     };
   }, [src, onLoad]);
 

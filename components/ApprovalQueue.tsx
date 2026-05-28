@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Check,
@@ -8,9 +8,12 @@ import {
   RefreshCw,
   Film,
   ShieldCheck,
+  CheckCircle2,
 } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
+import { EmptyState } from "./ui/EmptyState";
+import { ErrorBanner } from "./ui/ErrorBanner";
 import {
   listPendingPosts,
   setApprovalStatus,
@@ -41,17 +44,22 @@ export const ApprovalQueue: React.FC = () => {
   const [approver, setApprover] = useState("");
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
+  // Monotonic request id so a stale dealer's response can't overwrite the
+  // current dealer's pending list if the dealer changes mid-fetch.
+  const reqIdRef = useRef(0);
   const load = useCallback(async () => {
     if (!currentDealer) return;
+    const myId = ++reqIdRef.current;
     setLoading(true);
     setError(null);
     try {
       const items = await listPendingPosts(currentDealer.id);
-      setPending(items);
+      if (reqIdRef.current === myId) setPending(items);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (reqIdRef.current === myId)
+        setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (reqIdRef.current === myId) setLoading(false);
     }
   }, [currentDealer]);
 
@@ -88,7 +96,7 @@ export const ApprovalQueue: React.FC = () => {
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/5 border border-white/15 rounded-2xl p-4 sm:p-6 space-y-4"
+      className="bg-white/5 border border-white/10 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
     >
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
@@ -138,20 +146,19 @@ export const ApprovalQueue: React.FC = () => {
         className="bg-white/5 border-white/10 focus:border-primary-400"
       />
 
-      {error && (
-        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner message={error} onRetry={() => void load()} />}
 
       <AnimatePresence>
         {pending.length === 0 ? (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="py-8 text-center text-sm text-surface-400"
           >
-            Nothing pending — your team's clear.
+            <EmptyState
+              icon={CheckCircle2}
+              title="All caught up"
+              description="Nothing pending — your team's clear. New posts that need approval will appear here."
+            />
           </motion.div>
         ) : (
           <ul className="space-y-2">
