@@ -270,7 +270,8 @@ function checkProxyRateLimit(key, maxPerWindow, windowMs) {
 // Validation Helpers
 // ---------------------------------------------------------------------------
 
-function assertString(val, maxLength = 1024) {
+function assertString(val, maxLength) {
+  if (maxLength === undefined) maxLength = 1024;
   if (typeof val !== "string") {
     throw new Error("Expected a string");
   }

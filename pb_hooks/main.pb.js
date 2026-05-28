@@ -890,24 +890,25 @@ routerAdd("POST", "/api/telemetry", (c) => {
 // lockout. After 30 minutes the counter resets. Successes don't count.
 // ============================================================================
 
-const LOGIN_FAIL_WINDOW_SECONDS = 15 * 60; // 15 min
-const LOGIN_FAIL_THRESHOLD = 10;
-
 routerAdd("POST", "/api/app/session", (c) => {
-  const helpers = require(__hooks + "/helpers.js");
-  const ip = helpers.clientIP(c);
-  const ua = helpers.userAgent(c);
+  try {
+    const LOGIN_FAIL_WINDOW_SECONDS = 15 * 60; // 15 min
+    const LOGIN_FAIL_THRESHOLD = 10;
+    
+    console.log("Inside /api/app/session");
+    const helpers = require(__hooks + "/helpers.js");
+    const ip = helpers.clientIP(c);
+    const ua = helpers.userAgent(c);
 
-  // Lockout check BEFORE we even read the body — cheap and stops brute force.
-  const recentFails = helpers.countRecentEvents(
-    "login_fail",
-    ip,
-    LOGIN_FAIL_WINDOW_SECONDS
-  );
-  if (recentFails >= LOGIN_FAIL_THRESHOLD) {
-    helpers.logAuthEvent("login_locked", {
-      ip: ip,
-      userAgent: ua,
+    const recentFails = helpers.countRecentEvents(
+      "login_fail",
+      ip,
+      LOGIN_FAIL_WINDOW_SECONDS
+    );
+    if (recentFails >= LOGIN_FAIL_THRESHOLD) {
+      helpers.logAuthEvent("login_locked", {
+        ip: ip,
+        userAgent: ua,
       detail: `${recentFails} fails in window`,
     });
     c.response().header("Retry-After", String(LOGIN_FAIL_WINDOW_SECONDS));
@@ -1029,6 +1030,10 @@ routerAdd("POST", "/api/app/session", (c) => {
       custom_scenarios: record.getString("custom_scenarios"),
     },
   });
+  } catch (e) {
+    console.error("SESSION ERROR:", e);
+    return c.json(500, { error: e.toString() });
+  }
 });
 
 routerAdd("GET", "/api/app/session", (c) => {
