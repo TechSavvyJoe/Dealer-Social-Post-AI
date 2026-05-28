@@ -9,6 +9,8 @@ interface CircuitBreakerOptions {
   failureThreshold?: number;
   successThreshold?: number;
   timeout?: number;
+  /** Failures older than this window stop counting toward the open threshold. */
+  failureWindow?: number;
 }
 
 interface CircuitStats {
@@ -16,6 +18,8 @@ interface CircuitStats {
   successes: number;
   lastFailure: number;
   state: CircuitState;
+  /** True while a single HALF_OPEN probe is in flight, so we admit only one. */
+  halfOpenInFlight: boolean;
 }
 
 class CircuitBreaker {
@@ -24,6 +28,7 @@ class CircuitBreaker {
     failureThreshold: 5,
     successThreshold: 2,
     timeout: 30000, // 30 seconds before half-open
+    failureWindow: 60000, // count failures within a rolling 60s window
   };
 
   private getStats(service: string): CircuitStats {
@@ -33,6 +38,7 @@ class CircuitBreaker {
         successes: 0,
         lastFailure: 0,
         state: "CLOSED",
+        halfOpenInFlight: false,
       });
     }
     return this.stats.get(service)!;
@@ -51,15 +57,23 @@ class CircuitBreaker {
     if (stats.state === "OPEN") {
       const now = Date.now();
       if (now - stats.lastFailure > this.defaultOptions.timeout) {
-        // Transition to half-open
+        // Transition to half-open and admit exactly one probe.
         stats.state = "HALF_OPEN";
+        stats.successes = 0;
+        stats.halfOpenInFlight = true;
         console.log(`[CircuitBreaker] ${service}: OPEN -> HALF_OPEN`);
         return true;
       }
       return false;
     }
 
-    // HALF_OPEN - allow one request to test
+    // HALF_OPEN — allow only a single probe at a time. Without this guard,
+    // every concurrent caller (the common case right after the circuit trips)
+    // passes simultaneously and hammers the degraded service.
+    if (stats.halfOpenInFlight) {
+      return false;
+    }
+    stats.halfOpenInFlight = true;
     return true;
   }
 
@@ -68,6 +82,7 @@ class CircuitBreaker {
    */
   recordSuccess(service: string): void {
     const stats = this.getStats(service);
+    stats.halfOpenInFlight = false;
     stats.successes++;
 
     if (stats.state === "HALF_OPEN") {
@@ -77,9 +92,11 @@ class CircuitBreaker {
         stats.successes = 0;
         console.log(`[CircuitBreaker] ${service}: HALF_OPEN -> CLOSED`);
       }
-    } else {
-      stats.failures = Math.max(0, stats.failures - 1);
     }
+    // In CLOSED we deliberately do NOT decrement the failure counter per
+    // success. The old code did, which meant a service failing ~50% of the
+    // time kept `failures` oscillating near 0 and the breaker never opened.
+    // Failures now age out via the rolling window in recordFailure instead.
   }
 
   /**
@@ -87,8 +104,15 @@ class CircuitBreaker {
    */
   recordFailure(service: string): void {
     const stats = this.getStats(service);
+    const now = Date.now();
+    stats.halfOpenInFlight = false;
+    // Roll the failure window: if the last failure is older than the window,
+    // start counting fresh so `failures` reflects a recent failure *rate*.
+    if (stats.lastFailure && now - stats.lastFailure > this.defaultOptions.failureWindow) {
+      stats.failures = 0;
+    }
     stats.failures++;
-    stats.lastFailure = Date.now();
+    stats.lastFailure = now;
     stats.successes = 0;
 
     if (stats.state === "HALF_OPEN") {

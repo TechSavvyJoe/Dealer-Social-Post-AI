@@ -9,6 +9,33 @@ interface RetryOptions {
   maxDelay?: number;
   backoffMultiplier?: number;
   onRetry?: (attempt: number, error: Error) => void;
+  /**
+   * Predicate deciding whether an error is worth retrying. Defaults to
+   * "retry unless the error is clearly permanent" (4xx / auth / validation).
+   * Retrying those wastes attempts and, for non-idempotent operations, risks
+   * duplicate side effects (e.g. double image generations / double charges).
+   */
+  shouldRetry?: (error: Error) => boolean;
+}
+
+/**
+ * Heuristic for errors that will never succeed on retry, so we should fail
+ * fast instead of burning the backoff budget.
+ */
+function isPermanentError(error: Error): boolean {
+  const m = error.message.toLowerCase();
+  return (
+    m.includes("400") ||
+    m.includes("401") ||
+    m.includes("403") ||
+    m.includes("404") ||
+    m.includes("422") ||
+    m.includes("unauthorized") ||
+    m.includes("forbidden") ||
+    m.includes("not found") ||
+    m.includes("invalid") ||
+    m.includes("validation")
+  );
 }
 
 export class RetryError extends Error {
@@ -35,16 +62,23 @@ export async function retryWithBackoff<T>(
     maxDelay = 10000,
     backoffMultiplier = 2,
     onRetry,
+    shouldRetry = (e: Error) => !isPermanentError(e),
   } = options;
 
   let lastError: Error = new Error('Unknown error');
-  
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await operation();
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      
+
+      // Fail fast on errors that can't succeed on retry — surface the real
+      // error immediately rather than after N pointless attempts.
+      if (!shouldRetry(lastError)) {
+        throw lastError;
+      }
+
       if (attempt === maxAttempts) {
         throw new RetryError(
           `Operation failed after ${maxAttempts} attempts`,

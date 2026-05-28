@@ -83,6 +83,16 @@ export const enqueueTask = <T>(
 };
 
 export const clearQueue = () => {
-  queue.splice(0, queue.length);
-  active = false;
+  // Reject every pending (not-yet-started) task so callers awaiting them don't
+  // hang forever. We deliberately do NOT reset `active`: the task currently
+  // running owns that flag and resets it when it settles. Forcing it to false
+  // here would let runNext() start a second task concurrently with the live one.
+  const pending = queue.splice(0, queue.length);
+  pending.forEach((entry) => {
+    try {
+      entry.reject(new Error("Request queue cleared"));
+    } catch {
+      /* ignore */
+    }
+  });
 };
