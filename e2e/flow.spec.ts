@@ -7,13 +7,15 @@ test.describe('Dealer Social Post AI Flow', () => {
     // Check that we are on the Enter Dealer Code screen
     await expect(page.locator('text=Enter Dealer Code')).toBeVisible();
 
-    // Try invalid login by tapping 9-9-9-9 on the security dialpad
+    // Try invalid login by tapping 9-9-9-9-9-9 on the security dialpad
+    await page.getByRole('button', { name: '9' }).click();
+    await page.getByRole('button', { name: '9' }).click();
     await page.getByRole('button', { name: '9' }).click();
     await page.getByRole('button', { name: '9' }).click();
     await page.getByRole('button', { name: '9' }).click();
     await page.getByRole('button', { name: '9' }).click();
 
-    // Expect an error message "Dealer code not found." since 9999 is invalid
+    // Expect an error message "Dealer code not found." since 999999 is invalid
     await expect(page.locator('text=Dealer code not found.')).toBeVisible();
   });
 
