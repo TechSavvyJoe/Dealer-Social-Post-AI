@@ -174,7 +174,11 @@ export const generateFunSocialPostImage = async (
     } as any);
   });
 
-  const imageContentPart = imageResponse.candidates?.[0]?.content?.parts?.[0];
+  // With responseModalities ["TEXT","IMAGE"], the model often returns the text
+  // part first and the image at parts[1]. Scan for the inlineData part instead
+  // of assuming index 0, or a successful image gets reported as a failure.
+  const funParts = imageResponse.candidates?.[0]?.content?.parts ?? [];
+  const imageContentPart = funParts.find((p: any) => p?.inlineData);
   if (imageContentPart && imageContentPart.inlineData) {
     const generatedImageMime = imageContentPart.inlineData.mimeType;
     const generatedImageData = imageContentPart.inlineData.data;
@@ -225,7 +229,10 @@ export const editSocialPostImage = async (
   });
 
   let newImageBase64 = "";
-  const imageContentPart = imageResponse.candidates?.[0]?.content?.parts?.[0];
+  // Scan parts for the inlineData (the image may be at parts[1] after a text
+  // part) rather than hard-indexing parts[0].
+  const responseParts = imageResponse.candidates?.[0]?.content?.parts ?? [];
+  const imageContentPart = responseParts.find((p: any) => p?.inlineData);
   if (imageContentPart && imageContentPart.inlineData) {
     const generatedImageMime = imageContentPart.inlineData.mimeType;
     const generatedImageData = imageContentPart.inlineData.data;
@@ -262,9 +269,12 @@ export const generateSocialPostText = async (
   const taskConfig = TASKS[task];
 
   // Cache key — never cache regenerations (the whole point is variation).
+  // Hash the FULL image bytes, not just the first 256 base64 chars: two photos
+  // from the same camera share a long JPEG/EXIF prefix, so a 256-char key
+  // collides and could serve one customer's caption for another's vehicle.
   const cacheKey =
     !isRegeneration && FLAGS.enableResponseCache
-      ? `caption:${await hashString(textPrompt + ":" + base64Data.slice(0, 256))}`
+      ? `caption:${await hashString(textPrompt + ":" + base64Data)}`
       : null;
   if (cacheKey) {
     const cached = requestCache.get<string>(cacheKey);
@@ -302,7 +312,9 @@ export const generateSocialPostText = async (
       text = cleanGeneratedText(
         await generateTextViaClaude(claudePrompt, {
           model: taskConfig.claudeFallback,
-          temperature: taskConfig.params.temperature,
+          // Anthropic rejects temperature > 1.0 (caption_regenerate uses 1.05)
+          // with a 400, so the Claude fallback would hard-fail. Clamp to ≤1.
+          temperature: Math.min(taskConfig.params.temperature ?? 1, 1),
           maxTokens: taskConfig.params.maxOutputTokens,
         })
       );
@@ -358,7 +370,9 @@ export const editSocialPostText = async (
       text = cleanGeneratedText(
         await generateTextViaClaude(prompt, {
           model: taskConfig.claudeFallback,
-          temperature: taskConfig.params.temperature,
+          // Anthropic rejects temperature > 1.0 (caption_regenerate uses 1.05)
+          // with a 400, so the Claude fallback would hard-fail. Clamp to ≤1.
+          temperature: Math.min(taskConfig.params.temperature ?? 1, 1),
           maxTokens: taskConfig.params.maxOutputTokens,
         })
       );
@@ -473,7 +487,13 @@ export const generateSocialPost = async (
           quality: "hd",
         });
         // Synthesize a Gemini-shaped response so downstream extraction works.
-        const [, base64Data] = openaiImage.match(/^data:[^;]+;base64,(.+)$/) || [];
+        // Throw (don't substitute "") if the data URL is unparseable — an empty
+        // base64 string is truthy downstream and would ship a broken/blank
+        // image as if generation succeeded.
+        const match = openaiImage.match(/^data:([^;]+);base64,(.+)$/);
+        if (!match) {
+          throw new Error("OpenAI image fallback returned an unparseable image.");
+        }
         return {
           candidates: [
             {
@@ -481,8 +501,8 @@ export const generateSocialPost = async (
                 parts: [
                   {
                     inlineData: {
-                      mimeType: "image/png",
-                      data: base64Data || "",
+                      mimeType: match[1] || "image/png",
+                      data: match[2],
                     },
                   },
                 ],
@@ -505,7 +525,10 @@ export const generateSocialPost = async (
   ]);
 
   let newImageBase64 = "";
-  const imageContentPart = imageResponse.candidates?.[0]?.content?.parts?.[0];
+  // Scan parts for the inlineData (the image may be at parts[1] after a text
+  // part) rather than hard-indexing parts[0].
+  const responseParts = imageResponse.candidates?.[0]?.content?.parts ?? [];
+  const imageContentPart = responseParts.find((p: any) => p?.inlineData);
   if (imageContentPart && imageContentPart.inlineData) {
     const generatedImageMime = imageContentPart.inlineData.mimeType;
     const generatedImageData = imageContentPart.inlineData.data;
@@ -554,19 +577,16 @@ const fetchVideoThroughProxy = async (videoUri: string): Promise<string> => {
   // For Google API URIs, fetch through our proxy to add auth
   // The URI format is typically: https://generativelanguage.googleapis.com/v1beta/files/{fileId}:download
   try {
-    const proxyToken = import.meta.env.VITE_PROXY_ACCESS_TOKEN;
-
     // Extract the path from the full URL
     let proxyPath = videoUri;
     if (videoUri.includes("generativelanguage.googleapis.com/")) {
       proxyPath = videoUri.split("generativelanguage.googleapis.com/")[1];
     }
 
+    // Auth is the HttpOnly session cookie; credentials:"include" attaches it.
     const response = await fetch(`/api/proxy/${proxyPath}`, {
       method: "GET",
-      headers: {
-        ...(proxyToken ? { "X-Proxy-Token": proxyToken } : {}),
-      },
+      credentials: "include",
     });
 
     if (!response.ok) {
@@ -606,7 +626,10 @@ export const generatePostVideo = async (
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
   const prompt = generateVideoPrompt(style, options);
 
-  const { width, height } = await getImageDimensions(imageBase64Url);
+  // Measure the SAME bytes we send to Veo (the normalized data URL), not the
+  // raw input — passing a remote/blob URL here triggers a second fetch that can
+  // diverge from (or fail independently of) what the model receives.
+  const { width, height } = await getImageDimensions(normalisedImage);
   const derivedAspect =
     width === height ? "16:9" : width > height ? "16:9" : "9:16"; // Veo 3.1 only supports 16:9 and 9:16
   const aspectRatio =
@@ -636,6 +659,9 @@ export const generatePostVideo = async (
     parameters: {
       aspectRatio: aspectRatio,
       personGeneration: "allow_adult", // Required for image-to-video with people
+      // Was computed/clamped above (5/6/8s) but never sent — Veo defaulted the
+      // length on every request, discarding the caller's choice.
+      durationSeconds: durationSeconds,
     },
   };
 
@@ -650,13 +676,12 @@ export const generatePostVideo = async (
 
       // Use the predictLongRunning endpoint for Veo 3.x
       const apiPath = `v1beta/models/${veoModel}:predictLongRunning`;
-      const proxyToken = import.meta.env.VITE_PROXY_ACCESS_TOKEN;
 
       const response = await fetch(`/api/proxy/${apiPath}`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          ...(proxyToken ? { "X-Proxy-Token": proxyToken } : {}),
         },
         body: JSON.stringify(body),
       });
@@ -813,13 +838,12 @@ const pollGeminiVideoOperation = async (
       }
 
       console.log(`[VideoGen] Polling operation: ${pollPath}`);
-      const proxyToken = import.meta.env.VITE_PROXY_ACCESS_TOKEN;
 
       const response = await fetch(`/api/proxy/${pollPath}`, {
         method: "GET",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          ...(proxyToken ? { "X-Proxy-Token": proxyToken } : {}),
         },
       });
 

@@ -160,13 +160,20 @@ export const getLeaderboard = async (
       count: 0,
       videoCount: 0,
       releaseCount: 0,
-      lastPostedAt: item.generated_at,
+      lastPostedAt: "",
     };
     entry.count += 1;
     if (item.has_video) entry.videoCount += 1;
     if (item.has_release) entry.releaseCount += 1;
-    if (item.generated_at > entry.lastPostedAt) {
-      entry.lastPostedAt = item.generated_at;
+    // Compare numerically (not lexically) and only from VALID timestamps, so a
+    // missing/empty generated_at can't seed an "Invalid Date" into the UI and
+    // mixed offset formats (Z vs +00:00) don't pick the wrong "last posted".
+    const ts = item.generated_at ? Date.parse(item.generated_at) : NaN;
+    if (!Number.isNaN(ts)) {
+      const prev = entry.lastPostedAt ? Date.parse(entry.lastPostedAt) : NaN;
+      if (Number.isNaN(prev) || ts > prev) {
+        entry.lastPostedAt = item.generated_at;
+      }
     }
     map.set(key, entry);
   }

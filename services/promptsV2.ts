@@ -58,6 +58,11 @@ const styleHint = (style: StyleOption): string => {
       return "Warm, approachable, conversational. Casual but professional.";
     case StyleOption.Sporty:
       return "Action verbs, energy, motion. Sentence rhythm should pull forward.";
+    default:
+      // `style` can be an invalid value cast from untrusted custom-scenario
+      // JSON. Without this, the function returns undefined and "undefined" gets
+      // interpolated into the model prompt.
+      return "Crisp, clear, professional. Strong nouns and verbs.";
   }
 };
 
@@ -71,6 +76,9 @@ const imageStyleHint = (style: StyleOption): string => {
       return "Modern direct-to-consumer lifestyle brand. Soft, warm golden-hour lighting. Rounded, approachable but premium typography. Vibrant, cheerful color palette.";
     case StyleOption.Sporty:
       return "Action sports/energy drink ad. Aggressive forward-leaning italics. Gritty high-contrast HDR processing. Dynamic editorial grid layout with motion blur elements.";
+    default:
+      // Safe fallback for an out-of-enum style (see styleHint above).
+      return "Clean, professional automotive marketing photography. Balanced composition, natural lighting, modern typography.";
   }
 };
 
