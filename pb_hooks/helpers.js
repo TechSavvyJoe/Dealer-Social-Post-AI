@@ -267,6 +267,27 @@ function checkProxyRateLimit(key, maxPerWindow, windowMs) {
 }
 
 // ---------------------------------------------------------------------------
+// Validation Helpers
+// ---------------------------------------------------------------------------
+
+function assertString(val, maxLength = 1024) {
+  if (typeof val !== "string") {
+    throw new Error("Expected a string");
+  }
+  if (val.length > maxLength) {
+    throw new Error("String exceeds maximum length of " + maxLength);
+  }
+  return val;
+}
+
+function assertEnum(val, allowedValues) {
+  if (allowedValues.indexOf(val) === -1) {
+    throw new Error("Invalid value. Allowed: " + allowedValues.join(", "));
+  }
+  return val;
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
@@ -291,4 +312,7 @@ module.exports = {
   checkProxyRateLimit,
   // Constants
   SESSION_TTL_SECONDS,
+  // Validation
+  assertString,
+  assertEnum,
 };

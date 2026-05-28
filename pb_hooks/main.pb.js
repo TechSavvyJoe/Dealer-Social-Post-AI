@@ -894,7 +894,6 @@ const LOGIN_FAIL_WINDOW_SECONDS = 15 * 60; // 15 min
 const LOGIN_FAIL_THRESHOLD = 10;
 
 routerAdd("POST", "/api/app/session", (c) => {
-<<<<<<< HEAD
   const helpers = require(__hooks + "/helpers.js");
   const ip = helpers.clientIP(c);
   const ua = helpers.userAgent(c);
@@ -928,17 +927,6 @@ routerAdd("POST", "/api/app/session", (c) => {
       userAgent: ua,
       detail: "malformed code",
     });
-=======
-  let body = {};
-  try {
-    body = c.requestInfo().body || {};
-  } catch (e) {
-    console.error("Failed to parse body:", e);
-  }
-  const dealerCode = body.dealerCode;
-  
-  if (!dealerCode) {
->>>>>>> origin/main
     return c.json(400, { error: "Dealer code is required" });
   }
 
@@ -946,24 +934,11 @@ routerAdd("POST", "/api/app/session", (c) => {
   let role = "salesperson";
 
   try {
-<<<<<<< HEAD
     record = $app.dao().findFirstRecordByData("dealers", "code", dealerCode);
   } catch (_e) {
     /* not found by code */
   }
-=======
-    const record = $app.findFirstRecordByData("dealers", "code", dealerCode);
-    
-    // Set HttpOnly cookie using the official PocketBase JSVM Cookie class
-    c.setCookie(new Cookie({
-      name: "dealer_session",
-      value: record.id,
-      path: "/",
-      httpOnly: true,
-      secure: true,
-      maxAge: 604800,
-    }));
->>>>>>> origin/main
+
 
   if (!record) {
     try {
@@ -1057,7 +1032,6 @@ routerAdd("POST", "/api/app/session", (c) => {
 });
 
 routerAdd("GET", "/api/app/session", (c) => {
-<<<<<<< HEAD
   const helpers = require(__hooks + "/helpers.js");
   const token = helpers.readSessionToken(c);
   if (!token) return c.json(401, { error: "No active session" });
@@ -1070,33 +1044,6 @@ routerAdd("GET", "/api/app/session", (c) => {
   try {
     record = $app.dao().findRecordById("dealers", session.getString("dealer"));
   } catch (_e) {
-=======
-  try {
-    const cookieHeader = c.request.header.get("Cookie") || "";
-    const match = cookieHeader.match(/dealer_session=([^;]+)/);
-    if (!match) {
-      return c.json(401, { error: "No active session" });
-    }
-
-    const dealerId = match[1];
-
-    const record = $app.findRecordById("dealers", dealerId);
-    
-    let logoUrl = record.getString("logo");
-    if (logoUrl && !logoUrl.startsWith("http")) {
-       logoUrl = `/api/files/dealers/${record.id}/${logoUrl}`;
-    }
-
-    return c.json(200, { 
-      dealer: {
-        id: record.id,
-        name: record.getString("name"),
-        code: record.getString("code"),
-        logo: logoUrl
-      } 
-    });
-  } catch (err) {
->>>>>>> origin/main
     return c.json(401, { error: "Invalid session" });
   }
 
@@ -1105,6 +1052,7 @@ routerAdd("GET", "/api/app/session", (c) => {
   try {
     session.set("last_used_at", new Date().toISOString());
     $app.dao().saveRecord(session);
+    c.response().header().add("Set-Cookie", helpers.buildSessionCookie(token));
   } catch (_e) {
     /* ignore */
   }
@@ -1133,7 +1081,6 @@ routerAdd("GET", "/api/app/session", (c) => {
 });
 
 routerAdd("DELETE", "/api/app/session", (c) => {
-<<<<<<< HEAD
   const helpers = require(__hooks + "/helpers.js");
   // Best-effort: delete the row so the token is permanently dead even if
   // the cookie sticks around somewhere.
@@ -1147,16 +1094,6 @@ routerAdd("DELETE", "/api/app/session", (c) => {
     /* ignore */
   }
   c.response().header().add("Set-Cookie", helpers.buildClearCookie());
-=======
-  c.setCookie(new Cookie({
-    name: "dealer_session",
-    value: "",
-    path: "/",
-    httpOnly: true,
-    secure: true,
-    maxAge: -1,
-  }));
->>>>>>> origin/main
   return c.json(200, { success: true });
 });
 
@@ -1229,16 +1166,16 @@ routerAdd("POST", "/api/app/posts", (c) => {
 
     const record = new Record(posts, {
       dealer: dealer.id, // force dealer from session
-      salesperson_name: (body.salesperson_name || "").toString().slice(0, 120),
+      salesperson_name: helpers.assertString(body.salesperson_name || "", 120),
       salesperson_id: salespersonId,
       generated_at: new Date().toISOString(),
-      style: (body.style || "").toString().slice(0, 60),
-      tone: (body.tone || "").toString().slice(0, 60),
-      customer_name: (body.customer_name || "").toString().slice(0, 120),
-      vin: (body.vin || "").toString().slice(0, 17),
+      style: helpers.assertString(body.style || "", 60),
+      tone: helpers.assertString(body.tone || "", 60),
+      customer_name: helpers.assertString(body.customer_name || "", 120),
+      vin: helpers.assertString(body.vin || "", 17),
       has_release: !!body.has_release,
       has_video: !!body.has_video,
-      approval_status: body.approval_status === "pending" ? "pending" : "n_a",
+      approval_status: helpers.assertEnum(body.approval_status === "pending" ? "pending" : "n_a", ["n_a", "pending"]),
     });
     $app.dao().saveRecord(record);
 
@@ -1346,13 +1283,11 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
 
     if (body.approval_status) {
       const allowed = ["n_a", "pending", "approved", "rejected"];
-      if (!allowed.includes(body.approval_status)) {
-        return c.json(400, { error: "Invalid approval_status" });
-      }
+      helpers.assertEnum(body.approval_status, allowed);
       record.set("approval_status", body.approval_status);
     }
     if (body.approved_by !== undefined) {
-      record.set("approved_by", (body.approved_by || "").toString().slice(0, 120));
+      record.set("approved_by", helpers.assertString(body.approved_by || "", 120));
     }
     if (
       body.approval_status === "approved" ||
@@ -1420,8 +1355,8 @@ routerAdd("POST", "/api/app/salespeople", (c) => {
     const salespeople = $app.dao().findCollectionByNameOrId("salespeople");
     const record = new Record(salespeople, {
       dealer: dealer.id, // force from session
-      name: name.slice(0, 120),
-      pin: (body.pin || "").toString().slice(0, 12),
+      name: helpers.assertString(name, 120),
+      pin: helpers.assertString((body.pin || "").toString(), 12),
       active: body.active === false ? false : true,
       created_at: new Date().toISOString(),
     });
@@ -1455,9 +1390,9 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
     }
     const body = $apis.requestInfo(c).data || {};
     if (typeof body.name === "string")
-      record.set("name", body.name.toString().slice(0, 120));
+      record.set("name", helpers.assertString(body.name.toString(), 120));
     if (typeof body.pin === "string")
-      record.set("pin", body.pin.toString().slice(0, 12));
+      record.set("pin", helpers.assertString(body.pin.toString(), 12));
     if (typeof body.active === "boolean") record.set("active", body.active);
     $app.dao().saveRecord(record);
     return c.json(200, { id: record.id });

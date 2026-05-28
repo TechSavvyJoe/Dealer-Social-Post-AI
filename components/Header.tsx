@@ -109,7 +109,7 @@ export const Header: React.FC<HeaderProps> = ({
               {dealer.name}
             </span>
             <div className="hidden sm:block mt-0.5">
-              <Badge variant="tinted" color="primary" size="sm">
+              <Badge variant="primary" size="sm">
                 Social Media Generator
               </Badge>
             </div>

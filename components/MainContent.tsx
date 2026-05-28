@@ -244,7 +244,7 @@ export const MainContent: React.FC<MainContentProps> = ({
   };
 
   return (
-    <PageTransition pageKey={displayedStep}>
+    <PageTransition pageKey={String(displayedStep)}>
       <div className="w-full flex-1 flex flex-col h-full">
         {stepContent()}
       </div>
