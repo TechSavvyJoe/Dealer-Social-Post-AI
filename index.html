@@ -6,15 +6,13 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
     />
-    <link rel="preconnect" href="https://aistudiocdn.com" />
-    <link rel="dns-prefetch" href="https://aistudiocdn.com" />
     <meta
       name="description"
       content="AI-powered social media post creator for car dealers"
     />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline' https://aistudiocdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; connect-src 'self' https://aistudiocdn.com https://vpic.nhtsa.dot.gov https://generativelanguage.googleapis.com https://*.googleapis.com https://api.openai.com https://api.anthropic.com;"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; connect-src 'self' https://vpic.nhtsa.dot.gov https://generativelanguage.googleapis.com https://*.googleapis.com https://api.openai.com https://api.anthropic.com;"
     />
     <meta name="theme-color" content="#020617" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -27,16 +25,6 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <title>Dealer Social Post AI</title>
-    <script type="importmap">
-      {
-        "imports": {
-          "@google/genai": "https://aistudiocdn.com/@google/genai@^1.28.0",
-          "react/": "https://aistudiocdn.com/react@^19.2.0/",
-          "react": "https://aistudiocdn.com/react@^19.2.0",
-          "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/"
-        }
-      }
-    </script>
     <style>
       /* Critical above-the-fold styles */
       :root {

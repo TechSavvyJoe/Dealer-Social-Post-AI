@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Loader2, Sparkles } from "lucide-react";
 import { Logo } from "./Logo";
@@ -25,12 +25,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     let currentCode = dealerCode;
     if (key === "backspace") {
       currentCode = currentCode.slice(0, -1);
-    } else if (currentCode.length < 4) {
+    } else if (currentCode.length < 6) {
       currentCode += key;
     }
     setDealerCode(currentCode);
 
-    if (currentCode.length === 4) {
+    if (currentCode.length === 6) {
       setIsLoading(true);
       try {
         const loginSuccess = await onLogin(currentCode);
@@ -51,6 +51,29 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       }
     }
   };
+
+  // Allow physical keyboard for alphanumeric admin codes
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        isLoading ||
+        isSuccess
+      ) {
+        return;
+      }
+
+      if (e.key === "Backspace") {
+        handleDialpadKeyPress("backspace");
+      } else if (/^[a-zA-Z0-9]$/.test(e.key)) {
+        handleDialpadKeyPress(e.key.toUpperCase());
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [dealerCode, isLoading, isSuccess]);
 
   return (
     <motion.div
@@ -167,13 +190,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       Enter Dealer Code
                     </h1>
                     <p className="text-sm text-surface-400">
-                      4-digit access code
+                      6-digit access code
                     </p>
                   </motion.div>
 
                   {/* PIN Dots with enhanced glow */}
-                  <div className="flex justify-center gap-5 py-6">
-                    {[...Array(4)].map((_, i) => {
+                  <div className="flex justify-center gap-3 sm:gap-5 py-6">
+                    {[...Array(6)].map((_, i) => {
                       const isFilled = i < dealerCode.length;
                       const isActive = i === dealerCode.length;
 
