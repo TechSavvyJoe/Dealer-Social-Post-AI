@@ -3,7 +3,7 @@ migrate(
   (db) => {
     const dao = new Dao(db);
     try {
-      const collection = dao.findCollectionByNameOrId("dealers");
+      let collection = null; try { collection = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
       if (!collection) return;
       try {
         const record = dao.findFirstRecordByFilter(collection.id, "code = '0000'");

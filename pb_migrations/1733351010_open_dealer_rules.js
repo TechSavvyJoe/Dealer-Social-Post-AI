@@ -3,7 +3,7 @@ migrate(
   (db) => {
     const dao = new Dao(db);
     try {
-      const collection = dao.findCollectionByNameOrId("dealers");
+      let collection = null; try { collection = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
       if (!collection) {
         console.log("dealers collection not found");
         return;
@@ -27,7 +27,7 @@ migrate(
   (db) => {
     const dao = new Dao(db);
     try {
-      const collection = dao.findCollectionByNameOrId("dealers");
+      let collection = null; try { collection = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
       if (!collection) return;
       
       // Rollback: lock down again

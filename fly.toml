@@ -13,10 +13,22 @@ primary_region = "iad"
   force_https = true
   auto_stop_machines = true
   auto_start_machines = true
-  min_machines_running = 0
+  # Keep one machine warm — cold start + Veo 90s = a salesperson watching a
+  # spinner for ~100s on the first request of the morning. Costs ~$3-5/mo
+  # extra; pays for itself the first time a dealer's GM watches the demo.
+  min_machines_running = 1
   processes = ["app"]
 
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/api/app/health"
+
 [[vm]]
+  # 256MB shared-cpu was OOMing under concurrent Veo / Imagen generation.
+  # 1GB / shared-2x absorbs 3-5 simultaneous video generations comfortably.
   cpu_kind = "shared"
-  cpus = 1
-  memory_mb = 256
+  cpus = 2
+  memory_mb = 1024

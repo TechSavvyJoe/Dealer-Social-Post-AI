@@ -31,43 +31,25 @@ export const checkHealth = async (): Promise<boolean> => {
 // --- Data Access Functions ---
 
 /**
- * Gets a list of all dealers from PocketBase.
- * Includes retry logic for transient failures.
- * @returns A promise resolving to an array of Dealer objects.
+ * Gets a list of all dealers via the admin-gated `/api/app/dealers` endpoint.
+ * Returns [] if the caller isn't an admin or the session is missing.
  */
 export const getAllDealers = async (): Promise<Dealer[]> => {
   try {
-    const records = await retryWithBackoff(
-      () => pb.collection(COLLECTION_NAME).getFullList({ sort: "name" }),
-      {
-        maxAttempts: 3,
-        initialDelay: 500,
-        onRetry: (attempt, error) => {
-          console.warn(
-            `[Database] Retry attempt ${attempt} for getAllDealers:`,
-            error.message
-          );
-        },
-      }
-    );
-
-    return records.map((rawRecord) => {
-      // Validate at runtime
-      const record = DealerRecordSchema.parse(rawRecord);
-
-      // Check if there is an uploaded file
-      const logoUrl =
-        record.logo && !record.logo.startsWith("http")
-          ? pb.files.getURL(rawRecord, record.logo)
-          : record.logo;
-
-      return {
-        id: record.id,
-        name: record.name,
-        logo: logoUrl || undefined,
-        code: record.code || "",
-      };
-    });
+    const res = await fetch("/api/app/dealers", { credentials: "include" });
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) return [];
+      throw new Error(`/api/app/dealers ${res.status}`);
+    }
+    const body = (await res.json()) as { items?: Dealer[] };
+    return (body.items || []).map((d) => ({
+      ...d,
+      logo: d.logo || undefined,
+      brand_voice: d.brand_voice || undefined,
+      banned_phrases: d.banned_phrases || undefined,
+      oem_affiliation: d.oem_affiliation || undefined,
+      brand_color: d.brand_color || undefined,
+    }));
   } catch (error) {
     const { title, description } = getErrorMessage(error);
     console.error(`[Database] ${title}:`, description, error);
@@ -84,10 +66,15 @@ export const findDealer = async (
   dealerCode: string
 ): Promise<Dealer | undefined> => {
   try {
-    // Search for dealer by code field instead of ID
+    // Search for dealer by code field instead of ID. Parameterized to
+    // prevent filter-string injection in case `dealerCode` ever flows from
+    // user-supplied input (today the dialpad enforces digits, but defense
+    // in depth — PB supports {:name} placeholders + filterParams).
     const rawRecord = await pb
       .collection(COLLECTION_NAME)
-      .getFirstListItem(`code="${dealerCode}"`);
+      .getFirstListItem("code = {:code}", {
+        filter: { code: dealerCode },
+      } as any);
       
     const record = DealerRecordSchema.parse(rawRecord);
 
@@ -101,6 +88,9 @@ export const findDealer = async (
       name: record.name,
       logo: logoUrl || undefined,
       code: record.code || "",
+      brand_voice: record.brand_voice || undefined,
+      banned_phrases: record.banned_phrases || undefined,
+      oem_affiliation: record.oem_affiliation || undefined,
     };
   } catch (error) {
     // PocketBase throws 404 if not found
@@ -130,6 +120,9 @@ export const findDealerById = async (
       name: record.name,
       logo: logoUrl || undefined,
       code: record.code || "",
+      brand_voice: record.brand_voice || undefined,
+      banned_phrases: record.banned_phrases || undefined,
+      oem_affiliation: record.oem_affiliation || undefined,
     };
   } catch (error) {
     // PocketBase throws 404 if not found
@@ -151,116 +144,82 @@ export const getDealers = async (): Promise<Dealer[]> => {
 
 // --- Data Mutation Functions ---
 
-export const addDealer = async (
-  dealer: Omit<Dealer, "id">
-): Promise<Dealer> => {
-  try {
-    const record = await pb.collection(COLLECTION_NAME).create(dealer);
-    const logoUrl =
-      record.logo && !record.logo.startsWith("http")
-        ? pb.files.getURL(record, record.logo)
-        : record.logo;
+// ============================================================================
+// Dealer mutations — all route through admin-gated /api/app/dealers endpoints
+// in pb_hooks/main.pb.js. Direct REST writes on `dealers` are blocked since
+// migration 1748000400_lock_collection_rules.
+// ============================================================================
 
-    return {
-      id: record.id,
-      name: record.name,
-      logo: logoUrl,
-      code: record.code,
-    };
-  } catch (error) {
-    console.error("Error adding dealer:", error);
-    throw error;
+const mutateDealer = async (
+  url: string,
+  method: "POST" | "PATCH" | "DELETE",
+  formData?: FormData
+): Promise<Dealer> => {
+  const res = await fetch(url, {
+    method,
+    credentials: "include",
+    body: formData,
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body?.error || detail;
+    } catch {
+      /* not json */
+    }
+    throw new Error(`${url}: ${detail}`);
   }
+  return (await res.json()) as Dealer;
+};
+
+export const addDealer = async (dealer: Omit<Dealer, "id">): Promise<Dealer> => {
+  const fd = new FormData();
+  fd.append("name", dealer.name);
+  if (dealer.code) fd.append("code", dealer.code);
+  if (dealer.logo) fd.append("logo", dealer.logo);
+  return mutateDealer("/api/app/dealers", "POST", fd);
 };
 
 export const updateDealer = async (dealer: Dealer): Promise<Dealer> => {
-  try {
-    const record = await pb.collection(COLLECTION_NAME).update(dealer.id, {
-      name: dealer.name,
-      logo: dealer.logo,
-    });
-    const logoUrl =
-      record.logo && !record.logo.startsWith("http")
-        ? pb.files.getURL(record, record.logo)
-        : record.logo;
-
-    return {
-      id: record.id,
-      name: record.name,
-      logo: logoUrl,
-      code: record.code,
-    };
-  } catch (error) {
-    console.error("Error updating dealer:", error);
-    throw error;
-  }
+  const fd = new FormData();
+  fd.append("name", dealer.name);
+  if (dealer.logo) fd.append("logo", dealer.logo);
+  return mutateDealer(
+    `/api/app/dealers/${encodeURIComponent(dealer.id)}`,
+    "PATCH",
+    fd
+  );
 };
 
-/**
- * Updates an existing dealer with support for file uploads.
- * @param dealerId The ID of the dealer to update.
- * @param formData The FormData object containing updated dealer data.
- * @returns A promise resolving to the updated Dealer object.
- */
 export const updateDealerWithFile = async (
   dealerId: string,
   formData: FormData
 ): Promise<Dealer> => {
-  try {
-    const record = await pb
-      .collection(COLLECTION_NAME)
-      .update(dealerId, formData);
-
-    const logoUrl =
-      record.logo && !record.logo.startsWith("http")
-        ? pb.files.getURL(record, record.logo)
-        : record.logo;
-
-    return {
-      id: record.id,
-      name: record.name,
-      logo: logoUrl,
-      code: record.code,
-    };
-  } catch (error) {
-    console.error("Error updating dealer with file:", error);
-    throw error;
-  }
+  return mutateDealer(
+    `/api/app/dealers/${encodeURIComponent(dealerId)}`,
+    "PATCH",
+    formData
+  );
 };
 
-/**
- * Creates a new dealer with support for file uploads.
- * @param formData The FormData object containing dealer data.
- * @returns A promise resolving to the newly created Dealer object.
- */
-export const addDealerWithFile = async (
-  formData: FormData
-): Promise<Dealer> => {
-  try {
-    const record = await pb.collection(COLLECTION_NAME).create(formData);
-
-    const logoUrl =
-      record.logo && !record.logo.startsWith("http")
-        ? pb.files.getURL(record, record.logo)
-        : record.logo;
-
-    return {
-      id: record.id,
-      name: record.name,
-      logo: logoUrl,
-      code: record.code,
-    };
-  } catch (error) {
-    console.error("Error adding dealer with file:", error);
-    throw error;
-  }
+export const addDealerWithFile = async (formData: FormData): Promise<Dealer> => {
+  return mutateDealer("/api/app/dealers", "POST", formData);
 };
 
 export const deleteDealer = async (dealerId: string): Promise<void> => {
-  try {
-    await pb.collection(COLLECTION_NAME).delete(dealerId);
-  } catch (error) {
-    console.error("Error deleting dealer:", error);
-    throw error;
+  const res = await fetch(
+    `/api/app/dealers/${encodeURIComponent(dealerId)}`,
+    { method: "DELETE", credentials: "include" }
+  );
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body?.error || detail;
+    } catch {
+      /* not json */
+    }
+    throw new Error(`Failed to delete dealer: ${detail}`);
   }
 };

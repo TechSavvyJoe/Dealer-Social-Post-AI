@@ -1,52 +1,12 @@
 /// <reference path="../pb_data/types.d.ts" />
+// NEUTRALIZED 2026-05-27 — no auto-seeded demo dealer.
+// Kept as a no-op so PocketBase's migration history stays consistent.
+// If you want a demo dealer, create one via the Admin Dashboard.
 migrate(
-  (db) => {
-    const dao = new Dao(db);
-    const collection = dao.findCollectionByNameOrId("dealers");
-
-    if (!collection) {
-      return;
-    }
-
-    // Check if demo dealer already exists
-    try {
-      const existing = dao.findFirstRecordByFilter(
-        collection.id,
-        "code = '1234'"
-      );
-      if (existing) {
-        return;
-      }
-    } catch (e) {
-      // Not found
-    }
-
-    const record = new Record(collection, {
-      name: "Demo Dealer",
-      code: "1234",
-      logo: "https://via.placeholder.com/150?text=Demo",
-    });
-
-    dao.saveRecord(record);
+  (_db) => {
+    console.log("[migration] create_demo_dealer is neutralized (no-op)");
   },
-  (db) => {
-    const dao = new Dao(db);
-    const collection = dao.findCollectionByNameOrId("dealers");
-
-    if (!collection) {
-      return;
-    }
-
-    try {
-      const record = dao.findFirstRecordByFilter(
-        collection.id,
-        "code = '1234'"
-      );
-      if (record) {
-        dao.deleteRecord(record);
-      }
-    } catch (e) {
-      // Not found
-    }
+  (_db) => {
+    // no-op down
   }
 );

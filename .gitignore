@@ -42,3 +42,14 @@ pb_hooks/jwt_*.txt
 pb_hooks/jwt_*.pem
 pb_hooks/jwt_*.bin
 pb_hooks/test_vertex_auth.pb.js
+# Google Cloud / Vertex service account JSONs (any name)
+gen-lang-client-*.json
+*-service-account*.json
+*serviceaccount*.json
+.local-secrets/
+.secrets/
+# Backup files and downloaded credentials
+*.pem
+*.p12
+credentials.json
+*-credentials.json

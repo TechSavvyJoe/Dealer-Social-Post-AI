@@ -3,7 +3,7 @@ migrate(
     const dao = new Dao(db);
     
     try {
-      const collection = dao.findCollectionByNameOrId("dealers");
+      let collection = null; try { collection = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
       if (!collection) {
         console.log("dealers collection not found, skipping rules update");
         return;
@@ -25,7 +25,7 @@ migrate(
     const dao = new Dao(db);
     
     try {
-      const collection = dao.findCollectionByNameOrId("dealers");
+      let collection = null; try { collection = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
       if (!collection) {
         return;
       }

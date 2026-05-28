@@ -17,6 +17,72 @@ import { normalizeError, recoveryHint } from "../utils/errorHandler";
 import { getGeminiClient } from "./geminiClient";
 import { getModel } from "../utils/modelConfig";
 import { GeminiVideoOperationSchema } from "../utils/schemas";
+import { FLAGS, getFallbackChain, TASKS } from "./modelConfig";
+import {
+  generateTextViaClaude,
+  shouldFallbackToClaude,
+} from "./claudeAdapter";
+import {
+  generateImageViaOpenAI,
+  shouldFallbackToOpenAI,
+} from "./openaiAdapter";
+import { requestCache } from "../utils/requestCache";
+import { logEvent as logTelemetry } from "../utils/telemetry";
+
+/**
+ * Tries each model in the fallback chain for a given task. The action
+ * receives the resolved model id and should perform a single attempt.
+ * Returns on first success; throws the last error if every model fails.
+ */
+async function withFallbackChain<T>(
+  task: keyof typeof TASKS,
+  action: (modelId: string) => Promise<T>
+): Promise<T> {
+  const chain = getFallbackChain(task);
+  let lastErr: unknown;
+  for (const modelId of chain) {
+    try {
+      return await action(modelId);
+    } catch (err) {
+      lastErr = err;
+      const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+      // Stop the chain on non-retryable failures (4xx that aren't 429).
+      if (
+        msg.includes("400") ||
+        msg.includes("401") ||
+        msg.includes("403") ||
+        msg.includes("404")
+      ) {
+        throw err;
+      }
+      // Otherwise try the next model.
+      console.warn(
+        `[withFallbackChain] ${task} on ${modelId} failed; trying next model.`,
+        err
+      );
+    }
+  }
+  throw lastErr ?? new Error(`All models failed for task ${task}`);
+}
+
+/**
+ * sha-256 of a string, hex-encoded. Used to key the response cache.
+ */
+async function hashString(input: string): Promise<string> {
+  if (typeof crypto !== "undefined" && crypto.subtle) {
+    const buf = new TextEncoder().encode(input);
+    const digest = await crypto.subtle.digest("SHA-256", buf);
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+  // Non-crypto fallback (test environments without subtle). Good enough for cache key.
+  let h = 0;
+  for (let i = 0; i < input.length; i++) {
+    h = (h * 31 + input.charCodeAt(i)) | 0;
+  }
+  return `nohash:${h.toString(16)}`;
+}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -97,13 +163,15 @@ export const generateFunSocialPostImage = async (
   }
 
   const client = getGeminiClient();
-  const imageResponse = await client.models.generateContent({
-    // Use gemini-3-pro-image for best quality image generation
-    model: "gemini-3-pro-image-preview",
-    contents: { parts: imageParts },
-    generationConfig: {
-      responseModalities: ["TEXT" as any, "IMAGE" as any],
-    },
+  const imageResponse = await withFallbackChain("image_fun", async (modelId) => {
+    return await client.models.generateContent({
+      model: modelId,
+      contents: { parts: imageParts },
+      generationConfig: {
+        responseModalities: ["TEXT" as any, "IMAGE" as any],
+        ...TASKS.image_fun.params,
+      },
+    } as any);
   });
 
   const imageContentPart = imageResponse.candidates?.[0]?.content?.parts?.[0];
@@ -145,15 +213,15 @@ export const editSocialPostImage = async (
   }
 
   const client = getGeminiClient();
-  const imageResponse = await client.models.generateContent({
-    // Use gemini-3-pro-image for best quality image editing
-    model: "gemini-3-pro-image-preview",
-    contents: {
-      parts: imageParts,
-    },
-    generationConfig: {
-      responseModalities: ["TEXT" as any, "IMAGE" as any],
-    },
+  const imageResponse = await withFallbackChain("image_edit", async (modelId) => {
+    return await client.models.generateContent({
+      model: modelId,
+      contents: { parts: imageParts },
+      generationConfig: {
+        responseModalities: ["TEXT" as any, "IMAGE" as any],
+        ...TASKS.image_edit.params,
+      },
+    } as any);
   });
 
   let newImageBase64 = "";
@@ -190,24 +258,65 @@ export const generateSocialPostText = async (
     creativeBrief
   );
 
-  const client = getGeminiClient();
-  const textResponse = await client.models.generateContent({
-    // gemini-2.5-flash: Fast, high-quality text generation (1K RPM vs 150 RPM for pro)
-    model: "gemini-2.5-flash",
-    contents: { parts: [imagePart, { text: textPrompt }] },
-  });
+  const task = isRegeneration ? "caption_regenerate" : "caption";
+  const taskConfig = TASKS[task];
 
-  // Safely extract text with proper error handling
-  let rawText = "";
-  try {
-    rawText =
-      typeof textResponse.text === "function" ? textResponse.text() : "";
-  } catch (e) {
-    throw new Error("Failed to extract text from AI response.");
+  // Cache key — never cache regenerations (the whole point is variation).
+  const cacheKey =
+    !isRegeneration && FLAGS.enableResponseCache
+      ? `caption:${await hashString(textPrompt + ":" + base64Data.slice(0, 256))}`
+      : null;
+  if (cacheKey) {
+    const cached = requestCache.get<string>(cacheKey);
+    if (cached) return cached;
   }
-  const text = cleanGeneratedText(rawText);
+
+  const runOnGemini = () =>
+    withFallbackChain(task, async (modelId) => {
+      const client = getGeminiClient();
+      const response = await client.models.generateContent({
+        model: modelId,
+        contents: { parts: [imagePart, { text: textPrompt }] },
+        generationConfig: taskConfig.params,
+      } as any);
+      let rawText = "";
+      try {
+        rawText = typeof response.text === "function" ? response.text() : "";
+      } catch {
+        throw new Error("Failed to extract text from AI response.");
+      }
+      return cleanGeneratedText(rawText);
+    });
+
+  let text = "";
+  try {
+    text = await runOnGemini();
+  } catch (err) {
+    if (shouldFallbackToClaude(err) && taskConfig.claudeFallback) {
+      console.warn(
+        "[generateSocialPostText] Gemini exhausted; falling back to Claude",
+        err
+      );
+      // Claude doesn't see the image, so include a one-liner that frames it.
+      const claudePrompt = `${textPrompt}\n\n(Note: image was not transmitted to fallback model. Use the creative brief above to infer scene; do not invent specific visual details you cannot verify.)`;
+      text = cleanGeneratedText(
+        await generateTextViaClaude(claudePrompt, {
+          model: taskConfig.claudeFallback,
+          temperature: taskConfig.params.temperature,
+          maxTokens: taskConfig.params.maxOutputTokens,
+        })
+      );
+    } else {
+      throw err;
+    }
+  }
+
   if (!text) {
     throw new Error("Failed to generate post text from AI.");
+  }
+  if (cacheKey) {
+    // 5 minute cache — captions are pretty hot when iterating styles.
+    requestCache.set(cacheKey, text, 5 * 60 * 1000);
   }
   return text;
 };
@@ -218,23 +327,46 @@ export const editSocialPostText = async (
   tone: ToneOption
 ): Promise<string> => {
   const prompt = editTextPrompt(originalText, editPromptString, tone);
+  const taskConfig = TASKS["caption_edit"];
 
-  const client = getGeminiClient();
-  const textResponse = await client.models.generateContent({
-    // gemini-2.5-flash: Fast text editing
-    model: "gemini-2.5-flash",
-    contents: { parts: [{ text: prompt }] },
-  });
+  const runOnGemini = () =>
+    withFallbackChain("caption_edit", async (modelId) => {
+      const client = getGeminiClient();
+      const response = await client.models.generateContent({
+        model: modelId,
+        contents: { parts: [{ text: prompt }] },
+        generationConfig: taskConfig.params,
+      } as any);
+      let rawText = "";
+      try {
+        rawText = typeof response.text === "function" ? response.text() : "";
+      } catch {
+        throw new Error("Failed to extract text from AI response.");
+      }
+      return cleanGeneratedText(rawText);
+    });
 
-  // Safely extract text with proper error handling
-  let rawText = "";
+  let text = "";
   try {
-    rawText =
-      typeof textResponse.text === "function" ? textResponse.text() : "";
-  } catch (e) {
-    throw new Error("Failed to extract text from AI response.");
+    text = await runOnGemini();
+  } catch (err) {
+    if (shouldFallbackToClaude(err) && taskConfig.claudeFallback) {
+      console.warn(
+        "[editSocialPostText] Gemini exhausted; falling back to Claude",
+        err
+      );
+      text = cleanGeneratedText(
+        await generateTextViaClaude(prompt, {
+          model: taskConfig.claudeFallback,
+          temperature: taskConfig.params.temperature,
+          maxTokens: taskConfig.params.maxOutputTokens,
+        })
+      );
+    } else {
+      throw err;
+    }
   }
-  const text = cleanGeneratedText(rawText);
+
   if (!text) {
     throw new Error("Failed to edit post text with AI.");
   }
@@ -309,19 +441,63 @@ export const generateSocialPost = async (
   }
 
   const client = getGeminiClient();
-  const imagePromise = client.models
-    .generateContent({
-      model: "gemini-3-pro-image-preview",
-      contents: { parts: imageParts },
-      generationConfig: { responseModalities: ["TEXT" as any, "IMAGE" as any] },
-    })
-    .catch((error) => {
+  // Route through the fallback chain so an Imagen / preview-model outage
+  // automatically tries the next Gemini model in the ladder. If ALL Gemini
+  // image models exhaust AND the OpenAI flag is on, drop to OpenAI as the
+  // last-tier cross-vendor fallback (returns a fresh generated image rather
+  // than edit-of-source — degraded mode but still ships something).
+  const imagePromise = (async () => {
+    try {
+      return await withFallbackChain("image_generate", async (modelId) =>
+        client.models.generateContent({
+          model: modelId,
+          contents: { parts: imageParts },
+          generationConfig: {
+            responseModalities: ["TEXT" as any, "IMAGE" as any],
+            ...TASKS.image_generate.params,
+          },
+        } as any)
+      );
+    } catch (err) {
+      if (shouldFallbackToOpenAI(err)) {
+        console.warn(
+          "[generateSocialPost] All Gemini image models exhausted; falling back to OpenAI",
+          err
+        );
+        logTelemetry("image.fallback.openai", {
+          reason: err instanceof Error ? err.message : String(err),
+        });
+        const openaiImage = await generateImageViaOpenAI({
+          prompt: imagePrompt,
+          size: "1024x1024",
+          quality: "hd",
+        });
+        // Synthesize a Gemini-shaped response so downstream extraction works.
+        const [, base64Data] = openaiImage.match(/^data:[^;]+;base64,(.+)$/) || [];
+        return {
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType: "image/png",
+                      data: base64Data || "",
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        } as any;
+      }
       throw new Error(
         `Failed to generate image content: ${
-          error instanceof Error ? error.message : String(error)
+          err instanceof Error ? err.message : String(err)
         }`
       );
-    });
+    }
+  })();
 
   const [textResult, imageResponse] = await Promise.all([
     textPromise,
@@ -418,7 +594,8 @@ const fetchVideoThroughProxy = async (videoUri: string): Promise<string> => {
 export const generatePostVideo = async (
   imageBase64Url: string,
   style: VideoStyle,
-  options: VideoRequestOptions
+  options: VideoRequestOptions,
+  signal?: AbortSignal
 ): Promise<string> => {
   // Use Veo 3.1 Generate Preview - standard quality with audio
   // Fast variant: veo-3.1-fast-generate-preview (faster but lower quality)
@@ -514,7 +691,7 @@ export const generatePostVideo = async (
         console.log(
           `[VideoGen] Got async operation, polling: ${operationName}`
         );
-        return await pollGeminiVideoOperation(operationName, 360000); // 6 minute timeout for Veo 3.1
+        return await pollGeminiVideoOperation(operationName, 360000, signal); // 6 minute timeout for Veo 3.1
       }
 
       // Check for immediate response (unlikely but handle it)
@@ -597,11 +774,16 @@ export const generatePostVideo = async (
 };
 
 /**
- * Polls a Gemini API async operation until it completes
+ * Polls a Gemini API async operation until it completes.
+ *
+ * `signal` (optional): pass an AbortSignal from the caller (e.g. a React
+ * unmount cleanup) and the poll loop will throw out on next iteration instead
+ * of running forever in the background.
  */
 const pollGeminiVideoOperation = async (
   operationName: string,
-  timeoutMs: number = 300000
+  timeoutMs: number = 300000,
+  signal?: AbortSignal
 ): Promise<string> => {
   const startTime = Date.now();
   let pollInterval = 5000;
@@ -611,6 +793,9 @@ const pollGeminiVideoOperation = async (
   let cleanOpName = operationName.replace(/^\/+/, "");
 
   while (Date.now() - startTime < timeoutMs) {
+    if (signal?.aborted) {
+      throw new DOMException("Video polling aborted", "AbortError");
+    }
     try {
       // The operation name format is "models/{model}/operations/{opId}"
       // We need to poll at v1beta/{operationName}

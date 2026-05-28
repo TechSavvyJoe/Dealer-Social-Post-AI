@@ -19,6 +19,13 @@
     --color-error: 239 68 68; /* error-500 */
     --color-info: 6 182 212; /* info-500 */
 
+    /* White-label brand color — set per-dealer at runtime via useDealerTheme. */
+    --brand-primary: #1d4ed8;
+    --brand-primary-600: #1d4ed8;
+    --brand-primary-500: #2563eb;
+    --brand-primary-400: #60a5fa;
+    --brand-primary-300: #93c5fd;
+
     /* Surface colors */
     --color-surface-base: 2 6 23; /* surface-950 */
     --color-surface-elevated: 15 23 42; /* surface-900 */
@@ -189,6 +196,106 @@
   select {
     @apply font-sans;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* ====== Mobile + cross-browser hardening ======
+     These rules target real iOS Safari / Android Chrome / Firefox-mobile
+     gotchas. Every dealer iPad in the field is one of these. */
+
+  /* Kill the blue tap flash on iOS / Android Chrome */
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Prevent iOS Safari from zooming when an input focuses.
+     Threshold is 16px; we lock all form fields to ≥16px on small viewports.
+     Tailwind text-base is 16px so this only catches outliers (custom sizes
+     and select elements). */
+  @media (max-width: 768px) {
+    input,
+    textarea,
+    select {
+      font-size: 16px !important;
+    }
+  }
+
+  /* Touch targets — minimum 44×44 per Apple HIG, 48×48 per Android.
+     Tailwind small buttons can land at 32px on mobile; backstop here. */
+  @media (pointer: coarse) {
+    button,
+    a[role="button"],
+    [role="button"],
+    [data-touch-target] {
+      min-height: 44px;
+      min-width: 44px;
+    }
+  }
+
+  /* Prevent double-tap zoom on interactive elements without disabling pinch
+     elsewhere (so users can still pinch-zoom images). */
+  button,
+  a,
+  [role="button"],
+  input[type="button"],
+  input[type="submit"],
+  label {
+    touch-action: manipulation;
+  }
+
+  /* Smooth momentum scroll on iOS for any scrolling container */
+  .custom-scrollbar,
+  [data-scroll-container],
+  .overflow-y-auto,
+  .overflow-x-auto,
+  .overflow-auto {
+    -webkit-overflow-scrolling: touch;
+    /* Stop pull-to-refresh from triggering when scrolling inside modals */
+    overscroll-behavior: contain;
+  }
+
+  /* iOS Safari sticky-position glitch on rotation */
+  @supports (-webkit-touch-callout: none) {
+    .sticky {
+      will-change: transform;
+    }
+  }
+
+  /* Lock the canvas viewport when an input is focused so the soft keyboard
+     doesn't push everything weird. Available behind a flag in modern Chromium. */
+  @supports (height: 100dvh) {
+    .min-h-screen {
+      min-height: 100dvh;
+    }
+  }
+
+  /* On standalone iOS PWA, the status bar overlaps content unless we pad.
+     We already use --sat in index.html; make sure no descendant breaks the chain. */
+  @media (display-mode: standalone) {
+    body {
+      padding-top: env(safe-area-inset-top);
+    }
+  }
+
+  /* Firefox sometimes ignores backdrop-filter; provide a fallback solid bg */
+  @supports not (backdrop-filter: blur(1px)) {
+    .backdrop-blur-md,
+    .backdrop-blur-lg,
+    .backdrop-blur-xl,
+    .backdrop-blur-2xl {
+      background-color: rgba(15, 23, 42, 0.95);
+    }
+  }
+
+  /* Safari prefers contenteditable cursor stays inside .textarea blocks */
+  textarea {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  /* Long-press on images shouldn't open the iOS share sheet unless inside a
+     designated "shareable" container. Components that WANT long-press can opt back in. */
+  img:not([data-allow-callout]) {
+    -webkit-touch-callout: none;
   }
 
   /* Remove spinner from number inputs */

@@ -11,6 +11,20 @@ import {
 } from "../types";
 import { useToast } from "../components/ui/Toast";
 import { normalizeError, recoveryHint } from "../utils/errorHandler";
+import { logPost } from "../services/posts";
+import { applyDisclosures } from "../utils/complianceDisclosures";
+import { logEvent, logError } from "../utils/telemetry";
+import { saveRelease, CapturedRelease } from "../services/photoReleases";
+
+export interface GenerationMeta {
+  salespersonName?: string;
+  /** When the salesperson was picked from the dealer's roster, this is the salespeople record id. */
+  salespersonId?: string;
+  vin?: string;
+  hasRelease?: boolean;
+  /** Signed-but-unsaved release captured before generation. Saved linked to the post on success so we never create orphan release records. */
+  capturedRelease?: CapturedRelease;
+}
 
 export const useGeneration = () => {
   const { error: toastError } = useToast();
@@ -34,6 +48,9 @@ export const useGeneration = () => {
   const [progressMessage, setProgressMessage] = useState("");
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const timeoutsRef = useRef<NodeJS.Timeout[]>([]);
+  // One controller per active video poll. Aborted on unmount so a salesperson
+  // who navigates away mid-render stops eating Vertex quota.
+  const videoAbortControllersRef = useRef<Set<AbortController>>(new Set());
 
   const cleanupTimers = useCallback(() => {
     if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
@@ -43,7 +60,18 @@ export const useGeneration = () => {
 
   // Cleanup on unmount
   useEffect(() => {
-    return cleanupTimers;
+    return () => {
+      cleanupTimers();
+      // Abort any in-flight video polls.
+      for (const ctrl of videoAbortControllersRef.current) {
+        try {
+          ctrl.abort();
+        } catch {
+          /* ignore */
+        }
+      }
+      videoAbortControllersRef.current.clear();
+    };
   }, [cleanupTimers]);
 
   const generateMutation = useMutation({
@@ -53,9 +81,10 @@ export const useGeneration = () => {
       customerName: string;
       customText?: string;
       creativeBrief?: string;
+      meta?: GenerationMeta;
     }) => {
       if (!selectedImage || !currentDealer) throw new Error("Missing required data");
-      
+
       const { generateSocialPost } = await loadGeminiService();
       return runGeminiTask("ai.generate", () =>
         generateSocialPost(
@@ -94,12 +123,81 @@ export const useGeneration = () => {
       timeoutsRef.current.push(setTimeout(() => setProgressMessage("Almost there! Thanks for your patience."), 60000));
       timeoutsRef.current.push(setTimeout(() => setProgressMessage("Finalizing your post..."), 90000));
     },
-    onSuccess: async (result) => {
+    onSuccess: async (result, variables) => {
       cleanupTimers();
       setGenerationProgress(100);
       setProgressMessage("Complete!");
+
+      // Scan the caption for compliance triggers. Disclosures go into a
+      // separate `disclosures` field so the editable caption textarea
+      // never contains them (and a salesperson can't silently delete them).
+      const compliance = applyDisclosures(result.text);
+      if (compliance.prohibited.length > 0) {
+        logEvent("compliance.prohibited_detected", {
+          phrases: compliance.prohibited.map((p) => p.triggerPhrase),
+        });
+      }
+      if (compliance.changed && compliance.matches.length > 0) {
+        logEvent("compliance.disclosures_detected", {
+          categories: Array.from(
+            new Set(compliance.matches.map((m) => m.category))
+          ),
+        });
+      }
+      // Strip any pre-existing footer from the caption (idempotent) and put
+      // the disclosure block into its own field.
+      const captionOnly = result.text
+        .split("\n\n— Disclosures —")[0]
+        .trimEnd();
+      const disclosureBlock = compliance.text.startsWith(captionOnly)
+        ? compliance.text.slice(captionOnly.length).trim()
+        : "";
+      const finalPost = {
+        ...result,
+        text: captionOnly,
+        disclosures: disclosureBlock,
+        disclosureCategories: Array.from(
+          new Set(compliance.matches.map((m) => m.category))
+        ),
+      };
+
+      // Log post + (if a release was captured) save it linked to the post.
+      // Both are fire-and-forget; failures are logged but never block the user.
+      if (currentDealer) {
+        void (async () => {
+          const post = await logPost({
+            dealerId: currentDealer.id,
+            salespersonName: variables.meta?.salespersonName,
+            salespersonId: variables.meta?.salespersonId,
+            style: variables.style,
+            tone: variables.tone,
+            customerName: variables.customerName,
+            vin: variables.meta?.vin,
+            hasRelease: !!variables.meta?.capturedRelease,
+            hasVideo: false,
+            requiresApproval: !!currentDealer.requires_approval,
+          });
+          const captured = variables.meta?.capturedRelease;
+          if (captured && post) {
+            try {
+              await saveRelease({
+                customerName: captured.customerName,
+                signaturePngDataUrl: captured.signaturePngDataUrl,
+                vin: captured.vin,
+                postId: post.id,
+                notes: `Released for social media use by ${currentDealer.name}.`,
+              });
+            } catch (err) {
+              logError("photo_release.save_failed", {
+                message: err instanceof Error ? err.message : String(err),
+                postId: post.id,
+              });
+            }
+          }
+        })();
+      }
       await new Promise((resolve) => setTimeout(resolve, 500));
-      setGeneratedPost(result);
+      setGeneratedPost(finalPost);
       setStep(AppStep.RESULT);
     },
     onError: (err) => {
@@ -118,14 +216,16 @@ export const useGeneration = () => {
       tone: ToneOption,
       customerName: string,
       customText?: string,
-      creativeBrief?: string
+      creativeBrief?: string,
+      meta?: GenerationMeta
     ) => {
       await generateMutation.mutateAsync({
         style,
         tone,
         customerName,
         customText,
-        creativeBrief
+        creativeBrief,
+        meta,
       });
     },
     [generateMutation]
@@ -237,7 +337,20 @@ export const useGeneration = () => {
     },
     onMutate: () => setError(null),
     onSuccess: (newText) => {
-      if (generatedPost) setGeneratedPost({ ...generatedPost, text: newText });
+      if (!generatedPost) return;
+      const compliance = applyDisclosures(newText);
+      const captionOnly = newText.split("\n\n— Disclosures —")[0].trimEnd();
+      const disclosureBlock = compliance.text.startsWith(captionOnly)
+        ? compliance.text.slice(captionOnly.length).trim()
+        : "";
+      setGeneratedPost({
+        ...generatedPost,
+        text: captionOnly,
+        disclosures: disclosureBlock,
+        disclosureCategories: Array.from(
+          new Set(compliance.matches.map((m) => m.category))
+        ),
+      });
     },
     onError: (err) => {
       const normalized = normalizeError(err);
@@ -251,6 +364,32 @@ export const useGeneration = () => {
     await regenerateTextMutation.mutateAsync();
   }, [regenerateTextMutation]);
 
+  // One-shot caption generator that RETURNS the text instead of side-effecting
+  // the post. Used by the CaptionAlternativesModal which spawns 3 in parallel
+  // and lets the salesperson pick — replaces state itself on selection.
+  const generateCaptionVariant = useCallback(async (): Promise<string> => {
+    if (!selectedImage || !generationParams || !currentDealer) {
+      throw new Error("Missing required data for caption variant");
+    }
+    const { generateSocialPostText } = await loadGeminiService();
+    return await runGeminiTask("ai.caption.variant", () =>
+      generateSocialPostText(
+        selectedImage,
+        generationParams.tone,
+        currentDealer.name,
+        generationParams.customerName,
+        true, // regeneration mode — higher temperature, guaranteed variation
+        generationParams.creativeBrief
+      )
+    );
+  }, [
+    selectedImage,
+    generationParams,
+    currentDealer,
+    loadGeminiService,
+    runGeminiTask,
+  ]);
+
   const editTextMutation = useMutation({
     mutationFn: async (editPrompt: string) => {
       if (!generatedPost?.text || !editPrompt.trim()) throw new Error("Missing required data");
@@ -262,7 +401,20 @@ export const useGeneration = () => {
     },
     onMutate: () => setError(null),
     onSuccess: (newText) => {
-      if (generatedPost) setGeneratedPost({ ...generatedPost, text: newText });
+      if (!generatedPost) return;
+      const compliance = applyDisclosures(newText);
+      const captionOnly = newText.split("\n\n— Disclosures —")[0].trimEnd();
+      const disclosureBlock = compliance.text.startsWith(captionOnly)
+        ? compliance.text.slice(captionOnly.length).trim()
+        : "";
+      setGeneratedPost({
+        ...generatedPost,
+        text: captionOnly,
+        disclosures: disclosureBlock,
+        disclosureCategories: Array.from(
+          new Set(compliance.matches.map((m) => m.category))
+        ),
+      });
     },
     onError: (err) => {
       const msg = `Failed to apply text edits. ${err instanceof Error ? err.message : String(err)}`;
@@ -279,9 +431,17 @@ export const useGeneration = () => {
     mutationFn: async ({ style, options }: { style: VideoStyle, options: VideoRequestOptions }) => {
       if (!generatedPost?.image) throw new Error("No image available for video generation");
       const { generatePostVideo } = await loadGeminiService();
-      return runGeminiTask("ai.generate.video", () =>
-        generatePostVideo(generatedPost.image, style, options)
-      );
+      // Issue a controller bound to component lifecycle so the poll cancels
+      // if the user navigates away.
+      const controller = new AbortController();
+      videoAbortControllersRef.current.add(controller);
+      try {
+        return await runGeminiTask("ai.generate.video", () =>
+          generatePostVideo(generatedPost.image, style, options, controller.signal)
+        );
+      } finally {
+        videoAbortControllersRef.current.delete(controller);
+      }
     },
     onError: (err) => {
       const normalized = normalizeError(err);
@@ -307,5 +467,6 @@ export const useGeneration = () => {
     handleRegenerateText,
     handleEditText,
     handleGenerateVideo,
+    generateCaptionVariant,
   };
 };

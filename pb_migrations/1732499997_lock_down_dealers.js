@@ -3,7 +3,7 @@ migrate(
   (db) => {
     const dao = new Dao(db);
     try {
-      const collection = dao.findCollectionByNameOrId("dealers");
+      let collection = null; try { collection = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
       if (!collection) {
         console.log("dealers collection not found, skipping rule lock-down");
         return;
@@ -22,7 +22,7 @@ migrate(
   (db) => {
     const dao = new Dao(db);
     try {
-      const collection = dao.findCollectionByNameOrId("dealers");
+      let collection = null; try { collection = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
       if (!collection) return;
       // Avoid restoring the open write rules; keep writes disabled on rollback.
       collection.createRule = null;

@@ -8,6 +8,12 @@ import { motion } from "framer-motion";
 import { Button } from "./ui/Button";
 import { Skeleton } from "./ui/Skeleton";
 import { RefreshCw, Pencil } from "lucide-react";
+import { Leaderboard } from "./Leaderboard";
+import { ApprovalQueue } from "./ApprovalQueue";
+import { PostHistory } from "./PostHistory";
+import { DealerSetupWizard } from "./DealerSetupWizard";
+import { SystemHealthPanel } from "./SystemHealthPanel";
+import { useAppStore } from "../stores/appStore";
 
 const DealerCard: React.FC<{
   dealer: Dealer;
@@ -83,6 +89,7 @@ export const AdminDashboard: React.FC = () => {
   const [formState, setFormState] = useState({
     name: "",
     code: "",
+    admin_code: "",
     logoUrl: "",
     logoFile: null as File | null,
   });
@@ -122,7 +129,13 @@ export const AdminDashboard: React.FC = () => {
 
   // --- HELPERS ---
   const resetForm = () => {
-    setFormState({ name: "", code: "", logoUrl: "", logoFile: null });
+    setFormState({
+      name: "",
+      code: "",
+      admin_code: "",
+      logoUrl: "",
+      logoFile: null,
+    });
     setShowForm(false);
     setEditingDealer(null);
   };
@@ -132,6 +145,7 @@ export const AdminDashboard: React.FC = () => {
     setFormState({
       name: dealer.name,
       code: dealer.code || "",
+      admin_code: (dealer as any).admin_code || "",
       logoUrl: "",
       logoFile: null,
     });
@@ -176,6 +190,10 @@ export const AdminDashboard: React.FC = () => {
       formData.append("code", formState.code.trim());
     }
 
+    // admin_code is editable any time. Empty string clears it (no dealer-admin
+    // access until a new code is set).
+    formData.append("admin_code", formState.admin_code.trim());
+
     // Prioritize file upload, fallback to URL
     if (formState.logoFile) {
       formData.append("logo", formState.logoFile);
@@ -211,8 +229,75 @@ export const AdminDashboard: React.FC = () => {
 
   const dealers = data ?? [];
 
+  // First-time setup hint — show the wizard if the logged-in (admin) dealer
+  // hasn't filled in their own brand voice + color yet. Once dismissed via
+  // localStorage flag, hide forever. The wizard updates the dealer record
+  // via the same /api/app/dealers PATCH endpoint the form uses.
+  const sessionDealer = useAppStore((s) => s.currentDealer);
+  const [setupDismissed, setSetupDismissed] = React.useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem("dsp.setupDismissed") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const showSetup =
+    !setupDismissed &&
+    !!sessionDealer &&
+    (!sessionDealer.brand_voice || !sessionDealer.brand_color);
+
+  const dismissSetup = () => {
+    setSetupDismissed(true);
+    try {
+      localStorage.setItem("dsp.setupDismissed", "1");
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleWizardSave = async (
+    fields: Record<string, string | boolean>
+  ) => {
+    if (!sessionDealer) throw new Error("No active session");
+    const fd = new FormData();
+    Object.entries(fields).forEach(([k, v]) => {
+      fd.append(k, typeof v === "boolean" ? (v ? "true" : "false") : v);
+    });
+    const updated = await db.updateDealerWithFile(sessionDealer.id, fd);
+    queryClient.invalidateQueries({ queryKey: ["dealers"] });
+    // Optimistically merge into the live session dealer so the new brand
+    // color + voice take effect without a re-login.
+    useAppStore.setState((s) => ({
+      currentDealer: s.currentDealer
+        ? { ...s.currentDealer, ...fields, ...updated }
+        : s.currentDealer,
+    }));
+    return updated;
+  };
+
   return (
     <div className="w-full max-w-4xl mx-auto p-2 sm:p-4 space-y-6">
+      {showSetup && sessionDealer && (
+        <DealerSetupWizard
+          dealer={sessionDealer}
+          onSave={handleWizardSave}
+          onDismiss={dismissSetup}
+        />
+      )}
+
+      {/* System health — super admin's first-pane diagnostic */}
+      <SystemHealthPanel />
+
+      {/* Leaderboard at the top — it's the most-checked number on this screen */}
+      <Leaderboard />
+
+      {/* Approval queue — only renders when the dealer has approvals enabled OR there are pending items */}
+      <ApprovalQueue />
+
+      {/* Full searchable post history with CSV export */}
+      <PostHistory />
+
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
         <h2 className="text-3xl sm:text-4xl font-bold text-white">
           Admin Dashboard
@@ -305,6 +390,40 @@ export const AdminDashboard: React.FC = () => {
                 className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 text-white font-mono text-lg tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
+
+            {/* Manager admin code — when set, the GSM can log in with this
+                code and land on the per-dealership admin dashboard. Leave
+                blank to disable manager access for this dealer. */}
+            <div>
+              <label
+                htmlFor="admin_code"
+                className="block text-sm font-medium text-slate-300"
+              >
+                Manager Admin Code (optional)
+                <span className="text-xs text-slate-400 ml-2">
+                  4–12 chars. Separate code for the GSM/GM to access this
+                  dealership's settings.
+                </span>
+              </label>
+              <input
+                id="admin_code"
+                name="admin_code"
+                type="text"
+                value={formState.admin_code}
+                onChange={(e) =>
+                  setFormState((prev) => ({
+                    ...prev,
+                    admin_code: e.target.value
+                      .replace(/[^A-Za-z0-9]/g, "")
+                      .slice(0, 12),
+                  }))
+                }
+                maxLength={12}
+                placeholder="e.g., GSM2024 — leave blank to disable"
+                className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 text-white font-mono text-lg tracking-wider"
+              />
+            </div>
+
             <div>
               <label
                 htmlFor="logoUrl"

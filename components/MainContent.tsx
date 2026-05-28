@@ -11,6 +11,8 @@ import {
 } from "../types";
 import { Icon } from "./Icons";
 import { LoadingOverlay } from "./LoadingOverlay";
+import { VinScanner } from "./VinScanner";
+import { PageTransition } from "./ui/PageTransition";
 import { Button } from "./ui/Button";
 import { Shimmer } from "./ui/Shimmer";
 
@@ -20,6 +22,11 @@ const LazyLoginScreen = React.lazy(() =>
 );
 const LazyAdminDashboard = React.lazy(() =>
   import("./AdminDashboard").then((mod) => ({ default: mod.AdminDashboard }))
+);
+const LazyDealerAdminDashboard = React.lazy(() =>
+  import("./DealerAdminDashboard").then((mod) => ({
+    default: mod.DealerAdminDashboard,
+  }))
 );
 const LazyImageInput = React.lazy(() =>
   import("./CameraCapture").then((mod) => ({ default: mod.ImageInput }))
@@ -53,7 +60,18 @@ interface MainContentProps {
     tone: ToneOption,
     customerName: string,
     customText?: string,
-    creativeBrief?: string
+    creativeBrief?: string,
+    meta?: {
+      salespersonName?: string;
+      salespersonId?: string;
+      vin?: string;
+      hasRelease?: boolean;
+      capturedRelease?: {
+        customerName: string;
+        signaturePngDataUrl: string;
+        vin?: string;
+      };
+    }
   ) => Promise<void>;
   onBackToCapture: () => void;
   onStyleToneChange: (style: StyleOption, tone: ToneOption) => void;
@@ -66,6 +84,8 @@ interface MainContentProps {
     style: VideoStyle,
     options: VideoRequestOptions
   ) => Promise<string>;
+  /** One-shot caption generator for the alternatives modal. */
+  onGenerateCaptionVariant?: () => Promise<string>;
 }
 
 export const MainContent: React.FC<MainContentProps> = ({
@@ -92,6 +112,7 @@ export const MainContent: React.FC<MainContentProps> = ({
   onEditText,
   onFunMode,
   onGenerateVideo,
+  onGenerateCaptionVariant,
 }) => {
   const suspenseFallback = (label: string) => (
     <div
@@ -127,6 +148,12 @@ export const MainContent: React.FC<MainContentProps> = ({
         return (
           <Suspense fallback={suspenseFallback("Loading admin")}>
             <LazyAdminDashboard />
+          </Suspense>
+        );
+      case AppStep.DEALER_ADMIN:
+        return (
+          <Suspense fallback={suspenseFallback("Loading dealership dashboard")}>
+            <LazyDealerAdminDashboard />
           </Suspense>
         );
       case AppStep.CAPTURE:
@@ -205,6 +232,7 @@ export const MainContent: React.FC<MainContentProps> = ({
               onEditText={onEditText}
               onFunMode={onFunMode}
               onGenerateVideo={onGenerateVideo}
+              onGenerateCaptionVariant={onGenerateCaptionVariant}
               error={error}
               isDesktopLayout={isDesktopLayout}
             />
@@ -216,15 +244,10 @@ export const MainContent: React.FC<MainContentProps> = ({
   };
 
   return (
-    <motion.div
-      key={displayedStep}
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -10 }}
-      transition={{ duration: 0.3, ease: "easeOut" }}
-      className="w-full flex-1 flex flex-col"
-    >
-      {stepContent()}
-    </motion.div>
+    <PageTransition pageKey={displayedStep}>
+      <div className="w-full flex-1 flex flex-col h-full">
+        {stepContent()}
+      </div>
+    </PageTransition>
   );
 };

@@ -3,6 +3,7 @@ import { useAppStore } from '../stores/appStore';
 import { useLayoutMode } from './useLayoutMode';
 import { useGemini } from './useGemini';
 import { useGeneration } from './useGeneration';
+import { useDealerTheme } from './useDealerTheme';
 import { AppStep, StyleOption, ToneOption } from '../types';
 import { logEvent } from '../utils/telemetry';
 
@@ -26,6 +27,7 @@ export const useAppController = () => {
   // Custom Hooks
   const isDesktopLayout = useLayoutMode();
   useGemini();
+  useDealerTheme();
   const generationProps = useGeneration();
 
   // Initialization

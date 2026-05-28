@@ -25,9 +25,15 @@ import { EditTextModal } from "./EditTextModal";
 import { VideoDirectorModal } from "./VideoDirectorModal";
 import { FunModeDirectorModal } from "./FunModeDirectorModal";
 import { Badge } from "./ui/Badge";
+import { Spinner } from "./ui/LoadingAnimations";
 import { cn } from "../utils/classNames";
 import { ProgressBar } from "./ui/ProgressBar";
 import { normalizeError, recoveryHint } from "../utils/errorHandler";
+import { MultiFormatExportModal } from "./MultiFormatExportModal";
+import { LayoutGrid } from "lucide-react";
+import { PlatformLimitMeter } from "./PlatformLimitMeter";
+import { ShareDialog } from "./ShareDialog";
+import { CaptionAlternativesModal } from "./CaptionAlternativesModal";
 
 interface PostResultProps {
   post: GeneratedPost;
@@ -41,6 +47,8 @@ interface PostResultProps {
     style: VideoStyle,
     options: VideoRequestOptions
   ) => Promise<string>;
+  /** One-shot caption generator for the 3-variant alternatives modal. */
+  onGenerateCaptionVariant?: () => Promise<string>;
   error?: string | null;
   isDesktopLayout: boolean;
 }
@@ -48,7 +56,7 @@ interface PostResultProps {
 const LoadingOverlay: React.FC<{ message: string; progress?: number }> =
   React.memo(({ message, progress }) => (
     <div className="absolute inset-0 bg-surface-900/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-lg z-10 px-4">
-      <Loader2 className="h-12 w-12 text-primary-400 animate-spin mb-4" />
+      <Spinner size="lg" className="mb-4" />
       <p className="text-surface-50 font-semibold animate-pulse mb-2 text-center">
         {message}
       </p>
@@ -69,6 +77,7 @@ export const PostResult: React.FC<PostResultProps> = ({
   onEditText,
   onFunMode,
   onGenerateVideo,
+  onGenerateCaptionVariant,
   error,
   isDesktopLayout,
 }) => {
@@ -112,6 +121,20 @@ export const PostResult: React.FC<PostResultProps> = ({
 
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const [isMultiFormatOpen, setIsMultiFormatOpen] = useState(false);
+  const [isCaptionAltsOpen, setIsCaptionAltsOpen] = useState(false);
+  // Local override for the disclosure footer + categories — set when the
+  // user picks an alternative caption from the modal so the displayed
+  // compliance block matches the chosen variant.
+  const [disclosureOverride, setDisclosureOverride] = useState<{
+    text: string;
+    categories: string[];
+  } | null>(null);
+  // Reset override whenever the source post changes (regenerate, new post).
+  useEffect(() => {
+    setDisclosureOverride(null);
+  }, [post.image, post.text]);
   const imageBusy = isImageLoading || isVideoLoading;
   const textBusy = isTextLoading;
 
@@ -231,10 +254,32 @@ export const PostResult: React.FC<PostResultProps> = ({
     return success;
   };
 
+  // The on-screen "caption" textarea never contains disclosures (they're
+  // stored separately so the salesperson can't silently delete them). For
+  // copy + share + download we always paste the caption + disclosure block
+  // together so the dealer's actual social post is compliant.
+  //
+  // disclosureOverride takes precedence over post.disclosures when the user
+  // picked an alternative from the CaptionAlternativesModal (each variant
+  // may trigger a different compliance language set).
+  const activeDisclosures = (disclosureOverride?.text ?? post.disclosures ?? "")
+    .trim();
+  const activeDisclosureCategories =
+    disclosureOverride?.categories ?? post.disclosureCategories ?? [];
+  const captionWithDisclosures = (() => {
+    const cap = editedText.trim();
+    if (!activeDisclosures) return cap;
+    return `${cap}\n\n${
+      activeDisclosures.startsWith("— Disclosures —")
+        ? activeDisclosures
+        : `— Disclosures —\n${activeDisclosures}`
+    }`;
+  })();
+
   const handleCopy = async () => {
     triggerHapticFeedback();
     let success = false;
-    const textToCopy = editedText;
+    const textToCopy = captionWithDisclosures;
     if (navigator.clipboard) {
       try {
         await navigator.clipboard.writeText(textToCopy);
@@ -258,9 +303,11 @@ export const PostResult: React.FC<PostResultProps> = ({
     }
   };
 
-  const handleShare = async () => {
+  // Legacy native-share path (still used by the "More…" tile inside the
+  // ShareDialog when the user wants to bypass per-platform formatting).
+  const handleShareLegacy = async () => {
     triggerHapticFeedback();
-    const textToCopy = editedText;
+    const textToCopy = captionWithDisclosures;
     const textForShareAPI = textToCopy.trim();
     setIsSharing(true);
 
@@ -504,6 +551,34 @@ export const PostResult: React.FC<PostResultProps> = ({
         onClose={() => setIsPreviewOpen(false)}
         imageSrc={post.image}
       />
+      <MultiFormatExportModal
+        isOpen={isMultiFormatOpen}
+        onClose={() => setIsMultiFormatOpen(false)}
+        sourceImageUrl={post.image}
+      />
+      <ShareDialog
+        isOpen={isShareDialogOpen}
+        onClose={() => setIsShareDialogOpen(false)}
+        content={{
+          text: captionWithDisclosures,
+          imageDataUrl: post.image,
+          videoUrl: videoUrl || undefined,
+        }}
+      />
+      {onGenerateCaptionVariant && (
+        <CaptionAlternativesModal
+          isOpen={isCaptionAltsOpen}
+          onClose={() => setIsCaptionAltsOpen(false)}
+          generateOne={onGenerateCaptionVariant}
+          onSelect={({ text, disclosures, disclosureCategories }) => {
+            handleTextChange(text);
+            setDisclosureOverride({
+              text: disclosures,
+              categories: disclosureCategories,
+            });
+          }}
+        />
+      )}
       <EditTextModal
         isOpen={isTextEditing}
         onClose={() => setIsTextEditing(false)}
@@ -773,6 +848,30 @@ export const PostResult: React.FC<PostResultProps> = ({
                   </motion.button>
                 </Tooltip>
 
+                <Tooltip label="Export all 4 sizes at once (FB, IG/TikTok, Marketplace, GBP)" side="top">
+                  <motion.button
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setIsMultiFormatOpen(true);
+                    }}
+                    disabled={imageBusy || !!videoUrl}
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-2 relative overflow-hidden",
+                      "bg-gradient-to-r from-amber-500 to-orange-500 text-surface-50 font-bold",
+                      "py-3 px-4 rounded-xl transition-all duration-300",
+                      "text-xs sm:text-sm aspect-square",
+                      "shadow-lg hover:shadow-[0_0_25px_rgba(245,158,11,0.5)]",
+                      "disabled:opacity-50 disabled:cursor-not-allowed w-full"
+                    )}
+                    whileHover={{ scale: imageBusy ? 1 : 1.05, y: imageBusy ? 0 : -2 }}
+                    whileTap={{ scale: imageBusy ? 1 : 0.95 }}
+                  >
+                    <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
+                    <LayoutGrid className="w-5 h-5" />
+                    <span>All Formats</span>
+                  </motion.button>
+                </Tooltip>
+
                 <motion.button
                   onClick={() => {
                     triggerHapticFeedback();
@@ -961,7 +1060,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 onChange={(e) => handleTextChange(e.target.value)}
                 disabled={isTextLoading}
                 className={cn(
-                  "w-full h-40 lg:h-80 lg:max-h-[32rem]",
+                  "w-full h-40 lg:h-60 lg:max-h-[24rem]",
                   "bg-surface-800/50 text-surface-300 p-4 rounded-xl text-sm",
                   "resize-none border-2 border-transparent",
                   "focus:border-primary-400 focus:ring-2 focus:ring-primary-400",
@@ -969,6 +1068,36 @@ export const PostResult: React.FC<PostResultProps> = ({
                 )}
               />
             </div>
+
+            <PlatformLimitMeter text={captionWithDisclosures} className="mb-4" />
+
+            {/* Locked compliance disclosure block. Read-only so a salesperson
+                can't silently delete it. Bundled with the caption automatically
+                on copy/share/download. */}
+            {activeDisclosures && (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-4 rounded-xl border border-warning-700/40 bg-warning-900/20 p-3"
+              >
+                <div className="flex items-center gap-2 mb-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 text-warning-300" />
+                  <span className="text-[10px] uppercase tracking-wide text-warning-200 font-semibold">
+                    Required compliance disclosures
+                    {activeDisclosureCategories.length
+                      ? ` · ${activeDisclosureCategories.join(", ")}`
+                      : ""}
+                  </span>
+                </div>
+                <div className="text-[11px] text-warning-100/90 whitespace-pre-line leading-relaxed select-text">
+                  {activeDisclosures.replace(/^—\s*Disclosures\s*—\s*\n?/, "")}
+                </div>
+                <div className="text-[10px] text-warning-300/70 mt-2">
+                  Bundled with the caption automatically when you copy, share, or save.
+                </div>
+              </motion.div>
+            )}
+
             <div className="space-y-3">
               <div className="grid grid-cols-4 gap-2">
                 <motion.button
@@ -1020,7 +1149,6 @@ export const PostResult: React.FC<PostResultProps> = ({
                     "bg-white/10 border border-white/20 text-surface-50 font-medium",
                     "py-2 px-2 rounded-lg transition-all duration-300 text-xs",
                     "hover:bg-white/20 hover:border-white/30",
-                    "col-span-2",
                     textBusy && "opacity-70 cursor-not-allowed"
                   )}
                   whileHover={{ scale: textBusy ? 1 : 1.02 }}
@@ -1033,6 +1161,30 @@ export const PostResult: React.FC<PostResultProps> = ({
                   )}
                   <span>{textBusy ? "Updating…" : "Regenerate"}</span>
                 </motion.button>
+
+                {onGenerateCaptionVariant && (
+                  <motion.button
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setIsCaptionAltsOpen(true);
+                    }}
+                    disabled={textBusy}
+                    className={cn(
+                      "flex items-center justify-center gap-1 relative overflow-hidden",
+                      "bg-gradient-to-r from-purple-500/30 to-fuchsia-500/30",
+                      "border border-purple-400/30 text-purple-100 font-semibold",
+                      "py-2 px-2 rounded-lg transition-all duration-300 text-xs",
+                      "hover:from-purple-500/40 hover:to-fuchsia-500/40",
+                      textBusy && "opacity-70 cursor-not-allowed"
+                    )}
+                    whileHover={{ scale: textBusy ? 1 : 1.02 }}
+                    whileTap={{ scale: textBusy ? 1 : 0.98 }}
+                    title="Generate 3 caption alternatives and pick the best"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>3 ideas</span>
+                  </motion.button>
+                )}
               </div>
 
               <motion.button
@@ -1063,25 +1215,22 @@ export const PostResult: React.FC<PostResultProps> = ({
             <div className="border-t border-white/10 my-4"></div>
             <div className="space-y-3">
               <motion.button
-                onClick={handleShare}
-                disabled={isSharing}
+                onClick={() => {
+                  triggerHapticFeedback();
+                  setIsShareDialogOpen(true);
+                }}
                 className={cn(
                   "w-full flex items-center justify-center gap-2 relative overflow-hidden",
                   "bg-gradient-to-r from-teal-500 to-cyan-500 text-surface-50 font-bold",
                   "py-3 px-4 rounded-xl transition-all duration-300",
-                  "shadow-lg hover:shadow-[0_0_25px_rgba(20,184,166,0.5)]",
-                  isSharing && "opacity-70 cursor-not-allowed"
+                  "shadow-lg hover:shadow-[0_0_25px_rgba(20,184,166,0.5)]"
                 )}
-                whileHover={{ scale: isSharing ? 1 : 1.02 }}
-                whileTap={{ scale: isSharing ? 1 : 0.98 }}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
               >
                 <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                {isSharing ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <Share2 className="w-5 h-5" />
-                )}
-                <span>{isSharing ? "Opening share…" : "Share Post"}</span>
+                <Share2 className="w-5 h-5" />
+                <span>Share Post</span>
               </motion.button>
 
               <motion.button

@@ -8,6 +8,9 @@ import {
   Camera,
   ChevronRight,
   ChevronDown,
+  ScanLine,
+  Car,
+  X,
 } from "lucide-react";
 import { StyleOption, ToneOption } from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
@@ -21,9 +24,28 @@ import {
   CardTitle,
 } from "./ui/Card";
 import { Badge } from "./ui/Badge";
-import { Input, Textarea } from "./ui/Input";
+import { Input, Textarea, Select } from "./ui/Input";
 import { POST_TEMPLATES } from "./templates";
 import { cn } from "../utils/classNames";
+import { VinScanner } from "./VinScanner";
+import {
+  DecodedVehicle,
+  vehicleToCreativeBrief,
+} from "../services/vinDecoder";
+import { PhotoReleaseModal } from "./PhotoReleaseModal";
+import { useAppStore } from "../stores/appStore";
+import { ShieldCheck } from "lucide-react";
+import { CapturedRelease } from "../services/photoReleases";
+import { SalespersonPicker } from "./SalespersonPicker";
+import { ScenarioPicker } from "./ScenarioPicker";
+import {
+  PostScenario,
+  POST_SCENARIOS,
+  scenarioToCreativeBrief,
+  findScenario,
+  getScenariosForDealer,
+} from "../services/postScenarios";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 
 interface PostCustomizerProps {
   imageSrc: string;
@@ -32,7 +54,14 @@ interface PostCustomizerProps {
     tone: ToneOption,
     customerName: string,
     customText?: string,
-    creativeBrief?: string
+    creativeBrief?: string,
+    meta?: {
+      salespersonName?: string;
+      salespersonId?: string;
+      vin?: string;
+      hasRelease?: boolean;
+      capturedRelease?: CapturedRelease;
+    }
   ) => Promise<void> | void;
   onBack: () => void;
   dealershipName: string;
@@ -42,6 +71,8 @@ interface PostCustomizerProps {
   isDesktopLayout: boolean;
   isGenerating?: boolean;
 }
+
+const SALESPERSON_STORAGE_KEY = "dsp.salespersonName";
 
 // Simplified style descriptions
 const STYLE_INFO: Record<
@@ -125,12 +156,98 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [vinScannerOpen, setVinScannerOpen] = useState(false);
+  const [decodedVehicle, setDecodedVehicle] = useState<DecodedVehicle | null>(
+    null
+  );
+  const [releaseModalOpen, setReleaseModalOpen] = useState(false);
+  // Captured (not yet saved) release. Held in state until generation succeeds,
+  // then persisted via useGeneration linked to the post_id. Solves the orphan-
+  // release bug where signing without generating left dangling PB records.
+  const [capturedRelease, setCapturedRelease] = useState<CapturedRelease | null>(
+    null
+  );
+  const currentDealer = useAppStore((s) => s.currentDealer);
 
-  // Sync with defaults
+  // Post scenario — drives prompt context + default style/tone. "customer_delivery"
+  // is the implicit default; an undefined value also resolves to that.
+  const [scenarioId, setScenarioId] = useState<string>(
+    POST_SCENARIOS[0].id
+  );
+  // Scenario lookup now considers the dealer's custom_scenarios JSON too.
+  const activeScenario = useMemo(() => {
+    const all = getScenariosForDealer(currentDealer?.custom_scenarios);
+    return all.find((s) => s.id === scenarioId) || POST_SCENARIOS[0];
+  }, [scenarioId, currentDealer?.custom_scenarios]);
+
+  // Filter the style picker to the dealer's enabled set. Empty enabled_styles
+  // = all enabled (default). Default style is pre-selected when the dealer set
+  // one, overriding the user-level preferred style.
+  const allowedStyles = useMemo<StyleOption[]>(() => {
+    const raw = (currentDealer?.enabled_styles || "").trim();
+    if (!raw) return Object.values(StyleOption);
+    const allowedSet = new Set(
+      raw.split(",").map((s) => s.trim()).filter(Boolean)
+    );
+    const filtered = Object.values(StyleOption).filter((s) => allowedSet.has(s));
+    return filtered.length > 0 ? filtered : Object.values(StyleOption);
+  }, [currentDealer?.enabled_styles]);
+
+  const dealerDefaultStyle = currentDealer?.default_style as
+    | StyleOption
+    | undefined;
+
+  // Salesperson identity — picker pulls from the dealer's roster (if any),
+  // falls back to a free-text input when the roster is empty. Persists last
+  // selection in localStorage so the same iPad keeps the same identity.
+  const [salesperson, setSalesperson] = useState<{
+    id?: string;
+    name: string;
+  }>(() => {
+    if (typeof window === "undefined") return { name: "" };
+    try {
+      // Migrate from the legacy free-text key if it exists
+      const legacy = localStorage.getItem(SALESPERSON_STORAGE_KEY);
+      if (legacy) return { name: legacy };
+    } catch {
+      /* ignore */
+    }
+    return { name: "" };
+  });
+  const salespersonName = salesperson.name;
+
+  // Sync with defaults. Order of precedence:
+  //   1. Dealer-set default_style (if it's in the enabled set)
+  //   2. User-level preferred style (if it's in the enabled set)
+  //   3. First enabled style
   useEffect(() => {
-    setStyle(defaultStyle);
+    let nextStyle: StyleOption = defaultStyle;
+    if (
+      dealerDefaultStyle &&
+      allowedStyles.includes(dealerDefaultStyle)
+    ) {
+      nextStyle = dealerDefaultStyle;
+    } else if (!allowedStyles.includes(nextStyle)) {
+      nextStyle = allowedStyles[0];
+    }
+    setStyle(nextStyle);
     setTone(defaultTone);
-  }, [defaultStyle, defaultTone]);
+  }, [defaultStyle, defaultTone, dealerDefaultStyle, allowedStyles]);
+
+  // When the salesperson picks a new scenario, retune style + tone to the
+  // scenario's smart defaults — but respect the dealer's enabled_styles list
+  // (don't pick a style the GSM has disabled).
+  const handleScenarioChange = useCallback(
+    (s: PostScenario | undefined) => {
+      if (!s) return;
+      setScenarioId(s.id);
+      if (allowedStyles.includes(s.defaultStyle)) {
+        setStyle(s.defaultStyle);
+      }
+      setTone(s.defaultTone);
+    },
+    [allowedStyles]
+  );
 
   // Notify parent
   useEffect(() => {
@@ -148,10 +265,102 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   const handleGenerate = useCallback(async () => {
     triggerHapticFeedback();
     let preparedText: string | undefined;
-    let creativeBrief: string | undefined;
 
     const styleInfo = STYLE_INFO[style];
-    creativeBrief = `Design DNA: ${styleInfo.aiHint}`;
+    const briefParts: string[] = [`Design DNA: ${styleInfo.aiHint}`];
+
+    // Scenario context (Customer Delivery / Pre-Owned Spotlight / Service
+    // Promo / etc). This goes near the top of the brief so it dominates the
+    // default delivery-post framing where the scenarios diverge from it.
+    // Custom dealer scenarios resolve via the dealer's custom_scenarios JSON.
+    const scenarioBlock = scenarioToCreativeBrief(
+      scenarioId,
+      currentDealer?.custom_scenarios
+    );
+    if (scenarioBlock) {
+      briefParts.push(scenarioBlock);
+    }
+
+    // Inject decoded vehicle context if a VIN was scanned. This grounds the
+    // model in concrete facts (year/make/model/trim/powertrain) so the caption
+    // stops hallucinating equipment that isn't on the car.
+    if (decodedVehicle && !decodedVehicle.empty) {
+      const vehicleBrief = vehicleToCreativeBrief(decodedVehicle);
+      if (vehicleBrief) {
+        briefParts.push(`Vehicle facts (do not contradict): ${vehicleBrief}`);
+      }
+    }
+
+    // Per-dealer brand voice / banned phrases / OEM affiliation. These come
+    // from the dealers PocketBase record so each dealership can tune voice
+    // without a code change.
+    if (currentDealer?.brand_voice?.trim()) {
+      briefParts.push(
+        `Brand voice (match this exactly): ${currentDealer.brand_voice.trim()}`
+      );
+    }
+    if (currentDealer?.banned_phrases?.trim()) {
+      const banned = currentDealer.banned_phrases
+        .split(/[\n,]+/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+      if (banned.length > 0) {
+        briefParts.push(
+          `Forbidden phrases (do not use, even as a near-match): ${banned
+            .map((p) => `"${p}"`)
+            .join(", ")}.`
+        );
+      }
+    }
+    if (currentDealer?.oem_affiliation?.trim()) {
+      briefParts.push(
+        `OEM affiliation: ${currentDealer.oem_affiliation.trim()}. Respect that manufacturer's brand-guideline tone and avoid claims that conflict with their advertising standards.`
+      );
+    }
+
+    // Identity context — tagline, website, address, hours give the model
+    // grounded facts to weave in naturally (and never invent).
+    const identityFacts: string[] = [];
+    if (currentDealer?.tagline?.trim())
+      identityFacts.push(`Tagline: "${currentDealer.tagline.trim()}"`);
+    if (currentDealer?.website?.trim())
+      identityFacts.push(`Website: ${currentDealer.website.trim()}`);
+    if (currentDealer?.address?.trim())
+      identityFacts.push(`Address: ${currentDealer.address.trim()}`);
+    if (currentDealer?.hours?.trim())
+      identityFacts.push(`Hours: ${currentDealer.hours.trim()}`);
+    if (currentDealer?.phone?.trim())
+      identityFacts.push(`Phone: ${currentDealer.phone.trim()}`);
+    if (identityFacts.length > 0) {
+      briefParts.push(
+        `Dealership facts (may be referenced, never contradicted): ${identityFacts.join(
+          "; "
+        )}.`
+      );
+    }
+
+    // Default hashtags + footer get appended to the final caption rather than
+    // injected as suggestion text — guarantees they actually show up.
+    const dealerHashtags = (currentDealer?.default_hashtags || "")
+      .split(/[\n,]+/)
+      .map((h) => h.trim())
+      .filter(Boolean)
+      .map((h) => (h.startsWith("#") ? h : `#${h}`));
+    if (dealerHashtags.length > 0) {
+      briefParts.push(
+        `Required hashtags (include these exact hashtags in the post): ${dealerHashtags.join(
+          " "
+        )}.`
+      );
+    }
+    const dealerFooter = (currentDealer?.default_footer || "").trim();
+    if (dealerFooter) {
+      briefParts.push(
+        `Required footer (append verbatim AFTER the caption, BEFORE the hashtags): "${dealerFooter}"`
+      );
+    }
+
+    const creativeBrief = briefParts.join(" ");
 
     if (captionSource === "custom" && customMessage.trim()) {
       preparedText = customMessage.trim();
@@ -159,13 +368,40 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
     setIsSubmitting(true);
     try {
-      await onGenerate(style, tone, customerName, preparedText, creativeBrief);
+      await onGenerate(style, tone, customerName, preparedText, creativeBrief, {
+        salespersonName: salesperson.name.trim() || undefined,
+        salespersonId: salesperson.id,
+        vin: decodedVehicle?.vin,
+        hasRelease: !!capturedRelease,
+        capturedRelease: capturedRelease || undefined,
+      });
     } finally {
       setIsSubmitting(false);
     }
-  }, [captionSource, tone, style, customerName, customMessage, onGenerate]);
+  }, [
+    captionSource,
+    tone,
+    style,
+    customerName,
+    customMessage,
+    decodedVehicle,
+    salesperson,
+    capturedRelease,
+    currentDealer,
+    scenarioId,
+    onGenerate,
+  ]);
 
   const isBusy = isGenerating || isSubmitting;
+
+  // Cmd/Ctrl+Enter fires the primary action (generate) from anywhere in the
+  // customizer — including when focus is inside a text field. The shortcuts
+  // hook intentionally bypasses its is-typing guard for the primary chord.
+  useKeyboardShortcuts({
+    onPrimary: () => {
+      if (!isBusy) void handleGenerate();
+    },
+  });
 
   return (
     <div className="flex-1 flex items-start justify-center py-2 sm:py-4 px-2 sm:px-4">
@@ -218,6 +454,19 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           </CardHeader>
 
           <CardContent className="space-y-5 pt-0 relative">
+            {/* Post scenario — selects which kind of post this is (delivery,
+                pre-owned spotlight, service promo, etc). Tunes prompt + defaults. */}
+            <ScenarioPicker
+              value={scenarioId}
+              onChange={handleScenarioChange}
+            />
+
+            {/* Salesperson — searchable roster picker w/ unrostered fallback */}
+            <SalespersonPicker
+              value={salesperson}
+              onChange={setSalesperson}
+            />
+
             {/* Customer Name - Compact */}
             <Input
               label="Customer's name (optional)"
@@ -227,6 +476,94 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               fullWidth
               className="bg-white/5 border-white/10 focus:border-primary-400 focus:bg-white/10 transition-colors"
             />
+
+            {/* VIN Scanner — show pill if vehicle decoded, otherwise show CTA */}
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+                Vehicle
+              </label>
+              {decodedVehicle && !decodedVehicle.empty ? (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="flex items-start gap-3 rounded-xl border border-success-500/40 bg-success-500/10 px-3 py-2.5"
+                >
+                  <Car className="h-4 w-4 text-success-300 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-success-100 truncate">
+                      {decodedVehicle.summary}
+                    </div>
+                    <div className="text-[10px] font-mono text-success-300/80 truncate">
+                      VIN {decodedVehicle.vin}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Clear vehicle"
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setDecodedVehicle(null);
+                    }}
+                    className="p-1 -mr-1 text-success-300/80 hover:text-success-100 rounded-full transition-colors"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </motion.div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="md"
+                  leftIcon={<ScanLine className="h-4 w-4" />}
+                  onClick={() => {
+                    triggerHapticFeedback();
+                    setVinScannerOpen(true);
+                  }}
+                  fullWidth
+                  className="border-dashed border-white/20 bg-white/5 hover:bg-white/10"
+                >
+                  Scan VIN (optional — boosts accuracy)
+                </Button>
+              )}
+            </div>
+
+            {/* Photo release — capture customer's signed consent before posting their photo */}
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+                Photo release
+              </label>
+              {capturedRelease ? (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="flex items-start gap-3 rounded-xl border border-success-500/40 bg-success-500/10 px-3 py-2.5"
+                >
+                  <ShieldCheck className="h-4 w-4 text-success-300 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-success-100">
+                      Release captured for {capturedRelease.customerName}
+                    </div>
+                    <div className="text-[10px] text-success-300/80">
+                      Will be saved when you generate the post.
+                    </div>
+                  </div>
+                </motion.div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="md"
+                  leftIcon={<ShieldCheck className="h-4 w-4" />}
+                  onClick={() => {
+                    triggerHapticFeedback();
+                    setReleaseModalOpen(true);
+                  }}
+                  fullWidth
+                  className="border-dashed border-white/20 bg-white/5 hover:bg-white/10"
+                  disabled={!currentDealer}
+                >
+                  Capture customer release (optional)
+                </Button>
+              )}
+            </div>
 
             {/* Style Selection - Simplified Grid */}
             <div className="space-y-2">
@@ -239,7 +576,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                {Object.values(StyleOption).map((option) => {
+                {allowedStyles.map((option) => {
                   const info = STYLE_INFO[option];
                   const isActive = option === style;
                   return (
@@ -452,17 +789,10 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                     className="pt-3 space-y-3"
                   >
                     {/* Template Selection */}
-                    <div className="space-y-2">
-                      <label className="text-xs font-medium text-surface-300">
-                        Use a template
-                      </label>
-                      <select
+                    <div className="space-y-2 pb-2">
+                      <Select
+                        label="Use a template"
                         aria-label="Select template"
-                        className={cn(
-                          "w-full rounded-xl border border-surface-700",
-                          "bg-surface-900/60 px-3 py-2 text-sm text-surface-50",
-                          "focus:border-primary-500 focus:outline-none transition-colors"
-                        )}
                         value={selectedTemplateId}
                         onChange={(e) => {
                           setSelectedTemplateId(e.target.value);
@@ -488,7 +818,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                             {template.name}
                           </option>
                         ))}
-                      </select>
+                      </Select>
                     </div>
 
                     {/* Style Preview */}
@@ -520,7 +850,12 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 onClick={handleGenerate}
                 disabled={isBusy}
                 fullWidth
-                className="relative overflow-hidden shadow-lg shadow-primary-500/20 h-14 text-base"
+                className="relative overflow-hidden h-14 text-base"
+                style={{
+                  background:
+                    "linear-gradient(135deg, var(--brand-primary-500), var(--brand-primary))",
+                  boxShadow: "0 14px 30px -12px var(--brand-primary, #1d4ed8)",
+                }}
               >
                 {isBusy && (
                   <motion.div
@@ -534,8 +869,13 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                     }}
                   />
                 )}
-                <span className="relative z-10">
+                <span className="relative z-10 flex items-center gap-2">
                   {isBusy ? "Creating your post..." : "Generate Post"}
+                  {!isBusy && (
+                    <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-white/15 border border-white/20 text-white/80">
+                      ⌘↵
+                    </kbd>
+                  )}
                 </span>
               </Button>
               <Button
@@ -566,6 +906,25 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           }
           position="bottom-right"
           className="sm:hidden"
+        />
+      )}
+
+      <VinScanner
+        isOpen={vinScannerOpen}
+        onClose={() => setVinScannerOpen(false)}
+        onVehicleDecoded={(vehicle) => {
+          setDecodedVehicle(vehicle);
+        }}
+      />
+
+      {currentDealer && (
+        <PhotoReleaseModal
+          isOpen={releaseModalOpen}
+          onClose={() => setReleaseModalOpen(false)}
+          dealershipName={currentDealer.name}
+          vin={decodedVehicle?.vin}
+          defaultCustomerName={customerName}
+          onCaptured={(release) => setCapturedRelease(release)}
         />
       )}
     </div>

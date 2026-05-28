@@ -5,7 +5,7 @@ migrate(
     
     // Check if collection already exists
     try {
-      const existing = dao.findCollectionByNameOrId("dealers");
+      let existing = null; try { existing = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
       if (existing) {
         console.log("dealers collection already exists, skipping creation");
         return;
@@ -88,7 +88,7 @@ migrate(
   (db) => {
     const dao = new Dao(db);
     try {
-      const collection = dao.findCollectionByNameOrId("dealers_collection");
+      let collection = null; try { collection = dao.findCollectionByNameOrId("dealers_collection"); } catch(e) {}
       if (collection) {
         return dao.deleteCollection(collection);
       }

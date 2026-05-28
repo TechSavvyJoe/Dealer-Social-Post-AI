@@ -4,6 +4,15 @@ import {
   VideoStyle,
   VideoRequestOptions,
 } from "../types";
+import { FLAGS } from "./modelConfig";
+import {
+  generateTextPromptV2,
+  editTextPromptV2,
+  generateImagePromptV2,
+  editImagePromptV2,
+  generateFunPromptV2,
+  generateVideoPromptV2,
+} from "./promptsV2";
 
 export const generateImagePrompt = (
   style: StyleOption,
@@ -12,6 +21,15 @@ export const generateImagePrompt = (
   customMessage?: string,
   creativeBrief?: string
 ): string => {
+  if (FLAGS.useV2Prompts) {
+    return generateImagePromptV2(
+      style,
+      dealershipName,
+      hasLogo,
+      customMessage,
+      creativeBrief
+    );
+  }
   const criticalRules = `
 **CRITICAL, NON-NEGOTIABLE CORE DIRECTIVES: READ AND OBEY THESE RULES ABOVE ALL ELSE. FAILURE TO FOLLOW THEM PERFECTLY IS A TOTAL TASK FAILURE.**
 
@@ -211,6 +229,15 @@ export const generateTextPrompt = (
   isRegeneration = false,
   creativeBrief?: string
 ): string => {
+  if (FLAGS.useV2Prompts) {
+    return generateTextPromptV2(
+      tone,
+      dealershipName,
+      customerName,
+      isRegeneration,
+      creativeBrief
+    );
+  }
   const nameInfo = customerName
     ? `The customer's first name is ${customerName}. Personalize the post by addressing them directly.`
     : "The customer's name was not provided, so refer to them as 'our latest happy customer' or a similar friendly phrase.";
@@ -1009,6 +1036,22 @@ export const generateFunPrompt = (
   logoBase64Url?: string,
   requestedStyle?: string
 ): string => {
+  if (FLAGS.useV2Prompts) {
+    const matched = funStyleCatalog.find(
+      (s) => s.id === requestedStyle || s.name === requestedStyle
+    );
+    // Use the style's full Veo/Imagen prompt as the artistic-direction summary,
+    // truncated so the V2 wrapper stays under model context budgets.
+    const summary = matched
+      ? `${matched.name}: ${matched.prompt.slice(0, 1200)}`
+      : "Surprise me with a bold artistic transformation.";
+    return generateFunPromptV2(
+      summary,
+      dealershipName,
+      !!logoBase64Url,
+      matched?.name || requestedStyle
+    );
+  }
   const criticalRules = `
 **CRITICAL, NON-NEGOTIABLE CORE DIRECTIVES: READ AND OBEY THESE RULES ABOVE ALL ELSE. FAILURE TO FOLLOW THEM PERFECTLY IS A TOTAL TASK FAILURE.**
 
@@ -1097,6 +1140,9 @@ export const editImagePrompt = (
   dealershipName: string,
   logoBase64Url?: string
 ): string => {
+  if (FLAGS.useV2Prompts) {
+    return editImagePromptV2(editPrompt, dealershipName, !!logoBase64Url);
+  }
   const criticalRulesForEditing = `
 **CRITICAL, NON-NEGOTIABLE CORE DIRECTIVES FOR EDITING: READ AND OBEY THESE RULES ABOVE ALL ELSE. FAILURE TO FOLLOW THEM PERFECTLY IS A TOTAL TASK FAILURE.**
 
@@ -1158,6 +1204,9 @@ export const editTextPrompt = (
   editPrompt: string,
   tone: ToneOption
 ): string => {
+  if (FLAGS.useV2Prompts) {
+    return editTextPromptV2(originalText, editPrompt, tone);
+  }
   return `You are an expert social media copy editor for an automotive dealership.
 
 **ORIGINAL TEXT:**
@@ -1187,6 +1236,9 @@ export const generateVideoPrompt = (
   style: VideoStyle,
   options: VideoRequestOptions
 ): string => {
+  if (FLAGS.useV2Prompts) {
+    return generateVideoPromptV2(style, options);
+  }
   const coreInstruction = `You are an expert AI video animator specializing in creating dynamic motion from static images.
 
 **YOUR MISSION:**

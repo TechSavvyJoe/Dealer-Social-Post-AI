@@ -6,6 +6,7 @@ import {
   StyleOption,
   ToneOption,
   GenerationParams,
+  UserRole,
 } from "../types";
 import { loadSession, saveSession, clearSession } from "../utils/persistence";
 // Removed duplicate import
@@ -15,6 +16,7 @@ interface AppState {
   // Core State
   step: AppStep;
   currentDealer: Dealer | null;
+  role: UserRole;
   selectedImage: string | null;
   generatedPost: GeneratedPost | null;
   generationParams: GenerationParams | null;
@@ -50,6 +52,7 @@ interface AppState {
 export const useAppStore = create<AppState>((set, get) => ({
   step: AppStep.LOGIN,
   currentDealer: null,
+  role: "salesperson" as UserRole,
   selectedImage: null,
   generatedPost: null,
   generationParams: null,
@@ -142,21 +145,22 @@ export const useAppStore = create<AppState>((set, get) => ({
         throw new Error("Invalid dealer code");
       }
 
-      const { dealer } = await res.json();
-      
+      const body = await res.json();
+      const dealer = body.dealer;
+      const serverRole: UserRole = (body.role as UserRole) || "salesperson";
+
       if (dealer) {
-        // Optional admin code is configured via VITE_ADMIN_CODE to avoid hardcoded backdoors
-        const configuredAdminCode =
-          typeof import.meta !== "undefined"
-            ? (import.meta as any).env?.VITE_ADMIN_CODE
-            : undefined;
-        const targetStep =
-          configuredAdminCode && dealer.code === configuredAdminCode
-            ? AppStep.ADMIN
-            : AppStep.CAPTURE;
+        // Route by server-supplied role. Three flows:
+        //   super_admin → AppStep.ADMIN (manage all dealerships)
+        //   dealer_admin → AppStep.DEALER_ADMIN (manage one dealership)
+        //   salesperson → AppStep.CAPTURE (generate posts)
+        let targetStep = AppStep.CAPTURE;
+        if (serverRole === "super_admin") targetStep = AppStep.ADMIN;
+        else if (serverRole === "dealer_admin") targetStep = AppStep.DEALER_ADMIN;
 
         set({
           currentDealer: dealer,
+          role: serverRole,
           step: targetStep,
           error: null,
         });
@@ -215,10 +219,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const res = await fetch("/api/app/session", { method: "GET" });
       if (res.ok) {
-        const { dealer } = await res.json();
+        const body = await res.json();
+        const dealer = body.dealer;
+        const serverRole: UserRole = (body.role as UserRole) || "salesperson";
         if (dealer) {
           set({
             currentDealer: dealer,
+            role: serverRole,
             selectedImage: session?.selectedImage || null,
             generatedPost:
               session?.generatedPost && session.generatedPost.image

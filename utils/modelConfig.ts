@@ -1,24 +1,14 @@
-export const MODELS = {
-  text: {
-    primary: 'gemini-3-flash-preview',
-    fallback: 'gemini-3.1-flash-lite',
-  },
-  image: {
-    primary: 'gemini-3.1-flash-image-preview',
-    fallback: 'gemini-3-pro-image-preview',
-  },
-  imagen: {
-    primary: 'imagen-4.0-generate-001',
-  },
-  video: {
-    primary: 'veo-3.1-generate-preview',
-    fast: 'veo-3.1-fast-generate-preview',
-    lite: 'veo-3.1-lite-generate-preview',
-  }
-};
-
-export const getModel = (type: keyof typeof MODELS, variant: 'primary' | 'fallback' | 'fast' | 'lite' = 'primary') => {
-  const modelGroup = MODELS[type];
-  if (!modelGroup) return '';
-  return (modelGroup as any)[variant] || modelGroup.primary;
-};
+/**
+ * Re-export of services/modelConfig.
+ *
+ * Pre-existing imports throughout the codebase point at `../utils/modelConfig`
+ * even though the actual file lives at `services/modelConfig`. Rather than
+ * rewrite all the call sites (and re-touch every PR they appear in), this
+ * file proxies the canonical module so both import paths resolve to the same
+ * exports.
+ *
+ * If you ever consolidate locations, delete this file and update the 3 import
+ * sites in services/geminiClient.ts, services/geminiService.ts, and
+ * services/geminiService.test.ts.
+ */
+export { MODELS, getModel } from "../services/modelConfig";

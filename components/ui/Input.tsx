@@ -297,3 +297,129 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
 );
 
 Textarea.displayName = 'Textarea';
+
+/**
+ * Select component with similar styling to Input
+ */
+export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
+  label?: string;
+  error?: string;
+  helperText?: string;
+  fullWidth?: boolean;
+}
+
+export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
+  (
+    {
+      className,
+      label,
+      error,
+      helperText,
+      fullWidth = false,
+      id,
+      children,
+      ...props
+    },
+    ref
+  ) => {
+    const [isFocused, setIsFocused] = useState(false);
+    const [hasValue, setHasValue] = useState(!!props.value || !!props.defaultValue);
+
+    const selectId = id || `select-${label?.toLowerCase().replace(/\s+/g, '-')}`;
+    const showFloatingLabel = isFocused || hasValue || true; // Selects usually always show value
+
+    const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+      setHasValue(true);
+      props.onChange?.(e);
+    };
+
+    return (
+      <div className={cn('relative', fullWidth && 'w-full')}>
+        <div className="relative">
+          <select
+            ref={ref}
+            id={selectId}
+            className={cn(
+              // Base styles
+              'w-full rounded-xl appearance-none',
+              'bg-surface-900/60 border-2',
+              'px-4 py-3',
+              'text-base text-surface-50',
+              'transition-all duration-200 ease-apple',
+              // Focus state
+              'focus:outline-none focus:ring-0',
+              error
+                ? 'border-error-500/50 focus:border-error-500'
+                : 'border-surface-700 focus:border-primary-500',
+              // Disabled state
+              'disabled:opacity-50 disabled:cursor-not-allowed',
+              // With floating label
+              label && 'pt-6 pb-2',
+              className
+            )}
+            onFocus={(e) => {
+              setIsFocused(true);
+              props.onFocus?.(e);
+            }}
+            onBlur={(e) => {
+              setIsFocused(false);
+              props.onBlur?.(e);
+            }}
+            onChange={handleChange}
+            {...props}
+          >
+            {children}
+          </select>
+          
+          {/* Custom Chevron icon for select */}
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-surface-400">
+            <svg width="12" height="8" viewBox="0 0 12 8" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </div>
+
+          {/* Floating label */}
+          {label && (
+            <label
+              htmlFor={selectId}
+              className={cn(
+                'absolute left-4 transition-all duration-200 ease-apple pointer-events-none',
+                'top-1.5 text-xs font-medium',
+                isFocused ? 'text-primary-400' : 'text-surface-400'
+              )}
+            >
+              {label}
+            </label>
+          )}
+
+          {/* Error icon */}
+          {error && (
+            <div className="absolute right-10 top-1/2 -translate-y-1/2 text-error-500 pointer-events-none">
+              <AlertCircle className="h-5 w-5" aria-hidden="true" />
+            </div>
+          )}
+        </div>
+
+        {/* Helper text or error message */}
+        <AnimatePresence mode="wait">
+          {(error || helperText) && (
+            <motion.p
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.2 }}
+              className={cn(
+                'mt-1.5 text-sm px-1',
+                error ? 'text-error-400' : 'text-surface-400'
+              )}
+            >
+              {error || helperText}
+            </motion.p>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
+);
+
+Select.displayName = 'Select';

@@ -1,10 +1,11 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Loader2, AlertCircle, Sparkles } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 import { Logo } from "./Logo";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Dialpad } from "./Dialpad";
 import { Card, CardContent } from "./ui/Card";
+import { useToast } from "./ui/Toast";
 import { cn } from "../utils/classNames";
 
 interface LoginScreenProps {
@@ -13,14 +14,13 @@ interface LoginScreenProps {
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [dealerCode, setDealerCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const toast = useToast();
 
   const handleDialpadKeyPress = async (key: string) => {
     triggerHapticFeedback();
     if (isLoading || isSuccess) return;
-    setError(null);
 
     let currentCode = dealerCode;
     if (key === "backspace") {
@@ -32,7 +32,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
     if (currentCode.length === 4) {
       setIsLoading(true);
-      setError(null);
       try {
         const loginSuccess = await onLogin(currentCode);
         if (loginSuccess) {
@@ -40,13 +39,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           // Brief success animation before transition
           await new Promise((r) => setTimeout(r, 800));
         } else {
-          setError("Dealer code not found.");
+          toast.error("Dealer code not found.");
           setTimeout(() => {
             setDealerCode("");
           }, 1000);
         }
       } catch (e) {
-        setError(e instanceof Error ? e.message : "An unknown error occurred.");
+        toast.error(e instanceof Error ? e.message : "An unknown error occurred.");
       } finally {
         setIsLoading(false);
       }
@@ -244,27 +243,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   >
                     <Dialpad onKeyPress={handleDialpadKeyPress} />
                   </motion.div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Error Message */}
-            <AnimatePresence>
-              {error && !isLoading && !isSuccess && (
-                <motion.div
-                  className={cn(
-                    "mt-4 bg-error-900/50 border border-error-700/50",
-                    "text-error-300 px-4 py-3 rounded-xl",
-                    "flex items-start gap-3 text-sm",
-                    "backdrop-blur-sm"
-                  )}
-                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                  <span className="leading-relaxed">{error}</span>
                 </motion.div>
               )}
             </AnimatePresence>

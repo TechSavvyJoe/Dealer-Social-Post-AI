@@ -18,9 +18,41 @@ export default defineConfig(() => {
         deny: ["**/pocketbase", "**/pb_data/**", "**/pb_migrations/**"],
       },
     },
-    plugins: [react()],
+    plugins: [
+      react(),
+      // Stamp the service worker with a fresh version on every build so
+      // returning users get the new app shell instead of a stale cache.
+      // Runs AFTER the static-copy step (writeBundle + enforce:"post") so
+      // we patch the file the user actually downloads, not a temp copy.
+      {
+        name: "stamp-service-worker",
+        apply: "build",
+        enforce: "post",
+        writeBundle: {
+          sequential: true,
+          order: "post",
+          handler: (options) => {
+            const fs = require("fs");
+            const pathMod = require("path");
+            const outDir = (options && options.dir) || "dist";
+            const swOut = pathMod.resolve(__dirname, outDir, "sw.js");
+            if (!fs.existsSync(swOut)) return;
+            const stamp = `dsp-${Date.now()}`;
+            const sw = fs
+              .readFileSync(swOut, "utf8")
+              .replace(
+                /const VERSION = "[^"]+";/,
+                `const VERSION = "${stamp}";`
+              );
+            fs.writeFileSync(swOut, sw);
+            console.log(`[sw] stamped version ${stamp} → ${swOut}`);
+          },
+        },
+      },
+    ],
     define: {
       // Removed GEMINI_API_KEY to prevent inlining secret into client bundle
+      __SW_VERSION__: JSON.stringify(`dsp-${Date.now()}`),
     },
     resolve: {
       alias: {

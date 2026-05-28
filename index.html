@@ -12,14 +12,18 @@
     />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline' https://aistudiocdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://aistudiocdn.com;"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' https://aistudiocdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; connect-src 'self' https://aistudiocdn.com https://vpic.nhtsa.dot.gov https://generativelanguage.googleapis.com https://*.googleapis.com https://api.openai.com https://api.anthropic.com;"
     />
     <meta name="theme-color" content="#020617" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta
       name="apple-mobile-web-app-status-bar-style"
       content="black-translucent"
     />
+    <meta name="apple-mobile-web-app-title" content="Dealer Social" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
     <title>Dealer Social Post AI</title>
     <script type="importmap">
       {

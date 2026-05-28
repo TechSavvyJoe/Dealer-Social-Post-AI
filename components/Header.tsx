@@ -4,6 +4,7 @@ import { Settings, LogOut, ChevronDown } from "lucide-react";
 import { Dealer } from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Button } from "./ui/Button";
+import { Badge } from "./ui/Badge";
 import { cn } from "../utils/classNames";
 
 interface HeaderProps {
@@ -89,10 +90,13 @@ export const Header: React.FC<HeaderProps> = ({
                 className={cn(
                   "w-10 h-10 rounded-xl flex items-center justify-center",
                   "font-bold text-white text-xl",
-                  "bg-gradient-to-br from-primary-500 to-secondary-600",
-                  "shadow-lg shadow-primary-500/20",
-                  "ring-1 ring-white/10"
+                  "shadow-lg ring-1 ring-white/10"
                 )}
+                style={{
+                  background:
+                    "linear-gradient(135deg, var(--brand-primary-500), var(--brand-primary))",
+                  boxShadow: "0 10px 25px -10px var(--brand-primary, #1d4ed8)",
+                }}
               >
                 {dealer.name.charAt(0)}
               </div>
@@ -104,9 +108,11 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="font-bold text-surface-50 text-lg tracking-tight leading-tight">
               {dealer.name}
             </span>
-            <span className="text-xs text-surface-400 hidden sm:block">
-              Social Media Generator
-            </span>
+            <div className="hidden sm:block mt-0.5">
+              <Badge variant="tinted" color="primary" size="sm">
+                Social Media Generator
+              </Badge>
+            </div>
           </div>
         </motion.div>
 

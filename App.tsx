@@ -7,6 +7,7 @@ import { ImageCropModal } from "./components/ImageCropModal";
 import { VideoDirectorModal } from "./components/VideoDirectorModal";
 import { ToastProvider } from "./components/ui/Toast";
 import { useAppController } from "./hooks/useAppController";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { AppStep } from "./types";
 
 const AppContent: React.FC = () => {
@@ -44,7 +45,42 @@ const AppContent: React.FC = () => {
     handleRegenerateText,
     handleEditText,
     handleGenerateVideo,
+    generateCaptionVariant,
   } = useAppController();
+
+  // Power-user shortcuts. Step-aware so each key does the smart thing where you are.
+  useKeyboardShortcuts({
+    onCancel: () => {
+      if (isSettingsOpen) {
+        setIsSettingsOpen(false);
+        return;
+      }
+      if (isVideoDirectorOpen) {
+        setIsVideoDirectorOpen(false);
+        return;
+      }
+      if (cropModalOpen) {
+        setCropModalOpen(false);
+        return;
+      }
+      // Step-specific back actions
+      if (step === AppStep.CUSTOMIZE) {
+        setStep(AppStep.CAPTURE);
+        return;
+      }
+      if (step === AppStep.RESULT) {
+        reset();
+        return;
+      }
+    },
+    onPalette: () => setIsSettingsOpen(!isSettingsOpen),
+    onFocusSearch: () => {
+      const first = document.querySelector<HTMLElement>(
+        "input:not([disabled]), textarea:not([disabled])"
+      );
+      first?.focus();
+    },
+  });
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 font-sans selection:bg-indigo-500/30">
@@ -87,6 +123,7 @@ const AppContent: React.FC = () => {
             onEditText={handleEditText}
             onFunMode={handleFunMode}
             onGenerateVideo={handleGenerateVideo}
+            onGenerateCaptionVariant={generateCaptionVariant}
           />
         </AnimatePresence>
       </main>

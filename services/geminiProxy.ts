@@ -34,7 +34,11 @@ export async function fetchFromProxy(
 
     try {
       console.log(`[GeminiProxy] [${requestId}] Requesting ${method} ${path}`);
-      const proxyToken = import.meta.env.VITE_PROXY_ACCESS_TOKEN;
+
+      // Auth: HttpOnly session cookie (set via POST /api/app/session). The
+      // bundled VITE_PROXY_ACCESS_TOKEN was removed 2026-05-28 because it
+      // leaked to anyone who viewed the JS bundle and bypassed per-dealer
+      // rate limits. credentials:"include" is what attaches the cookie.
 
       // Group paths by service type for circuit breaking (e.g. gemini-text, imagen, veo)
       let serviceKey = "gemini-api";
@@ -47,14 +51,32 @@ export async function fetchFromProxy(
           async () => {
             const res = await fetch(`/api/proxy/${path}`, {
               method: method,
-              headers: {
-                "Content-Type": "application/json",
-                ...(proxyToken ? { "X-Proxy-Token": proxyToken } : {}),
-              },
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
               // Only include body for POST requests
               body: method === "POST" ? JSON.stringify(body) : undefined,
               signal: controller.signal,
             });
+
+            // 401 → session expired or missing. Don't retry; surface to the
+            // caller so the app can route back to the login screen.
+            if (res.status === 401) {
+              const err = new Error(
+                "Session expired or missing — please log in again."
+              );
+              (err as any).status = 401;
+              throw err;
+            }
+
+            // 429 → rate limited. Surface immediately; retry would just
+            // burn the rest of the budget.
+            if (res.status === 429) {
+              const err = new Error(
+                "Too many requests — slow down and try again in a minute."
+              );
+              (err as any).status = 429;
+              throw err;
+            }
 
             // Retry on 502, 503, 504 errors
             if (res.status === 502 || res.status === 503 || res.status === 504) {

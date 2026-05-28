@@ -1,55 +1,47 @@
 /// <reference path="../pb_data/types.d.ts" />
+/**
+ * NEUTRALIZED 2026-05-27 — DO NOT re-create the "Admin" dealer with the
+ * well-known code "0000". Combined with formerly-open collection rules this
+ * was a publicly-guessable login. After migration 1748000400 locks the
+ * collection rules AND we drop this seed, admin access is gated by the
+ * ADMIN_DEALER_CODE env var resolving to a dealer YOU create manually with
+ * a real (non-0000) code.
+ *
+ * Up migration is a no-op so PocketBase's migration history stays consistent.
+ * Down migration is also a no-op; we intentionally do not re-introduce the
+ * backdoor on rollback.
+ */
+migrate(
+  (_db) => {
+    console.log("[migration] add_admin_dealer is neutralized (no-op)");
+  },
+  (_db) => {
+    // no-op down
+  }
+);
+
+// Also wipe an existing 0000 dealer if migration 1732499996 didn't catch it
+// (e.g. if it was re-created manually). This runs as a separate migration
+// step so PB treats it as its own checkpoint.
 migrate(
   (db) => {
     const dao = new Dao(db);
-    const collection = dao.findCollectionByNameOrId("dealers");
-
-    if (!collection) {
-      console.log("dealers collection not found");
-      return;
-    }
-
-    // Check if Admin dealer already exists
     try {
-      const existing = dao.findFirstRecordByFilter(
-        collection.id,
+      let dealers = null; try { dealers = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
+      if (!dealers) return;
+      const stale = dao.findFirstRecordByFilter(
+        dealers.id,
         "code = '0000'"
       );
-      if (existing) {
-        console.log("Admin dealer already exists");
-        return;
+      if (stale) {
+        dao.deleteRecord(stale);
+        console.log("[migration] Removed stale code=0000 dealer");
       }
-    } catch (e) {
-      // Not found, proceed with creation
+    } catch (_e) {
+      // none present
     }
-
-    const record = new Record(collection, {
-      name: "Admin",
-      code: "0000",
-      logo: "https://via.placeholder.com/150?text=Admin",
-    });
-
-    dao.saveRecord(record);
-    console.log("Created Admin dealer with code 0000");
   },
-  (db) => {
-    const dao = new Dao(db);
-    const collection = dao.findCollectionByNameOrId("dealers");
-
-    if (!collection) {
-      return;
-    }
-
-    try {
-      const record = dao.findFirstRecordByFilter(
-        collection.id,
-        "code = '0000'"
-      );
-      if (record) {
-        dao.deleteRecord(record);
-      }
-    } catch (e) {
-      // Not found
-    }
+  (_db) => {
+    // no-op down
   }
 );

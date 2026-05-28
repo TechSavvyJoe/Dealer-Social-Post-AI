@@ -1,55 +1,13 @@
 /// <reference path="../pb_data/types.d.ts" />
-migrate((db) => {
-  const dao = new Dao(db);
-  
-  try {
-    const collection = dao.findCollectionByNameOrId("dealers");
-    if (!collection) {
-      console.log("dealers collection not found, skipping initial data");
-      return null;
-    }
-
-    // Check if admin dealer already exists
-    try {
-      const existing = dao.findFirstRecordByFilter(collection.id, "code = '0000'");
-      if (existing) {
-        console.log("Admin dealer already exists, skipping creation");
-        return null;
-      }
-    } catch (e) {
-      // Record doesn't exist, proceed with creation
-    }
-
-    // Create admin dealer with code 0000
-    const adminRecord = new Record(collection, {
-      "name": "Admin",
-      "code": "0000",
-      "logo": "https://via.placeholder.com/150?text=Admin"
-    });
-
-    dao.saveRecord(adminRecord);
-  } catch (e) {
-    console.log("Error creating initial dealers:", e);
+// NEUTRALIZED 2026-05-27 — formerly seeded a dealer with code "0000". That's
+// the well-known backdoor; we never want it created automatically. See
+// pb_migrations/1733351001_add_admin_dealer.js for the matching no-op +
+// cleanup of any pre-existing stale record.
+migrate(
+  (_db) => {
+    console.log("[migration] initial_dealers is neutralized (no-op)");
+  },
+  (_db) => {
+    // no-op down
   }
-
-  return null;
-}, (db) => {
-  const dao = new Dao(db);
-  
-  try {
-    const collection = dao.findCollectionByNameOrId("dealers");
-    if (!collection) {
-      return null;
-    }
-
-    // Find and delete admin record
-    const record = dao.findFirstRecordByFilter(collection.id, "code = '0000'");
-    if (record) {
-      dao.deleteRecord(record);
-    }
-  } catch (e) {
-    // Ignore if not found
-  }
-
-  return null;
-})
+);
