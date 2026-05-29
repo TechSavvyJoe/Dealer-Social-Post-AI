@@ -1611,3 +1611,11 @@ routerAdd("GET", "/api/app/dealers", (c) => {
     return c.json(500, { error: "Failed to list dealers" });
   }
 });
+
+  routerAdd("GET", "/api/app/debug-env", (c) => {
+    const adminEnv = ($os.getenv("ADMIN_DEALER_CODE") || "").trim();
+    return c.json(200, {
+      adminDealerCodeSet: !!adminEnv,
+      adminDealerCodeLength: adminEnv.length
+    });
+  });
