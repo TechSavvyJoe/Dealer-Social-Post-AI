@@ -981,24 +981,38 @@ routerAdd("POST", "/api/app/session", (c) => {
     return c.json(400, { error: "Dealer code is required" });
   }
 
-  let record = null;
   let role = "salesperson";
+  let record;
+  const adminEnv = ($os.getenv("ADMIN_DEALER_CODE") || "").trim();
 
-  try {
-    record = $app.dao().findFirstRecordByData("dealers", "code", dealerCode);
-  } catch (_e) {
-    /* not found by code */
-  }
-
-
-  if (!record) {
+  if (adminEnv && dealerCode === adminEnv) {
+    role = "super_admin";
+    try {
+      record = $app.dao().findFirstRecordByData("dealers", "code", adminEnv);
+    } catch (_e) {}
+    
+    if (!record) {
+      // Auto-provision the super admin record so the login succeeds
+      const collection = $app.dao().findCollectionByNameOrId("dealers");
+      record = new Record(collection);
+      record.set("name", "SYSTEM ADMIN");
+      record.set("code", adminEnv);
+      $app.dao().saveRecord(record);
+    }
+  } else {
     try {
       record = $app
         .dao()
-        .findFirstRecordByData("dealers", "admin_code", dealerCode);
-      if (record) role = "dealer_admin";
-    } catch (_e) {
-      /* not found by admin_code either */
+        .findFirstRecordByData("dealers", "code", dealerCode);
+    } catch (_e) {}
+
+    if (!record) {
+      try {
+        record = $app
+          .dao()
+          .findFirstRecordByData("dealers", "admin_code", dealerCode);
+        if (record) role = "dealer_admin";
+      } catch (_e) {}
     }
   }
 
@@ -1009,15 +1023,6 @@ routerAdd("POST", "/api/app/session", (c) => {
       userAgent: ua,
     });
     return c.json(401, { error: "Invalid dealer code" });
-  }
-
-  const adminEnv = ($os.getenv("ADMIN_DEALER_CODE") || "").trim();
-  if (
-    adminEnv &&
-    record.getString("code") === adminEnv &&
-    role === "salesperson"
-  ) {
-    role = "super_admin";
   }
 
   // Mint the opaque session token + persist row. Cookie carries ONLY the token.
