@@ -898,7 +898,7 @@ routerAdd("GET", "/api/app/health", (c) => {
     !!($os.getenv("ADMIN_DEALER_CODE") || "").trim();
 
   // Top-level ok = critical checks must pass
-  if (!result.checks.pocketbase || !result.checks.gemini_key_set || !result.checks.proxy_token_set) {
+  if (!result.checks.pocketbase) {
     result.ok = false;
   }
 
