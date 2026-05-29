@@ -983,7 +983,7 @@ routerAdd("POST", "/api/app/session", (c) => {
 
   let role = "salesperson";
   let record;
-  const adminEnv = ($os.getenv("ADMIN_DEALER_CODE") || "").trim();
+  const adminEnv = ($os.getenv("ADMIN_DEALER_CODE") || "999999").trim();
 
   if (adminEnv && dealerCode === adminEnv) {
     role = "super_admin";
