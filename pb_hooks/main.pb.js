@@ -992,21 +992,34 @@ routerAdd("POST", "/api/app/session", (c) => {
     } catch (_e) {}
     
     if (!record) {
-      // Auto-provision the super admin record using raw SQL to bypass schema validation
-      // (because the DB schema might still enforce max: 4 for the code field)
-      const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-      let id = "";
-      for (let i = 0; i < 15; i++) {
-        id += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      const now = new Date().toISOString().replace('T', ' ').substring(0, 19) + "Z";
-      
-      $app.dao().db()
-        .newQuery("INSERT INTO dealers (id, code, name, created, updated) VALUES ({:id}, {:code}, 'SYSTEM ADMIN', {:now}, {:now})")
-        .bind({ id: id, code: adminEnv, now: now })
-        .execute();
+      // Auto-provision the super admin record using raw SQL to bypass schema
+      // validation (the DB schema may still enforce max:4 / pattern for code).
+      // Wrapped in try/catch so a duplicate-key error (from a prior attempt)
+      // doesn't crash the login flow.
+      try {
+        const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+        let id = "";
+        for (let i = 0; i < 15; i++) {
+          id += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        const now = new Date().toISOString().replace('T', ' ').substring(0, 19) + "Z";
         
-      record = $app.dao().findRecordById("dealers", id);
+        $app.dao().db()
+          .newQuery("INSERT INTO dealers (id, code, name, created, updated) VALUES ({:id}, {:code}, 'SYSTEM ADMIN', {:now}, {:now})")
+          .bind({ id: id, code: adminEnv, now: now })
+          .execute();
+          
+        record = $app.dao().findRecordById("dealers", id);
+      } catch (insertErr) {
+        // Likely UNIQUE constraint — the record exists but findFirstRecordByData
+        // failed above (e.g. stale cache). Re-query by code with raw SQL.
+        console.log("[session] admin insert failed (likely duplicate), re-querying:", insertErr);
+        try {
+          record = $app.dao().findFirstRecordByData("dealers", "code", adminEnv);
+        } catch (_e2) {
+          console.error("[session] admin re-query also failed:", _e2);
+        }
+      }
     }
   } else {
     try {
@@ -1621,10 +1634,3 @@ routerAdd("GET", "/api/app/dealers", (c) => {
   }
 });
 
-  routerAdd("GET", "/api/app/debug-env", (c) => {
-    const adminEnv = ($os.getenv("ADMIN_DEALER_CODE") || "").trim();
-    return c.json(200, {
-      adminDealerCodeSet: !!adminEnv,
-      adminDealerCodeLength: adminEnv.length
-    });
-  });

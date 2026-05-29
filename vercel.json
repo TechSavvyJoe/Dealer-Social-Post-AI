@@ -1,3 +1,9 @@
 {
-  "framework": "vite"
+  "framework": "vite",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://dealer-social-post-ai-production.fly.dev/api/:path*"
+    }
+  ]
 }
