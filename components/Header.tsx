@@ -76,43 +76,34 @@ export const Header: React.FC<HeaderProps> = ({
             transition={{ type: "spring", stiffness: 400, damping: 25 }}
           >
             {dealer.logo ? (
-              <>
-                {/* Glow effect on hover */}
-                <div className="absolute inset-0 rounded-xl bg-primary-500/20 opacity-0 group-hover:opacity-100 blur-xl transition-opacity duration-300" />
-                <img
-                  src={dealer.logo}
-                  alt={`${dealer.name} Logo`}
-                  className="relative w-10 h-10 object-contain rounded-xl bg-white/10 p-1.5 ring-1 ring-white/10 group-hover:ring-white/20 transition-all"
-                />
-              </>
+              <img
+                src={dealer.logo}
+                alt={`${dealer.name} logo`}
+                className="relative w-10 h-10 object-contain rounded-xl bg-white/10 p-1.5 ring-1 ring-white/10 group-hover:ring-white/15 transition-all duration-200"
+              />
             ) : (
               <div
                 className={cn(
                   "w-10 h-10 rounded-xl flex items-center justify-center",
-                  "font-bold text-white text-xl",
-                  "shadow-lg ring-1 ring-white/10"
+                  "font-semibold text-[color:var(--brand-foreground)] text-xl",
+                  "ring-1 ring-white/10"
                 )}
-                style={{
-                  background:
-                    "linear-gradient(135deg, var(--brand-primary-500), var(--brand-primary))",
-                  boxShadow: "0 10px 25px -10px var(--brand-primary, #1d4ed8)",
-                }}
+                style={{ backgroundColor: "var(--brand-primary)" }}
+                aria-hidden="true"
               >
                 {dealer.name.charAt(0)}
               </div>
             )}
           </motion.div>
 
-          {/* Dealer name with animation */}
+          {/* Dealer name + product label, sentence case (Dealer Trust) */}
           <div className="flex flex-col">
-            <span className="font-bold text-surface-50 text-lg tracking-tight leading-tight">
+            <span className="font-semibold text-surface-50 text-base sm:text-lg tracking-tight leading-tight">
               {dealer.name}
             </span>
-            <div className="hidden sm:block mt-0.5">
-              <Badge variant="primary" size="sm">
-                Social Media Generator
-              </Badge>
-            </div>
+            <span className="hidden sm:inline text-xs font-medium text-surface-300 mt-0.5 tracking-tight">
+              Social post studio
+            </span>
           </div>
         </motion.div>
 

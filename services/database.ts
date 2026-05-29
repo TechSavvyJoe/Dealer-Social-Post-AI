@@ -66,15 +66,13 @@ export const findDealer = async (
   dealerCode: string
 ): Promise<Dealer | undefined> => {
   try {
-    // Search for dealer by code field instead of ID. Parameterized to
-    // prevent filter-string injection in case `dealerCode` ever flows from
-    // user-supplied input (today the dialpad enforces digits, but defense
-    // in depth — PB supports {:name} placeholders + filterParams).
+    // Search for dealer by code field instead of ID. Use pb.filter() for safe
+    // {:name} placeholder substitution — passing a {filter:{...}} object as the
+    // options arg does NOT substitute the placeholder (the literal "{:code}"
+    // string gets sent and the query never matches).
     const rawRecord = await pb
       .collection(COLLECTION_NAME)
-      .getFirstListItem("code = {:code}", {
-        filter: { code: dealerCode },
-      } as any);
+      .getFirstListItem(pb.filter("code = {:code}", { code: dealerCode }));
       
     const record = DealerRecordSchema.parse(rawRecord);
 

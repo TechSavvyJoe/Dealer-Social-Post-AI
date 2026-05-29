@@ -12,6 +12,10 @@ interface CacheEntry<T> {
 class RequestCache {
   private cache = new Map<string, CacheEntry<any>>();
   private pendingRequests = new Map<string, Promise<any>>();
+  // Hard cap so a long-lived SPA session keying on dynamic inputs (prompts,
+  // image URLs) can't grow this Map unbounded and leak memory. Map preserves
+  // insertion order, so the first key is the least-recently-used.
+  private maxSize = 200;
 
   /**
    * Get cached data if valid
@@ -26,6 +30,10 @@ class RequestCache {
       return null;
     }
 
+    // LRU touch: move to the end so eviction targets genuinely stale keys.
+    this.cache.delete(key);
+    this.cache.set(key, entry);
+
     return entry.data as T;
   }
 
@@ -33,11 +41,19 @@ class RequestCache {
    * Set cached data with TTL
    */
   set<T>(key: string, data: T, ttlMs: number = 60000): void {
+    // Refresh recency if the key already exists.
+    this.cache.delete(key);
     this.cache.set(key, {
       data,
       timestamp: Date.now(),
       ttl: ttlMs,
     });
+    // Evict least-recently-used entries past the cap.
+    while (this.cache.size > this.maxSize) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest === undefined) break;
+      this.cache.delete(oldest);
+    }
   }
 
   /**

@@ -14,6 +14,7 @@ import {
   Loader2,
   Undo2,
   Redo2,
+  type LucideIcon,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import { Tooltip } from "./ui/Tooltip";
@@ -48,6 +49,84 @@ const LazyFunModeDirectorModal = React.lazy(() =>
   import("./FunModeDirectorModal").then((mod) => ({ default: mod.FunModeDirectorModal }))
 );
 
+// ---------------------------------------------------------------------------
+// Action-tile styling. One shared surface keeps the primary workflow looking
+// like a single designed system instead of a rainbow of one-off gradients.
+// Meaning is carried by an accent-colored icon, not by a different button
+// color per action (the restrained, elite-SaaS pattern). A single primary
+// action (Save) gets the one solid accent. Every tile inherits a focus-visible
+// ring for keyboard accessibility.
+// ---------------------------------------------------------------------------
+const TILE_BASE =
+  "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden " +
+  "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300 " +
+  "text-[11px] sm:text-xs md:text-sm font-bold min-h-[80px] sm:aspect-square w-full " +
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 " +
+  "focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950 " +
+  "disabled:opacity-50 disabled:cursor-not-allowed";
+const TILE_NEUTRAL =
+  "bg-white/[0.06] border border-white/[0.08] text-surface-50 " +
+  "hover:bg-white/[0.10] hover:border-white/[0.15]";
+const TILE_PRIMARY =
+  "bg-success-600 text-white shadow-lg shadow-success-900/30 hover:bg-success-500 " +
+  "focus-visible:ring-success-400/70";
+const TILE_ICON_ACCENT = "text-primary-300";
+
+/**
+ * One action tile in the PostResult action grid. Encapsulates the shared
+ * surface, motion, focus ring, haptics, tooltip wrapping, and busy/disabled
+ * handling so each tile is declared in one line instead of ~20 lines of
+ * duplicated markup. `busy` swaps the icon for a spinner; the video tile
+ * spins its own icon via iconClassName instead and leaves busy false.
+ */
+const ActionTile: React.FC<{
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+  tooltip?: string;
+  disabled?: boolean;
+  busy?: boolean;
+  variant?: "neutral" | "primary";
+  /** Accent color (and any extra classes) for the icon on neutral tiles. */
+  iconClassName?: string;
+}> = ({
+  icon: Icon,
+  label,
+  onClick,
+  tooltip,
+  disabled = false,
+  busy = false,
+  variant = "neutral",
+  iconClassName,
+}) => {
+  const button = (
+    <motion.button
+      onClick={() => {
+        triggerHapticFeedback();
+        onClick();
+      }}
+      disabled={disabled}
+      className={cn(TILE_BASE, variant === "primary" ? TILE_PRIMARY : TILE_NEUTRAL)}
+      whileHover={{ scale: disabled ? 1 : 1.04, y: disabled ? 0 : -2 }}
+      whileTap={{ scale: disabled ? 1 : 0.97 }}
+    >
+      {busy ? (
+        <Loader2 className={cn("w-5 h-5 animate-spin", iconClassName)} />
+      ) : (
+        <Icon className={cn("w-5 h-5", iconClassName)} />
+      )}
+      <span>{label}</span>
+    </motion.button>
+  );
+  return tooltip ? (
+    <Tooltip label={tooltip} side="top">
+      {button}
+    </Tooltip>
+  ) : (
+    button
+  );
+};
+
 interface PostResultProps {
   post: GeneratedPost;
   onStartOver: () => void;
@@ -68,7 +147,7 @@ interface PostResultProps {
 
 const LoadingOverlay: React.FC<{ message: string; progress?: number }> =
   React.memo(({ message, progress }) => (
-    <div className="absolute inset-0 bg-surface-900/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-lg z-10 px-4">
+    <div className="absolute inset-0 bg-surface-900/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-2xl z-10 px-4">
       <Spinner size="lg" className="mb-4" />
       <p className="text-surface-50 font-semibold animate-pulse mb-2 text-center">
         {message}
@@ -341,14 +420,10 @@ export const PostResult: React.FC<PostResultProps> = ({
     }
 
     if (success) {
+      // The inline checkmark (2s) is enough acknowledgment for a routine copy.
+      // Confetti is reserved for genuine completion moments (saving the post).
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-      confetti({
-        particleCount: 50,
-        spread: 50,
-        origin: { y: 0.7 },
-        gravity: 1.2,
-      });
     }
   };
 
@@ -760,219 +835,90 @@ export const PostResult: React.FC<PostResultProps> = ({
 
             <div className="w-full space-y-3">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
-                <Tooltip label="Get a new version" side="top">
-                  <motion.button
-                    onClick={() => {
-                      triggerHapticFeedback();
-                      handleImageAction(onRegenerateImage, [
-                        "Refreshing with your chosen style...",
-                        "Balancing lighting and color...",
-                        "Finishing touches...",
-                      ]);
-                    }}
-                    disabled={imageBusy || !!videoUrl}
-                    className={cn(
-                      "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden",
-                      "bg-white/10 border border-white/20 text-surface-50 font-bold",
-                      "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300",
-                      "text-[10px] sm:text-xs md:text-sm",
-                      "min-h-[80px] sm:aspect-square",
-                      "hover:bg-white/20 hover:border-white/30",
-                      "disabled:opacity-50 disabled:cursor-not-allowed w-full"
-                    )}
-                    whileHover={{
-                      scale: imageBusy ? 1 : 1.05,
-                      y: imageBusy ? 0 : -2,
-                    }}
-                    whileTap={{ scale: imageBusy ? 1 : 0.95 }}
-                  >
-                    <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                    {imageBusy ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="w-5 h-5" />
-                    )}
-                    <span>{imageBusy ? "Working..." : "Regenerate"}</span>
-                  </motion.button>
-                </Tooltip>
+                <ActionTile
+                  icon={RefreshCw}
+                  iconClassName="text-surface-300"
+                  tooltip="Get a new version"
+                  disabled={imageBusy || !!videoUrl}
+                  busy={imageBusy}
+                  label={imageBusy ? "Working..." : "Regenerate"}
+                  onClick={() =>
+                    handleImageAction(onRegenerateImage, [
+                      "Refreshing with your chosen style...",
+                      "Balancing lighting and color...",
+                      "Finishing touches...",
+                    ])
+                  }
+                />
 
-                <Tooltip label="Change specific details" side="top">
-                  <motion.button
-                    onClick={() => {
-                      triggerHapticFeedback();
-                      setIsImageEditing(!isImageEditing);
-                    }}
-                    disabled={imageBusy || !!videoUrl}
-                    className={cn(
-                      "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden",
-                      "bg-gradient-to-r from-sky-500 to-primary-500 text-surface-50 font-bold",
-                      "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300",
-                      "text-[10px] sm:text-xs md:text-sm",
-                      "min-h-[80px] sm:aspect-square",
-                      "shadow-lg hover:shadow-glow-primary",
-                      "disabled:opacity-50 disabled:cursor-not-allowed w-full"
-                    )}
-                    whileHover={{ scale: 1.05, y: -2 }}
-                    whileTap={{ scale: 0.95 }}
-                  >
-                    <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                    {imageBusy ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <Edit3 className="w-5 h-5" />
-                    )}
-                    <span>
-                      {imageBusy
-                        ? "Working..."
-                        : isImageEditing
-                        ? "Cancel"
-                        : "AI Image Edit"}
-                    </span>
-                  </motion.button>
-                </Tooltip>
+                <ActionTile
+                  icon={Edit3}
+                  iconClassName={TILE_ICON_ACCENT}
+                  tooltip="Change specific details"
+                  disabled={imageBusy || !!videoUrl}
+                  busy={imageBusy}
+                  label={
+                    imageBusy
+                      ? "Working..."
+                      : isImageEditing
+                      ? "Cancel"
+                      : "AI Image Edit"
+                  }
+                  onClick={() => setIsImageEditing(!isImageEditing)}
+                />
 
-                <Tooltip label="Artistic transformations" side="top">
-                  <motion.button
-                    onClick={() => {
-                      triggerHapticFeedback();
-                      setIsFunModeDirectorOpen(true);
-                    }}
-                    disabled={imageBusy || !!videoUrl}
-                    className={cn(
-                      "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden",
-                      "bg-gradient-to-r from-purple-500 to-pink-500 text-surface-50 font-bold",
-                      "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300",
-                      "text-[10px] sm:text-xs md:text-sm",
-                      "min-h-[80px] sm:aspect-square",
-                      "shadow-lg hover:shadow-[0_0_25px_rgba(168,85,247,0.5)]",
-                      "disabled:opacity-50 disabled:cursor-not-allowed w-full"
-                    )}
-                    whileHover={{ scale: 1.05, y: -2 }}
-                    whileTap={{ scale: 0.95 }}
-                  >
-                    <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                    {imageBusy ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <Sparkles className="w-5 h-5" />
-                    )}
-                    <span>{imageBusy ? "Working..." : "Fun Mode"}</span>
-                  </motion.button>
-                </Tooltip>
+                <ActionTile
+                  icon={Sparkles}
+                  iconClassName="text-secondary-300"
+                  tooltip="Artistic transformations"
+                  disabled={imageBusy || !!videoUrl}
+                  busy={imageBusy}
+                  label={imageBusy ? "Working..." : "Fun Mode"}
+                  onClick={() => setIsFunModeDirectorOpen(true)}
+                />
 
-                <Tooltip label="Download to your device" side="top">
-                  <motion.button
-                    onClick={handleSave}
-                    disabled={imageBusy}
-                    className={cn(
-                      "flex flex-col items-center justify-center gap-2 relative overflow-hidden",
-                      "bg-gradient-to-r from-success-500 to-emerald-600 text-surface-50 font-bold",
-                      "py-3 px-4 rounded-xl transition-all duration-300",
-                      "text-xs sm:text-sm aspect-square",
-                      "shadow-lg hover:shadow-glow-success",
-                      imageBusy && "opacity-70 cursor-not-allowed w-full"
-                    )}
-                    whileHover={{
-                      scale: imageBusy ? 1 : 1.05,
-                      y: imageBusy ? 0 : -2,
-                    }}
-                    whileTap={{ scale: imageBusy ? 1 : 0.95 }}
-                  >
-                    <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                    {imageBusy ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <Download className="w-5 h-5" />
-                    )}
-                    <span>
-                      {imageBusy
-                        ? "Working..."
-                        : `Save ${videoUrl ? "Video" : "Image"}`}
-                    </span>
-                  </motion.button>
-                </Tooltip>
+                <ActionTile
+                  icon={Download}
+                  variant="primary"
+                  tooltip="Download to your device"
+                  disabled={imageBusy}
+                  busy={imageBusy}
+                  label={
+                    imageBusy ? "Working..." : `Save ${videoUrl ? "Video" : "Image"}`
+                  }
+                  onClick={handleSave}
+                />
 
-                <Tooltip label="Turn your image into a video" side="top">
-                  <motion.button
-                    onClick={() => {
-                      triggerHapticFeedback();
-                      setIsVideoDirectorOpen(true);
-                    }}
-                    disabled={imageBusy || isVideoLoading}
-                    className={cn(
-                      "flex flex-col items-center justify-center gap-2 relative overflow-hidden",
-                      "bg-gradient-to-r from-primary-500 to-secondary-600 text-surface-50 font-bold",
-                      "py-3 px-4 rounded-xl transition-all duration-300",
-                      "text-xs sm:text-sm aspect-square",
-                      "shadow-lg hover:shadow-glow-primary",
-                      "disabled:opacity-50 disabled:cursor-not-allowed w-full"
-                    )}
-                    whileHover={{
-                      scale: isVideoLoading ? 1 : 1.05,
-                      y: isVideoLoading ? 0 : -2,
-                    }}
-                    whileTap={{ scale: isVideoLoading ? 1 : 0.95 }}
-                  >
-                    <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                    <Film
-                      className={cn(
-                        "w-5 h-5",
-                        isVideoLoading && "animate-spin"
-                      )}
-                    />
-                    <span>
-                      {isVideoLoading
-                        ? "Rendering…"
-                        : videoUrl
-                        ? "New Video"
-                        : "Animate with AI"}
-                    </span>
-                  </motion.button>
-                </Tooltip>
+                <ActionTile
+                  icon={Film}
+                  iconClassName={cn(TILE_ICON_ACCENT, isVideoLoading && "animate-spin")}
+                  tooltip="Turn your image into a video"
+                  disabled={imageBusy || isVideoLoading}
+                  label={
+                    isVideoLoading
+                      ? "Rendering…"
+                      : videoUrl
+                      ? "New Video"
+                      : "Animate with AI"
+                  }
+                  onClick={() => setIsVideoDirectorOpen(true)}
+                />
 
-                <Tooltip label="Export all 4 sizes at once (FB, IG/TikTok, Marketplace, GBP)" side="top">
-                  <motion.button
-                    onClick={() => {
-                      triggerHapticFeedback();
-                      setIsMultiFormatOpen(true);
-                    }}
-                    disabled={imageBusy || !!videoUrl}
-                    className={cn(
-                      "flex flex-col items-center justify-center gap-2 relative overflow-hidden",
-                      "bg-gradient-to-r from-amber-500 to-orange-500 text-surface-50 font-bold",
-                      "py-3 px-4 rounded-xl transition-all duration-300",
-                      "text-xs sm:text-sm aspect-square",
-                      "shadow-lg hover:shadow-[0_0_25px_rgba(245,158,11,0.5)]",
-                      "disabled:opacity-50 disabled:cursor-not-allowed w-full"
-                    )}
-                    whileHover={{ scale: imageBusy ? 1 : 1.05, y: imageBusy ? 0 : -2 }}
-                    whileTap={{ scale: imageBusy ? 1 : 0.95 }}
-                  >
-                    <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                    <LayoutGrid className="w-5 h-5" />
-                    <span>All Formats</span>
-                  </motion.button>
-                </Tooltip>
+                <ActionTile
+                  icon={LayoutGrid}
+                  iconClassName="text-amber-300"
+                  tooltip="Export all 4 sizes at once (FB, IG/TikTok, Marketplace, GBP)"
+                  disabled={imageBusy || !!videoUrl}
+                  label="All Formats"
+                  onClick={() => setIsMultiFormatOpen(true)}
+                />
 
-                <motion.button
-                  onClick={() => {
-                    triggerHapticFeedback();
-                    onStartOver();
-                  }}
-                  className={cn(
-                    "flex flex-col items-center justify-center gap-2 relative overflow-hidden",
-                    "bg-white/10 border border-white/20 text-surface-50 font-bold",
-                    "py-3 px-4 rounded-xl transition-all duration-300",
-                    "text-xs sm:text-sm aspect-square",
-                    "hover:bg-white/20 hover:border-white/30"
-                  )}
-                  whileHover={{ scale: 1.05, y: -2 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <span className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
-                  <RotateCcw className="w-5 h-5" />
-                  <span>Create Another</span>
-                </motion.button>
+                <ActionTile
+                  icon={RotateCcw}
+                  iconClassName="text-surface-300"
+                  label="Create Another"
+                  onClick={onStartOver}
+                />
               </div>
               <AnimatePresence>
                 {isImageEditing && (
@@ -1101,7 +1047,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                             Remove
                           </button>
                         </div>
-                        <div className="flex flex-col gap-1 text-[10px] text-warning-200">
+                        <div className="flex flex-col gap-1 text-xs text-warning-200">
                           {job.error && <span>{job.error}</span>}
                           <span className="text-indigo-100/70">
                             Started{" "}
@@ -1163,18 +1109,18 @@ export const PostResult: React.FC<PostResultProps> = ({
                 className="mb-4 rounded-xl border border-warning-700/40 bg-warning-900/20 p-3"
               >
                 <div className="flex items-center gap-2 mb-1.5">
-                  <AlertCircle className="w-3.5 h-3.5 text-warning-300" />
-                  <span className="text-[10px] uppercase tracking-wide text-warning-200 font-semibold">
+                  <AlertCircle className="w-4 h-4 text-warning-300" />
+                  <span className="text-xs uppercase tracking-wide text-warning-200 font-semibold">
                     Required compliance disclosures
                     {activeDisclosureCategories.length
                       ? ` · ${activeDisclosureCategories.join(", ")}`
                       : ""}
                   </span>
                 </div>
-                <div className="text-[11px] text-warning-100/90 whitespace-pre-line leading-relaxed select-text">
+                <div className="text-sm text-warning-100/90 whitespace-pre-line leading-relaxed select-text">
                   {activeDisclosures.replace(/^—\s*Disclosures\s*—\s*\n?/, "")}
                 </div>
-                <div className="text-[10px] text-warning-300/70 mt-2">
+                <div className="text-xs text-warning-300/70 mt-2">
                   Bundled with the caption automatically when you copy, share, or save.
                 </div>
               </motion.div>
@@ -1188,13 +1134,15 @@ export const PostResult: React.FC<PostResultProps> = ({
                   className={cn(
                     "flex items-center justify-center gap-1",
                     "bg-white/10 border border-white/20 text-surface-50 font-medium",
-                    "py-2 px-2 rounded-lg transition-all duration-300 text-xs",
+                    "py-2.5 px-2 min-h-[44px] rounded-xl transition-all duration-300 text-xs",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950",
                     "hover:bg-white/20 hover:border-white/30",
                     "disabled:opacity-30 disabled:cursor-not-allowed"
                   )}
                   whileHover={{ scale: historyIndex > 0 ? 1.05 : 1 }}
                   whileTap={{ scale: historyIndex > 0 ? 0.95 : 1 }}
                   title="Undo (Ctrl+Z)"
+                  aria-label="Undo text change"
                 >
                   <Undo2 className="w-3 h-3" />
                 </motion.button>
@@ -1205,7 +1153,8 @@ export const PostResult: React.FC<PostResultProps> = ({
                   className={cn(
                     "flex items-center justify-center gap-1",
                     "bg-white/10 border border-white/20 text-surface-50 font-medium",
-                    "py-2 px-2 rounded-lg transition-all duration-300 text-xs",
+                    "py-2.5 px-2 min-h-[44px] rounded-xl transition-all duration-300 text-xs",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950",
                     "hover:bg-white/20 hover:border-white/30",
                     "disabled:opacity-30 disabled:cursor-not-allowed"
                   )}
@@ -1216,6 +1165,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     scale: historyIndex < textHistory.length - 1 ? 0.95 : 1,
                   }}
                   title="Redo (Ctrl+Y)"
+                  aria-label="Redo text change"
                 >
                   <Redo2 className="w-3 h-3" />
                 </motion.button>
@@ -1229,7 +1179,8 @@ export const PostResult: React.FC<PostResultProps> = ({
                   className={cn(
                     "flex items-center justify-center gap-1",
                     "bg-white/10 border border-white/20 text-surface-50 font-medium",
-                    "py-2 px-2 rounded-lg transition-all duration-300 text-xs",
+                    "py-2.5 px-2 min-h-[44px] rounded-xl transition-all duration-300 text-xs",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950",
                     "hover:bg-white/20 hover:border-white/30",
                     textBusy && "opacity-70 cursor-not-allowed"
                   )}
@@ -1253,17 +1204,17 @@ export const PostResult: React.FC<PostResultProps> = ({
                     disabled={textBusy}
                     className={cn(
                       "flex items-center justify-center gap-1 relative overflow-hidden",
-                      "bg-gradient-to-r from-purple-500/30 to-fuchsia-500/30",
-                      "border border-purple-400/30 text-purple-100 font-semibold",
-                      "py-2 px-2 rounded-lg transition-all duration-300 text-xs",
-                      "hover:from-purple-500/40 hover:to-fuchsia-500/40",
+                      "bg-white/[0.06] border border-white/[0.08] text-surface-50 font-semibold",
+                      "py-2.5 px-2 min-h-[44px] rounded-xl transition-all duration-300 text-xs",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950",
+                      "hover:bg-white/[0.10] hover:border-white/[0.15]",
                       textBusy && "opacity-70 cursor-not-allowed"
                     )}
                     whileHover={{ scale: textBusy ? 1 : 1.02 }}
                     whileTap={{ scale: textBusy ? 1 : 0.98 }}
                     title="Generate 3 caption alternatives and pick the best"
                   >
-                    <Sparkles className="w-3 h-3" />
+                    <Sparkles className="w-3 h-3 text-secondary-300" />
                     <span>3 ideas</span>
                   </motion.button>
                 )}
@@ -1276,20 +1227,20 @@ export const PostResult: React.FC<PostResultProps> = ({
                 }}
                 disabled={textBusy}
                 className={cn(
-                  "w-full flex items-center justify-center gap-2 relative overflow-hidden",
-                  "bg-gradient-to-r from-sky-500 to-primary-500 text-surface-50 font-bold",
-                  "py-2 px-4 rounded-xl transition-all duration-300 text-sm",
-                  "shadow-lg hover:shadow-glow-primary",
+                  "w-full flex items-center justify-center gap-2",
+                  "bg-white/[0.06] border border-white/[0.08] text-surface-50 font-bold",
+                  "py-2.5 px-4 min-h-[44px] rounded-xl transition-all duration-300 text-sm",
+                  "hover:bg-white/[0.10] hover:border-white/[0.15]",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950",
                   textBusy && "opacity-70 cursor-not-allowed"
                 )}
                 whileHover={{ scale: textBusy ? 1 : 1.02 }}
                 whileTap={{ scale: textBusy ? 1 : 0.98 }}
               >
-                <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
                 {textBusy ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin text-primary-300" />
                 ) : (
-                  <Edit3 className="w-4 h-4" />
+                  <Edit3 className="w-4 h-4 text-primary-300" />
                 )}
                 <span>{textBusy ? "Updating…" : "Edit with AI"}</span>
               </motion.button>
@@ -1302,15 +1253,15 @@ export const PostResult: React.FC<PostResultProps> = ({
                   setIsShareDialogOpen(true);
                 }}
                 className={cn(
-                  "w-full flex items-center justify-center gap-2 relative overflow-hidden",
-                  "bg-gradient-to-r from-teal-500 to-cyan-500 text-surface-50 font-bold",
-                  "py-3 px-4 rounded-xl transition-all duration-300",
-                  "shadow-lg hover:shadow-[0_0_25px_rgba(20,184,166,0.5)]"
+                  "w-full flex items-center justify-center gap-2",
+                  "bg-primary-600 text-white font-bold shadow-lg shadow-primary-900/30",
+                  "py-3 px-4 min-h-[44px] rounded-xl transition-all duration-300",
+                  "hover:bg-primary-500",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950"
                 )}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
               >
-                <span className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 hover:opacity-100 transition-opacity pointer-events-none" />
                 <Share2 className="w-5 h-5" />
                 <span>Share Post</span>
               </motion.button>

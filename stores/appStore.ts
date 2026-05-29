@@ -44,7 +44,7 @@ interface AppState {
 
   // Complex Actions
   login: (dealerId: string) => Promise<boolean>;
-  logout: () => void;
+  logout: () => Promise<void>;
   reset: () => void;
   restoreSession: () => Promise<void>;
 }
@@ -242,6 +242,16 @@ export const useAppStore = create<AppState>((set, get) => ({
               ? AppStep.RESULT
               : AppStep.CAPTURE) as AppStep,
             compactMode: session?.compactMode ?? false,
+            // Restore saved style/tone for authenticated users too. These were
+            // previously only restored in the unauthenticated fall-through
+            // (which returns early above), so a logged-in user's preferences
+            // silently reset to defaults on every reload.
+            ...(session?.preferredStyle
+              ? { preferredStyle: session.preferredStyle as StyleOption }
+              : {}),
+            ...(session?.preferredTone
+              ? { preferredTone: session.preferredTone as ToneOption }
+              : {}),
           });
           logEvent("app.session.restored", {
             step: session?.step,

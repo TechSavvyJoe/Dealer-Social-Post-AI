@@ -38,8 +38,18 @@ interface ToastProviderProps {
 
 export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // Track auto-dismiss timers so we can clear them on manual close and on
+  // unmount — otherwise they fire setState after the provider is gone.
+  const timersRef = React.useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map()
+  );
 
   const removeToast = useCallback((id: string) => {
+    const handle = timersRef.current.get(id);
+    if (handle) {
+      clearTimeout(handle);
+      timersRef.current.delete(id);
+    }
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   }, []);
 
@@ -52,11 +62,21 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
       triggerHapticFeedback();
 
       if (duration > 0) {
-        setTimeout(() => removeToast(id), duration);
+        const handle = setTimeout(() => removeToast(id), duration);
+        timersRef.current.set(id, handle);
       }
     },
     [removeToast]
   );
+
+  // Clear any still-pending dismiss timers when the provider unmounts.
+  React.useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach((handle) => clearTimeout(handle));
+      timers.clear();
+    };
+  }, []);
 
   const success = useCallback(
     (message: string, duration?: number) => showToast('success', message, duration),

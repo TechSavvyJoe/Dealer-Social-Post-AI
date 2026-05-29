@@ -6,6 +6,7 @@ import {
   PostScenario,
   ScenarioCategory,
   SCENARIO_CATEGORY_LABELS,
+  SCENARIO_CATEGORY_ICON,
   getScenariosForDealer,
 } from "../services/postScenarios";
 import { useAppStore } from "../stores/appStore";
@@ -74,10 +75,16 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
           "text-left text-sm"
         )}
       >
-        <span className="flex items-center gap-2 min-w-0">
-          <span className="text-lg leading-none flex-shrink-0">
-            {current?.emoji}
-          </span>
+        <span className="flex items-center gap-2.5 min-w-0">
+          {current &&
+            (() => {
+              const Icon = SCENARIO_CATEGORY_ICON[current.category];
+              return (
+                <span className="flex-shrink-0 flex items-center justify-center w-9 h-9 rounded-lg bg-primary-500/10 border border-primary-500/20">
+                  <Icon className="w-5 h-5 text-primary-300" />
+                </span>
+              );
+            })()}
           <span className="min-w-0">
             <span className="block text-surface-50 truncate font-semibold">
               {current?.label}
@@ -128,9 +135,21 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
                               : "hover:bg-white/5 text-surface-100"
                           )}
                         >
-                          <span className="text-lg leading-none flex-shrink-0 pt-0.5">
-                            {s.emoji}
-                          </span>
+                          {(() => {
+                            const Icon = SCENARIO_CATEGORY_ICON[s.category];
+                            return (
+                              <span
+                                className={cn(
+                                  "flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg mt-0.5 transition-colors",
+                                  active
+                                    ? "bg-primary-500/20 text-primary-200"
+                                    : "bg-white/[0.06] text-surface-300"
+                                )}
+                              >
+                                <Icon className="w-4 h-4" />
+                              </span>
+                            );
+                          })()}
                           <span className="flex-1 min-w-0">
                             <span className="block font-semibold text-sm">
                               {s.label}

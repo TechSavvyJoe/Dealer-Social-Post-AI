@@ -17,11 +17,14 @@ export const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
  * @throws An error if the data URL format is invalid.
  */
 export const parseDataUrl = (dataUrl: string) => {
-  const match = dataUrl.match(/^data:(.+);base64,(.+)$/);
+  // [^;,]+ keeps the greedy MIME group from swallowing a second ";base64," in
+  // the payload; [\s\S]+ tolerates newlines in the body (fetch-derived or
+  // line-wrapped data URLs) that the $-anchored `.+` previously rejected.
+  const match = dataUrl.match(/^data:([^;,]+);base64,([\s\S]+)$/);
   if (!match) {
     throw new Error("Invalid data URL");
   }
-  return { mimeType: match[1], data: match[2] };
+  return { mimeType: match[1], data: match[2].replace(/\s/g, "") };
 };
 
 /**
@@ -274,13 +277,9 @@ export const urlToDataUrl = async (url: string): Promise<string> => {
     const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
 
     try {
-      const proxyHeaders =
-        typeof import.meta !== "undefined" &&
-        (import.meta as any).env?.VITE_PROXY_ACCESS_TOKEN
-          ? { "X-Proxy-Token": (import.meta as any).env.VITE_PROXY_ACCESS_TOKEN }
-          : undefined;
+      // Auth is the HttpOnly session cookie; credentials:"include" attaches it.
       const response = await fetch(proxyUrl, {
-        headers: proxyHeaders,
+        credentials: "include",
       });
       if (response.ok) {
         const blob = await response.blob();

@@ -82,25 +82,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       animate={{ opacity: 1 }}
       transition={{ duration: 0.5 }}
     >
-      {/* Ambient glow effect */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <motion.div
-          className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full"
-          style={{
-            background:
-              "radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, transparent 70%)",
-          }}
-          animate={{
-            scale: [1, 1.1, 1],
-            opacity: [0.5, 0.7, 0.5],
-          }}
-          transition={{
-            duration: 4,
-            repeat: Infinity,
-            ease: "easeInOut",
-          }}
-        />
-      </div>
+      {/* Brand-tinted ambient glow — static, subtle, picks up dealer color. */}
+      <div
+        aria-hidden="true"
+        className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[420px] h-[420px] rounded-full pointer-events-none opacity-60"
+        style={{
+          background:
+            "radial-gradient(circle, color-mix(in srgb, var(--brand-primary) 14%, transparent), transparent 70%)",
+        }}
+      />
 
       {/* Logo */}
       <motion.div
@@ -120,12 +110,18 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         className="w-full relative z-10"
       >
         <Card
-          elevation={4}
+          elevation={3}
           className={cn(
             "min-h-[380px] flex flex-col justify-center",
-            "backdrop-blur-xl bg-surface-900/60 border-white/10",
+            "backdrop-blur-xl border-white/[0.06]",
             isSuccess && "border-success-500/50 shadow-glow-success"
           )}
+          style={{
+            backgroundColor:
+              "color-mix(in srgb, rgb(var(--color-surface-elevated)) 82%, transparent)",
+          }}
+          aria-live="polite"
+          aria-busy={isLoading}
         >
           <CardContent className="flex flex-col justify-center" padded>
             <AnimatePresence mode="wait">
@@ -213,27 +209,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                             damping: 20,
                           }}
                         >
-                          {/* Glow effect for filled dots */}
-                          {isFilled && (
-                            <motion.div
-                              className="absolute inset-0 rounded-full bg-primary-500"
-                              initial={{ scale: 0.8, opacity: 0 }}
-                              animate={{ scale: 1.8, opacity: 0 }}
-                              transition={{ duration: 0.5 }}
-                              style={{ filter: "blur(8px)" }}
-                            />
-                          )}
-
-                          {/* Active indicator ring */}
+                          {/* Active indicator ring — a calm static ring marks
+                              the next slot without a perpetual pulse. */}
                           {isActive && (
-                            <motion.div
-                              className="absolute inset-[-4px] rounded-full border-2 border-primary-400/50"
-                              animate={{
-                                scale: [1, 1.1, 1],
-                                opacity: [0.5, 1, 0.5],
-                              }}
-                              transition={{ duration: 1.5, repeat: Infinity }}
-                            />
+                            <div className="absolute inset-[-4px] rounded-full border-2 border-primary-400/40" />
                           )}
 
                           {/* Dot */}

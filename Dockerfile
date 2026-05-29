@@ -10,8 +10,17 @@ RUN npm run build
 # Stage 2: Setup PocketBase
 FROM ubuntu:22.04
 
-ARG PB_VERSION=0.38.0
-ARG PB_SHA256="66396ed5efec837aa8d2addc009894968a5f4fb7cb2b0ea57db6105cb91b095d"
+# Pinned to 0.22.21 to MATCH the JSVM API the hooks are written against
+# (pb_hooks/*.js use $app.dao(), c.request(), $apis.requestInfo — all removed
+# in PocketBase v0.23+). The committed ./pocketbase binary and
+# start-pocketbase.sh are also 0.22.21, so this is the version actually tested.
+# Building 0.38.0 here shipped hooks that throw at runtime (every /api/app/*
+# and /api/proxy/* route fails). To move to 0.38 later, migrate ALL hooks +
+# migrations to the v0.23+ API first, then bump this version + SHA together.
+# SHA256 is for pocketbase_0.22.21_linux_amd64.zip (verified against the
+# official GitHub release).
+ARG PB_VERSION=0.22.21
+ARG PB_SHA256="b63271053a2ea2c703f3438a8fc7db89775d6f5667765b72a5157bfaa35414e6"
 # Cache bust arg - change to force rebuild of frontend copy
 ARG CACHE_BUST=1
 

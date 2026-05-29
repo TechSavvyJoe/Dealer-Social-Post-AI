@@ -10,6 +10,17 @@ migrate(
       return;
     }
 
+    // SECURITY: these are well-known, trivially-guessable login codes. Seeding
+    // them in production re-creates the very backdoor that
+    // 1732499996_remove_admin_backdoor.js removed. Only seed when explicitly
+    // opted in via SEED_DEV_DEALERS=1 (never set in prod). See the companion
+    // cleanup migration 1750000100_remove_dev_dealers.js which deletes any rows
+    // a prior run of this migration already created.
+    if (($os.getenv("SEED_DEV_DEALERS") || "").trim() !== "1") {
+      console.log("SEED_DEV_DEALERS != 1 — skipping dev/backdoor dealer seed");
+      return;
+    }
+
     // Insert mock dealers
     const mockDealers = [
       { name: "Demo Dealer", code: "0000" },

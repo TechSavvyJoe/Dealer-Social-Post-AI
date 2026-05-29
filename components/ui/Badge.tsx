@@ -38,6 +38,9 @@ interface BadgeProps extends Omit<HTMLMotionProps<"span">, "ref"> {
   dot?: boolean;
   /** Animate the dot (pulse effect) */
   pulse?: boolean;
+  /** Uppercase the label. Defaults to true for status chips; pass false for
+   *  descriptive labels so they don't read as shouty. */
+  uppercase?: boolean;
 }
 
 /**
@@ -56,6 +59,7 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
       size = "md",
       dot = false,
       pulse = false,
+      uppercase = true,
       children,
       ...props
     },
@@ -66,7 +70,8 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
       className={cn(
         "inline-flex items-center",
         "rounded-full",
-        "font-semibold uppercase tracking-wider",
+        "font-semibold tracking-wider",
+        uppercase && "uppercase",
         "transition-all duration-200",
         variantStyles[variant],
         sizeStyles[size],

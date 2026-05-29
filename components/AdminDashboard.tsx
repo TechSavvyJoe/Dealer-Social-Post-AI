@@ -13,6 +13,7 @@ import { ApprovalQueue } from "./ApprovalQueue";
 import { PostHistory } from "./PostHistory";
 import { DealerSetupWizard } from "./DealerSetupWizard";
 import { SystemHealthPanel } from "./SystemHealthPanel";
+import { ConfirmationModal } from "./ConfirmationModal";
 import { useAppStore } from "../stores/appStore";
 
 const DealerCard: React.FC<{
@@ -95,6 +96,12 @@ export const AdminDashboard: React.FC = () => {
   });
   const [showForm, setShowForm] = useState(false);
   const [editingDealer, setEditingDealer] = useState<Dealer | null>(null);
+  // Dealer awaiting delete confirmation. Deleting a dealership is permanent and
+  // irreversible, so it must go through a confirm step rather than fire on a
+  // single click.
+  const [dealerPendingDelete, setDealerPendingDelete] = useState<Dealer | null>(
+    null
+  );
 
   // --- DATA FETCHING ---
   const { data, error, isPending, refetch } = useQuery({
@@ -124,6 +131,13 @@ export const AdminDashboard: React.FC = () => {
     mutationFn: db.deleteDealer,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dealers"] });
+    },
+    onError: (err) => {
+      // Was silent before — a failed delete left the dealer on screen with no
+      // signal. Surface it (rendered below) and log for diagnostics.
+      logError("admin.dealer.delete.failed", {
+        message: err instanceof Error ? err.message : String(err),
+      });
     },
   });
 
@@ -492,6 +506,11 @@ export const AdminDashboard: React.FC = () => {
           Error loading dealers: {String(error)}
         </div>
       )}
+      {deleteMutation.isError && (
+        <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg">
+          Failed to delete dealer: {String(deleteMutation.error)}
+        </div>
+      )}
       {isPending ? (
         <div className="grid gap-4">
           <Skeleton className="h-24 w-full" />
@@ -504,7 +523,10 @@ export const AdminDashboard: React.FC = () => {
             <DealerCard
               key={dealer.id}
               dealer={dealer}
-              onDelete={deleteMutation.mutate}
+              onDelete={(id) => {
+                const target = dealers.find((d) => d.id === id);
+                if (target) setDealerPendingDelete(target);
+              }}
               onEdit={handleEditDealer}
               isDeleting={
                 deleteMutation.isPending &&
@@ -519,6 +541,16 @@ export const AdminDashboard: React.FC = () => {
           )}
         </div>
       )}
+
+      <ConfirmationModal
+        isOpen={!!dealerPendingDelete}
+        onClose={() => setDealerPendingDelete(null)}
+        onConfirm={() => {
+          if (dealerPendingDelete) deleteMutation.mutate(dealerPendingDelete.id);
+          setDealerPendingDelete(null);
+        }}
+        itemName={dealerPendingDelete?.name ?? ""}
+      />
     </div>
   );
 };

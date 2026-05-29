@@ -2,7 +2,6 @@ import React, { Suspense } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Header } from "./components/Header";
 import { MainContent } from "./components/MainContent";
-import { ToastProvider } from "./components/ui/Toast";
 import { useAppController } from "./hooks/useAppController";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { AppStep } from "./types";
@@ -91,7 +90,13 @@ const AppContent: React.FC = () => {
   });
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 font-sans selection:bg-indigo-500/30">
+    <div
+      className="min-h-screen font-sans"
+      style={{
+        backgroundColor: "rgb(var(--color-surface-base))",
+        color: "rgb(var(--color-text-primary))",
+      }}
+    >
       {currentDealer && (
         <Header
           dealer={currentDealer}
@@ -169,11 +174,9 @@ const AppContent: React.FC = () => {
 };
 
 const App: React.FC = () => {
-  return (
-    <ToastProvider>
-      <AppContent />
-    </ToastProvider>
-  );
+  // ToastProvider is mounted once at the root (index.tsx); no need to nest a
+  // second provider here.
+  return <AppContent />;
 };
 
 export default App;

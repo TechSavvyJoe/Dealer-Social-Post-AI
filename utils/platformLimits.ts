@@ -54,11 +54,38 @@ export const PLATFORM_LIMITS: PlatformLimit[] = [
 
 export type CountState = "ok" | "fold" | "over";
 
+// Count user-perceived characters, not UTF-16 code units. `"🚗".length` is 2
+// and flag/ZWJ emoji are more, so `text.length` over-counts and falsely flags
+// emoji-containing captions as "over" the limit — blocking valid posts in an
+// app whose whole job is emoji-rich social captions. Intl.Segmenter gives
+// grapheme clusters; fall back to code points where unavailable.
+let _grapheme: { segment: (s: string) => Iterable<unknown> } | null = null;
+let _graphemeInit = false;
+const countGraphemes = (text: string): number => {
+  if (!_graphemeInit) {
+    _graphemeInit = true;
+    const Ctor = (Intl as { Segmenter?: new (l: string | undefined, o: { granularity: string }) => { segment: (s: string) => Iterable<unknown> } }).Segmenter;
+    if (typeof Ctor === "function") {
+      try {
+        _grapheme = new Ctor(undefined, { granularity: "grapheme" });
+      } catch {
+        _grapheme = null;
+      }
+    }
+  }
+  if (_grapheme) {
+    let n = 0;
+    for (const _ of _grapheme.segment(text)) n++;
+    return n;
+  }
+  return Array.from(text).length;
+};
+
 export const evaluate = (
   text: string,
   limit: PlatformLimit
 ): { count: number; state: CountState; remaining: number } => {
-  const count = text.length;
+  const count = countGraphemes(text);
   let state: CountState = "ok";
   if (count > limit.maxChars) state = "over";
   else if (limit.softFoldChars && count > limit.softFoldChars) state = "fold";

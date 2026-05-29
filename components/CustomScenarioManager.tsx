@@ -7,6 +7,7 @@ import {
   PostScenario,
   ScenarioCategory,
   SCENARIO_CATEGORY_LABELS,
+  SCENARIO_CATEGORY_ICON,
   parseCustomScenarios,
   serializeCustomScenarios,
 } from "../services/postScenarios";
@@ -28,7 +29,14 @@ interface EditingState extends Partial<PostScenario> {
 }
 
 const blankScenario = (): EditingState => ({
-  id: `custom_${Date.now().toString(36)}`,
+  // Collision-resistant id: two scenarios created in the same millisecond used
+  // to get the same `Date.now()` id, and the save filter (`id !== next.id`)
+  // would then silently replace the first with the second.
+  id: `custom_${
+    typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
+  }`,
   label: "",
   emoji: "✨",
   category: "promo",
@@ -201,7 +209,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
             exit={{ opacity: 0, y: -4 }}
             className="rounded-xl border border-primary-500/30 bg-primary-500/5 p-3 space-y-3"
           >
-            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <Input
                 label="Label"
                 value={editing.label}
@@ -212,35 +220,39 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                 fullWidth
                 className="bg-white/5 border-white/10 focus:border-primary-400"
               />
-              <Input
-                label="Emoji"
-                value={editing.emoji}
-                onChange={(e) =>
-                  setEditing({ ...editing, emoji: e.target.value })
-                }
-                placeholder="🌸"
-                className="bg-white/5 border-white/10 focus:border-primary-400 text-center max-w-[5rem]"
-              />
               <div>
                 <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
                   Category
                 </label>
-                <select
-                  value={editing.category}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      category: e.target.value as ScenarioCategory,
-                    })
-                  }
-                  className="mt-1 w-full bg-surface-900/60 border-2 border-surface-700 focus:border-primary-500 rounded-xl px-3 py-3 text-base text-surface-50"
-                >
-                  {Object.entries(SCENARIO_CATEGORY_LABELS).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
+                <div className="mt-1 flex items-center gap-2">
+                  {(() => {
+                    const Icon = SCENARIO_CATEGORY_ICON[editing.category];
+                    return (
+                      <span
+                        className="flex-shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-primary-500/10 border border-primary-500/20"
+                        title="Tile icon (set automatically by category)"
+                      >
+                        <Icon className="w-5 h-5 text-primary-300" />
+                      </span>
+                    );
+                  })()}
+                  <select
+                    value={editing.category}
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        category: e.target.value as ScenarioCategory,
+                      })
+                    }
+                    className="w-full bg-surface-900/60 border-2 border-surface-700 focus:border-primary-500 rounded-xl px-3 py-3 text-base text-surface-50"
+                  >
+                    {Object.entries(SCENARIO_CATEGORY_LABELS).map(([k, v]) => (
+                      <option key={k} value={k}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -409,8 +421,15 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
               key={s.id}
               className="rounded-xl border border-white/10 bg-surface-900/40 px-3 py-2.5 flex items-center justify-between gap-3"
             >
-              <div className="min-w-0 flex items-start gap-2">
-                <span className="text-xl leading-none pt-0.5">{s.emoji}</span>
+              <div className="min-w-0 flex items-start gap-2.5">
+                {(() => {
+                  const Icon = SCENARIO_CATEGORY_ICON[s.category];
+                  return (
+                    <span className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg bg-white/[0.06] text-surface-300 mt-0.5">
+                      <Icon className="w-4 h-4" />
+                    </span>
+                  );
+                })()}
                 <div className="min-w-0">
                   <div className="text-sm font-semibold text-surface-50 truncate">
                     {s.label}

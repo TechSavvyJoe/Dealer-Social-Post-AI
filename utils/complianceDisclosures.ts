@@ -44,10 +44,14 @@ const RULES: Rule[] = [
   {
     category: "financing_apr",
     patterns: [
-      /\b0\s*%\s*apr\b/i,
+      // Any advertised numeric APR triggers a Reg Z disclosure. The old rule
+      // only matched 0/1.9/2.9/3.9/4.9%, so real ads like "0.9% APR",
+      // "1.49% APR", "5.9% APR" or "6% APR" shipped with NO financing
+      // disclosure — a Truth-in-Lending under-disclosure. Generalize to catch
+      // every numeric APR (over-disclosing is the legally safe direction).
+      /\b\d{1,2}(?:\.\d{1,2})?\s*%\s*apr\b/i,
       /\bzero\s+percent\s+apr\b/i,
       /\b0\s*apr\b/i,
-      /\b(?:1\.9|2\.9|3\.9|4\.9)\s*%\s*apr\b/i,
       /\bfinancing\s+as\s+low\s+as\b/i,
     ],
     disclosure:

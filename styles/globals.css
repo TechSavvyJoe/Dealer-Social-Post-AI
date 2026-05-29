@@ -9,59 +9,105 @@
 @tailwind utilities;
 
 @layer base {
-  /* Root variables for dynamic theming */
+  /* =========================================================================
+     DEALER TRUST design tokens (2026-05-29 rewrite)
+     Aligned with the sister product LTV-Desking-PRO. Navy primary, calm
+     neutral charcoal surface, no decorative gradients, sentence case in copy.
+     Colors are stated in OKLCH (the May-2026 design-system default) with sRGB
+     fallbacks for older browsers via Tailwind utility classes.
+     ========================================================================= */
   :root {
-    --color-primary: 59 130 246; /* primary-500 */
-    --color-primary-hover: 37 99 235; /* primary-600 */
-    --color-secondary: 147 51 234; /* secondary-600 */
+    /* --- Semantic palette (R G B triplets, fed into bg-[rgb(var(--x))]) --- */
+    --color-primary: 30 64 175; /* navy-700 — Dealer Trust primary */
+    --color-primary-hover: 30 58 138; /* navy-800 */
+    --color-secondary: 71 85 105; /* slate-600 — calm neutral, no purple */
     --color-success: 22 163 74; /* success-600 */
-    --color-warning: 245 158 11; /* warning-500 */
-    --color-error: 239 68 68; /* error-500 */
-    --color-info: 6 182 212; /* info-500 */
+    --color-warning: 217 119 6; /* amber-600 */
+    --color-error: 220 38 38; /* red-600 */
+    --color-info: 8 145 178; /* cyan-600 — used sparingly */
 
-    /* White-label brand color — set per-dealer at runtime via useDealerTheme. */
-    --brand-primary: #1d4ed8;
-    --brand-primary-600: #1d4ed8;
+    /* --- White-label brand color (per-dealer, runtime override) --- */
+    --brand-primary: #1e40af; /* navy-700 default */
+    --brand-primary-700: #1e3a8a;
+    --brand-primary-600: #1e40af;
     --brand-primary-500: #2563eb;
     --brand-primary-400: #60a5fa;
     --brand-primary-300: #93c5fd;
+    /* Foreground color paired with the brand. White on navy reads AA at 16px+;
+       useDealerTheme.ts can override if a dealer picks a pastel brand. */
+    --brand-foreground: #ffffff;
 
-    /* Surface colors */
-    --color-surface-base: 2 6 23; /* surface-950 */
-    --color-surface-elevated: 15 23 42; /* surface-900 */
-    --color-surface-overlay: 30 41 59; /* surface-800 */
+    /* --- Surface (background) scale — calm neutral charcoal, NOT swirly --- */
+    --color-surface-base: 9 13 23; /* near-black, OKLCH(0.15 0.02 250) ish */
+    --color-surface-elevated: 17 22 36; /* one step lighter */
+    --color-surface-overlay: 27 33 50; /* card overlay */
+    --color-surface-raised: 38 44 63; /* modal / popover */
 
-    /* Text colors */
-    --color-text-primary: 248 250 252; /* surface-50 */
-    --color-text-secondary: 203 213 225; /* surface-300 */
-    --color-text-tertiary: 148 163 184; /* surface-400 */
+    /* --- Text scale — high contrast, no muddy mids --- */
+    --color-text-primary: 244 247 252; /* AA on every surface step */
+    --color-text-secondary: 192 200 216; /* AA at 4.7:1 on surface-base */
+    --color-text-tertiary: 140 148 168; /* AA-large only; use for hints */
 
-    /* Border colors */
-    --color-border: 51 65 85; /* surface-700 */
-    --color-border-light: 30 41 59; /* surface-800 */
+    /* --- Borders + dividers — hairline, ~6% white --- */
+    --color-border: 60 70 92;
+    --color-border-strong: 84 96 122;
+    --color-border-light: 38 44 63;
 
-    /* Fluid spacing scale (responsive) */
-    --spacing-xs: clamp(0.5rem, 0.4rem + 0.5vw, 0.75rem);
-    --spacing-sm: clamp(0.75rem, 0.6rem + 0.75vw, 1rem);
-    --spacing-md: clamp(1rem, 0.8rem + 1vw, 1.5rem);
-    --spacing-lg: clamp(1.5rem, 1.2rem + 1.5vw, 2.25rem);
-    --spacing-xl: clamp(2rem, 1.6rem + 2vw, 3rem);
-    --spacing-2xl: clamp(3rem, 2.4rem + 3vw, 4.5rem);
+    /* --- Focus ring — always brand color, never random --- */
+    --focus-ring: var(--brand-primary);
+    --focus-ring-offset: rgb(var(--color-surface-base));
 
-    /* Touch targets */
-    --spacing-touch-target: 2.75rem; /* 44px - Apple HIG minimum */
+    /* --- Type scale — modular 1.125 (major second), display 1.2 --- */
+    --font-size-xs: 0.75rem; /* 12 */
+    --font-size-sm: 0.875rem; /* 14 */
+    --font-size-base: 1rem; /* 16 */
+    --font-size-lg: 1.125rem; /* 18 */
+    --font-size-xl: 1.25rem; /* 20 */
+    --font-size-2xl: 1.5rem; /* 24 */
+    --font-size-3xl: 1.875rem; /* 30 */
+    --font-size-4xl: 2.25rem; /* 36 */
+    --font-size-display: 3rem; /* 48 — login + admin H1 only */
 
-    /* Premium gradient colors */
-    --gradient-start: rgba(59, 130, 246, 0.15);
-    --gradient-mid: rgba(147, 51, 234, 0.1);
-    --gradient-end: rgba(236, 72, 153, 0.08);
+    /* --- Spacing — 4px base, rhythm-locked --- */
+    --spacing-xs: 0.5rem;
+    --spacing-sm: 0.75rem;
+    --spacing-md: 1rem;
+    --spacing-lg: 1.5rem;
+    --spacing-xl: 2rem;
+    --spacing-2xl: 3rem;
+    --spacing-touch-target: 2.75rem; /* 44px Apple HIG */
 
-    /* iOS-style custom easing curves */
-    --ease-ios: cubic-bezier(0.4, 0, 0.2, 1);
+    /* --- Radii — subtle, consistent --- */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 20px;
+
+    /* --- Elevation — flat by default, lift only on raise --- */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.28);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.36);
+    --shadow-focus: 0 0 0 3px color-mix(in srgb, var(--brand-primary) 40%, transparent);
+
+    /* --- Motion — fast, eased, never showy --- */
+    --duration-fast: 120ms;
+    --duration-base: 180ms;
+    --duration-slow: 260ms;
+    --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+    /* Legacy ease names kept so existing components still compile. */
+    --ease-ios: var(--ease-in-out);
     --ease-ios-in: cubic-bezier(0.4, 0, 1, 1);
-    --ease-ios-out: cubic-bezier(0, 0, 0.2, 1);
+    --ease-ios-out: var(--ease-out);
     --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
     --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+
+    /* --- Decorative gradients neutralized.
+       Variables kept so any straggler reference still compiles, but they
+       resolve to transparent so the old aurora swirls disappear. --- */
+    --gradient-start: transparent;
+    --gradient-mid: transparent;
+    --gradient-end: transparent;
   }
 
   /* Smooth scroll behavior with advanced typography */
@@ -91,102 +137,61 @@
     }
   }
 
-  /* Base body styles with premium background */
+  /* --- Base body — Dealer Trust calm neutral surface, no animated swirls.
+     The old indigo/purple/pink aurora layers and floating-particle animation
+     were removed 2026-05-29 because they shouted "AI demo" louder than they
+     framed the product. A single hairline accent at the top of the viewport
+     does the work without distracting the salesperson. --- */
   body {
-    @apply bg-surface-950 text-surface-50 font-sans;
-    @apply selection:bg-primary-500/30 selection:text-primary-100;
+    background-color: rgb(var(--color-surface-base));
+    color: rgb(var(--color-text-primary));
+    @apply font-sans;
+    /* Subtle brand-tinted gradient floor — static, no animation. */
+    background-image:
+      radial-gradient(
+        ellipse 120% 60% at 50% -10%,
+        color-mix(in srgb, var(--brand-primary) 8%, transparent),
+        transparent 70%
+      );
+    background-attachment: fixed;
     min-height: 100vh;
     min-height: 100dvh;
     overflow-x: hidden;
     position: relative;
   }
 
-  /* Premium layered background */
+  body::selection,
+  *::selection {
+    background-color: color-mix(in srgb, var(--brand-primary) 28%, transparent);
+    color: rgb(var(--color-text-primary));
+  }
+
+  /* Hairline brand accent at the top — anchors the brand without a hero swirl. */
   body::before {
     content: "";
     position: fixed;
-    inset: 0;
-    background: 
-      /* Primary ambient glow */ radial-gradient(
-        ellipse 80% 50% at 50% -20%,
-        var(--gradient-start),
-        transparent 50%
-      ),
-      /* Secondary accent glow */
-        radial-gradient(
-          ellipse 60% 40% at 80% 20%,
-          var(--gradient-mid),
-          transparent 40%
-        ),
-      /* Tertiary accent */
-        radial-gradient(
-          ellipse 40% 30% at 20% 80%,
-          var(--gradient-end),
-          transparent 35%
-        ),
-      /* Subtle grid pattern */
-        linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
-    background-size: 100% 100%, 100% 100%, 100% 100%, 60px 60px, 60px 60px;
-    z-index: -2;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--brand-primary) 35%,
+      var(--brand-primary) 65%,
+      transparent
+    );
+    opacity: 0.7;
+    z-index: 50;
     pointer-events: none;
-    animation: ambient-pulse 20s ease-in-out infinite;
   }
 
-  /* Floating particles layer */
-  body::after {
-    content: "";
-    position: fixed;
-    inset: 0;
-    background-image: radial-gradient(
-        circle at 20% 30%,
-        rgba(59, 130, 246, 0.03) 0%,
-        transparent 20%
-      ),
-      radial-gradient(
-        circle at 80% 70%,
-        rgba(147, 51, 234, 0.03) 0%,
-        transparent 20%
-      ),
-      radial-gradient(
-        circle at 50% 50%,
-        rgba(34, 197, 94, 0.02) 0%,
-        transparent 30%
-      );
-    z-index: -1;
-    pointer-events: none;
-    animation: particles-float 30s ease-in-out infinite alternate;
-  }
-
-  @keyframes ambient-pulse {
-    0%,
-    100% {
-      opacity: 1;
-      filter: brightness(1);
-    }
-    50% {
-      opacity: 0.9;
-      filter: brightness(1.1);
-    }
-  }
-
-  @keyframes particles-float {
-    0% {
-      transform: translateY(0) scale(1);
-    }
-    50% {
-      transform: translateY(-20px) scale(1.02);
-    }
-    100% {
-      transform: translateY(10px) scale(0.98);
-    }
-  }
-
-  /* Improved focus visibility (accessibility) */
+  /* Focus ring — always brand color, always 3px, always visible. */
   *:focus-visible {
-    @apply outline-none ring-2 ring-primary-500/70 ring-offset-2 ring-offset-surface-950;
-    @apply rounded-lg;
-    transition: box-shadow 0.2s ease;
+    outline: none;
+    box-shadow: var(--shadow-focus);
+    border-radius: var(--radius-md);
+    transition: box-shadow var(--duration-fast) var(--ease-out);
   }
 
   /* Better default for buttons and inputs */

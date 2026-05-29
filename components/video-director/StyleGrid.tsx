@@ -21,7 +21,7 @@ const StyleCard: React.FC<StyleCardProps> = React.memo(({ style, icon, descripti
   return (
     <motion.button
       onClick={handleClick}
-      className="group flex flex-col items-center justify-center text-center p-3 bg-white/5 border border-white/10 rounded-xl aspect-square transition-all duration-200 hover:bg-indigo-500/20 hover:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+      className="group flex flex-col items-center justify-center text-center p-3 bg-white/5 border border-white/10 rounded-xl aspect-square transition-all duration-200 hover:bg-indigo-500/20 hover:border-indigo-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
       title={description}
       aria-label={`${style}: ${description}`}
       whileHover={{ scale: 1.05, y: -2 }}
@@ -88,7 +88,7 @@ export const StyleGrid: React.FC<StyleGridProps> = ({ onSelect }) => {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search styles..."
-            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/50 focus:outline-none focus:ring-2 focus:ring-primary-400"
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
           />
         </div>
       </div>

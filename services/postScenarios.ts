@@ -16,6 +16,15 @@
  * dealer record. This catalog is the built-in starter set.
  */
 import { StyleOption, ToneOption, VideoStyle } from "../types";
+import {
+  KeyRound,
+  Car,
+  Wrench,
+  Tag,
+  HeartHandshake,
+  Trophy,
+  type LucideIcon,
+} from "lucide-react";
 
 export type ScenarioCategory =
   | "delivery"
@@ -282,8 +291,19 @@ export const parseCustomScenarios = (raw?: string): PostScenario[] => {
           category: (entry.category as ScenarioCategory) || "promo",
           blurb: typeof entry.blurb === "string" ? entry.blurb : "",
           emoji: typeof entry.emoji === "string" ? entry.emoji : "✨",
-          defaultStyle: (entry.defaultStyle as StyleOption) || StyleOption.Modern,
-          defaultTone: (entry.defaultTone as ToneOption) || ToneOption.Promotional,
+          // Validate against the enum members — `|| Default` only catches
+          // empty/undefined, letting an arbitrary string ("neon") through as a
+          // bogus enum that later breaks style switches downstream.
+          defaultStyle: Object.values(StyleOption).includes(
+            entry.defaultStyle as StyleOption
+          )
+            ? (entry.defaultStyle as StyleOption)
+            : StyleOption.Modern,
+          defaultTone: Object.values(ToneOption).includes(
+            entry.defaultTone as ToneOption
+          )
+            ? (entry.defaultTone as ToneOption)
+            : ToneOption.Promotional,
           requiresCustomer: !!entry.requiresCustomer,
           requiresVehicle: entry.requiresVehicle !== false,
           promptAdditions: entry.promptAdditions,
@@ -332,6 +352,22 @@ export const SCENARIO_CATEGORY_LABELS: Record<ScenarioCategory, string> = {
   promo: "Promotions",
   community: "Community",
   team: "Team",
+};
+
+/**
+ * Category → lucide icon. The scenario marker is derived from the category
+ * (not a per-scenario hand-picked emoji) so built-in AND dealer-created custom
+ * scenarios render a single, consistent, on-brand icon set. The `emoji` field
+ * on PostScenario is retained for backward compatibility but is no longer the
+ * primary visual marker.
+ */
+export const SCENARIO_CATEGORY_ICON: Record<ScenarioCategory, LucideIcon> = {
+  delivery: KeyRound,
+  inventory: Car,
+  service: Wrench,
+  promo: Tag,
+  community: HeartHandshake,
+  team: Trophy,
 };
 
 /**

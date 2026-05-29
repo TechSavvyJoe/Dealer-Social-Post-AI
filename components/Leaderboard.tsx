@@ -1,7 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Trophy, Film, ShieldCheck, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "./ui/Button";
+import { EmptyState } from "./ui/EmptyState";
+import { ErrorBanner } from "./ui/ErrorBanner";
+import { Skeleton } from "./ui/Skeleton";
+import { cn } from "../utils/classNames";
 import {
   getLeaderboard,
   LeaderboardEntry,
@@ -85,19 +89,24 @@ export const Leaderboard: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Monotonic request id: when `range`/dealer changes quickly, an older fetch
+  // can resolve after a newer one — only the latest request may write state.
+  const reqIdRef = useRef(0);
   const load = useMemo(
     () => async () => {
       if (!currentDealer) return;
+      const myId = ++reqIdRef.current;
       setLoading(true);
       setError(null);
       try {
         const since = startOfRange(range);
         const data = await getLeaderboard(currentDealer.id, since);
-        setEntries(data);
+        if (reqIdRef.current === myId) setEntries(data);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        if (reqIdRef.current === myId)
+          setError(err instanceof Error ? err.message : String(err));
       } finally {
-        setLoading(false);
+        if (reqIdRef.current === myId) setLoading(false);
       }
     },
     [currentDealer, range]
@@ -113,7 +122,7 @@ export const Leaderboard: React.FC = () => {
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/5 border border-white/15 rounded-2xl p-4 sm:p-6 space-y-4"
+      className="bg-white/5 border border-white/10 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
     >
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
@@ -170,33 +179,44 @@ export const Leaderboard: React.FC = () => {
         </div>
       </div>
 
-      {error && (
-        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner message={error} onRetry={() => void load()} />}
 
       <AnimatePresence mode="wait">
         {loading && entries.length === 0 ? (
           <motion.div
             key="loading"
-            className="py-12 flex items-center justify-center text-surface-400 text-sm"
+            className="space-y-2"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            aria-label="Loading leaderboard"
           >
-            <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading…
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-3 rounded-xl border border-white/10 bg-surface-900/40 px-3 py-2.5"
+              >
+                <Skeleton variant="circular" width={36} height={36} />
+                <div className="flex-1 space-y-2">
+                  <Skeleton width="45%" height={12} />
+                  <Skeleton width="30%" height={10} />
+                </div>
+                <Skeleton width={32} height={24} />
+              </div>
+            ))}
           </motion.div>
         ) : entries.length === 0 ? (
           <motion.div
             key="empty"
-            className="py-12 text-center text-sm text-surface-400"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            No posts yet in this window. Tell your team — first one on the
-            board gets bragging rights.
+            <EmptyState
+              icon={Trophy}
+              title="No posts yet in this window"
+              description="Tell your team — first one on the board gets bragging rights."
+            />
           </motion.div>
         ) : (
           <motion.ul
@@ -212,13 +232,23 @@ export const Leaderboard: React.FC = () => {
                 initial={{ opacity: 0, x: -8 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: idx * 0.03 }}
-                className="flex items-center gap-3 rounded-xl border border-white/10 bg-surface-900/40 px-3 py-2.5"
+                className={cn(
+                  "flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors",
+                  idx === 0
+                    ? "border-amber-400/30 bg-amber-500/[0.06]"
+                    : "border-white/10 bg-surface-900/40"
+                )}
               >
-                <div className="flex-shrink-0 w-9 h-9 rounded-full bg-white/5 flex items-center justify-center">
+                <div
+                  className={cn(
+                    "flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center",
+                    idx === 0 ? "bg-amber-500/15" : "bg-white/5"
+                  )}
+                >
                   {idx < 3 ? (
                     <Trophy className={`h-4 w-4 ${trophyTint(idx)}`} />
                   ) : (
-                    <span className="text-xs text-surface-400 font-mono">
+                    <span className="text-xs text-surface-400 font-semibold tabular-nums">
                       {ordinal(idx + 1)}
                     </span>
                   )}
@@ -227,32 +257,47 @@ export const Leaderboard: React.FC = () => {
                   <div className="text-sm font-semibold text-surface-50 truncate">
                     {entry.salesperson}
                   </div>
-                  <div className="text-[10px] text-surface-500 flex items-center gap-3">
-                    <span>
-                      Last post {new Date(entry.lastPostedAt).toLocaleDateString()}
-                    </span>
+                  <div className="text-[11px] text-surface-500 flex items-center gap-3 mt-0.5">
+                    {entry.videoCount > 0 && (
+                      <span
+                        className="flex items-center gap-1 text-primary-300/80"
+                        title="Posts with video"
+                      >
+                        <Film className="h-3 w-3" /> {entry.videoCount}
+                      </span>
+                    )}
+                    {entry.releaseCount > 0 && (
+                      <span
+                        className="flex items-center gap-1 text-success-300/80"
+                        title="Posts with signed release"
+                      >
+                        <ShieldCheck className="h-3 w-3" /> {entry.releaseCount}
+                      </span>
+                    )}
+                    {(() => {
+                      const t = entry.lastPostedAt
+                        ? Date.parse(entry.lastPostedAt)
+                        : NaN;
+                      return Number.isNaN(t) ? null : (
+                        <span>Last {new Date(t).toLocaleDateString()}</span>
+                      );
+                    })()}
                   </div>
                 </div>
-                <div className="flex items-center gap-3 text-xs flex-shrink-0">
-                  {entry.videoCount > 0 && (
-                    <span
-                      className="flex items-center gap-1 text-primary-200"
-                      title="Posts with video"
-                    >
-                      <Film className="h-3 w-3" /> {entry.videoCount}
-                    </span>
-                  )}
-                  {entry.releaseCount > 0 && (
-                    <span
-                      className="flex items-center gap-1 text-success-200"
-                      title="Posts with signed release"
-                    >
-                      <ShieldCheck className="h-3 w-3" /> {entry.releaseCount}
-                    </span>
-                  )}
-                  <span className="text-lg font-bold text-surface-50 tabular-nums">
+                {/* Hero metric — the count is the point of a leaderboard, so it
+                    dominates the row. */}
+                <div className="flex-shrink-0 text-right leading-none">
+                  <div
+                    className={cn(
+                      "text-2xl font-extrabold tabular-nums",
+                      idx === 0 ? "text-amber-200" : "text-surface-50"
+                    )}
+                  >
                     {entry.count}
-                  </span>
+                  </div>
+                  <div className="text-[10px] uppercase tracking-wider text-surface-500 mt-0.5">
+                    {entry.count === 1 ? "post" : "posts"}
+                  </div>
                 </div>
               </motion.li>
             ))}

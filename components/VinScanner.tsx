@@ -91,6 +91,10 @@ export const VinScanner: React.FC<VinScannerProps> = ({
   const [mode, setMode] = useState<"scanner" | "manual">("scanner");
   const [manualVin, setManualVin] = useState("");
   const [isDecoding, setIsDecoding] = useState(false);
+  // Mirror of `isDecoding` read inside the detection interval. Keeping it in a
+  // ref (rather than the effect dep array) stops the camera from being torn
+  // down and re-acquired every time a decode starts/finishes.
+  const isDecodingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [scanStatus, setScanStatus] = useState<string>("Point at the VIN barcode");
   const [lastDecoded, setLastDecoded] = useState<DecodedVehicle | null>(null);
@@ -115,6 +119,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
       }
       setError(null);
       setIsDecoding(true);
+      isDecodingRef.current = true;
       setScanStatus(`Looking up ${cleaned}…`);
       try {
         const vehicle = await decodeVin(cleaned);
@@ -144,11 +149,17 @@ export const VinScanner: React.FC<VinScannerProps> = ({
         setError(`Decode failed: ${msg}`);
         logError("vin.decode.error", { vin: cleaned, message: msg });
       } finally {
+        isDecodingRef.current = false;
         if (!cancelledRef.current) setIsDecoding(false);
       }
     },
     [onClose, onVehicleDecoded]
   );
+
+  // Keep a stable ref to the latest handleDecode so the camera effect can call
+  // it without listing it (or its unstable parent callbacks) as a dependency.
+  const handleDecodeRef = useRef(handleDecode);
+  handleDecodeRef.current = handleDecode;
 
   // Start camera + barcode detection loop when scanner mode is active.
   useEffect(() => {
@@ -195,7 +206,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
         }
 
         detectionIntervalRef.current = window.setInterval(async () => {
-          if (!videoRef.current || isDecoding) return;
+          if (!videoRef.current || isDecodingRef.current) return;
           try {
             const results = await detector.detect(videoRef.current);
             if (results.length > 0) {
@@ -207,7 +218,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
                 const slice = candidate.slice(i, i + 17);
                 if (isValidVin(slice)) {
                   stopCamera();
-                  void handleDecode(slice);
+                  void handleDecodeRef.current(slice);
                   return;
                 }
               }
@@ -234,7 +245,9 @@ export const VinScanner: React.FC<VinScannerProps> = ({
       cancelled = true;
       stopCamera();
     };
-  }, [isOpen, mode, isDecoding, handleDecode, stopCamera]);
+    // `isDecoding` and `handleDecode` are intentionally read via refs above so
+    // they don't re-trigger camera acquisition. Keep deps minimal.
+  }, [isOpen, mode, stopCamera]);
 
   // Clean up on unmount
   useEffect(() => stopCamera, [stopCamera]);
