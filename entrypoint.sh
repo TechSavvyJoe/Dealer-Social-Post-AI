@@ -11,6 +11,16 @@ ls -la /pb
 # Start PocketBase in background
 echo "Starting PocketBase in background..."
 
+if [ -f /pb/pb_data/data.db ]; then
+  # Check if _collections has a schema column
+  if ! sqlite3 /pb/pb_data/data.db "PRAGMA table_info(_collections);" | grep -q "schema"; then
+    echo "WARNING: Database appears to be from PB v0.23+. Moving out of the way for fresh v0.22.21 creation..."
+    mv /pb/pb_data/data.db /pb/pb_data/data.db.v23bak
+    [ -f /pb/pb_data/logs.db ] && mv /pb/pb_data/logs.db /pb/pb_data/logs.db.v23bak
+  else
+    echo "Database schema is compatible with PB v0.22.21."
+  fi
+fi
 # Inject Vertex AI Credentials if provided
 if [ -n "$VERTEX_SERVICE_ACCOUNT_JSON" ]; then
     echo "Injecting Vertex AI credentials from VERTEX_SERVICE_ACCOUNT_JSON..."

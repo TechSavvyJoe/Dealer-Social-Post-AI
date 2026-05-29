@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
     openssl \
+    sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and verify PocketBase
