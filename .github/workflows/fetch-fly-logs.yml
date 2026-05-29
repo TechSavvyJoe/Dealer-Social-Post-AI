@@ -11,6 +11,6 @@ jobs:
       - name: Setup flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
       - name: Get Logs
-        run: flyctl logs -a dealer-social-post-ai-production -n 100
+        run: flyctl logs -a dealer-social-post-ai-production --no-tail
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
