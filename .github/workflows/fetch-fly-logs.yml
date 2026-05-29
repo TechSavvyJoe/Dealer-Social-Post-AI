@@ -1,5 +1,6 @@
 name: Fetch Fly Logs
 on:
+  workflow_dispatch:
   push:
     paths:
       - '.github/workflows/fetch-fly-logs.yml'
