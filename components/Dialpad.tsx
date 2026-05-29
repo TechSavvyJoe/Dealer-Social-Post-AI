@@ -26,14 +26,16 @@ const DialpadButton: React.FC<{
   children: React.ReactNode;
   className?: string;
   delay?: number;
-}> = ({ onClick, children, className = "", delay = 0 }) => (
+  ariaLabel?: string;
+}> = ({ onClick, children, className = "", delay = 0, ariaLabel }) => (
   <motion.button
     type="button"
     onClick={onClick}
+    aria-label={ariaLabel}
     className={cn(
       // Base styles
       "flex items-center justify-center",
-      "w-16 h-16 sm:w-18 sm:h-18",
+      "w-16 h-16 sm:w-20 sm:h-20",
       "rounded-2xl",
       // Colors with glass effect
       "bg-white/[0.06] backdrop-blur-sm",
@@ -73,7 +75,11 @@ export const Dialpad: React.FC<DialpadProps> = ({ onKeyPress }) => {
   const buttons = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div
+      className="flex flex-col items-center gap-3"
+      role="group"
+      aria-label="Dealer code keypad"
+    >
       {/* Number grid */}
       <div className="grid grid-cols-3 gap-3">
         {buttons.map((num, index) => (
@@ -81,6 +87,7 @@ export const Dialpad: React.FC<DialpadProps> = ({ onKeyPress }) => {
             key={num}
             onClick={() => onKeyPress(num as any)}
             delay={0.05 + index * 0.02}
+            ariaLabel={`Digit ${num}`}
           >
             {num}
           </DialpadButton>
@@ -90,10 +97,14 @@ export const Dialpad: React.FC<DialpadProps> = ({ onKeyPress }) => {
       {/* Bottom row with 0 and backspace */}
       <div className="grid grid-cols-3 gap-3">
         {/* Empty cell */}
-        <div className="w-16 h-16 sm:w-18 sm:h-18" />
+        <div className="w-16 h-16 sm:w-20 sm:h-20" aria-hidden="true" />
 
         {/* Zero button */}
-        <DialpadButton onClick={() => onKeyPress("0")} delay={0.25}>
+        <DialpadButton
+          onClick={() => onKeyPress("0")}
+          delay={0.25}
+          ariaLabel="Digit 0"
+        >
           0
         </DialpadButton>
 
@@ -101,9 +112,10 @@ export const Dialpad: React.FC<DialpadProps> = ({ onKeyPress }) => {
         <DialpadButton
           onClick={() => onKeyPress("backspace")}
           delay={0.27}
+          ariaLabel="Delete last digit"
           className="text-surface-400 hover:text-white"
         >
-          <Icon type="backspace" className="w-6 h-6" />
+          <Icon type="backspace" className="w-6 h-6" aria-hidden="true" />
         </DialpadButton>
       </div>
     </div>

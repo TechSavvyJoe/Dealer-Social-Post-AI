@@ -106,20 +106,19 @@ export async function fetchFromProxy(
     const responseText = await response.text();
 
     if (!response.ok) {
-      let errorJson;
+      // Prefer Google's structured error message when the body is JSON; fall
+      // back to the raw text. (Parsing is isolated so the parse-failure catch
+      // doesn't swallow the message we want to surface.)
+      let message: string;
       try {
-        errorJson = JSON.parse(responseText);
-        // Use the detailed error message from Google if available
-        const detailedMessage =
-          errorJson?.error?.message || JSON.stringify(errorJson);
-        throw new Error(detailedMessage);
-      } catch (e) {
-        // If the response is not JSON, throw the raw text
-        throw new Error(
+        const errorJson = JSON.parse(responseText);
+        message = errorJson?.error?.message || JSON.stringify(errorJson);
+      } catch {
+        message =
           responseText ||
-            `Proxy request to ${path} failed with status ${response.status}`
-        );
+          `Proxy request to ${path} failed with status ${response.status}`;
       }
+      throw new Error(message);
     }
 
     // Log performance

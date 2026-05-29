@@ -1,55 +1,66 @@
-import React from 'react';
+import React from "react";
 
-export const Logo: React.FC<{ className?: string }> = ({ className = 'w-32 h-32' }) => (
-  <svg 
-    className={className} 
-    viewBox="0 0 184 40" 
-    xmlns="http://www.w3.org/2000/svg" 
-    aria-label="Dealer Social Post AI Logo"
+/**
+ * Brand mark. Rewritten 2026-05-29 to align with the Dealer Trust system
+ * (no indigo→purple gradient, sentence case in the marketing wordmark, tighter
+ * letterforms). The logomark is a stylized aperture — geometry borrowed from
+ * the social-post + camera concept this product lives at.
+ *
+ * Color is pulled from --brand-primary so the mark white-labels per dealer.
+ */
+export const Logo: React.FC<{ className?: string }> = ({
+  className = "w-32 h-32",
+}) => (
+  <svg
+    className={className}
+    viewBox="0 0 200 40"
+    xmlns="http://www.w3.org/2000/svg"
+    role="img"
+    aria-label="Dealer Social Post AI"
   >
-    <defs>
-      <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" style={{ stopColor: '#6366f1' }} /> {/* indigo-500 */}
-        <stop offset="100%" style={{ stopColor: '#a855f7' }} /> {/* purple-500 */}
-      </linearGradient>
-    </defs>
-
-    {/* Logomark - Abstract Car/Post Icon */}
-    <g transform="translate(8, 0)">
-      {/* Main Shape */}
-      <path 
-        d="M24 0 L56 20 L24 40 L-8 20 Z M8 20 L24 10 L40 20 L24 30 Z"
-        fill="url(#logoGradient)"
+    {/* Logomark — chamfered square aperture, solid brand color */}
+    <g transform="translate(0, 0)">
+      <rect
+        x="2"
+        y="2"
+        width="36"
+        height="36"
+        rx="9"
+        fill="var(--brand-primary, #1e40af)"
       />
-      {/* AI Sparkle / Highlight */}
+      {/* Aperture cut */}
       <path
-        d="M21.33 10 L24 15 L26.67 10 L30.67 8 L26.67 6 L24 1 L21.33 6 Z"
-        fill="#ffffff"
+        d="M12 20 L20 12 L28 20 L20 28 Z"
+        fill="var(--brand-foreground, #ffffff)"
+        opacity="0.95"
       />
+      {/* Soft inner accent */}
+      <circle cx="20" cy="20" r="3" fill="var(--brand-primary, #1e40af)" />
     </g>
 
-    {/* Wordmark */}
-    <g transform="translate(74, 0)">
-      <text 
-        x="0" 
-        y="16" 
-        fontFamily="Poppins, sans-serif" 
-        fontSize="14" 
-        fontWeight="600" 
-        fill="#e2e8f0"
+    {/* Wordmark — sentence case, tighter tracking, neutral white */}
+    <g transform="translate(50, 0)">
+      <text
+        x="0"
+        y="17"
+        fontFamily="Inter, -apple-system, BlinkMacSystemFont, sans-serif"
+        fontSize="10"
+        fontWeight="600"
+        letterSpacing="2"
+        fill="#9aa3b8"
       >
         DEALER SOCIAL
       </text>
-      <text 
-        x="0" 
-        y="34" 
-        fontFamily="Poppins, sans-serif" 
-        fontSize="18" 
-        fontWeight="800"
-        fill="#ffffff"
+      <text
+        x="0"
+        y="34"
+        fontFamily="Inter, -apple-system, BlinkMacSystemFont, sans-serif"
+        fontSize="17"
+        fontWeight="700"
+        letterSpacing="-0.4"
+        fill="#f4f7fc"
       >
-        POST 
-        <tspan fill="url(#logoGradient)">AI</tspan>
+        Post studio
       </text>
     </g>
   </svg>

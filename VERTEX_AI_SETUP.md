@@ -8,9 +8,13 @@ Your Vertex AI API key has been successfully configured! Both Gemini API and Ver
 
 ### 1. API Keys Added ([.env.local](.env.local))
 ```bash
-GEMINI_API_KEY=AIzaSyD5g64nF8GmSlDPcNBySnsms-lPEOQdqpE
-VERTEX_API_KEY=AQ.Ab8RN6Liri1IvdZLXPKa3QsEtKd-wfOSHM1gSiy0Q5p8KkwrUA
+GEMINI_API_KEY=<your-gemini-api-key>
+VERTEX_API_KEY=<your-vertex-api-key>
 ```
+
+> ⚠️ **Never commit real keys.** Put them in `.env.local` (git-ignored) for dev,
+> or set them as Fly/Vercel secrets in production. Earlier revisions of this
+> file contained live keys — those keys must be rotated (see SECURITY_ACTIONS.md).
 
 ### 2. PocketBase Proxy Updated ([pb_hooks/main.pb.js](pb_hooks/main.pb.js))
 The proxy now supports both:

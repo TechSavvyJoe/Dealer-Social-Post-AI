@@ -11,6 +11,18 @@ import {
   ScanLine,
   Car,
   X,
+  Gem,
+  Zap,
+  PartyPopper,
+  Gauge,
+  Flame,
+  Briefcase,
+  Users,
+  Smile,
+  Megaphone,
+  Command,
+  CornerDownLeft,
+  type LucideIcon,
 } from "lucide-react";
 import { StyleOption, ToneOption } from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
@@ -76,44 +88,45 @@ interface PostCustomizerProps {
 
 const SALESPERSON_STORAGE_KEY = "dsp.salespersonName";
 
-// Simplified style descriptions
+// Style descriptions. Icons are lucide components (not emoji) so they render
+// identically across OS/browser, sit on the baseline, and share one stroke weight.
 const STYLE_INFO: Record<
   StyleOption,
-  { emoji: string; desc: string; aiHint: string }
+  { icon: LucideIcon; desc: string; aiHint: string }
 > = {
   [StyleOption.Luxury]: {
-    emoji: "✨",
+    icon: Gem,
     desc: "Elegant & refined",
     aiHint:
       "Deliver a luxurious, editorial layout with elevated metallic detailing.",
   },
   [StyleOption.Modern]: {
-    emoji: "⚡",
+    icon: Zap,
     desc: "Bold & futuristic",
     aiHint:
       "Create an avant-garde, high-contrast composition with geometric overlays.",
   },
   [StyleOption.Friendly]: {
-    emoji: "🎉",
+    icon: PartyPopper,
     desc: "Warm & playful",
     aiHint:
       "Deliver a cheerful, handcrafted layout with warm colors and lively motion.",
   },
   [StyleOption.Sporty]: {
-    emoji: "🏎️",
+    icon: Gauge,
     desc: "Dynamic & energetic",
     aiHint:
       "Produce a high-energy layout with motion trails and glowing accents.",
   },
 };
 
-const TONE_INFO: Record<ToneOption, { emoji: string; short: string }> = {
-  [ToneOption.Excited]: { emoji: "🔥", short: "Hype & energy" },
-  [ToneOption.Professional]: { emoji: "💼", short: "Confident & refined" },
-  [ToneOption.Family]: { emoji: "👨‍👩‍👧", short: "Warm & welcoming" },
-  [ToneOption.Humorous]: { emoji: "😄", short: "Fun & clever" },
-  [ToneOption.Inspirational]: { emoji: "🌟", short: "Uplifting & forward" },
-  [ToneOption.Promotional]: { emoji: "📣", short: "CTA-focused" },
+const TONE_INFO: Record<ToneOption, { icon: LucideIcon; short: string }> = {
+  [ToneOption.Excited]: { icon: Flame, short: "Hype & energy" },
+  [ToneOption.Professional]: { icon: Briefcase, short: "Confident & refined" },
+  [ToneOption.Family]: { icon: Users, short: "Warm & welcoming" },
+  [ToneOption.Humorous]: { icon: Smile, short: "Fun & clever" },
+  [ToneOption.Inspirational]: { icon: Sparkles, short: "Uplifting & forward" },
+  [ToneOption.Promotional]: { icon: Megaphone, short: "CTA-focused" },
 };
 
 const TypewriterText: React.FC<{ text: string }> = ({ text }) => {
@@ -452,7 +465,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   Create Your Post
                 </CardTitle>
                 <CardDescription className="text-xs sm:text-sm">
-                  Pick a style and let AI do the magic
+                  Pick a style — AI handles the rest
                 </CardDescription>
               </div>
               <Button
@@ -621,7 +634,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       className={cn(
                         "relative flex items-center gap-2 rounded-xl border px-3 py-3 text-left transition-all overflow-hidden",
                         isActive
-                          ? "border-primary-400 bg-primary-500/20 shadow-[0_0_15px_-3px_rgba(56,189,248,0.3)]"
+                          ? "border-primary-400 bg-primary-500/20 shadow-glow-primary"
                           : "border-white/10 bg-white/5 hover:border-primary-400/30 hover:bg-white/10"
                       )}
                       whileTap={{ scale: 0.98 }}
@@ -634,9 +647,12 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                           transition={{ duration: 0.3 }}
                         />
                       )}
-                      <span className="text-2xl relative z-10">
-                        {info.emoji}
-                      </span>
+                      <info.icon
+                        className={cn(
+                          "h-5 w-5 flex-shrink-0 relative z-10 transition-colors",
+                          isActive ? "text-primary-300" : "text-surface-400"
+                        )}
+                      />
                       <div className="flex-1 min-w-0 relative z-10">
                         <div className="flex items-center gap-1.5">
                           <span
@@ -692,12 +708,17 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       className={cn(
                         "relative flex items-center gap-1.5 rounded-full border px-4 py-2 whitespace-nowrap transition-all flex-shrink-0 snap-center",
                         isActive
-                          ? "border-success-400 bg-success-500/20 shadow-[0_0_10px_-2px_rgba(74,222,128,0.3)]"
+                          ? "border-success-400 bg-success-500/20 shadow-glow-success"
                           : "border-white/10 bg-white/5 hover:border-success-400/30 hover:bg-white/10"
                       )}
                       whileTap={{ scale: 0.95 }}
                     >
-                      <span className="text-sm">{info.emoji}</span>
+                      <info.icon
+                        className={cn(
+                          "h-4 w-4 flex-shrink-0 transition-colors",
+                          isActive ? "text-success-300" : "text-surface-400"
+                        )}
+                      />
                       <span
                         className={cn(
                           "text-xs font-semibold",
@@ -732,7 +753,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       "text-surface-400 hover:text-surface-200"
                   )}
                 >
-                  AI Magic
+                  AI Caption
                 </Button>
                 <Button
                   variant={captionSource === "custom" ? "filled" : "ghost"}
@@ -888,8 +909,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 <span className="relative z-10 flex items-center gap-2">
                   {isBusy ? "Creating your post..." : "Generate Post"}
                   {!isBusy && (
-                    <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-white/15 border border-white/20 text-white/80">
-                      ⌘↵
+                    <kbd className="hidden sm:inline-flex items-center gap-1 px-1.5 py-1 rounded bg-white/15 border border-white/20 text-white/80">
+                      <Command className="w-3 h-3" />
+                      <CornerDownLeft className="w-3 h-3" />
                     </kbd>
                   )}
                 </span>
