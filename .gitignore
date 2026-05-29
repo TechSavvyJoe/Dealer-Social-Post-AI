@@ -53,3 +53,4 @@ gen-lang-client-*.json
 *.p12
 credentials.json
 *-credentials.json
+.vercel
