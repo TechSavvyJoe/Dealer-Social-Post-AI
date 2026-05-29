@@ -1,0 +1,16 @@
+name: Fetch Fly Logs
+on:
+  push:
+    paths:
+      - '.github/workflows/fetch-fly-logs.yml'
+
+jobs:
+  fetch-logs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Get Logs
+        run: flyctl logs -a dealer-social-post-ai-production -n 100
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
