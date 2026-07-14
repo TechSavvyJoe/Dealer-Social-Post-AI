@@ -4,6 +4,7 @@ import { fileToNormalizedDataUrl } from "../utils/imageUtils";
 import { WebcamCapture } from "./WebcamCapture";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { ImagePreviewModal } from "./ImagePreviewModal";
+import { Button } from "./ui/Button";
 
 interface ImageInputProps {
   onImageSelected: (imageSrc: string) => void;
@@ -147,18 +148,19 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({
 
   if (error) {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center bg-red-900/50 border border-red-700 text-red-300 p-8 text-center rounded-2xl">
-        <Icon type="error" className="w-16 h-16 text-red-400 mb-4" />
-        <p className="text-red-300 text-lg">{error}</p>
-        <button
+      <div className="w-full h-full flex flex-col items-center justify-center bg-error-900/25 border border-error-700/50 text-error-200 p-8 text-center rounded-2xl">
+        <Icon type="error" className="w-16 h-16 text-error-300 mb-4" />
+        <p className="text-error-100 text-lg">{error}</p>
+        <Button
+          variant="primary"
           onClick={() => {
             triggerHapticFeedback();
             setError(null);
           }}
-          className="mt-6 bg-indigo-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-indigo-500 transition-colors"
+          className="mt-6"
         >
-          Try Again
-        </button>
+          Try again
+        </Button>
       </div>
     );
   }
@@ -188,7 +190,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({
               setLastSource(null);
             }
           }}
-          confirmLabel="Use Photo"
+          confirmLabel="Use photo"
           onRetake={() => {
             if (lastSource === "camera-webcam") {
               setPendingImage(null);
@@ -212,29 +214,29 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({
     <>
       <div className="flex-1 flex items-center justify-center px-4 py-6">
         <div
-          className={`relative w-full max-w-2xl p-2 sm:p-4 bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl border transition-all duration-150 ${
-            isDraggingOver ? "border-indigo-400 scale-[1.02]" : "border-white/20"
+          className={`relative w-full max-w-2xl p-2 sm:p-4 bg-surface-900/72 backdrop-blur-xl rounded-2xl shadow-2xl border transition-all duration-150 ${
+            isDraggingOver ? "border-primary-400 scale-[1.01]" : "border-white/10"
           }`}
         >
         {/* Processing overlay */}
         {isProcessing && (
-          <div className="absolute inset-0 bg-black/60 rounded-2xl flex items-center justify-center z-20">
+          <div className="absolute inset-0 bg-surface-950/75 backdrop-blur-sm rounded-2xl flex items-center justify-center z-20">
             <div className="text-center">
-              <div className="w-10 h-10 border-3 border-white/30 border-t-white rounded-full animate-spin mx-auto" />
-              <p className="mt-3 text-white font-medium">Processing...</p>
+              <div className="w-10 h-10 border-3 border-white/20 border-t-primary-300 rounded-full animate-spin mx-auto" />
+              <p className="mt-3 text-surface-50 font-medium">Processing...</p>
             </div>
           </div>
         )}
         
         {isDraggingOver && (
-          <div className="absolute inset-0 bg-indigo-600/50 rounded-2xl flex items-center justify-center pointer-events-none z-10">
+          <div className="absolute inset-0 bg-primary-600/30 backdrop-blur-sm rounded-2xl flex items-center justify-center pointer-events-none z-10">
             <div className="text-center">
               <Icon
                 type="upload"
                 className="w-12 h-12 text-white mx-auto"
               />
               <p className="mt-2 text-xl font-bold text-white">
-                Drop Image Here
+                Drop image here
               </p>
             </div>
           </div>
@@ -244,12 +246,12 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({
             triggerHapticFeedback();
             onClose();
           }}
-          className="absolute top-2 right-2 sm:top-4 sm:right-4 p-2 text-white/50 hover:text-white transition-colors z-20 rounded-full hover:bg-white/10 touch-manipulation"
+          className="absolute top-2 right-2 sm:top-4 sm:right-4 p-2 text-surface-300 hover:text-surface-50 transition-colors z-20 rounded-full hover:bg-white/10 touch-manipulation"
           aria-label="Close"
         >
           <Icon type="close" className="w-6 h-6" />
         </button>
-        <div className="relative border-2 border-dashed border-white/20 rounded-xl p-4 sm:p-6">
+        <div className="relative border-2 border-dashed border-white/12 rounded-xl p-4 sm:p-6 bg-white/[0.03]">
           <input
             type="file"
             ref={fileInputRef}
@@ -270,33 +272,32 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({
           />
 
           <div className="text-center py-4 sm:py-6">
-            <h2 className="text-xl sm:text-2xl font-bold text-white mb-1">
-              Add a Photo
+            <h2 className="text-xl sm:text-2xl font-bold text-surface-50 mb-1">
+              Add a photo
             </h2>
-            <p className="text-indigo-300/80 mb-5 text-sm">
+            <p className="text-surface-300 mb-5 text-sm">
               Take a photo or upload from your gallery
             </p>
             <div className="flex flex-col sm:flex-row justify-center items-center gap-3">
-              <button
+              <Button
                 onClick={handleOpenCamera}
                 disabled={isProcessing}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-500 to-purple-600 
-                         text-white font-semibold py-3.5 px-6 rounded-xl transition-all shadow-lg
-                         active:scale-95 touch-manipulation disabled:opacity-50"
+                fullWidth
+                className="sm:w-auto"
+                leftIcon={<Icon type="camera" className="w-5 h-5" />}
               >
-                <Icon type="camera" className="w-5 h-5" />
-                <span>Take Photo</span>
-              </button>
-              <button
+                Take photo
+              </Button>
+              <Button
                 onClick={handleUploadPhoto}
                 disabled={isProcessing}
-                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-white/10 border border-white/20 
-                         text-white font-semibold py-3.5 px-6 rounded-xl transition-all
-                         hover:bg-white/15 active:scale-95 touch-manipulation disabled:opacity-50"
+                variant="outline"
+                fullWidth
+                className="sm:w-auto"
+                leftIcon={<Icon type="upload" className="w-5 h-5" />}
               >
-                <Icon type="upload" className="w-5 h-5" />
-                <span>Upload</span>
-              </button>
+                Upload
+              </Button>
             </div>
           </div>
         </div>
@@ -317,7 +318,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({
             setLastSource(null);
           }
         }}
-        confirmLabel="Use Photo"
+        confirmLabel="Use photo"
         onRetake={() => {
           if (lastSource === "camera-webcam") {
             setPendingImage(null);

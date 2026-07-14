@@ -2,62 +2,54 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# Run and deploy your AI Studio app
+# Dealer Social Post AI
 
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/drive/1oUQItN2xAWstwviAV2sxEz_GXnXp2MId
+AI-powered social media post creator for automotive dealerships. Salespeople log in with a dealer code, capture a delivery photo, and generate branded images, captions, compliance disclosures, and optional video.
 
 ## Quick Start
 
-**Prerequisites:** Node.js 18+
+**Prerequisites:** Node.js 22.12+
 
 1. **Install dependencies:**
    ```bash
    npm install
    ```
 
-2. **Get your API keys:**
-   - **Gemini API:** Visit [Google AI Studio](https://aistudio.google.com/app/apikey)
-   - **Vertex AI (optional):** For advanced features like Veo video generation
+2. **Configure environment:**
+   ```bash
+   cp .env.example .env.local
+   ```
+   Set at least:
+   - `GEMINI_API_KEY` — required for generation
+   - `ADMIN_DEALER_CODE` — 6+ character code for super-admin (optional but recommended)
+   - `VITE_POCKETBASE_URL=http://127.0.0.1:8090`
 
-3. **Configure your API keys:**
-   - Edit `.env.local` file in the project root
-   - Set `GEMINI_API_KEY=your-actual-api-key`
-   - (Optional) Set `VERTEX_API_KEY=your-vertex-api-key` for advanced features
-
-4. **Start the app:**
+3. **Start the app:**
    ```bash
    npm run dev:full
    ```
-   This starts both the PocketBase backend (port 8090) and Vite frontend (port 5173).
+   This starts PocketBase (port 8090) and the Vite frontend (port 5173).
 
-5. **Open your browser:**
+4. **Open your browser:**
    - Frontend: http://localhost:5173
    - PocketBase Admin: http://localhost:8090/_/
 
-📖 **For detailed setup instructions, see [SETUP.md](SETUP.md)**
-🚀 **For Vertex AI setup and advanced features, see [VERTEX_AI_SETUP.md](VERTEX_AI_SETUP.md)**
+📖 **Detailed setup:** [SETUP.md](SETUP.md)  
+🚀 **Vertex AI (video / Imagen):** [VERTEX_AI_SETUP.md](VERTEX_AI_SETUP.md)
 
-## Troubleshooting
-
-If you see an error like "Failed to generate image content" or "Something went wrong while processing your request":
-
-1. Make sure your `GEMINI_API_KEY` is set in `.env.local`
-2. Restart PocketBase completely
-3. See [SETUP.md](SETUP.md) for detailed troubleshooting steps
-
-### Available Commands
+## Commands
 
 | Command | Description |
 |---------|-------------|
-| `npm run dev:full` | Start both backend and frontend (recommended) |
-| `npm run start:backend` | Start PocketBase backend only |
-| `npm run dev` | Start Vite frontend only |
-| `npm run build` | Build for production |
-| `npm run test` | Run tests |
+| `npm run dev:full` | Start backend + frontend |
+| `npm run start:backend` | PocketBase only |
+| `npm run dev` | Vite frontend only |
+| `npm run build` | Production build |
+| `npm run typecheck` | TypeScript check |
+| `npm run test` | Unit / component tests |
 
-## Develop & Test
+## Architecture
 
-- Type-check the project: `npm run typecheck`
-- Run component/unit tests: `npm run test`
+- **Frontend:** React 19 + Vite + Tailwind + Zustand
+- **Backend:** PocketBase custom hooks (`pb_hooks/`) with session cookies
+- **Deploy:** Docker → Fly.io (`fly.toml`); optional Vercel rewrite for `/api/*`

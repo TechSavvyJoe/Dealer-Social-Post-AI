@@ -12,9 +12,8 @@ import { SPRING_CONFIGS, shouldReduceMotion } from "../../utils/animations";
  * - plain: Tertiary action (text only)
  * - outline: Alternative action (bordered)
  * - danger: Destructive action (red)
- * - gradient-sky: Sky blue gradient (AI/creative features)
- * - gradient-purple: Purple/pink gradient (special features)
- * - gradient-teal: Teal/cyan gradient (success actions)
+ * - gradient-sky: Brand blue gradient (AI/creative features)
+ * - gradient-teal: Success/info gradient (confirmation actions)
  */
 type Variant =
   | "filled"
@@ -23,7 +22,6 @@ type Variant =
   | "outline"
   | "danger"
   | "gradient-sky"
-  | "gradient-purple"
   | "gradient-teal"
   | "primary"
   | "secondary"
@@ -127,13 +125,6 @@ const variantStyles: Record<Variant, string> = {
   ),
   "gradient-sky": cn(
     "bg-gradient-to-r from-sky-500 to-primary-500",
-    "text-white",
-    "shadow-elevation-2",
-    "hover:shadow-elevation-3 hover:brightness-110",
-    "active:scale-[0.98]"
-  ),
-  "gradient-purple": cn(
-    "bg-gradient-to-r from-purple-500 to-pink-500",
     "text-white",
     "shadow-elevation-2",
     "hover:shadow-elevation-3 hover:brightness-110",

@@ -814,31 +814,40 @@ routerAdd("GET", "/api/proxy-image", (c) => {
 // any actual secret values.
 // ----------------------------------------------------------------------------
 routerAdd("GET", "/api/app/health", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const isAuthedAdmin =
+    helpers.sessionRoleFromCookie(c) === "super_admin";
+
   const result = {
     ok: true,
     ts: new Date().toISOString(),
     checks: {
       pocketbase: false,
       gemini_key_set: false,
+      // Optional S2S token — not required for browser session auth.
       proxy_token_set: false,
       vertex_credentials_set: false,
       anthropic_key_set: false,
       openai_key_set: false,
       admin_dealer_code_set: false,
     },
-    counts: {
+    version: "1.0",
+  };
+
+  // Aggregate tenant counts only for authenticated super-admins.
+  if (isAuthedAdmin) {
+    result.counts = {
       dealers: 0,
       posts_24h: 0,
       photo_releases_24h: 0,
-    },
-    version: "1.0",
-  };
+    };
+  }
 
   try {
     // Smoke a trivial PB query
     const dealers = $app.dao().findCollectionByNameOrId("dealers");
     result.checks.pocketbase = !!dealers;
-    if (dealers) {
+    if (dealers && isAuthedAdmin) {
       try {
         const all = $app
           .dao()
@@ -853,38 +862,39 @@ routerAdd("GET", "/api/app/health", (c) => {
     result.checks.pocketbase = false;
   }
 
-  // Posts in the last 24h (across all dealers)
-  try {
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const posts = $app
-      .dao()
-      .findRecordsByFilter(
-        "posts",
-        "generated_at >= {:s}",
-        "-generated_at",
-        1000,
-        0,
-        { s: since }
-      );
-    result.counts.posts_24h = posts.length;
-  } catch (_e) {
-    /* posts collection may not exist yet */
-  }
-  try {
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const releases = $app
-      .dao()
-      .findRecordsByFilter(
-        "photo_releases",
-        "signed_at >= {:s}",
-        "-signed_at",
-        1000,
-        0,
-        { s: since }
-      );
-    result.counts.photo_releases_24h = releases.length;
-  } catch (_e) {
-    /* photo_releases may not exist yet */
+  if (isAuthedAdmin) {
+    try {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const posts = $app
+        .dao()
+        .findRecordsByFilter(
+          "posts",
+          "generated_at >= {:s}",
+          "-generated_at",
+          1000,
+          0,
+          { s: since }
+        );
+      result.counts.posts_24h = posts.length;
+    } catch (_e) {
+      /* posts collection may not exist yet */
+    }
+    try {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const releases = $app
+        .dao()
+        .findRecordsByFilter(
+          "photo_releases",
+          "signed_at >= {:s}",
+          "-signed_at",
+          1000,
+          0,
+          { s: since }
+        );
+      result.counts.photo_releases_24h = releases.length;
+    } catch (_e) {
+      /* photo_releases may not exist yet */
+    }
   }
 
   // Env presence (booleans only — never echo the values)
@@ -897,8 +907,8 @@ routerAdd("GET", "/api/app/health", (c) => {
   result.checks.admin_dealer_code_set =
     !!($os.getenv("ADMIN_DEALER_CODE") || "").trim();
 
-  // Top-level ok = critical checks must pass
-  if (!result.checks.pocketbase) {
+  // Top-level ok = critical checks must pass (uptime monitors hit this).
+  if (!result.checks.pocketbase || !result.checks.gemini_key_set) {
     result.ok = false;
   }
 
@@ -983,19 +993,19 @@ routerAdd("POST", "/api/app/session", (c) => {
 
   let role = "salesperson";
   let record;
-  const adminEnv = ($os.getenv("ADMIN_DEALER_CODE") || "999999").trim();
+  // SECURITY: never fall back to a hardcoded admin code. If ADMIN_DEALER_CODE
+  // is unset, super-admin login is simply unavailable.
+  const adminEnv = ($os.getenv("ADMIN_DEALER_CODE") || "").trim();
 
   if (adminEnv && dealerCode === adminEnv) {
     role = "super_admin";
     try {
       record = $app.dao().findFirstRecordByData("dealers", "code", adminEnv);
     } catch (_e) {}
-    
+
     if (!record) {
-      // Auto-provision the super admin record using raw SQL to bypass schema
-      // validation (the DB schema may still enforce max:4 / pattern for code).
-      // Wrapped in try/catch so a duplicate-key error (from a prior attempt)
-      // doesn't crash the login flow.
+      // Auto-provision only when ADMIN_DEALER_CODE is explicitly configured.
+      // Uses raw SQL so a still-migrating schema can't block bootstrap.
       try {
         const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
         let id = "";
@@ -1003,16 +1013,14 @@ routerAdd("POST", "/api/app/session", (c) => {
           id += chars.charAt(Math.floor(Math.random() * chars.length));
         }
         const now = new Date().toISOString().replace('T', ' ').substring(0, 19) + "Z";
-        
+
         $app.dao().db()
           .newQuery("INSERT INTO dealers (id, code, name, created, updated) VALUES ({:id}, {:code}, 'SYSTEM ADMIN', {:now}, {:now})")
           .bind({ id: id, code: adminEnv, now: now })
           .execute();
-          
+
         record = $app.dao().findRecordById("dealers", id);
       } catch (insertErr) {
-        // Likely UNIQUE constraint — the record exists but findFirstRecordByData
-        // failed above (e.g. stale cache). Re-query by code with raw SQL.
         console.log("[session] admin insert failed (likely duplicate), re-querying:", insertErr);
         try {
           record = $app.dao().findFirstRecordByData("dealers", "code", adminEnv);
@@ -1070,42 +1078,9 @@ routerAdd("POST", "/api/app/session", (c) => {
     detail: `role=${role}`,
   });
 
-  let logoUrl = record.getString("logo");
-  if (logoUrl && !logoUrl.startsWith("http")) {
-    logoUrl = `/api/files/dealers/${record.id}/${logoUrl}`;
-  }
-
   return c.json(200, {
     role: role,
-    dealer: {
-      id: record.id,
-      name: record.getString("name"),
-      code: record.getString("code"),
-      logo: logoUrl,
-      brand_voice: record.getString("brand_voice"),
-      banned_phrases: record.getString("banned_phrases"),
-      oem_affiliation: record.getString("oem_affiliation"),
-      requires_approval: record.getBool
-        ? record.getBool("requires_approval")
-        : !!record.get("requires_approval"),
-      brand_color: record.getString("brand_color"),
-      website: record.getString("website"),
-      phone: record.getString("phone"),
-      address: record.getString("address"),
-      hours: record.getString("hours"),
-      tagline: record.getString("tagline"),
-      facebook_url: record.getString("facebook_url"),
-      instagram_handle: record.getString("instagram_handle"),
-      tiktok_handle: record.getString("tiktok_handle"),
-      x_handle: record.getString("x_handle"),
-      gbp_url: record.getString("gbp_url"),
-      default_hashtags: record.getString("default_hashtags"),
-      default_footer: record.getString("default_footer"),
-      enabled_styles: record.getString("enabled_styles"),
-      default_style: record.getString("default_style"),
-      enabled_fun_styles: record.getString("enabled_fun_styles"),
-      custom_scenarios: record.getString("custom_scenarios"),
-    },
+    dealer: helpers.serializeDealer(record),
   });
   } catch (e) {
     console.error("SESSION ERROR:", e);
@@ -1139,26 +1114,9 @@ routerAdd("GET", "/api/app/session", (c) => {
     /* ignore */
   }
 
-  let logoUrl = record.getString("logo");
-  if (logoUrl && !logoUrl.startsWith("http")) {
-    logoUrl = `/api/files/dealers/${record.id}/${logoUrl}`;
-  }
-
   return c.json(200, {
     role: role,
-    dealer: {
-      id: record.id,
-      name: record.getString("name"),
-      code: record.getString("code"),
-      logo: logoUrl,
-      brand_voice: record.getString("brand_voice"),
-      banned_phrases: record.getString("banned_phrases"),
-      oem_affiliation: record.getString("oem_affiliation"),
-      requires_approval: record.getBool
-        ? record.getBool("requires_approval")
-        : !!record.get("requires_approval"),
-      brand_color: record.getString("brand_color"),
-    },
+    dealer: helpers.serializeDealer(record),
   });
 });
 
@@ -1205,8 +1163,23 @@ routerAdd("POST", "/api/app/photo_releases", (c) => {
 
     const form = new RecordUpsertForm($app, new Record(releases));
     form.loadRequest($apis.requestInfo(c), "");
-    // Force dealer field to the session's dealer; ignore any client-supplied value.
+    // Force dealer + audit fields server-side; never trust client timestamps.
     form.data["dealer"] = dealer.id;
+    form.data["signed_at"] = new Date().toISOString();
+    try {
+      const ip = helpers.clientIP(c) || "";
+      // Store a hash, not the raw IP (field is named ip_hash).
+      form.data["ip_hash"] = ip
+        ? $security.sha256(ip)
+        : "";
+    } catch (_e) {
+      form.data["ip_hash"] = "";
+    }
+    try {
+      form.data["user_agent"] = (helpers.userAgent(c) || "").toString().slice(0, 300);
+    } catch (_e) {
+      form.data["user_agent"] = "";
+    }
 
     form.submit();
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Settings, LogOut, ChevronDown } from "lucide-react";
+import { Settings, LogOut } from "lucide-react";
 import { Dealer } from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Button } from "./ui/Button";
@@ -51,8 +51,8 @@ export const Header: React.FC<HeaderProps> = ({
         "w-full z-40 sticky top-0",
         "transition-all duration-300 ease-out",
         isScrolled
-          ? "bg-surface-900/90 backdrop-blur-2xl shadow-lg shadow-black/10"
-          : "bg-surface-900/70 backdrop-blur-xl",
+          ? "bg-surface-900/92 backdrop-blur-2xl shadow-lg shadow-black/15"
+          : "bg-surface-900/72 backdrop-blur-xl",
         "border-b",
         isScrolled ? "border-white/10" : "border-white/5"
       )}
@@ -60,17 +60,17 @@ export const Header: React.FC<HeaderProps> = ({
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
     >
-      <div className="mx-auto flex w-full max-w-screen-2xl items-center justify-between px-4 py-3 sm:px-6 lg:px-10">
+      <div className="mx-auto flex w-full max-w-screen-2xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-10">
         {/* Dealer Info */}
         <motion.div
-          className="flex items-center gap-3"
+          className="min-w-0 flex items-center gap-3"
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.1, duration: 0.4 }}
         >
           {/* Logo with hover effect */}
           <motion.div
-            className="relative group cursor-pointer"
+            className="relative group shrink-0"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.98 }}
             transition={{ type: "spring", stiffness: 400, damping: 25 }}
@@ -79,14 +79,14 @@ export const Header: React.FC<HeaderProps> = ({
               <img
                 src={dealer.logo}
                 alt={`${dealer.name} logo`}
-                className="relative w-10 h-10 object-contain rounded-xl bg-white/10 p-1.5 ring-1 ring-white/10 group-hover:ring-white/15 transition-all duration-200"
+                className="relative w-11 h-11 object-contain rounded-2xl bg-white/[0.07] p-1.5 ring-1 ring-white/10 shadow-sm transition-all duration-200 group-hover:ring-white/20"
               />
             ) : (
               <div
                 className={cn(
-                  "w-10 h-10 rounded-xl flex items-center justify-center",
+                  "w-11 h-11 rounded-2xl flex items-center justify-center",
                   "font-semibold text-[color:var(--brand-foreground)] text-xl",
-                  "ring-1 ring-white/10"
+                  "ring-1 ring-white/10 shadow-sm"
                 )}
                 style={{ backgroundColor: "var(--brand-primary)" }}
                 aria-hidden="true"
@@ -97,10 +97,17 @@ export const Header: React.FC<HeaderProps> = ({
           </motion.div>
 
           {/* Dealer name + product label, sentence case (Dealer Trust) */}
-          <div className="flex flex-col">
-            <span className="font-semibold text-surface-50 text-base sm:text-lg tracking-tight leading-tight">
-              {dealer.name}
-            </span>
+          <div className="min-w-0 flex flex-col">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate font-semibold text-surface-50 text-base sm:text-lg tracking-tight leading-tight">
+                {dealer.name}
+              </span>
+              {dealer.requires_approval && (
+                <Badge variant="warning" size="sm" uppercase={false}>
+                  Approval required
+                </Badge>
+              )}
+            </div>
             <span className="hidden sm:inline text-xs font-medium text-surface-300 mt-0.5 tracking-tight">
               Social post studio
             </span>
@@ -135,7 +142,7 @@ export const Header: React.FC<HeaderProps> = ({
             <AnimatePresence>
               {showTooltip === "settings" && (
                 <motion.div
-                  className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-surface-800 text-xs text-surface-200 rounded-lg whitespace-nowrap sm:hidden z-50"
+                  className="absolute top-full left-1/2 -translate-x-1/2 mt-2 rounded-lg border border-white/10 bg-surface-950/95 px-2 py-1 text-xs text-surface-200 shadow-lg whitespace-nowrap sm:hidden z-50"
                   initial={{ opacity: 0, y: -5 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -5 }}
@@ -162,22 +169,22 @@ export const Header: React.FC<HeaderProps> = ({
                 "hover:bg-error-500/15 hover:border-error-500/40 hover:text-error-300",
                 "active:bg-error-500/25"
               )}
-              aria-label="Logout"
+              aria-label="Log out"
               aria-keyshortcuts="Shift+L"
             >
-              <span className="hidden sm:inline">Logout</span>
+              <span className="hidden sm:inline">Log out</span>
             </Button>
 
             {/* Tooltip for mobile */}
             <AnimatePresence>
               {showTooltip === "logout" && (
                 <motion.div
-                  className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-surface-800 text-xs text-surface-200 rounded-lg whitespace-nowrap sm:hidden z-50"
+                  className="absolute top-full left-1/2 -translate-x-1/2 mt-2 rounded-lg border border-white/10 bg-surface-950/95 px-2 py-1 text-xs text-surface-200 shadow-lg whitespace-nowrap sm:hidden z-50"
                   initial={{ opacity: 0, y: -5 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -5 }}
                 >
-                  Logout
+                  Log out
                 </motion.div>
               )}
             </AnimatePresence>

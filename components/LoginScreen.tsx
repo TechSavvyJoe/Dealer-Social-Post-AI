@@ -1,12 +1,15 @@
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Loader2, Sparkles } from "lucide-react";
+import { CheckCircle2, Loader2, ShieldCheck } from "lucide-react";
 import { Logo } from "./Logo";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Dialpad } from "./Dialpad";
 import { Card, CardContent } from "./ui/Card";
 import { useToast } from "./ui/Toast";
 import { cn } from "../utils/classNames";
+
+const DEALER_CODE_LENGTH = 6;
+const ADMIN_CODE_MAX_LENGTH = 12;
 
 interface LoginScreenProps {
   onLogin: (dealerId: string) => Promise<boolean>;
@@ -17,38 +20,67 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const toast = useToast();
+  const isAdminCodeEntry = /[A-Z]/i.test(dealerCode) || dealerCode.length > DEALER_CODE_LENGTH;
 
-  const handleDialpadKeyPress = async (key: string) => {
-    triggerHapticFeedback();
-    if (isLoading || isSuccess) return;
+  const submitCode = useCallback(
+    async (codeToSubmit: string) => {
+      const normalizedCode = codeToSubmit.trim().toUpperCase();
+      if (
+        isLoading ||
+        isSuccess ||
+        normalizedCode.length < DEALER_CODE_LENGTH
+      ) {
+        if (normalizedCode.length > 0 && normalizedCode.length < DEALER_CODE_LENGTH) {
+          toast.info("Enter at least 6 characters to sign in.");
+        }
+        return;
+      }
 
-    let currentCode = dealerCode;
-    if (key === "backspace") {
-      currentCode = currentCode.slice(0, -1);
-    } else if (currentCode.length < 6) {
-      currentCode += key;
-    }
-    setDealerCode(currentCode);
-
-    if (currentCode.length === 6) {
       setIsLoading(true);
       try {
-        const loginSuccess = await onLogin(currentCode);
+        const loginSuccess = await onLogin(normalizedCode);
         if (loginSuccess) {
           setIsSuccess(true);
+          toast.success("Access confirmed.");
           // Brief success animation before transition
           await new Promise((r) => setTimeout(r, 800));
         } else {
-          toast.error("Dealer code not found.");
-          setTimeout(() => {
+          toast.error("Code not recognized. Check the code and try again.");
+          if (/^\d{6}$/.test(normalizedCode)) {
             setDealerCode("");
-          }, 1000);
+          } else {
+            setDealerCode(normalizedCode);
+          }
         }
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "An unknown error occurred.");
       } finally {
         setIsLoading(false);
       }
+    },
+    [isLoading, isSuccess, onLogin, toast]
+  );
+
+  const handleDialpadKeyPress = async (key: string) => {
+    triggerHapticFeedback();
+    if (isLoading || isSuccess) return;
+
+    if (key === "clear") {
+      setDealerCode("");
+      return;
+    }
+
+    const currentCode =
+      key === "backspace"
+        ? dealerCode.slice(0, -1)
+        : /^\d$/.test(key) && dealerCode.length < DEALER_CODE_LENGTH
+        ? `${dealerCode}${key}`
+        : dealerCode;
+
+    setDealerCode(currentCode);
+
+    if (currentCode.length === DEALER_CODE_LENGTH && /^\d{6}$/.test(currentCode)) {
+      await submitCode(currentCode);
     }
   };
 
@@ -64,16 +96,28 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         return;
       }
 
-      if (e.key === "Backspace") {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        submitCode(dealerCode);
+      } else if (e.key === "Backspace") {
         handleDialpadKeyPress("backspace");
+      } else if (e.key === "Escape") {
+        setDealerCode("");
       } else if (/^[a-zA-Z0-9]$/.test(e.key)) {
-        handleDialpadKeyPress(e.key.toUpperCase());
+        const nextCode = `${dealerCode}${e.key.toUpperCase()}`.slice(
+          0,
+          ADMIN_CODE_MAX_LENGTH
+        );
+        setDealerCode(nextCode);
+        if (nextCode.length === DEALER_CODE_LENGTH && /^\d{6}$/.test(nextCode)) {
+          submitCode(nextCode);
+        }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [dealerCode, isLoading, isSuccess]);
+  }, [dealerCode, handleDialpadKeyPress, isLoading, isSuccess, submitCode]);
 
   return (
     <motion.div
@@ -85,7 +129,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       {/* Brand-tinted ambient glow — static, subtle, picks up dealer color. */}
       <div
         aria-hidden="true"
-        className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[420px] h-[420px] rounded-full pointer-events-none opacity-60"
+        className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[420px] h-[420px] rounded-full pointer-events-none opacity-50"
         style={{
           background:
             "radial-gradient(circle, color-mix(in srgb, var(--brand-primary) 14%, transparent), transparent 70%)",
@@ -112,8 +156,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         <Card
           elevation={3}
           className={cn(
-            "min-h-[380px] flex flex-col justify-center",
-            "backdrop-blur-xl border-white/[0.06]",
+            "min-h-[420px] flex flex-col justify-center",
+            "backdrop-blur-xl border-white/[0.08]",
             isSuccess && "border-success-500/50 shadow-glow-success"
           )}
           style={{
@@ -128,21 +172,24 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               {isSuccess ? (
                 <motion.div
                   key="success"
-                  className="flex flex-col items-center justify-center py-12"
+                  className="flex flex-col items-center justify-center py-12 text-center"
                   initial={{ opacity: 0, scale: 0.8 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.8 }}
                   transition={{ duration: 0.4, type: "spring", stiffness: 300 }}
                 >
                   <motion.div
-                    className="w-16 h-16 rounded-full bg-success-500/20 flex items-center justify-center mb-4"
+                    className="w-16 h-16 rounded-full bg-success-500/15 border border-success-500/30 flex items-center justify-center mb-4"
                     animate={{ scale: [1, 1.1, 1] }}
                     transition={{ duration: 0.5, repeat: 2 }}
                   >
-                    <Sparkles className="h-8 w-8 text-success-400" />
+                    <CheckCircle2 className="h-8 w-8 text-success-400" />
                   </motion.div>
                   <p className="text-lg font-semibold text-success-300">
-                    Welcome!
+                    Access confirmed
+                  </p>
+                  <p className="mt-1 text-sm text-surface-400">
+                    Opening your dealership workspace.
                   </p>
                 </motion.div>
               ) : isLoading ? (
@@ -163,7 +210,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     />
                   </div>
                   <p className="mt-4 text-sm text-surface-300">
-                    Authenticating...
+                    Verifying access...
                   </p>
                 </motion.div>
               ) : (
@@ -182,11 +229,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.1 }}
                   >
+                    <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06]">
+                      <ShieldCheck className="h-5 w-5 text-primary-300" />
+                    </div>
                     <h1 className="text-2xl font-bold text-surface-50 mb-1">
-                      Enter Dealer Code
+                      Enter dealer code
                     </h1>
                     <p className="text-sm text-surface-400">
-                      6-digit access code
+                      Use the keypad for six digits, or type an admin code and press Enter.
                     </p>
                   </motion.div>
 
@@ -220,7 +270,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                             className={cn(
                               "w-4 h-4 rounded-full transition-all duration-200 relative z-10",
                               isFilled
-                                ? "bg-primary-400 shadow-lg shadow-primary-500/50"
+                                ? "bg-primary-400 shadow-lg shadow-primary-500/30"
                                 : "bg-surface-700/80 border border-surface-600"
                             )}
                             animate={{
@@ -235,6 +285,22 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                         </motion.div>
                       );
                     })}
+                  </div>
+
+                  <div
+                    className={cn(
+                      "min-h-[34px] rounded-full border px-3 py-2 text-center text-xs font-medium transition-all",
+                      isAdminCodeEntry
+                        ? "border-primary-500/30 bg-primary-500/10 text-primary-200"
+                        : "border-white/[0.06] bg-white/[0.03] text-surface-400"
+                    )}
+                    aria-live="polite"
+                  >
+                    {isAdminCodeEntry
+                      ? `${dealerCode.length}/${ADMIN_CODE_MAX_LENGTH} admin code characters. Press Enter to continue.`
+                      : dealerCode.length > 0
+                      ? `${DEALER_CODE_LENGTH - dealerCode.length} digits remaining`
+                      : "Ready for salesperson access"}
                   </div>
 
                   {/* Dialpad */}

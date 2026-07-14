@@ -1,6 +1,8 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Icon } from './Icons';
 import { triggerHapticFeedback } from '../utils/haptics';
+import { Button } from './ui/Button';
+import { Modal } from './ui/Modal';
 
 interface WebcamCaptureProps {
   onImageSelected: (imageSrc: string) => void;
@@ -146,13 +148,23 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, o
 
   if (error) {
     return (
-      <div className="w-full max-w-2xl mx-auto p-8 flex flex-col items-center justify-center bg-red-900/50 border border-red-700 text-center rounded-2xl">
-        <Icon type="error" className="w-16 h-16 text-red-400 mb-4" />
-        <p className="text-red-300 text-lg">{error}</p>
-        <button onClick={handleClose} className="mt-6 bg-indigo-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-indigo-500 transition-colors">
-          Go Back
-        </button>
-      </div>
+      <Modal
+        isOpen
+        onClose={handleClose}
+        title="Camera unavailable"
+        description="We could not start the camera on this device."
+        size="lg"
+      >
+        <div className="flex flex-col items-center justify-center text-center">
+          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-error-500/30 bg-error-500/10">
+            <Icon type="error" className="w-8 h-8 text-error-300" />
+          </div>
+          <p className="text-error-100 text-base leading-relaxed">{error}</p>
+          <Button onClick={handleClose} className="mt-6">
+            Go back
+          </Button>
+        </div>
+      </Modal>
     );
   }
 
@@ -160,28 +172,40 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({ onImageSelected, o
   const aspectRatioClass = orientation === 'portrait' ? 'aspect-[9/16]' : 'aspect-video';
 
   return (
-    <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-sm flex flex-col items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="webcam-title">
-        <h2 id="webcam-title" className="sr-only">Webcam Capture</h2>
-        <div className={`relative w-full max-w-4xl ${aspectRatioClass} bg-black rounded-lg overflow-hidden shadow-2xl border-2 border-white/10`}>
+    <Modal
+      isOpen
+      onClose={handleClose}
+      title="Take photo"
+      description="Frame the vehicle and customer, then capture when ready."
+      size="full"
+      className="sm:max-w-4xl bg-surface-900 border-white/10"
+    >
+      <div className="space-y-5">
+        <div className={`relative w-full ${aspectRatioClass} bg-black rounded-2xl overflow-hidden shadow-2xl border border-white/10`}>
             <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" aria-label="Live webcam feed" />
             <canvas ref={canvasRef} className="hidden" aria-hidden="true" />
             {/* Flip camera button */}
-            <button
+            <Button
+              type="button"
               onClick={() => { triggerHapticFeedback(); setFacingMode(prev => prev === 'environment' ? 'user' : 'environment'); }}
-              className="absolute top-3 left-3 text-white bg-black/40 hover:bg-black/60 transition-colors rounded-full p-2"
+              variant="outline"
+              size="icon"
+              className="absolute top-3 left-3 border-white/15 bg-surface-950/60 text-surface-50 hover:bg-surface-900/80"
               aria-label="Flip camera"
             >
               <Icon type="restart" className="w-6 h-6" />
-            </button>
+            </Button>
         </div>
-        <div className="flex items-center justify-center w-full max-w-4xl mt-6">
-             <button onClick={handleClose} title="Go Back" aria-label="Go Back" className="absolute left-4 sm:left-auto text-slate-300 hover:text-white transition-colors p-3 rounded-full bg-black/30 hover:bg-black/50">
-                <Icon type="retake" className="w-8 h-8" />
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
+            <Button onClick={handleClose} title="Go back" aria-label="Go back" variant="outline" size="icon">
+              <Icon type="retake" className="w-6 h-6" />
+            </Button>
+            <button onClick={handleCapture} title="Take photo" aria-label="Take photo" className="w-20 h-20 p-1 rounded-full bg-white/80 hover:bg-white active:bg-white transition-all flex items-center justify-center shadow-lg shadow-black/30 transform active:scale-95 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-900">
+                <div className="w-full h-full rounded-full bg-white ring-4 ring-inset ring-surface-900"></div>
             </button>
-            <button onClick={handleCapture} title="Take Photo" aria-label="Take Photo" className="w-20 h-20 p-1 rounded-full bg-white/50 hover:bg-white/75 active:bg-white transition-all flex items-center justify-center shadow-lg transform active:scale-95">
-                <div className="w-full h-full rounded-full bg-white ring-4 ring-inset ring-slate-800"></div>
-            </button>
+            <div aria-hidden="true" />
         </div>
-    </div>
+      </div>
+    </Modal>
   );
 };

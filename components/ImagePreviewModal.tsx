@@ -20,7 +20,7 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = memo(
     imageSrc,
     onConfirm,
     onRetake,
-    confirmLabel = "Use Photo",
+    confirmLabel = "Use photo",
   }) => {
     const handleClose = () => {
       triggerHapticFeedback();

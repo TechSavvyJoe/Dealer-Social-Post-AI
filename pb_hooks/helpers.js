@@ -288,6 +288,48 @@ function assertEnum(val, allowedValues) {
   return val;
 }
 
+/**
+ * Serialize a dealers collection record into the public dealer payload shared
+ * by POST and GET /api/app/session. Keep these in sync — a refresh must not
+ * drop brand/settings fields that login returned.
+ */
+function serializeDealer(record) {
+  let logoUrl = record.getString("logo");
+  if (logoUrl && !logoUrl.startsWith("http")) {
+    logoUrl = `/api/files/dealers/${record.id}/${logoUrl}`;
+  }
+
+  return {
+    id: record.id,
+    name: record.getString("name"),
+    code: record.getString("code"),
+    logo: logoUrl,
+    brand_voice: record.getString("brand_voice"),
+    banned_phrases: record.getString("banned_phrases"),
+    oem_affiliation: record.getString("oem_affiliation"),
+    requires_approval: record.getBool
+      ? record.getBool("requires_approval")
+      : !!record.get("requires_approval"),
+    brand_color: record.getString("brand_color"),
+    website: record.getString("website"),
+    phone: record.getString("phone"),
+    address: record.getString("address"),
+    hours: record.getString("hours"),
+    tagline: record.getString("tagline"),
+    facebook_url: record.getString("facebook_url"),
+    instagram_handle: record.getString("instagram_handle"),
+    tiktok_handle: record.getString("tiktok_handle"),
+    x_handle: record.getString("x_handle"),
+    gbp_url: record.getString("gbp_url"),
+    default_hashtags: record.getString("default_hashtags"),
+    default_footer: record.getString("default_footer"),
+    enabled_styles: record.getString("enabled_styles"),
+    default_style: record.getString("default_style"),
+    enabled_fun_styles: record.getString("enabled_fun_styles"),
+    custom_scenarios: record.getString("custom_scenarios"),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
@@ -316,4 +358,6 @@ module.exports = {
   // Validation
   assertString,
   assertEnum,
+  // Serialization
+  serializeDealer,
 };

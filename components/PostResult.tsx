@@ -32,6 +32,7 @@ import { PlatformLimitMeter } from "./PlatformLimitMeter";
 import { ShareDialog } from "./ShareDialog";
 import { CaptionAlternativesModal } from "./CaptionAlternativesModal";
 import { ProgressiveImage } from "./ui/ProgressiveImage";
+import { useToast } from "./ui/Toast";
 import { useTouchGestures } from "../hooks/useTouchGestures";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 
@@ -143,6 +144,7 @@ interface PostResultProps {
   onGenerateCaptionVariant?: () => Promise<string>;
   error?: string | null;
   isDesktopLayout: boolean;
+  requiresApproval?: boolean;
 }
 
 const LoadingOverlay: React.FC<{ message: string; progress?: number }> =
@@ -172,8 +174,10 @@ export const PostResult: React.FC<PostResultProps> = ({
   onGenerateCaptionVariant,
   error,
   isDesktopLayout,
+  requiresApproval = false,
 }) => {
   const [copied, setCopied] = useState(false);
+  const toast = useToast();
 
   const [isImageEditing, setIsImageEditing] = useState(false);
   const [imageEditPrompt, setImageEditPrompt] = useState("");
@@ -229,6 +233,8 @@ export const PostResult: React.FC<PostResultProps> = ({
   }, [post.image, post.text]);
   const imageBusy = isImageLoading || isVideoLoading;
   const textBusy = isTextLoading;
+  const approvalGateMessage =
+    "This post is awaiting manager approval. Save, share, and export unlock after approval.";
 
   // Swipe gesture for returning to home/start over on mobile
   const touchHandlers = useTouchGestures({
@@ -339,6 +345,10 @@ export const PostResult: React.FC<PostResultProps> = ({
 
   const handleSave = async () => {
     triggerHapticFeedback();
+    if (requiresApproval) {
+      toast.warning(approvalGateMessage);
+      return;
+    }
     const link = document.createElement("a");
 
     if (videoUrl) {
@@ -358,7 +368,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       particleCount: 100,
       spread: 70,
       origin: { y: 0.6 },
-      colors: ["#38bdf8", "#818cf8", "#c084fc", "#e879f9"],
+      colors: ["#1e40af", "#2563eb", "#60a5fa", "#16a34a"],
     });
   };
 
@@ -431,6 +441,10 @@ export const PostResult: React.FC<PostResultProps> = ({
   // ShareDialog when the user wants to bypass per-platform formatting).
   const handleShareLegacy = async () => {
     triggerHapticFeedback();
+    if (requiresApproval) {
+      toast.warning(approvalGateMessage);
+      return;
+    }
     const textToCopy = captionWithDisclosures;
     const textForShareAPI = textToCopy.trim();
     setIsSharing(true);
@@ -469,8 +483,8 @@ export const PostResult: React.FC<PostResultProps> = ({
       if (navigator.share && navigator.canShare(shareData)) {
         await navigator.share(shareData);
       } else {
-        alert(
-          "Web Share is not supported on your device, but the post text has been copied to your clipboard!"
+        toast.info(
+          "Sharing is not supported on this device, so the post text was copied to your clipboard."
         );
       }
     } catch (error) {
@@ -478,8 +492,8 @@ export const PostResult: React.FC<PostResultProps> = ({
         // User cancelled the share dialog, do nothing.
       } else {
         console.error("Sharing failed:", error);
-        alert(
-          "Could not open the share dialog, but the post text has been copied to your clipboard!"
+        toast.error(
+          "Could not open sharing, so the post text was copied to your clipboard."
         );
       }
     } finally {
@@ -686,7 +700,7 @@ export const PostResult: React.FC<PostResultProps> = ({
               )} 
             />
             <span className="text-xs font-semibold text-surface-200">
-              {shouldRefresh ? "Release to Regenerate" : "Pull down to Regenerate"}
+              {shouldRefresh ? "Release to regenerate" : "Pull down to regenerate"}
             </span>
           </div>
         </div>
@@ -701,12 +715,12 @@ export const PostResult: React.FC<PostResultProps> = ({
       </Suspense>
 
       <MultiFormatExportModal
-        isOpen={isMultiFormatOpen}
+        isOpen={isMultiFormatOpen && !requiresApproval}
         onClose={() => setIsMultiFormatOpen(false)}
         sourceImageUrl={post.image}
       />
       <ShareDialog
-        isOpen={isShareDialogOpen}
+        isOpen={isShareDialogOpen && !requiresApproval}
         onClose={() => setIsShareDialogOpen(false)}
         content={{
           text: captionWithDisclosures,
@@ -754,7 +768,7 @@ export const PostResult: React.FC<PostResultProps> = ({
             handleImageAction(
               () => onFunMode(styleName),
               [
-                "Queuing Fun Mode style...",
+                "Queuing fun mode style...",
                 "Illustrating with your photo reference...",
                 "Polishing colors and details...",
               ]
@@ -775,8 +789,32 @@ export const PostResult: React.FC<PostResultProps> = ({
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1, duration: 0.4 }}
         >
-          Your Post is Ready!
+          {requiresApproval ? "Post awaiting approval" : "Your post is ready"}
         </motion.h2>
+        {requiresApproval && (
+          <motion.div
+            className="mx-auto flex max-w-3xl flex-col gap-3 rounded-2xl border border-warning-500/30 bg-warning-500/10 px-4 py-4 text-warning-100 shadow-lg shadow-black/10 sm:flex-row sm:items-start"
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25 }}
+            role="status"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-warning-500/30 bg-warning-500/12">
+              <AlertCircle className="h-5 w-5 text-warning-300" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-semibold text-warning-100">Manager approval pending</p>
+                <Badge variant="warning" uppercase={false}>
+                  Save and share locked
+                </Badge>
+              </div>
+              <p className="mt-1 text-sm leading-relaxed text-warning-100/80">
+                {approvalGateMessage}
+              </p>
+            </div>
+          </motion.div>
+        )}
         {error && (
           <motion.div
             className="mb-4 bg-error-900/50 border border-error-700 text-error-300 px-4 py-3 rounded-xl flex items-center justify-center gap-2 backdrop-blur-sm"
@@ -862,29 +900,33 @@ export const PostResult: React.FC<PostResultProps> = ({
                       ? "Working..."
                       : isImageEditing
                       ? "Cancel"
-                      : "AI Image Edit"
+                      : "AI image edit"
                   }
                   onClick={() => setIsImageEditing(!isImageEditing)}
                 />
 
                 <ActionTile
                   icon={Sparkles}
-                  iconClassName="text-secondary-300"
+                  iconClassName="text-primary-300"
                   tooltip="Artistic transformations"
                   disabled={imageBusy || !!videoUrl}
                   busy={imageBusy}
-                  label={imageBusy ? "Working..." : "Fun Mode"}
+                  label={imageBusy ? "Working..." : "Fun mode"}
                   onClick={() => setIsFunModeDirectorOpen(true)}
                 />
 
                 <ActionTile
                   icon={Download}
                   variant="primary"
-                  tooltip="Download to your device"
-                  disabled={imageBusy}
+                  tooltip={
+                    requiresApproval
+                      ? "Manager approval is required before saving"
+                      : "Download to your device"
+                  }
+                  disabled={imageBusy || requiresApproval}
                   busy={imageBusy}
                   label={
-                    imageBusy ? "Working..." : `Save ${videoUrl ? "Video" : "Image"}`
+                    imageBusy ? "Working..." : `Save ${videoUrl ? "video" : "image"}`
                   }
                   onClick={handleSave}
                 />
@@ -898,7 +940,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     isVideoLoading
                       ? "Rendering…"
                       : videoUrl
-                      ? "New Video"
+                      ? "New video"
                       : "Animate with AI"
                   }
                   onClick={() => setIsVideoDirectorOpen(true)}
@@ -907,16 +949,26 @@ export const PostResult: React.FC<PostResultProps> = ({
                 <ActionTile
                   icon={LayoutGrid}
                   iconClassName="text-amber-300"
-                  tooltip="Export all 4 sizes at once (FB, IG/TikTok, Marketplace, GBP)"
-                  disabled={imageBusy || !!videoUrl}
-                  label="All Formats"
-                  onClick={() => setIsMultiFormatOpen(true)}
+                  tooltip={
+                    requiresApproval
+                      ? "Manager approval is required before exporting"
+                      : "Export all 4 sizes at once (FB, IG/TikTok, Marketplace, GBP)"
+                  }
+                  disabled={imageBusy || !!videoUrl || requiresApproval}
+                  label="All formats"
+                  onClick={() => {
+                    if (requiresApproval) {
+                      toast.warning(approvalGateMessage);
+                      return;
+                    }
+                    setIsMultiFormatOpen(true);
+                  }}
                 />
 
                 <ActionTile
                   icon={RotateCcw}
                   iconClassName="text-surface-300"
-                  label="Create Another"
+                  label="Create another"
                   onClick={onStartOver}
                 />
               </div>
@@ -950,7 +1002,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                       }}
                       disabled={!imageEditPrompt.trim()}
                       className={cn(
-                        "w-full bg-gradient-to-r from-primary-500 to-secondary-600",
+                        "w-full bg-primary-600 hover:bg-primary-500",
                         "text-surface-50 font-bold py-2 px-4 rounded-xl",
                         "transition-all duration-300 shadow-lg hover:shadow-glow-primary",
                         "disabled:opacity-50 disabled:cursor-not-allowed"
@@ -958,7 +1010,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                     >
-                      Submit Edit
+                      Submit edit
                     </motion.button>
                   </motion.div>
                 )}
@@ -1049,7 +1101,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                         </div>
                         <div className="flex flex-col gap-1 text-xs text-warning-200">
                           {job.error && <span>{job.error}</span>}
-                          <span className="text-indigo-100/70">
+                          <span className="text-surface-400">
                             Started{" "}
                             {new Date(job.createdAt).toLocaleTimeString([], {
                               hour: "2-digit",
@@ -1066,13 +1118,13 @@ export const PostResult: React.FC<PostResultProps> = ({
           </div>
 
           <motion.div
-            className="bg-white/10 backdrop-blur-lg border border-white/20 p-4 lg:p-6 rounded-2xl flex flex-col"
+            className="bg-surface-900/72 backdrop-blur-lg border border-white/10 p-4 lg:p-6 rounded-2xl flex flex-col"
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.2, duration: 0.4 }}
           >
             <h3 className="text-xl font-semibold mb-3 text-surface-50">
-              Generated Social Post
+              Generated social post
             </h3>
             <div className="relative mb-4">
               {isTextLoading && <LoadingOverlay message="Updating Text..." />}
@@ -1214,7 +1266,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     whileTap={{ scale: textBusy ? 1 : 0.98 }}
                     title="Generate 3 caption alternatives and pick the best"
                   >
-                    <Sparkles className="w-3 h-3 text-secondary-300" />
+                    <Sparkles className="w-3 h-3 text-primary-300" />
                     <span>3 ideas</span>
                   </motion.button>
                 )}
@@ -1250,20 +1302,26 @@ export const PostResult: React.FC<PostResultProps> = ({
               <motion.button
                 onClick={() => {
                   triggerHapticFeedback();
+                  if (requiresApproval) {
+                    toast.warning(approvalGateMessage);
+                    return;
+                  }
                   setIsShareDialogOpen(true);
                 }}
+                disabled={requiresApproval}
                 className={cn(
                   "w-full flex items-center justify-center gap-2",
                   "bg-primary-600 text-white font-bold shadow-lg shadow-primary-900/30",
                   "py-3 px-4 min-h-[44px] rounded-xl transition-all duration-300",
                   "hover:bg-primary-500",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950"
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950",
+                  requiresApproval && "opacity-50 cursor-not-allowed hover:bg-primary-600"
                 )}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+                whileHover={{ scale: requiresApproval ? 1 : 1.02 }}
+                whileTap={{ scale: requiresApproval ? 1 : 0.98 }}
               >
                 <Share2 className="w-5 h-5" />
-                <span>Share Post</span>
+                <span>{requiresApproval ? "Awaiting approval" : "Share post"}</span>
               </motion.button>
 
               <motion.button
@@ -1282,7 +1340,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 ) : (
                   <Copy className="w-5 h-5" />
                 )}
-                <span>{copied ? "Copied!" : "Copy Text Only"}</span>
+                <span>{copied ? "Copied" : "Copy text only"}</span>
               </motion.button>
             </div>
           </motion.div>

@@ -235,6 +235,7 @@ export const MainContent: React.FC<MainContentProps> = ({
               onGenerateCaptionVariant={onGenerateCaptionVariant}
               error={error}
               isDesktopLayout={isDesktopLayout}
+              requiresApproval={Boolean(currentDealer?.requires_approval)}
             />
           </Suspense>
         ) : null;
