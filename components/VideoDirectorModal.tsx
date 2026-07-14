@@ -39,8 +39,8 @@ const StyleButton = memo(
         triggerHapticFeedback();
         onSelect(style);
       }}
-      className="group relative flex flex-col items-center p-4 sm:p-5 bg-white/5 hover:bg-indigo-500/20 
-               border border-white/10 hover:border-indigo-400 rounded-2xl transition-all duration-150
+      className="group relative flex flex-col items-center p-4 sm:p-5 bg-surface-900/60 hover:bg-primary-500/15
+               border border-surface-800 hover:border-primary-400 rounded-2xl transition-all duration-150
                active:scale-95 touch-manipulation w-full h-full"
     >
       {isRecommended && (
@@ -50,7 +50,7 @@ const StyleButton = memo(
       )}
       <Icon
         type={icon as any}
-        className="w-10 h-10 sm:w-12 sm:h-12 text-indigo-400 group-hover:text-indigo-300 transition-colors"
+        className="w-10 h-10 sm:w-12 sm:h-12 text-primary-300 group-hover:text-primary-200 transition-colors"
       />
       <span className="mt-2 font-semibold text-white text-sm text-center">
         {style}
@@ -87,14 +87,14 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
         isOpen={isOpen}
         onClose={onClose}
         size="lg"
-        className="bg-slate-900 border-white/10"
+        className="bg-surface-900 border-surface-800"
         showCloseButton={false} // Custom header below
       >
         {/* Custom Header within Modal Body for specific styling */}
         <div className="flex justify-between items-center mb-6">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-500/20 rounded-lg">
-              <Icon type="movie" className="w-5 h-5 text-indigo-400" />
+            <div className="p-2 bg-primary-500/15 rounded-lg border border-primary-500/20">
+              <Icon type="movie" className="w-5 h-5 text-primary-300" />
             </div>
             <div>
               <h2 className="text-lg font-bold text-white">Create Video</h2>
@@ -112,7 +112,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
 
         {/* Recommended Styles - Main Section */}
         <div className="mb-4">
-          <p className="text-xs font-semibold text-indigo-300/80 uppercase tracking-wide mb-3">
+          <p className="text-xs font-semibold text-primary-300/80 uppercase tracking-wide mb-3">
             Recommended
           </p>
           <div className="grid grid-cols-2 gap-3">

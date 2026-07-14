@@ -130,7 +130,7 @@ export const DealerAdminDashboard: React.FC = () => {
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 p-1 bg-surface-950/40 rounded-xl border border-white/5 w-full sm:w-auto sm:inline-flex">
+      <div className="flex gap-1 p-1 bg-surface-950/60 rounded-xl border border-surface-800 w-full sm:w-auto sm:inline-flex">
         {(
           [
             { key: "overview", label: "Overview", icon: Trophy },
@@ -307,7 +307,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/5 border border-white/10 rounded-2xl p-4 sm:p-6 space-y-6 shadow-elevation-2 backdrop-blur-xl"
+      className="bg-surface-900/60 border border-surface-800 rounded-2xl p-4 sm:p-6 space-y-6 shadow-elevation-2 backdrop-blur-xl"
     >
       <div className="flex items-center gap-3">
         <div
@@ -802,7 +802,7 @@ const DealerTeamCard: React.FC = () => {
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/5 border border-white/10 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
+      className="bg-surface-900/60 border border-surface-800 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
     >
       <div className="flex items-center gap-3">
         <div

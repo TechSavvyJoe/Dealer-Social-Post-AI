@@ -77,7 +77,7 @@ const ordinal = (n: number) => {
 
 const trophyTint = (rank: number) => {
   if (rank === 0) return "text-amber-400";
-  if (rank === 1) return "text-slate-300";
+  if (rank === 1) return "text-surface-300";
   if (rank === 2) return "text-orange-400";
   return "text-surface-500";
 };
@@ -122,7 +122,7 @@ export const Leaderboard: React.FC = () => {
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/5 border border-white/10 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
+      className="bg-surface-900/60 border border-surface-800 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
     >
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
@@ -146,7 +146,7 @@ export const Leaderboard: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex bg-surface-950/40 p-1 rounded-xl border border-white/5">
+          <div className="flex bg-surface-950/60 p-1 rounded-xl border border-surface-800">
             {RANGES.map((r) => (
               <button
                 key={r.key}
@@ -194,7 +194,7 @@ export const Leaderboard: React.FC = () => {
             {Array.from({ length: 5 }).map((_, i) => (
               <div
                 key={i}
-                className="flex items-center gap-3 rounded-xl border border-white/10 bg-surface-900/40 px-3 py-2.5"
+                className="flex items-center gap-3 rounded-xl border border-surface-800 bg-surface-900/40 px-3 py-2.5"
               >
                 <Skeleton variant="circular" width={36} height={36} />
                 <div className="flex-1 space-y-2">
@@ -236,7 +236,7 @@ export const Leaderboard: React.FC = () => {
                   "flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors",
                   idx === 0
                     ? "border-amber-400/30 bg-amber-500/[0.06]"
-                    : "border-white/10 bg-surface-900/40"
+                    : "border-surface-800 bg-surface-900/40"
                 )}
               >
                 <div

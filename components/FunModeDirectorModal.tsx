@@ -107,7 +107,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
       footer={
         <>
           <Button
-            variant="gradient-purple"
+            variant="tinted"
             onClick={handleSurpriseMe}
             className="flex-1"
             leftIcon={<Shuffle className="w-4 h-4" />}
@@ -116,7 +116,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
           </Button>
 
           <Button
-            variant="gradient-teal"
+            variant="filled"
             onClick={handleConfirm}
             disabled={!selectedStyle}
             className="flex-1"
@@ -128,10 +128,10 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
       }
     >
       {/* Header */}
-      <div className="px-6 py-5 border-b border-white/10 bg-gradient-to-r from-purple-600/20 to-pink-600/20 -mx-6 -mt-6 mb-6">
+      <div className="px-6 py-5 border-b border-surface-800 bg-surface-900/70 -mx-6 -mt-6 mb-6">
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl shadow-lg shadow-purple-500/20">
+            <div className="p-2 bg-primary-500/15 rounded-xl border border-primary-500/25 shadow-glow-primary">
               <Sparkles className="w-6 h-6 text-white" />
             </div>
             <div>

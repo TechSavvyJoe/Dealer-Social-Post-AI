@@ -33,8 +33,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ values, onChange }) =>
               className={cn(
                 'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all',
                 values.duration === value
-                  ? 'border-indigo-400 bg-indigo-500/30 text-white'
-                  : 'border-white/10 bg-slate-900/50 text-indigo-100/80 hover:border-indigo-400/50'
+                  ? 'border-primary-400 bg-primary-500/20 text-white'
+                  : 'border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50'
               )}
             >
               {label}
@@ -54,8 +54,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ values, onChange }) =>
               className={cn(
                 'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all',
                 values.aspectPreference === value
-                  ? 'border-sky-400 bg-sky-500/30 text-white'
-                  : 'border-white/10 bg-slate-900/50 text-indigo-100/80 hover:border-sky-400/50'
+                  ? 'border-primary-400 bg-primary-500/20 text-white'
+                  : 'border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50'
               )}
             >
               {label}
@@ -78,8 +78,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ values, onChange }) =>
               className={cn(
                 'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
                 values.pacing === value
-                  ? 'border-amber-400 bg-amber-500/30 text-white'
-                  : 'border-white/10 bg-slate-900/50 text-indigo-100/80 hover:border-amber-400/50'
+                  ? 'border-primary-400 bg-primary-500/20 text-white'
+                  : 'border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50'
               )}
             >
               {label}
@@ -99,8 +99,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ values, onChange }) =>
               className={cn(
                 'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all',
                 values.soundtrack === value
-                  ? 'border-emerald-400 bg-emerald-500/30 text-white'
-                  : 'border-white/10 bg-slate-900/50 text-indigo-100/80 hover:border-emerald-400/50'
+                  ? 'border-primary-400 bg-primary-500/20 text-white'
+                  : 'border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50'
               )}
             >
               {label}
