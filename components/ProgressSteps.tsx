@@ -5,7 +5,7 @@ import { AppStep } from '../types';
 import { cn } from '../utils/classNames';
 
 const stepOrder: Array<{ step: AppStep; label: string }> = [
-  { step: AppStep.LOGIN, label: 'Login' },
+  { step: AppStep.LOGIN, label: 'Sign in' },
   { step: AppStep.CAPTURE, label: 'Capture' },
   { step: AppStep.CUSTOMIZE, label: 'Customize' },
   { step: AppStep.GENERATING, label: 'Generating' },
@@ -20,7 +20,10 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
   const activeIndex = stepOrder.findIndex(({ step }) => step === activeStep);
 
   return (
-    <nav className="w-full max-w-screen-2xl px-2 md:px-4 mx-auto py-3 md:py-4 sticky top-0 z-20 backdrop-blur-md bg-surface-900/60 border-b border-white/10">
+    <nav
+      className="w-full max-w-screen-2xl px-2 md:px-4 mx-auto py-3 md:py-4 sticky top-0 z-20 backdrop-blur-md bg-surface-900/72 border-b border-white/[0.06]"
+      aria-label="Progress"
+    >
       <ol className="flex flex-wrap items-center justify-center gap-2 sm:gap-4">
         {stepOrder.map(({ step, label }, index) => {
           const isActive = step === activeStep;
@@ -34,26 +37,20 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
                 <motion.div
                   className={cn(
                     'relative flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full',
-                    'border-2 transition-all duration-300',
-                    'font-bold text-xs sm:text-sm',
+                    'border transition-all duration-300',
+                    'font-semibold text-xs sm:text-sm',
                     isActive && cn(
-                      'border-primary-400 bg-primary-500/30 text-surface-50',
-                      'shadow-glow-primary scale-110'
+                      'border-primary-400 bg-primary-500/18 text-surface-50',
+                      'shadow-lg shadow-primary-950/20'
                     ),
                     isComplete && cn(
-                      'border-success-400 bg-success-500/30 text-success-100',
-                      'shadow-lg shadow-success-500/20'
+                      'border-success-500/50 bg-success-500/14 text-success-100'
                     ),
-                    isUpcoming && 'border-surface-600 bg-surface-800/50 text-surface-400'
+                    isUpcoming && 'border-white/[0.08] bg-surface-800/45 text-surface-400'
                   )}
                   initial={false}
                   animate={{
-                    scale: isActive ? 1.1 : 1,
-                    backgroundColor: isActive
-                      ? 'rgba(59, 130, 246, 0.3)'
-                      : isComplete
-                      ? 'rgba(34, 197, 94, 0.3)'
-                      : 'rgba(30, 41, 59, 0.5)',
+                    scale: isActive ? 1.04 : 1,
                   }}
                   transition={{ type: 'spring', stiffness: 400, damping: 25 }}
                 >
@@ -68,26 +65,12 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
                   ) : (
                     <span>{index + 1}</span>
                   )}
-
-                  {/* Active pulse ring */}
-                  {isActive && (
-                    <motion.span
-                      className="absolute inset-0 rounded-full border-2 border-primary-400"
-                      initial={{ scale: 1, opacity: 0.8 }}
-                      animate={{ scale: 1.3, opacity: 0 }}
-                      transition={{
-                        duration: 1.5,
-                        repeat: Infinity,
-                        ease: 'easeOut',
-                      }}
-                    />
-                  )}
                 </motion.div>
 
                 {/* Label */}
                 <motion.span
                   className={cn(
-                    'text-[10px] sm:text-xs uppercase tracking-wider font-medium whitespace-nowrap',
+                    'text-[10px] sm:text-xs tracking-wide font-medium whitespace-nowrap',
                     'transition-all duration-300',
                     isActive && 'text-surface-50 font-semibold',
                     isComplete && 'text-success-300',
@@ -107,7 +90,7 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
                 <div className="hidden sm:flex items-center h-8 w-8 md:w-12 lg:w-16">
                   <div className="relative w-full h-[2px] overflow-hidden">
                     {/* Background line */}
-                    <div className="absolute inset-0 bg-surface-700" />
+                    <div className="absolute inset-0 bg-white/[0.08]" />
 
                     {/* Progress line */}
                     <motion.div

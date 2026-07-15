@@ -21,15 +21,15 @@ const StyleCard: React.FC<StyleCardProps> = React.memo(({ style, icon, descripti
   return (
     <motion.button
       onClick={handleClick}
-      className="group flex flex-col items-center justify-center text-center p-3 bg-white/5 border border-white/10 rounded-xl aspect-square transition-all duration-200 hover:bg-indigo-500/20 hover:border-indigo-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+      className="group flex flex-col items-center justify-center text-center p-3 bg-surface-900/60 border border-surface-800 rounded-xl aspect-square transition-all duration-200 hover:bg-primary-500/15 hover:border-primary-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
       title={description}
       aria-label={`${style}: ${description}`}
       whileHover={{ scale: 1.05, y: -2 }}
       whileTap={{ scale: 0.97 }}
     >
-      <Icon type={icon} className="w-8 h-8 sm:w-10 sm:h-10 text-indigo-400 transition-colors duration-200 group-hover:text-indigo-300" />
+      <Icon type={icon} className="w-8 h-8 sm:w-10 sm:h-10 text-primary-300 transition-colors duration-200 group-hover:text-primary-200" />
       <h3 className="mt-2 font-semibold text-white text-xs text-center break-words leading-tight">{style}</h3>
-      <p className="mt-1 text-[11px] text-indigo-100/80 line-clamp-2">{description}</p>
+      <p className="mt-1 text-[11px] text-surface-300 line-clamp-2">{description}</p>
     </motion.button>
   );
 });

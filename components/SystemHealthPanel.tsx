@@ -28,7 +28,7 @@ interface HealthPayload {
     openai_key_set: boolean;
     admin_dealer_code_set: boolean;
   };
-  counts: {
+  counts?: {
     dealers: number;
     posts_24h: number;
     photo_releases_24h: number;
@@ -61,8 +61,8 @@ const checkRows: Array<{
     key: "proxy_token_set",
     label: "Proxy access token",
     icon: ShieldCheck,
-    critical: true,
-    hint: "PROXY_ACCESS_TOKEN gates the AI proxy routes.",
+    critical: false,
+    hint: "Optional server-to-server proxy hardening. Browser access no longer requires PROXY_ACCESS_TOKEN.",
   },
   {
     key: "vertex_credentials_set",
@@ -89,7 +89,7 @@ const checkRows: Array<{
     key: "admin_dealer_code_set",
     label: "ADMIN_DEALER_CODE",
     icon: ShieldCheck,
-    critical: false,
+    critical: true,
     hint: "Required for the super-admin login route.",
   },
 ];
@@ -137,7 +137,7 @@ export const SystemHealthPanel: React.FC = () => {
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/5 border border-white/10 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
+      className="bg-surface-900/60 border border-surface-800 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
     >
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
@@ -216,7 +216,7 @@ export const SystemHealthPanel: React.FC = () => {
                 ok === false &&
                   !row.critical &&
                   "border-warning-500/30 bg-warning-500/5",
-                ok === null && "border-white/10 bg-white/5"
+                ok === null && "border-surface-800 bg-surface-900/40"
               )}
             >
               <Icon
@@ -255,19 +255,23 @@ export const SystemHealthPanel: React.FC = () => {
         })}
       </div>
 
-      {data && (
-        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/10">
+      {data?.counts ? (
+        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-surface-800">
           <Stat label="Dealers" value={data.counts.dealers} />
           <Stat label="Posts (24h)" value={data.counts.posts_24h} />
           <Stat label="Releases (24h)" value={data.counts.photo_releases_24h} />
         </div>
-      )}
+      ) : data ? (
+        <div className="rounded-xl border border-surface-800 bg-surface-900/40 px-3 py-2 text-xs text-surface-400">
+          Activity counts are unavailable from this health endpoint.
+        </div>
+      ) : null}
     </motion.div>
   );
 };
 
 const Stat: React.FC<{ label: string; value: number }> = ({ label, value }) => (
-  <div className="rounded-xl border border-white/10 bg-surface-900/40 px-3 py-2 text-center">
+  <div className="rounded-xl border border-surface-800 bg-surface-900/40 px-3 py-2 text-center">
     <div className="text-2xl font-bold text-surface-50 tabular-nums">
       {value}
     </div>

@@ -196,7 +196,7 @@ export const PostHistory: React.FC = () => {
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/5 border border-white/10 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
+      className="bg-surface-900/60 border border-surface-800 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
     >
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
@@ -245,7 +245,7 @@ export const PostHistory: React.FC = () => {
             className="bg-white/5 border-white/10 focus:border-primary-400 pl-9"
           />
         </div>
-        <div className="flex bg-surface-950/40 p-1 rounded-xl border border-white/5 overflow-x-auto">
+        <div className="flex bg-surface-950/60 p-1 rounded-xl border border-surface-800 overflow-x-auto">
           {STATUS_FILTERS.map((f) => (
             <button
               key={f.key}
@@ -278,7 +278,7 @@ export const PostHistory: React.FC = () => {
             {Array.from({ length: 6 }).map((_, i) => (
               <div
                 key={i}
-                className="flex items-center gap-3 rounded-xl border border-white/10 bg-surface-900/40 px-3 py-3"
+                className="flex items-center gap-3 rounded-xl border border-surface-800 bg-surface-900/40 px-3 py-3"
               >
                 <Skeleton variant="rectangular" width={40} height={40} />
                 <div className="flex-1 space-y-2">

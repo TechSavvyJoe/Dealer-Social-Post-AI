@@ -39,8 +39,8 @@ export const PresetSelector: React.FC<PresetSelectorProps> = ({ currentValues, o
               onSelect(preset.values);
             }}
             className={cn(
-              "rounded-xl border border-white/15 bg-slate-900/70 hover:border-primary-400/60 hover:bg-primary-500/10 transition-all text-left px-3 py-3",
-              matchesPreset(preset) && "border-primary-400 bg-primary-500/10 shadow-[0_0_0_1px_rgba(129,140,248,0.35)]"
+              "rounded-xl border border-surface-800 bg-surface-900/70 hover:border-primary-400/60 hover:bg-primary-500/10 transition-all text-left px-3 py-3",
+              matchesPreset(preset) && "border-primary-400 bg-primary-500/10 shadow-[0_0_0_1px_rgba(59,130,246,0.35)]"
             )}
           >
             <div className="flex items-center justify-between gap-2 mb-1">
@@ -51,7 +51,7 @@ export const PresetSelector: React.FC<PresetSelectorProps> = ({ currentValues, o
                 </span>
               )}
             </div>
-            <div className="text-[11px] text-indigo-100/80">{preset.description}</div>
+            <div className="text-[11px] text-surface-300">{preset.description}</div>
           </button>
         ))}
       </div>

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dealer } from "../types";
 import * as db from "../services/database";
 import { Icon } from "./Icons";
-import { logEvent, logError } from "../utils/telemetry";
+import { logError } from "../utils/telemetry";
 import { motion } from "framer-motion";
 import { Button } from "./ui/Button";
 import { Skeleton } from "./ui/Skeleton";
@@ -15,6 +15,15 @@ import { DealerSetupWizard } from "./DealerSetupWizard";
 import { SystemHealthPanel } from "./SystemHealthPanel";
 import { ConfirmationModal } from "./ConfirmationModal";
 import { useAppStore } from "../stores/appStore";
+import { useToast } from "./ui/Toast";
+
+const DEALER_CODE_LENGTH = 6;
+const DEALER_CODE_PATTERN = /^\d{6}$/;
+const ADMIN_DEALER_CODE = "000000";
+
+const fieldClassName =
+  "mt-1 block w-full rounded-xl border border-surface-700 bg-surface-900/70 px-4 py-3 text-surface-50 placeholder:text-surface-500 transition-colors focus:border-primary-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
+const labelClassName = "block text-sm font-medium text-surface-300";
 
 const DealerCard: React.FC<{
   dealer: Dealer;
@@ -22,44 +31,46 @@ const DealerCard: React.FC<{
   onEdit: (dealer: Dealer) => void;
   isDeleting: boolean;
 }> = ({ dealer, onDelete, onEdit, isDeleting }) => {
-  const isAdminDealer = dealer.code === "0000";
+  const isAdminDealer = dealer.code === ADMIN_DEALER_CODE;
 
   return (
     <motion.div
-      className="bg-white/5 border border-white/20 rounded-2xl p-4 sm:p-6"
+      className="rounded-2xl border border-white/10 bg-surface-900/55 p-4 shadow-elevation-1 backdrop-blur-xl transition-colors hover:border-primary-500/30 hover:bg-surface-900/75 sm:p-6"
       layout
     >
-      <div className="flex justify-between items-start">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-center gap-4">
           {dealer.logo ? (
             <img
               src={dealer.logo}
               alt={`${dealer.name} Logo`}
-              className="w-16 h-16 object-contain rounded-lg bg-white/10 p-1"
+              className="h-16 w-16 rounded-xl border border-white/10 bg-surface-950/50 object-contain p-2"
             />
           ) : (
-            <div className="w-16 h-16 bg-indigo-900 rounded-lg flex items-center justify-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-xl border border-primary-500/20 bg-primary-500/10">
               <Icon
                 type="building-office"
-                className="w-8 h-8 text-indigo-400"
+                className="h-8 w-8 text-primary-300"
               />
             </div>
           )}
-          <div>
-            <h3 className="text-xl font-bold text-white">{dealer.name}</h3>
-            <div className="flex items-center gap-3 text-sm text-slate-400">
+          <div className="min-w-0">
+            <h3 className="truncate text-xl font-bold text-surface-50">
+              {dealer.name}
+            </h3>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-surface-400">
               <span>
                 Code:{" "}
-                <span className="font-mono text-indigo-400 font-semibold">
+                <span className="font-mono font-semibold tracking-wider text-primary-300">
                   {dealer.code || "N/A"}
                 </span>
               </span>
-              <span className="text-slate-600">|</span>
-              <span className="text-xs">ID: {dealer.id}</span>
+              <span className="hidden text-surface-700 sm:inline">|</span>
+              <span className="text-xs text-surface-500">ID: {dealer.id}</span>
             </div>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex justify-end gap-2">
           <Button
             variant="outline"
             size="icon"
@@ -87,6 +98,7 @@ const DealerCard: React.FC<{
 
 export const AdminDashboard: React.FC = () => {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [formState, setFormState] = useState({
     name: "",
     code: "",
@@ -114,7 +126,11 @@ export const AdminDashboard: React.FC = () => {
     mutationFn: db.addDealerWithFile,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dealers"] });
+      toast.success("Dealer created.");
       resetForm();
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to create dealer.");
     },
   });
 
@@ -123,7 +139,11 @@ export const AdminDashboard: React.FC = () => {
       db.updateDealerWithFile(dealerId, formData),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dealers"] });
+      toast.success("Dealer updated.");
       resetForm();
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to update dealer.");
     },
   });
 
@@ -131,6 +151,7 @@ export const AdminDashboard: React.FC = () => {
     mutationFn: db.deleteDealer,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dealers"] });
+      toast.success("Dealer deleted.");
     },
     onError: (err) => {
       // Was silent before — a failed delete left the dealer on screen with no
@@ -138,6 +159,7 @@ export const AdminDashboard: React.FC = () => {
       logError("admin.dealer.delete.failed", {
         message: err instanceof Error ? err.message : String(err),
       });
+      toast.error(err instanceof Error ? err.message : "Failed to delete dealer.");
     },
   });
 
@@ -169,8 +191,11 @@ export const AdminDashboard: React.FC = () => {
   // --- HANDLERS ---
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    // Only allow 4 digits for code field (and don't allow editing code when updating)
-    if (name === "code" && (value.length > 4 || !/^\d*$/.test(value))) {
+    // Dealer login codes are fixed-width numeric codes.
+    if (
+      name === "code" &&
+      (value.length > DEALER_CODE_LENGTH || !/^\d*$/.test(value))
+    ) {
       return;
     }
     setFormState((prev) => ({ ...prev, [name]: value }));
@@ -189,10 +214,8 @@ export const AdminDashboard: React.FC = () => {
     e.preventDefault();
     if (!formState.name.trim()) return;
     
-    // For new dealers, code is required
-    if (!editingDealer && !formState.code.trim()) return;
-    if (!editingDealer && formState.code.length !== 4) {
-      alert("Dealer code must be exactly 4 digits");
+    if (!editingDealer && !DEALER_CODE_PATTERN.test(formState.code.trim())) {
+      toast.error("Dealer code must be exactly 6 digits.");
       return;
     }
 
@@ -229,7 +252,9 @@ export const AdminDashboard: React.FC = () => {
         formData.append("logo", file);
       } catch (err) {
         console.error("Failed to fetch logo from URL:", err);
-        alert("Could not load image from URL. Please upload a file instead, or ensure the URL is accessible (some URLs may be blocked by CORS).");
+        toast.error(
+          "Could not load that logo URL. Upload a file instead or use a publicly accessible image."
+        );
         return;
       }
     }
@@ -291,7 +316,7 @@ export const AdminDashboard: React.FC = () => {
   };
 
   return (
-    <div className="w-full max-w-4xl mx-auto p-2 sm:p-4 space-y-6">
+    <div className="mx-auto w-full max-w-5xl space-y-6 p-2 sm:p-4">
       {showSetup && sessionDealer && (
         <DealerSetupWizard
           dealer={sessionDealer}
@@ -312,11 +337,17 @@ export const AdminDashboard: React.FC = () => {
       {/* Full searchable post history with CSV export */}
       <PostHistory />
 
-      <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-        <h2 className="text-3xl sm:text-4xl font-bold text-white">
-          Admin Dashboard
-        </h2>
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+      <div className="rounded-2xl border border-white/10 bg-surface-900/45 p-5 shadow-elevation-2 backdrop-blur-xl sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-3xl font-bold text-surface-50 sm:text-4xl">
+              Admin dashboard
+            </h2>
+            <p className="mt-2 text-sm text-surface-400">
+              Manage dealerships, login codes, approvals, and production health.
+            </p>
+          </div>
+          <div className="flex w-full items-center gap-2 sm:w-auto">
           <Button
             variant="outline"
             size="sm"
@@ -340,6 +371,7 @@ export const AdminDashboard: React.FC = () => {
           >
             {showForm ? "Cancel" : "Add Dealer"}
           </Button>
+          </div>
         </div>
       </div>
 
@@ -348,25 +380,32 @@ export const AdminDashboard: React.FC = () => {
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-slate-800 p-6 rounded-lg"
+          className="rounded-2xl border border-white/10 bg-surface-900/70 p-5 shadow-elevation-3 backdrop-blur-xl sm:p-6"
         >
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-xl font-semibold">
+              <div>
+                <h3 className="text-xl font-semibold text-surface-50">
                 {editingDealer ? `Edit: ${editingDealer.name}` : "New Dealer"}
-              </h3>
+                </h3>
+                <p className="mt-1 text-sm text-surface-400">
+                  {editingDealer
+                    ? "Update dealership details. Login codes cannot be changed after creation."
+                    : "Create a dealership with a unique 6-digit login code."}
+                </p>
+              </div>
               {editingDealer?.logo && (
                 <img
                   src={editingDealer.logo}
                   alt="Current logo"
-                  className="w-12 h-12 object-contain rounded bg-white/10 p-1"
+                  className="h-12 w-12 rounded-xl border border-white/10 bg-surface-950/50 object-contain p-2"
                 />
               )}
             </div>
             <div>
               <label
                 htmlFor="name"
-                className="block text-sm font-medium text-slate-300"
+                className={labelClassName}
               >
                 Dealer Name *
               </label>
@@ -377,17 +416,20 @@ export const AdminDashboard: React.FC = () => {
                 value={formState.name}
                 onChange={handleInputChange}
                 required
-                className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 text-white"
+                className={fieldClassName}
+                placeholder="e.g., Midtown Motors"
               />
             </div>
             <div>
               <label
                 htmlFor="code"
-                className="block text-sm font-medium text-slate-300"
+                className={labelClassName}
               >
-                Dealer Code (4 digits) {!editingDealer && "*"}
-                <span className="text-xs text-slate-400 ml-2">
-                  {editingDealer ? "(Cannot be changed)" : "Used for login (e.g., 5555, 6666)"}
+                Dealer Code (6 digits) {!editingDealer && "*"}
+                <span className="ml-2 text-xs text-surface-400">
+                  {editingDealer
+                    ? "(Cannot be changed)"
+                    : "Used for login (e.g., 123456)"}
                 </span>
               </label>
               <input
@@ -398,10 +440,11 @@ export const AdminDashboard: React.FC = () => {
                 onChange={handleInputChange}
                 required={!editingDealer}
                 disabled={!!editingDealer}
-                maxLength={4}
-                pattern="\d{4}"
-                placeholder="e.g., 5555"
-                className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 text-white font-mono text-lg tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+                maxLength={DEALER_CODE_LENGTH}
+                pattern="\d{6}"
+                inputMode="numeric"
+                placeholder="e.g., 123456"
+                className={`${fieldClassName} font-mono text-lg tracking-[0.2em]`}
               />
             </div>
 
@@ -411,10 +454,10 @@ export const AdminDashboard: React.FC = () => {
             <div>
               <label
                 htmlFor="admin_code"
-                className="block text-sm font-medium text-slate-300"
+                className={labelClassName}
               >
                 Manager Admin Code (optional)
-                <span className="text-xs text-slate-400 ml-2">
+                <span className="ml-2 text-xs text-surface-400">
                   4–12 chars. Separate code for the GSM/GM to access this
                   dealership's settings.
                 </span>
@@ -434,14 +477,14 @@ export const AdminDashboard: React.FC = () => {
                 }
                 maxLength={12}
                 placeholder="e.g., GSM2024 — leave blank to disable"
-                className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 text-white font-mono text-lg tracking-wider"
+                className={`${fieldClassName} font-mono text-lg tracking-wider`}
               />
             </div>
 
             <div>
               <label
                 htmlFor="logoUrl"
-                className="block text-sm font-medium text-slate-300"
+                className={labelClassName}
               >
                 Logo URL
               </label>
@@ -452,14 +495,19 @@ export const AdminDashboard: React.FC = () => {
                 value={formState.logoUrl}
                 onChange={handleInputChange}
                 disabled={!!formState.logoFile}
-                className="mt-1 block w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 text-white disabled:opacity-50"
+                placeholder="https://example.com/logo.png"
+                className={fieldClassName}
               />
             </div>
-            <div className="text-center text-slate-400 text-sm">OR</div>
+            <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-wide text-surface-500">
+              <span className="h-px flex-1 bg-white/10" />
+              or
+              <span className="h-px flex-1 bg-white/10" />
+            </div>
             <div>
               <label
                 htmlFor="logoFile"
-                className="block text-sm font-medium text-slate-300"
+                className={labelClassName}
               >
                 Upload Logo {editingDealer && "(replaces current)"}
               </label>
@@ -469,7 +517,7 @@ export const AdminDashboard: React.FC = () => {
                 type="file"
                 accept="image/*"
                 onChange={handleFileChange}
-                className="mt-1 block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700"
+                className="mt-1 block w-full rounded-xl border border-dashed border-surface-700 bg-surface-950/40 px-4 py-3 text-sm text-surface-400 file:mr-4 file:rounded-full file:border-0 file:bg-primary-600 file:px-4 file:py-2 file:font-semibold file:text-white hover:file:bg-primary-700"
               />
             </div>
             <div className="flex justify-end gap-3">
@@ -493,7 +541,7 @@ export const AdminDashboard: React.FC = () => {
               </Button>
             </div>
             {(addMutation.isError || updateMutation.isError) && (
-              <p className="text-red-400">
+              <p className="rounded-xl border border-error-500/30 bg-error-500/10 px-3 py-2 text-sm text-error-200">
                 Error: {(addMutation.error || updateMutation.error)?.message}
               </p>
             )}
@@ -502,12 +550,12 @@ export const AdminDashboard: React.FC = () => {
       )}
 
       {error && (
-        <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg">
+        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-4 py-3 text-error-100">
           Error loading dealers: {String(error)}
         </div>
       )}
       {deleteMutation.isError && (
-        <div className="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg">
+        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-4 py-3 text-error-100">
           Failed to delete dealer: {String(deleteMutation.error)}
         </div>
       )}
@@ -535,7 +583,7 @@ export const AdminDashboard: React.FC = () => {
             />
           ))}
           {dealers.length === 0 && !error && (
-            <div className="text-center py-10 bg-white/5 rounded-2xl">
+            <div className="rounded-2xl border border-white/10 bg-surface-900/45 py-10 text-center text-surface-400">
               <p>No dealerships found.</p>
             </div>
           )}

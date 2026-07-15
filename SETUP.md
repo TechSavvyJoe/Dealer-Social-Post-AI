@@ -2,22 +2,31 @@
 
 ## Quick Start
 
-### 1. Get Your Gemini API Key
+### 1. Prerequisites
 
-1. Visit [Google AI Studio](https://aistudio.google.com/app/apikey)
-2. Sign in with your Google account
-3. Click "Create API Key"
-4. Copy your API key
+- Node.js **22.12+**
+- A Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
 
-### 2. Configure Your API Key
+### 2. Configure environment
 
-Edit the `.env.local` file in the project root:
+```bash
+cp .env.example .env.local
+```
+
+Edit `.env.local`:
 
 ```bash
 GEMINI_API_KEY=your-actual-api-key-here
+ADMIN_DEALER_CODE=your-private-super-admin-code
+VITE_POCKETBASE_URL=http://127.0.0.1:8090
 ```
 
-Replace `your-actual-api-key-here` with the API key you copied from Google AI Studio.
+`ADMIN_DEALER_CODE` is required for super-admin login. There is no hardcoded fallback.
+
+Optional:
+- `VERTEX_SERVICE_ACCOUNT_JSON` — Veo video + Imagen
+- `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` — fallback providers
+- `VITE_ENABLE_CLAUDE_FALLBACK` / `VITE_ENABLE_OPENAI_FALLBACK`
 
 ### 3. Install Dependencies
 

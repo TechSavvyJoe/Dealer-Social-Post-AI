@@ -38,9 +38,8 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
-      # Skip when e2e tests aren't present yet (e2e/ dir was deleted; restore
-      # via a follow-up PR alongside the auth-fix smoke tests).
-      - run: |
+      - name: Run Playwright e2e
+        run: |
           if [ -d e2e ]; then
             npx playwright test
           else
@@ -48,3 +47,4 @@ jobs:
           fi
         env:
           CI: true
+          # Frontend-only smoke tests stub API routes; PocketBase is not required.

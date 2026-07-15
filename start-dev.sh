@@ -14,26 +14,30 @@ echo ""
 if [ ! -f .env.local ]; then
     echo "Creating .env.local file..."
     cat > .env.local << 'EOF'
-# Gemini API Key
-# Get your API key from: https://aistudio.google.com/app/apikey
-GEMINI_API_KEY=your-api-key-here
-VITE_PROXY_ACCESS_TOKEN=dev-proxy-token
+# Copy from .env.example and fill in real values.
+# Server-side only — never prefix AI keys with VITE_.
 
-# Instructions:
-# 1. Replace 'your-api-key-here' with your actual Gemini API key
-# 2. Replace 'dev-proxy-token' with a secret string (frontend & PocketBase must match)
-# 3. Save this file
-# 4. Restart this script
-#
-# Note: This file is git-ignored and will not be committed to version control
+GEMINI_API_KEY=your-api-key-here
+ADMIN_DEALER_CODE=
+
+# Optional fallbacks / Vertex for video
+# ANTHROPIC_API_KEY=
+# OPENAI_API_KEY=
+# VERTEX_SERVICE_ACCOUNT_JSON=
+
+VITE_POCKETBASE_URL=http://127.0.0.1:8090
 EOF
     echo "✓ Created .env.local file"
     echo ""
 fi
 
-# Load environment variables
+# Load environment variables safely (supports quoted values; avoids xargs breakage
+# on JSON secrets like VERTEX_SERVICE_ACCOUNT_JSON).
 if [ -f .env.local ]; then
-    export $(grep -v '^#' .env.local | xargs)
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env.local
+    set +a
 fi
 
 # Check if GEMINI_API_KEY is set
@@ -49,6 +53,10 @@ if [ -z "$GEMINI_API_KEY" ] || [ "$GEMINI_API_KEY" = "your-api-key-here" ]; then
     read -p "Press Enter to continue anyway (the app will not work until you set the API key)..."
 else
     echo "✓ GEMINI_API_KEY is configured"
+fi
+
+if [ -z "$ADMIN_DEALER_CODE" ]; then
+    echo "ℹ️  ADMIN_DEALER_CODE is unset — super-admin login is disabled until you set it."
 fi
 
 # Check if node_modules exists

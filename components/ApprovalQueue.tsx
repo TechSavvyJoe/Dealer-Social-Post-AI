@@ -96,7 +96,7 @@ export const ApprovalQueue: React.FC = () => {
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/5 border border-white/10 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
+      className="bg-surface-900/60 border border-surface-800 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
     >
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
@@ -169,7 +169,7 @@ export const ApprovalQueue: React.FC = () => {
                 initial={{ opacity: 0, scale: 0.98 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="rounded-xl border border-white/10 bg-surface-900/40 p-3 flex flex-wrap items-center gap-3"
+                className="rounded-xl border border-surface-800 bg-surface-900/40 p-3 flex flex-wrap items-center gap-3"
               >
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-semibold text-surface-50">

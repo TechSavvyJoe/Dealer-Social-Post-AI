@@ -12,7 +12,10 @@ echo "========================================="
 # Load environment variables from .env.local if it exists
 if [ -f .env.local ]; then
     echo "Loading environment variables from .env.local..."
-    export $(grep -v '^#' .env.local | xargs)
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env.local
+    set +a
 else
     echo "WARNING: .env.local file not found!"
     echo "Please create .env.local with your GEMINI_API_KEY"
