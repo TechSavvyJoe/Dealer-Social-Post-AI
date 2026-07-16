@@ -154,13 +154,17 @@ describe("final frontend residuals", () => {
     await user.click(screen.getByRole("button", { name: "Log out" }));
     expect(onLogout).not.toHaveBeenCalled();
     expect(
-      screen.getByRole("dialog", { name: "Log out and discard this post?" }),
+      await screen.findByRole("dialog", {
+        name: "Log out and discard this post?",
+      }),
     ).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Keep working" }));
     expect(onLogout).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Log out" }));
-    await user.click(screen.getByRole("button", { name: "Log out anyway" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Log out anyway" }),
+    );
     expect(onLogout).toHaveBeenCalledTimes(1);
   });
 
