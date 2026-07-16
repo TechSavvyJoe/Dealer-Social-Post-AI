@@ -1,0 +1,20 @@
+# Keep CLI / upload deploys small (Git deploys already use the repo tree).
+node_modules
+pb_data
+pocketbase
+pocketbase.zip
+dist
+coverage
+playwright-report
+test-results
+.git
+.superpowers
+.local-secrets
+.secrets
+*.log
+.env
+.env.*
+*.pem
+*.p12
+key.json
+vertex_key.json
