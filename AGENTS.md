@@ -33,8 +33,8 @@ Quick reference:
 - **AI generation** (captions + branded images) routes through the session-gated
   `/api/proxy/*` PocketBase route, which appends `GEMINI_API_KEY` server-side and calls
   the Gemini API. The frontend model chain (`services/modelConfig.ts`) prefers preview
-  models (e.g. `gemini-3-*`) and falls back to GA models like `gemini-2.5-flash` /
-  `gemini-2.5-flash-image`, so generation works even if a preview model id isn't
+  models (e.g. `gemini-3-*`) and falls back to GA models like `gemini-3.1-flash-lite` or
+  `gemini-3.1-flash-image`, so generation works even if a preview model id isn't
   available to your key.
 - **Fresh DB bootstrap:** `pb_data/` is gitignored, so each fresh machine bootstraps the
   schema from `pb_migrations/` on first `serve`. If a JS migration throws, PocketBase
