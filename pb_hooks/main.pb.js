@@ -1203,7 +1203,7 @@ routerAdd("POST", "/api/app/session", (c) => {
       ? configuredAdminCode
       : "";
 
-    if (adminEnv && dealerCode === adminEnv) {
+    if (adminEnv && dealerCode.toLowerCase() === adminEnv.toLowerCase()) {
       role = "super_admin";
       try {
         record = $app.dao().findFirstRecordByData("dealers", "code", adminEnv);
