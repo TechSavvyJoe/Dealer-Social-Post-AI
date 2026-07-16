@@ -55,6 +55,17 @@ export enum VideoStyle {
 export interface GeneratedPost {
   image: string; // base64 data URL
   text: string;
+  /** Server record used for owner-scoped approval status polling. */
+  postId?: string;
+  /** `submission_failed` is client-only and keeps delivery locked safely. */
+  approvalStatus?:
+    "n_a" | "pending" | "approved" | "rejected" | "submission_failed";
+  /**
+   * A captured signature is not considered usable until the protected release
+   * record has been saved. Failed persistence locks all delivery actions so a
+   * post can never claim consent that the backend does not hold.
+   */
+  releaseStatus?: "not_required" | "saved" | "save_failed";
   /**
    * Required compliance disclosure footer, stored separately from `text` so
    * a salesperson can't silently delete it while editing the caption.

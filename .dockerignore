@@ -1,0 +1,53 @@
+# Keep local credentials, databases, and generated output out of every remote
+# Docker/Fly build context. The Dockerfile copies application sources from the
+# repository root, so required frontend, hook, and migration sources remain.
+
+# Version-control and local tool state
+.git/
+.github/
+.claude/
+.remember/
+.vercel/
+.DS_Store
+
+# Dependencies and generated artifacts
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.log
+deploy_output.txt
+
+# Tests and local-only tooling (not used by the production image build)
+__tests__/
+e2e/
+scripts/
+vitest.config.ts
+vitest.setup.ts
+playwright.config.ts
+
+# Environment files and credential material
+.env
+.env.*
+.local-secrets/
+.secrets/
+key.json
+vertex_key.json
+pb_hooks/vertex_key.json
+pb_hooks/jwt_*.txt
+pb_hooks/jwt_*.pem
+pb_hooks/jwt_*.bin
+gen-lang-client-*.json
+*-service-account*.json
+*serviceaccount*.json
+credentials.json
+*-credentials.json
+*.pem
+*.p12
+
+# PocketBase local runtime state and binaries
+pb_data/
+pocketbase
+pocketbase.zip
+

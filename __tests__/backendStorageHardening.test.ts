@@ -1,0 +1,261 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+type Policies = {
+  isAllowedImageProxyUrl(url: string, configuredHosts?: string): boolean;
+};
+
+type Helpers = {
+  findSessionByToken(token: string): unknown;
+  createSession(
+    dealerId: string,
+    role: string,
+    ip: string,
+    userAgent: string,
+  ): { token: string; expiresAt: Date };
+  refreshSession(session: { set(field: string, value: string): void }): Date;
+};
+
+function loadPocketBaseCommonJs<T>(relativePath: string): T {
+  const source = readFileSync(resolve(process.cwd(), relativePath), "utf8");
+  const module = { exports: {} as T };
+  new Function("module", "exports", source)(module, module.exports);
+  return module.exports;
+}
+
+const policies = loadPocketBaseCommonJs<Policies>(
+  "pb_hooks/requestPolicies.js",
+);
+const helpers = loadPocketBaseCommonJs<Helpers>("pb_hooks/helpers.js");
+const runtime = globalThis as Record<string, any>;
+const originalSecurity = runtime.$security;
+const originalApp = runtime.$app;
+const originalRecord = runtime.Record;
+const originalOs = runtime.$os;
+
+afterEach(() => {
+  runtime.$security = originalSecurity;
+  runtime.$app = originalApp;
+  runtime.Record = originalRecord;
+  runtime.$os = originalOs;
+});
+
+describe("PocketBase sensitive-storage hardening", () => {
+  it("looks sessions up by a SHA-256 verifier instead of plaintext", () => {
+    const sha256 = vi.fn(() => "a".repeat(64));
+    const findFirstRecordByFilter = vi.fn(() => ({
+      getString: (field: string) =>
+        field === "expires_at" ? "2099-01-01 00:00:00.000Z" : "",
+    }));
+    runtime.$security = { sha256 };
+    runtime.$app = {
+      dao: () => ({ findFirstRecordByFilter }),
+    };
+
+    const token = "b".repeat(64);
+    expect(helpers.findSessionByToken(token)).toBeTruthy();
+    expect(sha256).toHaveBeenCalledWith(token);
+    expect(findFirstRecordByFilter).toHaveBeenCalledWith(
+      "sessions",
+      "token_hash = {:h}",
+      { h: "a".repeat(64) },
+    );
+  });
+
+  it("persists only a token verifier when creating a session", () => {
+    let savedData: Record<string, unknown> | undefined;
+    runtime.$security = {
+      randomStringWithAlphabet: (length: number, alphabet: string) =>
+        alphabet[0].repeat(length),
+      sha256: () => "c".repeat(64),
+    };
+    runtime.Record = class {
+      constructor(_collection: unknown, data: Record<string, unknown>) {
+        savedData = data;
+      }
+    };
+    runtime.$app = {
+      dao: () => ({
+        findCollectionByNameOrId: () => ({ id: "sessions" }),
+        saveRecord: () => undefined,
+      }),
+    };
+
+    const created = helpers.createSession(
+      "dealer-id",
+      "salesperson",
+      "203.0.113.10",
+      "test-agent",
+    );
+
+    expect(created.token).toMatch(/^[a-f0-9]{64}$/);
+    expect(savedData).toMatchObject({ token_hash: "c".repeat(64) });
+    expect(savedData).not.toHaveProperty("token");
+  });
+
+  it("rejects a super-admin cookie after the deployment secret rotates", () => {
+    const session = {
+      getString: (field: string) => {
+        if (field === "expires_at") return "2099-01-01 00:00:00.000Z";
+        if (field === "role") return "super_admin";
+        if (field === "dealer") return "old-admin-dealer";
+        return "";
+      },
+    };
+    const deleteRecord = vi.fn();
+    runtime.$security = { sha256: () => "a".repeat(64) };
+    runtime.$os = { getenv: () => "New99999" };
+    runtime.$app = {
+      dao: () => ({
+        findFirstRecordByFilter: () => session,
+        findRecordById: () => ({
+          getString: (field: string) => (field === "code" ? "Old99999" : ""),
+        }),
+        deleteRecord,
+      }),
+    };
+
+    expect(helpers.findSessionByToken("b".repeat(64))).toBeNull();
+    expect(deleteRecord).toHaveBeenCalledWith(session);
+  });
+
+  it("slides the authoritative database expiry together with the cookie", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-15T12:00:00.000Z"));
+    const values: Record<string, string> = {};
+    const session = {
+      set: vi.fn((field: string, value: string) => {
+        values[field] = value;
+      }),
+    };
+    const saveRecord = vi.fn();
+    runtime.$app = { dao: () => ({ saveRecord }) };
+
+    try {
+      const expires = helpers.refreshSession(session);
+      expect(values.last_used_at).toBe("2026-07-15T12:00:00.000Z");
+      expect(values.expires_at).toBe("2026-07-22T12:00:00.000Z");
+      expect(expires.toISOString()).toBe(values.expires_at);
+      expect(saveRecord).toHaveBeenCalledWith(session);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the sensitive-field migrations forward-only", () => {
+    const sessionMigration = readFileSync(
+      resolve(process.cwd(), "pb_migrations/1750300000_hash_session_tokens.js"),
+      "utf8",
+    );
+    const signatureMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        "pb_migrations/1750300100_protect_photo_release_signatures.js",
+      ),
+      "utf8",
+    );
+    const approvalMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        "pb_migrations/1750300200_add_approval_creative.js",
+      ),
+      "utf8",
+    );
+
+    expect(sessionMigration).toContain(
+      "sessions.schema.removeField(finalLegacyField.id)",
+    );
+    expect(sessionMigration).toContain("$security.sha256(token)");
+    expect(signatureMigration).toContain(
+      "signatureField.options.protected = true",
+    );
+    expect(signatureMigration).not.toContain("protected = false");
+    expect(approvalMigration).toContain("protected: true");
+    expect(approvalMigration).toContain('name: "owner_session_hash"');
+  });
+});
+
+describe("PocketBase image proxy policy", () => {
+  it("allows only operator-trusted HTTPS image origins", () => {
+    expect(
+      policies.isAllowedImageProxyUrl("https://i.imgur.com/example.png"),
+    ).toBe(true);
+    expect(
+      policies.isAllowedImageProxyUrl(
+        "https://cdn.example-dealer.com/logo.jpg",
+        "cdn.example-dealer.com,*.trusted-cdn.example",
+      ),
+    ).toBe(true);
+    expect(
+      policies.isAllowedImageProxyUrl(
+        "https://tenant.trusted-cdn.example/logo.jpg",
+        "*.trusted-cdn.example",
+      ),
+    ).toBe(true);
+    expect(
+      policies.isAllowedImageProxyUrl("https://i.imgur.com:443/example.png"),
+    ).toBe(true);
+  });
+
+  it.each([
+    "http://i.imgur.com/example.png",
+    "https://127.0.0.1/private",
+    "https://169.254.169.254/latest/meta-data",
+    "https://2130706433/private",
+    "https://metadata.google.internal/computeMetadata/v1",
+    "https://storage.googleapis.com/user-controlled/object.png",
+    "https://googleapis.com.attacker.example/image.png",
+    "https://user:password@i.imgur.com/example.png",
+    "https://i.imgur.com:8443/example.png",
+    "https://i.imgur.com\\@attacker.example/image.png",
+    "https://i.imgur.com%2f.attacker.example/image.png",
+    "https://i..imgur.com/image.png",
+    "https://attacker.example/image.png",
+  ])("rejects untrusted image URL %s", (url) => {
+    expect(policies.isAllowedImageProxyUrl(url)).toBe(false);
+  });
+
+  it("does not depend on a URL constructor unavailable in PocketBase 0.22", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "pb_hooks/requestPolicies.js"),
+      "utf8",
+    );
+    expect(source).not.toContain("new URL(rawUrl)");
+  });
+});
+
+describe("Generated video transport", () => {
+  it("keeps Google file downloads behind the authenticated binary proxy", () => {
+    const clientSource = readFileSync(
+      resolve(process.cwd(), "services/geminiService.ts"),
+      "utf8",
+    );
+    const hookSource = readFileSync(
+      resolve(process.cwd(), "pb_hooks/main.pb.js"),
+      "utf8",
+    );
+
+    expect(clientSource).toContain(
+      'parsed.hostname !== "generativelanguage.googleapis.com"',
+    );
+    expect(clientSource).toContain("fetch(`/api/proxy/${proxyPath}`");
+    expect(clientSource).not.toContain("await fetch(videoUri)");
+    expect(hookSource).toContain("return c.blob(");
+    expect(hookSource).toContain("Generated video exceeds 100 MB");
+  });
+});
+
+describe("PocketBase container startup", () => {
+  it("fails closed on incompatible data and preserves PID 1", () => {
+    const entrypoint = readFileSync(
+      resolve(process.cwd(), "entrypoint.sh"),
+      "utf8",
+    );
+
+    expect(entrypoint).not.toContain("data.db.v23bak");
+    expect(entrypoint).not.toMatch(/mv\s+\/pb\/pb_data/);
+    expect(entrypoint).toContain("exit 1");
+    expect(entrypoint).toContain("exec /pb/pocketbase serve");
+  });
+});

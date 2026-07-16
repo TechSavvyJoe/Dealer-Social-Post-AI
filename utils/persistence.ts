@@ -1,12 +1,12 @@
+import type { GeneratedPost } from "../types";
+import { clearAllCreatives } from "./creativeStorage";
+
 const STORAGE_KEY = "dealer-social-post-ai.session";
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const MAX_STORED_IMAGE_BYTES = 500_000; // ~0.5MB safety cap per image
 
 interface PersistedState {
-  generatedPost?: {
-    image?: string;
-    text: string;
-  };
+  generatedPost?: Omit<GeneratedPost, "image"> & { image?: string };
   selectedImage?: string;
   dealerId?: string;
   step?: number;
@@ -45,6 +45,7 @@ export const loadSession = (): PersistedState | null => {
 
     return session;
   } catch {
+    clearSession();
     return null;
   }
 };
@@ -58,7 +59,7 @@ export const saveSession = (state: PersistedState) => {
         next.generatedPost?.image &&
         next.generatedPost.image.length > MAX_STORED_IMAGE_BYTES
       ) {
-        next.generatedPost = { ...next.generatedPost, image: undefined as any };
+        next.generatedPost = { ...next.generatedPost, image: undefined };
       }
       if (
         next.selectedImage &&
@@ -85,7 +86,7 @@ export const saveSession = (state: PersistedState) => {
       const slimmed = pruneImages({
         ...sessionWithTimestamp,
         generatedPost: sessionWithTimestamp.generatedPost
-          ? { text: sessionWithTimestamp.generatedPost.text }
+          ? { ...sessionWithTimestamp.generatedPost, image: undefined }
           : undefined,
         selectedImage: undefined,
       });
@@ -114,4 +115,5 @@ export const clearSession = () => {
   } catch {
     // ignore storage failures
   }
+  void clearAllCreatives();
 };

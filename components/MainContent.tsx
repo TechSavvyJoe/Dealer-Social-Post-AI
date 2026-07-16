@@ -9,33 +9,31 @@ import {
   VideoRequestOptions,
   Dealer,
 } from "../types";
-import { Icon } from "./Icons";
 import { LoadingOverlay } from "./LoadingOverlay";
-import { VinScanner } from "./VinScanner";
 import { PageTransition } from "./ui/PageTransition";
 import { Button } from "./ui/Button";
 import { Shimmer } from "./ui/Shimmer";
 
 // Lazy load components
 const LazyLoginScreen = React.lazy(() =>
-  import("./LoginScreen").then((mod) => ({ default: mod.LoginScreen }))
+  import("./LoginScreen").then((mod) => ({ default: mod.LoginScreen })),
 );
 const LazyAdminDashboard = React.lazy(() =>
-  import("./AdminDashboard").then((mod) => ({ default: mod.AdminDashboard }))
+  import("./AdminDashboard").then((mod) => ({ default: mod.AdminDashboard })),
 );
 const LazyDealerAdminDashboard = React.lazy(() =>
   import("./DealerAdminDashboard").then((mod) => ({
     default: mod.DealerAdminDashboard,
-  }))
+  })),
 );
 const LazyImageInput = React.lazy(() =>
-  import("./CameraCapture").then((mod) => ({ default: mod.ImageInput }))
+  import("./CameraCapture").then((mod) => ({ default: mod.ImageInput })),
 );
 const LazyPostCustomizer = React.lazy(() =>
-  import("./PostCustomizer").then((mod) => ({ default: mod.PostCustomizer }))
+  import("./PostCustomizer").then((mod) => ({ default: mod.PostCustomizer })),
 );
 const LazyPostResult = React.lazy(() =>
-  import("./PostResult").then((mod) => ({ default: mod.PostResult }))
+  import("./PostResult").then((mod) => ({ default: mod.PostResult })),
 );
 
 interface MainContentProps {
@@ -55,6 +53,7 @@ interface MainContentProps {
   onLogin: (dealerId: string) => Promise<boolean>;
   onImageSelected: (image: string) => void;
   onReset: () => void;
+  onDismissError: () => void;
   onGenerate: (
     style: StyleOption,
     tone: ToneOption,
@@ -71,7 +70,7 @@ interface MainContentProps {
         signaturePngDataUrl: string;
         vin?: string;
       };
-    }
+    },
   ) => Promise<void>;
   onBackToCapture: () => void;
   onStyleToneChange: (style: StyleOption, tone: ToneOption) => void;
@@ -82,7 +81,7 @@ interface MainContentProps {
   onFunMode: (styleName?: string) => Promise<void>;
   onGenerateVideo: (
     style: VideoStyle,
-    options: VideoRequestOptions
+    options: VideoRequestOptions,
   ) => Promise<string>;
   /** One-shot caption generator for the alternatives modal. */
   onGenerateCaptionVariant?: () => Promise<string>;
@@ -103,6 +102,7 @@ export const MainContent: React.FC<MainContentProps> = ({
   onLogin,
   onImageSelected,
   onReset,
+  onDismissError,
   onGenerate,
   onBackToCapture,
   onStyleToneChange,
@@ -178,40 +178,33 @@ export const MainContent: React.FC<MainContentProps> = ({
           isGenerating: step === AppStep.GENERATING,
         };
 
-        if (error) {
-          return (
-            <div className="w-full max-w-screen-2xl mx-auto p-4 flex flex-col items-center justify-center min-h-[50vh]">
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-error/10 border border-error/30 p-6 rounded-2xl max-w-md w-full text-center backdrop-blur-md"
-              >
-                <div className="w-12 h-12 bg-error/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Icon type="error" className="w-6 h-6 text-error" />
-                </div>
-                <h3 className="text-lg font-bold text-white mb-2">
-                  Something went wrong
-                </h3>
-                <p className="text-error-200 mb-6">{error}</p>
-                <div className="flex gap-3 justify-center">
-                  <Button variant="outline" onClick={onReset}>
-                    Start Over
-                  </Button>
-                  <Button
-                    variant="primary"
-                    onClick={() => window.location.reload()}
-                  >
-                    Reload App
-                  </Button>
-                </div>
-              </motion.div>
-            </div>
-          );
-        }
         return selectedImage ? (
-          <Suspense fallback={suspenseFallback("Loading")}>
-            <LazyPostCustomizer {...customizerProps} />
-          </Suspense>
+          <div className="mx-auto w-full max-w-screen-2xl space-y-4">
+            {error ? (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mx-auto flex max-w-3xl flex-col gap-3 rounded-xl border border-error-500/30 bg-error-500/10 p-4 text-error-100 sm:flex-row sm:items-center sm:justify-between"
+                role="alert"
+              >
+                <div>
+                  <p className="font-semibold">Generation was interrupted</p>
+                  <p className="mt-1 text-sm text-error-200">{error}</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onDismissError}
+                  className="shrink-0"
+                >
+                  Back to editor
+                </Button>
+              </motion.div>
+            ) : null}
+            <Suspense fallback={suspenseFallback("Loading editor")}>
+              <LazyPostCustomizer {...customizerProps} />
+            </Suspense>
+          </div>
         ) : null;
       case AppStep.GENERATING:
         return (
@@ -236,6 +229,7 @@ export const MainContent: React.FC<MainContentProps> = ({
               error={error}
               isDesktopLayout={isDesktopLayout}
               requiresApproval={Boolean(currentDealer?.requires_approval)}
+              bannedPhrases={currentDealer?.banned_phrases}
             />
           </Suspense>
         ) : null;
@@ -246,9 +240,7 @@ export const MainContent: React.FC<MainContentProps> = ({
 
   return (
     <PageTransition pageKey={String(displayedStep)}>
-      <div className="w-full flex-1 flex flex-col h-full">
-        {stepContent()}
-      </div>
+      <div className="w-full flex-1 flex flex-col h-full">{stepContent()}</div>
     </PageTransition>
   );
 };

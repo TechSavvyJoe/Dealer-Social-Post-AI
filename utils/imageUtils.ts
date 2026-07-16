@@ -27,6 +27,26 @@ export const parseDataUrl = (dataUrl: string) => {
   return { mimeType: match[1], data: match[2].replace(/\s/g, "") };
 };
 
+/** Return a safe filename extension that matches an image source's format. */
+export const imageFileExtension = (source: string): string => {
+  const dataMime = source.match(/^data:image\/(png|jpe?g|webp|avif);/i)?.[1];
+  if (dataMime) return dataMime.toLowerCase() === "jpeg" ? "jpg" : dataMime;
+
+  try {
+    const pathname = new URL(source, "https://local.invalid").pathname;
+    const extension = pathname.match(/\.(png|jpe?g|webp|avif)$/i)?.[1];
+    if (extension) {
+      return extension.toLowerCase() === "jpeg"
+        ? "jpg"
+        : extension.toLowerCase();
+    }
+  } catch {
+    /* fall through to the interoperable photo default */
+  }
+
+  return "jpg";
+};
+
 /**
  * Reads a File object and converts it into a data URL string.
  * This is useful for displaying a local preview of a user-selected image before processing.
@@ -124,36 +144,48 @@ export const getJpegExifOrientation = (file: File): Promise<number> => {
  * Generates a new oriented (and EXIF metadata stripped) data URL from an image File.
  * For JPEG files, applies EXIF orientation. For other formats, uses createImageBitmap
  * which automatically handles orientation in modern browsers.
- * 
+ *
  * This ensures photos taken in portrait/landscape are displayed correctly regardless
  * of how the camera saved them.
  */
 export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
+  const maxDimension = 2048;
+
   // Modern browsers (Chrome 81+, Safari 15+, Firefox 98+) support createImageBitmap
   // with automatic orientation handling via imageOrientation option
-  if (typeof createImageBitmap !== 'undefined') {
+  if (typeof createImageBitmap !== "undefined") {
     try {
       // Create bitmap with automatic orientation correction
       const bitmap = await createImageBitmap(file, {
-        imageOrientation: 'from-image', // Respect EXIF orientation
+        imageOrientation: "from-image", // Respect EXIF orientation
       });
-      
-      const canvas = document.createElement('canvas');
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
-      const ctx = canvas.getContext('2d');
-      
+
+      const scale = Math.min(
+        1,
+        maxDimension / Math.max(bitmap.width, bitmap.height),
+      );
+      const outputWidth = Math.max(1, Math.round(bitmap.width * scale));
+      const outputHeight = Math.max(1, Math.round(bitmap.height * scale));
+
+      const canvas = document.createElement("canvas");
+      canvas.width = outputWidth;
+      canvas.height = outputHeight;
+      const ctx = canvas.getContext("2d");
+
       if (ctx) {
-        ctx.drawImage(bitmap, 0, 0);
+        ctx.drawImage(bitmap, 0, 0, outputWidth, outputHeight);
         bitmap.close(); // Free memory
-        
+
         // Use high quality for photos
-        const mimeType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+        const mimeType = file.type === "image/png" ? "image/png" : "image/jpeg";
         return canvas.toDataURL(mimeType, 0.92);
       }
       bitmap.close();
     } catch (e) {
-      console.warn('createImageBitmap failed, falling back to manual EXIF handling:', e);
+      console.warn(
+        "createImageBitmap failed, falling back to manual EXIF handling:",
+        e,
+      );
     }
   }
 
@@ -165,12 +197,12 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
   } catch {
     orientation = 1;
   }
-  
+
   // If orientation is 1 and not JPEG, just return original
   if (orientation === 1 && file.type !== "image/jpeg") {
     return originalDataUrl;
   }
-  
+
   // Load image into canvas and apply transforms
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const i = new Image();
@@ -178,15 +210,15 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
     i.onerror = reject;
     i.src = originalDataUrl;
   });
-  
+
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
   if (!ctx) {
     return originalDataUrl;
   }
-  
+
   const { width, height } = img;
-  
+
   // Set canvas size depending on rotation
   if (orientation > 4 && orientation < 9) {
     canvas.width = height;
@@ -195,7 +227,7 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
     canvas.width = width;
     canvas.height = height;
   }
-  
+
   // Apply orientation transforms
   switch (orientation) {
     case 2: // Flip horizontal
@@ -231,104 +263,45 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
     default:
       break;
   }
-  
+
   ctx.drawImage(img, 0, 0);
   const mimeType = file.type === "image/jpeg" ? "image/jpeg" : file.type;
   return canvas.toDataURL(mimeType, 0.92);
 };
 
 /**
- * Finds a direct image URL from an HTML string by looking for meta tags.
- * @param html The HTML content of a webpage.
- * @returns The found image URL or null.
- */
-const findImageUrlInHtml = (html: string): string | null => {
-  // Look for <meta property="og:image" content="URL">
-  const ogImageMatch = html.match(
-    /<meta\s+(?:name|property)="og:image"\s+content="([^"]+)"/
-  );
-  if (ogImageMatch && ogImageMatch[1]) {
-    // Clean up potential tracking parameters
-    return ogImageMatch[1].split("?")[0];
-  }
-  // Fallback to <link rel="image_src" href="URL">
-  const imageSrcMatch = html.match(/<link\s+rel="image_src"\s+href="([^"]+)"/);
-  if (imageSrcMatch && imageSrcMatch[1]) {
-    return imageSrcMatch[1].split("?")[0];
-  }
-  return null;
-};
-
-/**
  * Fetches an image from a URL and converts it into a data URL string.
- * This is useful for using remote images with APIs that require base64 data.
- * It includes a special handler for Imgur page URLs to find the direct image link.
+ * Remote content always travels through the authenticated, allowlisted image
+ * proxy so arbitrary origins never receive the browser user's IP address.
  * @param url The URL of the image to fetch.
  * @returns A Promise that resolves to the data URL string representation of the image.
  */
 export const urlToDataUrl = async (url: string): Promise<string> => {
   try {
-    let imageUrl = url;
-
-    // If the URL is an Imgur page (e.g., imgur.com/a/xyz) instead of a direct image link (i.imgur.com/xyz.jpg),
-    // we need to fetch the page's HTML and find the actual image URL.
-    // Use our own secure local proxy instead of allorigins.win
-    // This avoids leaking user IP to third parties and ensures consistent behavior
     const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
-
-    try {
-      // Auth is the HttpOnly session cookie; credentials:"include" attaches it.
-      const response = await fetch(proxyUrl, {
-        credentials: "include",
-      });
-      if (response.ok) {
-        const blob = await response.blob();
-        return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        });
-      }
-    } catch (e) {
-      console.warn(
-        "Local proxy failed, falling back to direct fetch (might fail CORS)",
-        e
-      );
-    }
-
-    // Fetch the final image URL (either the original or the one we resolved).
-    // Direct image hosts like i.imgur.com usually have CORS headers that allow this fetch.
-    const response = await fetch(imageUrl);
+    const response = await fetch(proxyUrl, { credentials: "include" });
 
     if (!response.ok) {
-      throw new Error(`Network response was not ok for URL: ${imageUrl}`);
+      throw new Error(`Image proxy rejected the request (${response.status}).`);
     }
     const blob = await response.blob();
 
-    // Verify that what we downloaded is actually an image file.
     if (!blob.type.startsWith("image/")) {
-      throw new Error(
-        `The link provided does not point to a direct image. Content type found: ${blob.type}. Please use a link ending in .jpg, .png, etc.`
-      );
+      throw new Error("The remote resource is not a supported image.");
     }
 
-    // Convert blob to data URL
     return new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        resolve(reader.result as string);
-      };
-      reader.onerror = (error) => reject(error);
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error("Failed to read remote image."));
       reader.readAsDataURL(blob);
     });
   } catch (error) {
-    console.error(
-      `Error fetching URL to convert to data URL for '${url}':`,
-      error
-    );
+    // Never log the URL itself: an operator may use a signed image URL whose
+    // query string is a credential.
+    console.error("Remote image conversion failed.", error);
     throw new Error(
-      `Failed to load image from URL. Please check the link and your network connection.`
+      "Failed to load image from URL. Check that it is a trusted HTTPS image host and try again.",
     );
   }
 };

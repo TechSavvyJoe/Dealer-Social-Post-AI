@@ -46,7 +46,7 @@ const getBarcodeDetector = (): BarcodeDetectorConstructor | null => {
 const DESIRED_FORMATS = ["code_39", "code_128", "data_matrix"];
 
 const resolveSupportedFormats = async (
-  Detector: BarcodeDetectorConstructor
+  Detector: BarcodeDetectorConstructor,
 ): Promise<string[]> => {
   try {
     if (typeof Detector.getSupportedFormats === "function") {
@@ -96,7 +96,9 @@ export const VinScanner: React.FC<VinScannerProps> = ({
   // down and re-acquired every time a decode starts/finishes.
   const isDecodingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
-  const [scanStatus, setScanStatus] = useState<string>("Point at the VIN barcode");
+  const [scanStatus, setScanStatus] = useState<string>(
+    "Point at the VIN barcode",
+  );
   const [lastDecoded, setLastDecoded] = useState<DecodedVehicle | null>(null);
 
   const stopCamera = useCallback(() => {
@@ -127,10 +129,10 @@ export const VinScanner: React.FC<VinScannerProps> = ({
         setLastDecoded(vehicle);
         if (vehicle.empty) {
           setError(vehicle.summary);
-          logEvent("vin.decode.empty", { vin: cleaned });
+          logEvent("vin.decode.empty", { vinPresent: true });
         } else {
           logEvent("vin.decode.success", {
-            vin: cleaned,
+            vinPresent: true,
             year: vehicle.year,
             make: vehicle.make,
             model: vehicle.model,
@@ -147,13 +149,13 @@ export const VinScanner: React.FC<VinScannerProps> = ({
         if (cancelledRef.current) return;
         const msg = err instanceof Error ? err.message : String(err);
         setError(`Decode failed: ${msg}`);
-        logError("vin.decode.error", { vin: cleaned, message: msg });
+        logError("vin.decode.error", { vinPresent: true, message: msg });
       } finally {
         isDecodingRef.current = false;
         if (!cancelledRef.current) setIsDecoding(false);
       }
     },
-    [onClose, onVehicleDecoded]
+    [onClose, onVehicleDecoded],
   );
 
   // Keep a stable ref to the latest handleDecode so the camera effect can call
@@ -170,7 +172,9 @@ export const VinScanner: React.FC<VinScannerProps> = ({
 
     const Detector = getBarcodeDetector();
     if (!Detector) {
-      setScanStatus("Camera barcode scanning isn't supported on this browser. Switch to Manual.");
+      setScanStatus(
+        "Camera barcode scanning isn't supported on this browser. Switch to Manual.",
+      );
       return;
     }
 
@@ -200,7 +204,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
           // refuse the `formats` option but still scan defaults.
           console.warn(
             "[VinScanner] Detector formats rejected; falling back to defaults",
-            err
+            err,
           );
           detector = new Detector();
         }
@@ -222,7 +226,9 @@ export const VinScanner: React.FC<VinScannerProps> = ({
                   return;
                 }
               }
-              setScanStatus(`Detected "${candidate.slice(0, 24)}…" — keep aiming`);
+              setScanStatus(
+                `Detected "${candidate.slice(0, 24)}…" — keep aiming`,
+              );
             }
           } catch {
             // detection errors are non-fatal; loop continues
@@ -233,7 +239,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
         setError(
           msg.toLowerCase().includes("permission")
             ? "Camera permission was denied. Use Manual entry instead."
-            : `Camera unavailable: ${msg}`
+            : `Camera unavailable: ${msg}`,
         );
         logError("vin.scanner.camera_error", { message: msg });
       }
@@ -324,7 +330,11 @@ export const VinScanner: React.FC<VinScannerProps> = ({
                 <motion.div
                   className="absolute left-[10%] right-[10%] h-[2px] bg-primary-400 shadow-[0_0_12px_rgba(56,189,248,0.8)]"
                   animate={{ top: ["38%", "62%", "38%"] }}
-                  transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
+                  transition={{
+                    duration: 2.5,
+                    repeat: Infinity,
+                    ease: "easeInOut",
+                  }}
                 />
               </div>
               <p className="text-xs text-surface-300 text-center">
@@ -332,7 +342,8 @@ export const VinScanner: React.FC<VinScannerProps> = ({
               </p>
               <p className="text-[10px] text-surface-500 text-center leading-relaxed">
                 Tip: the VIN barcode is usually on the driver-side door jamb or
-                lower-left corner of the windshield. Hold steady, fill the frame.
+                lower-left corner of the windshield. Hold steady, fill the
+                frame.
               </p>
             </motion.div>
           )}

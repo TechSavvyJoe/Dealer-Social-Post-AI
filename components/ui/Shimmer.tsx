@@ -19,7 +19,7 @@ export const Shimmer: React.FC<ShimmerProps> = ({
       className={cn(
         "relative overflow-hidden bg-surface-800/50",
         rounded,
-        className
+        className,
       )}
       style={{
         width: width,
@@ -28,7 +28,7 @@ export const Shimmer: React.FC<ShimmerProps> = ({
       role="status"
       aria-label="Loading..."
     >
-      <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/8 to-transparent" />
+      <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/10 to-transparent" />
     </div>
   );
 };

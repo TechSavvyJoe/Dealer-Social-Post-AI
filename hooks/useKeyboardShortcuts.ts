@@ -24,7 +24,8 @@ export const useKeyboardShortcuts = (handlers: ShortcutHandlers): void => {
     const isTypingTarget = (target: EventTarget | null): boolean => {
       if (!target || !(target instanceof HTMLElement)) return false;
       const tag = target.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT")
+        return true;
       if (target.isContentEditable) return true;
       return false;
     };
@@ -32,6 +33,13 @@ export const useKeyboardShortcuts = (handlers: ShortcutHandlers): void => {
     const onKey = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
       const typing = isTypingTarget(e.target);
+
+      // Modal content owns every keyboard interaction while it is open. Letting
+      // a page-level chord through can submit the editor behind a photo-release
+      // dialog or stack Settings over an existing modal/focus trap.
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) {
+        return;
+      }
 
       // Cmd/Ctrl+Enter — primary
       if (meta && e.key === "Enter" && handlers.onPrimary) {
@@ -44,6 +52,7 @@ export const useKeyboardShortcuts = (handlers: ShortcutHandlers): void => {
       if (e.key === "Escape" && handlers.onCancel) {
         // Allow textarea/select to handle their own escape first
         if (typing && (e.target as HTMLElement).tagName === "SELECT") return;
+        e.preventDefault();
         handlers.onCancel();
         return;
       }

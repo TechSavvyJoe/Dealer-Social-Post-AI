@@ -53,7 +53,7 @@ export const getAllDealers = async (): Promise<Dealer[]> => {
   } catch (error) {
     const { title, description } = getErrorMessage(error);
     console.error(`[Database] ${title}:`, description, error);
-    return [];
+    throw error;
   }
 };
 
@@ -63,7 +63,7 @@ export const getAllDealers = async (): Promise<Dealer[]> => {
  * @returns A promise resolving to the Dealer object or undefined if not found.
  */
 export const findDealer = async (
-  dealerCode: string
+  dealerCode: string,
 ): Promise<Dealer | undefined> => {
   try {
     // Search for dealer by code field instead of ID. Use pb.filter() for safe
@@ -73,7 +73,7 @@ export const findDealer = async (
     const rawRecord = await pb
       .collection(COLLECTION_NAME)
       .getFirstListItem(pb.filter("code = {:code}", { code: dealerCode }));
-      
+
     const record = DealerRecordSchema.parse(rawRecord);
 
     const logoUrl =
@@ -102,7 +102,7 @@ export const findDealer = async (
  * @returns A promise resolving to the Dealer object or undefined if not found.
  */
 export const findDealerById = async (
-  dealerId: string
+  dealerId: string,
 ): Promise<Dealer | undefined> => {
   try {
     const rawRecord = await pb.collection(COLLECTION_NAME).getOne(dealerId);
@@ -151,7 +151,7 @@ export const getDealers = async (): Promise<Dealer[]> => {
 const mutateDealer = async (
   url: string,
   method: "POST" | "PATCH" | "DELETE",
-  formData?: FormData
+  formData?: FormData,
 ): Promise<Dealer> => {
   const res = await fetch(url, {
     method,
@@ -171,7 +171,9 @@ const mutateDealer = async (
   return (await res.json()) as Dealer;
 };
 
-export const addDealer = async (dealer: Omit<Dealer, "id">): Promise<Dealer> => {
+export const addDealer = async (
+  dealer: Omit<Dealer, "id">,
+): Promise<Dealer> => {
   const fd = new FormData();
   fd.append("name", dealer.name);
   if (dealer.code) fd.append("code", dealer.code);
@@ -186,30 +188,32 @@ export const updateDealer = async (dealer: Dealer): Promise<Dealer> => {
   return mutateDealer(
     `/api/app/dealers/${encodeURIComponent(dealer.id)}`,
     "PATCH",
-    fd
+    fd,
   );
 };
 
 export const updateDealerWithFile = async (
   dealerId: string,
-  formData: FormData
+  formData: FormData,
 ): Promise<Dealer> => {
   return mutateDealer(
     `/api/app/dealers/${encodeURIComponent(dealerId)}`,
     "PATCH",
-    formData
+    formData,
   );
 };
 
-export const addDealerWithFile = async (formData: FormData): Promise<Dealer> => {
+export const addDealerWithFile = async (
+  formData: FormData,
+): Promise<Dealer> => {
   return mutateDealer("/api/app/dealers", "POST", formData);
 };
 
 export const deleteDealer = async (dealerId: string): Promise<void> => {
-  const res = await fetch(
-    `/api/app/dealers/${encodeURIComponent(dealerId)}`,
-    { method: "DELETE", credentials: "include" }
-  );
+  const res = await fetch(`/api/app/dealers/${encodeURIComponent(dealerId)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
   if (!res.ok) {
     let detail = res.statusText;
     try {

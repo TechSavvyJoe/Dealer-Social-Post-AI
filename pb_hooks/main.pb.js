@@ -1,9 +1,10 @@
 /**
- * This hook file creates a generic proxy for the Google Gemini API and Vertex AI.
+ * This hook file creates an allowlisted proxy for the Google Gemini API.
  * It allows the frontend to send requests to paths like:
- * - `/api/proxy/v1beta/models/gemini-pro:generateContent` (Gemini API)
- * - `/api/proxy/vertex/v1beta1/projects/{PROJECT_ID}/locations/{LOCATION}/...` (Vertex AI)
- * and the hook will forward the request to the appropriate Google API with the secret API key.
+ * - `/api/proxy/v1beta/models/gemini-3.5-flash:generateContent` (Gemini API)
+ * and forwards only configured model/method pairs with the server-side key.
+ * Legacy Vertex code below is unreachable because requestPolicies intentionally
+ * denies every `vertex/*` path; do not re-enable it without an S2S-only route.
  */
 // ---------------------------------------------------------------------------
 // Vertex AI access-token cache (module scope so it actually persists across
@@ -36,52 +37,33 @@ const proxyHandler = (c) => {
   // simply skip the fallback check.
   const proxyAccessToken = ($os.getenv("PROXY_ACCESS_TOKEN") || "").trim();
 
-  // Helper function moved inside handler for PocketBase JSVM compatibility
-  const isAllowedProxyPathLocal = (path) => {
-    const geminiPatterns = [
-      /^v1beta\/models\/[^/]+:generateContent$/,
-      /^v1beta\/models\/[^/]+:generateImages$/,
-      /^v1beta\/models\/[^/]+:generateVideos$/,
-      /^v1beta\/models\/[^/]+:predictLongRunning$/,
-      /^v1beta\/operations\/.+$/,
-      /^v1beta\/models\/[^/]+\/operations\/.+$/, // New format for operation polling
-      /^v1beta\/files\/.+$/, // For downloading generated video files
-    ];
-    const vertexPatterns = [
-      /^vertex\/v1beta1\/projects\/[^/]+\/locations\/[^/]+\/publishers\/google\/models\/[^/]+:(generateContent|predict|generateVideos|generateImages|predictLongRunning)$/,
-      /^vertex\/v1beta1\/operations\/.+$/,
-      /^vertex\/v1\/projects\/[^/]+\/locations\/[^/]+\/publishers\/google\/models\/[^/]+:predict$/,
-    ];
-    return [...geminiPatterns, ...vertexPatterns].some((re) => re.test(path));
-  };
-
-  // Helper for SSRF protection
-  const isPrivateHostLocal = (host) => {
-    if (host === "localhost") return true;
-    return (
-      /^(\d{1,3}\.){3}\d{1,3}$/.test(host) &&
-      /^(10\.|127\.|0\.0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(
-        host
-      )
-    );
-  };
-
   let path = null;
 
   // Multiple methods to extract path for PocketBase JSVM compatibility
   try {
-    // Method 1: Direct pathParams
-    if (c.pathParams && c.pathParams.path) {
-      path = c.pathParams.path;
-    }
+    // Method 1: PocketBase 0.22 router context API. Wildcard parameters are
+    // exposed through pathParam(), not a public pathParams object.
+    path = c.pathParam("path");
   } catch (e) {
-    // pathParams may not be available
+    // pathParam may not be available in other compatible runtimes
   }
 
-  // Method 2: Get from URL path directly
   if (!path) {
     try {
-      const fullPath = c.request.url.path || c.request.url.pathname;
+      // Method 2: Direct pathParams fallback for older/custom runtimes
+      if (c.pathParams && c.pathParams.path) {
+        path = c.pathParams.path;
+      }
+    } catch (e) {
+      // pathParams may not be available
+    }
+  }
+
+  // Method 3: Get from URL path directly
+  if (!path) {
+    try {
+      const request = c.request();
+      const fullPath = request.url.path || request.url.pathname;
       if (fullPath && fullPath.startsWith("/api/proxy/")) {
         path = fullPath.substring("/api/proxy/".length);
       }
@@ -90,10 +72,10 @@ const proxyHandler = (c) => {
     }
   }
 
-  // Method 3: Get from raw URL string
+  // Method 4: Get from raw URL string
   if (!path) {
     try {
-      const urlStr = c.request.url.string();
+      const urlStr = c.request().url.string();
       const match = urlStr.match(/\/api\/proxy\/(.+)/);
       if (match) {
         path = match[1];
@@ -105,6 +87,7 @@ const proxyHandler = (c) => {
 
   try {
     const helpers = require(__hooks + "/helpers.js");
+    const policies = require(__hooks + "/requestPolicies.js");
     const requestInfo = $apis.requestInfo(c);
     const headers = requestInfo.headers || {};
 
@@ -140,7 +123,9 @@ const proxyHandler = (c) => {
         });
         return c.json(401, { error: "Unauthorized proxy request" });
       }
-      rateLimitKey = "token:" + incomingToken.substring(0, 16);
+      // There is a single configured S2S token, so a constant bucket avoids
+      // retaining or logging any part of that credential.
+      rateLimitKey = "s2s-token";
     }
 
     // Per-dealer (or per-token-prefix) sliding window. 60 req/min absorbs a
@@ -149,7 +134,7 @@ const proxyHandler = (c) => {
     const limit = helpers.checkProxyRateLimit(
       rateLimitKey,
       RATE_LIMIT_MAX_REQUESTS,
-      RATE_LIMIT_WINDOW_MS
+      RATE_LIMIT_WINDOW_MS,
     );
     if (!limit.ok) {
       helpers.logAuthEvent("proxy_rate_limited", {
@@ -160,7 +145,7 @@ const proxyHandler = (c) => {
       });
       const retryAfter = Math.max(
         1,
-        Math.ceil((limit.retryAfterMs || 60000) / 1000)
+        Math.ceil((limit.retryAfterMs || 60000) / 1000),
       );
       c.response().header("Retry-After", String(retryAfter));
       return c.json(429, {
@@ -173,23 +158,94 @@ const proxyHandler = (c) => {
       console.log("[Proxy] Path extraction failed. Request details:", {
         pathParams: c.pathParams,
       });
-      return c.json(400, {
-        error: "Missing API path.",
-        debug: "Path extraction failed from all methods",
+      return c.json(400, { error: "Missing API path" });
+    }
+
+    if (!policies.isAllowedProxyRequest(path, requestInfo.method)) {
+      return c.json(403, {
+        error: "Proxy method or path not allowed",
       });
     }
 
-    if (!isAllowedProxyPathLocal(path)) {
+    const authorizedProxyPath = path;
+    const operationStartProvider = policies.providerOperationStartProvider(
+      authorizedProxyPath,
+      requestInfo.method,
+    );
+    const requestedProviderResource = policies.providerResourceRequest(
+      authorizedProxyPath,
+      requestInfo.method,
+    );
+
+    // Shared S2S credentials have no tenant identity and therefore cannot
+    // create, poll, or download dealer-owned provider resources. Stateful
+    // provider routes require a browser session resolved to one dealer.
+    if ((operationStartProvider || requestedProviderResource) && !dealer) {
       return c.json(403, {
-        error: "Proxy path not allowed",
+        error: "Dealer session required for provider resource access",
       });
+    }
+    if (
+      requestedProviderResource &&
+      !helpers.dealerOwnsProviderResource(dealer.id, requestedProviderResource)
+    ) {
+      // Use the same response for missing, expired, and other-dealer IDs so
+      // the ownership ledger cannot be used as a resource-existence oracle.
+      return c.json(403, { error: "Provider resource access denied" });
+    }
+
+    // Generation bodies are an authorization boundary too: a permitted model
+    // must not become an arbitrary pass-through for tools, oversized prompts,
+    // unsupported resolutions, or other cost-amplifying provider options.
+    // Polling and file-download GETs intentionally keep an empty body.
+    let sanitizedProxyBody = "";
+    if ((requestInfo.method || "").toString().toUpperCase() === "POST") {
+      const upstreamRequest = policies.buildGeminiProxyRequest(
+        path,
+        requestInfo.data,
+      );
+      if (!upstreamRequest) {
+        return c.json(400, {
+          error: "Invalid or unsupported generation request",
+        });
+      }
+      sanitizedProxyBody = JSON.stringify(upstreamRequest);
+    }
+
+    const costPolicy = policies.proxyCostPolicy(path);
+    if (costPolicy) {
+      const costLimit = helpers.checkProxyRateLimit(
+        rateLimitKey + ":" + costPolicy.bucket,
+        costPolicy.maxRequests,
+        costPolicy.windowMs,
+      );
+      if (!costLimit.ok) {
+        helpers.logAuthEvent("proxy_rate_limited", {
+          dealerId: dealer ? dealer.id : "",
+          ip: helpers.clientIP(c),
+          userAgent: helpers.userAgent(c),
+          detail:
+            "generation_bucket=" +
+            costPolicy.bucket +
+            " count=" +
+            costLimit.count,
+        });
+        const retryAfter = Math.max(
+          1,
+          Math.ceil((costLimit.retryAfterMs || costPolicy.windowMs) / 1000),
+        );
+        c.response().header("Retry-After", String(retryAfter));
+        return c.json(429, {
+          error: "Generation rate limit exceeded",
+          retry_after_seconds: retryAfter,
+        });
+      }
     }
 
     // Detect if this is a Vertex AI request or Gemini API request
     const isVertexAI = path.startsWith("vertex/");
     let baseUrl;
     let authHeader = {};
-    let queryParamsToAdd = [];
 
     if (isVertexAI) {
       // Vertex AI endpoint -> Use Service Account Auth.
@@ -212,7 +268,7 @@ const proxyHandler = (c) => {
               serviceAccount = JSON.parse(envKey);
             } catch (e) {
               throw new Error(
-                "Failed to parse VERTEX_SERVICE_ACCOUNT_JSON: " + e.toString()
+                "Failed to parse VERTEX_SERVICE_ACCOUNT_JSON: " + e.toString(),
               );
             }
           } else {
@@ -244,7 +300,7 @@ const proxyHandler = (c) => {
                   $os.getenv("universe_domain") || "googleapis.com",
               };
               console.log(
-                "[Vertex] Constructed service account from individual env vars"
+                "[Vertex] Constructed service account from individual env vars",
               );
             } else {
               // Fall back to file
@@ -252,7 +308,7 @@ const proxyHandler = (c) => {
               // Read key file
               if (!$os.getFile(keyPath).exists()) {
                 throw new Error(
-                  "Vertex credentials not found. Set VERTEX_SERVICE_ACCOUNT_JSON env var, individual service account fields, or create vertex_key.json"
+                  "Vertex credentials not found. Set VERTEX_SERVICE_ACCOUNT_JSON env var, individual service account fields, or create vertex_key.json",
                 );
               }
               const rawKey = $os.readFile(keyPath);
@@ -322,11 +378,7 @@ const proxyHandler = (c) => {
           // Sign JWT. Temp filenames carry a per-request random suffix so
           // two concurrent Vertex requests in the same second can't clobber
           // each other's key files. (Date.now()/1000 was seconds-precision.)
-          const reqId =
-            typeof $security !== "undefined" &&
-            $security.randomStringWithAlphabet
-              ? $security.randomStringWithAlphabet(12, "0123456789abcdef")
-              : `${now}_${Math.floor(Math.random() * 1e9).toString(16)}`;
+          const reqId = helpers.secureRandomString(24, "0123456789abcdef");
           const tempDir = `${__hooks}/../temp`;
           const tempKey = `${tempDir}/temp_key_${reqId}.pem`;
           const tempToken = `${tempDir}/temp_token_${reqId}.txt`;
@@ -381,7 +433,7 @@ const proxyHandler = (c) => {
             const signCmd = $os.cmd(
               "/bin/sh",
               "-c",
-              `${opensslBin} dgst -sha256 -sign "${tempKey}" -out "${tempSig}" "${tempToken}" 2>&1`
+              `${opensslBin} dgst -sha256 -sign "${tempKey}" -out "${tempSig}" "${tempToken}" 2>&1`,
             );
             const signOut = signCmd.output();
 
@@ -402,7 +454,7 @@ const proxyHandler = (c) => {
             const b64Cmd = $os.cmd(
               "/bin/sh",
               "-c",
-              `${opensslBin} base64 -in "${tempSig}"`
+              `${opensslBin} base64 -in "${tempSig}"`,
             );
             const b64 = b64Cmd.output();
 
@@ -427,12 +479,12 @@ const proxyHandler = (c) => {
             if (tokenResp.statusCode !== 200) {
               console.log(
                 "[Auth] Token Exchange Failed. Status:",
-                tokenResp.statusCode
+                tokenResp.statusCode,
               );
               // Do not log raw body if it contains sensitive info, but usually error body is safe.
               // However, to be safe, we'll just log the status and throw.
               throw new Error(
-                `Token exchange failed with status ${tokenResp.statusCode}`
+                `Token exchange failed with status ${tokenResp.statusCode}`,
               );
             }
 
@@ -460,8 +512,7 @@ const proxyHandler = (c) => {
       } catch (e) {
         console.error("Failed to get Vertex Access Token:", e);
         return c.json(500, {
-          error: "Authentication failed for Vertex AI",
-          details: e.toString(),
+          error: "Vertex AI authentication is temporarily unavailable",
         });
       }
 
@@ -494,7 +545,10 @@ const proxyHandler = (c) => {
         });
       }
       baseUrl = GEMINI_API_URL_BASE;
-      queryParamsToAdd.push(`key=${geminiApiKey}`);
+      // Keep provider credentials out of URLs, access logs, and intermediary
+      // query-string telemetry. Google's Gemini API supports this header on
+      // every route used here.
+      authHeader = { "x-goog-api-key": geminiApiKey };
     }
 
     // Build target URL, preserve incoming query params
@@ -511,18 +565,15 @@ const proxyHandler = (c) => {
       if (Array.isArray(value)) {
         value.forEach((v) =>
           queryParts.push(
-            `${encodeURIComponent(key)}=${encodeURIComponent(String(v))}`
-          )
+            `${encodeURIComponent(key)}=${encodeURIComponent(String(v))}`,
+          ),
         );
       } else if (value !== undefined && value !== null) {
         queryParts.push(
-          `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`
+          `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`,
         );
       }
     });
-
-    // Add our auth params (API Key for Gemini)
-    queryParamsToAdd.forEach((p) => queryParts.push(p));
 
     if (queryParts.length > 0) {
       const separator = targetUrl.includes("?") ? "&" : "?";
@@ -530,20 +581,16 @@ const proxyHandler = (c) => {
     }
 
     const apiType = isVertexAI ? "Vertex AI" : "Gemini API";
-    console.log(
-      `[Proxy ${apiType}] ${requestInfo.method} ${targetUrl.replace(
-        /key=[^&]+/,
-        "key=HIDDEN"
-      )}`
-    );
+    const safeLogUrl = targetUrl
+      .replace(/key=[^&]+/, "key=HIDDEN")
+      .replace(/(\/operations\/)[^?]+/, "$1[redacted]")
+      .replace(/(\/files\/)[^?]+/, "$1[redacted]");
+    console.log(`[Proxy ${apiType}] ${requestInfo.method} ${safeLogUrl}`);
 
     const res = $http.send({
       url: targetUrl,
       method: requestInfo.method,
-      body:
-        requestInfo.method === "POST" && requestInfo.body
-          ? JSON.stringify(requestInfo.body)
-          : "",
+      body: sanitizedProxyBody,
       headers: {
         "Content-Type": "application/json",
         ...authHeader,
@@ -558,6 +605,7 @@ const proxyHandler = (c) => {
     // corrupts the body we re-encode below, and forwarding upstream
     // Set-Cookie / Cache-Control can poison the SW/browser cache or leak
     // upstream cookies onto this authenticated origin.
+    let upstreamContentType = "";
     if (res.headers) {
       Object.entries(res.headers).forEach(([key, value]) => {
         if (
@@ -565,28 +613,84 @@ const proxyHandler = (c) => {
           value !== null &&
           String(key).toLowerCase() === "content-type"
         ) {
+          upstreamContentType = String(value).split(";", 1)[0].trim();
           c.response().header("Content-Type", String(value));
         }
       });
     }
 
+    const isVideoDownload =
+      cleanPath.startsWith("v1beta/files/") &&
+      (upstreamContentType.indexOf("video/") === 0 ||
+        upstreamContentType === "application/octet-stream");
+    if (isVideoDownload) {
+      const binaryBody = res.raw || res.body;
+      const maxVideoBytes = 100 * 1024 * 1024;
+      if (!binaryBody || binaryBody.length === 0) {
+        return c.json(502, { error: "Video download returned no data" });
+      }
+      if (binaryBody.length > maxVideoBytes) {
+        return c.json(413, { error: "Generated video exceeds 100 MB" });
+      }
+      c.response().header("Cache-Control", "private, no-store");
+      c.response().header("X-Content-Type-Options", "nosniff");
+      return c.blob(res.statusCode, upstreamContentType, binaryBody);
+    }
+
     const body =
       res.body ?? res.raw ?? (res.json ? JSON.stringify(res.json) : "");
 
+    let jsonBody = null;
     try {
-      const jsonBody = JSON.parse(body);
-      return c.json(res.statusCode, jsonBody);
-    } catch (e) {
+      jsonBody =
+        res.json && typeof res.json === "object" ? res.json : JSON.parse(body);
+    } catch (_e) {
       return c.string(res.statusCode, body);
     }
+
+    if (
+      dealer &&
+      res.statusCode >= 200 &&
+      res.statusCode < 300 &&
+      (operationStartProvider ||
+        (requestedProviderResource &&
+          requestedProviderResource.resource_type === "operation"))
+    ) {
+      const discoveredResources = policies.providerResourcesFromResponse(
+        authorizedProxyPath,
+        jsonBody,
+      );
+      const securedOperation = discoveredResources.some(
+        (resource) => resource.resource_type === "operation",
+      );
+
+      // If an async start returned a name, never hand the identifier to the
+      // browser unless its durable ownership claim was understood and saved.
+      if (
+        operationStartProvider &&
+        typeof jsonBody.name === "string" &&
+        !securedOperation
+      ) {
+        return c.json(502, { error: "Invalid provider operation response" });
+      }
+
+      try {
+        if (discoveredResources.length) {
+          helpers.claimProviderResources(dealer.id, discoveredResources);
+        }
+      } catch (_e) {
+        console.error("[Proxy] Provider resource ownership save failed");
+        return c.json(502, { error: "Could not secure provider resource" });
+      }
+    }
+
+    return c.json(res.statusCode, jsonBody);
   } catch (err) {
     const apiType =
       path && path.startsWith("vertex/") ? "Vertex AI" : "Gemini API";
     console.error(`[Proxy ${apiType}] Error:`, err);
     return c.json(500, {
-      error: `Failed to proxy request to ${apiType}.`,
-      details: err.toString(),
-      path: path,
+      error: `${apiType} request failed`,
     });
   }
 };
@@ -602,10 +706,11 @@ const proxyHandler = (c) => {
 // ----------------------------------------------------------------------------
 routerAdd("POST", "/api/proxy/openai/v1/images/generations", (c) => {
   const helpers = require(__hooks + "/helpers.js");
+  const policies = require(__hooks + "/requestPolicies.js");
   const openaiKey = ($os.getenv("OPENAI_API_KEY") || "").trim();
-  if (!openaiKey) {
-    return c.json(503, { error: "OpenAI API key is not configured" });
-  }
+  const enabled =
+    ($os.getenv("ENABLE_OPENAI_FALLBACK") || "").trim().toLowerCase() ===
+    "true";
   // Session cookie required (same model as primary Gemini proxy).
   const dealer = helpers.dealerFromSession(c);
   if (!dealer) {
@@ -616,16 +721,23 @@ routerAdd("POST", "/api/proxy/openai/v1/images/generations", (c) => {
     });
     return c.json(401, { error: "Unauthorized proxy request" });
   }
+  if (!enabled || !openaiKey) {
+    return c.json(503, { error: "OpenAI image fallback is not enabled" });
+  }
   const limit = helpers.checkProxyRateLimit(
     "openai:" + dealer.id,
-    30,
-    60 * 1000
+    5,
+    60 * 1000,
   );
   if (!limit.ok) {
     c.response().header("Retry-After", "60");
     return c.json(429, { error: "Rate limit exceeded" });
   }
   const requestInfo = $apis.requestInfo(c);
+  const upstreamRequest = policies.buildOpenAIImageRequest(requestInfo.data);
+  if (!upstreamRequest) {
+    return c.json(400, { error: "Invalid OpenAI image request" });
+  }
   try {
     const res = $http.send({
       url: "https://api.openai.com/v1/images/generations",
@@ -634,10 +746,7 @@ routerAdd("POST", "/api/proxy/openai/v1/images/generations", (c) => {
         "Content-Type": "application/json",
         Authorization: `Bearer ${openaiKey}`,
       },
-      body:
-        requestInfo.method === "POST" && requestInfo.data
-          ? JSON.stringify(requestInfo.data)
-          : "",
+      body: JSON.stringify(upstreamRequest),
       timeout: 120000,
     });
     const body =
@@ -651,17 +760,17 @@ routerAdd("POST", "/api/proxy/openai/v1/images/generations", (c) => {
     console.error("[Proxy OpenAI] error", err);
     return c.json(500, {
       error: "Failed to proxy request to OpenAI",
-      details: err.toString(),
     });
   }
 });
 
 routerAdd("POST", "/api/proxy/anthropic/v1/messages", (c) => {
   const helpers = require(__hooks + "/helpers.js");
+  const policies = require(__hooks + "/requestPolicies.js");
   const anthropicKey = ($os.getenv("ANTHROPIC_API_KEY") || "").trim();
-  if (!anthropicKey) {
-    return c.json(503, { error: "Anthropic API key is not configured" });
-  }
+  const enabled =
+    ($os.getenv("ENABLE_CLAUDE_FALLBACK") || "").trim().toLowerCase() ===
+    "true";
   const dealer = helpers.dealerFromSession(c);
   if (!dealer) {
     helpers.logAuthEvent("proxy_unauthorized", {
@@ -671,16 +780,25 @@ routerAdd("POST", "/api/proxy/anthropic/v1/messages", (c) => {
     });
     return c.json(401, { error: "Unauthorized proxy request" });
   }
+  if (!enabled || !anthropicKey) {
+    return c.json(503, { error: "Anthropic fallback is not enabled" });
+  }
   const limit = helpers.checkProxyRateLimit(
     "anthropic:" + dealer.id,
-    60,
-    60 * 1000
+    15,
+    60 * 1000,
   );
   if (!limit.ok) {
     c.response().header("Retry-After", "60");
     return c.json(429, { error: "Rate limit exceeded" });
   }
   const requestInfo = $apis.requestInfo(c);
+  const upstreamRequest = policies.buildAnthropicMessageRequest(
+    requestInfo.data,
+  );
+  if (!upstreamRequest) {
+    return c.json(400, { error: "Invalid Anthropic message request" });
+  }
   try {
     const res = $http.send({
       url: "https://api.anthropic.com/v1/messages",
@@ -690,10 +808,7 @@ routerAdd("POST", "/api/proxy/anthropic/v1/messages", (c) => {
         "x-api-key": anthropicKey,
         "anthropic-version": "2023-06-01",
       },
-      body:
-        requestInfo.method === "POST" && requestInfo.data
-          ? JSON.stringify(requestInfo.data)
-          : "",
+      body: JSON.stringify(upstreamRequest),
       timeout: 120000,
     });
     const body =
@@ -707,7 +822,6 @@ routerAdd("POST", "/api/proxy/anthropic/v1/messages", (c) => {
     console.error("[Proxy Anthropic] error", err);
     return c.json(500, {
       error: "Failed to proxy request to Anthropic",
-      details: err.toString(),
     });
   }
 });
@@ -718,16 +832,13 @@ routerAdd("POST", "/api/proxy/:path(*)", proxyHandler);
 
 routerAdd("GET", "/api/proxy-image", (c) => {
   const helpers = require(__hooks + "/helpers.js");
+  const policies = require(__hooks + "/requestPolicies.js");
   const url = c.queryParam("url");
   const dealer = helpers.dealerFromSession(c);
   if (!dealer) {
     return c.json(401, { error: "Unauthorized proxy request" });
   }
-  const limit = helpers.checkProxyRateLimit(
-    "img:" + dealer.id,
-    120,
-    60 * 1000
-  );
+  const limit = helpers.checkProxyRateLimit("img:" + dealer.id, 120, 60 * 1000);
   if (!limit.ok) {
     c.response().header("Retry-After", "60");
     return c.json(429, { error: "Rate limit exceeded" });
@@ -737,50 +848,9 @@ routerAdd("GET", "/api/proxy-image", (c) => {
     return c.json(400, { error: "Missing url parameter" });
   }
 
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "https:") {
-      return c.json(400, { error: "Only https URLs are allowed" });
-    }
-
-    // SSRF protection. The naive dotted-quad regex used previously missed
-    // IPv6 (::1, fc00::/7, fe80::), the cloud metadata hostname, and non-dotted
-    // numeric IP encodings (http://2130706433, http://0x7f000001,
-    // http://017700000001) that all still resolve to private/loopback targets.
-    const isBlockedHost = (rawHost) => {
-      if (!rawHost) return true;
-      const host = rawHost.toLowerCase();
-      // Internal / loopback / link-local hostnames
-      if (
-        host === "localhost" ||
-        host.endsWith(".localhost") ||
-        host.endsWith(".local") ||
-        host.endsWith(".internal") ||
-        host === "metadata.google.internal"
-      ) {
-        return true;
-      }
-      // Any IPv6 literal — block wholesale (upstreams we proxy are IPv4-reachable)
-      if (host.indexOf(":") !== -1) return true;
-      // Dotted-quad IPv4: block loopback, private, link-local, CGNAT, broadcast
-      if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
-        return (
-          /^(0\.|10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(
-            host
-          ) || host === "255.255.255.255"
-        );
-      }
-      // Non-dotted numeric host forms (decimal/hex/octal) bypass the dotted-quad
-      // check but still resolve to an IP — reject them all.
-      if (/^\d+$/.test(host) || /^0x[0-9a-f]+$/.test(host)) return true;
-      return false;
-    };
-
-    if (isBlockedHost(parsed.hostname)) {
-      return c.json(400, { error: "Private/loopback hosts are not allowed" });
-    }
-  } catch (e) {
-    return c.json(400, { error: "Invalid url parameter" });
+  const configuredHosts = $os.getenv("IMAGE_PROXY_ALLOWED_HOSTS") || "";
+  if (!policies.isAllowedImageProxyUrl(url, configuredHosts)) {
+    return c.json(400, { error: "Image URL host is not allowed" });
   }
 
   try {
@@ -794,14 +864,52 @@ routerAdd("GET", "/api/proxy-image", (c) => {
       return c.json(res.statusCode, { error: "Failed to fetch image" });
     }
 
-    const contentType =
-      res.headers["Content-Type"] || "application/octet-stream";
+    const headerValue = (name) => {
+      const wanted = name.toLowerCase();
+      const headers = res.headers || {};
+      for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() !== wanted) continue;
+        const value = headers[key];
+        return Array.isArray(value) ? value[0] || "" : value || "";
+      }
+      return "";
+    };
 
-    // Return the raw image data
-    // Note: res.raw is the byte slice of the body
+    const contentType = headerValue("content-type")
+      .toString()
+      .split(";", 1)[0]
+      .trim()
+      .toLowerCase();
+    const allowedTypes = [
+      "image/png",
+      "image/jpeg",
+      "image/webp",
+      "image/gif",
+      "image/avif",
+    ];
+    if (allowedTypes.indexOf(contentType) === -1) {
+      return c.json(415, {
+        error: "Upstream response is not a supported image",
+      });
+    }
+
+    const maxBytes = 10 * 1024 * 1024;
+    const declaredLength = parseInt(headerValue("content-length"), 10);
+    const actualLength = res.raw ? res.raw.length : 0;
+    if (
+      (Number.isFinite(declaredLength) && declaredLength > maxBytes) ||
+      actualLength > maxBytes
+    ) {
+      return c.json(413, { error: "Upstream image exceeds 10 MB" });
+    }
+
+    c.response().header("Cache-Control", "private, no-store");
+    c.response().header("X-Content-Type-Options", "nosniff");
+
     return c.blob(res.statusCode, contentType, res.raw);
   } catch (err) {
-    return c.json(500, { error: "Proxy failed: " + err.toString() });
+    console.error("[proxy-image] fetch failed", err);
+    return c.json(500, { error: "Image proxy request failed" });
   }
 });
 
@@ -810,32 +918,32 @@ routerAdd("GET", "/api/proxy-image", (c) => {
 
 // ----------------------------------------------------------------------------
 // Health + diagnostics endpoint. Public (no session required) so uptime
-// monitors can hit it. Returns connectivity + config presence WITHOUT leaking
-// any actual secret values.
+// monitors can hit it. Public callers get only aggregate readiness; detailed
+// configuration presence and tenant counts require a super-admin session.
 // ----------------------------------------------------------------------------
 routerAdd("GET", "/api/app/health", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  const isAuthedAdmin =
-    helpers.sessionRoleFromCookie(c) === "super_admin";
+  const policies = require(__hooks + "/requestPolicies.js");
+  const isAuthedAdmin = helpers.sessionRoleFromCookie(c) === "super_admin";
 
+  const checks = {
+    pocketbase: false,
+    gemini_key_set: false,
+    // Optional S2S token — not required for browser session auth.
+    proxy_token_set: false,
+    anthropic_key_set: false,
+    openai_key_set: false,
+    admin_dealer_code_set: false,
+  };
   const result = {
     ok: true,
     ts: new Date().toISOString(),
-    checks: {
-      pocketbase: false,
-      gemini_key_set: false,
-      // Optional S2S token — not required for browser session auth.
-      proxy_token_set: false,
-      vertex_credentials_set: false,
-      anthropic_key_set: false,
-      openai_key_set: false,
-      admin_dealer_code_set: false,
-    },
     version: "1.0",
   };
 
   // Aggregate tenant counts only for authenticated super-admins.
   if (isAuthedAdmin) {
+    result.checks = checks;
     result.counts = {
       dealers: 0,
       posts_24h: 0,
@@ -846,7 +954,7 @@ routerAdd("GET", "/api/app/health", (c) => {
   try {
     // Smoke a trivial PB query
     const dealers = $app.dao().findCollectionByNameOrId("dealers");
-    result.checks.pocketbase = !!dealers;
+    checks.pocketbase = !!dealers;
     if (dealers && isAuthedAdmin) {
       try {
         const all = $app
@@ -859,7 +967,7 @@ routerAdd("GET", "/api/app/health", (c) => {
     }
   } catch (e) {
     result.ok = false;
-    result.checks.pocketbase = false;
+    checks.pocketbase = false;
   }
 
   if (isAuthedAdmin) {
@@ -873,7 +981,7 @@ routerAdd("GET", "/api/app/health", (c) => {
           "-generated_at",
           1000,
           0,
-          { s: since }
+          { s: since },
         );
       result.counts.posts_24h = posts.length;
     } catch (_e) {
@@ -889,7 +997,7 @@ routerAdd("GET", "/api/app/health", (c) => {
           "-signed_at",
           1000,
           0,
-          { s: since }
+          { s: since },
         );
       result.counts.photo_releases_24h = releases.length;
     } catch (_e) {
@@ -898,22 +1006,112 @@ routerAdd("GET", "/api/app/health", (c) => {
   }
 
   // Env presence (booleans only — never echo the values)
-  result.checks.gemini_key_set = !!($os.getenv("GEMINI_API_KEY") || "").trim();
-  result.checks.proxy_token_set = !!($os.getenv("PROXY_ACCESS_TOKEN") || "").trim();
-  result.checks.vertex_credentials_set =
-    !!($os.getenv("VERTEX_SERVICE_ACCOUNT_JSON") || $os.getenv("private_key") || "").trim();
-  result.checks.anthropic_key_set = !!($os.getenv("ANTHROPIC_API_KEY") || "").trim();
-  result.checks.openai_key_set = !!($os.getenv("OPENAI_API_KEY") || "").trim();
-  result.checks.admin_dealer_code_set =
-    !!($os.getenv("ADMIN_DEALER_CODE") || "").trim();
+  checks.gemini_key_set = !!($os.getenv("GEMINI_API_KEY") || "").trim();
+  checks.proxy_token_set = !!($os.getenv("PROXY_ACCESS_TOKEN") || "").trim();
+  checks.anthropic_key_set = !!($os.getenv("ANTHROPIC_API_KEY") || "").trim();
+  checks.openai_key_set = !!($os.getenv("OPENAI_API_KEY") || "").trim();
+  checks.claude_fallback_enabled =
+    checks.anthropic_key_set &&
+    ($os.getenv("ENABLE_CLAUDE_FALLBACK") || "").trim().toLowerCase() ===
+      "true";
+  checks.openai_fallback_enabled =
+    checks.openai_key_set &&
+    ($os.getenv("ENABLE_OPENAI_FALLBACK") || "").trim().toLowerCase() ===
+      "true";
+  checks.admin_dealer_code_set = policies.isValidAdminDealerCode(
+    $os.getenv("ADMIN_DEALER_CODE") || "",
+  );
 
   // Top-level ok = critical checks must pass (uptime monitors hit this).
-  if (!result.checks.pocketbase || !result.checks.gemini_key_set) {
+  if (
+    !checks.pocketbase ||
+    !checks.gemini_key_set ||
+    !checks.admin_dealer_code_set
+  ) {
     result.ok = false;
   }
 
   return c.json(result.ok ? 200 : 503, result);
 });
+
+function redactTelemetryVinStrings(value) {
+  return String(value).replace(
+    /(^|[^A-HJ-NPR-Z0-9])([A-HJ-NPR-Z0-9]{17})(?=$|[^A-HJ-NPR-Z0-9])/gi,
+    function (match, prefix, candidate) {
+      if (!/\d/.test(candidate)) return match;
+      return prefix + "[REDACTED_VIN]";
+    },
+  );
+}
+
+function isSensitiveTelemetryKey(key) {
+  const normalized = String(key)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+  if (
+    normalized === "vin" ||
+    normalized.endsWith("vehiclevin") ||
+    normalized.endsWith("attachedvin")
+  ) {
+    return true;
+  }
+
+  if (
+    normalized === "code" ||
+    normalized.endsWith("dealercode") ||
+    normalized.endsWith("admincode") ||
+    normalized.endsWith("accesscode") ||
+    normalized.endsWith("invitecode")
+  ) {
+    return true;
+  }
+
+  return (
+    normalized.indexOf("authorization") !== -1 ||
+    normalized.indexOf("cookie") !== -1 ||
+    normalized.indexOf("token") !== -1 ||
+    normalized.indexOf("signature") !== -1 ||
+    normalized.indexOf("password") !== -1 ||
+    normalized.indexOf("secret") !== -1 ||
+    normalized.indexOf("credential") !== -1 ||
+    normalized.endsWith("apikey")
+  );
+}
+
+function redactTelemetryValue(value, key, depth) {
+  if (key && isSensitiveTelemetryKey(key)) return "[REDACTED]";
+  if (typeof value === "string") return redactTelemetryVinStrings(value);
+  if (
+    value === null ||
+    typeof value === "boolean" ||
+    typeof value === "number"
+  ) {
+    return value;
+  }
+  if (depth >= 10) return "[TRUNCATED]";
+
+  if (Array.isArray(value)) {
+    return value.map(function (entry) {
+      return redactTelemetryValue(entry, "", depth + 1);
+    });
+  }
+
+  if (value && typeof value === "object") {
+    const redacted = {};
+    Object.keys(value).forEach(function (property) {
+      const safeProperty = redactTelemetryVinStrings(property);
+      redacted[safeProperty] = redactTelemetryValue(
+        value[property],
+        property,
+        depth + 1,
+      );
+    });
+    return redacted;
+  }
+
+  return "[UNSUPPORTED]";
+}
 
 routerAdd("POST", "/api/telemetry", (c) => {
   try {
@@ -924,17 +1122,21 @@ routerAdd("POST", "/api/telemetry", (c) => {
     const rl = helpers.checkProxyRateLimit(
       "telemetry:" + helpers.clientIP(c),
       30,
-      60 * 1000
+      60 * 1000,
     );
     if (!rl.ok) return c.json(429, { success: false });
 
     const rawBody = $apis.requestInfo(c).data || {};
-    // Cap how much attacker-controlled text reaches the log stream.
-    const serialized = JSON.stringify(rawBody).slice(0, 2000);
+    // Redact before truncating so secrets cannot survive beyond the slice
+    // boundary, then apply a serialized-string VIN pass as defense in depth.
+    const redactedBody = redactTelemetryValue(rawBody, "", 0);
+    const serialized = redactTelemetryVinStrings(
+      JSON.stringify(redactedBody),
+    ).slice(0, 2000);
     console.log("[Telemetry]", serialized);
     return c.json(200, { success: true });
-  } catch (err) {
-    console.error("Telemetry error:", err);
+  } catch (_err) {
+    console.error("Telemetry redaction error");
     // Return 200 even on error to prevent client noise; do not echo details.
     return c.json(200, { success: false });
   }
@@ -955,136 +1157,157 @@ routerAdd("POST", "/api/app/session", (c) => {
   try {
     const LOGIN_FAIL_WINDOW_SECONDS = 15 * 60; // 15 min
     const LOGIN_FAIL_THRESHOLD = 10;
-    
+
     const helpers = require(__hooks + "/helpers.js");
+    const policies = require(__hooks + "/requestPolicies.js");
     const ip = helpers.clientIP(c);
     const ua = helpers.userAgent(c);
 
     const recentFails = helpers.countRecentEvents(
       "login_fail",
       ip,
-      LOGIN_FAIL_WINDOW_SECONDS
+      LOGIN_FAIL_WINDOW_SECONDS,
     );
     if (recentFails >= LOGIN_FAIL_THRESHOLD) {
       helpers.logAuthEvent("login_locked", {
         ip: ip,
         userAgent: ua,
-      detail: `${recentFails} fails in window`,
-    });
-    c.response().header("Retry-After", String(LOGIN_FAIL_WINDOW_SECONDS));
-    return c.json(429, {
-      error: "Too many login attempts. Try again in a few minutes.",
-      retry_after_seconds: LOGIN_FAIL_WINDOW_SECONDS,
-    });
-  }
+        detail: `${recentFails} fails in window`,
+      });
+      c.response().header("Retry-After", String(LOGIN_FAIL_WINDOW_SECONDS));
+      return c.json(429, {
+        error: "Too many login attempts. Try again in a few minutes.",
+        retry_after_seconds: LOGIN_FAIL_WINDOW_SECONDS,
+      });
+    }
 
-  const body = $apis.requestInfo(c).data || {};
-  const dealerCode = (body.dealerCode || "").toString().trim();
+    const body = $apis.requestInfo(c).data || {};
+    const dealerCode = (body.dealerCode || "").toString().trim();
 
-  if (!dealerCode || dealerCode.length < 4 || dealerCode.length > 12) {
-    helpers.logAuthEvent("login_fail", {
-      codeAttempted: dealerCode,
-      ip: ip,
-      userAgent: ua,
-      detail: "malformed code",
-    });
-    return c.json(400, { error: "Dealer code is required" });
-  }
+    if (!dealerCode || dealerCode.length < 4 || dealerCode.length > 12) {
+      helpers.logAuthEvent("login_fail", {
+        credentialPresent: dealerCode.length > 0,
+        ip: ip,
+        userAgent: ua,
+        detail: "malformed code",
+      });
+      return c.json(400, { error: "Dealer code is required" });
+    }
 
-  let role = "salesperson";
-  let record;
-  // SECURITY: never fall back to a hardcoded admin code. If ADMIN_DEALER_CODE
-  // is unset, super-admin login is simply unavailable.
-  const adminEnv = ($os.getenv("ADMIN_DEALER_CODE") || "").trim();
+    let role = "salesperson";
+    let record;
+    // SECURITY: never fall back to a hardcoded admin code. If ADMIN_DEALER_CODE
+    // is unset, super-admin login is simply unavailable.
+    const configuredAdminCode = ($os.getenv("ADMIN_DEALER_CODE") || "").trim();
+    const adminEnv = policies.isValidAdminDealerCode(configuredAdminCode)
+      ? configuredAdminCode
+      : "";
 
-  if (adminEnv && dealerCode === adminEnv) {
-    role = "super_admin";
-    try {
-      record = $app.dao().findFirstRecordByData("dealers", "code", adminEnv);
-    } catch (_e) {}
-
-    if (!record) {
-      // Auto-provision only when ADMIN_DEALER_CODE is explicitly configured.
-      // Uses raw SQL so a still-migrating schema can't block bootstrap.
+    if (adminEnv && dealerCode === adminEnv) {
+      role = "super_admin";
       try {
-        const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-        let id = "";
-        for (let i = 0; i < 15; i++) {
-          id += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        const now = new Date().toISOString().replace('T', ' ').substring(0, 19) + "Z";
+        record = $app.dao().findFirstRecordByData("dealers", "code", adminEnv);
+      } catch (_e) {}
 
-        $app.dao().db()
-          .newQuery("INSERT INTO dealers (id, code, name, created, updated) VALUES ({:id}, {:code}, 'SYSTEM ADMIN', {:now}, {:now})")
-          .bind({ id: id, code: adminEnv, now: now })
-          .execute();
-
-        record = $app.dao().findRecordById("dealers", id);
-      } catch (insertErr) {
-        console.log("[session] admin insert failed (likely duplicate), re-querying:", insertErr);
+      if (!record) {
+        // Auto-provision only when ADMIN_DEALER_CODE is explicitly configured.
+        // Uses raw SQL so a still-migrating schema can't block bootstrap.
         try {
-          record = $app.dao().findFirstRecordByData("dealers", "code", adminEnv);
-        } catch (_e2) {
-          console.error("[session] admin re-query also failed:", _e2);
+          const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+          const id = helpers.secureRandomString(15, chars);
+          const now =
+            new Date().toISOString().replace("T", " ").substring(0, 19) + "Z";
+
+          $app
+            .dao()
+            .db()
+            .newQuery(
+              "INSERT INTO dealers (id, code, name, created, updated) VALUES ({:id}, {:code}, 'SYSTEM ADMIN', {:now}, {:now})",
+            )
+            .bind({ id: id, code: adminEnv, now: now })
+            .execute();
+
+          record = $app.dao().findRecordById("dealers", id);
+        } catch (insertErr) {
+          console.log(
+            "[session] admin insert failed (likely duplicate), re-querying:",
+            insertErr,
+          );
+          try {
+            record = $app
+              .dao()
+              .findFirstRecordByData("dealers", "code", adminEnv);
+          } catch (_e2) {
+            console.error("[session] admin re-query also failed:", _e2);
+          }
         }
       }
-    }
-  } else {
-    try {
-      record = $app
-        .dao()
-        .findFirstRecordByData("dealers", "code", dealerCode);
-    } catch (_e) {}
-
-    if (!record) {
+    } else {
       try {
         record = $app
           .dao()
-          .findFirstRecordByData("dealers", "admin_code", dealerCode);
-        if (record) role = "dealer_admin";
+          .findFirstRecordByData("dealers", "code", dealerCode);
       } catch (_e) {}
-    }
-  }
 
-  if (!record) {
-    helpers.logAuthEvent("login_fail", {
-      codeAttempted: dealerCode,
+      if (!record) {
+        try {
+          record = $app
+            .dao()
+            .findFirstRecordByData("dealers", "admin_code", dealerCode);
+          if (record) role = "dealer_admin";
+        } catch (_e) {}
+      }
+    }
+
+    if (role === "super_admin" && !record) {
+      helpers.logAuthEvent("login_fail", {
+        credentialPresent: true,
+        ip: ip,
+        userAgent: ua,
+        detail: "admin account unavailable",
+      });
+      return c.json(503, {
+        error: "Administrative login is temporarily unavailable",
+      });
+    }
+
+    if (!record) {
+      helpers.logAuthEvent("login_fail", {
+        credentialPresent: true,
+        ip: ip,
+        userAgent: ua,
+      });
+      return c.json(401, { error: "Invalid dealer code" });
+    }
+
+    // Mint the opaque session token + persist row. Cookie carries ONLY the token.
+    let token, expiresAt;
+    try {
+      const session = helpers.createSession(record.id, role, ip, ua);
+      token = session.token;
+      expiresAt = session.expiresAt;
+    } catch (err) {
+      console.error("[session POST] createSession failed", err);
+      return c.json(500, { error: "Failed to start session" });
+    }
+
+    c.response().header().add("Set-Cookie", helpers.buildSessionCookie(token));
+
+    helpers.logAuthEvent("login_success", {
+      dealerId: record.id,
+      credentialPresent: true,
       ip: ip,
       userAgent: ua,
+      detail: `role=${role}`,
     });
-    return c.json(401, { error: "Invalid dealer code" });
-  }
 
-  // Mint the opaque session token + persist row. Cookie carries ONLY the token.
-  let token, expiresAt;
-  try {
-    const session = helpers.createSession(record.id, role, ip, ua);
-    token = session.token;
-    expiresAt = session.expiresAt;
-  } catch (err) {
-    console.error("[session POST] createSession failed", err);
-    return c.json(500, { error: "Failed to start session" });
-  }
-
-  c.response()
-    .header()
-    .add("Set-Cookie", helpers.buildSessionCookie(token));
-
-  helpers.logAuthEvent("login_success", {
-    dealerId: record.id,
-    codeAttempted: dealerCode,
-    ip: ip,
-    userAgent: ua,
-    detail: `role=${role}`,
-  });
-
-  return c.json(200, {
-    role: role,
-    dealer: helpers.serializeDealer(record),
-  });
+    return c.json(200, {
+      role: role,
+      dealer: helpers.serializeDealer(record),
+    });
   } catch (e) {
     console.error("SESSION ERROR:", e);
-    return c.json(500, { error: e.toString() });
+    return c.json(500, { error: "Session request failed" });
   }
 });
 
@@ -1104,11 +1327,10 @@ routerAdd("GET", "/api/app/session", (c) => {
     return c.json(401, { error: "Invalid session" });
   }
 
-  // Sliding refresh — touch last_used_at on every authenticated request so
-  // an active dealer never silently expires mid-day. Best effort.
+  // Sliding refresh — extend the authoritative database expiry and the cookie
+  // together so an active dealer does not expire at the original login time.
   try {
-    session.set("last_used_at", new Date().toISOString());
-    $app.dao().saveRecord(session);
+    helpers.refreshSession(session);
     c.response().header().add("Set-Cookie", helpers.buildSessionCookie(token));
   } catch (_e) {
     /* ignore */
@@ -1148,8 +1370,6 @@ routerAdd("DELETE", "/api/app/session", (c) => {
 
 // dealerFromSession moved to top
 
-// isAdminDealer moved to top
-
 // ---- Photo releases -----------------------------------------------------
 routerAdd("POST", "/api/app/photo_releases", (c) => {
   const helpers = require(__hooks + "/helpers.js");
@@ -1157,60 +1377,205 @@ routerAdd("POST", "/api/app/photo_releases", (c) => {
   if (!dealer) return c.json(401, { error: "No active session" });
 
   try {
-    // multipart form expected — same shape the old direct-pb path used.
     const releases = $app.dao().findCollectionByNameOrId("photo_releases");
-    if (!releases) return c.json(500, { error: "photo_releases collection missing" });
+    if (!releases)
+      return c.json(500, { error: "photo_releases collection missing" });
 
-    const form = new RecordUpsertForm($app, new Record(releases));
-    form.loadRequest($apis.requestInfo(c), "");
-    // Force dealer + audit fields server-side; never trust client timestamps.
-    form.data["dealer"] = dealer.id;
-    form.data["signed_at"] = new Date().toISOString();
+    const body = $apis.requestInfo(c).data || {};
+    const customerName = helpers.assertString(
+      (body.customer_name || "").toString().trim(),
+      120,
+    );
+    if (!customerName) {
+      return c.json(400, { error: "Customer name is required" });
+    }
+
+    let signatureFile = null;
+    try {
+      const header = c.formFile("signature_png");
+      if (header) signatureFile = $filesystem.fileFromMultipart(header);
+    } catch (_e) {}
+    if (!signatureFile) {
+      return c.json(400, { error: "Signature image is required" });
+    }
+
+    // Only allowlist the customer-controlled release fields. Dealer,
+    // timestamp, IP hash, and user agent always come from the active request.
+    // A newly captured release is deliberately unlinked: it must be durable
+    // before any provider call, and is linked only after the post exists.
+    const record = new Record(releases);
+    const form = new RecordUpsertForm($app, record);
+    form.setFullManageAccess(true);
+    const data = {
+      dealer: dealer.id,
+      customer_name: customerName,
+      signed_at: new Date().toISOString(),
+      vin: helpers.assertString((body.vin || "").toString().trim(), 17),
+      notes: helpers.assertString((body.notes || "").toString(), 1000),
+      post_id: "",
+      ip_hash: "",
+      user_agent: "",
+    };
     try {
       const ip = helpers.clientIP(c) || "";
       // Store a hash, not the raw IP (field is named ip_hash).
-      form.data["ip_hash"] = ip
-        ? $security.sha256(ip)
-        : "";
-    } catch (_e) {
-      form.data["ip_hash"] = "";
-    }
+      data.ip_hash = ip ? $security.sha256(ip) : "";
+    } catch (_e) {}
     try {
-      form.data["user_agent"] = (helpers.userAgent(c) || "").toString().slice(0, 300);
-    } catch (_e) {
-      form.data["user_agent"] = "";
-    }
+      data.user_agent = (helpers.userAgent(c) || "").toString().slice(0, 300);
+    } catch (_e) {}
 
+    form.loadData(data);
+    form.addFiles("signature_png", signatureFile);
     form.submit();
 
     return c.json(200, {
-      id: form.record.id,
-      customer_name: form.record.getString("customer_name"),
-      signed_at: form.record.getString("signed_at"),
-      vin: form.record.getString("vin"),
+      id: record.id,
+      customer_name: record.getString("customer_name"),
+      signed_at: record.getString("signed_at"),
+      vin: record.getString("vin"),
     });
   } catch (err) {
     console.error("[/api/app/photo_releases] error", err);
-    return c.json(400, { error: "Failed to save release: " + err.toString() });
+    return c.json(400, { error: helpers.safePhotoReleaseError(err) });
+  }
+});
+
+// Link a protected signature that already exists to the post created after AI
+// generation. This is a one-way, idempotent transition: the signature file is
+// never accepted or re-saved here, and an existing link cannot be redirected.
+routerAdd("POST", "/api/app/photo_releases/:id/link-post", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const dealer = helpers.dealerFromSession(c);
+  if (!dealer) return c.json(401, { error: "No active session" });
+
+  let release = null;
+  try {
+    release = $app.dao().findRecordById("photo_releases", c.pathParam("id"));
+  } catch (_e) {
+    return c.json(404, { error: "Photo release not found" });
+  }
+  if (release.getString("dealer") !== dealer.id) {
+    return c.json(403, { error: "Cross-dealer release link blocked" });
+  }
+  if (!release.getString("signature_png")) {
+    return c.json(409, { error: "Photo release has no stored signature" });
+  }
+
+  const body = $apis.requestInfo(c).data || {};
+  const postId = helpers.assertString(
+    (body.post_id || "").toString().trim(),
+    64,
+  );
+  if (!postId) return c.json(400, { error: "post_id is required" });
+
+  let post = null;
+  try {
+    post = $app.dao().findRecordById("posts", postId);
+  } catch (_e) {
+    return c.json(404, { error: "Post not found" });
+  }
+  if (post.getString("dealer") !== dealer.id) {
+    return c.json(403, { error: "Cross-dealer release link blocked" });
+  }
+
+  // A salesperson may only link consent to a post created by this exact
+  // browser session, not another salesperson's post in the same dealership.
+  const token = helpers.readSessionToken(c);
+  const currentOwnerHash = token ? helpers.hashSessionToken(token) : "";
+  if (
+    !currentOwnerHash ||
+    currentOwnerHash !== post.getString("owner_session_hash")
+  ) {
+    return c.json(403, { error: "Post belongs to another session" });
+  }
+
+  try {
+    const existingPostId = release.getString("post_id");
+    if (existingPostId && existingPostId !== post.id) {
+      return c.json(409, {
+        error: "Photo release is already linked to another post",
+      });
+    }
+
+    if (!existingPostId) {
+      // This conditional write is the one-way concurrency boundary. Two
+      // simultaneous requests cannot redirect one release to different posts.
+      const linkedAt = new Date().toISOString();
+      const result = $app
+        .dao()
+        .db()
+        .newQuery(
+          "UPDATE photo_releases " +
+            "SET post_id = {:postId}, updated = {:updated} " +
+            "WHERE id = {:releaseId} AND dealer = {:dealer} " +
+            "AND (post_id = '' OR post_id IS NULL)",
+        )
+        .bind({
+          postId: post.id,
+          updated: linkedAt,
+          releaseId: release.id,
+          dealer: dealer.id,
+        })
+        .execute();
+
+      if (!result || result.rowsAffected() !== 1) {
+        const current = $app
+          .dao()
+          .findRecordById("photo_releases", release.id);
+        if (current.getString("post_id") !== post.id) {
+          return c.json(409, {
+            error: "Photo release is already linked to another post",
+          });
+        }
+      }
+    }
+
+    // Only a successfully stored same-dealer link is allowed to assert
+    // consent on the post. A failed post update leaves the conservative false
+    // value in place; retrying this idempotent endpoint repairs it safely.
+    const hasRelease = post.getBool
+      ? post.getBool("has_release")
+      : !!post.get("has_release");
+    if (!hasRelease) {
+      post.set("has_release", true);
+      $app.dao().saveRecord(post);
+    }
+
+    return c.json(200, {
+      id: release.id,
+      post_id: post.id,
+      has_release: true,
+    });
+  } catch (err) {
+    console.error("[/api/app/photo_releases/:id/link-post] error", err);
+    return c.json(400, { error: "Failed to link photo release" });
   }
 });
 
 // ---- Posts (log + leaderboard + approval) ------------------------------
 routerAdd("POST", "/api/app/posts", (c) => {
   const helpers = require(__hooks + "/helpers.js");
+  const policies = require(__hooks + "/requestPolicies.js");
   const dealer = helpers.dealerFromSession(c);
   if (!dealer) return c.json(401, { error: "No active session" });
 
   try {
-    const body = $apis.requestInfo(c).data || {};
     const posts = $app.dao().findCollectionByNameOrId("posts");
     if (!posts) return c.json(500, { error: "posts collection missing" });
+
+    const record = new Record(posts);
+    const form = new RecordUpsertForm($app, record);
+    form.setFullManageAccess(true);
+    const body = $apis.requestInfo(c).data || {};
 
     // Validate optional salesperson_id is one of this dealership's records.
     let salespersonId = "";
     if (body.salesperson_id) {
       try {
-        const sp = $app.dao().findRecordById("salespeople", body.salesperson_id.toString());
+        const sp = $app
+          .dao()
+          .findRecordById("salespeople", body.salesperson_id.toString());
         if (sp && sp.getString("dealer") === dealer.id) {
           salespersonId = sp.id;
         }
@@ -1219,20 +1584,84 @@ routerAdd("POST", "/api/app/posts", (c) => {
       }
     }
 
-    const record = new Record(posts, {
-      dealer: dealer.id, // force dealer from session
-      salesperson_name: helpers.assertString(body.salesperson_name || "", 120),
+    const approvalStatus = policies.initialApprovalStatus(dealer);
+    const caption = helpers.assertString(
+      (body.caption || "").toString().trim(),
+      12000,
+    );
+    const disclosures = helpers.assertString(
+      (body.disclosures || "").toString().trim(),
+      12000,
+    );
+    if (approvalStatus === "pending" && !caption) {
+      return c.json(400, { error: "Review caption is required" });
+    }
+    if (approvalStatus === "pending") {
+      const compliance = policies.validatePostCompliance(
+        caption,
+        disclosures,
+        dealer.getString("banned_phrases"),
+      );
+      if (!compliance.ok) {
+        return c.json(400, { error: compliance.error });
+      }
+    }
+
+    let creativeFile = null;
+    if (approvalStatus === "pending") {
+      try {
+        const header = c.formFile("creative_image");
+        if (header) creativeFile = $filesystem.fileFromMultipart(header);
+      } catch (_e) {}
+      if (!creativeFile) {
+        return c.json(400, { error: "Review image is required" });
+      }
+    }
+
+    // Load only the server-approved text fields, then attach the parsed upload
+    // explicitly. This avoids trusting multipart filename strings as record
+    // values and keeps all tenant/policy/audit fields server-controlled.
+    const token = helpers.readSessionToken(c);
+    form.loadData({
+      dealer: dealer.id,
+      salesperson_name: helpers.assertString(
+        (body.salesperson_name || "").toString(),
+        120,
+      ),
       salesperson_id: salespersonId,
       generated_at: new Date().toISOString(),
-      style: helpers.assertString(body.style || "", 60),
-      tone: helpers.assertString(body.tone || "", 60),
-      customer_name: helpers.assertString(body.customer_name || "", 120),
-      vin: helpers.assertString(body.vin || "", 17),
-      has_release: !!body.has_release,
-      has_video: !!body.has_video,
-      approval_status: helpers.assertEnum(body.approval_status === "pending" ? "pending" : "n_a", ["n_a", "pending"]),
+      style: helpers.assertString((body.style || "").toString(), 60),
+      tone: helpers.assertString((body.tone || "").toString(), 60),
+      customer_name: helpers.assertString(
+        (body.customer_name || "").toString(),
+        120,
+      ),
+      vin: helpers.assertString((body.vin || "").toString(), 17),
+      // Release status is derived from a durably stored, same-dealer signature
+      // by the photo-releases endpoint. Never trust a client assertion here.
+      has_release: false,
+      // Video metrics are recorded only by the owner-scoped completion route
+      // after rendering succeeds; a client cannot pre-claim success here.
+      has_video: false,
+      approval_status: approvalStatus,
+      approved_by: "",
+      approved_at: "",
+      caption: approvalStatus === "pending" ? caption : "",
+      disclosures: approvalStatus === "pending" ? disclosures : "",
+      // Every derived artifact (approval polling, protected creative, video
+      // completion) is bound to the opaque browser session that logged it.
+      owner_session_hash: token ? helpers.hashSessionToken(token) : "",
     });
-    $app.dao().saveRecord(record);
+    if (creativeFile) form.addFiles("creative_image", creativeFile);
+    form.submit();
+
+    if (approvalStatus === "pending" && !record.getString("creative_image")) {
+      // Never create a queue item a manager cannot actually inspect.
+      try {
+        $app.dao().deleteRecord(record);
+      } catch (_e) {}
+      return c.json(400, { error: "Review image is required" });
+    }
 
     return c.json(200, {
       id: record.id,
@@ -1242,7 +1671,133 @@ routerAdd("POST", "/api/app/posts", (c) => {
     });
   } catch (err) {
     console.error("[/api/app/posts] create error", err);
-    return c.json(400, { error: "Failed to log post: " + err.toString() });
+    return c.json(400, { error: "Failed to log post" });
+  }
+});
+
+// Record successful video rendering only from the browser session that logged
+// the source post. The transition is intentionally idempotent so client retry
+// after a lost response cannot inflate or corrupt metrics.
+routerAdd("POST", "/api/app/posts/:id/video-generated", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const dealer = helpers.dealerFromSession(c);
+  if (!dealer) return c.json(401, { error: "No active session" });
+
+  let record = null;
+  try {
+    record = $app.dao().findRecordById("posts", c.pathParam("id"));
+  } catch (_e) {
+    return c.json(404, { error: "Post not found" });
+  }
+
+  if (record.getString("dealer") !== dealer.id) {
+    return c.json(403, { error: "Cross-dealer video update blocked" });
+  }
+
+  const token = helpers.readSessionToken(c);
+  const currentOwnerHash = token ? helpers.hashSessionToken(token) : "";
+  if (
+    !currentOwnerHash ||
+    currentOwnerHash !== record.getString("owner_session_hash")
+  ) {
+    return c.json(403, { error: "Post belongs to another session" });
+  }
+
+  try {
+    const alreadyGenerated = record.getBool
+      ? record.getBool("has_video")
+      : !!record.get("has_video");
+    if (!alreadyGenerated) {
+      record.set("has_video", true);
+      $app.dao().saveRecord(record);
+    }
+    return c.json(200, { id: record.id, has_video: true });
+  } catch (err) {
+    console.error("[/api/app/posts/:id/video-generated] error", err);
+    return c.json(500, { error: "Failed to record generated video" });
+  }
+});
+
+// The submitting browser can poll only its own post. A post id is not a bearer
+// credential: ownership is checked against a SHA-256 verifier of the current
+// opaque session token, and the dealer relationship is checked independently.
+routerAdd("GET", "/api/app/posts/:id/status", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const dealer = helpers.dealerFromSession(c);
+  if (!dealer) return c.json(401, { error: "No active session" });
+
+  try {
+    const record = $app.dao().findRecordById("posts", c.pathParam("id"));
+    if (record.getString("dealer") !== dealer.id) {
+      return c.json(403, { error: "Cross-dealer status read blocked" });
+    }
+
+    const role = helpers.sessionRoleFromCookie(c);
+    const isManager = role === "dealer_admin" || role === "super_admin";
+    const token = helpers.readSessionToken(c);
+    const currentOwnerHash = token ? helpers.hashSessionToken(token) : "";
+    const isOwner =
+      !!currentOwnerHash &&
+      currentOwnerHash === record.getString("owner_session_hash");
+    if (!isOwner && !isManager) {
+      return c.json(403, { error: "Post status belongs to another session" });
+    }
+
+    c.response().header().set("Cache-Control", "private, no-store");
+    return c.json(200, {
+      id: record.id,
+      approval_status: record.getString("approval_status"),
+      approved_by: record.getString("approved_by"),
+      approved_at: record.getString("approved_at"),
+    });
+  } catch (err) {
+    return c.json(404, { error: "Post not found" });
+  }
+});
+
+// Protected creative images are never exposed through PocketBase's public file
+// route. This endpoint authorizes the manager (or submitting browser session)
+// first and then streams the stored file from the configured local/S3 backend.
+routerAdd("GET", "/api/app/posts/:id/creative-image", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const dealer = helpers.dealerFromSession(c);
+  if (!dealer) return c.json(401, { error: "No active session" });
+
+  try {
+    const record = $app.dao().findRecordById("posts", c.pathParam("id"));
+    if (record.getString("dealer") !== dealer.id) {
+      return c.json(403, { error: "Cross-dealer creative read blocked" });
+    }
+
+    const role = helpers.sessionRoleFromCookie(c);
+    const isManager = role === "dealer_admin" || role === "super_admin";
+    const token = helpers.readSessionToken(c);
+    const currentOwnerHash = token ? helpers.hashSessionToken(token) : "";
+    const isOwner =
+      !!currentOwnerHash &&
+      currentOwnerHash === record.getString("owner_session_hash");
+    if (!isOwner && !isManager) {
+      return c.json(403, { error: "Creative belongs to another session" });
+    }
+
+    const filename = record.getString("creative_image");
+    if (!filename) return c.json(404, { error: "Creative image not found" });
+
+    const fileSystem = $app.newFilesystem();
+    try {
+      const fileKey = record.baseFilesPath() + "/" + filename;
+      if (!fileSystem.exists(fileKey)) {
+        return c.json(404, { error: "Creative image not found" });
+      }
+      c.response().header().set("Cache-Control", "private, no-store");
+      c.response().header().set("X-Content-Type-Options", "nosniff");
+      fileSystem.serve(c.response(), c.request(), fileKey, filename);
+      return;
+    } finally {
+      fileSystem.close();
+    }
+  } catch (err) {
+    return c.json(404, { error: "Creative image not found" });
   }
 });
 
@@ -1250,6 +1805,10 @@ routerAdd("GET", "/api/app/posts", (c) => {
   const helpers = require(__hooks + "/helpers.js");
   const dealer = helpers.dealerFromSession(c);
   if (!dealer) return c.json(401, { error: "No active session" });
+  const role = helpers.sessionRoleFromCookie(c);
+  if (role !== "dealer_admin" && role !== "super_admin") {
+    return c.json(403, { error: "Manager role required" });
+  }
 
   try {
     const query = $apis.requestInfo(c).query || {};
@@ -1282,7 +1841,7 @@ routerAdd("GET", "/api/app/posts", (c) => {
         "-generated_at",
         limit,
         0,
-        params
+        params,
       );
 
     const items = records.map((r) => ({
@@ -1295,29 +1854,34 @@ routerAdd("GET", "/api/app/posts", (c) => {
       tone: r.getString("tone"),
       customer_name: r.getString("customer_name"),
       vin: r.getString("vin"),
-      has_release: r.getBool ? r.getBool("has_release") : !!r.get("has_release"),
+      has_release: r.getBool
+        ? r.getBool("has_release")
+        : !!r.get("has_release"),
       has_video: r.getBool ? r.getBool("has_video") : !!r.get("has_video"),
       approval_status: r.getString("approval_status"),
       approved_by: r.getString("approved_by"),
       approved_at: r.getString("approved_at"),
+      caption: r.getString("caption"),
+      disclosures: r.getString("disclosures"),
+      creative_image_url: r.getString("creative_image")
+        ? `/api/app/posts/${r.id}/creative-image`
+        : "",
     }));
 
     return c.json(200, { items });
   } catch (err) {
     console.error("[/api/app/posts] list error", err);
-    return c.json(500, { error: "Failed to list posts: " + err.toString() });
+    return c.json(500, { error: "Failed to list posts" });
   }
 });
 
 routerAdd("PATCH", "/api/app/posts/:id", (c) => {
   const helpers = require(__hooks + "/helpers.js");
+  const policies = require(__hooks + "/requestPolicies.js");
   const dealer = helpers.dealerFromSession(c);
   if (!dealer) return c.json(401, { error: "No active session" });
   const role = helpers.sessionRoleFromCookie(c);
-  const isSuperAdmin = helpers.isAdminDealer(dealer);
-  // Approval is a manager action. Allow super_admin OR dealer_admin (the latter
-  // only for posts attached to their OWN dealership — enforced below).
-  if (!isSuperAdmin && role !== "dealer_admin") {
+  if (role !== "dealer_admin" && role !== "super_admin") {
     return c.json(403, {
       error: "Manager role required to set approval status",
     });
@@ -1328,34 +1892,87 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
     const body = $apis.requestInfo(c).data || {};
     const record = $app.dao().findRecordById("posts", id);
 
-    // Tenant isolation — a dealer_admin can only act on posts that belong to
-    // their own dealership. Super-admin bypasses for cross-tenant support.
-    if (!isSuperAdmin && record.getString("dealer") !== dealer.id) {
+    // Approval authority matches the manager's list/view scope. There is no
+    // audited tenant-selection mechanism, so even a global super-admin session
+    // cannot blindly mutate another dealership's queue by guessing a post id.
+    if (record.getString("dealer") !== dealer.id) {
       return c.json(403, {
         error: "Cross-dealer approval is not allowed",
       });
     }
 
-    if (body.approval_status) {
-      const allowed = ["n_a", "pending", "approved", "rejected"];
-      helpers.assertEnum(body.approval_status, allowed);
-      record.set("approval_status", body.approval_status);
+    const decision = helpers.assertEnum(body.approval_status, [
+      "approved",
+      "rejected",
+    ]);
+    if (record.getString("approval_status") !== "pending") {
+      return c.json(409, { error: "This approval has already been decided" });
     }
-    if (body.approved_by !== undefined) {
-      record.set("approved_by", helpers.assertString(body.approved_by || "", 120));
-    }
-    if (
-      body.approval_status === "approved" ||
-      body.approval_status === "rejected"
-    ) {
-      record.set("approved_at", new Date().toISOString());
+    const approver = helpers.assertString(
+      (body.approved_by || "").toString().trim(),
+      120,
+    );
+    if (!approver) {
+      return c.json(400, { error: "Approver name is required" });
     }
 
-    $app.dao().saveRecord(record);
-    return c.json(200, { id: record.id, approval_status: record.getString("approval_status") });
+    if (
+      decision === "approved" &&
+      (!record.getString("caption") || !record.getString("creative_image"))
+    ) {
+      return c.json(409, {
+        error: "Cannot approve a post without reviewable creative",
+      });
+    }
+    if (decision === "approved") {
+      // Re-evaluate the stored, immutable review copy against the current
+      // dealer policy. This protects legacy queue entries and catches phrases
+      // blocked after submission; rejection remains available to clear them.
+      const compliance = policies.validatePostCompliance(
+        record.getString("caption"),
+        record.getString("disclosures"),
+        dealer.getString("banned_phrases"),
+      );
+      if (!compliance.ok) {
+        return c.json(409, { error: compliance.error });
+      }
+    }
+
+    // The pending check above gives a fast response for ordinary retries, but
+    // only this conditional UPDATE is the concurrency boundary. SQLite will
+    // serialize the competing writers; exactly one can change `pending`, and
+    // the loser observes rowsAffected=0 instead of overwriting the decision.
+    const approvedAt = new Date().toISOString();
+    const result = $app
+      .dao()
+      .db()
+      .newQuery(
+        "UPDATE posts " +
+          "SET approval_status = {:decision}, approved_by = {:approver}, " +
+          "approved_at = {:approvedAt}, updated = {:updated} " +
+          "WHERE id = {:id} AND dealer = {:dealer} " +
+          "AND approval_status = 'pending'",
+      )
+      .bind({
+        decision: decision,
+        approver: approver,
+        approvedAt: approvedAt,
+        updated: approvedAt,
+        id: record.id,
+        dealer: dealer.id,
+      })
+      .execute();
+    if (!result || result.rowsAffected() !== 1) {
+      return c.json(409, { error: "This approval has already been decided" });
+    }
+
+    return c.json(200, {
+      id: record.id,
+      approval_status: decision,
+    });
   } catch (err) {
     console.error("[/api/app/posts/:id] patch error", err);
-    return c.json(400, { error: "Failed to update post: " + err.toString() });
+    return c.json(400, { error: "Failed to update post" });
   }
 });
 
@@ -1424,7 +2041,7 @@ routerAdd("POST", "/api/app/salespeople", (c) => {
     });
   } catch (err) {
     console.error("[/api/app/salespeople] create error", err);
-    return c.json(400, { error: "Failed to create: " + err.toString() });
+    return c.json(400, { error: "Failed to create salesperson" });
   }
 });
 
@@ -1452,7 +2069,8 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
     $app.dao().saveRecord(record);
     return c.json(200, { id: record.id });
   } catch (err) {
-    return c.json(400, { error: "Failed to update: " + err.toString() });
+    console.error("[/api/app/salespeople/:id] update error", err);
+    return c.json(400, { error: "Failed to update salesperson" });
   }
 });
 
@@ -1475,7 +2093,8 @@ routerAdd("DELETE", "/api/app/salespeople/:id", (c) => {
     $app.dao().saveRecord(record);
     return c.json(200, { success: true });
   } catch (err) {
-    return c.json(400, { error: "Failed to deactivate: " + err.toString() });
+    console.error("[/api/app/salespeople/:id] deactivate error", err);
+    return c.json(400, { error: "Failed to deactivate salesperson" });
   }
 });
 
@@ -1484,17 +2103,40 @@ routerAdd("POST", "/api/app/dealers", (c) => {
   const helpers = require(__hooks + "/helpers.js");
   const dealer = helpers.dealerFromSession(c);
   if (!dealer) return c.json(401, { error: "No active session" });
-  if (!helpers.isAdminDealer(dealer)) return c.json(403, { error: "Admin only" });
+  if (helpers.sessionRoleFromCookie(c) !== "super_admin") {
+    return c.json(403, { error: "Admin only" });
+  }
 
   try {
     const dealers = $app.dao().findCollectionByNameOrId("dealers");
-    const form = new RecordUpsertForm($app, new Record(dealers));
-    form.loadRequest($apis.requestInfo(c), "");
+    helpers.restrictDealerLogoSchema(dealers);
+    const body = $apis.requestInfo(c).data || {};
+    const data = helpers.dealerMutationData(body, true, true);
+    if (!data.name) return c.json(400, { error: "Dealer name is required" });
+    if (!data.code) {
+      return c.json(400, { error: "A unique 6-digit dealer code is required" });
+    }
+    if (data.admin_code && data.admin_code === data.code) {
+      return c.json(400, {
+        error: "Dealer and manager codes must be different",
+      });
+    }
+    helpers.assertDealerCredentialAvailable(data.code, "");
+    if (data.admin_code) {
+      helpers.assertDealerCredentialAvailable(data.admin_code, "");
+    }
+
+    const record = new Record(dealers);
+    const form = new RecordUpsertForm($app, record);
+    form.setFullManageAccess(true);
+    form.loadData(data);
+    const logo = helpers.dealerLogoFile(c);
+    if (logo) form.addFiles("logo", logo);
     form.submit();
-    return c.json(200, { id: form.record.id });
+    return c.json(200, { id: record.id });
   } catch (err) {
     console.error("[/api/app/dealers] create error", err);
-    return c.json(400, { error: "Failed to create dealer: " + err.toString() });
+    return c.json(400, { error: helpers.safeDealerMutationError(err) });
   }
 });
 
@@ -1505,7 +2147,7 @@ routerAdd("PATCH", "/api/app/dealers/:id", (c) => {
 
   const id = c.pathParam("id");
   const role = helpers.sessionRoleFromCookie(c);
-  const isSuperAdmin = helpers.isAdminDealer(dealer);
+  const isSuperAdmin = role === "super_admin";
   const isSelfDealerAdmin = role === "dealer_admin" && id === dealer.id;
 
   // Super admin can patch any dealer; dealer_admin can only patch their own
@@ -1518,21 +2160,80 @@ routerAdd("PATCH", "/api/app/dealers/:id", (c) => {
 
   try {
     const target = $app.dao().findRecordById("dealers", id);
-    const form = new RecordUpsertForm($app, target);
-    form.loadRequest($apis.requestInfo(c), "");
-    // Code is immutable after creation (it's the login credential).
-    form.data["code"] = target.getString("code");
-    // Dealer-admin can't change admin_code on themselves (that's a super-admin
-    // ladder rung — prevents a manager from rotating their own credential
-    // without your knowledge).
-    if (!isSuperAdmin) {
-      form.data["admin_code"] = target.getString("admin_code");
+    helpers.restrictDealerLogoSchema(target.collection());
+    const body = $apis.requestInfo(c).data || {};
+    const data = helpers.dealerMutationData(body, isSuperAdmin, isSuperAdmin);
+    if (data.name !== undefined && !data.name) {
+      return c.json(400, { error: "Dealer name is required" });
     }
+    if (
+      isSuperAdmin &&
+      target.id === dealer.id &&
+      data.code !== undefined &&
+      data.code !== target.getString("code")
+    ) {
+      return c.json(400, {
+        error:
+          "The system-admin dealer code must be rotated through the deployment secret runbook",
+      });
+    }
+    const finalCode =
+      data.code !== undefined ? data.code : target.getString("code");
+    const finalAdminCode =
+      data.admin_code !== undefined
+        ? data.admin_code
+        : target.getString("admin_code");
+    if (finalAdminCode && finalAdminCode === finalCode) {
+      return c.json(400, {
+        error: "Dealer and manager codes must be different",
+      });
+    }
+    if (data.code !== undefined) {
+      helpers.assertDealerCredentialAvailable(data.code, target.id);
+    }
+    if (data.admin_code) {
+      helpers.assertDealerCredentialAvailable(data.admin_code, target.id);
+    }
+    const codeRotated =
+      isSuperAdmin && !!data.code && data.code !== target.getString("code");
+    const adminCodeRotated =
+      isSuperAdmin &&
+      data.admin_code !== undefined &&
+      data.admin_code !== target.getString("admin_code");
+
+    const form = new RecordUpsertForm($app, target);
+    form.setFullManageAccess(true);
+    form.loadData(data);
+    const logo = helpers.dealerLogoFile(c);
+    if (logo) form.addFiles("logo", logo);
     form.submit();
+
+    if (codeRotated || adminCodeRotated) {
+      const preserveToken =
+        isSuperAdmin && target.id === dealer.id
+          ? helpers.readSessionToken(c)
+          : "";
+      const revokedSessions = helpers.revokeDealerSessions(
+        target.id,
+        preserveToken,
+      );
+      helpers.logAuthEvent("dealer_credentials_rotated", {
+        dealerId: target.id,
+        ip: helpers.clientIP(c),
+        userAgent: helpers.userAgent(c),
+        detail:
+          "rotated_by=super_admin code=" +
+          (codeRotated ? "yes" : "no") +
+          " manager_code=" +
+          (adminCodeRotated ? "yes" : "no") +
+          " sessions_revoked=" +
+          revokedSessions,
+      });
+    }
     return c.json(200, { id: target.id });
   } catch (err) {
     console.error("[/api/app/dealers/:id] patch error", err);
-    return c.json(400, { error: "Failed to update dealer: " + err.toString() });
+    return c.json(400, { error: helpers.safeDealerMutationError(err) });
   }
 });
 
@@ -1540,19 +2241,23 @@ routerAdd("DELETE", "/api/app/dealers/:id", (c) => {
   const helpers = require(__hooks + "/helpers.js");
   const dealer = helpers.dealerFromSession(c);
   if (!dealer) return c.json(401, { error: "No active session" });
-  if (!helpers.isAdminDealer(dealer)) return c.json(403, { error: "Admin only" });
+  if (helpers.sessionRoleFromCookie(c) !== "super_admin") {
+    return c.json(403, { error: "Admin only" });
+  }
 
   try {
     const id = c.pathParam("id");
     if (id === dealer.id) {
-      return c.json(400, { error: "Refusing to delete your own dealer record" });
+      return c.json(400, {
+        error: "Refusing to delete your own dealer record",
+      });
     }
     const target = $app.dao().findRecordById("dealers", id);
     $app.dao().deleteRecord(target);
     return c.json(200, { success: true });
   } catch (err) {
     console.error("[/api/app/dealers/:id] delete error", err);
-    return c.json(400, { error: "Failed to delete dealer: " + err.toString() });
+    return c.json(400, { error: "Failed to delete dealer" });
   }
 });
 
@@ -1561,7 +2266,7 @@ routerAdd("GET", "/api/app/dealers", (c) => {
   const helpers = require(__hooks + "/helpers.js");
   const dealer = helpers.dealerFromSession(c);
   if (!dealer) return c.json(401, { error: "No active session" });
-  if (!helpers.isAdminDealer(dealer)) {
+  if (helpers.sessionRoleFromCookie(c) !== "super_admin") {
     return c.json(403, { error: "Admin only" });
   }
   try {
@@ -1606,4 +2311,3 @@ routerAdd("GET", "/api/app/dealers", (c) => {
     return c.json(500, { error: "Failed to list dealers" });
   }
 });
-

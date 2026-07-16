@@ -1,5 +1,11 @@
-import React, { useState, useEffect, useCallback, Suspense } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  Suspense,
+} from "react";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
   RefreshCw,
   Edit3,
@@ -14,15 +20,15 @@ import {
   Loader2,
   Undo2,
   Redo2,
+  ChevronDown,
+  CircleCheck,
   type LucideIcon,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import { Tooltip } from "./ui/Tooltip";
 import { GeneratedPost, VideoStyle, VideoRequestOptions } from "../types";
-import { dataUrlToBlob } from "../utils/imageUtils";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Badge } from "./ui/Badge";
-import { Spinner } from "./ui/LoadingAnimations";
 import { cn } from "../utils/classNames";
 import { ProgressBar } from "./ui/ProgressBar";
 import { normalizeError, recoveryHint } from "../utils/errorHandler";
@@ -33,52 +39,53 @@ import { ShareDialog } from "./ShareDialog";
 import { CaptionAlternativesModal } from "./CaptionAlternativesModal";
 import { ProgressiveImage } from "./ui/ProgressiveImage";
 import { useToast } from "./ui/Toast";
-import { useTouchGestures } from "../hooks/useTouchGestures";
-import { usePullToRefresh } from "../hooks/usePullToRefresh";
+import { Modal } from "./ui/Modal";
+import { Button } from "./ui/Button";
+import {
+  getPostApprovalStatus,
+  markPostVideoGenerated,
+} from "../services/posts";
+import { imageFileExtension } from "../utils/imageUtils";
+import {
+  analyzeCaptionForDelivery,
+  prohibitedClaimsMessage,
+} from "../utils/complianceDisclosures";
 
 // Lazy load modals for performance
 const LazyImagePreviewModal = React.lazy(() =>
-  import("./ImagePreviewModal").then((mod) => ({ default: mod.ImagePreviewModal }))
+  import("./ImagePreviewModal").then((mod) => ({
+    default: mod.ImagePreviewModal,
+  })),
 );
 const LazyEditTextModal = React.lazy(() =>
-  import("./EditTextModal").then((mod) => ({ default: mod.EditTextModal }))
+  import("./EditTextModal").then((mod) => ({ default: mod.EditTextModal })),
 );
 const LazyVideoDirectorModal = React.lazy(() =>
-  import("./VideoDirectorModal").then((mod) => ({ default: mod.VideoDirectorModal }))
+  import("./VideoDirectorModal").then((mod) => ({
+    default: mod.VideoDirectorModal,
+  })),
 );
 const LazyFunModeDirectorModal = React.lazy(() =>
-  import("./FunModeDirectorModal").then((mod) => ({ default: mod.FunModeDirectorModal }))
+  import("./FunModeDirectorModal").then((mod) => ({
+    default: mod.FunModeDirectorModal,
+  })),
 );
 
-// ---------------------------------------------------------------------------
-// Action-tile styling. One shared surface keeps the primary workflow looking
-// like a single designed system instead of a rainbow of one-off gradients.
-// Meaning is carried by an accent-colored icon, not by a different button
-// color per action (the restrained, elite-SaaS pattern). A single primary
-// action (Save) gets the one solid accent. Every tile inherits a focus-visible
-// ring for keyboard accessibility.
-// ---------------------------------------------------------------------------
 const TILE_BASE =
-  "flex flex-col items-center justify-center gap-1 sm:gap-2 relative overflow-hidden " +
-  "py-2 px-3 sm:py-3 sm:px-4 rounded-xl transition-all duration-300 " +
-  "text-[11px] sm:text-xs md:text-sm font-bold min-h-[80px] sm:aspect-square w-full " +
+  "flex items-center justify-start gap-2.5 relative overflow-hidden " +
+  "py-2.5 px-3 rounded-xl transition-colors duration-200 " +
+  "text-xs sm:text-sm font-semibold min-h-[44px] w-full " +
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 " +
   "focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950 " +
   "disabled:opacity-50 disabled:cursor-not-allowed";
 const TILE_NEUTRAL =
   "bg-white/[0.06] border border-white/[0.08] text-surface-50 " +
   "hover:bg-white/[0.10] hover:border-white/[0.15]";
-const TILE_PRIMARY =
-  "bg-success-600 text-white shadow-lg shadow-success-900/30 hover:bg-success-500 " +
-  "focus-visible:ring-success-400/70";
 const TILE_ICON_ACCENT = "text-primary-300";
 
 /**
- * One action tile in the PostResult action grid. Encapsulates the shared
- * surface, motion, focus ring, haptics, tooltip wrapping, and busy/disabled
- * handling so each tile is declared in one line instead of ~20 lines of
- * duplicated markup. `busy` swaps the icon for a spinner; the video tile
- * spins its own icon via iconClassName instead and leaves busy false.
+ * A compact secondary tool. Result completion actions intentionally use a
+ * stronger treatment below the caption; these controls stay visually quiet.
  */
 const ActionTile: React.FC<{
   icon: LucideIcon;
@@ -87,8 +94,6 @@ const ActionTile: React.FC<{
   tooltip?: string;
   disabled?: boolean;
   busy?: boolean;
-  variant?: "neutral" | "primary";
-  /** Accent color (and any extra classes) for the icon on neutral tiles. */
   iconClassName?: string;
 }> = ({
   icon: Icon,
@@ -97,26 +102,34 @@ const ActionTile: React.FC<{
   tooltip,
   disabled = false,
   busy = false,
-  variant = "neutral",
   iconClassName,
 }) => {
+  const shouldReduceMotion = useReducedMotion();
   const button = (
     <motion.button
+      type="button"
       onClick={() => {
         triggerHapticFeedback();
         onClick();
       }}
       disabled={disabled}
-      className={cn(TILE_BASE, variant === "primary" ? TILE_PRIMARY : TILE_NEUTRAL)}
-      whileHover={{ scale: disabled ? 1 : 1.04, y: disabled ? 0 : -2 }}
-      whileTap={{ scale: disabled ? 1 : 0.97 }}
+      aria-busy={busy || undefined}
+      className={cn(TILE_BASE, TILE_NEUTRAL)}
+      whileHover={shouldReduceMotion ? undefined : { x: disabled ? 0 : 2 }}
+      whileTap={shouldReduceMotion ? undefined : { scale: disabled ? 1 : 0.98 }}
     >
       {busy ? (
-        <Loader2 className={cn("w-5 h-5 animate-spin", iconClassName)} />
+        <Loader2
+          className={cn(
+            "w-4 h-4 shrink-0",
+            !shouldReduceMotion && "animate-spin",
+            iconClassName,
+          )}
+        />
       ) : (
-        <Icon className={cn("w-5 h-5", iconClassName)} />
+        <Icon className={cn("w-4 h-4 shrink-0", iconClassName)} />
       )}
-      <span>{label}</span>
+      <span className="truncate">{label}</span>
     </motion.button>
   );
   return tooltip ? (
@@ -138,29 +151,51 @@ interface PostResultProps {
   onFunMode: (styleName?: string) => Promise<void>;
   onGenerateVideo: (
     style: VideoStyle,
-    options: VideoRequestOptions
+    options: VideoRequestOptions,
   ) => Promise<string>;
   /** One-shot caption generator for the 3-variant alternatives modal. */
   onGenerateCaptionVariant?: () => Promise<string>;
   error?: string | null;
   isDesktopLayout: boolean;
   requiresApproval?: boolean;
+  /** Dealership-managed words or phrases that may not be delivered. */
+  bannedPhrases?: string;
 }
 
-const LoadingOverlay: React.FC<{ message: string; progress?: number }> =
-  React.memo(({ message, progress }) => (
-    <div className="absolute inset-0 bg-surface-900/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-2xl z-10 px-4">
-      <Spinner size="lg" className="mb-4" />
-      <p className="text-surface-50 font-semibold animate-pulse mb-2 text-center">
-        {message}
-      </p>
-      {typeof progress === "number" && progress > 0 && (
-        <div className="w-full max-w-sm">
-          <ProgressBar value={progress} />
-        </div>
-      )}
-    </div>
-  ));
+const BusyOverlay: React.FC<{ message: string; progress?: number }> =
+  React.memo(({ message, progress }) => {
+    const shouldReduceMotion = useReducedMotion();
+
+    return (
+      <div
+        className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-2xl bg-surface-950/90 px-5 text-center backdrop-blur-sm"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        <Loader2
+          className={cn(
+            "mb-3 h-7 w-7 text-primary-300",
+            !shouldReduceMotion && "animate-spin",
+          )}
+          aria-hidden="true"
+        />
+        <p className="mb-1 font-semibold text-surface-50">{message}</p>
+        <p className="mb-3 text-xs text-surface-400">
+          Keep this screen open. Your current work is safe.
+        </p>
+        {typeof progress === "number" && progress > 0 ? (
+          <div className="w-full max-w-sm">
+            <ProgressBar
+              value={progress}
+              showShimmer={!shouldReduceMotion}
+              loadingLabel={message}
+            />
+          </div>
+        ) : null}
+      </div>
+    );
+  });
 
 export const PostResult: React.FC<PostResultProps> = ({
   post,
@@ -175,9 +210,11 @@ export const PostResult: React.FC<PostResultProps> = ({
   error,
   isDesktopLayout,
   requiresApproval = false,
+  bannedPhrases,
 }) => {
   const [copied, setCopied] = useState(false);
   const toast = useToast();
+  const shouldReduceMotion = useReducedMotion();
 
   const [isImageEditing, setIsImageEditing] = useState(false);
   const [imageEditPrompt, setImageEditPrompt] = useState("");
@@ -216,10 +253,26 @@ export const PostResult: React.FC<PostResultProps> = ({
   >([]);
 
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [isSharing, setIsSharing] = useState(false);
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const [isMultiFormatOpen, setIsMultiFormatOpen] = useState(false);
   const [isCaptionAltsOpen, setIsCaptionAltsOpen] = useState(false);
+  const [isToolsOpen, setIsToolsOpen] = useState(isDesktopLayout);
+  const [isStartOverConfirmOpen, setIsStartOverConfirmOpen] = useState(false);
+  const [hasSavedMedia, setHasSavedMedia] = useState(false);
+  const [hasCopiedCaption, setHasCopiedCaption] = useState(false);
+  const [approvalStatus, setApprovalStatus] = useState<
+    NonNullable<GeneratedPost["approvalStatus"]>
+  >(
+    post.approvalStatus ??
+      (requiresApproval
+        ? post.postId
+          ? "pending"
+          : "submission_failed"
+        : "n_a"),
+  );
+  const [approvalCheckError, setApprovalCheckError] = useState<string | null>(
+    null,
+  );
   // Local override for the disclosure footer + categories — set when the
   // user picks an alternative caption from the modal so the displayed
   // compliance block matches the chosen variant.
@@ -230,47 +283,119 @@ export const PostResult: React.FC<PostResultProps> = ({
   // Reset override whenever the source post changes (regenerate, new post).
   useEffect(() => {
     setDisclosureOverride(null);
+    setHasSavedMedia(false);
+    setHasCopiedCaption(false);
   }, [post.image, post.text]);
+
+  useEffect(() => {
+    setIsToolsOpen(isDesktopLayout);
+  }, [isDesktopLayout]);
+  const captionAnalysis = useMemo(
+    () => analyzeCaptionForDelivery(editedText, bannedPhrases),
+    [bannedPhrases, editedText],
+  );
   const imageBusy = isImageLoading || isVideoLoading;
   const textBusy = isTextLoading;
+  const approvalLocked = requiresApproval && approvalStatus !== "approved";
+  const releaseLocked = post.releaseStatus === "save_failed";
+  const claimLocked = captionAnalysis.compliance.prohibited.length > 0;
+  const deliveryLocked = approvalLocked || releaseLocked || claimLocked;
+  // Once a creative has entered the review workflow it must remain byte-for-
+  // byte equivalent to what the manager saw. Delivery unlocks on approval,
+  // while edits require starting a new review submission.
+  const creativeLockedForReview = requiresApproval;
   const approvalGateMessage =
-    "This post is awaiting manager approval. Save, share, and export unlock after approval.";
+    approvalStatus === "approved"
+      ? "Manager approved this exact creative. Save, share, and export are unlocked; start a new post to make changes."
+      : approvalStatus === "rejected"
+        ? "A manager rejected this creative. Delivery remains locked; create another post with the requested changes."
+        : approvalStatus === "submission_failed"
+          ? "This creative could not be submitted for approval. Delivery remains locked; check your connection and create another post to retry."
+          : "This exact image and caption are awaiting manager approval. Save, share, and export unlock automatically after approval.";
+  const releaseGateMessage =
+    "The signed photo release was not stored, so consent cannot be verified. Copy, share, save, and export remain locked; check your connection and create another post to retry.";
+  const claimGateMessage = claimLocked
+    ? prohibitedClaimsMessage(captionAnalysis.compliance.prohibited)
+    : "";
+  const deliveryGateMessage = claimLocked
+    ? claimGateMessage
+    : releaseLocked
+      ? releaseGateMessage
+      : approvalGateMessage;
+  const deliveryLockLabel = claimLocked
+    ? "Claim blocked"
+    : releaseLocked
+      ? "Release not saved"
+      : "Approval pending";
 
-  // Swipe gesture for returning to home/start over on mobile
-  const touchHandlers = useTouchGestures({
-    onSwipeRight: () => {
-      triggerHapticFeedback();
-      onStartOver();
-    }
-  });
+  useEffect(() => {
+    setApprovalStatus(
+      post.approvalStatus ??
+        (requiresApproval
+          ? post.postId
+            ? "pending"
+            : "submission_failed"
+          : "n_a"),
+    );
+    setApprovalCheckError(null);
+  }, [post.postId, post.approvalStatus, requiresApproval]);
 
-  // Pull down gesture to regenerate a new design/post automatically
-  const { pullDistance, shouldRefresh, handlers: pullHandlers } = usePullToRefresh({
-    onRefresh: async () => {
-      triggerHapticFeedback();
-      await handleImageAction(onRegenerateImage, [
-        "Refreshing with your chosen style...",
-        "Balancing lighting and color...",
-        "Finishing touches...",
-      ]);
+  useEffect(() => {
+    if (!requiresApproval || approvalStatus !== "pending" || !post.postId) {
+      return;
     }
-  });
 
-  // Combine both swipe and pull touch handlers safely
-  const combinedTouchHandlers = {
-    onTouchStart: (e: React.TouchEvent) => {
-      touchHandlers.onTouchStart(e.nativeEvent);
-      pullHandlers.onTouchStart(e.nativeEvent);
-    },
-    onTouchMove: (e: React.TouchEvent) => {
-      touchHandlers.onTouchMove(e.nativeEvent);
-      pullHandlers.onTouchMove(e.nativeEvent);
-    },
-    onTouchEnd: (e: React.TouchEvent) => {
-      touchHandlers.onTouchEnd();
-      pullHandlers.onTouchEnd();
-    }
-  };
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let active = true;
+
+    const schedule = () => {
+      if (active) timeoutId = setTimeout(checkStatus, 10000);
+    };
+    const checkStatus = async () => {
+      if (!active) return;
+      if (typeof document !== "undefined" && document.hidden) {
+        schedule();
+        return;
+      }
+      try {
+        const result = await getPostApprovalStatus(
+          post.postId as string,
+          controller.signal,
+        );
+        if (!active) return;
+        setApprovalCheckError(null);
+        setApprovalStatus(result.approval_status);
+        if (result.approval_status === "approved") {
+          toast.success("Manager approved this post. Delivery is unlocked.");
+          return;
+        }
+        if (result.approval_status === "rejected") {
+          toast.warning("Manager requested changes. Delivery remains locked.");
+          return;
+        }
+        schedule();
+      } catch (err) {
+        if (
+          !active ||
+          (err instanceof DOMException && err.name === "AbortError")
+        ) {
+          return;
+        }
+        setApprovalCheckError(
+          "Approval status could not be refreshed. We’ll keep checking.",
+        );
+        schedule();
+      }
+    };
+
+    void checkStatus();
+    return () => {
+      active = false;
+      controller.abort();
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [approvalStatus, post.postId, requiresApproval, toast]);
 
   useEffect(() => {
     setEditedText(post.text);
@@ -281,6 +406,16 @@ export const PostResult: React.FC<PostResultProps> = ({
   // Keyboard shortcuts for undo/redo
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target;
+      const isTyping =
+        target instanceof HTMLElement &&
+        (target.matches("input, textarea, select") || target.isContentEditable);
+      if (
+        isTyping ||
+        document.querySelector('[role="dialog"][aria-modal="true"]')
+      ) {
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
         e.preventDefault();
         handleUndo();
@@ -300,13 +435,14 @@ export const PostResult: React.FC<PostResultProps> = ({
   const handleTextChange = useCallback(
     (newText: string) => {
       setEditedText(newText);
+      setHasCopiedCaption(false);
       // Add to history, removing any future history if we're not at the end
       const newHistory = textHistory.slice(0, historyIndex + 1);
       newHistory.push(newText);
       setTextHistory(newHistory);
       setHistoryIndex(newHistory.length - 1);
     },
-    [historyIndex, textHistory]
+    [historyIndex, textHistory],
   );
 
   const handleUndo = useCallback(() => {
@@ -314,6 +450,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       const newIndex = historyIndex - 1;
       setHistoryIndex(newIndex);
       setEditedText(textHistory[newIndex]);
+      setHasCopiedCaption(false);
       triggerHapticFeedback();
     }
   }, [historyIndex, textHistory]);
@@ -323,6 +460,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       const newIndex = historyIndex + 1;
       setHistoryIndex(newIndex);
       setEditedText(textHistory[newIndex]);
+      setHasCopiedCaption(false);
       triggerHapticFeedback();
     }
   }, [historyIndex, textHistory]);
@@ -343,10 +481,14 @@ export const PostResult: React.FC<PostResultProps> = ({
     setVideoUrl(null);
   }, [post.image]);
 
+  useEffect(() => {
+    setHasSavedMedia(false);
+  }, [videoUrl]);
+
   const handleSave = async () => {
     triggerHapticFeedback();
-    if (requiresApproval) {
-      toast.warning(approvalGateMessage);
+    if (deliveryLocked) {
+      toast.warning(deliveryGateMessage);
       return;
     }
     const link = document.createElement("a");
@@ -356,20 +498,23 @@ export const PostResult: React.FC<PostResultProps> = ({
       link.download = "social-media-video.mp4";
     } else {
       link.href = post.image;
-      link.download = "social-media-post.jpg";
+      link.download = `social-media-post.${imageFileExtension(post.image)}`;
     }
 
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setHasSavedMedia(true);
+    toast.success(`${videoUrl ? "Video" : "Image"} saved to your device.`);
 
-    // Trigger confetti
-    confetti({
-      particleCount: 100,
-      spread: 70,
-      origin: { y: 0.6 },
-      colors: ["#1e40af", "#2563eb", "#60a5fa", "#16a34a"],
-    });
+    if (!shouldReduceMotion) {
+      confetti({
+        particleCount: 70,
+        spread: 64,
+        origin: { y: 0.65 },
+        colors: ["#1e40af", "#2563eb", "#60a5fa", "#16a34a"],
+      });
+    }
   };
 
   const synchronousCopy = (text: string): boolean => {
@@ -400,10 +545,15 @@ export const PostResult: React.FC<PostResultProps> = ({
   // disclosureOverride takes precedence over post.disclosures when the user
   // picked an alternative from the CaptionAlternativesModal (each variant
   // may trigger a different compliance language set).
-  const activeDisclosures = (disclosureOverride?.text ?? post.disclosures ?? "")
-    .trim();
-  const activeDisclosureCategories =
-    disclosureOverride?.categories ?? post.disclosureCategories ?? [];
+  const captionWasEdited = editedText !== post.text;
+  const activeDisclosures = (
+    captionWasEdited
+      ? captionAnalysis.disclosures
+      : (disclosureOverride?.text ?? post.disclosures ?? "")
+  ).trim();
+  const activeDisclosureCategories = captionWasEdited
+    ? captionAnalysis.disclosureCategories
+    : (disclosureOverride?.categories ?? post.disclosureCategories ?? []);
   const captionWithDisclosures = (() => {
     const cap = editedText.trim();
     if (!activeDisclosures) return cap;
@@ -416,6 +566,10 @@ export const PostResult: React.FC<PostResultProps> = ({
 
   const handleCopy = async () => {
     triggerHapticFeedback();
+    if (deliveryLocked) {
+      toast.warning(deliveryGateMessage);
+      return;
+    }
     let success = false;
     const textToCopy = captionWithDisclosures;
     if (navigator.clipboard) {
@@ -433,71 +587,13 @@ export const PostResult: React.FC<PostResultProps> = ({
       // The inline checkmark (2s) is enough acknowledgment for a routine copy.
       // Confetti is reserved for genuine completion moments (saving the post).
       setCopied(true);
+      setHasCopiedCaption(true);
       setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  // Legacy native-share path (still used by the "More…" tile inside the
-  // ShareDialog when the user wants to bypass per-platform formatting).
-  const handleShareLegacy = async () => {
-    triggerHapticFeedback();
-    if (requiresApproval) {
-      toast.warning(approvalGateMessage);
-      return;
-    }
-    const textToCopy = captionWithDisclosures;
-    const textForShareAPI = textToCopy.trim();
-    setIsSharing(true);
-
-    let copySuccess = false;
-    if (navigator.clipboard) {
-      try {
-        await navigator.clipboard.writeText(textToCopy);
-        copySuccess = true;
-      } catch (err) {
-        copySuccess = synchronousCopy(textToCopy);
-      }
+      toast.success("Caption and disclosures copied.");
     } else {
-      copySuccess = synchronousCopy(textToCopy);
-    }
-
-    if (copySuccess) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-
-    try {
-      const mediaUrl = videoUrl || post.image;
-      const mediaBlob = await (await fetch(mediaUrl)).blob();
-      const fileName = videoUrl
-        ? "social-media-video.mp4"
-        : "social-media-post.jpg";
-      const file = new File([mediaBlob], fileName, { type: mediaBlob.type });
-
-      const shareData = {
-        title: "New Car Celebration!",
-        text: textForShareAPI,
-        files: [file],
-      };
-
-      if (navigator.share && navigator.canShare(shareData)) {
-        await navigator.share(shareData);
-      } else {
-        toast.info(
-          "Sharing is not supported on this device, so the post text was copied to your clipboard."
-        );
-      }
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        // User cancelled the share dialog, do nothing.
-      } else {
-        console.error("Sharing failed:", error);
-        toast.error(
-          "Could not open sharing, so the post text was copied to your clipboard."
-        );
-      }
-    } finally {
-      setIsSharing(false);
+      toast.error(
+        "The caption could not be copied. Select the text and copy it manually.",
+      );
     }
   };
 
@@ -507,7 +603,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       "Updating image...",
       "Polishing details...",
       "Almost there...",
-    ]
+    ],
   ) => {
     setIsImageLoading(true);
     setImageLoadingMessage(messages[0] || "Updating Image...");
@@ -551,7 +647,7 @@ export const PostResult: React.FC<PostResultProps> = ({
   const startVideoJob = async (
     style: VideoStyle,
     options: VideoRequestOptions,
-    existingJobId?: string
+    existingJobId?: string,
   ) => {
     setIsVideoLoading(true);
 
@@ -594,8 +690,8 @@ export const PostResult: React.FC<PostResultProps> = ({
       prev.map((job) =>
         job.id === jobId
           ? { ...job, status: "processing", error: undefined }
-          : job
-      )
+          : job,
+      ),
     );
 
     const maxAttempts = 3;
@@ -605,9 +701,21 @@ export const PostResult: React.FC<PostResultProps> = ({
         setVideoUrl((prev) => prev || url); // auto-open the first available video
         setVideoJobs((prev) =>
           prev.map((job) =>
-            job.id === jobId ? { ...job, status: "completed", url } : job
-          )
+            job.id === jobId ? { ...job, status: "completed", url } : job,
+          ),
         );
+        if (post.postId) {
+          try {
+            await markPostVideoGenerated(post.postId);
+          } catch (_err) {
+            // The paid render succeeded, so keep it usable. Be explicit that
+            // only the history metric failed rather than misreporting the
+            // whole generation as failed and tempting a costly retry.
+            toast.warning(
+              "Video created, but its history metric could not be updated.",
+            );
+          }
+        }
       } catch (error) {
         const normalized = normalizeError(error);
         const retryDelay =
@@ -617,14 +725,14 @@ export const PostResult: React.FC<PostResultProps> = ({
         if (retryDelay > 0) {
           allowRotation = false;
           setVideoLoadingMessage(
-            `${attemptMessage}. Retrying in ${retryDelay / 1000}s...`
+            `${attemptMessage}. Retrying in ${retryDelay / 1000}s...`,
           );
           setVideoJobs((prev) =>
             prev.map((job) =>
               job.id === jobId
                 ? { ...job, status: "queued", error: attemptMessage }
-                : job
-            )
+                : job,
+            ),
           );
           await new Promise((resolve) => setTimeout(resolve, retryDelay));
           allowRotation = true;
@@ -640,8 +748,8 @@ export const PostResult: React.FC<PostResultProps> = ({
           prev.map((job) =>
             job.id === jobId
               ? { ...job, status: "failed", error: finalMessage }
-              : job
-          )
+              : job,
+          ),
         );
         throw normalized;
       }
@@ -659,7 +767,7 @@ export const PostResult: React.FC<PostResultProps> = ({
 
   const handleGenerateVideo = async (
     style: VideoStyle,
-    options: VideoRequestOptions
+    options: VideoRequestOptions,
   ) => {
     setIsVideoDirectorOpen(false);
     await startVideoJob(style, options);
@@ -682,30 +790,35 @@ export const PostResult: React.FC<PostResultProps> = ({
     setVideoJobs((prev) => prev.filter((job) => job.id !== jobId));
   };
 
+  const hasWorkAtRisk =
+    !hasSavedMedia ||
+    !hasCopiedCaption ||
+    editedText !== post.text ||
+    imageEditPrompt.trim().length > 0 ||
+    videoJobs.length > 0;
+
+  const handleCreateAnotherRequest = () => {
+    triggerHapticFeedback();
+    if (imageBusy || textBusy) {
+      toast.warning(
+        "Wait for the current update to finish before starting another post.",
+      );
+      return;
+    }
+    if (hasWorkAtRisk) {
+      setIsStartOverConfirmOpen(true);
+      return;
+    }
+    onStartOver();
+  };
+
+  const confirmCreateAnother = () => {
+    setIsStartOverConfirmOpen(false);
+    onStartOver();
+  };
+
   return (
     <>
-      {pullDistance > 0 && (
-        <div 
-          className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center pointer-events-none transition-opacity duration-150"
-          style={{ 
-            transform: `translateY(${Math.min(pullDistance / 2, 40)}px)`,
-            opacity: Math.min(pullDistance / 80, 1)
-          }}
-        >
-          <div className="bg-surface-900/90 border border-white/10 backdrop-blur-md px-4 py-2 rounded-full flex items-center gap-2 shadow-lg">
-            <RefreshCw 
-              className={cn(
-                "w-4 h-4 text-primary-400 transition-transform", 
-                shouldRefresh ? "rotate-180 scale-110 text-success-400 animate-spin" : "rotate-0 scale-100"
-              )} 
-            />
-            <span className="text-xs font-semibold text-surface-200">
-              {shouldRefresh ? "Release to regenerate" : "Pull down to regenerate"}
-            </span>
-          </div>
-        </div>
-      )}
-
       <Suspense fallback={null}>
         <LazyImagePreviewModal
           isOpen={isPreviewOpen && !videoUrl}
@@ -715,12 +828,12 @@ export const PostResult: React.FC<PostResultProps> = ({
       </Suspense>
 
       <MultiFormatExportModal
-        isOpen={isMultiFormatOpen && !requiresApproval}
+        isOpen={isMultiFormatOpen && !deliveryLocked}
         onClose={() => setIsMultiFormatOpen(false)}
         sourceImageUrl={post.image}
       />
       <ShareDialog
-        isOpen={isShareDialogOpen && !requiresApproval}
+        isOpen={isShareDialogOpen && !deliveryLocked}
         onClose={() => setIsShareDialogOpen(false)}
         content={{
           text: captionWithDisclosures,
@@ -728,11 +841,38 @@ export const PostResult: React.FC<PostResultProps> = ({
           videoUrl: videoUrl || undefined,
         }}
       />
+      <Modal
+        isOpen={isStartOverConfirmOpen}
+        onClose={() => setIsStartOverConfirmOpen(false)}
+        size="sm"
+        title="Create another post?"
+        description="This result is not fully preserved yet."
+        footer={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => setIsStartOverConfirmOpen(false)}
+              fullWidth
+            >
+              Keep editing
+            </Button>
+            <Button variant="danger" onClick={confirmCreateAnother} fullWidth>
+              Discard and continue
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm leading-relaxed text-surface-300">
+          Save the media and copy the caption first if you want to keep both.
+          Starting another post replaces this workspace.
+        </p>
+      </Modal>
       {onGenerateCaptionVariant && (
         <CaptionAlternativesModal
-          isOpen={isCaptionAltsOpen}
+          isOpen={isCaptionAltsOpen && !creativeLockedForReview}
           onClose={() => setIsCaptionAltsOpen(false)}
           generateOne={onGenerateCaptionVariant}
+          bannedPhrases={bannedPhrases}
           onSelect={({ text, disclosures, disclosureCategories }) => {
             handleTextChange(text);
             setDisclosureOverride({
@@ -745,7 +885,7 @@ export const PostResult: React.FC<PostResultProps> = ({
 
       <Suspense fallback={null}>
         <LazyEditTextModal
-          isOpen={isTextEditing}
+          isOpen={isTextEditing && !creativeLockedForReview}
           onClose={() => setIsTextEditing(false)}
           onSubmit={handleTextEditSubmit}
           originalText={post.text}
@@ -754,14 +894,14 @@ export const PostResult: React.FC<PostResultProps> = ({
       </Suspense>
       <Suspense fallback={null}>
         <LazyVideoDirectorModal
-          isOpen={isVideoDirectorOpen}
+          isOpen={isVideoDirectorOpen && !creativeLockedForReview}
           onClose={() => setIsVideoDirectorOpen(false)}
           onSelectStyle={handleGenerateVideo}
         />
       </Suspense>
       <Suspense fallback={null}>
         <LazyFunModeDirectorModal
-          isOpen={isFunModeDirectorOpen}
+          isOpen={isFunModeDirectorOpen && !creativeLockedForReview}
           onClose={() => setIsFunModeDirectorOpen(false)}
           onSelectStyle={(styleName) => {
             setIsFunModeDirectorOpen(false);
@@ -771,56 +911,164 @@ export const PostResult: React.FC<PostResultProps> = ({
                 "Queuing fun mode style...",
                 "Illustrating with your photo reference...",
                 "Polishing colors and details...",
-              ]
+              ],
             );
           }}
         />
       </Suspense>
-      <motion.div
-        className="flex-1 w-full max-w-screen-2xl mx-auto px-1 sm:px-4 md:px-6 py-4 sm:py-6 space-y-6 touch-pan-y"
-        initial={{ opacity: 0, y: 20 }}
+      <motion.section
+        className="mx-auto w-full max-w-screen-2xl flex-1 space-y-5 px-2 py-4 sm:px-4 sm:py-6 md:px-6"
+        initial={shouldReduceMotion ? false : { opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
-        {...combinedTouchHandlers}
+        transition={{ duration: shouldReduceMotion ? 0 : 0.35 }}
+        aria-busy={imageBusy || textBusy}
       >
-        <motion.h2
-          className="text-3xl sm:text-4xl font-bold text-center text-surface-50"
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1, duration: 0.4 }}
-        >
-          {requiresApproval ? "Post awaiting approval" : "Your post is ready"}
-        </motion.h2>
-        {requiresApproval && (
-          <motion.div
-            className="mx-auto flex max-w-3xl flex-col gap-3 rounded-2xl border border-warning-500/30 bg-warning-500/10 px-4 py-4 text-warning-100 shadow-lg shadow-black/10 sm:flex-row sm:items-start"
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.25 }}
-            role="status"
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-primary-300">
+              <CircleCheck className="h-4 w-4" aria-hidden="true" />
+              Post workspace
+            </div>
+            <h2 className="text-2xl font-semibold tracking-tight text-surface-50 sm:text-3xl">
+              {claimLocked
+                ? "Caption claim needs attention"
+                : releaseLocked
+                  ? "Photo release needs attention"
+                  : requiresApproval
+                    ? approvalStatus === "approved"
+                      ? "Approved and ready to publish"
+                      : approvalStatus === "rejected"
+                        ? "Manager requested changes"
+                        : "Ready for manager review"
+                    : "Ready to publish"}
+            </h2>
+            <p className="mt-1 text-sm text-surface-400">
+              Review the media and caption, then copy, share, or save.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleCreateAnotherRequest}
+            className="inline-flex min-h-[44px] items-center justify-center gap-2 self-start rounded-xl border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-surface-200 transition-colors hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 sm:self-auto"
           >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-warning-500/30 bg-warning-500/12">
-              <AlertCircle className="h-5 w-5 text-warning-300" />
+            <RotateCcw className="h-4 w-4" aria-hidden="true" />
+            Create another
+          </button>
+        </header>
+        {claimLocked && (
+          <motion.div
+            id="caption-compliance-alert"
+            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10"
+            initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
+            role="alert"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-current/20 bg-black/10">
+              <AlertCircle className="h-5 w-5" aria-hidden="true" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <p className="font-semibold text-warning-100">Manager approval pending</p>
-                <Badge variant="warning" uppercase={false}>
-                  Save and share locked
+                <p className="font-semibold">Caption claim blocked</p>
+                <Badge variant="error" uppercase={false}>
+                  Delivery locked
                 </Badge>
               </div>
-              <p className="mt-1 text-sm leading-relaxed text-warning-100/80">
+              <p className="mt-1 text-sm leading-relaxed opacity-80">
+                {claimGateMessage}
+              </p>
+            </div>
+          </motion.div>
+        )}
+        {releaseLocked && (
+          <motion.div
+            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10"
+            initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
+            role="alert"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-current/20 bg-black/10">
+              <AlertCircle className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-semibold">Photo release not saved</p>
+                <Badge variant="error" uppercase={false}>
+                  Delivery locked
+                </Badge>
+              </div>
+              <p className="mt-1 text-sm leading-relaxed opacity-80">
+                {releaseGateMessage}
+              </p>
+            </div>
+          </motion.div>
+        )}
+        {requiresApproval && (
+          <motion.div
+            className={cn(
+              "mx-auto flex max-w-3xl flex-col gap-3 rounded-2xl px-4 py-4 shadow-lg shadow-black/10 sm:flex-row sm:items-start",
+              approvalStatus === "approved"
+                ? "border border-success-500/30 bg-success-500/10 text-success-100"
+                : approvalStatus === "pending"
+                  ? "border border-warning-500/30 bg-warning-500/10 text-warning-100"
+                  : "border border-error-500/30 bg-error-500/10 text-error-100",
+            )}
+            initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
+            role="status"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-current/20 bg-black/10">
+              {approvalStatus === "approved" ? (
+                <CircleCheck className="h-5 w-5" />
+              ) : (
+                <AlertCircle className="h-5 w-5" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-semibold">
+                  {approvalStatus === "approved"
+                    ? "Manager approved"
+                    : approvalStatus === "rejected"
+                      ? "Manager rejected"
+                      : approvalStatus === "submission_failed"
+                        ? "Approval submission failed"
+                        : "Manager approval pending"}
+                </p>
+                <Badge
+                  variant={
+                    approvalStatus === "approved"
+                      ? "success"
+                      : approvalStatus === "pending"
+                        ? "warning"
+                        : "error"
+                  }
+                  uppercase={false}
+                >
+                  {approvalStatus === "approved"
+                    ? "Delivery unlocked"
+                    : "Save and share locked"}
+                </Badge>
+              </div>
+              <p className="mt-1 text-sm leading-relaxed opacity-80">
                 {approvalGateMessage}
               </p>
+              {approvalCheckError ? (
+                <p className="mt-2 text-xs font-medium opacity-75">
+                  {approvalCheckError}
+                </p>
+              ) : null}
             </div>
           </motion.div>
         )}
         {error && (
           <motion.div
             className="mb-4 bg-error-900/50 border border-error-700 text-error-300 px-4 py-3 rounded-xl flex items-center justify-center gap-2 backdrop-blur-sm"
-            initial={{ opacity: 0, scale: 0.95 }}
+            initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.3 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.3 }}
           >
             <AlertCircle className="w-5 h-5" />
             <span>{error}</span>
@@ -833,10 +1081,25 @@ export const PostResult: React.FC<PostResultProps> = ({
               : "grid-cols-1 gap-6"
           }`}
         >
-          <div className="flex flex-col items-center bg-white/5 p-4 rounded-2xl shadow-2xl space-y-4">
-            <div className="relative w-full">
+          <section
+            className="flex flex-col items-center space-y-4 rounded-2xl border border-white/10 bg-white/[0.04] p-3 shadow-2xl shadow-black/20 sm:p-4"
+            aria-labelledby="media-preview-heading"
+            aria-busy={imageBusy}
+          >
+            <div className="flex w-full items-center justify-between px-1">
+              <h3
+                id="media-preview-heading"
+                className="text-sm font-semibold text-surface-100"
+              >
+                Media preview
+              </h3>
+              <Badge variant={videoUrl ? "info" : "neutral"} uppercase={false}>
+                {videoUrl ? "Video" : "Image"}
+              </Badge>
+            </div>
+            <div className="relative w-full overflow-hidden rounded-xl bg-surface-950/60">
               {(isImageLoading || isVideoLoading) && (
-                <LoadingOverlay
+                <BusyOverlay
                   message={
                     isVideoLoading ? videoLoadingMessage : imageLoadingMessage
                   }
@@ -848,10 +1111,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                 <video
                   src={videoUrl}
                   controls
-                  autoPlay
-                  loop
+                  autoPlay={!shouldReduceMotion}
+                  loop={!shouldReduceMotion}
                   muted
-                  className="rounded-xl shadow-2xl w-full object-contain"
+                  className="max-h-[70dvh] w-full rounded-xl object-contain shadow-2xl"
                 />
               ) : (
                 <button
@@ -865,42 +1128,77 @@ export const PostResult: React.FC<PostResultProps> = ({
                   <ProgressiveImage
                     src={post.image}
                     alt="Generated social media post"
-                    className="rounded-xl shadow-2xl w-full object-contain"
+                    className="max-h-[70dvh] w-full rounded-xl object-contain shadow-2xl"
                   />
                 </button>
               )}
             </div>
 
             <div className="w-full space-y-3">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
+              <button
+                type="button"
+                onClick={() => setIsToolsOpen((open) => !open)}
+                aria-expanded={isToolsOpen}
+                aria-controls="result-creative-tools"
+                className="flex min-h-[48px] w-full items-center gap-3 rounded-xl border border-white/10 bg-surface-950/35 px-3 text-left transition-colors hover:border-white/20 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-500/15 text-primary-300">
+                  <Sparkles className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-surface-100">
+                    Creative tools
+                  </span>
+                  <span className="block truncate text-xs text-surface-400">
+                    Optional image, caption, video, and export controls
+                  </span>
+                </span>
+                <ChevronDown
+                  className={cn(
+                    "h-4 w-4 shrink-0 text-surface-400 transition-transform",
+                    isToolsOpen && "rotate-180",
+                  )}
+                  aria-hidden="true"
+                />
+              </button>
+
+              <div
+                id="result-creative-tools"
+                data-testid="creative-tools-panel"
+                hidden={!isToolsOpen}
+                className={cn(
+                  "grid grid-cols-2 gap-2 lg:grid-cols-3",
+                  !isToolsOpen && "hidden",
+                )}
+              >
                 <ActionTile
                   icon={RefreshCw}
                   iconClassName="text-surface-300"
-                  tooltip="Get a new version"
-                  disabled={imageBusy || !!videoUrl}
+                  tooltip="Generate a new image version"
+                  disabled={imageBusy || !!videoUrl || creativeLockedForReview}
                   busy={imageBusy}
-                  label={imageBusy ? "Working..." : "Regenerate"}
-                  onClick={() =>
-                    handleImageAction(onRegenerateImage, [
+                  label={imageBusy ? "Updating image..." : "Regenerate image"}
+                  onClick={() => {
+                    void handleImageAction(onRegenerateImage, [
                       "Refreshing with your chosen style...",
                       "Balancing lighting and color...",
                       "Finishing touches...",
-                    ])
-                  }
+                    ]).catch(() => undefined);
+                  }}
                 />
 
                 <ActionTile
                   icon={Edit3}
                   iconClassName={TILE_ICON_ACCENT}
                   tooltip="Change specific details"
-                  disabled={imageBusy || !!videoUrl}
+                  disabled={imageBusy || !!videoUrl || creativeLockedForReview}
                   busy={imageBusy}
                   label={
                     imageBusy
-                      ? "Working..."
+                      ? "Updating image..."
                       : isImageEditing
-                      ? "Cancel"
-                      : "AI image edit"
+                        ? "Cancel"
+                        : "AI image edit"
                   }
                   onClick={() => setIsImageEditing(!isImageEditing)}
                 />
@@ -909,39 +1207,63 @@ export const PostResult: React.FC<PostResultProps> = ({
                   icon={Sparkles}
                   iconClassName="text-primary-300"
                   tooltip="Artistic transformations"
-                  disabled={imageBusy || !!videoUrl}
+                  disabled={imageBusy || !!videoUrl || creativeLockedForReview}
                   busy={imageBusy}
                   label={imageBusy ? "Working..." : "Fun mode"}
                   onClick={() => setIsFunModeDirectorOpen(true)}
                 />
 
                 <ActionTile
-                  icon={Download}
-                  variant="primary"
-                  tooltip={
-                    requiresApproval
-                      ? "Manager approval is required before saving"
-                      : "Download to your device"
-                  }
-                  disabled={imageBusy || requiresApproval}
-                  busy={imageBusy}
+                  icon={RefreshCw}
+                  iconClassName="text-surface-300"
+                  tooltip="Generate a new caption"
+                  disabled={textBusy || creativeLockedForReview}
+                  busy={textBusy}
                   label={
-                    imageBusy ? "Working..." : `Save ${videoUrl ? "video" : "image"}`
+                    textBusy ? "Updating caption..." : "Regenerate caption"
                   }
-                  onClick={handleSave}
+                  onClick={() => {
+                    void handleTextAction(onRegenerateText).catch(
+                      () => undefined,
+                    );
+                  }}
                 />
 
                 <ActionTile
+                  icon={Edit3}
+                  iconClassName={TILE_ICON_ACCENT}
+                  tooltip="Describe a caption change"
+                  disabled={textBusy || creativeLockedForReview}
+                  busy={textBusy}
+                  label={textBusy ? "Updating caption..." : "AI caption edit"}
+                  onClick={() => setIsTextEditing(true)}
+                />
+
+                {onGenerateCaptionVariant ? (
+                  <ActionTile
+                    icon={Sparkles}
+                    iconClassName={TILE_ICON_ACCENT}
+                    tooltip="Generate three caption options"
+                    disabled={textBusy || creativeLockedForReview}
+                    label="Three caption ideas"
+                    onClick={() => setIsCaptionAltsOpen(true)}
+                  />
+                ) : null}
+
+                <ActionTile
                   icon={Film}
-                  iconClassName={cn(TILE_ICON_ACCENT, isVideoLoading && "animate-spin")}
+                  iconClassName={TILE_ICON_ACCENT}
                   tooltip="Turn your image into a video"
-                  disabled={imageBusy || isVideoLoading}
+                  disabled={
+                    imageBusy || isVideoLoading || creativeLockedForReview
+                  }
+                  busy={isVideoLoading}
                   label={
                     isVideoLoading
                       ? "Rendering…"
                       : videoUrl
-                      ? "New video"
-                      : "Animate with AI"
+                        ? "New video"
+                        : "Animate with AI"
                   }
                   onClick={() => setIsVideoDirectorOpen(true)}
                 />
@@ -950,83 +1272,87 @@ export const PostResult: React.FC<PostResultProps> = ({
                   icon={LayoutGrid}
                   iconClassName="text-amber-300"
                   tooltip={
-                    requiresApproval
-                      ? "Manager approval is required before exporting"
+                    deliveryLocked
+                      ? deliveryGateMessage
                       : "Export all 4 sizes at once (FB, IG/TikTok, Marketplace, GBP)"
                   }
-                  disabled={imageBusy || !!videoUrl || requiresApproval}
+                  disabled={imageBusy || !!videoUrl || deliveryLocked}
                   label="All formats"
                   onClick={() => {
-                    if (requiresApproval) {
-                      toast.warning(approvalGateMessage);
+                    if (deliveryLocked) {
+                      toast.warning(deliveryGateMessage);
                       return;
                     }
                     setIsMultiFormatOpen(true);
                   }}
                 />
-
-                <ActionTile
-                  icon={RotateCcw}
-                  iconClassName="text-surface-300"
-                  label="Create another"
-                  onClick={onStartOver}
-                />
               </div>
               <AnimatePresence>
-                {isImageEditing && (
+                {isToolsOpen && isImageEditing && (
                   <motion.div
-                    className="space-y-2 p-3 bg-surface-800/50 rounded-xl border border-white/10"
-                    initial={{ opacity: 0, height: 0 }}
+                    className="space-y-2 rounded-xl border border-white/10 bg-surface-800/50 p-3"
+                    initial={
+                      shouldReduceMotion ? false : { opacity: 0, height: 0 }
+                    }
                     animate={{ opacity: 1, height: "auto" }}
                     exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.3 }}
+                    transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
                   >
+                    <label
+                      htmlFor="image-edit-request"
+                      className="text-xs font-semibold text-surface-200"
+                    >
+                      Image edit request
+                    </label>
                     <textarea
+                      id="image-edit-request"
                       value={imageEditPrompt}
                       onChange={(e) => setImageEditPrompt(e.target.value)}
-                      placeholder="e.g., Make the text gold..."
+                      placeholder="Example: Make the headline gold and brighten the vehicle."
                       className="w-full bg-surface-800/50 text-surface-50 border-2 border-white/20 rounded-xl px-3 py-2 focus:ring-2 focus:ring-primary-400 focus:border-primary-400 outline-none transition text-sm"
                       rows={2}
                     />
-                    <motion.button
+                    <Button
                       onClick={() => {
-                        triggerHapticFeedback();
-                        handleImageAction(
+                        void handleImageAction(
                           () => onEditImage(imageEditPrompt),
                           [
                             "Applying your edit request...",
                             "Re-rendering safely around people and cars...",
                             "Finalizing the updated image...",
-                          ]
-                        ).then(() => setIsImageEditing(false));
+                          ],
+                        )
+                          .then(() => {
+                            setIsImageEditing(false);
+                            setImageEditPrompt("");
+                          })
+                          .catch(() => undefined);
                       }}
                       disabled={!imageEditPrompt.trim()}
-                      className={cn(
-                        "w-full bg-primary-600 hover:bg-primary-500",
-                        "text-surface-50 font-bold py-2 px-4 rounded-xl",
-                        "transition-all duration-300 shadow-lg hover:shadow-glow-primary",
-                        "disabled:opacity-50 disabled:cursor-not-allowed"
-                      )}
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
+                      fullWidth
+                      size="sm"
                     >
-                      Submit edit
-                    </motion.button>
+                      Apply image edit
+                    </Button>
                   </motion.div>
                 )}
               </AnimatePresence>
-              {videoJobs.length > 0 && (
+              {isToolsOpen && videoJobs.length > 0 && (
                 <motion.div
                   className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-3"
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={shouldReduceMotion ? false : { opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3 }}
+                  transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold uppercase tracking-wide text-surface-50">
                       Video queue
                     </span>
-                    <span className="text-[10px] text-primary-200/70">
+                    <span
+                      className="text-[10px] text-primary-200/70"
+                      role="status"
+                      aria-live="polite"
+                    >
                       {
                         videoJobs.filter((job) => job.status === "processing")
                           .length
@@ -1043,9 +1369,13 @@ export const PostResult: React.FC<PostResultProps> = ({
                       <motion.li
                         key={job.id}
                         className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-surface-900/40 px-3 py-2 text-xs"
-                        initial={{ opacity: 0, scale: 0.95 }}
+                        initial={
+                          shouldReduceMotion
+                            ? false
+                            : { opacity: 0, scale: 0.95 }
+                        }
                         animate={{ opacity: 1, scale: 1 }}
-                        transition={{ duration: 0.2 }}
+                        transition={{ duration: shouldReduceMotion ? 0 : 0.2 }}
                       >
                         <div className="flex flex-col">
                           <span className="font-semibold text-surface-50">
@@ -1115,19 +1445,61 @@ export const PostResult: React.FC<PostResultProps> = ({
                 </motion.div>
               )}
             </div>
-          </div>
+          </section>
 
-          <motion.div
-            className="bg-surface-900/72 backdrop-blur-lg border border-white/10 p-4 lg:p-6 rounded-2xl flex flex-col"
-            initial={{ opacity: 0, x: 20 }}
+          <motion.section
+            className="flex flex-col rounded-2xl border border-white/10 bg-surface-900/70 p-4 backdrop-blur-lg lg:p-6"
+            initial={shouldReduceMotion ? false : { opacity: 0, x: 12 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.2, duration: 0.4 }}
+            transition={{
+              delay: shouldReduceMotion ? 0 : 0.12,
+              duration: shouldReduceMotion ? 0 : 0.3,
+            }}
+            aria-labelledby="caption-delivery-heading"
+            aria-busy={textBusy}
           >
-            <h3 className="text-xl font-semibold mb-3 text-surface-50">
-              Generated social post
-            </h3>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h3
+                  id="caption-delivery-heading"
+                  className="text-xl font-semibold text-surface-50"
+                >
+                  Caption and delivery
+                </h3>
+                <p className="mt-0.5 text-xs text-surface-400">
+                  {creativeLockedForReview
+                    ? "Review copy is locked to the exact creative submitted to the manager."
+                    : "Edit directly. Required disclosures stay attached automatically."}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={handleUndo}
+                  disabled={historyIndex === 0 || creativeLockedForReview}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-surface-200 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 disabled:cursor-not-allowed disabled:opacity-30"
+                  title="Undo (Ctrl+Z)"
+                  aria-label="Undo caption change"
+                >
+                  <Undo2 className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRedo}
+                  disabled={
+                    historyIndex === textHistory.length - 1 ||
+                    creativeLockedForReview
+                  }
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-surface-200 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 disabled:cursor-not-allowed disabled:opacity-30"
+                  title="Redo (Ctrl+Y)"
+                  aria-label="Redo caption change"
+                >
+                  <Redo2 className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
             <div className="relative mb-4">
-              {isTextLoading && <LoadingOverlay message="Updating Text..." />}
+              {isTextLoading && <BusyOverlay message="Updating caption..." />}
               {editedText !== post.text && (
                 <div className="mb-2 flex items-center gap-2 text-xs text-warning-300">
                   <Edit3 className="w-3 h-3" />
@@ -1136,28 +1508,124 @@ export const PostResult: React.FC<PostResultProps> = ({
               )}
               <textarea
                 aria-label="Generated social post text"
+                aria-invalid={claimLocked || undefined}
+                aria-describedby={
+                  claimLocked ? "caption-compliance-alert" : undefined
+                }
                 value={editedText}
                 onChange={(e) => handleTextChange(e.target.value)}
-                disabled={isTextLoading}
+                disabled={isTextLoading || creativeLockedForReview}
                 className={cn(
-                  "w-full h-40 lg:h-60 lg:max-h-[24rem]",
+                  "h-48 w-full lg:h-60 lg:max-h-[24rem]",
                   "bg-surface-800/50 text-surface-300 p-4 rounded-xl text-sm",
-                  "resize-none border-2 border-transparent",
+                  "resize-y border-2 border-transparent leading-relaxed",
                   "focus:border-primary-400 focus:ring-2 focus:ring-primary-400",
-                  "outline-none transition-all duration-300"
+                  "outline-none transition-all duration-300",
                 )}
               />
             </div>
 
-            <PlatformLimitMeter text={captionWithDisclosures} className="mb-4" />
+            <div
+              className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3"
+              aria-label="Post delivery actions"
+            >
+              <Button
+                variant="outline"
+                onClick={handleCopy}
+                disabled={deliveryLocked}
+                aria-label={
+                  deliveryLocked
+                    ? `Copy caption (${deliveryLockLabel.toLowerCase()})`
+                    : "Copy caption"
+                }
+                leftIcon={
+                  copied ? (
+                    <Check className="h-4 w-4" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )
+                }
+                fullWidth
+                disableHaptics
+              >
+                <span aria-live="polite">
+                  {deliveryLocked
+                    ? deliveryLockLabel
+                    : copied
+                      ? "Copied"
+                      : "Copy caption"}
+                </span>
+              </Button>
+              <Button
+                variant="filled"
+                onClick={() => {
+                  if (deliveryLocked) {
+                    toast.warning(deliveryGateMessage);
+                    return;
+                  }
+                  setIsShareDialogOpen(true);
+                }}
+                disabled={deliveryLocked}
+                aria-label={
+                  deliveryLocked
+                    ? `Share post (${deliveryLockLabel.toLowerCase()})`
+                    : "Share post"
+                }
+                leftIcon={<Share2 className="h-4 w-4" />}
+                fullWidth
+              >
+                {deliveryLocked ? deliveryLockLabel : "Share post"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleSave}
+                disabled={imageBusy || deliveryLocked}
+                loading={imageBusy}
+                aria-label={
+                  deliveryLocked
+                    ? `Save ${videoUrl ? "video" : "image"} (${deliveryLockLabel.toLowerCase()})`
+                    : `Save ${videoUrl ? "video" : "image"}`
+                }
+                leftIcon={<Download className="h-4 w-4" />}
+                className="border-success-500/35 text-success-100 hover:border-success-400/60 hover:bg-success-500/10"
+                fullWidth
+                disableHaptics
+              >
+                {deliveryLocked
+                  ? deliveryLockLabel
+                  : `Save ${videoUrl ? "video" : "image"}`}
+              </Button>
+            </div>
+
+            {requiresApproval ? (
+              <p
+                className={cn(
+                  "mb-4 text-xs",
+                  approvalStatus === "approved"
+                    ? "text-success-200"
+                    : "text-warning-200",
+                )}
+                role="status"
+              >
+                {approvalStatus === "approved"
+                  ? "Approved creative: copy, share, save, and export are available."
+                  : "Copy, share, save, and export unlock after manager approval."}
+              </p>
+            ) : null}
+
+            <PlatformLimitMeter
+              text={captionWithDisclosures}
+              className="mb-4"
+            />
 
             {/* Locked compliance disclosure block. Read-only so a salesperson
                 can't silently delete it. Bundled with the caption automatically
-                on copy/share/download. */}
+                on copy/share. Media downloads remain media-only. */}
             {activeDisclosures && (
               <motion.div
-                initial={{ opacity: 0, y: 6 }}
+                initial={shouldReduceMotion ? false : { opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: shouldReduceMotion ? 0 : 0.2 }}
                 className="mb-4 rounded-xl border border-warning-700/40 bg-warning-900/20 p-3"
               >
                 <div className="flex items-center gap-2 mb-1.5">
@@ -1173,179 +1641,14 @@ export const PostResult: React.FC<PostResultProps> = ({
                   {activeDisclosures.replace(/^—\s*Disclosures\s*—\s*\n?/, "")}
                 </div>
                 <div className="text-xs text-warning-300/70 mt-2">
-                  Bundled with the caption automatically when you copy, share, or save.
+                  Included automatically when you copy or share. Saving media
+                  downloads only the image or video, so copy the caption too.
                 </div>
               </motion.div>
             )}
-
-            <div className="space-y-3">
-              <div className="grid grid-cols-4 gap-2">
-                <motion.button
-                  onClick={handleUndo}
-                  disabled={historyIndex === 0}
-                  className={cn(
-                    "flex items-center justify-center gap-1",
-                    "bg-white/10 border border-white/20 text-surface-50 font-medium",
-                    "py-2.5 px-2 min-h-[44px] rounded-xl transition-all duration-300 text-xs",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950",
-                    "hover:bg-white/20 hover:border-white/30",
-                    "disabled:opacity-30 disabled:cursor-not-allowed"
-                  )}
-                  whileHover={{ scale: historyIndex > 0 ? 1.05 : 1 }}
-                  whileTap={{ scale: historyIndex > 0 ? 0.95 : 1 }}
-                  title="Undo (Ctrl+Z)"
-                  aria-label="Undo text change"
-                >
-                  <Undo2 className="w-3 h-3" />
-                </motion.button>
-
-                <motion.button
-                  onClick={handleRedo}
-                  disabled={historyIndex === textHistory.length - 1}
-                  className={cn(
-                    "flex items-center justify-center gap-1",
-                    "bg-white/10 border border-white/20 text-surface-50 font-medium",
-                    "py-2.5 px-2 min-h-[44px] rounded-xl transition-all duration-300 text-xs",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950",
-                    "hover:bg-white/20 hover:border-white/30",
-                    "disabled:opacity-30 disabled:cursor-not-allowed"
-                  )}
-                  whileHover={{
-                    scale: historyIndex < textHistory.length - 1 ? 1.05 : 1,
-                  }}
-                  whileTap={{
-                    scale: historyIndex < textHistory.length - 1 ? 0.95 : 1,
-                  }}
-                  title="Redo (Ctrl+Y)"
-                  aria-label="Redo text change"
-                >
-                  <Redo2 className="w-3 h-3" />
-                </motion.button>
-
-                <motion.button
-                  onClick={() => {
-                    triggerHapticFeedback();
-                    handleTextAction(onRegenerateText);
-                  }}
-                  disabled={textBusy}
-                  className={cn(
-                    "flex items-center justify-center gap-1",
-                    "bg-white/10 border border-white/20 text-surface-50 font-medium",
-                    "py-2.5 px-2 min-h-[44px] rounded-xl transition-all duration-300 text-xs",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950",
-                    "hover:bg-white/20 hover:border-white/30",
-                    textBusy && "opacity-70 cursor-not-allowed"
-                  )}
-                  whileHover={{ scale: textBusy ? 1 : 1.02 }}
-                  whileTap={{ scale: textBusy ? 1 : 0.98 }}
-                >
-                  {textBusy ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  ) : (
-                    <RefreshCw className="w-3 h-3" />
-                  )}
-                  <span>{textBusy ? "Updating…" : "Regenerate"}</span>
-                </motion.button>
-
-                {onGenerateCaptionVariant && (
-                  <motion.button
-                    onClick={() => {
-                      triggerHapticFeedback();
-                      setIsCaptionAltsOpen(true);
-                    }}
-                    disabled={textBusy}
-                    className={cn(
-                      "flex items-center justify-center gap-1 relative overflow-hidden",
-                      "bg-white/[0.06] border border-white/[0.08] text-surface-50 font-semibold",
-                      "py-2.5 px-2 min-h-[44px] rounded-xl transition-all duration-300 text-xs",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950",
-                      "hover:bg-white/[0.10] hover:border-white/[0.15]",
-                      textBusy && "opacity-70 cursor-not-allowed"
-                    )}
-                    whileHover={{ scale: textBusy ? 1 : 1.02 }}
-                    whileTap={{ scale: textBusy ? 1 : 0.98 }}
-                    title="Generate 3 caption alternatives and pick the best"
-                  >
-                    <Sparkles className="w-3 h-3 text-primary-300" />
-                    <span>3 ideas</span>
-                  </motion.button>
-                )}
-              </div>
-
-              <motion.button
-                onClick={() => {
-                  triggerHapticFeedback();
-                  setIsTextEditing(true);
-                }}
-                disabled={textBusy}
-                className={cn(
-                  "w-full flex items-center justify-center gap-2",
-                  "bg-white/[0.06] border border-white/[0.08] text-surface-50 font-bold",
-                  "py-2.5 px-4 min-h-[44px] rounded-xl transition-all duration-300 text-sm",
-                  "hover:bg-white/[0.10] hover:border-white/[0.15]",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950",
-                  textBusy && "opacity-70 cursor-not-allowed"
-                )}
-                whileHover={{ scale: textBusy ? 1 : 1.02 }}
-                whileTap={{ scale: textBusy ? 1 : 0.98 }}
-              >
-                {textBusy ? (
-                  <Loader2 className="w-4 h-4 animate-spin text-primary-300" />
-                ) : (
-                  <Edit3 className="w-4 h-4 text-primary-300" />
-                )}
-                <span>{textBusy ? "Updating…" : "Edit with AI"}</span>
-              </motion.button>
-            </div>
-            <div className="border-t border-white/10 my-4"></div>
-            <div className="space-y-3">
-              <motion.button
-                onClick={() => {
-                  triggerHapticFeedback();
-                  if (requiresApproval) {
-                    toast.warning(approvalGateMessage);
-                    return;
-                  }
-                  setIsShareDialogOpen(true);
-                }}
-                disabled={requiresApproval}
-                className={cn(
-                  "w-full flex items-center justify-center gap-2",
-                  "bg-primary-600 text-white font-bold shadow-lg shadow-primary-900/30",
-                  "py-3 px-4 min-h-[44px] rounded-xl transition-all duration-300",
-                  "hover:bg-primary-500",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950",
-                  requiresApproval && "opacity-50 cursor-not-allowed hover:bg-primary-600"
-                )}
-                whileHover={{ scale: requiresApproval ? 1 : 1.02 }}
-                whileTap={{ scale: requiresApproval ? 1 : 0.98 }}
-              >
-                <Share2 className="w-5 h-5" />
-                <span>{requiresApproval ? "Awaiting approval" : "Share post"}</span>
-              </motion.button>
-
-              <motion.button
-                onClick={handleCopy}
-                className={cn(
-                  "w-full flex items-center justify-center gap-2",
-                  "bg-white/10 border border-white/20 text-surface-50 font-bold",
-                  "py-2 px-4 rounded-xl transition-all duration-300",
-                  "hover:bg-white/20 hover:border-white/30"
-                )}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                {copied ? (
-                  <Check className="w-5 h-5" />
-                ) : (
-                  <Copy className="w-5 h-5" />
-                )}
-                <span>{copied ? "Copied" : "Copy text only"}</span>
-              </motion.button>
-            </div>
-          </motion.div>
+          </motion.section>
         </div>
-      </motion.div>
+      </motion.section>
     </>
   );
 };

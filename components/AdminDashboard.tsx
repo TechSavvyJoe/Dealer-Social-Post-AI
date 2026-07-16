@@ -16,10 +16,10 @@ import { SystemHealthPanel } from "./SystemHealthPanel";
 import { ConfirmationModal } from "./ConfirmationModal";
 import { useAppStore } from "../stores/appStore";
 import { useToast } from "./ui/Toast";
+import { dataUrlToBlob, urlToDataUrl } from "../utils/imageUtils";
 
 const DEALER_CODE_LENGTH = 6;
 const DEALER_CODE_PATTERN = /^\d{6}$/;
-const ADMIN_DEALER_CODE = "000000";
 
 const fieldClassName =
   "mt-1 block w-full rounded-xl border border-surface-700 bg-surface-900/70 px-4 py-3 text-surface-50 placeholder:text-surface-500 transition-colors focus:border-primary-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
@@ -30,8 +30,9 @@ const DealerCard: React.FC<{
   onDelete: (id: string) => void;
   onEdit: (dealer: Dealer) => void;
   isDeleting: boolean;
-}> = ({ dealer, onDelete, onEdit, isDeleting }) => {
-  const isAdminDealer = dealer.code === ADMIN_DEALER_CODE;
+  protectedDealerId?: string;
+}> = ({ dealer, onDelete, onEdit, isDeleting, protectedDealerId }) => {
+  const isActiveAdminDealer = dealer.id === protectedDealerId;
 
   return (
     <motion.div
@@ -83,9 +84,11 @@ const DealerCard: React.FC<{
             variant="danger"
             size="icon"
             onClick={() => onDelete(dealer.id)}
-            disabled={isDeleting || isAdminDealer}
+            disabled={isDeleting || isActiveAdminDealer}
             title={
-              isAdminDealer ? "Cannot delete Admin Control" : "Delete Dealer"
+              isActiveAdminDealer
+                ? "Cannot delete the active admin dealership"
+                : "Delete Dealer"
             }
           >
             <Icon type="trash" className="w-5 h-5" />
@@ -99,6 +102,7 @@ const DealerCard: React.FC<{
 export const AdminDashboard: React.FC = () => {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const sessionDealer = useAppStore((s) => s.currentDealer);
   const [formState, setFormState] = useState({
     name: "",
     code: "",
@@ -112,7 +116,7 @@ export const AdminDashboard: React.FC = () => {
   // irreversible, so it must go through a confirm step rather than fire on a
   // single click.
   const [dealerPendingDelete, setDealerPendingDelete] = useState<Dealer | null>(
-    null
+    null,
   );
 
   // --- DATA FETCHING ---
@@ -130,20 +134,29 @@ export const AdminDashboard: React.FC = () => {
       resetForm();
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to create dealer.");
+      toast.error(
+        err instanceof Error ? err.message : "Failed to create dealer.",
+      );
     },
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ dealerId, formData }: { dealerId: string; formData: FormData }) =>
-      db.updateDealerWithFile(dealerId, formData),
+    mutationFn: ({
+      dealerId,
+      formData,
+    }: {
+      dealerId: string;
+      formData: FormData;
+    }) => db.updateDealerWithFile(dealerId, formData),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dealers"] });
       toast.success("Dealer updated.");
       resetForm();
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to update dealer.");
+      toast.error(
+        err instanceof Error ? err.message : "Failed to update dealer.",
+      );
     },
   });
 
@@ -159,7 +172,9 @@ export const AdminDashboard: React.FC = () => {
       logError("admin.dealer.delete.failed", {
         message: err instanceof Error ? err.message : String(err),
       });
-      toast.error(err instanceof Error ? err.message : "Failed to delete dealer.");
+      toast.error(
+        err instanceof Error ? err.message : "Failed to delete dealer.",
+      );
     },
   });
 
@@ -213,17 +228,30 @@ export const AdminDashboard: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formState.name.trim()) return;
-    
-    if (!editingDealer && !DEALER_CODE_PATTERN.test(formState.code.trim())) {
+
+    const isProtectedAdminDealer = editingDealer?.id === sessionDealer?.id;
+    if (
+      !isProtectedAdminDealer &&
+      !DEALER_CODE_PATTERN.test(formState.code.trim())
+    ) {
       toast.error("Dealer code must be exactly 6 digits.");
+      return;
+    }
+    if (
+      formState.admin_code.trim() &&
+      !/^[A-Za-z0-9]{4,12}$/.test(formState.admin_code.trim())
+    ) {
+      toast.error("Manager code must be 4–12 letters or numbers.");
       return;
     }
 
     const formData = new FormData();
     formData.append("name", formState.name.trim());
-    
-    // Only include code for new dealers (code cannot be changed)
-    if (!editingDealer) {
+
+    // Super-admins may rotate dealership credentials. The active system-admin
+    // record stays tied to ADMIN_DEALER_CODE and is rotated through the secret
+    // manager runbook instead of this form.
+    if (!isProtectedAdminDealer) {
       formData.append("code", formState.code.trim());
     }
 
@@ -235,30 +263,29 @@ export const AdminDashboard: React.FC = () => {
     if (formState.logoFile) {
       formData.append("logo", formState.logoFile);
     } else if (formState.logoUrl.trim()) {
-      // Fetch URL and convert to Blob for PocketBase file upload
       try {
-        const response = await fetch(formState.logoUrl.trim());
-        if (!response.ok) {
-          throw new Error(`Failed to fetch image: ${response.statusText}`);
-        }
-        const blob = await response.blob();
-        if (!blob.type.startsWith("image/")) {
-          throw new Error("URL does not point to a valid image");
-        }
+        const normalizedUrl = formState.logoUrl.trim();
+        const blob = await dataUrlToBlob(await urlToDataUrl(normalizedUrl));
         // Extract filename from URL or use a default
-        const urlParts = formState.logoUrl.trim().split("/");
-        const filename = urlParts[urlParts.length - 1]?.split("?")[0] || "logo.png";
+        const pathname = new URL(normalizedUrl).pathname;
+        const sourceName = pathname.split("/").pop() || "logo";
+        const safeName = sourceName.replace(/[^A-Za-z0-9._-]/g, "_");
+        const extension =
+          blob.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
+        const filename = safeName.includes(".")
+          ? safeName
+          : `${safeName}.${extension}`;
         const file = new File([blob], filename, { type: blob.type });
         formData.append("logo", file);
       } catch (err) {
         console.error("Failed to fetch logo from URL:", err);
         toast.error(
-          "Could not load that logo URL. Upload a file instead or use a publicly accessible image."
+          "Could not load that logo URL. Upload a file instead or use a publicly accessible image.",
         );
         return;
       }
     }
-    
+
     if (editingDealer) {
       updateMutation.mutate({ dealerId: editingDealer.id, formData });
     } else {
@@ -272,7 +299,6 @@ export const AdminDashboard: React.FC = () => {
   // hasn't filled in their own brand voice + color yet. Once dismissed via
   // localStorage flag, hide forever. The wizard updates the dealer record
   // via the same /api/app/dealers PATCH endpoint the form uses.
-  const sessionDealer = useAppStore((s) => s.currentDealer);
   const [setupDismissed, setSetupDismissed] = React.useState(() => {
     if (typeof window === "undefined") return false;
     try {
@@ -295,9 +321,7 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  const handleWizardSave = async (
-    fields: Record<string, string | boolean>
-  ) => {
+  const handleWizardSave = async (fields: Record<string, string | boolean>) => {
     if (!sessionDealer) throw new Error("No active session");
     const fd = new FormData();
     Object.entries(fields).forEach(([k, v]) => {
@@ -348,29 +372,29 @@ export const AdminDashboard: React.FC = () => {
             </p>
           </div>
           <div className="flex w-full items-center gap-2 sm:w-auto">
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={<RefreshCw className="w-4 h-4" />}
-            onClick={() => refetch()}
-            disabled={isPending}
-          >
-            {isPending ? "Refreshing…" : "Refresh"}
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => {
-              if (showForm) {
-                resetForm();
-              } else {
-                setShowForm(true);
-              }
-            }}
-            leftIcon={<Icon type="plus" className="w-4 h-4" />}
-          >
-            {showForm ? "Cancel" : "Add Dealer"}
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              leftIcon={<RefreshCw className="w-4 h-4" />}
+              onClick={() => refetch()}
+              disabled={isPending}
+            >
+              {isPending ? "Refreshing…" : "Refresh"}
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                if (showForm) {
+                  resetForm();
+                } else {
+                  setShowForm(true);
+                }
+              }}
+              leftIcon={<Icon type="plus" className="w-4 h-4" />}
+            >
+              {showForm ? "Cancel" : "Add Dealer"}
+            </Button>
           </div>
         </div>
       </div>
@@ -386,11 +410,13 @@ export const AdminDashboard: React.FC = () => {
             <div className="flex items-center justify-between mb-2">
               <div>
                 <h3 className="text-xl font-semibold text-surface-50">
-                {editingDealer ? `Edit: ${editingDealer.name}` : "New Dealer"}
+                  {editingDealer ? `Edit: ${editingDealer.name}` : "New Dealer"}
                 </h3>
                 <p className="mt-1 text-sm text-surface-400">
                   {editingDealer
-                    ? "Update dealership details. Login codes cannot be changed after creation."
+                    ? editingDealer.id === sessionDealer?.id
+                      ? "Update dealership details. Rotate this system-admin code with the deployment secret runbook."
+                      : "Update dealership details or rotate its team and manager access codes."
                     : "Create a dealership with a unique 6-digit login code."}
                 </p>
               </div>
@@ -403,10 +429,7 @@ export const AdminDashboard: React.FC = () => {
               )}
             </div>
             <div>
-              <label
-                htmlFor="name"
-                className={labelClassName}
-              >
+              <label htmlFor="name" className={labelClassName}>
                 Dealer Name *
               </label>
               <input
@@ -421,15 +444,14 @@ export const AdminDashboard: React.FC = () => {
               />
             </div>
             <div>
-              <label
-                htmlFor="code"
-                className={labelClassName}
-              >
-                Dealer Code (6 digits) {!editingDealer && "*"}
+              <label htmlFor="code" className={labelClassName}>
+                Dealer Code (6 digits) *
                 <span className="ml-2 text-xs text-surface-400">
-                  {editingDealer
-                    ? "(Cannot be changed)"
-                    : "Used for login (e.g., 123456)"}
+                  {editingDealer?.id === sessionDealer?.id
+                    ? "Managed by the ADMIN_DEALER_CODE deployment secret"
+                    : editingDealer
+                      ? "Changing it revokes this dealership's existing sessions"
+                      : "Used for login (e.g., 123456)"}
                 </span>
               </label>
               <input
@@ -438,8 +460,8 @@ export const AdminDashboard: React.FC = () => {
                 type="text"
                 value={formState.code}
                 onChange={handleInputChange}
-                required={!editingDealer}
-                disabled={!!editingDealer}
+                required
+                disabled={editingDealer?.id === sessionDealer?.id}
                 maxLength={DEALER_CODE_LENGTH}
                 pattern="\d{6}"
                 inputMode="numeric"
@@ -452,10 +474,7 @@ export const AdminDashboard: React.FC = () => {
                 code and land on the per-dealership admin dashboard. Leave
                 blank to disable manager access for this dealer. */}
             <div>
-              <label
-                htmlFor="admin_code"
-                className={labelClassName}
-              >
+              <label htmlFor="admin_code" className={labelClassName}>
                 Manager Admin Code (optional)
                 <span className="ml-2 text-xs text-surface-400">
                   4–12 chars. Separate code for the GSM/GM to access this
@@ -482,20 +501,18 @@ export const AdminDashboard: React.FC = () => {
             </div>
 
             <div>
-              <label
-                htmlFor="logoUrl"
-                className={labelClassName}
-              >
+              <label htmlFor="logoUrl" className={labelClassName}>
                 Logo URL
               </label>
               <input
                 id="logoUrl"
                 name="logoUrl"
-                type="text"
+                type="url"
                 value={formState.logoUrl}
                 onChange={handleInputChange}
                 disabled={!!formState.logoFile}
                 placeholder="https://example.com/logo.png"
+                autoComplete="url"
                 className={fieldClassName}
               />
             </div>
@@ -505,27 +522,20 @@ export const AdminDashboard: React.FC = () => {
               <span className="h-px flex-1 bg-white/10" />
             </div>
             <div>
-              <label
-                htmlFor="logoFile"
-                className={labelClassName}
-              >
+              <label htmlFor="logoFile" className={labelClassName}>
                 Upload Logo {editingDealer && "(replaces current)"}
               </label>
               <input
                 id="logoFile"
                 name="logoFile"
                 type="file"
-                accept="image/*"
+                accept="image/png,image/jpeg,image/webp"
                 onChange={handleFileChange}
                 className="mt-1 block w-full rounded-xl border border-dashed border-surface-700 bg-surface-950/40 px-4 py-3 text-sm text-surface-400 file:mr-4 file:rounded-full file:border-0 file:bg-primary-600 file:px-4 file:py-2 file:font-semibold file:text-white hover:file:bg-primary-700"
               />
             </div>
             <div className="flex justify-end gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={resetForm}
-              >
+              <Button type="button" variant="outline" onClick={resetForm}>
                 Cancel
               </Button>
               <Button
@@ -533,10 +543,10 @@ export const AdminDashboard: React.FC = () => {
                 variant="primary"
                 disabled={addMutation.isPending || updateMutation.isPending}
               >
-                {(addMutation.isPending || updateMutation.isPending) 
-                  ? "Saving..." 
-                  : editingDealer 
-                    ? "Update Dealer" 
+                {addMutation.isPending || updateMutation.isPending
+                  ? "Saving..."
+                  : editingDealer
+                    ? "Update Dealer"
                     : "Save Dealer"}
               </Button>
             </div>
@@ -580,6 +590,7 @@ export const AdminDashboard: React.FC = () => {
                 deleteMutation.isPending &&
                 deleteMutation.variables === dealer.id
               }
+              protectedDealerId={sessionDealer?.id}
             />
           ))}
           {dealers.length === 0 && !error && (
@@ -594,7 +605,8 @@ export const AdminDashboard: React.FC = () => {
         isOpen={!!dealerPendingDelete}
         onClose={() => setDealerPendingDelete(null)}
         onConfirm={() => {
-          if (dealerPendingDelete) deleteMutation.mutate(dealerPendingDelete.id);
+          if (dealerPendingDelete)
+            deleteMutation.mutate(dealerPendingDelete.id);
           setDealerPendingDelete(null);
         }}
         itemName={dealerPendingDelete?.name ?? ""}

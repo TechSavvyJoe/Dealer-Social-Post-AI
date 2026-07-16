@@ -62,7 +62,7 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
       return;
     }
 
-    logEvent("photo_release.captured", { vin });
+    logEvent("photo_release.captured", { vinPresent: Boolean(vin) });
     triggerHapticFeedback();
     setCaptured(true);
     onCaptured?.({
@@ -113,7 +113,9 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
                   <ShieldCheck className="h-4 w-4 text-primary-300 mt-0.5 flex-shrink-0" />
                   <p>
                     By signing below, the customer grants{" "}
-                    <strong className="text-surface-50">{dealershipName}</strong>{" "}
+                    <strong className="text-surface-50">
+                      {dealershipName}
+                    </strong>{" "}
                     permission to use the photo taken today on social media,
                     websites, advertising, and other marketing materials. The
                     customer may withdraw consent in writing at any time by

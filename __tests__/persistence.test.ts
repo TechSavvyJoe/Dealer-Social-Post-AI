@@ -127,7 +127,7 @@ describe("Persistence Utils", () => {
       const existingTimestamp = Date.now() - 1000;
       localStorageMock.setItem(
         STORAGE_KEY,
-        JSON.stringify({ loginTimestamp: existingTimestamp, dealerId: "old" })
+        JSON.stringify({ loginTimestamp: existingTimestamp, dealerId: "old" }),
       );
 
       saveSession({ dealerId: "new123" });
@@ -145,6 +145,9 @@ describe("Persistence Utils", () => {
         generatedPost: {
           image: largeImage,
           text: "Test caption",
+          postId: "post-123",
+          approvalStatus: "pending" as const,
+          releaseStatus: "saved" as const,
         },
       };
 
@@ -154,6 +157,9 @@ describe("Persistence Utils", () => {
       expect(savedData.selectedImage).toBeUndefined();
       expect(savedData.generatedPost.image).toBeUndefined();
       expect(savedData.generatedPost.text).toBe("Test caption");
+      expect(savedData.generatedPost.postId).toBe("post-123");
+      expect(savedData.generatedPost.approvalStatus).toBe("pending");
+      expect(savedData.generatedPost.releaseStatus).toBe("saved");
     });
 
     it("keeps small images that are under the size limit", () => {
@@ -176,7 +182,7 @@ describe("Persistence Utils", () => {
           dealerId: "dealer123",
           step: 1,
           compactMode: true,
-        })
+        }),
       );
 
       saveSession({ step: 3 });
@@ -186,13 +192,45 @@ describe("Persistence Utils", () => {
       expect(savedData.step).toBe(3);
       expect(savedData.compactMode).toBe(true);
     });
+
+    it("can explicitly remove workflow fields while retaining the dealer session", () => {
+      saveSession({
+        dealerId: "dealer123",
+        step: 4,
+        selectedImage: "data:image/png;base64,old",
+        generatedPost: {
+          image: "data:image/png;base64,old-result",
+          text: "Old result",
+        },
+        generationParams: {
+          style: "Modern & Bold",
+          tone: "Excited",
+          customerName: "Alex",
+        },
+      });
+
+      saveSession({
+        dealerId: "dealer123",
+        step: 1,
+        selectedImage: undefined,
+        generatedPost: undefined,
+        generationParams: undefined,
+      });
+
+      const savedData = JSON.parse(localStorageMock.store[STORAGE_KEY]);
+      expect(savedData.dealerId).toBe("dealer123");
+      expect(savedData.step).toBe(1);
+      expect(savedData.selectedImage).toBeUndefined();
+      expect(savedData.generatedPost).toBeUndefined();
+      expect(savedData.generationParams).toBeUndefined();
+    });
   });
 
   describe("clearSession", () => {
     it("removes session from localStorage", () => {
       localStorageMock.setItem(
         STORAGE_KEY,
-        JSON.stringify({ dealerId: "test" })
+        JSON.stringify({ dealerId: "test" }),
       );
 
       clearSession();

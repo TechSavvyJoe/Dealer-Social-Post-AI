@@ -38,8 +38,12 @@ if ("serviceWorker" in navigator && !import.meta.env.DEV) {
               banner.innerHTML =
                 'New version available — <u style="text-underline-offset:3px">tap to refresh</u>';
               banner.onclick = () => {
+                navigator.serviceWorker.addEventListener(
+                  "controllerchange",
+                  () => window.location.reload(),
+                  { once: true },
+                );
                 installing.postMessage({ type: "SKIP_WAITING" });
-                window.location.reload();
               };
               document.body.appendChild(banner);
               window.setTimeout(() => banner.remove(), 30000);
@@ -54,8 +58,10 @@ if ("serviceWorker" in navigator && !import.meta.env.DEV) {
 const ReactQueryDevtools = React.lazy(() =>
   import("@tanstack/react-query-devtools").then((mod) => ({
     default: mod.ReactQueryDevtools,
-  }))
+  })),
 );
+const showReactQueryDevtools =
+  import.meta.env.DEV && import.meta.env.VITE_SHOW_QUERY_DEVTOOLS === "true";
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {
@@ -71,11 +77,11 @@ root.render(
           <App />
         </ErrorBoundary>
       </ToastProvider>
-      {import.meta.env.DEV && (
+      {showReactQueryDevtools && (
         <Suspense fallback={null}>
           <ReactQueryDevtools initialIsOpen={false} />
         </Suspense>
       )}
     </QueryClientProvider>
-  </React.StrictMode>
+  </React.StrictMode>,
 );

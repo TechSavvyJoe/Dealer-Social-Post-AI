@@ -27,7 +27,6 @@ import {
 import { StyleOption, ToneOption } from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Button } from "./ui/Button";
-import { FAB } from "./ui/FAB";
 import {
   Card,
   CardContent,
@@ -40,10 +39,7 @@ import { Input, Textarea, Select } from "./ui/Input";
 import { POST_TEMPLATES } from "./templates";
 import { cn } from "../utils/classNames";
 import { VinScanner } from "./VinScanner";
-import {
-  DecodedVehicle,
-  vehicleToCreativeBrief,
-} from "../services/vinDecoder";
+import { DecodedVehicle, vehicleToCreativeBrief } from "../services/vinDecoder";
 import { PhotoReleaseModal } from "./PhotoReleaseModal";
 import { useAppStore } from "../stores/appStore";
 import { ShieldCheck } from "lucide-react";
@@ -58,7 +54,6 @@ import {
   getScenariosForDealer,
 } from "../services/postScenarios";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
-import { useTouchGestures } from "../hooks/useTouchGestures";
 import { ProgressiveImage } from "./ui/ProgressiveImage";
 
 interface PostCustomizerProps {
@@ -75,7 +70,7 @@ interface PostCustomizerProps {
       vin?: string;
       hasRelease?: boolean;
       capturedRelease?: CapturedRelease;
-    }
+    },
   ) => Promise<void> | void;
   onBack: () => void;
   dealershipName: string;
@@ -85,8 +80,6 @@ interface PostCustomizerProps {
   isDesktopLayout: boolean;
   isGenerating?: boolean;
 }
-
-const SALESPERSON_STORAGE_KEY = "dsp.salespersonName";
 
 // Style descriptions. Icons are lucide components (not emoji) so they render
 // identically across OS/browser, sit on the baseline, and share one stroke weight.
@@ -133,18 +126,26 @@ const TypewriterText: React.FC<{ text: string }> = ({ text }) => {
   const [displayedText, setDisplayedText] = useState("");
 
   useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setDisplayedText(text);
+      return;
+    }
+
     let index = 0;
+    let intervalId: ReturnType<typeof setInterval> | undefined;
     setDisplayedText("");
     // Small delay before starting to type to allow for "clearing" feel
     const timeout = setTimeout(() => {
-      const intervalId = setInterval(() => {
+      intervalId = setInterval(() => {
         setDisplayedText((prev) => text.slice(0, index + 1));
         index++;
-        if (index === text.length) clearInterval(intervalId);
+        if (index === text.length && intervalId) clearInterval(intervalId);
       }, 15); // Typing speed
-      return () => clearInterval(intervalId);
     }, 100);
-    return () => clearTimeout(timeout);
+    return () => {
+      clearTimeout(timeout);
+      if (intervalId) clearInterval(intervalId);
+    };
   }, [text]);
 
   return <span>{displayedText}</span>;
@@ -173,22 +174,20 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [vinScannerOpen, setVinScannerOpen] = useState(false);
   const [decodedVehicle, setDecodedVehicle] = useState<DecodedVehicle | null>(
-    null
+    null,
   );
   const [releaseModalOpen, setReleaseModalOpen] = useState(false);
-  // Captured (not yet saved) release. Held in state until generation succeeds,
-  // then persisted via useGeneration linked to the post_id. Solves the orphan-
-  // release bug where signing without generating left dangling PB records.
-  const [capturedRelease, setCapturedRelease] = useState<CapturedRelease | null>(
-    null
-  );
+  const [releaseValidationError, setReleaseValidationError] = useState(false);
+  // Captured signature stays local until Generate. useGeneration durably saves
+  // it before the customer photo is sent to an AI provider, then links that
+  // same protected record to the created post.
+  const [capturedRelease, setCapturedRelease] =
+    useState<CapturedRelease | null>(null);
   const currentDealer = useAppStore((s) => s.currentDealer);
 
   // Post scenario — drives prompt context + default style/tone. "customer_delivery"
   // is the implicit default; an undefined value also resolves to that.
-  const [scenarioId, setScenarioId] = useState<string>(
-    POST_SCENARIOS[0].id
-  );
+  const [scenarioId, setScenarioId] = useState<string>(POST_SCENARIOS[0].id);
   // Scenario lookup now considers the dealer's custom_scenarios JSON too.
   const activeScenario = useMemo(() => {
     const all = getScenariosForDealer(currentDealer?.custom_scenarios);
@@ -202,15 +201,19 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     const raw = (currentDealer?.enabled_styles || "").trim();
     if (!raw) return Object.values(StyleOption);
     const allowedSet = new Set(
-      raw.split(",").map((s) => s.trim()).filter(Boolean)
+      raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
     );
-    const filtered = Object.values(StyleOption).filter((s) => allowedSet.has(s));
+    const filtered = Object.values(StyleOption).filter((s) =>
+      allowedSet.has(s),
+    );
     return filtered.length > 0 ? filtered : Object.values(StyleOption);
   }, [currentDealer?.enabled_styles]);
 
   const dealerDefaultStyle = currentDealer?.default_style as
-    | StyleOption
-    | undefined;
+    StyleOption | undefined;
 
   // Salesperson identity — picker pulls from the dealer's roster (if any),
   // falls back to a free-text input when the roster is empty. Persists last
@@ -218,32 +221,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   const [salesperson, setSalesperson] = useState<{
     id?: string;
     name: string;
-  }>(() => {
-    if (typeof window === "undefined") return { name: "" };
-    try {
-      // Migrate from the legacy free-text key if it exists
-      const legacy = localStorage.getItem(SALESPERSON_STORAGE_KEY);
-      if (legacy) return { name: legacy };
-    } catch {
-      /* ignore */
-    }
-    return { name: "" };
-  });
+  }>({ name: "" });
   const salespersonName = salesperson.name;
-
-  // Swipe right gesture to safely go back to capture screen on mobile
-  const touchHandlers = useTouchGestures({
-    onSwipeRight: () => {
-      triggerHapticFeedback();
-      onBack();
-    }
-  });
-
-  const reactTouchHandlers = {
-    onTouchStart: (e: React.TouchEvent) => touchHandlers.onTouchStart(e.nativeEvent),
-    onTouchMove: (e: React.TouchEvent) => touchHandlers.onTouchMove(e.nativeEvent),
-    onTouchEnd: () => touchHandlers.onTouchEnd(),
-  };
 
   // Sync with defaults. Order of precedence:
   //   1. Dealer-set default_style (if it's in the enabled set)
@@ -251,10 +230,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   //   3. First enabled style
   useEffect(() => {
     let nextStyle: StyleOption = defaultStyle;
-    if (
-      dealerDefaultStyle &&
-      allowedStyles.includes(dealerDefaultStyle)
-    ) {
+    if (dealerDefaultStyle && allowedStyles.includes(dealerDefaultStyle)) {
       nextStyle = dealerDefaultStyle;
     } else if (!allowedStyles.includes(nextStyle)) {
       nextStyle = allowedStyles[0];
@@ -275,7 +251,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
       }
       setTone(s.defaultTone);
     },
-    [allowedStyles]
+    [allowedStyles],
   );
 
   // Notify parent
@@ -293,6 +269,12 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
   const handleGenerate = useCallback(async () => {
     triggerHapticFeedback();
+    if (activeScenario.requiresCustomer && !capturedRelease) {
+      setReleaseValidationError(true);
+      setReleaseModalOpen(true);
+      return;
+    }
+    setReleaseValidationError(false);
     let preparedText: string | undefined;
 
     const styleInfo = STYLE_INFO[style];
@@ -304,7 +286,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     // Custom dealer scenarios resolve via the dealer's custom_scenarios JSON.
     const scenarioBlock = scenarioToCreativeBrief(
       scenarioId,
-      currentDealer?.custom_scenarios
+      currentDealer?.custom_scenarios,
     );
     if (scenarioBlock) {
       briefParts.push(scenarioBlock);
@@ -325,7 +307,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     // without a code change.
     if (currentDealer?.brand_voice?.trim()) {
       briefParts.push(
-        `Brand voice (match this exactly): ${currentDealer.brand_voice.trim()}`
+        `Brand voice (match this exactly): ${currentDealer.brand_voice.trim()}`,
       );
     }
     if (currentDealer?.banned_phrases?.trim()) {
@@ -337,13 +319,13 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         briefParts.push(
           `Forbidden phrases (do not use, even as a near-match): ${banned
             .map((p) => `"${p}"`)
-            .join(", ")}.`
+            .join(", ")}.`,
         );
       }
     }
     if (currentDealer?.oem_affiliation?.trim()) {
       briefParts.push(
-        `OEM affiliation: ${currentDealer.oem_affiliation.trim()}. Respect that manufacturer's brand-guideline tone and avoid claims that conflict with their advertising standards.`
+        `OEM affiliation: ${currentDealer.oem_affiliation.trim()}. Respect that manufacturer's brand-guideline tone and avoid claims that conflict with their advertising standards.`,
       );
     }
 
@@ -363,8 +345,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     if (identityFacts.length > 0) {
       briefParts.push(
         `Dealership facts (may be referenced, never contradicted): ${identityFacts.join(
-          "; "
-        )}.`
+          "; ",
+        )}.`,
       );
     }
 
@@ -378,14 +360,14 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     if (dealerHashtags.length > 0) {
       briefParts.push(
         `Required hashtags (include these exact hashtags in the post): ${dealerHashtags.join(
-          " "
-        )}.`
+          " ",
+        )}.`,
       );
     }
     const dealerFooter = (currentDealer?.default_footer || "").trim();
     if (dealerFooter) {
       briefParts.push(
-        `Required footer (append verbatim AFTER the caption, BEFORE the hashtags): "${dealerFooter}"`
+        `Required footer (append verbatim AFTER the caption, BEFORE the hashtags): "${dealerFooter}"`,
       );
     }
 
@@ -418,6 +400,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     capturedRelease,
     currentDealer,
     scenarioId,
+    activeScenario.requiresCustomer,
     onGenerate,
   ]);
 
@@ -433,25 +416,60 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   });
 
   return (
-    <div className="flex-1 flex items-start justify-center py-2 sm:py-4 px-2 sm:px-4 touch-pan-y" {...reactTouchHandlers}>
+    <div className="flex-1 flex items-start justify-center py-2 sm:py-4 px-2 sm:px-4">
       <motion.div
-        className="w-full max-w-2xl mx-auto"
+        className={cn(
+          "w-full mx-auto",
+          isDesktopLayout
+            ? "max-w-6xl grid grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)] gap-6 items-start"
+            : "max-w-2xl",
+        )}
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
+        {isDesktopLayout && (
+          <section className="sticky top-24 overflow-hidden rounded-[1.75rem] border border-white/10 bg-surface-950 shadow-2xl shadow-black/30">
+            <div className="flex items-center justify-between border-b border-white/10 px-5 py-4 text-xs font-semibold tracking-[0.12em] text-surface-400">
+              <span>PHOTO STAGE</span>
+              <span className="text-primary-300">02 DETAILS</span>
+            </div>
+            <div className="relative grid min-h-[560px] place-items-center bg-black p-5">
+              <ProgressiveImage
+                src={imageSrc}
+                alt="Selected post photo"
+                className="max-h-[620px] w-full rounded-2xl object-contain shadow-2xl"
+              />
+              <div
+                className="pointer-events-none absolute inset-x-8 top-1/2 h-px bg-primary-300/40 shadow-[0_0_16px_rgba(96,165,250,0.45)]"
+                aria-hidden="true"
+              />
+            </div>
+            <div className="flex items-center justify-between border-t border-white/10 px-5 py-4 text-xs text-surface-400">
+              <span>Review the full frame before generating.</span>
+              <button
+                type="button"
+                onClick={onBack}
+                className="font-semibold text-surface-200 hover:text-white"
+              >
+                Change photo
+              </button>
+            </div>
+          </section>
+        )}
+
         <Card
           elevation={2}
-          className="relative overflow-hidden border-white/10"
+          className="relative overflow-hidden border-white/10 bg-surface-900"
         >
-          {/* Ambient background glow for card */}
-          <div className="absolute inset-0 bg-gradient-to-br from-primary-500/5 via-transparent to-transparent pointer-events-none" />
-
           <CardHeader className="pb-3 relative">
             <div className="flex items-center gap-3">
               {/* Compact image preview */}
               <motion.div
-                className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border border-white/20 flex-shrink-0 shadow-lg"
+                className={cn(
+                  "w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border border-white/20 flex-shrink-0 shadow-lg",
+                  isDesktopLayout && "hidden",
+                )}
                 whileHover={{ scale: 1.05 }}
               >
                 <ProgressiveImage
@@ -468,17 +486,6 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   Pick a style — AI handles the rest
                 </CardDescription>
               </div>
-              <Button
-                variant="plain"
-                size="sm"
-                onClick={() => {
-                  triggerHapticFeedback();
-                  onBack();
-                }}
-                className="flex-shrink-0"
-              >
-                <Camera className="h-4 w-4" />
-              </Button>
             </div>
           </CardHeader>
 
@@ -492,6 +499,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
             {/* Salesperson — searchable roster picker w/ unrostered fallback */}
             <SalespersonPicker
+              dealerId={currentDealer?.id ?? ""}
               value={salesperson}
               onChange={setSalesperson}
             />
@@ -558,7 +566,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             {/* Photo release — capture customer's signed consent before posting their photo */}
             <div className="space-y-2">
               <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
-                Photo release
+                Photo release ·{" "}
+                {activeScenario.requiresCustomer ? "required" : "optional"}
               </label>
               {capturedRelease ? (
                 <motion.div
@@ -589,9 +598,18 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   className="border-dashed border-white/20 bg-white/5 hover:bg-white/10"
                   disabled={!currentDealer}
                 >
-                  Capture customer release (optional)
+                  Capture customer release
                 </Button>
               )}
+              {releaseValidationError && !capturedRelease ? (
+                <p
+                  className="rounded-lg border border-error-500/30 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100"
+                  role="alert"
+                >
+                  This customer-focused post needs a signed photo release before
+                  the photo can be sent for AI processing.
+                </p>
+              ) : null}
             </div>
 
             {/* Style Selection - Simplified Grid */}
@@ -611,6 +629,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   return (
                     <motion.button
                       key={option}
+                      type="button"
+                      aria-pressed={isActive}
                       onClick={(e) => {
                         triggerHapticFeedback();
                         setStyle(option);
@@ -635,7 +655,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         "relative flex items-center gap-2 rounded-xl border px-3 py-3 text-left transition-all overflow-hidden",
                         isActive
                           ? "border-primary-400 bg-primary-500/20 shadow-glow-primary"
-                          : "border-white/10 bg-white/5 hover:border-primary-400/30 hover:bg-white/10"
+                          : "border-white/10 bg-white/5 hover:border-primary-400/30 hover:bg-white/10",
                       )}
                       whileTap={{ scale: 0.98 }}
                     >
@@ -650,7 +670,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       <info.icon
                         className={cn(
                           "h-5 w-5 flex-shrink-0 relative z-10 transition-colors",
-                          isActive ? "text-primary-300" : "text-surface-400"
+                          isActive ? "text-primary-300" : "text-surface-400",
                         )}
                       />
                       <div className="flex-1 min-w-0 relative z-10">
@@ -658,7 +678,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                           <span
                             className={cn(
                               "text-sm font-semibold truncate transition-colors",
-                              isActive ? "text-primary-100" : "text-surface-50"
+                              isActive ? "text-primary-100" : "text-surface-50",
                             )}
                           >
                             {option.split(" ")[0]}
@@ -677,7 +697,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                             "text-[11px] block truncate transition-colors",
                             isActive
                               ? "text-primary-200/80"
-                              : "text-surface-400"
+                              : "text-surface-400",
                           )}
                         >
                           {info.desc}
@@ -701,6 +721,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   return (
                     <motion.button
                       key={option}
+                      type="button"
+                      aria-pressed={isActive}
                       onClick={() => {
                         triggerHapticFeedback();
                         setTone(option);
@@ -709,20 +731,20 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         "relative flex items-center gap-1.5 rounded-full border px-4 py-2 whitespace-nowrap transition-all flex-shrink-0 snap-center",
                         isActive
                           ? "border-success-400 bg-success-500/20 shadow-glow-success"
-                          : "border-white/10 bg-white/5 hover:border-success-400/30 hover:bg-white/10"
+                          : "border-white/10 bg-white/5 hover:border-success-400/30 hover:bg-white/10",
                       )}
                       whileTap={{ scale: 0.95 }}
                     >
                       <info.icon
                         className={cn(
                           "h-4 w-4 flex-shrink-0 transition-colors",
-                          isActive ? "text-success-300" : "text-surface-400"
+                          isActive ? "text-success-300" : "text-surface-400",
                         )}
                       />
                       <span
                         className={cn(
                           "text-xs font-semibold",
-                          isActive ? "text-success-100" : "text-surface-300"
+                          isActive ? "text-success-100" : "text-surface-300",
                         )}
                       >
                         {option}
@@ -741,6 +763,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               <div className="flex gap-2 bg-surface-950/30 p-1 rounded-xl border border-white/5">
                 <Button
                   variant={captionSource === "ai" ? "filled" : "ghost"}
+                  aria-pressed={captionSource === "ai"}
                   size="sm"
                   leftIcon={<Sparkles className="h-3.5 w-3.5" />}
                   onClick={() => {
@@ -750,13 +773,14 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   className={cn(
                     "flex-1 rounded-lg",
                     captionSource !== "ai" &&
-                      "text-surface-400 hover:text-surface-200"
+                      "text-surface-400 hover:text-surface-200",
                   )}
                 >
                   AI Caption
                 </Button>
                 <Button
                   variant={captionSource === "custom" ? "filled" : "ghost"}
+                  aria-pressed={captionSource === "custom"}
                   size="sm"
                   leftIcon={<Edit3 className="h-3.5 w-3.5" />}
                   onClick={() => {
@@ -766,7 +790,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   className={cn(
                     "flex-1 rounded-lg",
                     captionSource !== "custom" &&
-                      "text-surface-400 hover:text-surface-200"
+                      "text-surface-400 hover:text-surface-200",
                   )}
                 >
                   Write My Own
@@ -799,6 +823,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             {/* Advanced Options - Collapsible */}
             <div className="border-t border-white/10 pt-3">
               <button
+                type="button"
+                aria-expanded={showAdvanced}
+                aria-controls="advanced-post-options"
                 onClick={() => {
                   triggerHapticFeedback();
                   setShowAdvanced(!showAdvanced);
@@ -808,7 +835,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 <ChevronDown
                   className={cn(
                     "h-3.5 w-3.5 transition-transform group-hover:text-primary-400",
-                    showAdvanced && "rotate-180"
+                    showAdvanced && "rotate-180",
                   )}
                 />
                 <span className="group-hover:text-primary-400 transition-colors">
@@ -819,6 +846,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               <AnimatePresence>
                 {showAdvanced && (
                   <motion.div
+                    id="advanced-post-options"
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: "auto" }}
                     exit={{ opacity: 0, height: 0 }}
@@ -834,16 +862,19 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         onChange={(e) => {
                           setSelectedTemplateId(e.target.value);
                           const template = templateOptions.find(
-                            (t) => t.id === e.target.value
+                            (t) => t.id === e.target.value,
                           );
                           if (template) {
                             setCustomMessage(
                               template.content
                                 .replace(
                                   /\[Customer Name\]/g,
-                                  customerName.trim() || "our amazing customer"
+                                  customerName.trim() || "our amazing customer",
                                 )
-                                .replace(/\[Dealership Name\]/g, dealershipName)
+                                .replace(
+                                  /\[Dealership Name\]/g,
+                                  dealershipName,
+                                ),
                             );
                             setCaptionSource("custom");
                           }
@@ -934,19 +965,6 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         </Card>
       </motion.div>
 
-      {/* Mobile FAB for quick generation */}
-      {!isDesktopLayout && (
-        <FAB
-          onClick={handleGenerate}
-          show={!isBusy}
-          mainIcon={
-            isBusy ? <Sparkles className="animate-spin" /> : <Sparkles />
-          }
-          position="bottom-right"
-          className="sm:hidden"
-        />
-      )}
-
       <VinScanner
         isOpen={vinScannerOpen}
         onClose={() => setVinScannerOpen(false)}
@@ -962,7 +980,10 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           dealershipName={currentDealer.name}
           vin={decodedVehicle?.vin}
           defaultCustomerName={customerName}
-          onCaptured={(release) => setCapturedRelease(release)}
+          onCaptured={(release) => {
+            setCapturedRelease(release);
+            setReleaseValidationError(false);
+          }}
         />
       )}
     </div>

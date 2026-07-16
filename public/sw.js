@@ -18,9 +18,9 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(STATIC_CACHE)
-      .then((cache) => cache.addAll(APP_SHELL).catch(() => {}))
-      // Don't auto-skipWaiting; let the client prompt the user. The user's
-      // "tap to refresh" banner posts SKIP_WAITING below.
+      .then((cache) => cache.addAll(APP_SHELL).catch(() => {})),
+    // Don't auto-skipWaiting; let the client prompt the user. The user's
+    // "tap to refresh" banner posts SKIP_WAITING below.
   );
 });
 
@@ -38,10 +38,10 @@ self.addEventListener("activate", (event) => {
         Promise.all(
           keys
             .filter((key) => key !== STATIC_CACHE)
-            .map((key) => caches.delete(key))
-        )
+            .map((key) => caches.delete(key)),
+        ),
       )
-      .then(() => self.clients.claim())
+      .then(() => self.clients.claim()),
   );
 });
 
@@ -66,7 +66,11 @@ self.addEventListener("fetch", (event) => {
           caches.open(STATIC_CACHE).then((cache) => cache.put(req, copy));
           return res;
         })
-        .catch(() => caches.match("/index.html") || caches.match("/"))
+        .catch(() =>
+          caches
+            .match("/index.html")
+            .then((cachedIndex) => cachedIndex || caches.match("/")),
+        ),
     );
     return;
   }
@@ -84,6 +88,6 @@ self.addEventListener("fetch", (event) => {
         })
         .catch(() => cached);
       return cached || networkFetch;
-    })
+    }),
   );
 });

@@ -1,40 +1,26 @@
 import PocketBase from "pocketbase";
+import { authenticateAdmin, loadAdminConfig } from "./lib/pocketbaseAdmin.js";
 
-const PB_URL = "https://dealer-social-post-ai-production.fly.dev";
-const pb = new PocketBase(PB_URL);
+const config = loadAdminConfig();
+const pb = new PocketBase(config.url);
 
 async function checkRules() {
-  try {
-    console.log("Authenticating as admin...");
-    // Bypass SDK auth due to version mismatch
-    const authResponse = await fetch(
-      `${PB_URL}/api/admins/auth-with-password`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          identity: "joejgallant@gmail.com",
-          password: "Babymia78$",
-        }),
-      }
-    );
+  await authenticateAdmin(pb, config);
+  const collection = await pb.collections.getOne("dealers");
 
-    if (!authResponse.ok) throw new Error("Auth failed");
-    const authData = await authResponse.json();
-    pb.authStore.save(authData.token, authData.admin);
-
-    console.log("Fetching 'dealers' collection...");
-    const collection = await pb.collections.getOne("dealers");
-
-    console.log("Current Rules:");
-    console.log("- listRule:", collection.listRule);
-    console.log("- viewRule:", collection.viewRule);
-    console.log("- createRule:", collection.createRule);
-    console.log("- updateRule:", collection.updateRule);
-    console.log("- deleteRule:", collection.deleteRule);
-  } catch (error) {
-    console.error("Error:", error);
-  }
+  console.log(`PocketBase target: ${config.url}`);
+  console.log("Current dealers rules:");
+  console.log("- listRule:", collection.listRule);
+  console.log("- viewRule:", collection.viewRule);
+  console.log("- createRule:", collection.createRule);
+  console.log("- updateRule:", collection.updateRule);
+  console.log("- deleteRule:", collection.deleteRule);
 }
 
-checkRules();
+checkRules().catch((error) => {
+  console.error(
+    "Rule check failed:",
+    error instanceof Error ? error.message : String(error),
+  );
+  process.exitCode = 1;
+});

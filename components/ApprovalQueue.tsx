@@ -69,7 +69,7 @@ export const ApprovalQueue: React.FC = () => {
 
   const handleAction = async (
     post: PostRecord,
-    status: "approved" | "rejected"
+    status: "approved" | "rejected",
   ) => {
     if (!approver.trim()) {
       setError("Enter your manager name first so the approval is logged.");
@@ -88,7 +88,11 @@ export const ApprovalQueue: React.FC = () => {
   };
 
   // Hide the entire queue if this dealer doesn't use the approval gate.
-  if (currentDealer && !currentDealer.requires_approval && pending.length === 0) {
+  if (
+    currentDealer &&
+    !currentDealer.requires_approval &&
+    pending.length === 0
+  ) {
     return null;
   }
 
@@ -114,7 +118,8 @@ export const ApprovalQueue: React.FC = () => {
               Pending Approvals
             </h3>
             <p className="text-xs text-surface-400">
-              {pending.length} post{pending.length === 1 ? "" : "s"} awaiting manager review
+              {pending.length} post{pending.length === 1 ? "" : "s"} awaiting
+              manager review
             </p>
           </div>
         </div>
@@ -149,11 +154,18 @@ export const ApprovalQueue: React.FC = () => {
       {error && <ErrorBanner message={error} onRetry={() => void load()} />}
 
       <AnimatePresence>
-        {pending.length === 0 ? (
+        {loading && pending.length === 0 ? (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
+            className="flex min-h-32 items-center justify-center gap-2 text-sm text-surface-300"
+            role="status"
           >
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            Loading approval queue…
+          </motion.div>
+        ) : pending.length === 0 ? (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <EmptyState
               icon={CheckCircle2}
               title="All caught up"
@@ -162,76 +174,128 @@ export const ApprovalQueue: React.FC = () => {
           </motion.div>
         ) : (
           <ul className="space-y-2">
-            {pending.map((post) => (
-              <motion.li
-                key={post.id}
-                layout
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="rounded-xl border border-surface-800 bg-surface-900/40 p-3 flex flex-wrap items-center gap-3"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-surface-50">
-                    {post.salesperson_name || "Unattributed"}
-                    {post.customer_name && (
-                      <span className="text-surface-400 font-normal">
-                        {" "}
-                        · {post.customer_name}
-                      </span>
-                    )}
+            {pending.map((post) => {
+              const hasReviewCreative = Boolean(
+                post.creative_image_url && post.caption,
+              );
+              return (
+                <motion.li
+                  key={post.id}
+                  layout
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="rounded-xl border border-surface-800 bg-surface-900/40 p-3 flex flex-wrap items-center gap-3"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-surface-50">
+                      {post.salesperson_name || "Unattributed"}
+                      {post.customer_name && (
+                        <span className="text-surface-400 font-normal">
+                          {" "}
+                          · {post.customer_name}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-surface-400 flex items-center gap-2 flex-wrap mt-1">
+                      <span>{formatTime(post.generated_at)}</span>
+                      {post.style && <span>· {post.style}</span>}
+                      {post.tone && <span>· {post.tone}</span>}
+                      {post.vin && (
+                        <span className="font-mono">· {post.vin}</span>
+                      )}
+                      {post.has_video && (
+                        <span className="flex items-center gap-1 text-primary-200">
+                          <Film className="h-3 w-3" /> video
+                        </span>
+                      )}
+                      {post.has_release && (
+                        <span className="flex items-center gap-1 text-success-200">
+                          <ShieldCheck className="h-3 w-3" /> release
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-[11px] text-surface-400 flex items-center gap-2 flex-wrap mt-1">
-                    <span>{formatTime(post.generated_at)}</span>
-                    {post.style && <span>· {post.style}</span>}
-                    {post.tone && <span>· {post.tone}</span>}
-                    {post.vin && <span className="font-mono">· {post.vin}</span>}
-                    {post.has_video && (
-                      <span className="flex items-center gap-1 text-primary-200">
-                        <Film className="h-3 w-3" /> video
-                      </span>
+                  <div className="order-3 grid w-full gap-3 rounded-xl border border-white/10 bg-black/15 p-3 sm:grid-cols-[minmax(0,12rem)_1fr]">
+                    {post.creative_image_url ? (
+                      <img
+                        src={post.creative_image_url}
+                        alt={`Creative awaiting approval for ${post.customer_name || "customer delivery"}`}
+                        loading="lazy"
+                        className="aspect-square w-full rounded-lg border border-white/10 bg-surface-950 object-contain"
+                      />
+                    ) : (
+                      <div className="flex aspect-square w-full items-center justify-center rounded-lg border border-dashed border-error-500/30 bg-error-500/5 px-3 text-center text-xs text-error-200">
+                        Review image unavailable
+                      </div>
                     )}
-                    {post.has_release && (
-                      <span className="flex items-center gap-1 text-success-200">
-                        <ShieldCheck className="h-3 w-3" /> release
-                      </span>
-                    )}
+                    <div className="min-w-0 space-y-3">
+                      <div>
+                        <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-400">
+                          Submitted caption
+                        </p>
+                        <p className="max-h-40 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-surface-100">
+                          {post.caption || "Review caption unavailable"}
+                        </p>
+                      </div>
+                      {post.disclosures ? (
+                        <div className="rounded-lg border border-warning-500/20 bg-warning-500/10 px-3 py-2">
+                          <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-warning-300">
+                            Required disclosures
+                          </p>
+                          <p className="whitespace-pre-wrap text-xs leading-relaxed text-warning-100/80">
+                            {post.disclosures}
+                          </p>
+                        </div>
+                      ) : null}
+                      {!hasReviewCreative ? (
+                        <p className="text-xs font-medium text-error-200">
+                          This legacy item cannot be approved without reviewable
+                          creative. Reject it and have the salesperson resubmit.
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    leftIcon={
-                      busy[post.id] ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <X className="h-3.5 w-3.5" />
-                      )
-                    }
-                    onClick={() => handleAction(post, "rejected")}
-                    disabled={busy[post.id]}
-                  >
-                    Reject
-                  </Button>
-                  <Button
-                    variant="filled"
-                    size="sm"
-                    leftIcon={
-                      busy[post.id] ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Check className="h-3.5 w-3.5" />
-                      )
-                    }
-                    onClick={() => handleAction(post, "approved")}
-                    disabled={busy[post.id]}
-                  >
-                    Approve
-                  </Button>
-                </div>
-              </motion.li>
-            ))}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      leftIcon={
+                        busy[post.id] ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <X className="h-3.5 w-3.5" />
+                        )
+                      }
+                      onClick={() => handleAction(post, "rejected")}
+                      disabled={busy[post.id]}
+                    >
+                      Reject
+                    </Button>
+                    <Button
+                      variant="filled"
+                      size="sm"
+                      leftIcon={
+                        busy[post.id] ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Check className="h-3.5 w-3.5" />
+                        )
+                      }
+                      onClick={() => handleAction(post, "approved")}
+                      disabled={busy[post.id] || !hasReviewCreative}
+                      title={
+                        hasReviewCreative
+                          ? "Approve this exact creative"
+                          : "Creative is unavailable; reject and resubmit"
+                      }
+                    >
+                      Approve
+                    </Button>
+                  </div>
+                </motion.li>
+              );
+            })}
           </ul>
         )}
       </AnimatePresence>

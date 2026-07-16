@@ -22,8 +22,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --no-audit --no-fund
+      - run: npm run security:secrets
       - run: npm run typecheck
       - run: npm test
+      - run: npm run build
+      - run: npm audit --omit=dev --audit-level=high
 
   playwright:
     name: Playwright e2e
@@ -48,3 +51,61 @@ jobs:
         env:
           CI: true
           # Frontend-only smoke tests stub API routes; PocketBase is not required.
+
+  container-smoke:
+    name: production container + fresh migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: typecheck-and-test
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build production image
+        run: docker build --tag dealer-social-post-ai:ci .
+      - name: Boot fresh database and verify protected routes
+        run: |
+          container_id="$(docker run --detach \
+            --env GEMINI_API_KEY=test-gemini-key \
+            --env ADMIN_DEALER_CODE="${CI_ADMIN_DEALER_CODE:-999999}" \
+            --publish 127.0.0.1:8090:8090 \
+            dealer-social-post-ai:ci)"
+          cleanup() {
+            docker logs "$container_id" || true
+            docker rm --force "$container_id" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail \
+              http://127.0.0.1:8090/api/app/health \
+              --output /tmp/health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          grep --fixed-strings '"ok":true' /tmp/health.json
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:8090/api/app/session)" = "401"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:8090/api/proxy/v1beta/files/not-real:download)" = "401"
+
+          login_code="${CI_ADMIN_DEALER_CODE:-999999}"
+          test "$(curl --silent --output /tmp/login.json --cookie-jar /tmp/cookies.txt \
+            --write-out '%{http_code}' --request POST \
+            --header 'Content-Type: application/json' \
+            --data "{\"dealerCode\":\"${login_code}\"}" \
+            http://127.0.0.1:8090/api/app/session)" = "200"
+          session_cookie="$(awk '$6 == "dealer_session" { print $7 }' /tmp/cookies.txt)"
+          test -n "$session_cookie"
+          test "$(curl --silent --output /tmp/denied-model.json --write-out '%{http_code}' \
+            --request POST --header 'Content-Type: application/json' \
+            --header "Cookie: dealer_session=${session_cookie}" --data '{}' \
+            http://127.0.0.1:8090/api/proxy/v1beta/models/not-allowlisted:generateContent)" = "403"
+          grep --fixed-strings '"error":"Proxy method or path not allowed"' /tmp/denied-model.json
+          if grep --fixed-strings 'Missing API path' /tmp/denied-model.json; then
+            exit 1
+          fi
+          test "$(curl --silent --output /tmp/admin-health.json --write-out '%{http_code}' \
+            --header "Cookie: dealer_session=${session_cookie}" \
+            http://127.0.0.1:8090/api/app/health)" = "200"
+          grep --fixed-strings '"checks"' /tmp/admin-health.json

@@ -19,7 +19,8 @@ export type DisclosureCategory =
   | "lease"
   | "rebate_pricing"
   | "trade_value"
-  | "prohibited_phrase";
+  | "prohibited_phrase"
+  | "dealer_banned_phrase";
 
 export interface DisclosureMatch {
   category: DisclosureCategory;
@@ -114,7 +115,47 @@ const RULES: Rule[] = [
   },
 ];
 
-export const detectDisclosures = (text: string): DisclosureMatch[] => {
+export type DealerBannedPhrases = string | string[] | null | undefined;
+
+const parseDealerBannedPhrases = (value: DealerBannedPhrases): string[] => {
+  const phrases = Array.isArray(value) ? value : (value ?? "").split(/[\n,]+/);
+  return Array.from(
+    new Set(phrases.map((phrase) => phrase.trim()).filter(Boolean)),
+  );
+};
+
+const normalizePhrase = (value: string): string =>
+  value
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[\p{P}\p{S}\s]+/gu, " ")
+    .trim();
+
+const detectDealerBannedPhrases = (
+  text: string,
+  bannedPhrases: DealerBannedPhrases,
+): DisclosureMatch[] => {
+  const normalizedText = ` ${normalizePhrase(text)} `;
+  return parseDealerBannedPhrases(bannedPhrases)
+    .filter((phrase) => {
+      const normalizedPhrase = normalizePhrase(phrase);
+      return (
+        normalizedPhrase.length > 0 &&
+        normalizedText.includes(` ${normalizedPhrase} `)
+      );
+    })
+    .map((phrase) => ({
+      category: "dealer_banned_phrase" as const,
+      triggerPhrase: phrase,
+      disclosure: "",
+      prohibited: true,
+    }));
+};
+
+export const detectDisclosures = (
+  text: string,
+  bannedPhrases?: DealerBannedPhrases,
+): DisclosureMatch[] => {
   const matches: DisclosureMatch[] = [];
   for (const rule of RULES) {
     for (const pattern of rule.patterns) {
@@ -130,7 +171,7 @@ export const detectDisclosures = (text: string): DisclosureMatch[] => {
       }
     }
   }
-  return matches;
+  return [...matches, ...detectDealerBannedPhrases(text, bannedPhrases)];
 };
 
 const formatDisclosureFooter = (matches: DisclosureMatch[]): string => {
@@ -158,34 +199,101 @@ export interface ComplianceResult {
   changed: boolean;
 }
 
+export interface DeliveryCaption {
+  caption: string;
+  disclosures: string;
+  disclosureCategories: DisclosureCategory[];
+  compliance: ComplianceResult;
+}
+
+export const prohibitedClaimsMessage = (
+  prohibited: DisclosureMatch[],
+): string => {
+  const phrases = Array.from(
+    new Set(prohibited.map((match) => match.triggerPhrase.trim())),
+  );
+  const dealerConfigured = prohibited.some(
+    (match) => match.category === "dealer_banned_phrase",
+  );
+  const legalClaim = prohibited.some(
+    (match) => match.category === "prohibited_phrase",
+  );
+  const reason =
+    dealerConfigured && legalClaim
+      ? "These claims are prohibited or blocked by this dealership and cannot be published."
+      : dealerConfigured
+        ? "This dealership has blocked this wording, so it cannot be published."
+        : "Claims such as guaranteed approval or no credit check cannot be published.";
+  return `Remove prohibited advertising claim${phrases.length === 1 ? "" : "s"}: ${phrases.map((phrase) => `“${phrase}”`).join(", ")}. ${reason}`;
+};
+
 /**
  * Scans the text and returns the text with the disclosure footer appended.
- * If the text already contains "— Disclosures —" we assume it was processed
- * before and return unchanged (idempotent).
+ * Existing disclosure text is never trusted as proof of compliance. Strip it,
+ * rescan the editable caption, and rebuild the canonical footer. This keeps the
+ * transform idempotent without letting an empty marker suppress disclosures.
  */
-export const applyDisclosures = (text: string): ComplianceResult => {
+export const applyDisclosures = (
+  text: string,
+  bannedPhrases?: DealerBannedPhrases,
+): ComplianceResult => {
   if (!text) {
     return { text: "", matches: [], prohibited: [], changed: false };
   }
-  if (text.includes("— Disclosures —")) {
-    // Already has a disclosure block; treat as already compliant.
-    const matches = detectDisclosures(text);
-    return {
-      text,
-      matches,
-      prohibited: matches.filter((m) => m.prohibited),
-      changed: false,
-    };
-  }
-
-  const matches = detectDisclosures(text);
+  const markerIndex = text.indexOf("— Disclosures —");
+  const caption =
+    markerIndex >= 0 ? text.slice(0, markerIndex).trimEnd() : text;
+  const matches = detectDisclosures(caption, bannedPhrases);
   const prohibited = matches.filter((m) => m.prohibited);
   const footer = formatDisclosureFooter(matches);
-  const newText = footer ? text + footer : text;
+  const newText = footer ? caption + footer : caption;
   return {
     text: newText,
     matches,
     prohibited,
-    changed: footer.length > 0 || prohibited.length > 0,
+    changed: newText !== text || prohibited.length > 0,
   };
+};
+
+/** Split a scanned caption into editable copy plus its locked footer. */
+export const analyzeCaptionForDelivery = (
+  text: string,
+  bannedPhrases?: DealerBannedPhrases,
+): DeliveryCaption => {
+  const compliance = applyDisclosures(text, bannedPhrases);
+  const markerIndex = compliance.text.indexOf("— Disclosures —");
+  const caption =
+    markerIndex >= 0
+      ? compliance.text.slice(0, markerIndex).trimEnd()
+      : compliance.text.trimEnd();
+  const disclosures =
+    markerIndex >= 0 ? compliance.text.slice(markerIndex).trim() : "";
+  return {
+    caption,
+    disclosures,
+    disclosureCategories: Array.from(
+      new Set(
+        compliance.matches
+          .filter((match) => !match.prohibited)
+          .map((match) => match.category),
+      ),
+    ),
+    compliance,
+  };
+};
+
+/**
+ * Prepare copy for a delivery path and fail closed on legally prohibited
+ * claims. Callers surface the thrown message without replacing known-good
+ * creative.
+ */
+export const prepareCaptionForDelivery = (
+  text: string,
+  bannedPhrases?: DealerBannedPhrases,
+): DeliveryCaption => {
+  const result = analyzeCaptionForDelivery(text, bannedPhrases);
+  if (result.compliance.prohibited.length > 0) {
+    throw new Error(prohibitedClaimsMessage(result.compliance.prohibited));
+  }
+  return result;
 };

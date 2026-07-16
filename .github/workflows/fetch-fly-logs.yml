@@ -1,17 +1,19 @@
 name: Fetch Fly Logs
+
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/fetch-fly-logs.yml'
+
+permissions:
+  contents: read
 
 jobs:
   fetch-logs:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: Setup flyctl
-        uses: superfly/flyctl-actions/setup-flyctl@master
-      - name: Get Logs
-        run: flyctl logs -a dealer-social-post-ai-production --no-tail
+      - name: Set up pinned flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master 2026-07-15
+      - name: Get logs
+        run: flyctl logs --app dealer-social-post-ai-production --no-tail
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

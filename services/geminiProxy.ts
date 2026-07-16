@@ -1,5 +1,5 @@
 import { normalizeError } from "../utils/errorHandler";
-import { retryWithBackoff, isRetryableError } from "../utils/retry";
+import { retryWithBackoff } from "../utils/retry";
 import { performanceMonitor } from "../utils/performanceMonitor";
 import { withCircuitBreaker } from "../utils/circuitBreaker";
 
@@ -10,18 +10,18 @@ let requestCounter = 0;
  * A wrapper for the fetch API to communicate with our backend proxy for Gemini.
  * Now includes retry logic, performance monitoring, and enhanced error handling.
  * @param method 'GET' or 'POST'
- * @param path The path for the Google API (e.g., 'v1beta/models/gemini-pro:generateContent')
+ * @param path The path for the Google API (e.g., 'v1beta/models/gemini-3.5-flash:generateContent')
  * @param body The request body to be sent to the Gemini API.
  * @returns The JSON response from the API.
  */
 export async function fetchFromProxy(
   method: "GET" | "POST",
   path: string,
-  body: any
+  body: unknown,
 ) {
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
     throw normalizeError(
-      new Error("Offline: please reconnect to the internet.")
+      new Error("Offline: please reconnect to the internet."),
     );
   }
 
@@ -32,76 +32,52 @@ export async function fetchFromProxy(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 300000); // 300 second timeout (5 minutes)
 
-    try {
-      console.log(`[GeminiProxy] [${requestId}] Requesting ${method} ${path}`);
+  try {
+    console.log(`[GeminiProxy] [${requestId}] Requesting ${method} ${path}`);
 
-      // Auth: HttpOnly session cookie (set via POST /api/app/session). The
-      // bundled VITE_PROXY_ACCESS_TOKEN was removed 2026-05-28 because it
-      // leaked to anyone who viewed the JS bundle and bypassed per-dealer
-      // rate limits. credentials:"include" is what attaches the cookie.
+    // Auth is the HttpOnly session cookie. Provider credentials never enter
+    // the browser bundle.
+    let serviceKey = "gemini-api";
+    if (path.includes("image")) serviceKey = "gemini-image-api";
+    else if (path.includes("veo") || path.includes("video"))
+      serviceKey = "veo-api";
 
-      // Group paths by service type for circuit breaking (e.g. gemini-text, imagen, veo)
-      let serviceKey = "gemini-api";
-      if (path.includes("imagen")) serviceKey = "imagen-api";
-      else if (path.includes("veo") || path.includes("video")) serviceKey = "veo-api";
+    // Only network errors and 5xx responses count against the circuit and get
+    // retried. A 4xx means the service answered successfully, so it is parsed
+    // below and surfaced immediately without poisoning service health.
+    const response = await withCircuitBreaker(serviceKey, async () => {
+      return await retryWithBackoff(
+        async () => {
+          const res = await fetch(`/api/proxy/${path}`, {
+            method,
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: method === "POST" ? JSON.stringify(body) : undefined,
+            signal: controller.signal,
+          });
 
-      // Use retry logic for transient failures, wrapped in a circuit breaker for sustained failures
-      const response = await withCircuitBreaker(serviceKey, async () => {
-        return await retryWithBackoff(
-          async () => {
-            const res = await fetch(`/api/proxy/${path}`, {
-              method: method,
-              credentials: "include",
-              headers: { "Content-Type": "application/json" },
-              // Only include body for POST requests
-              body: method === "POST" ? JSON.stringify(body) : undefined,
-              signal: controller.signal,
-            });
-
-            // 401 → session expired or missing. Don't retry; surface to the
-            // caller so the app can route back to the login screen.
-            if (res.status === 401) {
-              const err = new Error(
-                "Session expired or missing — please log in again."
-              );
-              (err as any).status = 401;
-              throw err;
-            }
-
-            // 429 → rate limited. Surface immediately; retry would just
-            // burn the rest of the budget.
-            if (res.status === 429) {
-              const err = new Error(
-                "Too many requests — slow down and try again in a minute."
-              );
-              (err as any).status = 429;
-              throw err;
-            }
-
-            // Retry on 502, 503, 504 errors
-            if (res.status === 502 || res.status === 503 || res.status === 504) {
-              throw new Error(`Server error ${res.status} - retrying...`);
-            }
-
-            return res;
-          },
-          {
-            maxAttempts: 3,
-            initialDelay: 1000,
-            onRetry: (attempt, error) => {
-              console.warn(
-                `[GeminiProxy] [${requestId}] Retry ${attempt}:`,
-                error.message
-              );
-            },
+          if (res.status >= 500) {
+            throw new Error(`Server error ${res.status} - retrying...`);
           }
-        );
-      });
 
-      console.log(
-        `[GeminiProxy] [${requestId}] Response ${response.status} for ${path}`
+          return res;
+        },
+        {
+          maxAttempts: 3,
+          initialDelay: 1000,
+          onRetry: (attempt, error) => {
+            console.warn(
+              `[GeminiProxy] [${requestId}] Retry ${attempt}:`,
+              error.message,
+            );
+          },
+        },
       );
-      clearTimeout(timeoutId);
+    });
+
+    console.log(
+      `[GeminiProxy] [${requestId}] Response ${response.status} for ${path}`,
+    );
 
     const responseText = await response.text();
 
@@ -118,7 +94,12 @@ export async function fetchFromProxy(
           responseText ||
           `Proxy request to ${path} failed with status ${response.status}`;
       }
-      throw new Error(message);
+      if (response.status === 401) {
+        message = "Session expired or missing — please log in again.";
+      } else if (response.status === 429) {
+        message = "Too many requests — try again in a minute.";
+      }
+      throw new Error(`Proxy request failed (${response.status}): ${message}`);
     }
 
     // Log performance
@@ -130,17 +111,18 @@ export async function fetchFromProxy(
 
     try {
       return JSON.parse(responseText);
-    } catch (e) {
+    } catch {
       // If the successful response is not JSON, return the raw text
       return responseText;
     }
   } catch (error) {
-    clearTimeout(timeoutId);
     performanceMonitor.measure(`${markName}-error`, `${markName}-start`);
 
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error(`Request to ${path} timed out after 300 seconds.`);
     }
     throw normalizeError(error);
+  } finally {
+    clearTimeout(timeoutId);
   }
 }

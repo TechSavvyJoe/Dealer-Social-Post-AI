@@ -1,5 +1,3 @@
-import fetch from "node-fetch";
-
 const API_KEY = process.env.GEMINI_API_KEY;
 if (!API_KEY) {
   console.error("Error: GEMINI_API_KEY is not set.");
@@ -7,13 +5,15 @@ if (!API_KEY) {
 }
 
 async function listModels() {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${API_KEY}`;
+  const url = "https://generativelanguage.googleapis.com/v1beta/models";
   try {
-    const resp = await fetch(url);
+    const resp = await fetch(url, {
+      headers: { "x-goog-api-key": API_KEY },
+    });
     const data = await resp.json();
     if (resp.ok) {
       console.log("✅ Available Models (v1beta):");
-      data.models.forEach((m) => {
+      (data.models || []).forEach((m) => {
         console.log(`- ${m.name} (${m.supportedGenerationMethods.join(", ")})`);
       });
     } else {

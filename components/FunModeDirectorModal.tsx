@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, Shuffle, Star, X, Search, Clock3 } from "lucide-react";
+import { Sparkles, Shuffle, Star, Search, Clock3 } from "lucide-react";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { funStyleCatalog, funStyleCategories } from "../services/promptConfig";
 import { Modal } from "./ui/Modal";
@@ -28,7 +28,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
     setRecent((prev) => {
       const next = [styleId, ...prev.filter((id) => id !== styleId)].slice(
         0,
-        6
+        6,
       );
       localStorage.setItem("fun-mode-recent", JSON.stringify(next));
       return next;
@@ -68,10 +68,10 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
         category === "All"
           ? true
           : category === "Favorites"
-          ? favorites.includes(style.id)
-          : category === "Popular"
-          ? !!style.popular
-          : style.category === category;
+            ? favorites.includes(style.id)
+            : category === "Popular"
+              ? !!style.popular
+              : style.category === category;
       const q = searchQuery.trim().toLowerCase();
       const matchesSearch =
         !q ||
@@ -102,7 +102,8 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       size="xl"
-      showCloseButton={false}
+      title="Fun mode director"
+      description="Choose an art direction for this vehicle photo."
       className="bg-gradient-to-br from-surface-900 to-surface-800 p-0 overflow-hidden border-white/10"
       footer={
         <>
@@ -127,31 +128,6 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
         </>
       }
     >
-      {/* Header */}
-      <div className="px-6 py-5 border-b border-surface-800 bg-surface-900/70 -mx-6 -mt-6 mb-6">
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-primary-500/15 rounded-xl border border-primary-500/25 shadow-glow-primary">
-              <Sparkles className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-bold text-white">
-                Fun Mode Director
-              </h2>
-              <p className="text-sm text-white/70">
-                Transform your photo into amazing art styles!
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-white/60 hover:text-white transition-colors p-2 hover:bg-white/10 rounded-full"
-          >
-            <X className="w-6 h-6" />
-          </button>
-        </div>
-      </div>
-
       {/* Filters & Search */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-6">
         <div className="flex flex-wrap gap-2">
@@ -172,6 +148,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
         <div className="relative w-full lg:w-80">
           <Search className="w-4 h-4 text-white/60 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
+            aria-label="Search fun styles"
             className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-3 py-2 text-sm text-white placeholder:text-white/50 focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent transition-all"
             placeholder="Search styles or keywords"
             value={searchQuery}
@@ -213,9 +190,8 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
           const promptPreview = style.prompt.split(". ")[0];
           const isFavorite = favorites.includes(style.id);
           return (
-            <motion.button
+            <motion.div
               key={style.id}
-              onClick={() => handleStyleSelect(style.id)}
               className={`relative p-4 rounded-xl border-2 transition-all text-left group ${
                 selectedStyle === style.id
                   ? "border-primary-400 bg-primary-500/20 shadow-glow-primary"
@@ -224,7 +200,14 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
-              <div className="flex items-start justify-between gap-2 mb-2">
+              <button
+                type="button"
+                onClick={() => handleStyleSelect(style.id)}
+                className="absolute inset-0 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-900"
+                aria-label={`Use ${style.name} style`}
+                aria-pressed={selectedStyle === style.id}
+              />
+              <div className="pointer-events-none relative flex items-start justify-between gap-2 mb-2">
                 <div>
                   <h3 className="text-white font-semibold text-sm mb-1 group-hover:text-primary-300 transition-colors">
                     {style.name}
@@ -243,12 +226,12 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
                       e.stopPropagation();
                       toggleFavorite(style.id);
                     }}
-                    className={`p-1 rounded-full border transition-all ${
+                    className={`pointer-events-auto relative z-10 p-1 rounded-full border transition-all ${
                       isFavorite
                         ? "border-yellow-300/70 bg-yellow-400/10 text-yellow-200"
                         : "border-white/20 text-white/60 hover:border-yellow-200/60 hover:text-yellow-200"
                     }`}
-                    aria-label="Toggle favorite"
+                    aria-label={`${isFavorite ? "Remove" : "Add"} ${style.name} ${isFavorite ? "from" : "to"} favorites`}
                   >
                     <Star
                       className={`w-3.5 h-3.5 ${
@@ -258,10 +241,10 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
                   </button>
                 </div>
               </div>
-              <p className="text-white/70 text-xs leading-relaxed line-clamp-2">
+              <p className="pointer-events-none relative text-white/70 text-xs leading-relaxed line-clamp-2">
                 {promptPreview}
               </p>
-            </motion.button>
+            </motion.div>
           );
         })}
         {filteredStyles.length === 0 && (

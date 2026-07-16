@@ -20,19 +20,22 @@ if [ ! -f .env.local ]; then
 GEMINI_API_KEY=your-api-key-here
 ADMIN_DEALER_CODE=
 
-# Optional fallbacks / Vertex for video
+# Optional cross-provider fallbacks
 # ANTHROPIC_API_KEY=
 # OPENAI_API_KEY=
-# VERTEX_SERVICE_ACCOUNT_JSON=
+# ENABLE_CLAUDE_FALLBACK=false
+# ENABLE_OPENAI_FALLBACK=false
 
 VITE_POCKETBASE_URL=http://127.0.0.1:8090
+# VITE_ENABLE_CLAUDE_FALLBACK=false
+# VITE_ENABLE_OPENAI_FALLBACK=false
 EOF
     echo "✓ Created .env.local file"
     echo ""
 fi
 
-# Load environment variables safely (supports quoted values; avoids xargs breakage
-# on JSON secrets like VERTEX_SERVICE_ACCOUNT_JSON).
+# Load environment variables safely (supports quoted values and avoids xargs
+# splitting or exposing secret values in process arguments).
 if [ -f .env.local ]; then
     set -a
     # shellcheck disable=SC1091
@@ -56,7 +59,7 @@ else
 fi
 
 if [ -z "$ADMIN_DEALER_CODE" ]; then
-    echo "ℹ️  ADMIN_DEALER_CODE is unset — super-admin login is disabled until you set it."
+    echo "⚠️  ADMIN_DEALER_CODE is unset — readiness will remain unhealthy until you set it."
 fi
 
 # Check if node_modules exists

@@ -31,7 +31,18 @@ describe("PostCustomizer", () => {
 
     expect(baseProps.onStyleToneChange).toHaveBeenCalledWith(
       StyleOption.Sporty,
-      ToneOption.Excited
+      ToneOption.Excited,
+    );
+  });
+
+  it("does not send a customer-focused photo to AI before release capture", () => {
+    render(<PostCustomizer {...baseProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Generate Post/i }));
+
+    expect(baseProps.onGenerate).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "needs a signed photo release",
     );
   });
 

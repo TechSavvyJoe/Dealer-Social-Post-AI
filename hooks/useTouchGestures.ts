@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useRef } from "react";
 
 interface SwipeHandlers {
   onSwipeLeft?: () => void;
@@ -8,73 +8,118 @@ interface SwipeHandlers {
 }
 
 interface TouchGesturesOptions extends SwipeHandlers {
-  threshold?: number; // Minimum distance in pixels to trigger swipe
+  threshold?: number;
+  axisLockRatio?: number;
+  maxDurationMs?: number;
+  enabled?: boolean;
 }
 
+interface TouchPoint {
+  x: number;
+  y: number;
+  startedAt: number;
+}
+
+const INTERACTIVE_SELECTOR =
+  'button, a, input, textarea, select, [contenteditable="true"], [data-swipe-ignore]';
+
 /**
- * Hook for detecting touch gestures (swipe, pinch, long-press)
- * Provides mobile-first interaction patterns
+ * Detects deliberate one-finger swipes on non-interactive space. Axis locking,
+ * a time limit, and form-control exclusions prevent normal scrolling or text
+ * editing from unexpectedly navigating the app.
  */
-export const useTouchGestures = (options: TouchGesturesOptions = {}) => {
-  const {
+export const useTouchGestures = ({
+  onSwipeLeft,
+  onSwipeRight,
+  onSwipeUp,
+  onSwipeDown,
+  threshold = 64,
+  axisLockRatio = 1.25,
+  maxDurationMs = 650,
+  enabled = true,
+}: TouchGesturesOptions = {}) => {
+  const touchStart = useRef<TouchPoint | null>(null);
+  const touchEnd = useRef<{ x: number; y: number } | null>(null);
+
+  const resetGesture = useCallback(() => {
+    touchStart.current = null;
+    touchEnd.current = null;
+  }, []);
+
+  const handleTouchStart = useCallback(
+    (event: TouchEvent) => {
+      resetGesture();
+      if (!enabled || event.touches.length !== 1) return;
+
+      const target = event.target;
+      if (target instanceof Element && target.closest(INTERACTIVE_SELECTOR))
+        return;
+
+      const touch = event.touches[0];
+      touchStart.current = {
+        x: touch.clientX,
+        y: touch.clientY,
+        startedAt: Date.now(),
+      };
+    },
+    [enabled, resetGesture],
+  );
+
+  const handleTouchMove = useCallback(
+    (event: TouchEvent) => {
+      if (!touchStart.current || event.touches.length !== 1) {
+        resetGesture();
+        return;
+      }
+      const touch = event.touches[0];
+      touchEnd.current = { x: touch.clientX, y: touch.clientY };
+    },
+    [resetGesture],
+  );
+
+  const handleTouchEnd = useCallback(() => {
+    const start = touchStart.current;
+    const end = touchEnd.current;
+    resetGesture();
+
+    if (!start || !end || Date.now() - start.startedAt > maxDurationMs) return;
+
+    const xDiff = start.x - end.x;
+    const yDiff = start.y - end.y;
+    const horizontalDistance = Math.abs(xDiff);
+    const verticalDistance = Math.abs(yDiff);
+
+    if (
+      horizontalDistance >= threshold &&
+      horizontalDistance >= verticalDistance * axisLockRatio
+    ) {
+      if (xDiff > 0) onSwipeLeft?.();
+      else onSwipeRight?.();
+      return;
+    }
+
+    if (
+      verticalDistance >= threshold &&
+      verticalDistance >= horizontalDistance * axisLockRatio
+    ) {
+      if (yDiff > 0) onSwipeUp?.();
+      else onSwipeDown?.();
+    }
+  }, [
+    axisLockRatio,
+    maxDurationMs,
+    onSwipeDown,
     onSwipeLeft,
     onSwipeRight,
     onSwipeUp,
-    onSwipeDown,
-    threshold = 50,
-  } = options;
+    resetGesture,
+    threshold,
+  ]);
 
-  const touchStart = useRef<{ x: number; y: number } | null>(null);
-  const touchEnd = useRef<{ x: number; y: number } | null>(null);
-
-  const handleTouchStart = useCallback((e: TouchEvent) => {
-    touchEnd.current = null;
-    touchStart.current = {
-      x: e.targetTouches[0].clientX,
-      y: e.targetTouches[0].clientY,
-    };
-  }, []);
-
-  const handleTouchMove = useCallback((e: TouchEvent) => {
-    touchEnd.current = {
-      x: e.targetTouches[0].clientX,
-      y: e.targetTouches[0].clientY,
-    };
-  }, []);
-
-  const handleTouchEnd = useCallback(() => {
-    if (!touchStart.current || !touchEnd.current) return;
-
-    const xDiff = touchStart.current.x - touchEnd.current.x;
-    const yDiff = touchStart.current.y - touchEnd.current.y;
-
-    // Determine if horizontal or vertical swipe
-    if (Math.abs(xDiff) > Math.abs(yDiff)) {
-      // Horizontal swipe
-      if (Math.abs(xDiff) > threshold) {
-        if (xDiff > 0) {
-          onSwipeLeft?.();
-        } else {
-          onSwipeRight?.();
-        }
-      }
-    } else {
-      // Vertical swipe
-      if (Math.abs(yDiff) > threshold) {
-        if (yDiff > 0) {
-          onSwipeUp?.();
-        } else {
-          onSwipeDown?.();
-        }
-      }
-    }
-  }, [threshold, onSwipeLeft, onSwipeRight, onSwipeUp, onSwipeDown]);
-
-  const handlers = {
+  return {
     onTouchStart: handleTouchStart,
     onTouchMove: handleTouchMove,
     onTouchEnd: handleTouchEnd,
+    onTouchCancel: resetGesture,
   };
-
-  return handlers;
 };

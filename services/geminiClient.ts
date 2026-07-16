@@ -1,262 +1,66 @@
 import { fetchFromProxy } from "./geminiProxy";
-import { MODELS } from "../utils/modelConfig";
 
-// This is a mock/proxy implementation that mimics the @google/genai SDK
-// It ensures that all API calls are routed through our secure backend proxy,
-// so the API key never leaves the server.
-
-// Models that require Vertex AI (OAuth) instead of API key auth
-// Note: Only Imagen and Veo models truly require Vertex AI
-// Gemini models work with API key auth
-const VERTEX_ONLY_MODELS = [
-  "imagen-3",
-  MODELS.imagen.primary,
-  MODELS.video.primary,
-];
-
-// Helper to determine if model needs Vertex AI
-const needsVertexAI = (model: string): boolean => {
-  return VERTEX_ONLY_MODELS.some((m) => model.includes(m));
-};
-
-class MockVideoOperation {
-  name: string;
-  done: boolean;
-  response?: any;
-  error?: any;
-
-  constructor(initialResponse: any) {
-    this.name = initialResponse.name;
-    this.done = initialResponse.done;
-    this.response = initialResponse.response;
-    this.error = initialResponse.error;
-  }
+/**
+ * Minimal browser-side facade for Gemini GenerateContent.
+ *
+ * The browser never receives a provider credential. Requests go to the
+ * authenticated same-origin PocketBase proxy, which adds the server-side key.
+ * Veo uses the Gemini API's long-running prediction protocol and is implemented
+ * directly in `geminiService.ts`, so this client exposes no dead video API.
+ */
+interface GenerateContentParams {
+  model: string;
+  contents: unknown;
+  generationConfig?: Record<string, unknown>;
 }
 
-class MockGeminiClient {
+class ProxiedGeminiClient {
   get models() {
     return {
-      generateContent: async (params: {
-        model: string;
-        [key: string]: any;
-      }) => {
-        // Check if model requires Vertex AI
-        if (needsVertexAI(params.model)) {
-          // Route through Vertex AI
-          const projectId = "gen-lang-client-0994987899"; // From your service account
-          const location = "us-central1";
-          const vertexPath = `vertex/v1beta1/projects/${projectId}/locations/${location}/publishers/google/models/${params.model}:generateContent`;
-
-          // Transform request format for Vertex AI
-          const vertexBody = {
-            contents: params.contents
-              ? Array.isArray(params.contents)
-                ? params.contents
-                : [params.contents]
-              : [],
-            generationConfig: params.generationConfig,
-          };
-
-          const rawResponse = await fetchFromProxy(
-            "POST",
-            vertexPath,
-            vertexBody
-          );
-          return {
-            ...rawResponse,
-            text: () =>
-              rawResponse.candidates?.[0]?.content?.parts?.[0]?.text || "",
-          };
+      generateContent: async (params: GenerateContentParams) => {
+        const { model, contents, generationConfig } = params;
+        if (!/^[a-z0-9][a-z0-9._-]{0,127}$/i.test(model)) {
+          throw new Error("Gemini model identifier is invalid.");
         }
-
-        // Standard Gemini API path
-        // All Gemini models should use v1beta endpoint per official docs
-        // https://ai.google.dev/gemini-api/docs/image-generation
-        const version = "v1beta";
+        if (contents == null) {
+          throw new Error("Gemini contents are required.");
+        }
+        // SDKs accept a single Content object as shorthand; Google's raw REST
+        // contract requires `contents[]`. Normalize here because every current
+        // call site supplies one turn and this facade now talks raw REST.
+        const body = {
+          contents: Array.isArray(contents) ? contents : [contents],
+          ...(generationConfig ? { generationConfig } : {}),
+        };
         const rawResponse = await fetchFromProxy(
           "POST",
-          `${version}/models/${params.model}:generateContent`,
-          params
+          `v1beta/models/${model}:generateContent`,
+          body,
         );
+        if (!rawResponse || typeof rawResponse !== "object") {
+          throw new Error("Gemini returned an invalid response.");
+        }
+
         return {
           ...rawResponse,
-          text: () =>
-            rawResponse.candidates?.[0]?.content?.parts?.[0]?.text || "",
-        };
-      },
-      // Imagen 3 image generation via Vertex AI predict endpoint
-      generateImages: async (params: {
-        model: string;
-        prompt: string;
-        config?: {
-          numberOfImages?: number;
-          aspectRatio?: string;
-          outputMimeType?: string;
-        };
-      }) => {
-        const projectId = "gen-lang-client-0994987899";
-        const location = "us-central1";
-        const model = params.model || "imagen-3.0-generate-002";
-        const vertexPath = `vertex/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:predict`;
-
-        const vertexBody = {
-          instances: [{ prompt: params.prompt }],
-          parameters: {
-            sampleCount: params.config?.numberOfImages || 1,
-            aspectRatio: params.config?.aspectRatio || "1:1",
-            outputMimeType: params.config?.outputMimeType || "image/png",
+          text: () => {
+            const parts = rawResponse?.candidates?.[0]?.content?.parts ?? [];
+            return parts
+              .map((part: { text?: string }) => part?.text || "")
+              .join("");
           },
         };
-
-        const rawResponse = await fetchFromProxy(
-          "POST",
-          vertexPath,
-          vertexBody
-        );
-
-        // Transform response to match expected format
-        const predictions = rawResponse.predictions || [];
-        return {
-          images: predictions.map((pred: any) => ({
-            mimeType: pred.mimeType || "image/png",
-            data: pred.bytesBase64Encoded,
-          })),
-        };
-      },
-      generateVideos: async (params: { model: string; [key: string]: any }) => {
-        // Check if model requires Vertex AI (e.g. Veo)
-        if (needsVertexAI(params.model)) {
-          const projectId = "gen-lang-client-0994987899";
-          const location = "us-central1";
-          const vertexPath = `vertex/v1beta1/projects/${projectId}/locations/${location}/publishers/google/models/${params.model}:predict`;
-
-          // Transform request format for Vertex AI
-          // Veo expects { instances: [...], parameters: ... } structure for predict endpoint
-          const vertexBody = {
-            instances: [
-              {
-                prompt: params.prompt, // Veo might use 'prompt' or other fields depending on exact model version
-              },
-            ],
-            parameters: {
-              sampleCount: 1,
-              videoLengthSeconds: params.video_length_seconds || 6,
-              aspectRatio: params.aspect_ratio || "16:9",
-              // Add other parameters as needed
-            },
-          };
-
-          // However, the current implementation in geminiService sends a specific body structure
-          // that matches the Gemini API. Let's try to adapt it or use the correct Vertex endpoint.
-          // If the model is veo-3.1-generate-preview, it might be available via the standard generateVideos method
-          // but strictly on Vertex AI.
-
-          // Let's try the standard generateVideos path but routed through Vertex
-          const vertexGeneratePath = `vertex/v1beta1/projects/${projectId}/locations/${location}/publishers/google/models/${params.model}:generateVideos`;
-
-          return await fetchFromProxy("POST", vertexGeneratePath, params);
-        }
-
-        // Try known API permutations: prefer v1beta, fall back to v1alpha.
-        // We intentionally skip the singular generateVideo variant to avoid
-        // spamming the proxy with duplicate calls when models are unavailable.
-        const candidates = [
-          { version: "v1beta", method: "generateVideos" },
-          { version: "v1alpha", method: "generateVideos" },
-        ];
-
-        let lastError: unknown;
-        for (const candidate of candidates) {
-          try {
-            return await fetchFromProxy(
-              "POST",
-              `${candidate.version}/models/${params.model}%3A${candidate.method}`,
-              params
-            );
-          } catch (error) {
-            lastError = error;
-            const msg =
-              error instanceof Error
-                ? error.message.toLowerCase()
-                : String(error);
-            // Only continue on 404/not found; otherwise bubble up immediately.
-            if (!msg.includes("404") && !msg.includes("not found")) {
-              throw error;
-            }
-          }
-        }
-
-        // All attempts failed; surface the last error.
-        throw lastError instanceof Error
-          ? lastError
-          : new Error("Failed to generate video via Gemini API.");
-      },
-    };
-  }
-
-  get operations() {
-    return {
-      getVideosOperation: async (params: { operation: { name: string } }) => {
-        const operationName = params.operation.name;
-        if (!operationName) {
-          throw new Error("Missing operation name for video polling.");
-        }
-
-        // Ensure the path includes an API version prefix for the proxy. If the
-        // operation name doesn't include a version, try v1beta then v1alpha.
-        const normalized = operationName.replace(/^\/+/, "");
-        const candidates = normalized.startsWith("v1")
-          ? [normalized]
-          : [`v1beta/${normalized}`, `v1alpha/${normalized}`];
-
-        let lastError: unknown;
-        for (const candidate of candidates) {
-          try {
-            const response = await fetchFromProxy("GET", candidate, {});
-            return new MockVideoOperation(response);
-          } catch (error) {
-            lastError = error;
-            const msg =
-              error instanceof Error
-                ? error.message.toLowerCase()
-                : String(error);
-            if (!msg.includes("404") && !msg.includes("not found")) {
-              throw error;
-            }
-          }
-        }
-
-        throw lastError instanceof Error
-          ? lastError
-          : new Error("Failed to poll video operation status.");
       },
     };
   }
 }
 
-// --- Singleton instance of our mock client ---
-const memoizedClient = new MockGeminiClient();
+const memoizedClient = new ProxiedGeminiClient();
 
-/**
- * This function is now a no-op because the API key is handled on the server.
- * We keep the function to avoid having to refactor the components that call it.
- */
-export const configureGeminiClient = (apiKey?: string | null) => {
-  // No-op
-};
+/** The provider key is server-managed; retained for call-site compatibility. */
+export const configureGeminiClient = (_apiKey?: string | null) => undefined;
 
-/**
- * Returns the singleton instance of our proxied Gemini client.
- */
-export const getGeminiClient = (): MockGeminiClient => {
-  return memoizedClient;
-};
+export const getGeminiClient = (): ProxiedGeminiClient => memoizedClient;
 
-/**
- * This function now returns a static string. The original purpose was to throw
- * an error if the key was missing. We now always return a truthy value
- * to satisfy checks, because the key is managed on the server.
- */
-export const requireGeminiApiKey = (): string => {
-  return "CONFIGURED_ON_SERVER";
-};
+/** Retained for legacy readiness checks; no credential is exposed. */
+export const requireGeminiApiKey = (): string => "CONFIGURED_ON_SERVER";

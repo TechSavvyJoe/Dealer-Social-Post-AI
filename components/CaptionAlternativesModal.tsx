@@ -4,7 +4,7 @@ import { Loader2, Check, RefreshCw, Sparkles } from "lucide-react";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
 import { triggerHapticFeedback } from "../utils/haptics";
-import { applyDisclosures } from "../utils/complianceDisclosures";
+import { prepareCaptionForDelivery } from "../utils/complianceDisclosures";
 import { cn } from "../utils/classNames";
 
 interface CaptionAlternativesModalProps {
@@ -20,6 +20,8 @@ interface CaptionAlternativesModalProps {
   }) => void;
   /** How many alternatives to fetch. Default 3. */
   count?: number;
+  /** Dealership-managed words or phrases that must never be delivered. */
+  bannedPhrases?: string;
 }
 
 interface Variant {
@@ -37,13 +39,9 @@ interface Variant {
  * caption. The disclosure footer is split per-variant (each generation may
  * trigger different compliance language) and travels with the selection.
  */
-export const CaptionAlternativesModal: React.FC<CaptionAlternativesModalProps> = ({
-  isOpen,
-  onClose,
-  generateOne,
-  onSelect,
-  count = 3,
-}) => {
+export const CaptionAlternativesModal: React.FC<
+  CaptionAlternativesModalProps
+> = ({ isOpen, onClose, generateOne, onSelect, count = 3, bannedPhrases }) => {
   const [variants, setVariants] = useState<Variant[]>([]);
   const [picked, setPicked] = useState<number | null>(null);
 
@@ -52,19 +50,13 @@ export const CaptionAlternativesModal: React.FC<CaptionAlternativesModalProps> =
       const raw = await generateOne();
       // Split caption from disclosure footer so the editable caption stays
       // free of the locked compliance block.
-      const compliance = applyDisclosures(raw);
-      const captionOnly = raw.split("\n\n— Disclosures —")[0].trimEnd();
-      const disclosures = compliance.text.startsWith(captionOnly)
-        ? compliance.text.slice(captionOnly.length).trim()
-        : "";
+      const prepared = prepareCaptionForDelivery(raw, bannedPhrases);
       return {
         id,
-        text: captionOnly,
+        text: prepared.caption,
         loading: false,
-        disclosures,
-        disclosureCategories: Array.from(
-          new Set(compliance.matches.map((m) => m.category))
-        ),
+        disclosures: prepared.disclosures,
+        disclosureCategories: prepared.disclosureCategories,
       };
     } catch (err) {
       return {
@@ -135,18 +127,16 @@ export const CaptionAlternativesModal: React.FC<CaptionAlternativesModalProps> =
                 whileHover={
                   !v.loading && !v.error ? { scale: 1.01 } : undefined
                 }
-                whileTap={
-                  !v.loading && !v.error ? { scale: 0.99 } : undefined
-                }
+                whileTap={!v.loading && !v.error ? { scale: 0.99 } : undefined}
                 className={cn(
                   "relative flex flex-col text-left rounded-xl border p-3 transition-colors min-h-[220px]",
                   isPicked
                     ? "border-success-500/50 bg-success-500/10"
                     : v.error
-                    ? "border-error-500/40 bg-error-500/5"
-                    : v.loading
-                    ? "border-white/10 bg-white/5"
-                    : "border-white/10 bg-white/5 hover:border-primary-400/50 hover:bg-white/10"
+                      ? "border-error-500/40 bg-error-500/5"
+                      : v.loading
+                        ? "border-white/10 bg-white/5"
+                        : "border-white/10 bg-white/5 hover:border-primary-400/50 hover:bg-white/10",
                 )}
               >
                 <div className="flex items-center justify-between mb-2">
@@ -177,7 +167,8 @@ export const CaptionAlternativesModal: React.FC<CaptionAlternativesModalProps> =
                 )}
                 {v.disclosures && (
                   <div className="mt-2 text-[10px] text-warning-300/80 truncate">
-                    + compliance footer ({v.disclosureCategories?.join(", ") || "auto"})
+                    + compliance footer (
+                    {v.disclosureCategories?.join(", ") || "auto"})
                   </div>
                 )}
               </motion.button>

@@ -33,16 +33,15 @@ export const Modal: React.FC<ModalProps> = ({
   const contentRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
   const titleId = React.useId();
+  const descriptionId = React.useId();
 
   // Prevent body scroll when modal is open
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "unset";
-    }
+    if (!isOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     return () => {
-      document.body.style.overflow = "unset";
+      document.body.style.overflow = previousOverflow;
     };
   }, [isOpen]);
 
@@ -68,6 +67,7 @@ export const Modal: React.FC<ModalProps> = ({
     if (!isOpen) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        e.preventDefault();
         onClose();
         return;
       }
@@ -75,7 +75,7 @@ export const Modal: React.FC<ModalProps> = ({
       const root = contentRef.current;
       if (!root) return;
       const focusables = Array.from(
-        root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+        root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
       ).filter((el) => el.offsetParent !== null);
       if (focusables.length === 0) {
         e.preventDefault();
@@ -108,7 +108,7 @@ export const Modal: React.FC<ModalProps> = ({
   return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center sm:p-4">
+        <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center sm:p-4">
           {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
@@ -127,6 +127,7 @@ export const Modal: React.FC<ModalProps> = ({
             aria-modal="true"
             aria-labelledby={title ? titleId : undefined}
             aria-label={title ? undefined : "Dialog"}
+            aria-describedby={description ? descriptionId : undefined}
             tabIndex={-1}
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -135,17 +136,10 @@ export const Modal: React.FC<ModalProps> = ({
             className={cn(
               "relative w-full bg-surface-900 border border-white/10 shadow-2xl overflow-hidden flex flex-col",
               "rounded-t-2xl sm:rounded-2xl", // Sheet-like on mobile
-              "max-h-[90vh]",
+              "max-h-[calc(100dvh_-_var(--header-safe-top))] sm:max-h-[90vh]",
               sizeClasses[size],
-              className
+              className,
             )}
-            style={{
-              marginTop: "auto", // Push to bottom on mobile default
-              marginBottom: 0,
-              // On sm screens, center it
-            }}
-            // Reset margin on desktop
-            // We need to apply responsive classes via Tailwind for layout, but styles for drag
           >
             {/* Mobile Drag Handle */}
             <div
@@ -156,7 +150,7 @@ export const Modal: React.FC<ModalProps> = ({
             </div>
 
             {/* Header */}
-            {(title || showCloseButton) && (
+            {(title || description || showCloseButton) && (
               <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
                 <div>
                   {title && (
@@ -168,13 +162,17 @@ export const Modal: React.FC<ModalProps> = ({
                     </h2>
                   )}
                   {description && (
-                    <p className="text-sm text-surface-400 mt-1">
+                    <p
+                      id={descriptionId}
+                      className="text-sm text-surface-400 mt-1"
+                    >
                       {description}
                     </p>
                   )}
                 </div>
                 {showCloseButton && (
                   <button
+                    type="button"
                     onClick={onClose}
                     aria-label="Close dialog"
                     className="p-2 -mr-2 text-surface-400 hover:text-surface-50 hover:bg-white/5 rounded-full transition-colors"
@@ -192,7 +190,7 @@ export const Modal: React.FC<ModalProps> = ({
 
             {/* Footer */}
             {footer && (
-              <div className="px-6 py-4 bg-surface-950/30 border-t border-white/5 flex justify-end gap-3 rounded-b-2xl">
+              <div className="px-6 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-surface-950/30 border-t border-white/5 flex justify-end gap-3 rounded-b-2xl">
                 {footer}
               </div>
             )}
@@ -200,6 +198,6 @@ export const Modal: React.FC<ModalProps> = ({
         </div>
       )}
     </AnimatePresence>,
-    document.body
+    document.body,
   );
 };

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -12,7 +12,7 @@
     />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; connect-src 'self' https://vpic.nhtsa.dot.gov https://generativelanguage.googleapis.com https://*.googleapis.com https://api.openai.com https://api.anthropic.com;"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; connect-src 'self' https://vpic.nhtsa.dot.gov;"
     />
     <meta name="theme-color" content="#090d17" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -22,6 +22,7 @@
       content="black-translucent"
     />
     <meta name="apple-mobile-web-app-title" content="Dealer Social" />
+    <link rel="icon" type="image/png" href="/icon-192.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <title>Dealer Social Post AI</title>
@@ -57,8 +58,12 @@
         min-height: 100vh;
         min-height: 100dvh;
         background-color: #090d17; /* matches --color-surface-base */
-        overflow: hidden;
+        /* A clipped/scrollable ancestor prevents position: sticky descendants
+           from following the document scroll. Body already contains horizontal
+           overflow, so keep this shell visible and let the header stick. */
+        overflow: visible;
         position: relative;
+        isolation: isolate;
         display: flex;
         flex-direction: column;
       }
@@ -111,7 +116,6 @@
           padding: clamp(1.5rem, 2vw, 2rem);
         }
       }
-
     </style>
   </head>
   <body>

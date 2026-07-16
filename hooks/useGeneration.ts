@@ -1,6 +1,7 @@
 import { useCallback, useState, useRef, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useAppStore } from "../stores/appStore";
+import { useShallow } from "zustand/react/shallow";
 import { useGemini } from "./useGemini";
 import {
   StyleOption,
@@ -8,13 +9,18 @@ import {
   VideoStyle,
   VideoRequestOptions,
   AppStep,
+  GeneratedPost,
 } from "../types";
 import { useToast } from "../components/ui/Toast";
 import { normalizeError, recoveryHint } from "../utils/errorHandler";
 import { logPost } from "../services/posts";
-import { applyDisclosures } from "../utils/complianceDisclosures";
+import { prepareCaptionForDelivery } from "../utils/complianceDisclosures";
 import { logEvent, logError } from "../utils/telemetry";
-import { saveRelease, CapturedRelease } from "../services/photoReleases";
+import {
+  CapturedRelease,
+  linkReleaseToPost,
+  runWithPersistedPhotoRelease,
+} from "../services/photoReleases";
 
 export interface GenerationMeta {
   salespersonName?: string;
@@ -38,7 +44,19 @@ export const useGeneration = () => {
     setGenerationParams,
     setError,
     setStep,
-  } = useAppStore();
+  } = useAppStore(
+    useShallow((state) => ({
+      currentDealer: state.currentDealer,
+      selectedImage: state.selectedImage,
+      generatedPost: state.generatedPost,
+      generationParams: state.generationParams,
+      preferredTone: state.preferredTone,
+      setGeneratedPost: state.setGeneratedPost,
+      setGenerationParams: state.setGenerationParams,
+      setError: state.setError,
+      setStep: state.setStep,
+    })),
+  );
 
   const { runGeminiTask, loadGeminiService } = useGemini();
 
@@ -83,20 +101,27 @@ export const useGeneration = () => {
       creativeBrief?: string;
       meta?: GenerationMeta;
     }) => {
-      if (!selectedImage || !currentDealer) throw new Error("Missing required data");
+      if (!selectedImage || !currentDealer)
+        throw new Error("Missing required data");
 
-      const { generateSocialPost } = await loadGeminiService();
-      return runGeminiTask("ai.generate", () =>
-        generateSocialPost(
-          selectedImage,
-          params.style,
-          params.tone,
-          currentDealer.name,
-          params.customerName,
-          currentDealer.logo,
-          params.customText,
-          params.creativeBrief
-        )
+      return runWithPersistedPhotoRelease(
+        params.meta?.capturedRelease,
+        currentDealer.name,
+        async () => {
+          const { generateSocialPost } = await loadGeminiService();
+          return runGeminiTask("ai.generate", () =>
+            generateSocialPost(
+              selectedImage,
+              params.style,
+              params.tone,
+              currentDealer.name,
+              params.customerName,
+              currentDealer.logo,
+              params.customText,
+              params.creativeBrief,
+            ),
+          );
+        },
       );
     },
     onMutate: (variables) => {
@@ -110,61 +135,111 @@ export const useGeneration = () => {
         setGenerationProgress((prev) => {
           if (prev >= 95) return prev;
           const remaining = 95 - prev;
-          const increment = Math.max(0.1, remaining * 0.05 * (Math.random() + 0.5));
+          const increment = Math.max(
+            0.1,
+            remaining * 0.05 * (Math.random() + 0.5),
+          );
           return prev + increment;
         });
       }, 800);
 
-      timeoutsRef.current.push(setTimeout(() => setProgressMessage("Consulting the style guide..."), 2000));
-      timeoutsRef.current.push(setTimeout(() => setProgressMessage("Crafting the perfect caption..."), 4500));
-      timeoutsRef.current.push(setTimeout(() => setProgressMessage("Applying final polish..."), 7000));
-      timeoutsRef.current.push(setTimeout(() => setProgressMessage("AI is thinking hard... this might take a moment."), 15000));
-      timeoutsRef.current.push(setTimeout(() => setProgressMessage("Still working... generating high-quality content."), 30000));
-      timeoutsRef.current.push(setTimeout(() => setProgressMessage("Almost there! Thanks for your patience."), 60000));
-      timeoutsRef.current.push(setTimeout(() => setProgressMessage("Finalizing your post..."), 90000));
+      timeoutsRef.current.push(
+        setTimeout(
+          () => setProgressMessage("Consulting the style guide..."),
+          2000,
+        ),
+      );
+      timeoutsRef.current.push(
+        setTimeout(
+          () => setProgressMessage("Crafting the perfect caption..."),
+          4500,
+        ),
+      );
+      timeoutsRef.current.push(
+        setTimeout(() => setProgressMessage("Applying final polish..."), 7000),
+      );
+      timeoutsRef.current.push(
+        setTimeout(
+          () =>
+            setProgressMessage(
+              "AI is thinking hard... this might take a moment.",
+            ),
+          15000,
+        ),
+      );
+      timeoutsRef.current.push(
+        setTimeout(
+          () =>
+            setProgressMessage(
+              "Still working... generating high-quality content.",
+            ),
+          30000,
+        ),
+      );
+      timeoutsRef.current.push(
+        setTimeout(
+          () => setProgressMessage("Almost there! Thanks for your patience."),
+          60000,
+        ),
+      );
+      timeoutsRef.current.push(
+        setTimeout(() => setProgressMessage("Finalizing your post..."), 90000),
+      );
     },
-    onSuccess: async (result, variables) => {
+    onSuccess: async (gatedResult, variables) => {
       cleanupTimers();
       setGenerationProgress(100);
       setProgressMessage("Complete!");
 
+      const result = gatedResult.result;
+      const releaseId = gatedResult.releaseId;
+
       // Scan the caption for compliance triggers. Disclosures go into a
       // separate `disclosures` field so the editable caption textarea
       // never contains them (and a salesperson can't silently delete them).
-      const compliance = applyDisclosures(result.text);
-      if (compliance.prohibited.length > 0) {
+      let preparedCaption;
+      try {
+        preparedCaption = prepareCaptionForDelivery(
+          result.text,
+          currentDealer?.banned_phrases,
+        );
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : "The generated caption contains a prohibited advertising claim.";
         logEvent("compliance.prohibited_detected", {
-          phrases: compliance.prohibited.map((p) => p.triggerPhrase),
+          blocked: true,
         });
+        setError(message);
+        toastError(message);
+        setStep(AppStep.CUSTOMIZE);
+        return;
       }
+      const compliance = preparedCaption.compliance;
       if (compliance.changed && compliance.matches.length > 0) {
         logEvent("compliance.disclosures_detected", {
           categories: Array.from(
-            new Set(compliance.matches.map((m) => m.category))
+            new Set(compliance.matches.map((m) => m.category)),
           ),
         });
       }
-      // Strip any pre-existing footer from the caption (idempotent) and put
-      // the disclosure block into its own field.
-      const captionOnly = result.text
-        .split("\n\n— Disclosures —")[0]
-        .trimEnd();
-      const disclosureBlock = compliance.text.startsWith(captionOnly)
-        ? compliance.text.slice(captionOnly.length).trim()
-        : "";
-      const finalPost = {
+      const finalPost: GeneratedPost = {
         ...result,
-        text: captionOnly,
-        disclosures: disclosureBlock,
-        disclosureCategories: Array.from(
-          new Set(compliance.matches.map((m) => m.category))
-        ),
+        text: preparedCaption.caption,
+        disclosures: preparedCaption.disclosures,
+        disclosureCategories: preparedCaption.disclosureCategories,
       };
 
-      // Log post + (if a release was captured) save it linked to the post.
-      // Both are fire-and-forget; failures are logged but never block the user.
+      // Log post + (if a release was captured) link the already-persisted
+      // release to it. The signature was durably saved before the provider
+      // call, and this phase never uploads or duplicates it. An
+      // approval-gated creative must be persisted before rendering the result,
+      // because the returned id is the secure status-polling handle and the
+      // manager needs the exact image/caption they are approving.
       if (currentDealer) {
-        void (async () => {
+        const persistPost = async () => {
+          const captured = variables.meta?.capturedRelease;
           const post = await logPost({
             dealerId: currentDealer.id,
             salespersonName: variables.meta?.salespersonName,
@@ -173,28 +248,69 @@ export const useGeneration = () => {
             tone: variables.tone,
             customerName: variables.customerName,
             vin: variables.meta?.vin,
-            hasRelease: !!variables.meta?.capturedRelease,
+            // The release route flips this true only after its protected
+            // signature file has been durably stored. Starting false avoids a
+            // false consent claim if that second write fails.
+            hasRelease: false,
             hasVideo: false,
             requiresApproval: !!currentDealer.requires_approval,
+            caption: finalPost.text,
+            disclosures: finalPost.disclosures,
+            imageDataUrl: finalPost.image,
           });
-          const captured = variables.meta?.capturedRelease;
-          if (captured && post) {
+          let releaseStatus: NonNullable<GeneratedPost["releaseStatus"]> =
+            captured ? "save_failed" : "not_required";
+          if (captured && releaseId && post) {
             try {
-              await saveRelease({
-                customerName: captured.customerName,
-                signaturePngDataUrl: captured.signaturePngDataUrl,
-                vin: captured.vin,
-                postId: post.id,
-                notes: `Released for social media use by ${currentDealer.name}.`,
-              });
+              await linkReleaseToPost(releaseId, post.id);
+              releaseStatus = "saved";
             } catch (err) {
-              logError("photo_release.save_failed", {
+              logError("photo_release.link_failed", {
                 message: err instanceof Error ? err.message : String(err),
                 postId: post.id,
+                releaseId,
               });
             }
           }
-        })();
+          if (captured && (!releaseId || !post)) {
+            logError("photo_release.link_failed", {
+              message: !releaseId
+                ? "Persisted release id was unavailable"
+                : "Post record was unavailable for release linking",
+            });
+          }
+          return { post, releaseStatus };
+        };
+
+        // Await the small first-party persistence request for every generated
+        // post. Besides making metrics truthful, this gives subsequent video
+        // and release updates an owner-scoped post id.
+        const persisted = await persistPost();
+        const post = persisted.post;
+        finalPost.releaseStatus = persisted.releaseStatus;
+        if (post) finalPost.postId = post.id;
+
+        if (persisted.releaseStatus === "save_failed") {
+          toastError(
+            "The signed photo release could not be stored. Copy, share, save, and export are locked; check your connection and create another post to retry.",
+          );
+        }
+
+        if (currentDealer.requires_approval) {
+          if (post) {
+            finalPost.approvalStatus = post.approval_status || "pending";
+          } else {
+            // Preserve the expensive generated result, but fail closed: no id
+            // means there is nothing a manager can review or approve.
+            finalPost.approvalStatus = "submission_failed";
+            const approvalError =
+              "Your post was generated, but it could not be submitted for manager approval. Save and share remain locked; check your connection and create another post to retry.";
+            setError(approvalError);
+            toastError(approvalError);
+          }
+        } else {
+          finalPost.approvalStatus = "n_a";
+        }
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
       setGeneratedPost(finalPost);
@@ -207,7 +323,7 @@ export const useGeneration = () => {
       setError(fullMsg);
       toastError(fullMsg);
       setStep(AppStep.CUSTOMIZE);
-    }
+    },
   });
 
   const handleGenerate = useCallback(
@@ -217,7 +333,7 @@ export const useGeneration = () => {
       customerName: string,
       customText?: string,
       creativeBrief?: string,
-      meta?: GenerationMeta
+      meta?: GenerationMeta,
     ) => {
       await generateMutation.mutateAsync({
         style,
@@ -228,12 +344,13 @@ export const useGeneration = () => {
         meta,
       });
     },
-    [generateMutation]
+    [generateMutation],
   );
 
   const regenerateImageMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedImage || !generationParams || !currentDealer) throw new Error("Missing required data");
+      if (!selectedImage || !generationParams || !currentDealer)
+        throw new Error("Missing required data");
       const { generateSocialPost } = await loadGeminiService();
       return runGeminiTask("ai.regenerate.image", () =>
         generateSocialPost(
@@ -244,18 +361,25 @@ export const useGeneration = () => {
           generationParams.customerName,
           currentDealer.logo,
           generationParams.customText || generatedPost?.text,
-          generationParams.creativeBrief
-        )
+          generationParams.creativeBrief,
+        ),
       );
     },
     onMutate: () => setError(null),
-    onSuccess: (result) => setGeneratedPost(result),
+    // This control promises an image-only refresh. Preserve the caption,
+    // disclosure, release, approval, and owner-scoped post metadata rather
+    // than replacing the entire reviewed result with the provider response.
+    onSuccess: (result) => {
+      if (generatedPost) {
+        setGeneratedPost({ ...generatedPost, image: result.image });
+      }
+    },
     onError: (err) => {
       const normalized = normalizeError(err);
       const msg = `Failed to regenerate image. ${normalized.message} ${recoveryHint(normalized)}`;
       setError(msg);
       toastError(msg);
-    }
+    },
   });
 
   const handleRegenerateImage = useCallback(async () => {
@@ -264,92 +388,97 @@ export const useGeneration = () => {
 
   const funModeMutation = useMutation({
     mutationFn: async (styleName?: string) => {
-      if (!selectedImage || !currentDealer) throw new Error("Missing required data");
+      if (!selectedImage || !currentDealer)
+        throw new Error("Missing required data");
       const { generateFunSocialPostImage } = await loadGeminiService();
       return runGeminiTask("ai.fun", () =>
         generateFunSocialPostImage(
           selectedImage,
           currentDealer.name,
           currentDealer.logo,
-          styleName
-        )
+          styleName,
+        ),
       );
     },
     onMutate: () => setError(null),
     onSuccess: (newImage) => {
-      if (generatedPost) setGeneratedPost({ ...generatedPost, image: newImage });
+      if (generatedPost)
+        setGeneratedPost({ ...generatedPost, image: newImage });
     },
     onError: (err) => {
       const normalized = normalizeError(err);
       const msg = `Failed to generate fun image. ${normalized.message} ${recoveryHint(normalized)}`;
       setError(msg);
       toastError(msg);
-    }
+    },
   });
 
-  const handleFunMode = useCallback(async (styleName?: string) => {
-    await funModeMutation.mutateAsync(styleName);
-  }, [funModeMutation]);
+  const handleFunMode = useCallback(
+    async (styleName?: string) => {
+      await funModeMutation.mutateAsync(styleName);
+    },
+    [funModeMutation],
+  );
 
   const editImageMutation = useMutation({
     mutationFn: async (editPrompt: string) => {
-      if (!generatedPost?.image || !editPrompt.trim() || !currentDealer) throw new Error("Missing required data");
+      if (!generatedPost?.image || !editPrompt.trim() || !currentDealer)
+        throw new Error("Missing required data");
       const { editSocialPostImage } = await loadGeminiService();
       return runGeminiTask("ai.edit.image", () =>
         editSocialPostImage(
           generatedPost.image,
           editPrompt,
           currentDealer.name,
-          currentDealer.logo
-        )
+          currentDealer.logo,
+        ),
       );
     },
     onMutate: () => setError(null),
     onSuccess: (newImage) => {
-      if (generatedPost) setGeneratedPost({ ...generatedPost, image: newImage });
+      if (generatedPost)
+        setGeneratedPost({ ...generatedPost, image: newImage });
     },
     onError: (err) => {
       const normalized = normalizeError(err);
       const msg = `Failed to apply image edits. ${normalized.message} ${recoveryHint(normalized)}`;
       setError(msg);
       toastError(msg);
-    }
+    },
   });
 
-  const handleEditImage = useCallback(async (editPrompt: string) => {
-    await editImageMutation.mutateAsync(editPrompt);
-  }, [editImageMutation]);
+  const handleEditImage = useCallback(
+    async (editPrompt: string) => {
+      await editImageMutation.mutateAsync(editPrompt);
+    },
+    [editImageMutation],
+  );
 
   const regenerateTextMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedImage || !generationParams || !currentDealer) throw new Error("Missing required data");
+      if (!selectedImage || !generationParams || !currentDealer)
+        throw new Error("Missing required data");
       const { generateSocialPostText } = await loadGeminiService();
-      return runGeminiTask("ai.regenerate.text", () =>
+      const newText = await runGeminiTask("ai.regenerate.text", () =>
         generateSocialPostText(
           selectedImage,
           generationParams.tone,
           currentDealer.name,
           generationParams.customerName,
           true,
-          generationParams.creativeBrief
-        )
+          generationParams.creativeBrief,
+        ),
       );
+      return prepareCaptionForDelivery(newText, currentDealer.banned_phrases);
     },
     onMutate: () => setError(null),
-    onSuccess: (newText) => {
+    onSuccess: (prepared) => {
       if (!generatedPost) return;
-      const compliance = applyDisclosures(newText);
-      const captionOnly = newText.split("\n\n— Disclosures —")[0].trimEnd();
-      const disclosureBlock = compliance.text.startsWith(captionOnly)
-        ? compliance.text.slice(captionOnly.length).trim()
-        : "";
       setGeneratedPost({
         ...generatedPost,
-        text: captionOnly,
-        disclosures: disclosureBlock,
-        disclosureCategories: Array.from(
-          new Set(compliance.matches.map((m) => m.category))
-        ),
+        text: prepared.caption,
+        disclosures: prepared.disclosures,
+        disclosureCategories: prepared.disclosureCategories,
       });
     },
     onError: (err) => {
@@ -357,7 +486,7 @@ export const useGeneration = () => {
       const msg = `Failed to regenerate text. ${normalized.message} ${recoveryHint(normalized)}`;
       setError(msg);
       toastError(msg);
-    }
+    },
   });
 
   const handleRegenerateText = useCallback(async () => {
@@ -372,16 +501,18 @@ export const useGeneration = () => {
       throw new Error("Missing required data for caption variant");
     }
     const { generateSocialPostText } = await loadGeminiService();
-    return await runGeminiTask("ai.caption.variant", () =>
+    const variant = await runGeminiTask("ai.caption.variant", () =>
       generateSocialPostText(
         selectedImage,
         generationParams.tone,
         currentDealer.name,
         generationParams.customerName,
         true, // regeneration mode — higher temperature, guaranteed variation
-        generationParams.creativeBrief
-      )
+        generationParams.creativeBrief,
+      ),
     );
+    prepareCaptionForDelivery(variant, currentDealer.banned_phrases);
+    return variant;
   }, [
     selectedImage,
     generationParams,
@@ -392,44 +523,49 @@ export const useGeneration = () => {
 
   const editTextMutation = useMutation({
     mutationFn: async (editPrompt: string) => {
-      if (!generatedPost?.text || !editPrompt.trim()) throw new Error("Missing required data");
+      if (!generatedPost?.text || !editPrompt.trim())
+        throw new Error("Missing required data");
       const { editSocialPostText } = await loadGeminiService();
       const tone = generationParams?.tone || preferredTone;
-      return runGeminiTask("ai.edit.text", () =>
-        editSocialPostText(generatedPost.text, editPrompt, tone)
+      const newText = await runGeminiTask("ai.edit.text", () =>
+        editSocialPostText(generatedPost.text, editPrompt, tone),
       );
+      return prepareCaptionForDelivery(newText, currentDealer?.banned_phrases);
     },
     onMutate: () => setError(null),
-    onSuccess: (newText) => {
+    onSuccess: (prepared) => {
       if (!generatedPost) return;
-      const compliance = applyDisclosures(newText);
-      const captionOnly = newText.split("\n\n— Disclosures —")[0].trimEnd();
-      const disclosureBlock = compliance.text.startsWith(captionOnly)
-        ? compliance.text.slice(captionOnly.length).trim()
-        : "";
       setGeneratedPost({
         ...generatedPost,
-        text: captionOnly,
-        disclosures: disclosureBlock,
-        disclosureCategories: Array.from(
-          new Set(compliance.matches.map((m) => m.category))
-        ),
+        text: prepared.caption,
+        disclosures: prepared.disclosures,
+        disclosureCategories: prepared.disclosureCategories,
       });
     },
     onError: (err) => {
       const msg = `Failed to apply text edits. ${err instanceof Error ? err.message : String(err)}`;
       setError(msg);
       toastError(msg);
-    }
+    },
   });
 
-  const handleEditText = useCallback(async (editPrompt: string) => {
-    await editTextMutation.mutateAsync(editPrompt);
-  }, [editTextMutation]);
+  const handleEditText = useCallback(
+    async (editPrompt: string) => {
+      await editTextMutation.mutateAsync(editPrompt);
+    },
+    [editTextMutation],
+  );
 
   const generateVideoMutation = useMutation({
-    mutationFn: async ({ style, options }: { style: VideoStyle, options: VideoRequestOptions }) => {
-      if (!generatedPost?.image) throw new Error("No image available for video generation");
+    mutationFn: async ({
+      style,
+      options,
+    }: {
+      style: VideoStyle;
+      options: VideoRequestOptions;
+    }) => {
+      if (!generatedPost?.image)
+        throw new Error("No image available for video generation");
       const { generatePostVideo } = await loadGeminiService();
       // Issue a controller bound to component lifecycle so the poll cancels
       // if the user navigates away.
@@ -437,7 +573,12 @@ export const useGeneration = () => {
       videoAbortControllersRef.current.add(controller);
       try {
         return await runGeminiTask("ai.generate.video", () =>
-          generatePostVideo(generatedPost.image, style, options, controller.signal)
+          generatePostVideo(
+            generatedPost.image,
+            style,
+            options,
+            controller.signal,
+          ),
         );
       } finally {
         videoAbortControllersRef.current.delete(controller);
@@ -447,14 +588,17 @@ export const useGeneration = () => {
       const normalized = normalizeError(err);
       const msg = `Failed to generate video. ${normalized.message} ${recoveryHint(normalized)}`;
       toastError(msg);
-    }
+    },
   });
 
   const handleGenerateVideo = useCallback(
-    async (style: VideoStyle, options: VideoRequestOptions): Promise<string> => {
+    async (
+      style: VideoStyle,
+      options: VideoRequestOptions,
+    ): Promise<string> => {
       return await generateVideoMutation.mutateAsync({ style, options });
     },
-    [generateVideoMutation]
+    [generateVideoMutation],
   );
 
   return {

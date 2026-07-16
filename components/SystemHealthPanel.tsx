@@ -9,7 +9,6 @@ import {
   AlertTriangle,
   Database,
   KeyRound,
-  Globe,
   ShieldCheck,
   Server,
 } from "lucide-react";
@@ -23,9 +22,10 @@ interface HealthPayload {
     pocketbase: boolean;
     gemini_key_set: boolean;
     proxy_token_set: boolean;
-    vertex_credentials_set: boolean;
     anthropic_key_set: boolean;
     openai_key_set: boolean;
+    claude_fallback_enabled: boolean;
+    openai_fallback_enabled: boolean;
     admin_dealer_code_set: boolean;
   };
   counts?: {
@@ -55,7 +55,7 @@ const checkRows: Array<{
     label: "Gemini API key",
     icon: KeyRound,
     critical: true,
-    hint: "GEMINI_API_KEY env var. Required for text + image generation.",
+    hint: "GEMINI_API_KEY env var. Required for text, image, and Veo video generation.",
   },
   {
     key: "proxy_token_set",
@@ -65,32 +65,39 @@ const checkRows: Array<{
     hint: "Optional server-to-server proxy hardening. Browser access no longer requires PROXY_ACCESS_TOKEN.",
   },
   {
-    key: "vertex_credentials_set",
-    label: "Vertex credentials",
-    icon: Globe,
-    critical: false,
-    hint: "Service account for Imagen + Veo. Without it video generation fails.",
-  },
-  {
     key: "anthropic_key_set",
-    label: "Anthropic Claude (text fallback)",
+    label: "Anthropic API key",
     icon: KeyRound,
     critical: false,
-    hint: "Optional — enables cross-vendor text fallback when Gemini fails. Claude doesn't generate images.",
+    hint: "Optional server credential. The matching server and frontend fallback flags must also be enabled.",
   },
   {
     key: "openai_key_set",
-    label: "OpenAI GPT Image (image fallback)",
+    label: "OpenAI API key",
     icon: KeyRound,
     critical: false,
-    hint: "Optional — last-resort image fallback when ALL Gemini image models exhaust.",
+    hint: "Optional server credential. The matching server and frontend fallback flags must also be enabled.",
+  },
+  {
+    key: "claude_fallback_enabled",
+    label: "Claude fallback enabled",
+    icon: ShieldCheck,
+    critical: false,
+    hint: "Requires ANTHROPIC_API_KEY, ENABLE_CLAUDE_FALLBACK=true, and the matching Vite build flag.",
+  },
+  {
+    key: "openai_fallback_enabled",
+    label: "GPT Image fallback enabled",
+    icon: ShieldCheck,
+    critical: false,
+    hint: "Requires OPENAI_API_KEY, ENABLE_OPENAI_FALLBACK=true, and the matching Vite build flag.",
   },
   {
     key: "admin_dealer_code_set",
     label: "ADMIN_DEALER_CODE",
     icon: ShieldCheck,
     critical: true,
-    hint: "Required for the super-admin login route.",
+    hint: "Required for super-admin login; must be 6-12 alphanumeric characters.",
   },
 ];
 
@@ -130,7 +137,7 @@ export const SystemHealthPanel: React.FC = () => {
 
   const overallOk = data?.ok ?? false;
   const criticalFailures = checkRows.filter(
-    (r) => r.critical && data && !data.checks[r.key]
+    (r) => r.critical && data && !data.checks[r.key],
   );
 
   return (
@@ -197,8 +204,8 @@ export const SystemHealthPanel: React.FC = () => {
       {criticalFailures.length > 0 && (
         <div className="rounded-xl border border-error-700/50 bg-error-900/30 px-3 py-2 text-error-100 text-xs">
           <strong>Critical:</strong>{" "}
-          {criticalFailures.map((c) => c.label).join(", ")} — fix before users hit
-          the app.
+          {criticalFailures.map((c) => c.label).join(", ")} — fix before users
+          hit the app.
         </div>
       )}
 
@@ -212,11 +219,13 @@ export const SystemHealthPanel: React.FC = () => {
               className={cn(
                 "rounded-xl border p-3 flex items-start gap-3",
                 ok === true && "border-success-500/30 bg-success-500/5",
-                ok === false && row.critical && "border-error-500/40 bg-error-500/5",
+                ok === false &&
+                  row.critical &&
+                  "border-error-500/40 bg-error-500/5",
                 ok === false &&
                   !row.critical &&
                   "border-warning-500/30 bg-warning-500/5",
-                ok === null && "border-surface-800 bg-surface-900/40"
+                ok === null && "border-surface-800 bg-surface-900/40",
               )}
             >
               <Icon
@@ -225,7 +234,7 @@ export const SystemHealthPanel: React.FC = () => {
                   ok === true && "text-success-300",
                   ok === false && row.critical && "text-error-300",
                   ok === false && !row.critical && "text-warning-300",
-                  ok === null && "text-surface-400"
+                  ok === null && "text-surface-400",
                 )}
               />
               <div className="flex-1 min-w-0">
@@ -243,7 +252,7 @@ export const SystemHealthPanel: React.FC = () => {
                 <XCircle
                   className={cn(
                     "w-4 h-4 flex-shrink-0",
-                    row.critical ? "text-error-300" : "text-warning-300"
+                    row.critical ? "text-error-300" : "text-warning-300",
                   )}
                 />
               )}

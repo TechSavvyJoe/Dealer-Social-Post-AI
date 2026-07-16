@@ -1,108 +1,66 @@
 #!/usr/bin/env node
-import fetch from "node-fetch";
 
-console.log("\n🔍 Testing API Key Configuration\n");
+/**
+ * Opt-in provider diagnostic. This performs one small paid Gemini request
+ * without printing credential material. Node 22's built-in fetch keeps the
+ * script aligned with the production runtime.
+ */
 
-// Load from .env.local if running directly
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const VERTEX_API_KEY = process.env.VERTEX_API_KEY;
+const GEMINI_MODEL =
+  process.env.GEMINI_SMOKE_MODEL?.trim() || "gemini-3.5-flash";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim();
 
-console.log("Environment Variables:");
-console.log(`✓ GEMINI_API_KEY: ${GEMINI_API_KEY ? "Set (" + GEMINI_API_KEY.substring(0, 10) + "...)" : "❌ NOT SET"}`);
-console.log(`✓ VERTEX_API_KEY: ${VERTEX_API_KEY ? "Set (" + VERTEX_API_KEY.substring(0, 10) + "...)" : "❌ NOT SET"}`);
-console.log();
-
-// Test Gemini API
-async function testGeminiAPI() {
+const testGemini = async () => {
   if (!GEMINI_API_KEY) {
-    console.log("⏭️  Skipping Gemini API test (no key configured)");
-    return;
+    throw new Error("GEMINI_API_KEY is not configured.");
+  }
+  if (!/^[a-z0-9][a-z0-9._-]{0,127}$/i.test(GEMINI_MODEL)) {
+    throw new Error("GEMINI_SMOKE_MODEL is invalid.");
   }
 
-  console.log("Testing Gemini API...");
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
-  try {
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: "Say 'API works!' in exactly those words" }] }],
-      }),
-    });
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": GEMINI_API_KEY,
+    },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: "Reply with exactly OK." }] }],
+      generationConfig: { maxOutputTokens: 64 },
+    }),
+    signal: AbortSignal.timeout(30_000),
+  });
 
-    const data = await resp.json();
-
-    if (resp.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-      console.log("✅ Gemini API: Working!");
-      console.log(`   Response: ${data.candidates[0].content.parts[0].text.trim()}`);
-    } else {
-      console.log(`⚠️  Gemini API: Status ${resp.status}`);
-      console.log(`   ${JSON.stringify(data, null, 2)}`);
-    }
-  } catch (err) {
-    console.log("❌ Gemini API: Error -", err.message);
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const providerMessage = payload?.error?.message;
+    throw new Error(
+      `Gemini ${GEMINI_MODEL} returned ${response.status}${
+        providerMessage ? `: ${String(providerMessage).slice(0, 300)}` : ""
+      }`,
+    );
   }
-  console.log();
+
+  const text = (payload?.candidates?.[0]?.content?.parts || [])
+    .map((part) => (typeof part?.text === "string" ? part.text : ""))
+    .join("")
+    .trim();
+  if (!text) {
+    throw new Error(`Gemini ${GEMINI_MODEL} returned no text.`);
+  }
+
+  console.log(`Gemini ${GEMINI_MODEL} responded successfully.`);
+};
+
+try {
+  await testGemini();
+  console.log("Provider diagnostic passed.");
+} catch (error) {
+  console.error(
+    "Provider diagnostic failed:",
+    error instanceof Error ? error.message : String(error),
+  );
+  process.exitCode = 1;
 }
-
-// Test Vertex AI
-async function testVertexAI() {
-  if (!VERTEX_API_KEY) {
-    console.log("⏭️  Skipping Vertex AI test (no key configured)");
-    return;
-  }
-
-  console.log("Testing Vertex AI...");
-  const PROJECT_ID = "gen-lang-client-0994987899";
-  const LOCATION = "us-central1";
-
-  // Try with Gemini model first (lower quota requirements)
-  const MODEL = "gemini-2.0-flash-exp";
-  const url = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${MODEL}:generateContent?key=${VERTEX_API_KEY}`;
-
-  try {
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{
-          role: "user",
-          parts: [{ text: "Say 'Vertex works!' in exactly those words" }]
-        }],
-      }),
-    });
-
-    const data = await resp.json();
-
-    if (resp.ok) {
-      console.log("✅ Vertex AI: Working!");
-      if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        console.log(`   Response: ${data.candidates[0].content.parts[0].text.trim()}`);
-      }
-    } else if (resp.status === 429) {
-      console.log("⚠️  Vertex AI: Quota exceeded (but authentication works!)");
-      console.log("   Your API key is valid, but you've hit quota limits");
-    } else if (resp.status === 401 || resp.status === 403) {
-      console.log("❌ Vertex AI: Authentication failed");
-      console.log(`   ${JSON.stringify(data, null, 2)}`);
-    } else {
-      console.log(`⚠️  Vertex AI: Status ${resp.status}`);
-      console.log(`   ${JSON.stringify(data, null, 2)}`);
-    }
-  } catch (err) {
-    console.log("❌ Vertex AI: Error -", err.message);
-  }
-  console.log();
-}
-
-async function runTests() {
-  await testGeminiAPI();
-  await testVertexAI();
-
-  console.log("Test complete!\n");
-  console.log("📝 Note: If you see quota errors, your API key is working correctly.");
-  console.log("   You just need to wait for quotas to reset or request an increase.\n");
-}
-
-runTests();

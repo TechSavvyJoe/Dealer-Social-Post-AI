@@ -8,13 +8,19 @@ import { AppStep } from "./types";
 
 // Lazy load heavyweight modals
 const LazySettingsModal = React.lazy(() =>
-  import("./components/SettingsModal").then((mod) => ({ default: mod.SettingsModal }))
+  import("./components/SettingsModal").then((mod) => ({
+    default: mod.SettingsModal,
+  })),
 );
 const LazyImageCropModal = React.lazy(() =>
-  import("./components/ImageCropModal").then((mod) => ({ default: mod.ImageCropModal }))
+  import("./components/ImageCropModal").then((mod) => ({
+    default: mod.ImageCropModal,
+  })),
 );
 const LazyVideoDirectorModal = React.lazy(() =>
-  import("./components/VideoDirectorModal").then((mod) => ({ default: mod.VideoDirectorModal }))
+  import("./components/VideoDirectorModal").then((mod) => ({
+    default: mod.VideoDirectorModal,
+  })),
 );
 
 const AppContent: React.FC = () => {
@@ -27,7 +33,9 @@ const AppContent: React.FC = () => {
     preferredStyle,
     preferredTone,
     compactMode,
+    isRestoringSession,
     setStep,
+    setError,
     setPreferences,
     logout,
     reset,
@@ -76,22 +84,50 @@ const AppContent: React.FC = () => {
         return;
       }
       if (step === AppStep.RESULT) {
-        reset();
+        // Result replacement is intentionally guarded by PostResult's
+        // confirmation dialog. A global Escape must never bypass that guard
+        // and discard an expensive unsaved creative.
         return;
       }
     },
     onPalette: () => setIsSettingsOpen(!isSettingsOpen),
     onFocusSearch: () => {
       const first = document.querySelector<HTMLElement>(
-        "input:not([disabled]), textarea:not([disabled])"
+        "input:not([disabled]), textarea:not([disabled])",
       );
       first?.focus();
     },
   });
 
+  if (isRestoringSession) {
+    return (
+      <main
+        className="flex min-h-0 flex-1 items-center justify-center bg-surface-950 p-6 text-surface-50"
+        aria-busy="true"
+      >
+        <div
+          className="flex items-center gap-4"
+          role="status"
+          aria-live="polite"
+        >
+          <span
+            className="h-10 w-10 rounded-xl border border-primary-400/40 bg-primary-500/10 grid place-items-center"
+            aria-hidden="true"
+          >
+            <span className="h-2.5 w-2.5 rounded-full bg-primary-300 animate-pulse" />
+          </span>
+          <div>
+            <p className="font-semibold tracking-tight">Dealer Social</p>
+            <p className="text-sm text-surface-300">Preparing your studio…</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <div
-      className="min-h-screen font-sans"
+      className="flex min-h-0 flex-1 flex-col font-sans"
       style={{
         backgroundColor: "rgb(var(--color-surface-base))",
         color: "rgb(var(--color-text-primary))",
@@ -102,6 +138,9 @@ const AppContent: React.FC = () => {
           dealer={currentDealer}
           onLogout={() => logout()}
           onShowSettings={() => setIsSettingsOpen(true)}
+          confirmBeforeLogout={
+            step === AppStep.RESULT && Boolean(generatedPost)
+          }
         />
       )}
 
@@ -128,6 +167,7 @@ const AppContent: React.FC = () => {
             onLogin={handleLogin}
             onImageSelected={handleImageSelected}
             onReset={reset}
+            onDismissError={() => setError(null)}
             onGenerate={handleGenerate}
             onBackToCapture={() => setStep(AppStep.CAPTURE)}
             onStyleToneChange={handleStyleToneChange}
@@ -147,7 +187,9 @@ const AppContent: React.FC = () => {
           isOpen={isSettingsOpen}
           onClose={() => setIsSettingsOpen(false)}
           compactMode={compactMode}
-          onToggleCompactMode={(value) => setPreferences({ compactMode: value })}
+          onToggleCompactMode={(value) =>
+            setPreferences({ compactMode: value })
+          }
         />
       </Suspense>
 

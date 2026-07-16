@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { AlertCircle } from 'lucide-react';
-import { cn } from '../../utils/classNames';
+import React, { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { AlertCircle } from "lucide-react";
+import { cn } from "../../utils/classNames";
 
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   /** Label text */
@@ -37,25 +37,47 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
       leftIcon,
       rightIcon,
       fullWidth = false,
-      type = 'text',
+      type = "text",
       id,
+      value,
+      defaultValue,
+      onChange,
+      onFocus,
+      onBlur,
+      placeholder,
+      "aria-describedby": ariaDescribedBy,
+      "aria-invalid": ariaInvalid,
       ...props
     },
-    ref
+    ref,
   ) => {
     const [isFocused, setIsFocused] = useState(false);
-    const [hasValue, setHasValue] = useState(!!props.value || !!props.defaultValue);
+    const [uncontrolledHasValue, setUncontrolledHasValue] = useState(
+      () => defaultValue !== undefined && String(defaultValue).length > 0,
+    );
+    const generatedId = React.useId().replace(/:/g, "");
 
-    const inputId = id || `input-${label?.toLowerCase().replace(/\s+/g, '-')}`;
+    const inputId = id || `input-${generatedId}`;
+    const messageId = `${inputId}-message`;
+    const describedBy =
+      [ariaDescribedBy, error || helperText ? messageId : undefined]
+        .filter(Boolean)
+        .join(" ") || undefined;
+    const hasValue =
+      value !== undefined
+        ? String(value ?? "").length > 0
+        : uncontrolledHasValue;
     const showFloatingLabel = isFocused || hasValue;
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      setHasValue(e.target.value.length > 0);
-      props.onChange?.(e);
+      if (value === undefined) {
+        setUncontrolledHasValue(e.target.value.length > 0);
+      }
+      onChange?.(e);
     };
 
     return (
-      <div className={cn('relative', fullWidth && 'w-full')}>
+      <div className={cn("relative", fullWidth && "w-full")}>
         {/* Input container */}
         <div className="relative">
           {/* Left icon */}
@@ -67,47 +89,57 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
 
           {/* Input field */}
           <input
+            {...props}
             ref={ref}
             id={inputId}
             type={type}
+            value={value}
+            defaultValue={defaultValue}
+            aria-describedby={describedBy}
+            aria-invalid={error ? true : ariaInvalid}
             className={cn(
               // Base styles
-              'w-full rounded-xl',
-              'bg-surface-900/60 border-2',
-              'px-4 py-3',
-              'text-base text-surface-50',
-              'placeholder:text-surface-500',
-              'transition-all duration-200 ease-apple',
+              "w-full rounded-xl",
+              "bg-surface-900/60 border-2",
+              "px-4 py-3",
+              "text-base text-surface-50",
+              "placeholder:text-surface-500",
+              "transition-all duration-200 ease-apple",
 
               // Focus state
-              'focus:outline-none focus:ring-0',
+              "focus:outline-none focus:ring-0",
               error
-                ? 'border-error-500/50 focus:border-error-500'
-                : 'border-surface-700 focus:border-primary-500',
+                ? "border-error-500/50 focus:border-error-500"
+                : "border-surface-700 focus:border-primary-500",
 
               // Disabled state
-              'disabled:opacity-50 disabled:cursor-not-allowed',
+              "disabled:opacity-50 disabled:cursor-not-allowed",
 
               // With icons padding
-              leftIcon && 'pl-11',
-              rightIcon && 'pr-11',
+              leftIcon && "pl-11",
+              (rightIcon || error) && "pr-11",
 
               // With floating label
-              label && (showFloatingLabel ? 'pt-6 pb-2' : 'pt-3 pb-3'),
+              label && (showFloatingLabel ? "pt-6 pb-2" : "pt-3 pb-3"),
 
-              className
+              className,
             )}
             onFocus={(e) => {
               setIsFocused(true);
-              props.onFocus?.(e);
+              onFocus?.(e);
             }}
             onBlur={(e) => {
               setIsFocused(false);
-              props.onBlur?.(e);
+              onBlur?.(e);
             }}
             onChange={handleChange}
-            placeholder={showFloatingLabel ? props.placeholder : label || props.placeholder}
-            {...props}
+            placeholder={
+              label
+                ? showFloatingLabel
+                  ? placeholder
+                  : undefined
+                : placeholder
+            }
           />
 
           {/* Floating label */}
@@ -115,11 +147,11 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             <label
               htmlFor={inputId}
               className={cn(
-                'absolute left-4 transition-all duration-200 ease-apple pointer-events-none',
-                leftIcon && 'left-11',
+                "absolute left-4 transition-all duration-200 ease-apple pointer-events-none",
+                leftIcon && "left-11",
                 showFloatingLabel
-                  ? 'top-1.5 text-xs text-primary-400 font-medium'
-                  : 'top-1/2 -translate-y-1/2 text-base text-surface-400'
+                  ? "top-1.5 text-xs text-primary-400 font-medium"
+                  : "top-1/2 -translate-y-1/2 text-base text-surface-400",
               )}
             >
               {label}
@@ -127,26 +159,33 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           )}
 
           {/* Right icon or error icon */}
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 pointer-events-none">
-            {error ? (
-              <AlertCircle className="h-5 w-5 text-error-500" aria-hidden="true" />
-            ) : (
-              rightIcon && <span className="[&>svg]:h-5 [&>svg]:w-5">{rightIcon}</span>
-            )}
-          </div>
+          {(error || rightIcon) && (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 pointer-events-none">
+              {error ? (
+                <AlertCircle
+                  className="h-5 w-5 text-error-500"
+                  aria-hidden="true"
+                />
+              ) : (
+                <span className="[&>svg]:h-5 [&>svg]:w-5">{rightIcon}</span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Helper text or error message */}
         <AnimatePresence mode="wait">
           {(error || helperText) && (
             <motion.p
+              id={messageId}
+              role={error ? "alert" : undefined}
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.2 }}
               className={cn(
-                'mt-1.5 text-sm px-1',
-                error ? 'text-error-400' : 'text-surface-400'
+                "mt-1.5 text-sm px-1",
+                error ? "text-error-400" : "text-surface-400",
               )}
             >
               {error || helperText}
@@ -155,10 +194,10 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         </AnimatePresence>
       </div>
     );
-  }
+  },
 );
 
-Input.displayName = 'Input';
+Input.displayName = "Input";
 
 /**
  * Textarea component with similar styling to Input
@@ -186,69 +225,102 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       fullWidth = false,
       autoResize = false,
       id,
+      value,
+      defaultValue,
+      onChange,
+      onFocus,
+      onBlur,
+      placeholder,
+      "aria-describedby": ariaDescribedBy,
+      "aria-invalid": ariaInvalid,
       ...props
     },
-    ref
+    ref,
   ) => {
     const [isFocused, setIsFocused] = useState(false);
-    const [hasValue, setHasValue] = useState(!!props.value || !!props.defaultValue);
+    const [uncontrolledHasValue, setUncontrolledHasValue] = useState(
+      () => defaultValue !== undefined && String(defaultValue).length > 0,
+    );
+    const generatedId = React.useId().replace(/:/g, "");
 
-    const textareaId = id || `textarea-${label?.toLowerCase().replace(/\s+/g, '-')}`;
+    const textareaId = id || `textarea-${generatedId}`;
+    const messageId = `${textareaId}-message`;
+    const describedBy =
+      [ariaDescribedBy, error || helperText ? messageId : undefined]
+        .filter(Boolean)
+        .join(" ") || undefined;
+    const hasValue =
+      value !== undefined
+        ? String(value ?? "").length > 0
+        : uncontrolledHasValue;
     const showFloatingLabel = isFocused || hasValue;
 
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setHasValue(e.target.value.length > 0);
+      if (value === undefined) {
+        setUncontrolledHasValue(e.target.value.length > 0);
+      }
 
       // Auto-resize
       if (autoResize) {
-        e.target.style.height = 'auto';
+        e.target.style.height = "auto";
         e.target.style.height = `${e.target.scrollHeight}px`;
       }
 
-      props.onChange?.(e);
+      onChange?.(e);
     };
 
     return (
-      <div className={cn('relative', fullWidth && 'w-full')}>
+      <div className={cn("relative", fullWidth && "w-full")}>
         <div className="relative">
           <textarea
+            {...props}
             ref={ref}
             id={textareaId}
+            value={value}
+            defaultValue={defaultValue}
+            aria-describedby={describedBy}
+            aria-invalid={error ? true : ariaInvalid}
             className={cn(
               // Base styles
-              'w-full rounded-xl',
-              'bg-surface-900/60 border-2',
-              'px-4 py-3',
-              'text-base text-surface-50',
-              'placeholder:text-surface-500',
-              'transition-all duration-200 ease-apple',
-              'resize-none',
+              "w-full rounded-xl",
+              "bg-surface-900/60 border-2",
+              "px-4 py-3",
+              "text-base text-surface-50",
+              "placeholder:text-surface-500",
+              "transition-all duration-200 ease-apple",
+              "resize-none",
 
               // Focus state
-              'focus:outline-none focus:ring-0',
+              "focus:outline-none focus:ring-0",
               error
-                ? 'border-error-500/50 focus:border-error-500'
-                : 'border-surface-700 focus:border-primary-500',
+                ? "border-error-500/50 focus:border-error-500"
+                : "border-surface-700 focus:border-primary-500",
 
               // Disabled state
-              'disabled:opacity-50 disabled:cursor-not-allowed',
+              "disabled:opacity-50 disabled:cursor-not-allowed",
 
               // With floating label
-              label && (showFloatingLabel ? 'pt-6 pb-2' : 'pt-3 pb-3'),
+              label && (showFloatingLabel ? "pt-6 pb-2" : "pt-3 pb-3"),
+              error && "pr-11",
 
-              className
+              className,
             )}
             onFocus={(e) => {
               setIsFocused(true);
-              props.onFocus?.(e);
+              onFocus?.(e);
             }}
             onBlur={(e) => {
               setIsFocused(false);
-              props.onBlur?.(e);
+              onBlur?.(e);
             }}
             onChange={handleChange}
-            placeholder={showFloatingLabel ? props.placeholder : label || props.placeholder}
-            {...props}
+            placeholder={
+              label
+                ? showFloatingLabel
+                  ? placeholder
+                  : undefined
+                : placeholder
+            }
           />
 
           {/* Floating label */}
@@ -256,10 +328,10 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
             <label
               htmlFor={textareaId}
               className={cn(
-                'absolute left-4 transition-all duration-200 ease-apple pointer-events-none',
+                "absolute left-4 transition-all duration-200 ease-apple pointer-events-none",
                 showFloatingLabel
-                  ? 'top-1.5 text-xs text-primary-400 font-medium'
-                  : 'top-3 text-base text-surface-400'
+                  ? "top-1.5 text-xs text-primary-400 font-medium"
+                  : "top-3 text-base text-surface-400",
               )}
             >
               {label}
@@ -278,13 +350,15 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         <AnimatePresence mode="wait">
           {(error || helperText) && (
             <motion.p
+              id={messageId}
+              role={error ? "alert" : undefined}
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.2 }}
               className={cn(
-                'mt-1.5 text-sm px-1',
-                error ? 'text-error-400' : 'text-surface-400'
+                "mt-1.5 text-sm px-1",
+                error ? "text-error-400" : "text-surface-400",
               )}
             >
               {error || helperText}
@@ -293,10 +367,10 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         </AnimatePresence>
       </div>
     );
-  }
+  },
 );
 
-Textarea.displayName = 'Textarea';
+Textarea.displayName = "Textarea";
 
 /**
  * Select component with similar styling to Input
@@ -318,63 +392,89 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
       fullWidth = false,
       id,
       children,
+      value,
+      defaultValue,
+      onChange,
+      onFocus,
+      onBlur,
+      "aria-describedby": ariaDescribedBy,
+      "aria-invalid": ariaInvalid,
       ...props
     },
-    ref
+    ref,
   ) => {
     const [isFocused, setIsFocused] = useState(false);
-    const [hasValue, setHasValue] = useState(!!props.value || !!props.defaultValue);
+    const generatedId = React.useId().replace(/:/g, "");
 
-    const selectId = id || `select-${label?.toLowerCase().replace(/\s+/g, '-')}`;
-    const showFloatingLabel = isFocused || hasValue || true; // Selects usually always show value
+    const selectId = id || `select-${generatedId}`;
+    const messageId = `${selectId}-message`;
+    const describedBy =
+      [ariaDescribedBy, error || helperText ? messageId : undefined]
+        .filter(Boolean)
+        .join(" ") || undefined;
 
     const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-      setHasValue(true);
-      props.onChange?.(e);
+      onChange?.(e);
     };
 
     return (
-      <div className={cn('relative', fullWidth && 'w-full')}>
+      <div className={cn("relative", fullWidth && "w-full")}>
         <div className="relative">
           <select
+            {...props}
             ref={ref}
             id={selectId}
+            value={value}
+            defaultValue={defaultValue}
+            aria-describedby={describedBy}
+            aria-invalid={error ? true : ariaInvalid}
             className={cn(
               // Base styles
-              'w-full rounded-xl appearance-none',
-              'bg-surface-900/60 border-2',
-              'px-4 py-3',
-              'text-base text-surface-50',
-              'transition-all duration-200 ease-apple',
+              "w-full rounded-xl appearance-none",
+              "bg-surface-900/60 border-2",
+              "px-4 py-3",
+              "text-base text-surface-50",
+              "transition-all duration-200 ease-apple",
               // Focus state
-              'focus:outline-none focus:ring-0',
+              "focus:outline-none focus:ring-0",
               error
-                ? 'border-error-500/50 focus:border-error-500'
-                : 'border-surface-700 focus:border-primary-500',
+                ? "border-error-500/50 focus:border-error-500"
+                : "border-surface-700 focus:border-primary-500",
               // Disabled state
-              'disabled:opacity-50 disabled:cursor-not-allowed',
+              "disabled:opacity-50 disabled:cursor-not-allowed",
               // With floating label
-              label && 'pt-6 pb-2',
-              className
+              label && "pt-6 pb-2",
+              className,
             )}
             onFocus={(e) => {
               setIsFocused(true);
-              props.onFocus?.(e);
+              onFocus?.(e);
             }}
             onBlur={(e) => {
               setIsFocused(false);
-              props.onBlur?.(e);
+              onBlur?.(e);
             }}
             onChange={handleChange}
-            {...props}
           >
             {children}
           </select>
-          
+
           {/* Custom Chevron icon for select */}
           <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-surface-400">
-            <svg width="12" height="8" viewBox="0 0 12 8" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            <svg
+              width="12"
+              height="8"
+              viewBox="0 0 12 8"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M1 1.5L6 6.5L11 1.5"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
           </div>
 
@@ -383,9 +483,9 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
             <label
               htmlFor={selectId}
               className={cn(
-                'absolute left-4 transition-all duration-200 ease-apple pointer-events-none',
-                'top-1.5 text-xs font-medium',
-                isFocused ? 'text-primary-400' : 'text-surface-400'
+                "absolute left-4 transition-all duration-200 ease-apple pointer-events-none",
+                "top-1.5 text-xs font-medium",
+                isFocused ? "text-primary-400" : "text-surface-400",
               )}
             >
               {label}
@@ -404,13 +504,15 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
         <AnimatePresence mode="wait">
           {(error || helperText) && (
             <motion.p
+              id={messageId}
+              role={error ? "alert" : undefined}
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.2 }}
               className={cn(
-                'mt-1.5 text-sm px-1',
-                error ? 'text-error-400' : 'text-surface-400'
+                "mt-1.5 text-sm px-1",
+                error ? "text-error-400" : "text-surface-400",
               )}
             >
               {error || helperText}
@@ -419,7 +521,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
         </AnimatePresence>
       </div>
     );
-  }
+  },
 );
 
-Select.displayName = 'Select';
+Select.displayName = "Select";

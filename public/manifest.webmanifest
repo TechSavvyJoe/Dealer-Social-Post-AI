@@ -22,13 +22,5 @@
       "type": "image/png",
       "purpose": "any maskable"
     }
-  ],
-  "shortcuts": [
-    {
-      "name": "New post",
-      "short_name": "New",
-      "url": "/?action=new",
-      "description": "Start a new social-media post"
-    }
   ]
 }

@@ -1,61 +1,32 @@
-# Security Actions — DO THESE BEFORE PUBLISHING / DEMOING
+# Security actions required before deployment
 
-A Google Cloud service-account private key was previously committed to this repo at:
+Historical repository versions contained live provider and administrative credentials. Treat every exposed value as compromised even though the current tree no longer contains it.
 
-```
-gen-lang-client-0994987899-401e21ffbaae.json
-```
+## Mandatory rotation
 
-It has been moved to `.local-secrets/` (gitignored) so it will no longer be committed. **However, the key is still in git history.** If this repo is public, treat the key as fully compromised.
+Rotate and revoke all historically exposed credentials before publishing or deploying:
 
-## Must-do checklist
+- Gemini API keys;
+- Google Cloud service-account keys;
+- PocketBase administrator credentials;
+- proxy access tokens;
+- dealer and administrator login codes.
 
-### 1. Rotate the service-account key (5 minutes)
+Store replacements only in the deployment secret manager or a local git-ignored secret store. The active application uses `GEMINI_API_KEY`; generic Vertex browser routes are disabled and no Vertex service-account key is required for this release.
 
-1. Open Google Cloud Console → IAM & Admin → Service Accounts
-2. Find the account for project `gen-lang-client-0994987899`
-3. Open the "Keys" tab
-4. **Disable** the key with ID starting `401e21ffbaae...`
-5. **Create a new key** (JSON), download it
-6. Save the new key to `.local-secrets/` (already gitignored)
-7. Update Fly.io secrets:
-   ```bash
-   fly secrets set VERTEX_SERVICE_ACCOUNT_JSON="$(cat .local-secrets/your-new-key.json)" --app dealer-social-post-ai-production
-   ```
-8. After confirming production still works (test video generation), **delete** the old key in GCP Console.
+## Purge repository history
 
-### 2. Scrub the leaked key from git history (15 minutes)
+After rotation, remove credential files and literals from every Git ref with a reviewed `git filter-repo` plan. Rewriting history affects every collaborator, clone, tag, fork, cache, and mirror, so coordinate it explicitly and require fresh clones afterward.
 
-The key is still in your git history at HEAD and every prior commit. Anyone who has cloned this repo (or who scrapes GitHub for leaked keys) already has it. After rotation (step 1), scrub history so you don't ship the dead key to future contributors:
+Verify the rewritten repository with both history searches and the current-tree gate:
 
 ```bash
-# Install git-filter-repo if you don't have it
-brew install git-filter-repo
-
-# From the repo root:
-git filter-repo --path gen-lang-client-0994987899-401e21ffbaae.json --invert-paths --force
-
-# Force-push to GitHub (this rewrites history — everyone with a clone must re-clone)
-git push origin --force --all
-git push origin --force --tags
+git log --all --full-history -- '*.json' '*.env*' '*.pem'
+npm run security:secrets
 ```
 
-### 3. Verify
+Also search the hosting provider, CI logs/artifacts, shell transcripts, shared screenshots, and deployment logs. Deleting a file from the current branch does not revoke its credential or remove historical copies.
 
-```bash
-git log --all --full-history -- gen-lang-client-0994987899-401e21ffbaae.json
-# Should return nothing
-```
+## Release gate
 
-Then visit your GitHub repo and confirm the file is no longer searchable in the file tree or in any historical commit.
-
-## What was changed automatically
-
-- Moved `gen-lang-client-0994987899-401e21ffbaae.json` → `.local-secrets/` (no longer in repo working tree).
-- Updated `.gitignore` to catch all common service-account naming patterns (`gen-lang-client-*.json`, `*-service-account*.json`, `*serviceaccount*.json`, `.local-secrets/`, `.secrets/`, `*.pem`, `*.p12`, `credentials.json`, `*-credentials.json`).
-
-## Going forward
-
-- Production reads credentials from the `VERTEX_SERVICE_ACCOUNT_JSON` env var (set as a Fly.io secret). See `entrypoint.sh` and `pb_hooks/main.pb.js`.
-- For local dev, `pb_hooks/main.pb.js` falls back to reading `pb_hooks/vertex_key.json` if the env var isn't set. Copy your new key there for local testing (it's already gitignored).
-- Never commit a `.json` file with the words `private_key` in it. Run `git diff --cached` before every commit.
+Do not deploy until rotation and history cleanup are complete, a verified Fly volume/database snapshot exists, and the backend health/session/provider checks pass on the real production path. Disable Vercel's independent production auto-promotion, or make it require the successful Fly readiness job, so frontend and backend revisions cannot split.

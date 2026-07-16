@@ -59,7 +59,7 @@ const StyleButton = memo(
         {description}
       </span>
     </button>
-  )
+  ),
 );
 
 export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
@@ -79,7 +79,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
       (style: VideoStyle) => {
         onSelectStyle(style, defaultOptions);
       },
-      [onSelectStyle]
+      [onSelectStyle],
     );
 
     return (
@@ -87,29 +87,10 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
         isOpen={isOpen}
         onClose={onClose}
         size="lg"
+        title="Create video"
+        description="Choose a motion style for a six-second social clip."
         className="bg-surface-900 border-surface-800"
-        showCloseButton={false} // Custom header below
       >
-        {/* Custom Header within Modal Body for specific styling */}
-        <div className="flex justify-between items-center mb-6">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-primary-500/15 rounded-lg border border-primary-500/20">
-              <Icon type="movie" className="w-5 h-5 text-primary-300" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-white">Create Video</h2>
-              <p className="text-xs text-white/60">Tap a style to generate</p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/60 hover:text-white touch-manipulation"
-            aria-label="Close"
-          >
-            <Icon type="close" className="w-6 h-6" />
-          </button>
-        </div>
-
         {/* Recommended Styles - Main Section */}
         <div className="mb-4">
           <p className="text-xs font-semibold text-primary-300/80 uppercase tracking-wide mb-3">
@@ -166,7 +147,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
                         description={description}
                         onSelect={handleStyleSelect}
                       />
-                    )
+                    ),
                   )}
                 </div>
               </motion.div>
@@ -182,5 +163,5 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
         </div>
       </Modal>
     );
-  }
+  },
 );

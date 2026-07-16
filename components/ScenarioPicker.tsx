@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useId, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, Check, Sparkles } from "lucide-react";
 import {
@@ -36,12 +36,13 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
   className,
 }) => {
   const [open, setOpen] = useState(false);
+  const listboxId = useId();
   const currentDealer = useAppStore((s) => s.currentDealer);
 
   // Built-in catalog + dealer-defined custom scenarios from their record.
   const allScenarios = useMemo(
     () => getScenariosForDealer(currentDealer?.custom_scenarios),
-    [currentDealer?.custom_scenarios]
+    [currentDealer?.custom_scenarios],
   );
 
   const grouped = useMemo(() => {
@@ -65,6 +66,9 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
       </label>
       <button
         type="button"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-controls={listboxId}
         onClick={() => {
           triggerHapticFeedback();
           setOpen((o) => !o);
@@ -72,7 +76,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
         className={cn(
           "w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl",
           "bg-white/5 border border-white/10 hover:bg-white/10 transition-colors",
-          "text-left text-sm"
+          "text-left text-sm",
         )}
       >
         <span className="flex items-center gap-2.5 min-w-0">
@@ -97,7 +101,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
         <ChevronDown
           className={cn(
             "h-4 w-4 text-surface-400 flex-shrink-0 transition-transform",
-            open && "rotate-180"
+            open && "rotate-180",
           )}
         />
       </button>
@@ -105,6 +109,9 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
       <AnimatePresence>
         {open && (
           <motion.div
+            id={listboxId}
+            role="listbox"
+            aria-label="Post type"
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
@@ -123,6 +130,8 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
                       <li key={s.id}>
                         <button
                           type="button"
+                          role="option"
+                          aria-selected={active}
                           onClick={() => {
                             triggerHapticFeedback();
                             onChange(s);
@@ -132,7 +141,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
                             "w-full flex items-start gap-2 px-2 py-2 rounded-lg text-left transition-colors",
                             active
                               ? "bg-primary-500/20 text-primary-100"
-                              : "hover:bg-white/5 text-surface-100"
+                              : "hover:bg-white/5 text-surface-100",
                           )}
                         >
                           {(() => {
@@ -143,7 +152,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
                                   "flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg mt-0.5 transition-colors",
                                   active
                                     ? "bg-primary-500/20 text-primary-200"
-                                    : "bg-white/[0.06] text-surface-300"
+                                    : "bg-white/[0.06] text-surface-300",
                                 )}
                               >
                                 <Icon className="w-4 h-4" />
@@ -170,7 +179,8 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
             ))}
             <div className="border-t border-white/5 mt-1 pt-2 px-2 pb-1 text-[10px] text-surface-500 flex items-center gap-1">
               <Sparkles className="w-3 h-3" />
-              Picking a scenario tunes the prompt + defaults. Override anything below.
+              Picking a scenario tunes the prompt + defaults. Override anything
+              below.
             </div>
           </motion.div>
         )}

@@ -3,8 +3,8 @@
  *
  * When Gemini returns a non-retryable failure (rate limit ceiling, content
  * block, or persistent server error) and `VITE_ENABLE_CLAUDE_FALLBACK=true`,
- * the geminiService routes the call here instead. Joe runs Claude Max so this
- * is essentially free overflow capacity.
+ * the geminiService routes the call here instead. Anthropic API usage is
+ * separately metered from any consumer Claude subscription.
  *
  * Server-side: requires `ANTHROPIC_API_KEY` in PocketBase secrets. The hook in
  * `pb_hooks/main.pb.js` adds a /api/proxy/anthropic/* route that forwards to
@@ -45,10 +45,12 @@ const proxyHeaders = (): Record<string, string> => ({
  */
 export const generateTextViaClaude = async (
   prompt: string,
-  options: ClaudeMessageOptions = {}
+  options: ClaudeMessageOptions = {},
 ): Promise<string> => {
   if (!FLAGS.enableClaudeFallback) {
-    throw new Error("Claude fallback is disabled (set VITE_ENABLE_CLAUDE_FALLBACK=true)");
+    throw new Error(
+      "Claude fallback is disabled (set VITE_ENABLE_CLAUDE_FALLBACK=true)",
+    );
   }
 
   const body = {

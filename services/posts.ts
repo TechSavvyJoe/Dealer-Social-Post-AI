@@ -9,6 +9,8 @@
  * `{:name}` form) server-side — no string interpolation, no injection.
  */
 
+import { dataUrlToBlob } from "../utils/imageUtils";
+
 export type ApprovalStatus = "n_a" | "pending" | "approved" | "rejected";
 
 export interface LogPostInput {
@@ -25,6 +27,11 @@ export interface LogPostInput {
   hasVideo?: boolean;
   /** When the dealer requires manager approval, log post as 'pending'. */
   requiresApproval?: boolean;
+  /** The exact review copy submitted to the manager. */
+  caption?: string;
+  disclosures?: string;
+  /** The exact generated image submitted for review. */
+  imageDataUrl?: string;
 }
 
 export interface PostRecord {
@@ -43,11 +50,27 @@ export interface PostRecord {
   approval_status?: ApprovalStatus;
   approved_by?: string;
   approved_at?: string;
+  caption?: string;
+  disclosures?: string;
+  /** Session-authorized route; never a public PocketBase file URL. */
+  creative_image_url?: string;
+}
+
+export interface PostApprovalStatus {
+  id: string;
+  approval_status: ApprovalStatus;
+  approved_by?: string;
+  approved_at?: string;
+}
+
+export interface PostVideoStatus {
+  id: string;
+  has_video: true;
 }
 
 const jsonRequest = async <T>(
   url: string,
-  init: RequestInit = {}
+  init: RequestInit = {},
 ): Promise<T> => {
   const res = await fetch(url, {
     ...init,
@@ -71,23 +94,53 @@ const jsonRequest = async <T>(
 };
 
 export const logPost = async (
-  input: LogPostInput
+  input: LogPostInput,
 ): Promise<PostRecord | null> => {
   try {
-    return await jsonRequest<PostRecord>("/api/app/posts", {
+    const form = new FormData();
+    form.append("salesperson_name", input.salespersonName || "");
+    form.append("salesperson_id", input.salespersonId || "");
+    form.append("style", input.style || "");
+    form.append("tone", input.tone || "");
+    form.append("customer_name", input.customerName || "");
+    form.append("vin", input.vin || "");
+    form.append("has_release", input.hasRelease ? "true" : "false");
+    form.append("has_video", input.hasVideo ? "true" : "false");
+
+    // Review media is uploaded only for dealerships that use the approval
+    // gate. Non-approval post logs remain small operational records.
+    if (input.requiresApproval) {
+      if (!input.caption?.trim() || !input.imageDataUrl) {
+        throw new Error("Approval submission is missing its creative");
+      }
+      const image = await dataUrlToBlob(input.imageDataUrl);
+      const extension =
+        image.type === "image/png"
+          ? "png"
+          : image.type === "image/webp"
+            ? "webp"
+            : "jpg";
+      form.append("caption", input.caption.trim());
+      form.append("disclosures", input.disclosures?.trim() || "");
+      form.append("creative_image", image, `approval-creative.${extension}`);
+    }
+
+    const res = await fetch("/api/app/posts", {
       method: "POST",
-      body: JSON.stringify({
-        salesperson_name: input.salespersonName || "",
-        salesperson_id: input.salespersonId || "",
-        style: input.style || "",
-        tone: input.tone || "",
-        customer_name: input.customerName || "",
-        vin: input.vin || "",
-        has_release: !!input.hasRelease,
-        has_video: !!input.hasVideo,
-        approval_status: input.requiresApproval ? "pending" : "n_a",
-      }),
+      credentials: "include",
+      body: form,
     });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const body = await res.json();
+        detail = body?.error || detail;
+      } catch {
+        /* not json */
+      }
+      throw new Error(`Post submission failed: ${detail}`);
+    }
+    return (await res.json()) as PostRecord;
   } catch (err) {
     // Logging a post should never break the user's flow.
     console.warn("[posts.logPost] failed (non-fatal)", err);
@@ -95,10 +148,33 @@ export const logPost = async (
   }
 };
 
+/**
+ * Read the approval state for a post submitted by this browser session. The
+ * server binds the post to a hash of the opaque session token, so knowing a
+ * post id alone is insufficient.
+ */
+export const getPostApprovalStatus = async (
+  postId: string,
+  signal?: AbortSignal,
+): Promise<PostApprovalStatus> =>
+  jsonRequest<PostApprovalStatus>(
+    `/api/app/posts/${encodeURIComponent(postId)}/status`,
+    { signal },
+  );
+
+/** Mark a completed render on the owner-scoped post record (idempotent). */
+export const markPostVideoGenerated = async (
+  postId: string,
+): Promise<PostVideoStatus> =>
+  jsonRequest<PostVideoStatus>(
+    `/api/app/posts/${encodeURIComponent(postId)}/video-generated`,
+    { method: "POST" },
+  );
+
 export const setApprovalStatus = async (
   postId: string,
-  status: ApprovalStatus,
-  approvedBy?: string
+  status: "approved" | "rejected",
+  approvedBy?: string,
 ): Promise<void> => {
   await jsonRequest(`/api/app/posts/${encodeURIComponent(postId)}`, {
     method: "PATCH",
@@ -111,14 +187,14 @@ export const setApprovalStatus = async (
 
 export const listPendingPosts = async (
   _dealerId: string,
-  limit = 50
+  limit = 50,
 ): Promise<PostRecord[]> => {
   const qs = new URLSearchParams({
     approval_status: "pending",
     limit: String(limit),
   });
   const res = await jsonRequest<{ items: PostRecord[] }>(
-    `/api/app/posts?${qs.toString()}`
+    `/api/app/posts?${qs.toString()}`,
   );
   return res.items || [];
 };
@@ -140,7 +216,7 @@ export interface LeaderboardEntry {
 export const getLeaderboard = async (
   _dealerId: string,
   since: Date,
-  until: Date = new Date()
+  until: Date = new Date(),
 ): Promise<LeaderboardEntry[]> => {
   const qs = new URLSearchParams({
     since: since.toISOString(),
@@ -148,7 +224,7 @@ export const getLeaderboard = async (
     limit: "1000",
   });
   const res = await jsonRequest<{ items: PostRecord[] }>(
-    `/api/app/posts?${qs.toString()}`
+    `/api/app/posts?${qs.toString()}`,
   );
   const items = res.items || [];
 

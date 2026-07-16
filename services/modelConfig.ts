@@ -1,27 +1,17 @@
 /**
  * Model configuration + routing.
  *
- * Each task has a primary model, a fallback model, and a set of tuned
- * generation parameters (temperature, topK, topP, max output tokens, thinking
- * budget). The router prefers `primary`; on transient failure or rate limit it
- * automatically retries with `fallback`. An emergency model is used as a last
- * resort.
- *
- * "Thinking budget" applies to Gemini 2.5/3.x models that support extended
- * reasoning. Higher budgets = better quality at the cost of latency + cost.
- * For real-time showroom use (a salesperson holding an iPad) we keep budgets
- * low on captions (snappy) and moderate on image generation (worth the wait).
+ * Each task has a primary model, a fallback model, and a small set of safe
+ * generation limits. Gemini 3.x is optimized for its default sampling values,
+ * so task behavior comes from explicit prompts instead of legacy temperature,
+ * top-k, or top-p overrides. The router prefers `primary`; on transient failure
+ * or rate limit it retries with `fallback`, then an emergency model.
  */
 
 export type ModelTier = "fast" | "quality" | "premium";
 
 export interface GenerationParams {
-  temperature?: number;
-  topK?: number;
-  topP?: number;
   maxOutputTokens?: number;
-  /** Tokens of reasoning the model is allowed to spend internally before producing the answer. 0 = disabled, -1 = unlimited. */
-  thinkingBudget?: number;
   /** Stop sequences that cut the response short. */
   stopSequences?: string[];
 }
@@ -33,45 +23,45 @@ export interface TaskConfig {
   params: GenerationParams;
   /** Optional Anthropic Claude model id used as cross-vendor fallback (set via env). */
   claudeFallback?: string;
+  /** Claude-only sampling control; never forwarded to Gemini 3.x. */
+  claudeTemperature?: number;
 }
 
 /**
  * Canonical model identifiers. Keep this list in sync with what Google has
  * actually released — picking nonexistent ids breaks generation silently.
  *
- * Current as of 2026-05. Update when a new model GAs.
+ * Current as of 2026-07-15. Update only after checking Google's live model
+ * catalog and deprecation notices. Stable ids are preferred where Google
+ * offers them; Veo remains on the Gemini API's documented preview ids because
+ * its stable `-001` ids are Vertex-only.
  */
 export const MODELS = {
   // ---- Text + multimodal reasoning ----
   text: {
-    primary: "gemini-3-flash-preview",
+    primary: "gemini-3.5-flash",
     fallback: "gemini-3.1-flash-lite",
     // 2.5 series stays available as emergency long-tail fallback in case 3.x has an outage.
     emergency: "gemini-2.5-flash",
   },
   // ---- Image editing (multimodal: input image + prompt → image) ----
-  // Primary = "Nano Banana 2" / Gemini 3 Pro Image — leads CNET 2026 image-
-  // model rankings for character consistency and UGC ad creatives, which is
-  // exactly what dealer delivery posts need (preserve the customer's face).
+  // Gemini 3 Pro Image is Google's professional-asset model and is the right
+  // quality-first default for branded dealer creative. Gemini 3.1 Flash Image
+  // is the current all-around, lower-latency fallback.
   image: {
-    primary: "gemini-3-pro-image-preview",
-    fallback: "gemini-3.1-flash-image-preview",
-    emergency: "gemini-2.5-flash-image",
+    primary: "gemini-3-pro-image",
+    fallback: "gemini-3.1-flash-image",
+    emergency: "gemini-3.1-flash-lite-image",
   },
-  // ---- Pure text-to-image (Imagen, Vertex) ----
-  imagen: {
-    primary: "imagen-4.0-generate-001",
-    fallback: "imagen-3.0-generate-002",
-  },
-  // ---- Video (Veo, Vertex) ----
-  // Veo video generation.
-  // veo-3.1-generate-preview is the latest available in v1beta.
+  // ---- Video (Veo through the Gemini API) ----
+  // The Gemini API and Vertex expose different IDs. This app calls
+  // generativelanguage.googleapis.com, whose current Veo 3.1 IDs retain the
+  // `-preview` suffix. The GA `-001` IDs belong to Vertex / Gemini Enterprise
+  // Agent Platform and return 404 on this transport.
   video: {
     primary: "veo-3.1-generate-preview",
-    fallback: "veo-3.0-generate-001",
+    fallback: "veo-3.1-fast-generate-preview",
     fast: "veo-3.1-fast-generate-preview",
-    lite: "veo-3.1-lite-generate-preview",
-    emergency: "veo-2.0-generate-001",
   },
 } as const;
 
@@ -79,7 +69,8 @@ export const MODELS = {
  * Anthropic Claude fallback ids. Text-only — Claude doesn't generate images.
  * Used when Gemini text generation paths fail AND
  * `VITE_ENABLE_CLAUDE_FALLBACK` / server-side `ANTHROPIC_API_KEY` is set.
- * Joe runs Claude Max, so this is essentially free overflow capacity.
+ * Anthropic API usage is separately metered; a Claude subscription does not
+ * cover these server-side API calls.
  */
 export const CLAUDE_MODELS = {
   // The single-turn caption + edit task is fast on Haiku and good on Sonnet.
@@ -91,66 +82,47 @@ export const CLAUDE_MODELS = {
 /**
  * OpenAI image fallback. Used as a last-tier fallback when ALL Gemini image
  * models in the chain exhaust (rate limit, outage, or persistent safety
- * block). GPT Image 2 (released April 2026, surfaced via the
- * `gpt-image-1` API id) is currently the strongest cross-vendor image model
- * for text-rendered-on-image, which is exactly what social posts need.
+ * block). GPT Image 2 is the current quality-first cross-vendor option for
+ * text-rendered social creative.
  *
  * Requires server-side `OPENAI_API_KEY` and client flag
  * `VITE_ENABLE_OPENAI_FALLBACK=true` to enable.
  */
 export const OPENAI_MODELS = {
-  image: "gpt-image-1",
+  image: "gpt-image-2",
 } as const;
 
 /**
- * Per-task tuned parameters. These are starting points — Joe can adjust live
- * by editing this file (no DB migration needed) and redeploying.
+ * Per-task output limits. Prompt instructions carry the tone and variation;
+ * Google recommends leaving Gemini 3.x sampling parameters at their defaults.
  */
 export const TASK_PARAMS: Record<string, GenerationParams> = {
-  // Caption generation: punchy, varied, low repetition.
+  // Captions are short by design; this cap prevents accidental essays.
   text_caption: {
-    temperature: 0.9,
-    topK: 40,
-    topP: 0.95,
     maxOutputTokens: 600,
   },
-  // Caption regenerate: turn up temperature so variant isn't a paraphrase.
+  // The regenerate prompt asks for a distinct angle without sampling overrides.
   text_caption_regenerate: {
-    temperature: 1.05,
-    topK: 60,
-    topP: 0.98,
     maxOutputTokens: 600,
   },
-  // Caption edit: low temperature so user's intent dominates.
+  // The edit prompt constrains the model to the user's requested change.
   text_caption_edit: {
-    temperature: 0.6,
-    topK: 30,
-    topP: 0.9,
     maxOutputTokens: 600,
   },
-  // Image generation (Gemini image preview): moderate temperature, no thinking.
+  // Image models manage their own reasoning and composition defaults.
   image_generate: {
-    temperature: 0.85,
-    topP: 0.95,
     maxOutputTokens: 4096,
   },
-  // Image edit (e.g. "make the text gold"): tighter so intent dominates.
+  // Image edit (e.g. "make the text gold").
   image_edit: {
-    temperature: 0.65,
-    topP: 0.9,
     maxOutputTokens: 4096,
   },
-  // Fun-mode artistic transform: high temperature, more creativity.
+  // Fun-mode creativity is described by the selected art-direction prompt.
   image_fun: {
-    temperature: 1.05,
-    topP: 0.98,
     maxOutputTokens: 4096,
   },
   // Video prompt distillation (text → Veo prompt).
   video_prompt: {
-    temperature: 0.75,
-    topK: 32,
-    topP: 0.92,
     maxOutputTokens: 800,
   },
 };
@@ -164,6 +136,7 @@ export const TASKS: Record<string, TaskConfig> = {
     fallback: MODELS.text.fallback,
     emergency: MODELS.text.emergency,
     claudeFallback: CLAUDE_MODELS.text_fast,
+    claudeTemperature: 0.8,
     params: TASK_PARAMS.text_caption,
   },
   caption_regenerate: {
@@ -171,6 +144,7 @@ export const TASKS: Record<string, TaskConfig> = {
     fallback: MODELS.text.fallback,
     emergency: MODELS.text.emergency,
     claudeFallback: CLAUDE_MODELS.text_fast,
+    claudeTemperature: 1,
     params: TASK_PARAMS.text_caption_regenerate,
   },
   caption_edit: {
@@ -178,6 +152,7 @@ export const TASKS: Record<string, TaskConfig> = {
     fallback: MODELS.text.primary,
     emergency: MODELS.text.emergency,
     claudeFallback: CLAUDE_MODELS.text_fast,
+    claudeTemperature: 0.4,
     params: TASK_PARAMS.text_caption_edit,
   },
   image_generate: {
@@ -201,7 +176,6 @@ export const TASKS: Record<string, TaskConfig> = {
   video: {
     primary: MODELS.video.primary,
     fallback: MODELS.video.fast,
-    emergency: MODELS.video.lite,
     params: TASK_PARAMS.video_prompt,
   },
 };
@@ -212,7 +186,7 @@ export const TASKS: Record<string, TaskConfig> = {
  */
 export const getModel = (
   type: keyof typeof MODELS,
-  variant: "primary" | "fallback" | "fast" | "lite" | "emergency" = "primary"
+  variant: "primary" | "fallback" | "fast" | "lite" | "emergency" = "primary",
 ): string => {
   const group = MODELS[type];
   if (!group) return "";

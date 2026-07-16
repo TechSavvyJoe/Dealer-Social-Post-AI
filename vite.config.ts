@@ -3,13 +3,15 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig(() => {
+  const devBackendUrl = process.env.DEV_BACKEND_URL || "http://127.0.0.1:8090";
+
   return {
     server: {
       port: 5173,
       host: "0.0.0.0",
       proxy: {
         "/api": {
-          target: "http://127.0.0.1:8090",
+          target: devBackendUrl,
           changeOrigin: true,
         },
       },
@@ -42,7 +44,7 @@ export default defineConfig(() => {
               .readFileSync(swOut, "utf8")
               .replace(
                 /const VERSION = "[^"]+";/,
-                `const VERSION = "${stamp}";`
+                `const VERSION = "${stamp}";`,
               );
             fs.writeFileSync(swOut, sw);
             console.log(`[sw] stamped version ${stamp} → ${swOut}`);
@@ -70,15 +72,16 @@ export default defineConfig(() => {
       rollupOptions: {
         output: {
           manualChunks(id) {
-            if (id.includes('node_modules')) {
-              if (id.includes('react') || id.includes('zustand')) return 'vendor';
-              if (id.includes('framer-motion') || id.includes('lucide-react')) return 'ui';
-              if (id.includes('@google/genai')) return 'ai';
+            if (id.includes("node_modules")) {
+              if (id.includes("react") || id.includes("zustand"))
+                return "vendor";
+              if (id.includes("framer-motion") || id.includes("lucide-react"))
+                return "ui";
             }
-          }
+          },
         },
       },
-      // Increase chunk size warning limit (we have large AI models)
+      // Keep warnings useful without flagging the intentionally grouped UI vendor chunk.
       chunkSizeWarningLimit: 1000,
       // Enable minification
       minify: "esbuild" as const,

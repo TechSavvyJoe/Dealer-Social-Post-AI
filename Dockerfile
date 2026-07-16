@@ -5,22 +5,28 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+ARG VITE_ENABLE_CLAUDE_FALLBACK=false
+ARG VITE_ENABLE_OPENAI_FALLBACK=false
+ENV VITE_ENABLE_CLAUDE_FALLBACK=${VITE_ENABLE_CLAUDE_FALLBACK}
+ENV VITE_ENABLE_OPENAI_FALLBACK=${VITE_ENABLE_OPENAI_FALLBACK}
 RUN npm run build
 
 # Stage 2: Setup PocketBase
 FROM ubuntu:22.04
 
-# Pinned to 0.22.21 to MATCH the JSVM API the hooks are written against
+# Pinned to the latest 0.22 maintenance release to MATCH the JSVM API the hooks
+# are written against while retaining the security and stability backports in
+# that compatibility line.
 # (pb_hooks/*.js use $app.dao(), c.request(), $apis.requestInfo — all removed
 # in PocketBase v0.23+). The committed ./pocketbase binary and
-# start-pocketbase.sh are also 0.22.21, so this is the version actually tested.
-# Building 0.38.0 here shipped hooks that throw at runtime (every /api/app/*
-# and /api/proxy/* route fails). To move to 0.38 later, migrate ALL hooks +
+# start-pocketbase.sh use the same 0.22 line. Building 0.39.x here would ship
+# hooks that throw at runtime (every /api/app/*
+# and /api/proxy/* route fails). To move to 0.39 later, migrate ALL hooks +
 # migrations to the v0.23+ API first, then bump this version + SHA together.
-# SHA256 is for pocketbase_0.22.21_linux_amd64.zip (verified against the
+# SHA256 is for pocketbase_0.22.37_linux_amd64.zip (verified against the
 # official GitHub release).
-ARG PB_VERSION=0.22.21
-ARG PB_SHA256="b63271053a2ea2c703f3438a8fc7db89775d6f5667765b72a5157bfaa35414e6"
+ARG PB_VERSION=0.22.37
+ARG PB_SHA256="71ea53559eff79e7afc80898bd63bdb04930003e2ee9440971c3d958c25c63d8"
 # Cache bust arg - change to force rebuild of frontend copy
 ARG CACHE_BUST=1
 
@@ -28,7 +34,6 @@ RUN apt-get update && apt-get install -y \
     unzip \
     ca-certificates \
     curl \
-    openssl \
     sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 

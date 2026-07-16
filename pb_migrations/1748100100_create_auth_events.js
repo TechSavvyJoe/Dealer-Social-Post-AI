@@ -49,10 +49,11 @@ migrate(
         },
       },
       {
-        name: "code_attempted",
-        type: "text",
+        // Never persist login credentials in the audit log. Presence is enough
+        // to distinguish an empty request from an attempted login.
+        name: "credential_present",
+        type: "bool",
         required: false,
-        options: { max: 32 },
       },
       { name: "ip", type: "text", required: false, options: { max: 64 } },
       {
@@ -99,5 +100,5 @@ migrate(
     } catch (e) {
       // already gone
     }
-  }
+  },
 );

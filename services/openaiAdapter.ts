@@ -16,10 +16,10 @@ const PROXY_PATH = "/api/proxy/openai/v1/images/generations";
 
 interface OpenAIImageOptions {
   prompt: string;
-  /** Size — OpenAI supports "1024x1024", "1024x1792", "1792x1024" for gpt-image-1. */
-  size?: "1024x1024" | "1024x1792" | "1792x1024";
-  /** Quality — "standard" or "hd". HD costs more but renders text better. */
-  quality?: "standard" | "hd";
+  /** Standard GPT Image sizes; GPT Image 2 also supports bounded custom sizes. */
+  size?: "1024x1024" | "1024x1536" | "1536x1024";
+  /** GPT Image quality tier. */
+  quality?: "low" | "medium" | "high";
 }
 
 interface OpenAIImageResponse {
@@ -34,7 +34,7 @@ const proxyHeaders = (): Record<string, string> => ({
 });
 
 /**
- * Generate an image via OpenAI GPT Image (model id `gpt-image-1`). Returns
+ * Generate an image via OpenAI GPT Image (model id `gpt-image-2`). Returns
  * a base64 data URL ready to assign as `<img src>`.
  *
  * Throws if the OpenAI fallback flag is disabled or the proxy returns a
@@ -42,11 +42,11 @@ const proxyHeaders = (): Record<string, string> => ({
  * up the original Gemini error.
  */
 export const generateImageViaOpenAI = async (
-  options: OpenAIImageOptions
+  options: OpenAIImageOptions,
 ): Promise<string> => {
   if (!FLAGS.enableOpenAIFallback) {
     throw new Error(
-      "OpenAI fallback is disabled (set VITE_ENABLE_OPENAI_FALLBACK=true)"
+      "OpenAI fallback is disabled (set VITE_ENABLE_OPENAI_FALLBACK=true)",
     );
   }
 
@@ -54,9 +54,9 @@ export const generateImageViaOpenAI = async (
     model: OPENAI_MODELS.image,
     prompt: options.prompt,
     size: options.size || "1024x1024",
-    quality: options.quality || "hd",
+    quality: options.quality || "high",
     n: 1,
-    response_format: "b64_json",
+    output_format: "png",
   };
 
   const res = await fetch(PROXY_PATH, {

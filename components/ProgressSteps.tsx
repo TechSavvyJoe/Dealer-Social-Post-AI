@@ -1,15 +1,15 @@
-import React from 'react';
-import { motion } from 'framer-motion';
-import { Check } from 'lucide-react';
-import { AppStep } from '../types';
-import { cn } from '../utils/classNames';
+import React from "react";
+import { motion } from "framer-motion";
+import { Check } from "lucide-react";
+import { AppStep } from "../types";
+import { cn } from "../utils/classNames";
 
 const stepOrder: Array<{ step: AppStep; label: string }> = [
-  { step: AppStep.LOGIN, label: 'Sign in' },
-  { step: AppStep.CAPTURE, label: 'Capture' },
-  { step: AppStep.CUSTOMIZE, label: 'Customize' },
-  { step: AppStep.GENERATING, label: 'Generating' },
-  { step: AppStep.RESULT, label: 'Results' },
+  { step: AppStep.LOGIN, label: "Sign in" },
+  { step: AppStep.CAPTURE, label: "Capture" },
+  { step: AppStep.CUSTOMIZE, label: "Customize" },
+  { step: AppStep.GENERATING, label: "Generating" },
+  { step: AppStep.RESULT, label: "Results" },
 ];
 
 interface ProgressStepsProps {
@@ -21,7 +21,7 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
 
   return (
     <nav
-      className="w-full max-w-screen-2xl px-2 md:px-4 mx-auto py-3 md:py-4 sticky top-0 z-20 backdrop-blur-md bg-surface-900/72 border-b border-white/[0.06]"
+      className="w-full max-w-screen-2xl px-2 md:px-4 mx-auto py-3 md:py-4 sticky top-0 z-20 backdrop-blur-md bg-surface-900/70 border-b border-white/[0.06]"
       aria-label="Progress"
     >
       <ol className="flex flex-wrap items-center justify-center gap-2 sm:gap-4">
@@ -36,29 +36,36 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
               <div className="flex flex-col items-center gap-1.5">
                 <motion.div
                   className={cn(
-                    'relative flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full',
-                    'border transition-all duration-300',
-                    'font-semibold text-xs sm:text-sm',
-                    isActive && cn(
-                      'border-primary-400 bg-primary-500/18 text-surface-50',
-                      'shadow-lg shadow-primary-950/20'
-                    ),
-                    isComplete && cn(
-                      'border-success-500/50 bg-success-500/14 text-success-100'
-                    ),
-                    isUpcoming && 'border-white/[0.08] bg-surface-800/45 text-surface-400'
+                    "relative flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full",
+                    "border transition-all duration-300",
+                    "font-semibold text-xs sm:text-sm",
+                    isActive &&
+                      cn(
+                        "border-primary-400 bg-primary-500/20 text-surface-50",
+                        "shadow-lg shadow-primary-950/20",
+                      ),
+                    isComplete &&
+                      cn(
+                        "border-success-500/50 bg-success-500/10 text-success-100",
+                      ),
+                    isUpcoming &&
+                      "border-white/[0.08] bg-surface-800/45 text-surface-400",
                   )}
                   initial={false}
                   animate={{
                     scale: isActive ? 1.04 : 1,
                   }}
-                  transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                  transition={{ type: "spring", stiffness: 400, damping: 25 }}
                 >
                   {isComplete ? (
                     <motion.div
                       initial={{ scale: 0, rotate: -180 }}
                       animate={{ scale: 1, rotate: 0 }}
-                      transition={{ type: 'spring', stiffness: 500, damping: 20 }}
+                      transition={{
+                        type: "spring",
+                        stiffness: 500,
+                        damping: 20,
+                      }}
                     >
                       <Check className="h-4 w-4 sm:h-5 sm:w-5" />
                     </motion.div>
@@ -70,11 +77,11 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
                 {/* Label */}
                 <motion.span
                   className={cn(
-                    'text-[10px] sm:text-xs tracking-wide font-medium whitespace-nowrap',
-                    'transition-all duration-300',
-                    isActive && 'text-surface-50 font-semibold',
-                    isComplete && 'text-success-300',
-                    isUpcoming && 'text-surface-500'
+                    "text-[10px] sm:text-xs tracking-wide font-medium whitespace-nowrap",
+                    "transition-all duration-300",
+                    isActive && "text-surface-50 font-semibold",
+                    isComplete && "text-success-300",
+                    isUpcoming && "text-surface-500",
                   )}
                   initial={false}
                   animate={{
@@ -95,8 +102,8 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
                     {/* Progress line */}
                     <motion.div
                       className={cn(
-                        'absolute inset-0 origin-left',
-                        isComplete ? 'bg-success-400' : 'bg-primary-400'
+                        "absolute inset-0 origin-left",
+                        isComplete ? "bg-success-400" : "bg-primary-400",
                       )}
                       initial={{ scaleX: 0 }}
                       animate={{
