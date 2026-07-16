@@ -65,6 +65,9 @@ const AppContent: React.FC = () => {
     generateCaptionVariant,
   } = useAppController();
 
+  // Must run before any conditional return — React requires a stable hook order.
+  const isImpersonating = useAppStore((s) => s.isImpersonating);
+
   // Power-user shortcuts. Step-aware so each key does the smart thing where you are.
   useKeyboardShortcuts({
     onCancel: () => {
@@ -126,8 +129,6 @@ const AppContent: React.FC = () => {
       </main>
     );
   }
-
-  const isImpersonating = useAppStore((s) => s.isImpersonating);
 
   return (
     <div
