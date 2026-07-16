@@ -29,6 +29,12 @@ Quick reference:
   `VITE_POCKETBASE_URL=http://127.0.0.1:8090`, and `GEMINI_API_KEY` (only needed for AI
   generation). Without a Gemini key the app runs and login works, but any
   image/caption/video generation fails and `/api/app/health` returns `ok:false` (503).
+- **AI generation** (captions + branded images) routes through the session-gated
+  `/api/proxy/*` PocketBase route, which appends `GEMINI_API_KEY` server-side and calls
+  the Gemini API. The frontend model chain (`services/modelConfig.ts`) prefers preview
+  models (e.g. `gemini-3-*`) and falls back to GA models like `gemini-2.5-flash` /
+  `gemini-2.5-flash-image`, so generation works even if a preview model id isn't
+  available to your key.
 - **Fresh DB bootstrap:** `pb_data/` is gitignored, so each fresh machine bootstraps the
   schema from `pb_migrations/` on first `serve`. If a JS migration throws, PocketBase
   rolls the whole transaction back and refuses to start (you'll see only an empty
@@ -45,7 +51,16 @@ Quick reference:
   then log in with `990011` → routes to `DealerAdminDashboard`, where the "Team" tab adds
   salespeople (`POST /api/app/salespeople`, JSON — this path works).
 
-### Known pre-existing bug (not environment-related)
+### Runtime-compat fixes applied during setup
+This codebase mixes PocketBase 0.22 and 0.23+ JSVM idioms; a few 0.23-style calls
+broke at runtime on the pinned 0.22 binary and were corrected so the app runs:
+- `pb_migrations/1750100000_*`: field lookup now uses `schema.getFieldByName()` (fresh
+  DB bootstrap; PB would otherwise refuse to start).
+- `pb_hooks/main.pb.js` proxy: path via `c.pathParam("path")`, request via `c.request()`,
+  body via `requestInfo.data` (AI generation would otherwise fail with "Missing API path"
+  / empty upstream body).
+
+### Known pre-existing bug (not fixed here)
 - Dealer create/update via the super-admin UI fails with
   `unsupported request content-type`. The handlers for `POST /api/app/dealers` and
   `PATCH /api/app/dealers/:id` in `pb_hooks/main.pb.js` call
