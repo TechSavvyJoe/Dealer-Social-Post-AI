@@ -42,12 +42,11 @@ Quick reference:
   `_migrations` table). Migrations use PB 0.22 accessors (e.g. `schema.getFieldByName()`).
 
 ### How to log in / test end to end
-- Super-admin: log in with the `ADMIN_DEALER_CODE` value on the dialpad → routes to the
-  multi-dealer `AdminDashboard`.
-- Dealer manager (dealer-admin) and salesperson roster flows need a dealer that has an
-  `admin_code`. Since these are seeded per-environment (not committed), create test data
-  directly, e.g.:
-  `sqlite3 pb_data/data.db "INSERT INTO dealers (id, code, name, admin_code, created, updated) VALUES ('demodlr0000001a','770011','Sunrise Auto Group','990011', strftime('%Y-%m-%d %H:%M:%fZ'), strftime('%Y-%m-%d %H:%M:%fZ'));"`
-  then log in with the dealer `code` (`770011`) for the salesperson capture/generate flow,
-  or the `admin_code` (`990011`) for the `DealerAdminDashboard` (Team tab adds salespeople
-  via `POST /api/app/salespeople`).
+- Super-admin: **System admin** tab on login with `ADMIN_DEALER_CODE` → multi-dealer
+  hub (`AdminDashboard`) with tabs **Dealers | Admins | Users**. Use **Open as** to
+  impersonate any manager or salesperson.
+- Store access uses **personal 4-digit codes** on the people roster (`salespeople`
+  collection with `role` = `manager` | `salesperson`), not shared dealer codes.
+  Create people from the hub (or Team tab for salespeople only as a manager).
+- Example seed (after migrations): create a dealer via the hub UI, then add a manager
+  and a salesperson with unique 4-digit pins. Login with those pins on **Personal code**.

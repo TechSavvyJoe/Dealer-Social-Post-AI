@@ -20,6 +20,13 @@ import { Input, Textarea } from "./ui/Input";
 import { Dealer, StyleOption } from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { cn } from "../utils/classNames";
+import { HoursPicker } from "./HoursPicker";
+import {
+  defaultWeekHours,
+  parseHoursString,
+  serializeHours,
+  type WeekHours,
+} from "../utils/hoursFormat";
 
 interface DealerSetupWizardProps {
   dealer: Dealer;
@@ -75,7 +82,10 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
   const [website, setWebsite] = useState(dealer.website || "");
   const [phone, setPhone] = useState(dealer.phone || "");
   const [address, setAddress] = useState(dealer.address || "");
-  const [hours, setHours] = useState(dealer.hours || "");
+  const [hoursWeek, setHoursWeek] = useState<WeekHours>(
+    () => parseHoursString(dealer.hours) || defaultWeekHours(),
+  );
+  const hours = serializeHours(hoursWeek);
   const [tagline, setTagline] = useState(dealer.tagline || "");
 
   // Social
@@ -329,13 +339,10 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 fullWidth
                 className="bg-white/5 border-white/10 focus:border-primary-400"
               />
-              <Input
-                label="Hours"
-                value={hours}
-                onChange={(e) => setHours(e.target.value)}
-                placeholder="Mon–Fri 9–8, Sat 9–6, Sun closed"
-                fullWidth
-                className="bg-white/5 border-white/10 focus:border-primary-400"
+              <HoursPicker
+                value={hoursWeek}
+                onChange={setHoursWeek}
+                preview={hours}
               />
               <Input
                 label="Tagline"

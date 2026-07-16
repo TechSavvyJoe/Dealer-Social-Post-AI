@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dealer } from "../types";
 import * as db from "../services/database";
@@ -7,136 +7,126 @@ import { logError } from "../utils/telemetry";
 import { motion } from "framer-motion";
 import { Button } from "./ui/Button";
 import { Skeleton } from "./ui/Skeleton";
-import { RefreshCw, Pencil } from "lucide-react";
-import { Leaderboard } from "./Leaderboard";
-import { ApprovalQueue } from "./ApprovalQueue";
-import { PostHistory } from "./PostHistory";
-import { DealerSetupWizard } from "./DealerSetupWizard";
+import {
+  Building2,
+  Pencil,
+  RefreshCw,
+  Shield,
+  UserRound,
+  Users,
+  Eye,
+  Loader2,
+} from "lucide-react";
 import { SystemHealthPanel } from "./SystemHealthPanel";
 import { ConfirmationModal } from "./ConfirmationModal";
 import { useAppStore } from "../stores/appStore";
 import { useToast } from "./ui/Toast";
 import { dataUrlToBlob, urlToDataUrl } from "../utils/imageUtils";
+import {
+  listPeople,
+  addPerson,
+  updatePerson,
+  deactivatePerson,
+  type Person,
+  type PersonRole,
+} from "../services/salespeople";
+import { HoursPicker } from "./HoursPicker";
+import {
+  defaultWeekHours,
+  parseHoursString,
+  serializeHours,
+  type WeekHours,
+} from "../utils/hoursFormat";
+import { cn } from "../utils/classNames";
 
-const DEALER_CODE_LENGTH = 6;
-const DEALER_CODE_PATTERN = /^\d{6}$/;
+type HubTab = "dealers" | "admins" | "users";
 
 const fieldClassName =
   "mt-1 block w-full rounded-xl border border-surface-700 bg-surface-900/70 px-4 py-3 text-surface-50 placeholder:text-surface-500 transition-colors focus:border-primary-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
 const labelClassName = "block text-sm font-medium text-surface-300";
 
-const DealerCard: React.FC<{
-  dealer: Dealer;
-  onDelete: (id: string) => void;
-  onEdit: (dealer: Dealer) => void;
-  isDeleting: boolean;
-  protectedDealerId?: string;
-}> = ({ dealer, onDelete, onEdit, isDeleting, protectedDealerId }) => {
-  const isActiveAdminDealer = dealer.id === protectedDealerId;
-
-  return (
-    <motion.div
-      className="rounded-2xl border border-white/10 bg-surface-900/55 p-4 shadow-elevation-1 backdrop-blur-xl transition-colors hover:border-primary-500/30 hover:bg-surface-900/75 sm:p-6"
-      layout
-    >
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-center gap-4">
-          {dealer.logo ? (
-            <img
-              src={dealer.logo}
-              alt={`${dealer.name} Logo`}
-              className="h-16 w-16 rounded-xl border border-white/10 bg-surface-950/50 object-contain p-2"
-            />
-          ) : (
-            <div className="flex h-16 w-16 items-center justify-center rounded-xl border border-primary-500/20 bg-primary-500/10">
-              <Icon
-                type="building-office"
-                className="h-8 w-8 text-primary-300"
-              />
-            </div>
-          )}
-          <div className="min-w-0">
-            <h3 className="truncate text-xl font-bold text-surface-50">
-              {dealer.name}
-            </h3>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-surface-400">
-              <span>
-                Code:{" "}
-                <span className="font-mono font-semibold tracking-wider text-primary-300">
-                  {dealer.code || "N/A"}
-                </span>
-              </span>
-              <span className="hidden text-surface-700 sm:inline">|</span>
-              <span className="text-xs text-surface-500">ID: {dealer.id}</span>
-            </div>
-          </div>
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => onEdit(dealer)}
-            title="Edit Dealer"
-          >
-            <Pencil className="w-5 h-5" />
-          </Button>
-          <Button
-            variant="danger"
-            size="icon"
-            onClick={() => onDelete(dealer.id)}
-            disabled={isDeleting || isActiveAdminDealer}
-            title={
-              isActiveAdminDealer
-                ? "Cannot delete the active admin dealership"
-                : "Delete Dealer"
-            }
-          >
-            <Icon type="trash" className="w-5 h-5" />
-          </Button>
-        </div>
-      </div>
-    </motion.div>
-  );
-};
+const isSystemDealer = (dealer: Dealer, sessionDealerId?: string) =>
+  dealer.id === sessionDealerId ||
+  dealer.name?.toUpperCase() === "SYSTEM ADMIN";
 
 export const AdminDashboard: React.FC = () => {
   const queryClient = useQueryClient();
   const toast = useToast();
   const sessionDealer = useAppStore((s) => s.currentDealer);
-  const [formState, setFormState] = useState({
-    name: "",
-    code: "",
-    admin_code: "",
-    logoUrl: "",
-    logoFile: null as File | null,
-  });
-  const [showForm, setShowForm] = useState(false);
+  const impersonatePerson = useAppStore((s) => s.impersonatePerson);
+
+  const [tab, setTab] = useState<HubTab>("dealers");
+  const [dealerFilter, setDealerFilter] = useState<string>("");
+  const [showDealerForm, setShowDealerForm] = useState(false);
   const [editingDealer, setEditingDealer] = useState<Dealer | null>(null);
-  // Dealer awaiting delete confirmation. Deleting a dealership is permanent and
-  // irreversible, so it must go through a confirm step rather than fire on a
-  // single click.
   const [dealerPendingDelete, setDealerPendingDelete] = useState<Dealer | null>(
     null,
   );
+  const [formState, setFormState] = useState({
+    name: "",
+    logoUrl: "",
+    logoFile: null as File | null,
+  });
+  const [hoursWeek, setHoursWeek] = useState<WeekHours>(defaultWeekHours());
 
-  // --- DATA FETCHING ---
+  const [personForm, setPersonForm] = useState({
+    name: "",
+    pin: "",
+    dealerId: "",
+  });
+  const [savingPerson, setSavingPerson] = useState(false);
+  const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
+
   const { data, error, isPending, refetch } = useQuery({
     queryKey: ["dealers"],
     queryFn: () => db.getDealers(),
   });
 
-  // --- MUTATIONS ---
+  const dealers = data ?? [];
+  const storeDealers = useMemo(
+    () => dealers.filter((d) => !isSystemDealer(d, sessionDealer?.id)),
+    [dealers, sessionDealer?.id],
+  );
+
+  const peopleRole: PersonRole = tab === "admins" ? "manager" : "salesperson";
+
+  const {
+    data: people = [],
+    isPending: peopleLoading,
+    refetch: refetchPeople,
+  } = useQuery({
+    queryKey: ["people", peopleRole, dealerFilter || "all"],
+    queryFn: () =>
+      listPeople({
+        includeInactive: true,
+        role: peopleRole,
+        dealerId: dealerFilter || undefined,
+      }),
+    enabled: tab === "admins" || tab === "users",
+  });
+
+  const dealerNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const d of dealers) map.set(d.id, d.name);
+    return map;
+  }, [dealers]);
+
+  const resetDealerForm = () => {
+    setFormState({ name: "", logoUrl: "", logoFile: null });
+    setHoursWeek(defaultWeekHours());
+    setShowDealerForm(false);
+    setEditingDealer(null);
+  };
+
   const addMutation = useMutation({
     mutationFn: db.addDealerWithFile,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dealers"] });
       toast.success("Dealer created.");
-      resetForm();
+      resetDealerForm();
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : "Failed to create dealer.",
-      );
+      toast.error(err instanceof Error ? err.message : "Failed to create dealer.");
     },
   });
 
@@ -151,12 +141,10 @@ export const AdminDashboard: React.FC = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dealers"] });
       toast.success("Dealer updated.");
-      resetForm();
+      resetDealerForm();
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : "Failed to update dealer.",
-      );
+      toast.error(err instanceof Error ? err.message : "Failed to update dealer.");
     },
   });
 
@@ -167,106 +155,38 @@ export const AdminDashboard: React.FC = () => {
       toast.success("Dealer deleted.");
     },
     onError: (err) => {
-      // Was silent before — a failed delete left the dealer on screen with no
-      // signal. Surface it (rendered below) and log for diagnostics.
       logError("admin.dealer.delete.failed", {
         message: err instanceof Error ? err.message : String(err),
       });
-      toast.error(
-        err instanceof Error ? err.message : "Failed to delete dealer.",
-      );
+      toast.error(err instanceof Error ? err.message : "Failed to delete dealer.");
     },
   });
-
-  // --- HELPERS ---
-  const resetForm = () => {
-    setFormState({
-      name: "",
-      code: "",
-      admin_code: "",
-      logoUrl: "",
-      logoFile: null,
-    });
-    setShowForm(false);
-    setEditingDealer(null);
-  };
 
   const handleEditDealer = (dealer: Dealer) => {
     setEditingDealer(dealer);
     setFormState({
       name: dealer.name,
-      code: dealer.code || "",
-      admin_code: (dealer as any).admin_code || "",
       logoUrl: "",
       logoFile: null,
     });
-    setShowForm(true);
+    setHoursWeek(parseHoursString(dealer.hours) || defaultWeekHours());
+    setShowDealerForm(true);
   };
 
-  // --- HANDLERS ---
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    // Dealer login codes are fixed-width numeric codes.
-    if (
-      name === "code" &&
-      (value.length > DEALER_CODE_LENGTH || !/^\d*$/.test(value))
-    ) {
-      return;
-    }
-    setFormState((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null;
-    setFormState((prev) => ({
-      ...prev,
-      logoFile: file,
-      logoUrl: file ? "" : prev.logoUrl,
-    }));
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleDealerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formState.name.trim()) return;
 
-    const isProtectedAdminDealer = editingDealer?.id === sessionDealer?.id;
-    if (
-      !isProtectedAdminDealer &&
-      !DEALER_CODE_PATTERN.test(formState.code.trim())
-    ) {
-      toast.error("Dealer code must be exactly 6 digits.");
-      return;
-    }
-    if (
-      formState.admin_code.trim() &&
-      !/^[A-Za-z0-9]{4,12}$/.test(formState.admin_code.trim())
-    ) {
-      toast.error("Manager code must be 4–12 letters or numbers.");
-      return;
-    }
-
     const formData = new FormData();
     formData.append("name", formState.name.trim());
+    formData.append("hours", serializeHours(hoursWeek));
 
-    // Super-admins may rotate dealership credentials. The active system-admin
-    // record stays tied to ADMIN_DEALER_CODE and is rotated through the secret
-    // manager runbook instead of this form.
-    if (!isProtectedAdminDealer) {
-      formData.append("code", formState.code.trim());
-    }
-
-    // admin_code is editable any time. Empty string clears it (no dealer-admin
-    // access until a new code is set).
-    formData.append("admin_code", formState.admin_code.trim());
-
-    // Prioritize file upload, fallback to URL
     if (formState.logoFile) {
       formData.append("logo", formState.logoFile);
     } else if (formState.logoUrl.trim()) {
       try {
         const normalizedUrl = formState.logoUrl.trim();
         const blob = await dataUrlToBlob(await urlToDataUrl(normalizedUrl));
-        // Extract filename from URL or use a default
         const pathname = new URL(normalizedUrl).pathname;
         const sourceName = pathname.split("/").pop() || "logo";
         const safeName = sourceName.replace(/[^A-Za-z0-9._-]/g, "_");
@@ -275,12 +195,10 @@ export const AdminDashboard: React.FC = () => {
         const filename = safeName.includes(".")
           ? safeName
           : `${safeName}.${extension}`;
-        const file = new File([blob], filename, { type: blob.type });
-        formData.append("logo", file);
-      } catch (err) {
-        console.error("Failed to fetch logo from URL:", err);
+        formData.append("logo", new File([blob], filename, { type: blob.type }));
+      } catch {
         toast.error(
-          "Could not load that logo URL. Upload a file instead or use a publicly accessible image.",
+          "Could not load that logo URL. Upload a file instead or use a public image.",
         );
         return;
       }
@@ -293,311 +211,521 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  const dealers = data ?? [];
-
-  // First-time setup hint — show the wizard if the logged-in (admin) dealer
-  // hasn't filled in their own brand voice + color yet. Once dismissed via
-  // localStorage flag, hide forever. The wizard updates the dealer record
-  // via the same /api/app/dealers PATCH endpoint the form uses.
-  const [setupDismissed, setSetupDismissed] = React.useState(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      return localStorage.getItem("dsp.setupDismissed") === "1";
-    } catch {
-      return false;
+  const handleAddPerson = async () => {
+    if (!personForm.name.trim()) {
+      toast.error("Name is required.");
+      return;
     }
-  });
-  const showSetup =
-    !setupDismissed &&
-    !!sessionDealer &&
-    (!sessionDealer.brand_voice || !sessionDealer.brand_color);
-
-  const dismissSetup = () => {
-    setSetupDismissed(true);
+    const dealerId = personForm.dealerId || dealerFilter;
+    if (!dealerId) {
+      toast.error("Select a dealership for this person.");
+      return;
+    }
+    if (personForm.pin && !/^\d{4}$/.test(personForm.pin)) {
+      toast.error("Access code must be exactly 4 digits (or leave blank to auto-generate).");
+      return;
+    }
+    setSavingPerson(true);
     try {
-      localStorage.setItem("dsp.setupDismissed", "1");
-    } catch {
-      /* ignore */
+      await addPerson({
+        name: personForm.name.trim(),
+        pin: personForm.pin || undefined,
+        role: peopleRole,
+        dealer: dealerId,
+      });
+      toast.success(
+        peopleRole === "manager" ? "Manager added." : "User added.",
+      );
+      setPersonForm({ name: "", pin: "", dealerId: dealerFilter });
+      await refetchPeople();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to add person.");
+    } finally {
+      setSavingPerson(false);
     }
   };
 
-  const handleWizardSave = async (fields: Record<string, string | boolean>) => {
-    if (!sessionDealer) throw new Error("No active session");
-    const fd = new FormData();
-    Object.entries(fields).forEach(([k, v]) => {
-      fd.append(k, typeof v === "boolean" ? (v ? "true" : "false") : v);
-    });
-    const updated = await db.updateDealerWithFile(sessionDealer.id, fd);
-    queryClient.invalidateQueries({ queryKey: ["dealers"] });
-    // Optimistically merge into the live session dealer so the new brand
-    // color + voice take effect without a re-login.
-    useAppStore.setState((s) => ({
-      currentDealer: s.currentDealer
-        ? { ...s.currentDealer, ...fields, ...updated }
-        : s.currentDealer,
-    }));
-    return updated;
+  const handleTogglePerson = async (person: Person) => {
+    try {
+      await updatePerson(person.id, { active: !person.active });
+      await refetchPeople();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Update failed.");
+    }
   };
+
+  const handleOpenAs = async (person: Person) => {
+    if (!person.active) {
+      toast.error("Reactivate this person before opening as them.");
+      return;
+    }
+    setImpersonatingId(person.id);
+    try {
+      await impersonatePerson(person.id);
+      toast.success(`Now viewing as ${person.name}.`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not open as this person.",
+      );
+    } finally {
+      setImpersonatingId(null);
+    }
+  };
+
+  const tabs: Array<{ key: HubTab; label: string; icon: typeof Building2 }> = [
+    { key: "dealers", label: "Dealers", icon: Building2 },
+    { key: "admins", label: "Admins", icon: Shield },
+    { key: "users", label: "Users", icon: Users },
+  ];
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 p-2 sm:p-4">
-      {showSetup && sessionDealer && (
-        <DealerSetupWizard
-          dealer={sessionDealer}
-          onSave={handleWizardSave}
-          onDismiss={dismissSetup}
-        />
-      )}
-
-      {/* System health — super admin's first-pane diagnostic */}
       <SystemHealthPanel />
 
-      {/* Leaderboard at the top — it's the most-checked number on this screen */}
-      <Leaderboard />
-
-      {/* Approval queue — only renders when the dealer has approvals enabled OR there are pending items */}
-      <ApprovalQueue />
-
-      {/* Full searchable post history with CSV export */}
-      <PostHistory />
-
       <div className="rounded-2xl border border-white/10 bg-surface-900/45 p-5 shadow-elevation-2 backdrop-blur-xl sm:p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="text-3xl font-bold text-surface-50 sm:text-4xl">
-              Admin dashboard
+              System Admin
             </h2>
             <p className="mt-2 text-sm text-surface-400">
-              Manage dealerships, login codes, approvals, and production health.
+              Manage dealerships, store managers, and salespeople. Open any
+              person&apos;s workspace without re-entering codes.
             </p>
           </div>
-          <div className="flex w-full items-center gap-2 sm:w-auto">
-            <Button
-              variant="outline"
-              size="sm"
-              leftIcon={<RefreshCw className="w-4 h-4" />}
-              onClick={() => refetch()}
-              disabled={isPending}
-            >
-              {isPending ? "Refreshing…" : "Refresh"}
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                if (showForm) {
-                  resetForm();
-                } else {
-                  setShowForm(true);
-                }
+          <Button
+            variant="outline"
+            size="sm"
+            leftIcon={<RefreshCw className="h-4 w-4" />}
+            onClick={() => {
+              void refetch();
+              if (tab !== "dealers") void refetchPeople();
+            }}
+            disabled={isPending}
+          >
+            {isPending ? "Refreshing…" : "Refresh"}
+          </Button>
+        </div>
+
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div
+            className="inline-flex w-full gap-1 rounded-xl border border-surface-800 bg-surface-950/60 p-1 sm:w-auto"
+            role="tablist"
+            aria-label="System admin sections"
+          >
+            {tabs.map(({ key, label, icon: TabIcon }) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={tab === key}
+                onClick={() => {
+                  setTab(key);
+                  if (key !== "dealers") {
+                    setPersonForm((p) => ({
+                      ...p,
+                      dealerId: dealerFilter || p.dealerId,
+                    }));
+                  }
+                }}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors sm:flex-none",
+                  tab === key
+                    ? "bg-primary-500/30 text-primary-100"
+                    : "text-surface-400 hover:text-surface-200",
+                )}
+              >
+                <TabIcon className="h-4 w-4" />
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label htmlFor="dealer-filter" className="sr-only">
+              Filter by dealership
+            </label>
+            <select
+              id="dealer-filter"
+              value={dealerFilter}
+              onChange={(e) => {
+                setDealerFilter(e.target.value);
+                setPersonForm((p) => ({
+                  ...p,
+                  dealerId: e.target.value || p.dealerId,
+                }));
               }}
-              leftIcon={<Icon type="plus" className="w-4 h-4" />}
+              className="min-w-[12rem] flex-1 rounded-xl border border-surface-700 bg-surface-900/70 px-3 py-2 text-sm text-surface-100 sm:flex-none"
             >
-              {showForm ? "Cancel" : "Add Dealer"}
-            </Button>
+              <option value="">All dealerships</option>
+              {storeDealers.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </div>
 
-      {/* Add/Edit Dealer Form */}
-      {showForm && (
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="rounded-2xl border border-white/10 bg-surface-900/70 p-5 shadow-elevation-3 backdrop-blur-xl sm:p-6"
-        >
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="flex items-center justify-between mb-2">
-              <div>
-                <h3 className="text-xl font-semibold text-surface-50">
-                  {editingDealer ? `Edit: ${editingDealer.name}` : "New Dealer"}
-                </h3>
-                <p className="mt-1 text-sm text-surface-400">
-                  {editingDealer
-                    ? editingDealer.id === sessionDealer?.id
-                      ? "Update dealership details. Rotate this system-admin code with the deployment secret runbook."
-                      : "Update dealership details or rotate its team and manager access codes."
-                    : "Create a dealership with a unique 6-digit login code."}
-                </p>
-              </div>
-              {editingDealer?.logo && (
-                <img
-                  src={editingDealer.logo}
-                  alt="Current logo"
-                  className="h-12 w-12 rounded-xl border border-white/10 bg-surface-950/50 object-contain p-2"
-                />
-              )}
-            </div>
-            <div>
-              <label htmlFor="name" className={labelClassName}>
-                Dealer Name *
-              </label>
-              <input
-                id="name"
-                name="name"
-                type="text"
-                value={formState.name}
-                onChange={handleInputChange}
-                required
-                className={fieldClassName}
-                placeholder="e.g., Midtown Motors"
-              />
-            </div>
-            <div>
-              <label htmlFor="code" className={labelClassName}>
-                Dealer Code (6 digits) *
-                <span className="ml-2 text-xs text-surface-400">
-                  {editingDealer?.id === sessionDealer?.id
-                    ? "Managed by the ADMIN_DEALER_CODE deployment secret"
-                    : editingDealer
-                      ? "Changing it revokes this dealership's existing sessions"
-                      : "Used for login (e.g., 123456)"}
-                </span>
-              </label>
-              <input
-                id="code"
-                name="code"
-                type="text"
-                value={formState.code}
-                onChange={handleInputChange}
-                required
-                disabled={editingDealer?.id === sessionDealer?.id}
-                maxLength={DEALER_CODE_LENGTH}
-                pattern="\d{6}"
-                inputMode="numeric"
-                placeholder="e.g., 123456"
-                className={`${fieldClassName} font-mono text-lg tracking-[0.2em]`}
-              />
-            </div>
-
-            {/* Manager admin code — when set, the GSM can log in with this
-                code and land on the per-dealership admin dashboard. Leave
-                blank to disable manager access for this dealer. */}
-            <div>
-              <label htmlFor="admin_code" className={labelClassName}>
-                Manager Admin Code (optional)
-                <span className="ml-2 text-xs text-surface-400">
-                  4–12 chars. Separate code for the GSM/GM to access this
-                  dealership's settings.
-                </span>
-              </label>
-              <input
-                id="admin_code"
-                name="admin_code"
-                type="text"
-                value={formState.admin_code}
-                onChange={(e) =>
-                  setFormState((prev) => ({
-                    ...prev,
-                    admin_code: e.target.value
-                      .replace(/[^A-Za-z0-9]/g, "")
-                      .slice(0, 12),
-                  }))
+      {tab === "dealers" && (
+        <>
+          <div className="flex justify-end">
+            <Button
+              variant="primary"
+              size="sm"
+              leftIcon={<Icon type="plus" className="h-4 w-4" />}
+              onClick={() => {
+                if (showDealerForm) resetDealerForm();
+                else {
+                  setEditingDealer(null);
+                  setFormState({ name: "", logoUrl: "", logoFile: null });
+                  setHoursWeek(defaultWeekHours());
+                  setShowDealerForm(true);
                 }
-                maxLength={12}
-                placeholder="e.g., GSM2024 — leave blank to disable"
-                className={`${fieldClassName} font-mono text-lg tracking-wider`}
-              />
-            </div>
-
-            <div>
-              <label htmlFor="logoUrl" className={labelClassName}>
-                Logo URL
-              </label>
-              <input
-                id="logoUrl"
-                name="logoUrl"
-                type="url"
-                value={formState.logoUrl}
-                onChange={handleInputChange}
-                disabled={!!formState.logoFile}
-                placeholder="https://example.com/logo.png"
-                autoComplete="url"
-                className={fieldClassName}
-              />
-            </div>
-            <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-wide text-surface-500">
-              <span className="h-px flex-1 bg-white/10" />
-              or
-              <span className="h-px flex-1 bg-white/10" />
-            </div>
-            <div>
-              <label htmlFor="logoFile" className={labelClassName}>
-                Upload Logo {editingDealer && "(replaces current)"}
-              </label>
-              <input
-                id="logoFile"
-                name="logoFile"
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                onChange={handleFileChange}
-                className="mt-1 block w-full rounded-xl border border-dashed border-surface-700 bg-surface-950/40 px-4 py-3 text-sm text-surface-400 file:mr-4 file:rounded-full file:border-0 file:bg-primary-600 file:px-4 file:py-2 file:font-semibold file:text-white hover:file:bg-primary-700"
-              />
-            </div>
-            <div className="flex justify-end gap-3">
-              <Button type="button" variant="outline" onClick={resetForm}>
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                variant="primary"
-                disabled={addMutation.isPending || updateMutation.isPending}
-              >
-                {addMutation.isPending || updateMutation.isPending
-                  ? "Saving..."
-                  : editingDealer
-                    ? "Update Dealer"
-                    : "Save Dealer"}
-              </Button>
-            </div>
-            {(addMutation.isError || updateMutation.isError) && (
-              <p className="rounded-xl border border-error-500/30 bg-error-500/10 px-3 py-2 text-sm text-error-200">
-                Error: {(addMutation.error || updateMutation.error)?.message}
-              </p>
-            )}
-          </form>
-        </motion.div>
-      )}
-
-      {error && (
-        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-4 py-3 text-error-100">
-          Error loading dealers: {String(error)}
-        </div>
-      )}
-      {deleteMutation.isError && (
-        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-4 py-3 text-error-100">
-          Failed to delete dealer: {String(deleteMutation.error)}
-        </div>
-      )}
-      {isPending ? (
-        <div className="grid gap-4">
-          <Skeleton className="h-24 w-full" />
-          <Skeleton className="h-24 w-full" />
-          <Skeleton className="h-24 w-full" />
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {dealers.map((dealer) => (
-            <DealerCard
-              key={dealer.id}
-              dealer={dealer}
-              onDelete={(id) => {
-                const target = dealers.find((d) => d.id === id);
-                if (target) setDealerPendingDelete(target);
               }}
-              onEdit={handleEditDealer}
-              isDeleting={
-                deleteMutation.isPending &&
-                deleteMutation.variables === dealer.id
-              }
-              protectedDealerId={sessionDealer?.id}
-            />
-          ))}
-          {dealers.length === 0 && !error && (
-            <div className="rounded-2xl border border-white/10 bg-surface-900/45 py-10 text-center text-surface-400">
-              <p>No dealerships found.</p>
+            >
+              {showDealerForm ? "Cancel" : "Add Dealer"}
+            </Button>
+          </div>
+
+          {showDealerForm && (
+            <motion.div
+              initial={{ opacity: 0, y: -12 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-2xl border border-white/10 bg-surface-900/70 p-5 shadow-elevation-3 backdrop-blur-xl sm:p-6"
+            >
+              <form onSubmit={handleDealerSubmit} className="space-y-4">
+                <div>
+                  <h3 className="text-xl font-semibold text-surface-50">
+                    {editingDealer
+                      ? `Edit: ${editingDealer.name}`
+                      : "New dealership"}
+                  </h3>
+                  <p className="mt-1 text-sm text-surface-400">
+                    Access codes are assigned under Admins and Users — not on
+                    the store record.
+                  </p>
+                </div>
+                <div>
+                  <label htmlFor="name" className={labelClassName}>
+                    Dealer name *
+                  </label>
+                  <input
+                    id="name"
+                    name="name"
+                    type="text"
+                    required
+                    value={formState.name}
+                    onChange={(e) =>
+                      setFormState((s) => ({ ...s, name: e.target.value }))
+                    }
+                    className={fieldClassName}
+                    placeholder="e.g. Sunrise Auto Group"
+                  />
+                </div>
+                <HoursPicker
+                  value={hoursWeek}
+                  onChange={setHoursWeek}
+                  preview={serializeHours(hoursWeek)}
+                />
+                <div>
+                  <label htmlFor="logoUrl" className={labelClassName}>
+                    Logo URL
+                  </label>
+                  <input
+                    id="logoUrl"
+                    name="logoUrl"
+                    type="url"
+                    value={formState.logoUrl}
+                    disabled={!!formState.logoFile}
+                    onChange={(e) =>
+                      setFormState((s) => ({ ...s, logoUrl: e.target.value }))
+                    }
+                    className={fieldClassName}
+                    placeholder="https://example.com/logo.png"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="logoFile" className={labelClassName}>
+                    Upload logo {editingDealer ? "(replaces current)" : ""}
+                  </label>
+                  <input
+                    id="logoFile"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={(e) =>
+                      setFormState((s) => ({
+                        ...s,
+                        logoFile: e.target.files?.[0] || null,
+                        logoUrl: e.target.files?.[0] ? "" : s.logoUrl,
+                      }))
+                    }
+                    className="mt-1 block w-full rounded-xl border border-dashed border-surface-700 bg-surface-950/40 px-4 py-3 text-sm text-surface-400 file:mr-4 file:rounded-full file:border-0 file:bg-primary-600 file:px-4 file:py-2 file:font-semibold file:text-white"
+                  />
+                </div>
+                <div className="flex justify-end gap-3">
+                  <Button type="button" variant="outline" onClick={resetDealerForm}>
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    disabled={addMutation.isPending || updateMutation.isPending}
+                  >
+                    {addMutation.isPending || updateMutation.isPending
+                      ? "Saving…"
+                      : editingDealer
+                        ? "Update dealer"
+                        : "Create dealer"}
+                  </Button>
+                </div>
+              </form>
+            </motion.div>
+          )}
+
+          {isPending && (
+            <div className="space-y-3">
+              <Skeleton className="h-24 w-full rounded-2xl" />
+              <Skeleton className="h-24 w-full rounded-2xl" />
             </div>
           )}
+          {error && (
+            <p className="text-sm text-rose-300">
+              Failed to load dealerships. Try refresh.
+            </p>
+          )}
+
+          <div className="space-y-3">
+            {(dealerFilter
+              ? storeDealers.filter((d) => d.id === dealerFilter)
+              : storeDealers
+            ).map((dealer) => (
+              <motion.div
+                key={dealer.id}
+                layout
+                className="rounded-2xl border border-white/10 bg-surface-900/55 p-4 shadow-elevation-1 backdrop-blur-xl sm:p-5"
+              >
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 items-center gap-4">
+                    {dealer.logo ? (
+                      <img
+                        src={dealer.logo}
+                        alt=""
+                        className="h-14 w-14 rounded-xl border border-white/10 bg-surface-950/50 object-contain p-2"
+                      />
+                    ) : (
+                      <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-primary-500/20 bg-primary-500/10">
+                        <Building2 className="h-7 w-7 text-primary-300" />
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <h3 className="truncate text-lg font-bold text-surface-50">
+                        {dealer.name}
+                      </h3>
+                      <p className="mt-0.5 text-xs text-surface-500">
+                        {dealer.hours?.trim() || "Hours not set"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setDealerFilter(dealer.id);
+                        setTab("admins");
+                      }}
+                    >
+                      Admins
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setDealerFilter(dealer.id);
+                        setTab("users");
+                      }}
+                    >
+                      Users
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => handleEditDealer(dealer)}
+                      title="Edit dealer"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="icon"
+                      onClick={() => setDealerPendingDelete(dealer)}
+                      disabled={deleteMutation.isPending}
+                      title="Delete dealer"
+                    >
+                      <Icon type="trash" className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+            {!isPending && storeDealers.length === 0 && (
+              <p className="rounded-2xl border border-dashed border-surface-700 p-8 text-center text-sm text-surface-400">
+                No dealerships yet. Add your first store to get started.
+              </p>
+            )}
+          </div>
+        </>
+      )}
+
+      {(tab === "admins" || tab === "users") && (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-white/10 bg-surface-900/60 p-4 sm:p-5">
+            <h3 className="text-lg font-bold text-surface-50">
+              {tab === "admins" ? "Add manager" : "Add salesperson"}
+            </h3>
+            <p className="mt-1 text-xs text-surface-400">
+              Each person gets a unique 4-digit code for dialpad sign-in. Leave
+              pin blank to auto-generate.
+            </p>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+              {!dealerFilter && (
+                <div className="sm:w-48">
+                  <label className={labelClassName}>Dealership</label>
+                  <select
+                    value={personForm.dealerId}
+                    onChange={(e) =>
+                      setPersonForm((p) => ({ ...p, dealerId: e.target.value }))
+                    }
+                    className={fieldClassName}
+                  >
+                    <option value="">Select…</option>
+                    {storeDealers.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className="flex-1">
+                <label className={labelClassName}>Name</label>
+                <input
+                  value={personForm.name}
+                  onChange={(e) =>
+                    setPersonForm((p) => ({
+                      ...p,
+                      name: e.target.value.slice(0, 120),
+                    }))
+                  }
+                  className={fieldClassName}
+                  placeholder={
+                    tab === "admins" ? "e.g. Jordan Lee" : "e.g. Sarah Chen"
+                  }
+                />
+              </div>
+              <div className="sm:w-28">
+                <label className={labelClassName}>Code</label>
+                <input
+                  value={personForm.pin}
+                  onChange={(e) =>
+                    setPersonForm((p) => ({
+                      ...p,
+                      pin: e.target.value.replace(/\D/g, "").slice(0, 4),
+                    }))
+                  }
+                  className={`${fieldClassName} font-mono tracking-widest`}
+                  placeholder="auto"
+                  inputMode="numeric"
+                  maxLength={4}
+                />
+              </div>
+              <Button
+                variant="primary"
+                disabled={savingPerson}
+                leftIcon={
+                  savingPerson ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <UserRound className="h-4 w-4" />
+                  )
+                }
+                onClick={() => void handleAddPerson()}
+              >
+                Add
+              </Button>
+            </div>
+          </div>
+
+          {peopleLoading && (
+            <Skeleton className="h-32 w-full rounded-2xl" />
+          )}
+
+          <div className="space-y-2">
+            {people.map((person) => (
+              <div
+                key={person.id}
+                className={cn(
+                  "flex flex-col gap-3 rounded-2xl border border-white/10 bg-surface-900/55 p-4 sm:flex-row sm:items-center sm:justify-between",
+                  !person.active && "opacity-60",
+                )}
+              >
+                <div className="min-w-0">
+                  <div className="font-semibold text-surface-50">
+                    {person.name}
+                    {!person.active && (
+                      <span className="ml-2 text-xs font-medium text-surface-500">
+                        inactive
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 text-xs text-surface-400">
+                    {dealerNameById.get(person.dealer) || person.dealer}
+                    {person.pin ? (
+                      <>
+                        {" · "}
+                        <span className="font-mono text-primary-300">
+                          {person.pin}
+                        </span>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={!person.active || impersonatingId === person.id}
+                    leftIcon={
+                      impersonatingId === person.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Eye className="h-3.5 w-3.5" />
+                      )
+                    }
+                    onClick={() => void handleOpenAs(person)}
+                  >
+                    Open as
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleTogglePerson(person)}
+                  >
+                    {person.active ? "Deactivate" : "Reactivate"}
+                  </Button>
+                </div>
+              </div>
+            ))}
+            {!peopleLoading && people.length === 0 && (
+              <p className="rounded-2xl border border-dashed border-surface-700 p-8 text-center text-sm text-surface-400">
+                {tab === "admins"
+                  ? "No managers yet for this filter."
+                  : "No salespeople yet for this filter."}
+              </p>
+            )}
+          </div>
         </div>
       )}
 
@@ -605,11 +733,12 @@ export const AdminDashboard: React.FC = () => {
         isOpen={!!dealerPendingDelete}
         onClose={() => setDealerPendingDelete(null)}
         onConfirm={() => {
-          if (dealerPendingDelete)
+          if (dealerPendingDelete) {
             deleteMutation.mutate(dealerPendingDelete.id);
-          setDealerPendingDelete(null);
+            setDealerPendingDelete(null);
+          }
         }}
-        itemName={dealerPendingDelete?.name ?? ""}
+        itemName={dealerPendingDelete?.name || "dealership"}
       />
     </div>
   );

@@ -17,12 +17,19 @@ import {
   loadDealerCreative,
   saveDealerCreative,
 } from "../utils/creativeStorage";
+import type { Person } from "../services/salespeople";
+import {
+  exitImpersonation as exitImpersonationApi,
+  impersonatePerson as impersonatePersonApi,
+} from "../services/salespeople";
 
 interface AppState {
   // Core State
   step: AppStep;
   currentDealer: Dealer | null;
   role: UserRole;
+  currentPerson: Person | null;
+  isImpersonating: boolean;
   selectedImage: string | null;
   generatedPost: GeneratedPost | null;
   generationParams: GenerationParams | null;
@@ -54,7 +61,21 @@ interface AppState {
   logout: () => Promise<void>;
   reset: () => void;
   restoreSession: () => Promise<void>;
+  applyAuthPayload: (body: {
+    role?: string;
+    dealer?: Dealer;
+    person?: Person | null;
+    is_impersonation?: boolean;
+  }) => void;
+  impersonatePerson: (personId: string) => Promise<void>;
+  exitImpersonation: () => Promise<void>;
 }
+
+const stepForRole = (role: UserRole): AppStep => {
+  if (role === "super_admin") return AppStep.ADMIN;
+  if (role === "dealer_admin") return AppStep.DEALER_ADMIN;
+  return AppStep.CAPTURE;
+};
 
 const SESSION_REQUEST_TIMEOUT_MS = 8_000;
 
@@ -115,6 +136,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   step: AppStep.LOGIN,
   currentDealer: null,
   role: "salesperson" as UserRole,
+  currentPerson: null,
+  isImpersonating: false,
   selectedImage: null,
   generatedPost: null,
   generationParams: null,
@@ -123,6 +146,61 @@ export const useAppStore = create<AppState>((set, get) => ({
   preferredStyle: StyleOption.Modern,
   preferredTone: ToneOption.Excited,
   compactMode: false,
+
+  applyAuthPayload: (body) => {
+    const dealer = body.dealer || null;
+    const serverRole: UserRole = (body.role as UserRole) || "salesperson";
+    const targetStep = stepForRole(serverRole);
+    set({
+      currentDealer: dealer,
+      role: serverRole,
+      currentPerson: body.person || null,
+      isImpersonating: !!body.is_impersonation,
+      step: targetStep,
+      selectedImage: null,
+      generatedPost: null,
+      generationParams: null,
+      error: null,
+    });
+    if (dealer) {
+      const preferences = get();
+      saveSession({
+        dealerId: dealer.id,
+        step: targetStep,
+        loginTimestamp: Date.now(),
+        selectedImage: undefined,
+        generatedPost: undefined,
+        generationParams: undefined,
+        compactMode: preferences.compactMode,
+        preferredStyle: preferences.preferredStyle,
+        preferredTone: preferences.preferredTone,
+      });
+    }
+  },
+
+  impersonatePerson: async (personId: string) => {
+    const body = await impersonatePersonApi(personId);
+    clearSession();
+    await clearAllCreatives();
+    get().applyAuthPayload({
+      role: body.role,
+      dealer: body.dealer as Dealer,
+      person: body.person || null,
+      is_impersonation: true,
+    });
+  },
+
+  exitImpersonation: async () => {
+    const body = await exitImpersonationApi();
+    clearSession();
+    await clearAllCreatives();
+    get().applyAuthPayload({
+      role: body.role,
+      dealer: body.dealer as Dealer,
+      person: null,
+      is_impersonation: false,
+    });
+  },
 
   setStep: (step) => {
     set({ step });
@@ -229,7 +307,6 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       const body = await res.json();
       const dealer = body.dealer;
-      const serverRole: UserRole = (body.role as UserRole) || "salesperson";
 
       if (dealer) {
         // A successful credential exchange starts a clean tenant workspace.
@@ -238,39 +315,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         // with another dealer id and restored after the next reload.
         clearSession();
         await clearAllCreatives();
-
-        // Route by server-supplied role. Three flows:
-        //   super_admin → AppStep.ADMIN (manage all dealerships)
-        //   dealer_admin → AppStep.DEALER_ADMIN (manage one dealership)
-        //   salesperson → AppStep.CAPTURE (generate posts)
-        let targetStep = AppStep.CAPTURE;
-        if (serverRole === "super_admin") targetStep = AppStep.ADMIN;
-        else if (serverRole === "dealer_admin")
-          targetStep = AppStep.DEALER_ADMIN;
-
-        set({
-          currentDealer: dealer,
-          role: serverRole,
-          step: targetStep,
-          selectedImage: null,
-          generatedPost: null,
-          generationParams: null,
-          error: null,
+        get().applyAuthPayload({
+          role: body.role,
+          dealer,
+          person: body.person || null,
+          is_impersonation: !!body.is_impersonation,
         });
-
-        const preferences = get();
-        saveSession({
-          dealerId: dealer.id,
-          step: targetStep,
-          loginTimestamp: Date.now(),
-          selectedImage: undefined,
-          generatedPost: undefined,
-          generationParams: undefined,
-          compactMode: preferences.compactMode,
-          preferredStyle: preferences.preferredStyle,
-          preferredTone: preferences.preferredTone,
-        });
-
         return true;
       }
       return false;
@@ -306,10 +356,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({
       currentDealer: null,
+      currentPerson: null,
+      isImpersonating: false,
       selectedImage: null,
       generatedPost: null,
       error: null,
       step: AppStep.LOGIN,
+      role: "salesperson",
     });
     clearSession();
     if (dealerId) void clearDealerCreatives(dealerId);
@@ -378,6 +431,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           set({
             currentDealer: dealer,
             role: serverRole,
+            currentPerson: (body.person as Person | undefined) || null,
+            isImpersonating: !!body.is_impersonation,
             selectedImage: restoredSelectedImage,
             generatedPost: restoredGeneratedPost,
             generationParams: (matchesPersistedDealer

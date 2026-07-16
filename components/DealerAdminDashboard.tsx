@@ -24,6 +24,13 @@ import { cn } from "../utils/classNames";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { StyleOption } from "../types";
 import { CustomScenarioManager } from "./CustomScenarioManager";
+import { HoursPicker } from "./HoursPicker";
+import {
+  defaultWeekHours,
+  parseHoursString,
+  serializeHours,
+  type WeekHours,
+} from "../utils/hoursFormat";
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
@@ -197,7 +204,10 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
   const [website, setWebsite] = useState(dealer.website || "");
   const [phone, setPhone] = useState(dealer.phone || "");
   const [address, setAddress] = useState(dealer.address || "");
-  const [hours, setHours] = useState(dealer.hours || "");
+  const [hoursWeek, setHoursWeek] = useState<WeekHours>(
+    () => parseHoursString(dealer.hours) || defaultWeekHours(),
+  );
+  const hoursSerialized = serializeHours(hoursWeek);
   const [tagline, setTagline] = useState(dealer.tagline || "");
 
   // Social
@@ -239,7 +249,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
     website !== (dealer.website || "") ||
     phone !== (dealer.phone || "") ||
     address !== (dealer.address || "") ||
-    hours !== (dealer.hours || "") ||
+    hoursSerialized !== (dealer.hours || "") ||
     tagline !== (dealer.tagline || "") ||
     facebookUrl !== (dealer.facebook_url || "") ||
     instagramHandle !== (dealer.instagram_handle || "") ||
@@ -282,7 +292,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
         website: website.trim(),
         phone: phone.trim(),
         address: address.trim(),
-        hours: hours.trim(),
+        hours: hoursSerialized,
         tagline: tagline.trim(),
         facebook_url: facebookUrl.trim(),
         instagram_handle: instagramHandle.trim().replace(/^@/, ""),
@@ -360,13 +370,10 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
           fullWidth
           className="bg-white/5 border-white/10 focus:border-primary-400"
         />
-        <Input
-          label="Hours"
-          value={hours}
-          onChange={(e) => setHours(e.target.value)}
-          placeholder="Mon–Fri 9–8, Sat 9–6, Sun closed"
-          fullWidth
-          className="bg-white/5 border-white/10 focus:border-primary-400"
+        <HoursPicker
+          value={hoursWeek}
+          onChange={setHoursWeek}
+          preview={hoursSerialized}
         />
         <Input
           label="Tagline"
@@ -764,7 +771,16 @@ const DealerTeamCard: React.FC = () => {
     setSaving(true);
     try {
       const m = await import("../services/salespeople");
-      await m.addSalesperson({ name: newName.trim(), pin: newPin.trim() });
+      if (newPin.trim() && !/^\d{4}$/.test(newPin.trim())) {
+        setError("Access code must be exactly 4 digits (or leave blank).");
+        setSaving(false);
+        return;
+      }
+      await m.addSalesperson({
+        name: newName.trim(),
+        pin: newPin.trim() || undefined,
+        role: "salesperson",
+      });
       setNewName("");
       setNewPin("");
       await load();
@@ -819,8 +835,9 @@ const DealerTeamCard: React.FC = () => {
             Your team
           </h3>
           <p className="text-xs text-surface-400">
-            Add salespeople so they show up in the showroom picker. Deactivate
-            anyone who leaves — their historical posts stay intact.
+            Each salesperson gets a personal 4-digit code for sign-in and
+            appears in the showroom picker. Deactivate anyone who leaves —
+            historical posts stay intact.
           </p>
         </div>
       </div>
@@ -840,16 +857,18 @@ const DealerTeamCard: React.FC = () => {
         </div>
         <div className="sm:w-32">
           <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
-            PIN (opt.)
+            Code (4 dig.)
           </label>
           <input
             type="text"
             value={newPin}
             onChange={(e) =>
-              setNewPin(e.target.value.replace(/[^A-Za-z0-9]/g, "").slice(0, 12))
+              setNewPin(e.target.value.replace(/\D/g, "").slice(0, 4))
             }
-            placeholder="e.g. 1234"
-            className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-surface-100 font-mono focus:border-primary-400 focus:outline-none"
+            placeholder="auto"
+            inputMode="numeric"
+            maxLength={4}
+            className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-surface-100 font-mono tracking-widest focus:border-primary-400 focus:outline-none"
           />
         </div>
         <Button

@@ -16,14 +16,17 @@ import { Input } from "./ui/Input";
 import { useToast } from "./ui/Toast";
 import { cn } from "../utils/classNames";
 
-const DEALER_CODE_LENGTH = 6;
+/** Personal manager / user access codes are exactly 4 digits. */
+const PERSON_CODE_LENGTH = 4;
+/** Super-admin env secret may be longer alphanumeric. */
 const ADMIN_CODE_MAX_LENGTH = 12;
+const ADMIN_CODE_MIN_LENGTH = 4;
 
 interface LoginScreenProps {
   onLogin: (dealerId: string) => Promise<boolean>;
 }
 
-type EntryMode = "team" | "admin";
+type EntryMode = "personal" | "system";
 
 const STUDIO_STEPS = [
   { label: "Capture", detail: "Start with the vehicle", icon: Camera },
@@ -32,7 +35,7 @@ const STUDIO_STEPS = [
 ] as const;
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
-  const [entryMode, setEntryMode] = useState<EntryMode>("team");
+  const [entryMode, setEntryMode] = useState<EntryMode>("personal");
   const [dealerCode, setDealerCode] = useState("");
   const [adminCode, setAdminCode] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -43,17 +46,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
   const submitCode = useCallback(
     async (codeToSubmit: string, mode: EntryMode) => {
-      const normalizedCode = codeToSubmit.trim().toUpperCase();
-      if (
-        isLoading ||
-        isSuccess ||
-        normalizedCode.length < DEALER_CODE_LENGTH
-      ) {
-        if (
-          normalizedCode.length > 0 &&
-          normalizedCode.length < DEALER_CODE_LENGTH
-        ) {
-          toast.info("Enter at least 6 characters to sign in.");
+      const normalizedCode =
+        mode === "personal"
+          ? codeToSubmit.trim()
+          : codeToSubmit.trim().toUpperCase();
+      const minLen =
+        mode === "personal" ? PERSON_CODE_LENGTH : ADMIN_CODE_MIN_LENGTH;
+      if (isLoading || isSuccess || normalizedCode.length < minLen) {
+        if (normalizedCode.length > 0 && normalizedCode.length < minLen) {
+          toast.info(
+            mode === "personal"
+              ? "Enter your 4-digit access code."
+              : "Enter your system admin code.",
+          );
         }
         return;
       }
@@ -69,7 +74,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           );
         } else {
           toast.error("Code not recognized. Check the code and try again.");
-          if (mode === "team") {
+          if (mode === "personal") {
             setDealerCode("");
           } else {
             setAdminCode(normalizedCode);
@@ -99,13 +104,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       const nextCode =
         key === "backspace"
           ? dealerCode.slice(0, -1)
-          : dealerCode.length < DEALER_CODE_LENGTH
+          : dealerCode.length < PERSON_CODE_LENGTH
             ? `${dealerCode}${key}`
             : dealerCode;
 
       setDealerCode(nextCode);
-      if (nextCode.length === DEALER_CODE_LENGTH) {
-        await submitCode(nextCode, "team");
+      if (nextCode.length === PERSON_CODE_LENGTH) {
+        await submitCode(nextCode, "personal");
       }
     },
     [dealerCode, isLoading, isSuccess, submitCode],
@@ -117,7 +122,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   }, []);
 
   useEffect(() => {
-    if (entryMode !== "admin" || isLoading || isSuccess) return;
+    if (entryMode !== "system" || isLoading || isSuccess) return;
     const frame = requestAnimationFrame(() => adminInputRef.current?.focus());
     return () => cancelAnimationFrame(frame);
   }, [entryMode, isLoading, isSuccess]);
@@ -137,17 +142,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
       if (event.key === "Enter") {
         event.preventDefault();
-        const activeCode = entryMode === "admin" ? adminCode : dealerCode;
-        submitCode(activeCode, entryMode);
-      } else if (event.key === "Backspace" && entryMode === "team") {
+        const activeCode = entryMode === "system" ? adminCode : dealerCode;
+        void submitCode(activeCode, entryMode);
+      } else if (event.key === "Backspace" && entryMode === "personal") {
         event.preventDefault();
-        handleDialpadKeyPress("backspace");
+        void handleDialpadKeyPress("backspace");
       } else if (event.key === "Escape") {
         event.preventDefault();
-        entryMode === "admin" ? setAdminCode("") : setDealerCode("");
+        entryMode === "system" ? setAdminCode("") : setDealerCode("");
       } else if (/^[a-zA-Z]$/.test(event.key)) {
         event.preventDefault();
-        setEntryMode("admin");
+        setEntryMode("system");
         setAdminCode((current) =>
           `${current}${event.key.toUpperCase()}`.slice(
             0,
@@ -156,12 +161,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         );
       } else if (/^\d$/.test(event.key)) {
         event.preventDefault();
-        if (entryMode === "admin") {
+        if (entryMode === "system") {
           setAdminCode((current) =>
             `${current}${event.key}`.slice(0, ADMIN_CODE_MAX_LENGTH),
           );
         } else {
-          handleDialpadKeyPress(event.key as DialpadKey);
+          void handleDialpadKeyPress(event.key as DialpadKey);
         }
       }
     };
@@ -322,8 +327,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       Open your post studio
                     </h1>
                     <p className="mt-1 text-sm leading-relaxed text-surface-400">
-                      Choose your access type, then enter the code provided by
-                      your dealership.
+                      Enter your personal 4-digit code. Managers and salespeople
+                      each have their own access.
                     </p>
                   </div>
                 </div>
@@ -335,41 +340,41 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 >
                   <button
                     type="button"
-                    onClick={() => selectMode("team")}
-                    aria-pressed={entryMode === "team"}
+                    onClick={() => selectMode("personal")}
+                    aria-pressed={entryMode === "personal"}
                     className={cn(
                       "min-h-11 rounded-lg px-3 text-sm font-semibold transition-colors",
-                      entryMode === "team"
+                      entryMode === "personal"
                         ? "bg-surface-700 text-white shadow-sm"
                         : "text-surface-400 hover:text-surface-200",
                     )}
                   >
-                    Team access
+                    Personal code
                   </button>
                   <button
                     type="button"
-                    onClick={() => selectMode("admin")}
-                    aria-pressed={entryMode === "admin"}
+                    onClick={() => selectMode("system")}
+                    aria-pressed={entryMode === "system"}
                     className={cn(
                       "min-h-11 rounded-lg px-3 text-sm font-semibold transition-colors",
-                      entryMode === "admin"
+                      entryMode === "system"
                         ? "bg-surface-700 text-white shadow-sm"
                         : "text-surface-400 hover:text-surface-200",
                     )}
                   >
-                    Admin access
+                    System admin
                   </button>
                 </div>
 
-                {entryMode === "team" ? (
+                {entryMode === "personal" ? (
                   <div>
                     <div
                       className="mb-3 flex items-center justify-center gap-3 py-1.5"
                       role="status"
-                      aria-label={`${dealerCode.length} of ${DEALER_CODE_LENGTH} digits entered`}
+                      aria-label={`${dealerCode.length} of ${PERSON_CODE_LENGTH} digits entered`}
                     >
                       {Array.from(
-                        { length: DEALER_CODE_LENGTH },
+                        { length: PERSON_CODE_LENGTH },
                         (_, index) => (
                           <span
                             key={index}
@@ -392,8 +397,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       aria-live="polite"
                     >
                       {dealerCode.length > 0
-                        ? `${DEALER_CODE_LENGTH - dealerCode.length} digits remaining`
-                        : "Enter the 6-digit team code. Sign-in starts automatically."}
+                        ? `${PERSON_CODE_LENGTH - dealerCode.length} digits remaining`
+                        : "Enter your 4-digit code. Sign-in starts automatically."}
                     </p>
 
                     <Dialpad onKeyPress={handleDialpadKeyPress} />
@@ -403,7 +408,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     className="flex min-h-[18.5rem] flex-col justify-center"
                     onSubmit={(event) => {
                       event.preventDefault();
-                      submitCode(adminCode, "admin");
+                      void submitCode(adminCode, "system");
                     }}
                   >
                     <div className="rounded-2xl border border-white/[0.08] bg-[#101722] p-4 sm:p-5">
@@ -413,17 +418,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                         </div>
                         <div>
                           <h2 className="text-base font-semibold text-surface-100">
-                            Manager and admin access
+                            System administrator
                           </h2>
                           <p className="mt-1 text-sm leading-relaxed text-surface-400">
-                            Letters and numbers are supported on every device.
+                            Platform owner code from your deployment secret.
                           </p>
                         </div>
                       </div>
 
                       <Input
                         ref={adminInputRef}
-                        label="Admin access code"
+                        label="System admin code"
                         value={adminCode}
                         onChange={(event) =>
                           setAdminCode(
@@ -444,16 +449,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                         inputMode="text"
                         enterKeyHint="go"
                         maxLength={ADMIN_CODE_MAX_LENGTH}
-                        helperText={`${adminCode.length}/${ADMIN_CODE_MAX_LENGTH} characters · minimum 6`}
+                        helperText={`${adminCode.length}/${ADMIN_CODE_MAX_LENGTH} characters`}
                         fullWidth
                       />
 
                       <button
                         type="submit"
-                        disabled={adminCode.length < DEALER_CODE_LENGTH}
+                        disabled={adminCode.length < ADMIN_CODE_MIN_LENGTH}
                         className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary-600 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:bg-surface-700 disabled:text-surface-400"
                       >
-                        Continue to admin
+                        Continue to system admin
                         <ArrowRight className="h-4 w-4" aria-hidden="true" />
                       </button>
                     </div>

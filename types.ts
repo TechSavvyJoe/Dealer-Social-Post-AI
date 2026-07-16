@@ -94,8 +94,9 @@ export interface Dealer {
   id: string; // unique identifier
   name: string;
   logo?: string; // base64 data URL
-  code?: string; // 6-digit login code (optional, for admin display)
-  /** Per-dealership manager code. When set, logging in with this code routes to the DealerAdminDashboard instead of the salesperson capture flow. */
+  /** Legacy store code field (no longer used for personal login). */
+  code?: string;
+  /** Legacy manager code field (managers now use personal 4-digit codes). */
   admin_code?: string;
   /** Free-form voice guide injected into every prompt. */
   brand_voice?: string;

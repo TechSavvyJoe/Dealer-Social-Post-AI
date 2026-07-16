@@ -54,7 +54,7 @@ describe("PocketBase 0.22 multipart routes", () => {
       "helpers.dealerMutationData(body, isSuperAdmin, isSuperAdmin)",
     );
     expect(helpers).toContain("if (allowCode && body.code !== undefined)");
-    expect(helpers).toContain("if (!/^[0-9]{6}$/.test(code))");
+    expect(helpers).toContain('if (code && !/^[A-Za-z0-9]{4,12}$/.test(code))');
     expect(helpers).toContain("!/^[A-Za-z0-9]{4,12}$/.test(adminCode)");
     expect(helpers).toContain(
       'findFirstRecordByFilter("dealers", filter, params)',

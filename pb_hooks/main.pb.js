@@ -1191,11 +1191,12 @@ routerAdd("POST", "/api/app/session", (c) => {
         userAgent: ua,
         detail: "malformed code",
       });
-      return c.json(400, { error: "Dealer code is required" });
+      return c.json(400, { error: "Access code is required" });
     }
 
     let role = "salesperson";
     let record;
+    let personRecord = null;
     // SECURITY: never fall back to a hardcoded admin code. If ADMIN_DEALER_CODE
     // is unset, super-admin login is simply unavailable.
     const configuredAdminCode = ($os.getenv("ADMIN_DEALER_CODE") || "").trim();
@@ -1243,19 +1244,18 @@ routerAdd("POST", "/api/app/session", (c) => {
         }
       }
     } else {
-      try {
-        record = $app
-          .dao()
-          .findFirstRecordByData("dealers", "code", dealerCode);
-      } catch (_e) {}
-
-      if (!record) {
+      // Personal 4-digit codes on the people roster (managers + salespeople).
+      // Shared dealer/admin codes are no longer accepted for store login.
+      personRecord = helpers.findActivePersonByPin(dealerCode);
+      if (personRecord) {
+        role = helpers.personRoleToSessionRole(personRecord.getString("role"));
         try {
           record = $app
             .dao()
-            .findFirstRecordByData("dealers", "admin_code", dealerCode);
-          if (record) role = "dealer_admin";
-        } catch (_e) {}
+            .findRecordById("dealers", personRecord.getString("dealer"));
+        } catch (_e) {
+          record = null;
+        }
       }
     }
 
@@ -1277,13 +1277,21 @@ routerAdd("POST", "/api/app/session", (c) => {
         ip: ip,
         userAgent: ua,
       });
-      return c.json(401, { error: "Invalid dealer code" });
+      return c.json(401, { error: "Invalid access code" });
     }
 
     // Mint the opaque session token + persist row. Cookie carries ONLY the token.
     let token, expiresAt;
     try {
-      const session = helpers.createSession(record.id, role, ip, ua);
+      const sessionOpts = {};
+      if (personRecord) sessionOpts.personId = personRecord.id;
+      const session = helpers.createSession(
+        record.id,
+        role,
+        ip,
+        ua,
+        sessionOpts,
+      );
       token = session.token;
       expiresAt = session.expiresAt;
     } catch (err) {
@@ -1298,13 +1306,21 @@ routerAdd("POST", "/api/app/session", (c) => {
       credentialPresent: true,
       ip: ip,
       userAgent: ua,
-      detail: `role=${role}`,
+      detail:
+        "role=" +
+        role +
+        (personRecord ? " person=" + personRecord.id : ""),
     });
 
-    return c.json(200, {
+    const payload = {
       role: role,
       dealer: helpers.serializeDealer(record),
-    });
+      is_impersonation: false,
+    };
+    if (personRecord) {
+      payload.person = helpers.serializePerson(personRecord);
+    }
+    return c.json(200, payload);
   } catch (e) {
     console.error("SESSION ERROR:", e);
     return c.json(500, { error: "Session request failed" });
@@ -1336,9 +1352,190 @@ routerAdd("GET", "/api/app/session", (c) => {
     /* ignore */
   }
 
-  return c.json(200, {
+  const payload = {
     role: role,
     dealer: helpers.serializeDealer(record),
+    is_impersonation: !!(session.getBool
+      ? session.getBool("is_impersonation")
+      : session.get("is_impersonation")),
+  };
+  const personId = session.getString("person");
+  if (personId) {
+    try {
+      const person = $app.dao().findRecordById("salespeople", personId);
+      payload.person = helpers.serializePerson(person);
+    } catch (_e) {
+      /* person removed */
+    }
+  }
+  return c.json(200, payload);
+});
+
+// Super-admin opens a store as a manager or salesperson without their pin.
+routerAdd("POST", "/api/app/session/impersonate", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const token = helpers.readSessionToken(c);
+  if (!token) return c.json(401, { error: "No active session" });
+  const session = helpers.findSessionByToken(token);
+  if (!session) return c.json(401, { error: "Invalid session" });
+  if (session.getString("role") !== "super_admin") {
+    return c.json(403, { error: "Super admin only" });
+  }
+  if (
+    session.getBool
+      ? session.getBool("is_impersonation")
+      : session.get("is_impersonation")
+  ) {
+    return c.json(400, { error: "Already impersonating — exit first" });
+  }
+
+  const body = $apis.requestInfo(c).data || {};
+  const personId = (body.personId || "").toString().trim();
+  if (!personId) return c.json(400, { error: "personId is required" });
+
+  let person;
+  try {
+    person = $app.dao().findRecordById("salespeople", personId);
+  } catch (_e) {
+    return c.json(404, { error: "Person not found" });
+  }
+  const active = person.getBool
+    ? person.getBool("active")
+    : !!person.get("active");
+  if (!active) return c.json(400, { error: "Person is inactive" });
+
+  let dealer;
+  try {
+    dealer = $app.dao().findRecordById("dealers", person.getString("dealer"));
+  } catch (_e) {
+    return c.json(400, { error: "Dealer not found for person" });
+  }
+
+  const role = helpers.personRoleToSessionRole(person.getString("role"));
+  const ip = helpers.clientIP(c);
+  const ua = helpers.userAgent(c);
+
+  let minted;
+  try {
+    minted = helpers.createSession(dealer.id, role, ip, ua, {
+      personId: person.id,
+      isImpersonation: true,
+      impersonatorSessionId: session.id,
+    });
+  } catch (err) {
+    console.error("[impersonate] createSession failed", err);
+    return c.json(500, { error: "Failed to start impersonation" });
+  }
+
+  c.response()
+    .header()
+    .add("Set-Cookie", helpers.buildSessionCookie(minted.token));
+
+  helpers.logAuthEvent("impersonate_start", {
+    dealerId: dealer.id,
+    credentialPresent: true,
+    ip: ip,
+    userAgent: ua,
+    detail: "person=" + person.id + " role=" + role,
+  });
+
+  return c.json(200, {
+    role: role,
+    dealer: helpers.serializeDealer(dealer),
+    person: helpers.serializePerson(person),
+    is_impersonation: true,
+  });
+});
+
+routerAdd("POST", "/api/app/session/exit-impersonate", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const token = helpers.readSessionToken(c);
+  if (!token) return c.json(401, { error: "No active session" });
+  const session = helpers.findSessionByToken(token);
+  if (!session) return c.json(401, { error: "Invalid session" });
+
+  const isImpersonation = session.getBool
+    ? session.getBool("is_impersonation")
+    : !!session.get("is_impersonation");
+  if (!isImpersonation) {
+    return c.json(400, { error: "Not impersonating" });
+  }
+
+  const impersonatorId = session.getString("impersonator_session");
+  if (!impersonatorId) {
+    return c.json(400, { error: "Impersonation source missing" });
+  }
+
+  let adminSession;
+  try {
+    adminSession = $app.dao().findRecordById("sessions", impersonatorId);
+  } catch (_e) {
+    adminSession = null;
+  }
+  if (!adminSession || adminSession.getString("role") !== "super_admin") {
+    helpers.revokeSession(c);
+    c.response().header().add("Set-Cookie", helpers.buildClearCookie());
+    return c.json(401, {
+      error: "Super admin session expired — sign in again",
+    });
+  }
+
+  // Revoke the impersonation session; re-mint a fresh super-admin cookie so we
+  // never re-issue a stored plaintext token (only hashes are kept).
+  try {
+    $app.dao().deleteRecord(session);
+  } catch (_e) {
+    /* ignore */
+  }
+
+  let adminDealer;
+  try {
+    adminDealer = $app
+      .dao()
+      .findRecordById("dealers", adminSession.getString("dealer"));
+  } catch (_e) {
+    return c.json(401, { error: "Admin dealer unavailable" });
+  }
+
+  const ip = helpers.clientIP(c);
+  const ua = helpers.userAgent(c);
+  let minted;
+  try {
+    minted = helpers.createSession(
+      adminDealer.id,
+      "super_admin",
+      ip,
+      ua,
+      {},
+    );
+  } catch (err) {
+    console.error("[exit-impersonate] createSession failed", err);
+    return c.json(500, { error: "Failed to restore admin session" });
+  }
+
+  // Drop the old super-admin session row that was parked during impersonation.
+  try {
+    $app.dao().deleteRecord(adminSession);
+  } catch (_e) {
+    /* ignore */
+  }
+
+  c.response()
+    .header()
+    .add("Set-Cookie", helpers.buildSessionCookie(minted.token));
+
+  helpers.logAuthEvent("impersonate_exit", {
+    dealerId: adminDealer.id,
+    credentialPresent: true,
+    ip: ip,
+    userAgent: ua,
+    detail: "restored super_admin",
+  });
+
+  return c.json(200, {
+    role: "super_admin",
+    dealer: helpers.serializeDealer(adminDealer),
+    is_impersonation: false,
   });
 });
 
@@ -1976,38 +2173,79 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
   }
 });
 
-// ---- Salespeople CRUD (dealer-admin or super-admin) --------------------
-// sessionRoleFromCookie moved to top
+// ---- People roster (salespeople collection: managers + salespeople) ----
 
 routerAdd("GET", "/api/app/salespeople", (c) => {
   const helpers = require(__hooks + "/helpers.js");
   const dealer = helpers.dealerFromSession(c);
   if (!dealer) return c.json(401, { error: "No active session" });
+  const role = helpers.sessionRoleFromCookie(c);
   try {
     const query = $apis.requestInfo(c).query || {};
     const includeInactive =
       (query.include_inactive || "").toString() === "true";
-    const filter = includeInactive
-      ? "dealer = {:d}"
-      : "dealer = {:d} && active = true";
+    const roleFilter = (query.role || "").toString().trim();
+    const dealerFilter = (query.dealer || "").toString().trim();
+
+    let scopeDealerId = dealer.id;
+    if (role === "super_admin" && dealerFilter) {
+      scopeDealerId = dealerFilter;
+    } else if (role === "super_admin" && !dealerFilter) {
+      // Super admin may list across all dealers when no filter is set.
+      scopeDealerId = "";
+    }
+
+    let filterParts = [];
+    const params = {};
+    if (scopeDealerId) {
+      filterParts.push("dealer = {:d}");
+      params.d = scopeDealerId;
+    } else {
+      filterParts.push("1 = 1");
+    }
+    if (!includeInactive) filterParts.push("active = true");
+    if (role === "super_admin") {
+      if (roleFilter === "manager" || roleFilter === "salesperson") {
+        filterParts.push("role = {:role}");
+        params.role = roleFilter;
+      }
+    } else {
+      // Store managers and floor staff only list the salesperson roster
+      // (showroom picker + Team tab). Managers are system-admin only.
+      filterParts.push("role = {:role}");
+      params.role = "salesperson";
+    }
+
     const records = $app
       .dao()
-      .findRecordsByFilter("salespeople", filter, "name", 500, 0, {
-        d: dealer.id,
-      });
+      .findRecordsByFilter(
+        "salespeople",
+        filterParts.join(" && "),
+        "name",
+        1000,
+        0,
+        params,
+      );
+
+    // Salespeople never see pins of others; managers/super-admin need pins for ops.
+    const includePin = role === "super_admin" || role === "dealer_admin";
     return c.json(200, {
-      items: records.map((r) => ({
-        id: r.id,
-        dealer: r.getString("dealer"),
-        name: r.getString("name"),
-        pin: r.getString("pin"),
-        active: r.getBool ? r.getBool("active") : !!r.get("active"),
-        created_at: r.getString("created_at"),
-      })),
+      items: records.map((r) => {
+        const item = {
+          id: r.id,
+          dealer: r.getString("dealer"),
+          name: r.getString("name"),
+          role: r.getString("role") || "salesperson",
+          active: r.getBool ? r.getBool("active") : !!r.get("active"),
+          created_at: r.getString("created_at"),
+        };
+        if (includePin) item.pin = r.getString("pin");
+        return item;
+      }),
     });
   } catch (err) {
     console.error("[/api/app/salespeople] list error", err);
-    return c.json(500, { error: "Failed to list salespeople" });
+    return c.json(500, { error: "Failed to list people" });
   }
 });
 
@@ -2024,24 +2262,52 @@ routerAdd("POST", "/api/app/salespeople", (c) => {
     const name = (body.name || "").toString().trim();
     if (!name) return c.json(400, { error: "name is required" });
 
+    let personRole = (body.role || "salesperson").toString().trim();
+    if (personRole !== "manager" && personRole !== "salesperson") {
+      return c.json(400, { error: "role must be manager or salesperson" });
+    }
+    // Only super-admin may create managers.
+    if (personRole === "manager" && role !== "super_admin") {
+      return c.json(403, { error: "Only system admin can create managers" });
+    }
+    // Dealer admin can only create salespeople for their own store.
+    if (role === "dealer_admin") personRole = "salesperson";
+
+    let targetDealerId = dealer.id;
+    if (role === "super_admin" && body.dealer) {
+      targetDealerId = body.dealer.toString().trim();
+      try {
+        $app.dao().findRecordById("dealers", targetDealerId);
+      } catch (_e) {
+        return c.json(400, { error: "Invalid dealer" });
+      }
+    }
+
+    let pin = (body.pin || "").toString().trim();
+    if (!pin) {
+      pin = helpers.generateUniquePersonPin();
+    } else {
+      pin = helpers.assertPersonPinAvailable(pin, "");
+    }
+
     const salespeople = $app.dao().findCollectionByNameOrId("salespeople");
     const record = new Record(salespeople, {
-      dealer: dealer.id, // force from session
+      dealer: targetDealerId,
       name: helpers.assertString(name, 120),
-      pin: helpers.assertString((body.pin || "").toString(), 12),
+      pin: pin,
+      role: personRole,
       active: body.active === false ? false : true,
       created_at: new Date().toISOString(),
     });
     $app.dao().saveRecord(record);
-    return c.json(200, {
-      id: record.id,
-      name: record.getString("name"),
-      pin: record.getString("pin"),
-      active: true,
-    });
+    return c.json(200, helpers.serializePerson(record));
   } catch (err) {
     console.error("[/api/app/salespeople] create error", err);
-    return c.json(400, { error: "Failed to create salesperson" });
+    const msg = helpers.safeDealerMutationError(err);
+    return c.json(400, {
+      error:
+        msg === "Failed to save dealer" ? "Failed to create person" : msg,
+    });
   }
 });
 
@@ -2056,21 +2322,38 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
   try {
     const id = c.pathParam("id");
     const record = $app.dao().findRecordById("salespeople", id);
-    // Tenant isolation — can only edit your own dealership's salespeople
     if (record.getString("dealer") !== dealer.id && role !== "super_admin") {
       return c.json(403, { error: "Cross-dealer edit blocked" });
     }
+    const existingRole = record.getString("role") || "salesperson";
+    if (existingRole === "manager" && role !== "super_admin") {
+      return c.json(403, { error: "Only system admin can edit managers" });
+    }
+
     const body = $apis.requestInfo(c).data || {};
     if (typeof body.name === "string")
       record.set("name", helpers.assertString(body.name.toString(), 120));
-    if (typeof body.pin === "string")
-      record.set("pin", helpers.assertString(body.pin.toString(), 12));
+    if (typeof body.pin === "string") {
+      const pin = helpers.assertPersonPinAvailable(body.pin.toString(), id);
+      record.set("pin", pin);
+    }
     if (typeof body.active === "boolean") record.set("active", body.active);
+    if (typeof body.role === "string" && role === "super_admin") {
+      const nextRole = body.role.toString().trim();
+      if (nextRole !== "manager" && nextRole !== "salesperson") {
+        return c.json(400, { error: "role must be manager or salesperson" });
+      }
+      record.set("role", nextRole);
+    }
     $app.dao().saveRecord(record);
-    return c.json(200, { id: record.id });
+    return c.json(200, helpers.serializePerson(record));
   } catch (err) {
     console.error("[/api/app/salespeople/:id] update error", err);
-    return c.json(400, { error: "Failed to update salesperson" });
+    const msg = helpers.safeDealerMutationError(err);
+    return c.json(400, {
+      error:
+        msg === "Failed to save dealer" ? "Failed to update person" : msg,
+    });
   }
 });
 
@@ -2089,12 +2372,18 @@ routerAdd("DELETE", "/api/app/salespeople/:id", (c) => {
     if (record.getString("dealer") !== dealer.id && role !== "super_admin") {
       return c.json(403, { error: "Cross-dealer delete blocked" });
     }
+    if (
+      (record.getString("role") || "salesperson") === "manager" &&
+      role !== "super_admin"
+    ) {
+      return c.json(403, { error: "Only system admin can deactivate managers" });
+    }
     record.set("active", false);
     $app.dao().saveRecord(record);
     return c.json(200, { success: true });
   } catch (err) {
     console.error("[/api/app/salespeople/:id] deactivate error", err);
-    return c.json(400, { error: "Failed to deactivate salesperson" });
+    return c.json(400, { error: "Failed to deactivate person" });
   }
 });
 
@@ -2111,19 +2400,20 @@ routerAdd("POST", "/api/app/dealers", (c) => {
     const dealers = $app.dao().findCollectionByNameOrId("dealers");
     helpers.restrictDealerLogoSchema(dealers);
     const body = $apis.requestInfo(c).data || {};
+    // Super-admin creates stores by name/brand only. Personal access codes live
+    // on the people roster (managers / users), not on the dealer record.
     const data = helpers.dealerMutationData(body, true, true);
     if (!data.name) return c.json(400, { error: "Dealer name is required" });
-    if (!data.code) {
-      return c.json(400, { error: "A unique 6-digit dealer code is required" });
+    if (data.code) {
+      helpers.assertDealerCredentialAvailable(data.code, "");
     }
-    if (data.admin_code && data.admin_code === data.code) {
+    if (data.admin_code) {
+      helpers.assertDealerCredentialAvailable(data.admin_code, "");
+    }
+    if (data.admin_code && data.code && data.admin_code === data.code) {
       return c.json(400, {
         error: "Dealer and manager codes must be different",
       });
-    }
-    helpers.assertDealerCredentialAvailable(data.code, "");
-    if (data.admin_code) {
-      helpers.assertDealerCredentialAvailable(data.admin_code, "");
     }
 
     const record = new Record(dealers);

@@ -1,10 +1,12 @@
 import React, { Suspense } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Header } from "./components/Header";
+import { ImpersonationBanner } from "./components/ImpersonationBanner";
 import { MainContent } from "./components/MainContent";
 import { useAppController } from "./hooks/useAppController";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { AppStep } from "./types";
+import { useAppStore } from "./stores/appStore";
 
 // Lazy load heavyweight modals
 const LazySettingsModal = React.lazy(() =>
@@ -125,6 +127,8 @@ const AppContent: React.FC = () => {
     );
   }
 
+  const isImpersonating = useAppStore((s) => s.isImpersonating);
+
   return (
     <div
       className="flex min-h-0 flex-1 flex-col font-sans"
@@ -133,6 +137,7 @@ const AppContent: React.FC = () => {
         color: "rgb(var(--color-text-primary))",
       }}
     >
+      {isImpersonating && <ImpersonationBanner />}
       {currentDealer && (
         <Header
           dealer={currentDealer}

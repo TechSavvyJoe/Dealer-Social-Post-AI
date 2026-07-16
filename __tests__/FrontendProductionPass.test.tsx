@@ -123,7 +123,7 @@ describe("frontend production pass", () => {
     expect(globalCancel).not.toHaveBeenCalled();
   });
 
-  it("offers touch-accessible alphanumeric admin entry", async () => {
+  it("offers touch-accessible system admin entry", async () => {
     const onLogin = vi.fn().mockResolvedValue(false);
     const user = userEvent.setup();
     render(
@@ -132,15 +132,15 @@ describe("frontend production pass", () => {
       </ToastProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Admin access" }));
-    const adminInput = await screen.findByLabelText("Admin access code");
-    await user.type(adminInput, "gsm-123");
-    expect(adminInput).toHaveValue("GSM123");
+    await user.click(screen.getByRole("button", { name: "System admin" }));
+    const adminInput = await screen.findByLabelText("System admin code");
+    await user.type(adminInput, "admin99");
+    expect(adminInput).toHaveValue("ADMIN99");
 
     await user.click(
-      screen.getByRole("button", { name: /Continue to admin/i }),
+      screen.getByRole("button", { name: /Continue to system admin/i }),
     );
-    await waitFor(() => expect(onLogin).toHaveBeenCalledWith("GSM123"));
+    await waitFor(() => expect(onLogin).toHaveBeenCalledWith("ADMIN99"));
   });
 
   it("caps reviewed photo dimensions while preserving aspect ratio", () => {

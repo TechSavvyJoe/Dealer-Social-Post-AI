@@ -167,7 +167,14 @@ function hashSessionToken(token) {
   throw new Error("Secure session token hashing is unavailable");
 }
 
-function createSession(dealerId, role, ip, userAgent) {
+/**
+ * @param {string} dealerId
+ * @param {string} role
+ * @param {string} ip
+ * @param {string} userAgent
+ * @param {{ personId?: string, isImpersonation?: boolean, impersonatorSessionId?: string }} [opts]
+ */
+function createSession(dealerId, role, ip, userAgent, opts) {
   const sessions = $app.dao().findCollectionByNameOrId("sessions");
   if (!sessions) throw new Error("sessions collection missing");
 
@@ -175,8 +182,9 @@ function createSession(dealerId, role, ip, userAgent) {
   const tokenHash = hashSessionToken(token);
   const now = new Date();
   const expires = new Date(now.getTime() + SESSION_TTL_SECONDS * 1000);
+  const options = opts || {};
 
-  const record = new Record(sessions, {
+  const payload = {
     // The cookie keeps the opaque token; SQLite stores only its SHA-256
     // verifier. Tokens contain 256 bits of CSPRNG entropy, so an offline
     // preimage attack remains infeasible without retaining plaintext secrets.
@@ -187,9 +195,104 @@ function createSession(dealerId, role, ip, userAgent) {
     last_used_at: now.toISOString(),
     ip: (ip || "").slice(0, 64),
     user_agent: (userAgent || "").slice(0, 512),
-  });
+    is_impersonation: !!options.isImpersonation,
+  };
+  if (options.personId) payload.person = options.personId;
+  if (options.impersonatorSessionId) {
+    payload.impersonator_session = String(options.impersonatorSessionId).slice(
+      0,
+      64,
+    );
+  }
+
+  const record = new Record(sessions, payload);
   $app.dao().saveRecord(record);
-  return { token: token, expiresAt: expires };
+  return { token: token, expiresAt: expires, sessionId: record.id };
+}
+
+/** Exactly 4 digits — personal access codes for managers and salespeople. */
+function isValidPersonPin(value) {
+  return typeof value === "string" && /^[0-9]{4}$/.test(value);
+}
+
+function normalizePersonPin(value) {
+  return (value || "").toString().trim();
+}
+
+/**
+ * Find an active person by personal 4-digit pin.
+ * Returns null when not found or inactive.
+ */
+function findActivePersonByPin(pin) {
+  const normalized = normalizePersonPin(pin);
+  if (!isValidPersonPin(normalized)) return null;
+  try {
+    return $app.dao().findFirstRecordByFilter(
+      "salespeople",
+      "pin = {:pin} && active = true",
+      { pin: normalized },
+    );
+  } catch (_e) {
+    return null;
+  }
+}
+
+/**
+ * Ensure pin is free among active people (optionally excluding a record id).
+ */
+function assertPersonPinAvailable(pin, excludePersonId) {
+  const normalized = normalizePersonPin(pin);
+  if (!isValidPersonPin(normalized)) {
+    throw new Error("Access code must be exactly 4 digits");
+  }
+  let match = null;
+  try {
+    let filter = "pin = {:pin} && active = true";
+    const params = { pin: normalized };
+    if (excludePersonId) {
+      filter += " && id != {:excludeId}";
+      params.excludeId = excludePersonId;
+    }
+    match = $app.dao().findFirstRecordByFilter("salespeople", filter, params);
+  } catch (_e) {
+    match = null;
+  }
+  if (match) throw new Error("Access code is already in use");
+  return normalized;
+}
+
+function personRoleToSessionRole(personRole) {
+  if (personRole === "manager") return "dealer_admin";
+  return "salesperson";
+}
+
+function serializePerson(record) {
+  if (!record) return null;
+  return {
+    id: record.id,
+    dealer: record.getString("dealer"),
+    name: record.getString("name"),
+    pin: record.getString("pin"),
+    role: record.getString("role") || "salesperson",
+    active: record.getBool ? record.getBool("active") : !!record.get("active"),
+    created_at: record.getString("created_at"),
+  };
+}
+
+/**
+ * Mint a unique 4-digit pin for a new person. Retries on collision.
+ */
+function generateUniquePersonPin() {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const pin = secureRandomString(4, "0123456789");
+    try {
+      assertPersonPinAvailable(pin, "");
+      return pin;
+    } catch (_e) {
+      /* try again */
+    }
+  }
+  throw new Error("Could not allocate a unique access code");
 }
 
 /**
@@ -428,10 +531,12 @@ function dealerMutationData(body, allowCode, allowAdminCode) {
     data[field] = assertString(value, DEALER_TEXT_FIELD_LIMITS[field]);
   }
 
+  // Login no longer uses dealers.code / admin_code for store access. Super-admin
+  // may still set them for legacy/bootstrap (SYSTEM ADMIN code = ADMIN_DEALER_CODE).
   if (allowCode && body.code !== undefined) {
-    const code = assertString((body.code || "").toString().trim(), 6);
-    if (!/^[0-9]{6}$/.test(code)) {
-      throw new Error("Dealer code must be exactly 6 digits");
+    const code = assertString((body.code || "").toString().trim(), 12);
+    if (code && !/^[A-Za-z0-9]{4,12}$/.test(code)) {
+      throw new Error("Dealer code must be 4-12 alphanumeric characters");
     }
     data.code = code;
   }
@@ -535,17 +640,20 @@ function safeDealerMutationError(err) {
   const message = mutationErrorText(err);
   const known = [
     "Dealer code must be exactly 6 digits",
+    "Dealer code must be 4-12 alphanumeric characters",
     "Manager code must be 4-12 alphanumeric characters",
     "Dealer credential is already in use",
     "Dealer logo must be no larger than 5 MB",
     "Dealer logo must be a PNG, JPEG, or WebP image",
     "requires_approval must be true or false",
+    "Access code must be exactly 4 digits",
+    "Access code is already in use",
   ];
   for (let i = 0; i < known.length; i++) {
     if (message.indexOf(known[i]) !== -1) return known[i];
   }
   if (message.indexOf("Value must be unique") !== -1) {
-    return "Dealer or manager code is already in use";
+    return "Access code is already in use";
   }
   if (message.indexOf("String exceeds maximum length") !== -1) {
     return "A dealer field exceeds its maximum length";
@@ -807,6 +915,13 @@ module.exports = {
   assertDealerCredentialAvailable,
   safeDealerMutationError,
   safePhotoReleaseError,
+  isValidPersonPin,
+  normalizePersonPin,
+  findActivePersonByPin,
+  assertPersonPinAvailable,
+  personRoleToSessionRole,
+  serializePerson,
+  generateUniquePersonPin,
   // Provider resource ownership
   claimProviderResource,
   claimProviderResources,
