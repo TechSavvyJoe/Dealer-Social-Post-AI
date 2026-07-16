@@ -57,3 +57,4 @@ gen-lang-client-*.json
 credentials.json
 *-credentials.json
 .vercel
+.superpowers/
