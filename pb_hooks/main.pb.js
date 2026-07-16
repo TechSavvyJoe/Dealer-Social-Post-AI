@@ -2187,22 +2187,27 @@ routerAdd("GET", "/api/app/salespeople", (c) => {
     const roleFilter = (query.role || "").toString().trim();
     const dealerFilter = (query.dealer || "").toString().trim();
 
+    // Always tenant-scope people lists. Super admin must pass ?dealer= to
+    // pick a store — never return a mixed multi-dealer roster.
     let scopeDealerId = dealer.id;
-    if (role === "super_admin" && dealerFilter) {
+    if (role === "super_admin") {
+      if (!dealerFilter) {
+        return c.json(400, {
+          error: "Select a dealership before listing admins or users",
+        });
+      }
+      try {
+        $app.dao().findRecordById("dealers", dealerFilter);
+      } catch (_e) {
+        return c.json(400, { error: "Invalid dealership" });
+      }
       scopeDealerId = dealerFilter;
-    } else if (role === "super_admin" && !dealerFilter) {
-      // Super admin may list across all dealers when no filter is set.
-      scopeDealerId = "";
     }
 
     let filterParts = [];
     const params = {};
-    if (scopeDealerId) {
-      filterParts.push("dealer = {:d}");
-      params.d = scopeDealerId;
-    } else {
-      filterParts.push("1 = 1");
-    }
+    filterParts.push("dealer = {:d}");
+    params.d = scopeDealerId;
     if (!includeInactive) filterParts.push("active = true");
     if (role === "super_admin") {
       if (roleFilter === "manager" || roleFilter === "salesperson") {
@@ -2274,8 +2279,13 @@ routerAdd("POST", "/api/app/salespeople", (c) => {
     if (role === "dealer_admin") personRole = "salesperson";
 
     let targetDealerId = dealer.id;
-    if (role === "super_admin" && body.dealer) {
-      targetDealerId = body.dealer.toString().trim();
+    if (role === "super_admin") {
+      targetDealerId = (body.dealer || "").toString().trim();
+      if (!targetDealerId) {
+        return c.json(400, {
+          error: "dealer is required when creating people as system admin",
+        });
+      }
       try {
         $app.dao().findRecordById("dealers", targetDealerId);
       } catch (_e) {

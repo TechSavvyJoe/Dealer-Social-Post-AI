@@ -26,7 +26,6 @@ import {
   listPeople,
   addPerson,
   updatePerson,
-  deactivatePerson,
   type Person,
   type PersonRole,
 } from "../services/salespeople";
@@ -56,7 +55,8 @@ export const AdminDashboard: React.FC = () => {
   const impersonatePerson = useAppStore((s) => s.impersonatePerson);
 
   const [tab, setTab] = useState<HubTab>("dealers");
-  const [dealerFilter, setDealerFilter] = useState<string>("");
+  /** Active store context — required for Admins/Users; never "all dealers". */
+  const [selectedDealerId, setSelectedDealerId] = useState<string>("");
   const [showDealerForm, setShowDealerForm] = useState(false);
   const [editingDealer, setEditingDealer] = useState<Dealer | null>(null);
   const [dealerPendingDelete, setDealerPendingDelete] = useState<Dealer | null>(
@@ -72,7 +72,6 @@ export const AdminDashboard: React.FC = () => {
   const [personForm, setPersonForm] = useState({
     name: "",
     pin: "",
-    dealerId: "",
   });
   const [savingPerson, setSavingPerson] = useState(false);
   const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
@@ -88,28 +87,49 @@ export const AdminDashboard: React.FC = () => {
     [dealers, sessionDealer?.id],
   );
 
+  const selectedDealer = useMemo(
+    () => storeDealers.find((d) => d.id === selectedDealerId) || null,
+    [storeDealers, selectedDealerId],
+  );
+
+  // Drop selection if that store was deleted.
+  React.useEffect(() => {
+    if (
+      selectedDealerId &&
+      storeDealers.length > 0 &&
+      !storeDealers.some((d) => d.id === selectedDealerId)
+    ) {
+      setSelectedDealerId("");
+    }
+  }, [selectedDealerId, storeDealers]);
+
   const peopleRole: PersonRole = tab === "admins" ? "manager" : "salesperson";
+  const hasDealerContext = Boolean(selectedDealerId);
 
   const {
     data: people = [],
     isPending: peopleLoading,
     refetch: refetchPeople,
   } = useQuery({
-    queryKey: ["people", peopleRole, dealerFilter || "all"],
+    queryKey: ["people", peopleRole, selectedDealerId],
     queryFn: () =>
       listPeople({
         includeInactive: true,
         role: peopleRole,
-        dealerId: dealerFilter || undefined,
+        dealerId: selectedDealerId,
       }),
-    enabled: tab === "admins" || tab === "users",
+    enabled: hasDealerContext && (tab === "admins" || tab === "users"),
   });
 
-  const dealerNameById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const d of dealers) map.set(d.id, d.name);
-    return map;
-  }, [dealers]);
+  const selectDealer = (dealerId: string) => {
+    setSelectedDealerId(dealerId);
+    setPersonForm({ name: "", pin: "" });
+  };
+
+  const openPeopleTab = (dealerId: string, nextTab: "admins" | "users") => {
+    selectDealer(dealerId);
+    setTab(nextTab);
+  };
 
   const resetDealerForm = () => {
     setFormState({ name: "", logoUrl: "", logoFile: null });
@@ -212,17 +232,18 @@ export const AdminDashboard: React.FC = () => {
   };
 
   const handleAddPerson = async () => {
+    if (!selectedDealerId || !selectedDealer) {
+      toast.error("Select a dealership first.");
+      return;
+    }
     if (!personForm.name.trim()) {
       toast.error("Name is required.");
       return;
     }
-    const dealerId = personForm.dealerId || dealerFilter;
-    if (!dealerId) {
-      toast.error("Select a dealership for this person.");
-      return;
-    }
     if (personForm.pin && !/^\d{4}$/.test(personForm.pin)) {
-      toast.error("Access code must be exactly 4 digits (or leave blank to auto-generate).");
+      toast.error(
+        "Access code must be exactly 4 digits (or leave blank to auto-generate).",
+      );
       return;
     }
     setSavingPerson(true);
@@ -231,12 +252,14 @@ export const AdminDashboard: React.FC = () => {
         name: personForm.name.trim(),
         pin: personForm.pin || undefined,
         role: peopleRole,
-        dealer: dealerId,
+        dealer: selectedDealerId,
       });
       toast.success(
-        peopleRole === "manager" ? "Manager added." : "User added.",
+        peopleRole === "manager"
+          ? `Manager added to ${selectedDealer.name}.`
+          : `User added to ${selectedDealer.name}.`,
       );
-      setPersonForm({ name: "", pin: "", dealerId: dealerFilter });
+      setPersonForm({ name: "", pin: "" });
       await refetchPeople();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to add person.");
@@ -289,8 +312,8 @@ export const AdminDashboard: React.FC = () => {
               System Admin
             </h2>
             <p className="mt-2 text-sm text-surface-400">
-              Manage dealerships, store managers, and salespeople. Open any
-              person&apos;s workspace without re-entering codes.
+              Pick a dealership, then manage only that store&apos;s admins and
+              users. Rosters never mix across dealers.
             </p>
           </div>
           <Button
@@ -299,7 +322,7 @@ export const AdminDashboard: React.FC = () => {
             leftIcon={<RefreshCw className="h-4 w-4" />}
             onClick={() => {
               void refetch();
-              if (tab !== "dealers") void refetchPeople();
+              if (hasDealerContext && tab !== "dealers") void refetchPeople();
             }}
             disabled={isPending}
           >
@@ -307,7 +330,7 @@ export const AdminDashboard: React.FC = () => {
           </Button>
         </div>
 
-        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div
             className="inline-flex w-full gap-1 rounded-xl border border-surface-800 bg-surface-950/60 p-1 sm:w-auto"
             role="tablist"
@@ -319,15 +342,7 @@ export const AdminDashboard: React.FC = () => {
                 type="button"
                 role="tab"
                 aria-selected={tab === key}
-                onClick={() => {
-                  setTab(key);
-                  if (key !== "dealers") {
-                    setPersonForm((p) => ({
-                      ...p,
-                      dealerId: dealerFilter || p.dealerId,
-                    }));
-                  }
-                }}
+                onClick={() => setTab(key)}
                 className={cn(
                   "flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors sm:flex-none",
                   tab === key
@@ -341,29 +356,38 @@ export const AdminDashboard: React.FC = () => {
             ))}
           </div>
 
-          <div className="flex items-center gap-2">
-            <label htmlFor="dealer-filter" className="sr-only">
-              Filter by dealership
+          <div className="flex min-w-0 flex-1 flex-col gap-1 sm:max-w-md sm:items-end">
+            <label
+              htmlFor="selected-dealer"
+              className="text-xs font-medium uppercase tracking-wide text-surface-400"
+            >
+              Working in dealership
             </label>
             <select
-              id="dealer-filter"
-              value={dealerFilter}
-              onChange={(e) => {
-                setDealerFilter(e.target.value);
-                setPersonForm((p) => ({
-                  ...p,
-                  dealerId: e.target.value || p.dealerId,
-                }));
-              }}
-              className="min-w-[12rem] flex-1 rounded-xl border border-surface-700 bg-surface-900/70 px-3 py-2 text-sm text-surface-100 sm:flex-none"
+              id="selected-dealer"
+              value={selectedDealerId}
+              onChange={(e) => selectDealer(e.target.value)}
+              className="w-full rounded-xl border border-surface-700 bg-surface-900/70 px-3 py-2.5 text-sm text-surface-100"
             >
-              <option value="">All dealerships</option>
+              <option value="">Select a dealership…</option>
               {storeDealers.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name}
                 </option>
               ))}
             </select>
+            {selectedDealer ? (
+              <p className="text-xs text-primary-300/90">
+                Admins &amp; Users show only for{" "}
+                <strong className="font-semibold text-primary-200">
+                  {selectedDealer.name}
+                </strong>
+              </p>
+            ) : (
+              <p className="text-xs text-surface-500">
+                Choose a store to view or edit its people.
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -497,79 +521,87 @@ export const AdminDashboard: React.FC = () => {
           )}
 
           <div className="space-y-3">
-            {(dealerFilter
-              ? storeDealers.filter((d) => d.id === dealerFilter)
-              : storeDealers
-            ).map((dealer) => (
-              <motion.div
-                key={dealer.id}
-                layout
-                className="rounded-2xl border border-white/10 bg-surface-900/55 p-4 shadow-elevation-1 backdrop-blur-xl sm:p-5"
-              >
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex min-w-0 items-center gap-4">
-                    {dealer.logo ? (
-                      <img
-                        src={dealer.logo}
-                        alt=""
-                        className="h-14 w-14 rounded-xl border border-white/10 bg-surface-950/50 object-contain p-2"
-                      />
-                    ) : (
-                      <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-primary-500/20 bg-primary-500/10">
-                        <Building2 className="h-7 w-7 text-primary-300" />
+            {storeDealers.map((dealer) => {
+              const isSelected = dealer.id === selectedDealerId;
+              return (
+                <motion.div
+                  key={dealer.id}
+                  layout
+                  className={cn(
+                    "rounded-2xl border p-4 shadow-elevation-1 backdrop-blur-xl sm:p-5",
+                    isSelected
+                      ? "border-primary-500/50 bg-primary-500/10 ring-1 ring-primary-400/30"
+                      : "border-white/10 bg-surface-900/55",
+                  )}
+                >
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <button
+                      type="button"
+                      onClick={() => selectDealer(dealer.id)}
+                      className="flex min-w-0 items-center gap-4 text-left"
+                    >
+                      {dealer.logo ? (
+                        <img
+                          src={dealer.logo}
+                          alt=""
+                          className="h-14 w-14 rounded-xl border border-white/10 bg-surface-950/50 object-contain p-2"
+                        />
+                      ) : (
+                        <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-primary-500/20 bg-primary-500/10">
+                          <Building2 className="h-7 w-7 text-primary-300" />
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <h3 className="truncate text-lg font-bold text-surface-50">
+                          {dealer.name}
+                          {isSelected && (
+                            <span className="ml-2 text-xs font-semibold uppercase tracking-wide text-primary-300">
+                              selected
+                            </span>
+                          )}
+                        </h3>
+                        <p className="mt-0.5 text-xs text-surface-500">
+                          {dealer.hours?.trim() || "Hours not set"}
+                        </p>
                       </div>
-                    )}
-                    <div className="min-w-0">
-                      <h3 className="truncate text-lg font-bold text-surface-50">
-                        {dealer.name}
-                      </h3>
-                      <p className="mt-0.5 text-xs text-surface-500">
-                        {dealer.hours?.trim() || "Hours not set"}
-                      </p>
+                    </button>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openPeopleTab(dealer.id, "admins")}
+                      >
+                        Admins
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openPeopleTab(dealer.id, "users")}
+                      >
+                        Users
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => handleEditDealer(dealer)}
+                        title="Edit dealer"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="icon"
+                        onClick={() => setDealerPendingDelete(dealer)}
+                        disabled={deleteMutation.isPending}
+                        title="Delete dealer"
+                      >
+                        <Icon type="trash" className="h-4 w-4" />
+                      </Button>
                     </div>
                   </div>
-                  <div className="flex flex-wrap justify-end gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setDealerFilter(dealer.id);
-                        setTab("admins");
-                      }}
-                    >
-                      Admins
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setDealerFilter(dealer.id);
-                        setTab("users");
-                      }}
-                    >
-                      Users
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => handleEditDealer(dealer)}
-                      title="Edit dealer"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="icon"
-                      onClick={() => setDealerPendingDelete(dealer)}
-                      disabled={deleteMutation.isPending}
-                      title="Delete dealer"
-                    >
-                      <Icon type="trash" className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
+                </motion.div>
+              );
+            })}
             {!isPending && storeDealers.length === 0 && (
               <p className="rounded-2xl border border-dashed border-surface-700 p-8 text-center text-sm text-surface-400">
                 No dealerships yet. Add your first store to get started.
@@ -579,36 +611,47 @@ export const AdminDashboard: React.FC = () => {
         </>
       )}
 
-      {(tab === "admins" || tab === "users") && (
+      {(tab === "admins" || tab === "users") && !hasDealerContext && (
+        <div className="rounded-2xl border border-dashed border-surface-700 bg-surface-900/40 p-8 text-center">
+          <Building2 className="mx-auto mb-3 h-8 w-8 text-surface-500" />
+          <h3 className="text-lg font-semibold text-surface-100">
+            Select a dealership first
+          </h3>
+          <p className="mx-auto mt-2 max-w-md text-sm text-surface-400">
+            Admins and users are scoped to one store at a time. Choose a
+            dealership above, or open{" "}
+            <button
+              type="button"
+              className="font-semibold text-primary-300 underline-offset-2 hover:underline"
+              onClick={() => setTab("dealers")}
+            >
+              Dealers
+            </button>{" "}
+            and use that store&apos;s Admins / Users buttons.
+          </p>
+        </div>
+      )}
+
+      {(tab === "admins" || tab === "users") && hasDealerContext && selectedDealer && (
         <div className="space-y-4">
+          <div className="rounded-xl border border-primary-500/25 bg-primary-500/10 px-4 py-3 text-sm text-primary-100">
+            Managing{" "}
+            <strong className="font-semibold">{selectedDealer.name}</strong>
+            {tab === "admins" ? " — managers only" : " — salespeople only"}
+            . Switch dealership above to work in another store.
+          </div>
+
           <div className="rounded-2xl border border-white/10 bg-surface-900/60 p-4 sm:p-5">
             <h3 className="text-lg font-bold text-surface-50">
-              {tab === "admins" ? "Add manager" : "Add salesperson"}
+              {tab === "admins"
+                ? `Add manager · ${selectedDealer.name}`
+                : `Add salesperson · ${selectedDealer.name}`}
             </h3>
             <p className="mt-1 text-xs text-surface-400">
-              Each person gets a unique 4-digit code for dialpad sign-in. Leave
-              pin blank to auto-generate.
+              New people are created only for this dealership. Each gets a
+              unique 4-digit sign-in code (leave blank to auto-generate).
             </p>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
-              {!dealerFilter && (
-                <div className="sm:w-48">
-                  <label className={labelClassName}>Dealership</label>
-                  <select
-                    value={personForm.dealerId}
-                    onChange={(e) =>
-                      setPersonForm((p) => ({ ...p, dealerId: e.target.value }))
-                    }
-                    className={fieldClassName}
-                  >
-                    <option value="">Select…</option>
-                    {storeDealers.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
               <div className="flex-1">
                 <label className={labelClassName}>Name</label>
                 <input
@@ -658,9 +701,7 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </div>
 
-          {peopleLoading && (
-            <Skeleton className="h-32 w-full rounded-2xl" />
-          )}
+          {peopleLoading && <Skeleton className="h-32 w-full rounded-2xl" />}
 
           <div className="space-y-2">
             {people.map((person) => (
@@ -681,7 +722,7 @@ export const AdminDashboard: React.FC = () => {
                     )}
                   </div>
                   <div className="mt-0.5 text-xs text-surface-400">
-                    {dealerNameById.get(person.dealer) || person.dealer}
+                    {selectedDealer.name}
                     {person.pin ? (
                       <>
                         {" · "}
@@ -721,8 +762,8 @@ export const AdminDashboard: React.FC = () => {
             {!peopleLoading && people.length === 0 && (
               <p className="rounded-2xl border border-dashed border-surface-700 p-8 text-center text-sm text-surface-400">
                 {tab === "admins"
-                  ? "No managers yet for this filter."
-                  : "No salespeople yet for this filter."}
+                  ? `No managers yet for ${selectedDealer.name}.`
+                  : `No salespeople yet for ${selectedDealer.name}.`}
               </p>
             )}
           </div>
