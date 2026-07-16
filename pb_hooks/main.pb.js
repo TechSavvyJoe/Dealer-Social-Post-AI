@@ -70,18 +70,19 @@ const proxyHandler = (c) => {
 
   // Multiple methods to extract path for PocketBase JSVM compatibility
   try {
-    // Method 1: Direct pathParams
-    if (c.pathParams && c.pathParams.path) {
-      path = c.pathParams.path;
-    }
+    // Method 1: Named wildcard path param (PB 0.22 exposes pathParam() as a
+    // method; the `:path(*)` route names the wildcard "path").
+    const p = c.pathParam("path");
+    if (p) path = p;
   } catch (e) {
-    // pathParams may not be available
+    // pathParam may not be available
   }
 
-  // Method 2: Get from URL path directly
+  // Method 2: Get from URL path directly (c.request() is a method in PB 0.22).
   if (!path) {
     try {
-      const fullPath = c.request.url.path || c.request.url.pathname;
+      const req = c.request();
+      const fullPath = req.url.path || req.url.pathname;
       if (fullPath && fullPath.startsWith("/api/proxy/")) {
         path = fullPath.substring("/api/proxy/".length);
       }
@@ -93,7 +94,7 @@ const proxyHandler = (c) => {
   // Method 3: Get from raw URL string
   if (!path) {
     try {
-      const urlStr = c.request.url.string();
+      const urlStr = c.request().url.string();
       const match = urlStr.match(/\/api\/proxy\/(.+)/);
       if (match) {
         path = match[1];
@@ -541,8 +542,8 @@ const proxyHandler = (c) => {
       url: targetUrl,
       method: requestInfo.method,
       body:
-        requestInfo.method === "POST" && requestInfo.body
-          ? JSON.stringify(requestInfo.body)
+        requestInfo.method === "POST" && requestInfo.data
+          ? JSON.stringify(requestInfo.data)
           : "",
       headers: {
         "Content-Type": "application/json",
