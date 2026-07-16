@@ -151,7 +151,7 @@ describe("photo release consent gate", () => {
 
   it("links an existing release id without sending signature data", async () => {
     const fetchMock = vi.fn(
-      async () =>
+      async (_input?: string, _init?: RequestInit) =>
         new Response(
           JSON.stringify({
             id: "release-1",
