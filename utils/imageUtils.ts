@@ -5,6 +5,19 @@
  * @returns A Promise that resolves to a Blob.
  */
 export const dataUrlToBlob = async (dataUrl: string): Promise<Blob> => {
+  // Decode base64 data URLs directly so the Blob is created in the caller's
+  // realm (browser or jsdom). Routing through fetch() yields a Blob from the
+  // runtime's fetch implementation, which some environments (notably jsdom +
+  // Node's global fetch) reject when it's later passed to FormData.append.
+  const match = /^data:([^;,]*);base64,([\s\S]*)$/.exec(dataUrl);
+  if (match) {
+    const mime = match[1] || "application/octet-stream";
+    const binary = atob(match[2].replace(/\s/g, ""));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
+  }
+  // Non-base64 or remote URLs: fall back to fetch.
   const res = await fetch(dataUrl);
   return await res.blob();
 };

@@ -87,13 +87,19 @@ async function hashString(input: string): Promise<string> {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const blobToDataUrl = (blob: Blob): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error("Failed to read image data."));
-    reader.readAsDataURL(blob);
-  });
+const blobToDataUrl = async (blob: Blob): Promise<string> => {
+  // Use arrayBuffer() + btoa rather than FileReader so the conversion is
+  // independent of which realm produced the Blob. FileReader in jsdom rejects
+  // Blobs created by Node's fetch(), which broke logo loading under test.
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  const mime = blob.type || "application/octet-stream";
+  return `data:${mime};base64,${btoa(binary)}`;
+};
 
 const normaliseDataUrl = async (source?: string): Promise<string> => {
   if (!source) {
