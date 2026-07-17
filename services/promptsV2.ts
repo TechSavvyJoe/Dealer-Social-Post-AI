@@ -32,7 +32,7 @@ LOCK these from the source photo (pixel-faithful, same framing):
 - The real background / location and camera angle
 
 ALLOWED only:
-- Subtle color grade, exposure, contrast, sharpening
+- Subtle color grade, exposure, contrast, sharpening (pro retouch polish)
 - Tasteful text overlays, badges, and a small logo/watermark in empty space
 - Light cinematic polish that does NOT invent a new car, new people, or a new lot
 
@@ -43,6 +43,12 @@ FORBIDDEN (instant failure):
 - Covering faces, hands, or the vehicle with oversized graphics
 
 If you cannot place text without violating these rules, use a thin bottom/top banner over empty sky or pavement — never over the car or people.`;
+
+/** Shared quality bar for a high-budget dealership social creative studio. */
+const campaignQualityBar = `Quality bar: a leading automotive marketing agency producing a paid social unit for a multi-million-dollar OEM/dealer campaign.
+Classy, confident, expensive-looking. Apple-keynote restraint + premium OEM brochure craft.
+Not template Canva, not clip-art, not meme energy, not stock-photo composites.
+Every choice (type, grade, spacing, logo scale) should look intentional enough to justify a four- or five-figure creative fee.`;
 
 // ----------------------------------------------------------------------------
 // TEXT — Caption
@@ -107,7 +113,10 @@ export const generateTextPromptV2 = (
   const sections: string[] = [];
 
   sections.push(
-    `You are an elite automotive social-media copywriter. Write one short, scroll-stopping caption to accompany the attached delivery photo. Output the caption ONLY — no preamble, no labels, no commentary.`
+    `You are a senior social copywriter at a top automotive marketing agency.
+Write one short, scroll-stopping caption for a paid/organic dealership delivery post.
+Quality bar: copy that could run next to a luxury OEM campaign — confident, human, never cheesy dealership cliché.
+Output the caption ONLY — no preamble, no labels, no commentary.`
   );
 
   sections.push(
@@ -120,6 +129,7 @@ ${style ? `Visual style of the post: ${style} — ${styleHint(style)}` : ""}`
   );
 
   sections.push(xmlBlock("voice", TONE_FINGERPRINTS[tone]));
+  sections.push(xmlBlock("campaign_quality", campaignQualityBar));
 
   if (creativeBrief?.trim()) {
     sections.push(
@@ -136,7 +146,8 @@ ${style ? `Visual style of the post: ${style} — ${styleHint(style)}` : ""}`
       `Briefly study the photo before writing.
 - The car: if you can identify make+model with certainty, name it. If not, say "their new ride" / "this beauty" / similar. Wrong identification is worse than generic.
 - The people: count, vibe (family / couple / solo), apparent mood.
-- The scene: showroom vs outdoor — let it color the imagery.`
+- The scene: showroom vs outdoor — let it color the imagery.
+Ground the caption in what is actually visible — authenticity beats generic hype.`
     )
   );
 
@@ -145,16 +156,18 @@ ${style ? `Visual style of the post: ${style} — ${styleHint(style)}` : ""}`
     xmlBlock(
       "rules",
       `Length: 1–2 short hook sentences + 1 CTA. Three sentences max. Mobile-first — scannable on a phone screen.
+Hook must earn the scroll-stop in the first 8–12 words (specificity > vague excitement).
 Always name the store exactly as "${dealershipName}" in the body or CTA (not a shortened brand-only name) so multi-location traffic goes to the right rooftop.
 Hashtags: 4–6 total, space-separated:
   - #${storeTag} (required)
   - 1 location/market tag if you can infer city/region from the store name (e.g. #HowellMI)
   - 2–3 high-intent automotive discovery tags (e.g. #NewCarDelivery #HappyCustomer #CarShopping) — no spam stuffing
   - Optional OEM tag only if the vehicle brand is certain from the photo/brief
-Emoji: 0–2, never leading.
-No prices, APR, "guaranteed", "lowest", "no credit check".
+Emoji: 0–2, never leading. Prefer none for Professional/Luxury feel.
+No prices, APR, "guaranteed", "lowest", "no credit check", "best deal in town".
+Avoid clichés: "dream machine", "sold!", "another happy customer!!", all-caps hype.
 Do not invent vehicle specs not in <creative_brief>.
-Tone: lively Hollywood marketing polish — confident and fun, never cheesy or try-hard.
+Tone: high-budget campaign polish — confident and warm, never cheesy or try-hard.
 ${isRegeneration ? "REGENERATION: different opening + different hashtag mix than a prior draft." : ""}`
     )
   );
@@ -213,20 +226,25 @@ export const generateImagePromptV2 = (
   const sections: string[] = [];
 
   sections.push(
-    `You are an elite, world-class agency graphic designer and compositor. The attached photo shows a real customer with their new car. Your output is the SAME photo, but elevated with expert-level color grading, compositing, and typography to create a breathtaking social media advertisement. This is professional photo editing and design, not generic image generation.`
+    `You are a creative director + senior retoucher at a top automotive social agency.
+The attached photo is a REAL customer delivery. Your job: elevate THAT photo into a paid-social campaign still — the kind a global marketing firm would ship after a multi-thousand-dollar creative production.
+This is professional photo editing and design on the source image — NOT generic image generation, NOT a new scene, NOT a stock-car composite.`
   );
 
   sections.push(xmlBlock("subject_preservation", subjectPreservation));
   sections.push(xmlBlock("safe_zones", safeZoneRules));
+  sections.push(xmlBlock("campaign_quality", campaignQualityBar));
 
   sections.push(
     xmlBlock(
       "style_direction",
       `Style: ${style}
 ${imageStyleHint(style)}
-Color & grading: subtle cinematic grade only — lift faces slightly, keep paint accurate, do not invent a new environment.
-Typography: editorial hierarchy (hero line + short support line). Prefer open sky/pavement/wall safe zones. Avoid cheesy 3D chrome explosions or full-frame graphic takeover.
-Compositing: light text shadows ok; no stock-car pastes, no background replacement, no re-posed people.`
+Color & grading: subtle cinematic grade only — lift faces slightly, accurate paint color, controlled contrast, gentle highlight roll-off. Do not invent a new environment or sky replacement.
+Typography: editorial hierarchy (one hero line + optional short support). Refined tracking, high-end weight pairing, generous breathing room. Prefer open sky/pavement/wall safe zones.
+Avoid: cheesy 3D chrome, burst explosions, clip-art confetti piles, full-frame graphic takeover, meme stickers, watermark spam.
+Compositing: light text shadows ok; logo small and premium; no stock-car pastes, no background replacement, no re-posed people.
+Finish: looks like a finished campaign asset ready for Instagram/Facebook/TikTok paid social.`
     )
   );
 
@@ -323,7 +341,8 @@ export const generateFunPromptV2 = (
   requestedStyleName?: string
 ): string => {
   return [
-    `You are a premium campaign artist applying a stylized LOOK to a real delivery photo — like a limited Marvel/LEGO/superhero campaign treatment over photography, not a full redraw that invents a new car or new people.`,
+    `You are a premium campaign artist applying a stylized LOOK to a real delivery photo — like a limited Marvel/LEGO/superhero campaign treatment over photography, not a full redraw that invents a new car or new people.
+${campaignQualityBar}`,
     xmlBlock(
       "style",
       `${requestedStyleName ? `Style: ${requestedStyleName}\n` : ""}${styleSummary}
@@ -351,41 +370,125 @@ Mild stylization of skin/line is ok; identity must still match the photo at a gl
 };
 
 // ----------------------------------------------------------------------------
-// VIDEO — Veo prompt distillation
+// VIDEO — Veo image-to-video (photo-locked campaign motion)
 // ----------------------------------------------------------------------------
+
+/**
+ * Veo image-to-video works best when the prompt describes MOTION only.
+ * Describing a new scene, second car, morph, or "reveal of another vehicle"
+ * causes the model to invent frames that leave the source photo.
+ */
+const videoMotionForStyle = (
+  style: VideoStyle,
+  pacing: VideoRequestOptions["pacing"],
+): string => {
+  const snappy = pacing === "snappy";
+  const base = snappy
+    ? "Keep motion short, confident, and controlled — still premium, not chaotic."
+    : "Keep motion slow, smooth, and high-end commercial.";
+
+  switch (style) {
+    case VideoStyle.EpicReveal:
+      return `${base} Very slow push-in toward the group and the car already in the photo. Gentle light wrap on paint and faces. No second vehicle.`;
+    case VideoStyle.PartyTime:
+      return `${base} Soft confetti or sparkle particles in empty sky/pavement only. Tiny smile/energy on the people already present. Camera almost locked.`;
+    case VideoStyle.VintageFilm:
+      return `${base} Subtle handheld micro-shake and warm film grain over the SAME frame. No scene change.`;
+    case VideoStyle.NeonPulse:
+      return `${base} Soft edge glow that pulses once on the existing car body lines. Minimal camera drift.`;
+    case VideoStyle.CometStrike:
+      return `${base} Fine stardust particles drifting in empty background regions only. Locked framing.`;
+    case VideoStyle.HappyDance:
+      return `${base} Micro scale pulse (1–2%) of the whole frame — never re-pose people or the car.`;
+    case VideoStyle.JumpingForJoy:
+      return `${base} People stay planted; add a brief upward energy on existing smiles only. Do not make anyone leave the ground or leave the car.`;
+    case VideoStyle.SpeedLines:
+      return `${base} Faint speed streaks in empty edge regions only; car and people stay rock-still and sharp.`;
+    case VideoStyle.CarSketch:
+      return `${base} Brief line-sketch overlay that fades INTO the real photo within 1s — the real car and people must already match the photo.`;
+    case VideoStyle.GoldenRadiance:
+      return `${base} Warm golden highlight sweep across existing paint and faces. Classy auto ad.`;
+    case VideoStyle.GlitchPop:
+      return `${base} One or two tasteful micro-glitches that resolve immediately; identity never changes.`;
+    case VideoStyle.SmokeReveal:
+      return `${base} Thin atmospheric haze at the edges that clears to the SAME photo — never cover and replace with a different car.`;
+    case VideoStyle.Spotlight:
+      return `${base} Soft spotlight falloff that gently brightens the existing subjects without dark-to-different-scene transitions.`;
+    case VideoStyle.FireEmbers:
+      return `${base} Soft rising ember particles in empty space; warm grade; no fire covering faces or inventing a new scene.`;
+    case VideoStyle.LiquidChrome:
+      return `${base} Subtle specular roll across existing metal surfaces only — no liquid morph into another car.`;
+    case VideoStyle.StickerSlap:
+      return `${base} 1–2 small celebratory badges animate into empty corners only; photo underneath stays fixed.`;
+    case VideoStyle.GraffitiReveal:
+      return `${base} Brief color wash at edges that settles into the real photo; composition unchanged.`;
+    case VideoStyle.HolographicScan:
+      return `${base} Soft scan-line pass that resolves to the full-color source photo; no body swap.`;
+    case VideoStyle.RoadTrip:
+      return `${base} Gentle parallax on background only; people and car locked as the hero still.`;
+    case VideoStyle.Blueprint:
+      return `${base} Thin blueprint overlay that quickly dissolves to the real delivery photo already shown.`;
+    default:
+      return `${base} Slow push-in, natural light shimmer on the car, subjects locked.`;
+  }
+};
 
 export const generateVideoPromptV2 = (
   style: VideoStyle,
   options: VideoRequestOptions,
   baseCaption?: string
 ): string => {
-  const motion =
-    options.pacing === "cinematic"
-      ? "Cinematic slow-push, subtle parallax, gentle camera drift. Hold reveals."
-      : "Snappy cuts, quick zooms, energetic motion. Beat-matched if soundtrack present.";
+  const duration = options.durationSeconds || 6;
+  const aspect =
+    options.aspectPreference === "auto"
+      ? "match the source photo aspect"
+      : options.aspectPreference === "1:1"
+        ? "16:9 (letterbox if needed — never crop faces or the vehicle)"
+        : String(options.aspectPreference);
+
   return [
-    `Generate a 5–8 second video from the attached still photo.`,
+    `Image-to-video for a premium automotive dealership social campaign.
+The attached image is the FIRST FRAME and the ONLY scene. Animate that exact photograph.`,
     xmlBlock(
-      "style",
-      `${style}\nDuration: ${options.durationSeconds}s. Aspect: ${
-        options.aspectPreference === "auto" ? "match source" : options.aspectPreference
-      }. Resolution: ${options.resolution}. Pacing: ${options.pacing}.\n${motion}`
+      "hard_locks",
+      `This is NOT text-to-video and NOT a new scene generation.
+- Frame 1 = the attached photo. The last frame must still clearly be that same photo (same people, same car, same place).
+- Do not invent a second car, a different color car, a showroom swap, a highway plate, or a stock hero vehicle.
+- Do not morph faces or replace customers.
+- Do not zoom so hard that you invent detail that was not in the photo.
+- Do not push the photo away to reveal a different car underneath.
+- Keep the full vehicle and all people visible for the entire ${duration}s.
+- Prefer subtle camera moves (slow push / gentle drift) over aggressive zooms, whip pans, or snap cuts.`
+    ),
+    xmlBlock(
+      "campaign_quality",
+      `${campaignQualityBar}
+For video: motion should feel intentional and brief, like a high-budget social spot — not a random AI morph, zoom-into-another-car, or scene swap.
+Even playful styles keep the real photo sacred.`
+    ),
+    xmlBlock(
+      "motion",
+      `Style label: ${style}
+Duration: ${duration} seconds. Aspect: ${aspect}. Resolution target: ${options.resolution}.
+Pacing: ${options.pacing}.
+${videoMotionForStyle(style, options.pacing)}`
     ),
     xmlBlock(
       "soundtrack",
       options.soundtrack === "none"
-        ? `No audio.`
-        : `Background music style: ${options.soundtrack}. Build to a brief peak at the reveal moment. No copyrighted tracks.`
+        ? `No audio required; design a silent loop-friendly visual.`
+        : `Mood for audio (do not name copyrighted tracks): ${options.soundtrack}. Visual pacing should support that mood without changing the subjects.`
     ),
     baseCaption
       ? xmlBlock(
-          "narrative_hint",
-          `The companion caption is: "${baseCaption.trim()}". Reflect its mood and the subject's emotion in the motion.`
+          "mood_only",
+          `Companion caption mood (do not put caption text into the video frames): "${baseCaption.trim().slice(0, 280)}"`
         )
       : "",
     xmlBlock(
-      "subject_preservation",
-      `The people and the vehicle must remain recognizable. Do not regenerate faces or swap the vehicle. Slight motion (head turn, smile expansion) is allowed.`
+      "success_criteria",
+      `A viewer who saw the original photo must instantly recognize the same delivery moment.
+If the car or people change identity at any frame, the output is a failure.`
     ),
   ]
     .filter(Boolean)

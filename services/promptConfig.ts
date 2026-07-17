@@ -1239,17 +1239,16 @@ export const generateVideoPrompt = (
   if (FLAGS.useV2Prompts) {
     return generateVideoPromptV2(style, options);
   }
-  const coreInstruction = `You are an expert AI video animator specializing in creating dynamic motion from static images.
+  const coreInstruction = `You are a senior motion designer at a top automotive social agency creating image-to-video from a REAL delivery photograph.
 
-**YOUR MISSION:**
-Transform the provided static photograph into a ${options.durationSeconds}-second animated video clip.
+**MISSION:** Animate the attached still for ${options.durationSeconds} seconds. The photo is the first frame and the only scene.
 
-**CRITICAL REQUIREMENTS:**
-1. **PRESERVE THE SUBJECTS:** The people and car in the image MUST remain exactly as they appear. Do NOT replace, alter, or remove them.
-2. **ADD MOTION & EFFECTS:** Animate the scene with the specified theme/style. Add visual effects, camera movements, particles, or overlays as appropriate.
-3. **MAINTAIN FRAMING:** Keep the car and all people fully visible throughout the video. Do not crop or cut off important subjects.
-4. **SMOOTH ANIMATION:** Create fluid, professional-quality motion that feels polished and intentional.
-5. **LOOP-FRIENDLY:** If possible, design the animation to loop seamlessly.`;
+**HARD LOCKS (failure if broken):**
+1. Same people, same car, same location for every frame — no morph into a different vehicle.
+2. Do not zoom/push the photo away to reveal another car underneath.
+3. Do not invent a second car, stock hero car, or new background.
+4. Keep full vehicle + all people visible; prefer gentle camera drift/push over aggressive zoom.
+5. Premium OEM campaign quality — classy, expensive, intentional.`;
 
   const soundtrackInstruction =
     options.soundtrack === "none"
@@ -1281,19 +1280,17 @@ Transform the provided static photograph into a ${options.durationSeconds}-secon
   switch (style) {
     case VideoStyle.EpicReveal:
       styleInstruction =
-        "Theme: 'Epic Cinematic Reveal'. \n" +
-        "CAMERA MOTION: Perform a slow, majestic DOLLY ZOOM (Hitchcock effect) centered on the car. \n" +
-        "EFFECTS: Add volumetric god-rays beaming down from the sky. As the camera zooms, reveal subtle glowing dust motes floating in the air. \n" +
-        "ATMOSPHERE: High-end luxury commercial, awe-inspiring, premium. \n" +
-        "DETAILS: The car's paint should gleam with moving reflections.";
+        "Theme: Premium cinematic delivery moment.\n" +
+        "CAMERA: Very slow push-in only (no Hitchcock extreme, no snap zoom).\n" +
+        "EFFECTS: Soft light wrap and paint reflections on the EXISTING car.\n" +
+        "LOCK: Same car and people entire time.";
       break;
     case VideoStyle.PartyTime:
       styleInstruction =
-        "Theme: 'Ultimate Celebration'. \n" +
-        "CAMERA MOTION: Dynamic handheld camera movement that slightly bobs to a beat, zooming in and out rhythmically. \n" +
-        "EFFECTS: EXPLOSION of realistic 3D confetti and streamers falling from above. Add a subtle 'camera flash' strobing effect. \n" +
-        "ATMOSPHERE: High-energy party, excitement, joy. \n" +
-        "DETAILS: Make the people appear to be slightly bouncing or vibrating with excitement.";
+        "Theme: Tasteful celebration.\n" +
+        "CAMERA: Nearly locked off; micro drift only.\n" +
+        "EFFECTS: Light confetti in empty sky/pavement only — not covering faces.\n" +
+        "LOCK: No re-posing people; no new car.";
       break;
     case VideoStyle.VintageFilm:
       styleInstruction =
@@ -1321,15 +1318,14 @@ Transform the provided static photograph into a ${options.durationSeconds}-secon
       break;
     case VideoStyle.HappyDance:
       styleInstruction =
-        "Theme: 'Playful Bounce'. \n" +
-        "CAMERA MOTION: The camera should snap-zoom in and out to the beat of an imaginary song. \n" +
-        "EFFECTS: Add fun, pop-art style motion lines and shapes (stars, hearts) popping up around the happy customers. \n" +
-        "ATMOSPHERE: Fun, playful, TikTok/Reels style trend. \n" +
-        "DETAILS: Slightly squash-and-stretch the entire image rhythmically to make it feel like it's dancing.";
+        "Theme: Playful micro-energy on the existing photo.\n" +
+        "CAMERA: Micro scale pulse (1–2%) only — no snap-zoom that invents detail.\n" +
+        "EFFECTS: Tiny stars/hearts in empty corners only, not covering faces.\n" +
+        "LOCK: Same people and car every frame.";
       break;
     case VideoStyle.JumpingForJoy:
       styleInstruction =
-        "Theme: 'Jumping for Joy'. Isolate the primary customer in the photo. Animate them performing a single, energetic 'jump for joy'. They should leap up slightly, arms raised in excitement, and land back in their original position. To add impact, create a very slight camera shake effect the moment they land. The car and background must remain static.";
+        "Theme: Energy on existing smiles only — people stay planted, car static, micro camera settle. Do not isolate or invent a jump that changes composition.";
       break;
     case VideoStyle.SpeedLines:
       styleInstruction =
@@ -1337,7 +1333,7 @@ Transform the provided static photograph into a ${options.durationSeconds}-secon
       break;
     case VideoStyle.CarSketch:
       styleInstruction =
-        "Theme: 'Car Sketch'. Create an artistic reveal. Animate the scene as if it is being drawn by a charcoal pencil on textured paper. Start with rough outlines that quickly sketch themselves in, then have the color and detail fill in, transitioning smoothly into the final, full-color photo by the end of the clip.";
+        "Theme: Brief sketch overlay that dissolves into the real photo within ~1s. The photo identity must match from the first readable frame.";
       break;
     case VideoStyle.GoldenRadiance:
       styleInstruction =
@@ -1349,11 +1345,11 @@ Transform the provided static photograph into a ${options.durationSeconds}-secon
       break;
     case VideoStyle.SmokeReveal:
       styleInstruction =
-        "Theme: 'Smoke Reveal'. Create a dramatic and cool reveal. The video starts with a screen filled with thick, billowing colored smoke (e.g., blue or red). The smoke should then gracefully swirl and dissipate over the 4 seconds to dramatically unveil the car and happy customers behind it.";
+        "Theme: Soft atmospheric edge haze that clears — the SAME delivery photo is always underneath. Never replace with a different car.";
       break;
     case VideoStyle.Spotlight:
       styleInstruction =
-        "Theme: 'Spotlight'. Create a theatrical, 'big reveal' effect. The video begins with a mostly dark screen. A bright, clean spotlight then sweeps into the frame, scans around for a moment, and then comes to rest, perfectly illuminating the car and customers, making them the star of the show.";
+        "Theme: Gentle spotlight falloff brightening the existing subjects. Do not start from a black frame that becomes a different scene.";
       break;
     case VideoStyle.FireEmbers:
       styleInstruction =
@@ -1361,7 +1357,7 @@ Transform the provided static photograph into a ${options.durationSeconds}-secon
       break;
     case VideoStyle.LiquidChrome:
       styleInstruction =
-        "Theme: 'Liquid Chrome'. Create a sleek, futuristic reveal. Animate liquid metal or chrome that flows and swirls across the screen, gradually conforming to the shape of the car and solidifying to reveal the final, polished image. The effect should be smooth, reflective, and high-end.";
+        "Theme: Subtle specular roll across the existing car paint only — no liquid morph into another vehicle.";
       break;
     case VideoStyle.StickerSlap:
       styleInstruction =
@@ -1369,19 +1365,19 @@ Transform the provided static photograph into a ${options.durationSeconds}-secon
       break;
     case VideoStyle.GraffitiReveal:
       styleInstruction =
-        "Theme: 'Graffiti Reveal'. Start the video with a stylized brick wall filling the screen. Animate a burst of colorful spray paint that creates a graffiti-style outline of the car, which then transitions into the full, real photo, as if the graffiti art has come to life. The mood is urban, cool, and artistic.";
+        "Theme: Brief color wash at edges that settles into the real photo. Composition unchanged — never replace with a different car or a full brick-wall scene.";
       break;
     case VideoStyle.HolographicScan:
       styleInstruction =
-        "Theme: 'Holographic Scan'. Make the image appear as a flickering, blue-tinted hologram. Animate horizontal scan lines that move up and down the image. The hologram should briefly glitch and then resolve into the stable, full-color photo by the end of the clip. The feel is modern and tech-focused.";
+        "Theme: Soft scan-line pass over the existing photo that resolves to full color. No body swap, no different vehicle.";
       break;
     case VideoStyle.RoadTrip:
       styleInstruction =
-        "Theme: 'Road Trip'. Create a sense of adventure. Animate a stylized, dashed line that draws itself on screen, representing a map route. The line should loop around the happy customers and car. Overlay subtle, semi-transparent animated scenery (like mountains or trees) passing by on the sides of the frame.";
+        "Theme: Gentle parallax on background only; people and car locked as the hero still. No map overlay that invents a new scene.";
       break;
     case VideoStyle.Blueprint:
       styleInstruction =
-        "Theme: 'Blueprint'. Begin with a blue background. Animate white blueprint lines that quickly draw the technical schematic of the car on screen. Once the drawing is complete, have it seamlessly fade and transition into the final, full-color photograph of the car and customers.";
+        "Theme: Thin blueprint lines over the real photo that quickly dissolve — do not replace the photo with a different drawn car.";
       break;
   }
   return `${coreInstruction}

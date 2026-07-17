@@ -355,6 +355,37 @@ function revokeDealerSessions(dealerId, preserveToken) {
   return revoked;
 }
 
+/**
+ * End every session tied to a person (pin rotate / deactivate).
+ * Next sign-in must use the current access code.
+ */
+function revokePersonSessions(personId) {
+  if (!personId) return 0;
+  let records = [];
+  try {
+    records = $app.dao().findRecordsByFilter(
+      "sessions",
+      "person = {:person}",
+      "created",
+      10000,
+      0,
+      { person: personId },
+    );
+  } catch (_e) {
+    return 0;
+  }
+  let revoked = 0;
+  for (let i = 0; i < records.length; i++) {
+    try {
+      $app.dao().deleteRecord(records[i]);
+      revoked++;
+    } catch (_e) {
+      /* continue */
+    }
+  }
+  return revoked;
+}
+
 function buildSessionCookie(token, maxAgeSeconds) {
   const maxAge =
     typeof maxAgeSeconds === "number" ? maxAgeSeconds : SESSION_TTL_SECONDS;
@@ -894,6 +925,7 @@ module.exports = {
   refreshSession,
   revokeSession,
   revokeDealerSessions,
+  revokePersonSessions,
   buildSessionCookie,
   buildClearCookie,
   // Request metadata

@@ -2341,13 +2341,23 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
     }
 
     const body = $apis.requestInfo(c).data || {};
+    let pinRotated = false;
+    let deactivated = false;
     if (typeof body.name === "string")
       record.set("name", helpers.assertString(body.name.toString(), 120));
     if (typeof body.pin === "string") {
       const pin = helpers.assertPersonPinAvailable(body.pin.toString(), id);
+      if (pin !== record.getString("pin")) pinRotated = true;
       record.set("pin", pin);
     }
-    if (typeof body.active === "boolean") record.set("active", body.active);
+    if (typeof body.active === "boolean") {
+      if (body.active === false && (record.getBool
+        ? record.getBool("active")
+        : !!record.get("active"))) {
+        deactivated = true;
+      }
+      record.set("active", body.active);
+    }
     if (typeof body.role === "string" && role === "super_admin") {
       const nextRole = body.role.toString().trim();
       if (nextRole !== "manager" && nextRole !== "salesperson") {
@@ -2356,6 +2366,26 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
       record.set("role", nextRole);
     }
     $app.dao().saveRecord(record);
+
+    // New code or deactivation ends existing logins — next sign-in uses current code only.
+    if (pinRotated || deactivated) {
+      const revoked = helpers.revokePersonSessions(record.id);
+      helpers.logAuthEvent(
+        pinRotated ? "person_pin_rotated" : "person_deactivated",
+        {
+          dealerId: record.getString("dealer"),
+          credentialPresent: true,
+          ip: helpers.clientIP(c),
+          userAgent: helpers.userAgent(c),
+          detail:
+            "person=" +
+            record.id +
+            " sessions_revoked=" +
+            revoked,
+        },
+      );
+    }
+
     return c.json(200, helpers.serializePerson(record));
   } catch (err) {
     console.error("[/api/app/salespeople/:id] update error", err);

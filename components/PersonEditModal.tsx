@@ -278,7 +278,9 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                   </div>
                   <p className="mt-0.5 text-xs leading-relaxed text-surface-400">
                     4-digit sign-in code. Never shown in lists. Share only in
-                    person or a private channel.
+                    person or a private channel. Generating a new code ends
+                    their current sessions — next sign-in must use the new
+                    code.
                   </p>
                 </div>
               </div>
@@ -304,7 +306,8 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
               <div className="rounded-xl border border-primary-500/25 bg-primary-500/10 px-3 py-3 space-y-2">
                 <p className="text-[11px] font-medium text-primary-100/90">
                   Save this code now — it won’t appear in the roster after you
-                  leave this screen.
+                  leave this screen. On save, their open sessions end so the
+                  next sign-in uses this code only.
                 </p>
                 <div className="flex items-center gap-2">
                   <div className="flex flex-1 items-center justify-between rounded-lg border border-white/10 bg-surface-950/80 px-3 py-2.5 font-mono text-lg tracking-[0.35em] text-surface-50">
