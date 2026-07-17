@@ -587,14 +587,33 @@ const proxyHandler = (c) => {
       .replace(/(\/files\/)[^?]+/, "$1[redacted]");
     console.log(`[Proxy ${apiType}] ${requestInfo.method} ${safeLogUrl}`);
 
+    // Always pin binary file downloads to alt=media so Google returns bytes,
+    // not a JSON metadata envelope that browsers cannot play.
+    const isFileDownloadPath =
+      cleanPath.indexOf("v1beta/files/") === 0 &&
+      cleanPath.indexOf(":download") !== -1;
+    if (
+      isFileDownloadPath &&
+      (requestInfo.method || "").toString().toUpperCase() === "GET" &&
+      targetUrl.indexOf("alt=") === -1
+    ) {
+      targetUrl += (targetUrl.indexOf("?") === -1 ? "?" : "&") + "alt=media";
+    }
+
+    // GET downloads must not send a JSON content-type or body — that can make
+    // some upstreams return an error JSON body which then "plays" as a broken
+    // video (infinite spinner on the play button).
+    const isGet =
+      (requestInfo.method || "").toString().toUpperCase() === "GET";
+    const upstreamHeaders = isGet
+      ? { ...authHeader }
+      : { "Content-Type": "application/json", ...authHeader };
+
     const res = $http.send({
       url: targetUrl,
       method: requestInfo.method,
-      body: sanitizedProxyBody,
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeader,
-      },
+      body: isGet ? "" : sanitizedProxyBody,
+      headers: upstreamHeaders,
       timeout: 300000, // 5 minutes
     });
 

@@ -607,6 +607,18 @@ const getImageDimensions = (
   });
 };
 
+/** True if bytes look like an MP4/QuickTime container (ftyp box). */
+const looksLikeMp4 = (bytes: Uint8Array): boolean => {
+  if (bytes.length < 12) return false;
+  // ISO BMFF: size(4) + 'ftyp'(4) at offset 4
+  return (
+    bytes[4] === 0x66 &&
+    bytes[5] === 0x74 &&
+    bytes[6] === 0x79 &&
+    bytes[7] === 0x70
+  );
+};
+
 /**
  * Fetches video content from a Google API URL through our proxy
  * This is needed because the video URI requires API key authentication
@@ -628,7 +640,13 @@ const fetchVideoThroughProxy = async (videoUri: string): Promise<string> => {
     ) {
       throw new Error("Video download origin is not trusted.");
     }
-    const proxyPath = `${parsed.pathname.slice(1)}${parsed.search}`;
+    // Path only for allowlist; always request alt=media for binary bytes.
+    let pathname = parsed.pathname.replace(/^\/+/, "");
+    if (!pathname.endsWith(":download") && !pathname.includes(":download")) {
+      // Some responses omit the :download suffix
+      pathname = `${pathname}:download`;
+    }
+    const proxyPath = `${pathname}?alt=media`;
 
     const response = await fetch(`/api/proxy/${proxyPath}`, {
       method: "GET",
@@ -636,21 +654,61 @@ const fetchVideoThroughProxy = async (videoUri: string): Promise<string> => {
     });
 
     if (!response.ok) {
-      throw new Error(`Video proxy returned ${response.status}.`);
+      const errText = await response.text().catch(() => "");
+      throw new Error(
+        `Video proxy returned ${response.status}${errText ? `: ${errText.slice(0, 160)}` : ""}.`,
+      );
     }
 
-    const blob = await response.blob();
-    if (
-      blob.size === 0 ||
-      (!blob.type.startsWith("video/") &&
-        blob.type !== "application/octet-stream")
-    ) {
-      throw new Error("Video proxy returned invalid media.");
+    const rawBlob = await response.blob();
+    if (rawBlob.size === 0) {
+      throw new Error("Video proxy returned empty media.");
     }
-    return URL.createObjectURL(blob);
+
+    // Force a playable MIME type — Google often sends application/octet-stream,
+    // and some browsers refuse to decode that in <video>.
+    const typed = rawBlob.type.startsWith("video/")
+      ? rawBlob
+      : new Blob([rawBlob], { type: "video/mp4" });
+
+    // Soft validate container when arrayBuffer is available (jsdom tests may not).
+    try {
+      if (typeof typed.arrayBuffer === "function") {
+        const buf = new Uint8Array(await typed.arrayBuffer());
+        const head = buf.subarray(0, 16);
+        if (buf.byteLength > 32 && !looksLikeMp4(head)) {
+          // JSON error bodies sometimes sneak through as 200 + octet-stream
+          const asText = new TextDecoder().decode(buf.subarray(0, 80));
+          if (asText.trimStart().startsWith("{") || asText.includes("error")) {
+            throw new Error("Video proxy returned an error payload, not media.");
+          }
+          console.warn(
+            "[VideoGen] Downloaded media missing ftyp magic; shipping as video/mp4.",
+          );
+        }
+        // Rebuild from the same bytes so MIME is definitely video/mp4
+        return URL.createObjectURL(
+          new Blob([buf], { type: "video/mp4" }),
+        );
+      }
+    } catch (validateErr) {
+      if (
+        validateErr instanceof Error &&
+        validateErr.message.includes("error payload")
+      ) {
+        throw validateErr;
+      }
+      console.warn("[VideoGen] Video byte validation skipped:", validateErr);
+    }
+
+    return URL.createObjectURL(typed);
   } catch (error) {
     console.error("[VideoGen] Secure video download failed.", error);
-    throw new Error("Generated video could not be downloaded securely.");
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : "Generated video could not be downloaded securely.",
+    );
   }
 };
 
@@ -971,11 +1029,25 @@ const pollGeminiVideoOperation = async (
       await sleep(pollInterval);
       pollInterval = Math.min(pollInterval * 1.5, maxPollInterval);
     } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message.includes("Video generation failed:")
-      ) {
+      if (error instanceof DOMException && error.name === "AbortError") {
         throw error;
+      }
+      if (error instanceof Error) {
+        const msg = error.message;
+        // Terminal failures — do not spin until the 6-minute poll timeout.
+        if (
+          msg.includes("Video generation failed:") ||
+          msg.includes("Video proxy") ||
+          msg.includes("could not be downloaded") ||
+          msg.includes("non-video") ||
+          msg.includes("error payload") ||
+          msg.includes("empty media") ||
+          msg.includes("too small") ||
+          msg.includes("not trusted") ||
+          msg.includes("Operation completed but no video")
+        ) {
+          throw error;
+        }
       }
       console.error(
         `[VideoGen] Poll error (will retry in ${pollInterval / 1000}s):`,
@@ -1059,12 +1131,19 @@ const extractVideoFromPrediction = async (prediction: any): Promise<string> => {
  * Creates a blob URL from base64 video data
  */
 const createVideoBlobUrl = (base64Data: string): string => {
+  // Strip data-URL prefix if the model returned a full data URI
+  const pure = base64Data.includes(",")
+    ? base64Data.slice(base64Data.indexOf(",") + 1)
+    : base64Data;
   console.log(
-    `[VideoGen] Creating blob from base64 data (${base64Data.length} chars)`,
+    `[VideoGen] Creating blob from base64 data (${pure.length} chars)`,
   );
-  const bytes = atob(base64Data);
+  const bytes = atob(pure);
   const arr = new Uint8Array(bytes.length);
   for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
   const blob = new Blob([arr], { type: "video/mp4" });
+  if (blob.size < 1000) {
+    throw new Error("Generated video data was too small to be valid.");
+  }
   return URL.createObjectURL(blob);
 };

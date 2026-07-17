@@ -253,6 +253,12 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isVideoLoading, setIsVideoLoading] = useState(false);
   const [videoLoadingMessage, setVideoLoadingMessage] = useState("");
+  /** Browser is buffering / decoding the blob after generation finishes. */
+  const [isVideoBuffering, setIsVideoBuffering] = useState(false);
+  const [videoPlayError, setVideoPlayError] = useState<string | null>(null);
+  const videoElRef = useRef<HTMLVideoElement | null>(null);
+  /** Own blob URLs so we only revoke the previous one when replacing/unmounting. */
+  const activeVideoBlobRef = useRef<string | null>(null);
   const [videoJobs, setVideoJobs] = useState<
     Array<{
       id: string;
@@ -534,21 +540,42 @@ export const PostResult: React.FC<PostResultProps> = ({
     }
   }, [historyIndex, textHistory]);
 
+  const adoptVideoUrl = useCallback((url: string | null) => {
+    // Revoke only the previous blob we own — never revoke the URL still shown.
+    const prev = activeVideoBlobRef.current;
+    if (prev && prev !== url && prev.startsWith("blob:")) {
+      try {
+        URL.revokeObjectURL(prev);
+      } catch {
+        /* ignore */
+      }
+    }
+    activeVideoBlobRef.current = url;
+    setVideoUrl(url);
+    setVideoPlayError(null);
+    setIsVideoBuffering(Boolean(url));
+  }, []);
+
+  // Unmount-only revoke (avoid React Strict Mode / effect re-runs killing the
+  // blob while <video> still points at it — that causes endless play spinners).
   useEffect(() => {
-    // Cleanup function for the video object URL to prevent memory leaks.
-    // This runs when the component unmounts or when videoUrl changes.
-    const currentVideoUrl = videoUrl;
     return () => {
-      if (currentVideoUrl && currentVideoUrl.startsWith("blob:")) {
-        URL.revokeObjectURL(currentVideoUrl);
+      const owned = activeVideoBlobRef.current;
+      if (owned && owned.startsWith("blob:")) {
+        try {
+          URL.revokeObjectURL(owned);
+        } catch {
+          /* ignore */
+        }
+        activeVideoBlobRef.current = null;
       }
     };
-  }, [videoUrl]);
+  }, []);
 
   useEffect(() => {
     setVideoJobs([]);
-    setVideoUrl(null);
-  }, [post.image]);
+    adoptVideoUrl(null);
+  }, [post.image, adoptVideoUrl]);
 
   useEffect(() => {
     setHasSavedMedia(false);
@@ -841,12 +868,15 @@ export const PostResult: React.FC<PostResultProps> = ({
     const runAttempt = async (attempt: number): Promise<void> => {
       try {
         const url = await onGenerateVideo(style, options);
-        setVideoUrl((prev) => prev || url); // auto-open the first available video
+        // Always show the latest successful render (previous logic kept a
+        // stale/null URL if something odd was already set).
+        adoptVideoUrl(url);
         setVideoJobs((prev) =>
           prev.map((job) =>
             job.id === jobId ? { ...job, status: "completed", url } : job,
           ),
         );
+        toast.success("Video ready — tap play if it does not start.");
         if (post.postId) {
           try {
             await markPostVideoGenerated(post.postId);
@@ -1280,16 +1310,79 @@ export const PostResult: React.FC<PostResultProps> = ({
                   progress={isVideoLoading ? undefined : imageLoadingProgress}
                 />
               )}
+              {videoUrl && isVideoBuffering && !isVideoLoading && !videoPlayError ? (
+                <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center bg-surface-950/40">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary-300" />
+                </div>
+              ) : null}
 
               {videoUrl ? (
-                <video
-                  src={videoUrl}
-                  controls
-                  autoPlay={!shouldReduceMotion}
-                  loop={!shouldReduceMotion}
-                  muted
-                  className="max-h-[70dvh] w-full rounded-xl object-contain shadow-2xl"
-                />
+                <div className="w-full">
+                  <video
+                    ref={videoElRef}
+                    key={videoUrl}
+                    src={videoUrl}
+                    controls
+                    playsInline
+                    preload="auto"
+                    autoPlay={!shouldReduceMotion}
+                    loop={!shouldReduceMotion}
+                    muted
+                    onLoadStart={() => setIsVideoBuffering(true)}
+                    onLoadedData={() => {
+                      setIsVideoBuffering(false);
+                      setVideoPlayError(null);
+                    }}
+                    onCanPlay={() => {
+                      setIsVideoBuffering(false);
+                      setVideoPlayError(null);
+                      const el = videoElRef.current;
+                      if (el && !shouldReduceMotion) {
+                        void el.play().catch(() => {
+                          // Autoplay blocked — controls still work for manual play.
+                        });
+                      }
+                    }}
+                    onError={() => {
+                      setIsVideoBuffering(false);
+                      setVideoPlayError(
+                        "This video could not be played. Try Save video, or generate again.",
+                      );
+                    }}
+                    className="max-h-[70dvh] w-full rounded-xl object-contain shadow-2xl bg-black"
+                  />
+                  {videoPlayError ? (
+                    <div className="mt-2 space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 px-3 py-2 text-xs text-error-100">
+                      <p>{videoPlayError}</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 font-semibold text-surface-100"
+                          onClick={() => {
+                            const el = videoElRef.current;
+                            if (!el || !videoUrl) return;
+                            setVideoPlayError(null);
+                            setIsVideoBuffering(true);
+                            el.load();
+                            void el.play().catch(() => setIsVideoBuffering(false));
+                          }}
+                        >
+                          Retry play
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 font-semibold text-surface-100"
+                          onClick={() => {
+                            adoptVideoUrl(null);
+                            setVideoPlayError(null);
+                          }}
+                        >
+                          Show photo
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
               ) : (
                 <button
                   onClick={() => {
@@ -1620,7 +1713,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                           )}
                           {job.url && (
                             <button
-                              onClick={() => setVideoUrl(job.url || null)}
+                              onClick={() => adoptVideoUrl(job.url || null)}
                               className="text-[10px] font-semibold uppercase tracking-wide text-primary-200 hover:text-surface-50 transition-colors"
                             >
                               Preview

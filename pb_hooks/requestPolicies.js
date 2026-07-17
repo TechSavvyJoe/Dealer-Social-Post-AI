@@ -238,7 +238,12 @@ const ALLOWED_VEO_MODELS = [
  * an authenticated browser cannot select an arbitrary expensive model.
  */
 function isAllowedProxyPath(path) {
-  const normalized = (path || "").toString();
+  // Strip query/hash — clients and path extractors sometimes append ?alt=media.
+  const normalized = (path || "")
+    .toString()
+    .split("?")[0]
+    .split("#")[0]
+    .replace(/^\/+/, "");
 
   const contentMatch = normalized.match(
     /^v1beta\/models\/([a-z0-9._-]+):generateContent$/i,

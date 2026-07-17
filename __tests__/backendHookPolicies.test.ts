@@ -162,6 +162,11 @@ describe("PocketBase request policies", () => {
     expect(
       policies.isAllowedProxyPath("v1beta/files/generated-video:download"),
     ).toBe(true);
+    expect(
+      policies.isAllowedProxyPath(
+        "v1beta/files/generated-video:download?alt=media",
+      ),
+    ).toBe(true);
 
     expect(
       policies.isAllowedProxyPath(
@@ -448,11 +453,13 @@ describe("PocketBase request policies", () => {
     expect(hook).toContain(
       "policies.isAllowedProxyRequest(path, requestInfo.method)",
     );
-    expect(hook).toContain("body: sanitizedProxyBody");
+    expect(hook).toContain("sanitizedProxyBody");
+    expect(hook).toContain('body: isGet ? "" : sanitizedProxyBody');
     expect(hook).not.toContain("policies.serializeProxyBody(requestInfo)");
+    // Validation must run before the upstream HTTP send.
     expect(
       hook.indexOf('error: "Invalid or unsupported generation request"'),
-    ).toBeLessThan(hook.indexOf("body: sanitizedProxyBody"));
+    ).toBeLessThan(hook.indexOf("$http.send({"));
     expect(hook).toContain('path = c.pathParam("path")');
     expect(hook.indexOf('path = c.pathParam("path")')).toBeLessThan(
       hook.indexOf("if (c.pathParams && c.pathParams.path)"),

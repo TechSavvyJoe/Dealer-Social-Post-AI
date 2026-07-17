@@ -298,7 +298,7 @@ describe("GeminiService model routing", () => {
       "inlineData",
     );
     expect(global.fetch).toHaveBeenCalledWith(
-      "/api/proxy/v1beta/files/test-video:download",
+      "/api/proxy/v1beta/files/test-video:download?alt=media",
       expect.objectContaining({ method: "GET", credentials: "include" }),
     );
     expect(result).toBe("blob:fake-video-url");
