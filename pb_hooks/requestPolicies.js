@@ -625,27 +625,64 @@ function buildGenerateContentRequest(model, input) {
 
   if (IMAGE_GENERATE_CONTENT_MODELS.indexOf(model) === -1) return null;
   if (
-    !hasOnlyKeys(
-      generationConfig,
-      ["responseModalities", "imageConfig", "maxOutputTokens"],
-      ["responseModalities", "imageConfig", "maxOutputTokens"],
-    ) ||
     generationConfig.maxOutputTokens !== 4096 ||
     !Array.isArray(generationConfig.responseModalities) ||
     generationConfig.responseModalities.length !== 2 ||
     generationConfig.responseModalities[0] !== "TEXT" ||
-    generationConfig.responseModalities[1] !== "IMAGE" ||
-    !generationConfig.imageConfig ||
-    typeof generationConfig.imageConfig !== "object" ||
-    !hasOnlyKeys(generationConfig.imageConfig, ["imageSize"], ["imageSize"])
+    generationConfig.responseModalities[1] !== "IMAGE"
   ) {
     return null;
   }
 
-  // imageConfig.imageSize is a free string: "512" | "1K" | "2K" | "4K".
-  // Do not send these under responseFormat.image.imageSize (protobuf enum).
+  // Prefer generationConfig.imageConfig.imageSize ("1K"|"2K" string tokens).
+  // Legacy clients sent responseFormat.image.imageSize; Google now treats that
+  // nested field as a protobuf enum and rejects bare "2K". Always rewrite to
+  // imageConfig before proxying.
   const requiredSize = model === "gemini-3.1-flash-lite-image" ? "1K" : "2K";
-  if (generationConfig.imageConfig.imageSize !== requiredSize) {
+  let requestedSize = "";
+  const hasImageConfig =
+    generationConfig.imageConfig &&
+    typeof generationConfig.imageConfig === "object" &&
+    hasOnlyKeys(generationConfig.imageConfig, ["imageSize"], ["imageSize"]);
+  const hasLegacyResponseFormat =
+    generationConfig.responseFormat &&
+    typeof generationConfig.responseFormat === "object" &&
+    hasOnlyKeys(generationConfig.responseFormat, ["image"], ["image"]) &&
+    generationConfig.responseFormat.image &&
+    typeof generationConfig.responseFormat.image === "object" &&
+    hasOnlyKeys(
+      generationConfig.responseFormat.image,
+      ["imageSize"],
+      ["imageSize"],
+    );
+
+  if (hasImageConfig) {
+    if (
+      !hasOnlyKeys(
+        generationConfig,
+        ["responseModalities", "imageConfig", "maxOutputTokens"],
+        ["responseModalities", "imageConfig", "maxOutputTokens"],
+      )
+    ) {
+      return null;
+    }
+    requestedSize = generationConfig.imageConfig.imageSize;
+  } else if (hasLegacyResponseFormat) {
+    if (
+      !hasOnlyKeys(
+        generationConfig,
+        ["responseModalities", "responseFormat", "maxOutputTokens"],
+        ["responseModalities", "responseFormat", "maxOutputTokens"],
+      )
+    ) {
+      return null;
+    }
+    requestedSize = generationConfig.responseFormat.image.imageSize;
+  } else {
+    return null;
+  }
+
+  if (requestedSize !== requiredSize) {
     return null;
   }
 
