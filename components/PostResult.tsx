@@ -1426,10 +1426,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                   tooltip={
                     deliveryLocked
                       ? deliveryGateMessage
-                      : "Export all 4 sizes at once (FB, IG/TikTok, Marketplace, GBP)"
+                      : "Export Story, Feed, Marketplace & Google sizes — full creative, no crop"
                   }
                   disabled={imageBusy || !!videoUrl || deliveryLocked}
-                  label="All formats"
+                  label="Export sizes"
                   onClick={() => {
                     if (deliveryLocked) {
                       toast.warning(deliveryGateMessage);

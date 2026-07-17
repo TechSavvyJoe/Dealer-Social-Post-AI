@@ -1,20 +1,23 @@
 /**
- * Multi-format export.
+ * Multi-format export for dealership social creatives.
  *
- * Same source image, four target aspect ratios sized for the four places
- * dealerships actually post:
+ * Same designed post → platform canvas sizes:
+ *  - 1:1     1080×1080  Facebook / Instagram Feed
+ *  - 9:16    1080×1920  IG Story, Reels, TikTok, Shorts
+ *  - 1.91:1  1200×628   Facebook Marketplace / OG
+ *  - 4:3     1200×900   Google Business Profile
  *
- *  - 1:1     1080×1080  Facebook Feed / Instagram Feed
- *  - 9:16    1080×1920  IG Story, IG Reels, TikTok, YouTube Shorts
- *  - 1.91:1  1200×628   Facebook Marketplace listing thumbnail
- *  - 4:3     1200×900   Google Business Profile post
- *
- * The source image is "object-fit: cover"-style center-cropped onto each canvas
- * so the subject (car) stays centered. A subtle padding stripe is added to the
- * 9:16 variant when the source is landscape, to avoid clipping the vehicle.
+ * Fit mode is CONTAIN (letterbox), not cover-crop. Cover was chopping store
+ * nameplates, logos, and faces on fun-mode / branded posts. Empty space is
+ * filled with a blurred, darkened copy of the creative so the frame still
+ * looks like a premium social asset rather than a hard black bar.
  */
 
-export type ExportFormatId = "feed_square" | "story_vertical" | "marketplace" | "gbp";
+export type ExportFormatId =
+  | "feed_square"
+  | "story_vertical"
+  | "marketplace"
+  | "gbp";
 
 export interface ExportFormat {
   id: ExportFormatId;
@@ -33,7 +36,7 @@ export const EXPORT_FORMATS: ExportFormat[] = [
     filename: "post-story-9x16.jpg",
     width: 1080,
     height: 1920,
-    description: "IG Story, IG Reels, TikTok, YouTube Shorts — recommended",
+    description: "IG Story, Reels, TikTok, YouTube Shorts",
   },
   {
     id: "feed_square",
@@ -41,7 +44,7 @@ export const EXPORT_FORMATS: ExportFormat[] = [
     filename: "post-feed-1x1.jpg",
     width: 1080,
     height: 1080,
-    description: "Facebook Feed, Instagram Feed",
+    description: "Instagram Feed, Facebook Feed",
   },
   {
     id: "marketplace",
@@ -49,7 +52,7 @@ export const EXPORT_FORMATS: ExportFormat[] = [
     filename: "post-marketplace-191x1.jpg",
     width: 1200,
     height: 628,
-    description: "Facebook Marketplace, OG image",
+    description: "Facebook Marketplace, link previews",
   },
   {
     id: "gbp",
@@ -71,13 +74,28 @@ const loadImage = (src: string): Promise<HTMLImageElement> =>
     img.src = src;
   });
 
+/** Pure layout helper — contain (letterbox), never cover-crop. */
+export const computeContainRect = (
+  srcW: number,
+  srcH: number,
+  dstW: number,
+  dstH: number,
+): { drawW: number; drawH: number; dx: number; dy: number; scale: number } => {
+  const scale = Math.min(dstW / srcW, dstH / srcH);
+  const drawW = Math.round(srcW * scale);
+  const drawH = Math.round(srcH * scale);
+  const dx = Math.round((dstW - drawW) / 2);
+  const dy = Math.round((dstH - drawH) / 2);
+  return { drawW, drawH, dx, dy, scale };
+};
+
 /**
- * Renders the source image onto a canvas of the given format with a center-
- * cropped "cover" fit. Returns a data URL (JPEG, quality 0.9).
+ * Draw the full creative into the target canvas using contain + soft blur pad.
+ * Never crops store text, faces, or vehicle out of the designed post.
  */
 export const renderFormat = async (
   sourceDataUrl: string,
-  format: ExportFormat
+  format: ExportFormat,
 ): Promise<string> => {
   const img = await loadImage(sourceDataUrl);
 
@@ -88,47 +106,73 @@ export const renderFormat = async (
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas 2D context unavailable");
 
-  // Fill with black so vertical letterboxes look intentional on landscape sources.
-  ctx.fillStyle = "#000000";
-  ctx.fillRect(0, 0, format.width, format.height);
-
-  const srcAspect = img.width / img.height;
-  const dstAspect = format.width / format.height;
-
-  let drawW: number;
-  let drawH: number;
-  let dx: number;
-  let dy: number;
-
-  if (srcAspect > dstAspect) {
-    // Source is wider than target → match height, crop sides
-    drawH = format.height;
-    drawW = format.height * srcAspect;
-    dx = (format.width - drawW) / 2;
-    dy = 0;
-  } else {
-    // Source is taller than (or equal to) target → match width, crop top/bottom
-    drawW = format.width;
-    drawH = format.width / srcAspect;
-    dx = 0;
-    dy = (format.height - drawH) / 2;
-  }
+  const { drawW, drawH, dx, dy } = computeContainRect(
+    img.width,
+    img.height,
+    format.width,
+    format.height,
+  );
 
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
+
+  // Soft premium backdrop: cover-fill with the source, blur, darken.
+  // Falls back to near-black if filter is unsupported.
+  try {
+    const coverScale = Math.max(
+      format.width / img.width,
+      format.height / img.height,
+    );
+    const bgW = Math.round(img.width * coverScale * 1.08);
+    const bgH = Math.round(img.height * coverScale * 1.08);
+    const bgX = Math.round((format.width - bgW) / 2);
+    const bgY = Math.round((format.height - bgH) / 2);
+    ctx.save();
+    ctx.filter = "blur(28px) brightness(0.45) saturate(1.05)";
+    ctx.drawImage(img, bgX, bgY, bgW, bgH);
+    ctx.restore();
+  } catch {
+    ctx.fillStyle = "#0a0a0c";
+    ctx.fillRect(0, 0, format.width, format.height);
+  }
+
+  // Subtle vignette so the letterbox edges feel intentional
+  const vignette = ctx.createRadialGradient(
+    format.width / 2,
+    format.height / 2,
+    Math.min(format.width, format.height) * 0.25,
+    format.width / 2,
+    format.height / 2,
+    Math.max(format.width, format.height) * 0.7,
+  );
+  vignette.addColorStop(0, "rgba(0,0,0,0)");
+  vignette.addColorStop(1, "rgba(0,0,0,0.35)");
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, format.width, format.height);
+
+  // Full creative, uncropped
   ctx.drawImage(img, dx, dy, drawW, drawH);
 
-  return canvas.toDataURL("image/jpeg", 0.9);
+  // Hairline edge on the creative plate so it reads as a placed asset
+  if (drawW < format.width - 2 || drawH < format.height - 2) {
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(dx + 0.5, dy + 0.5, drawW - 1, drawH - 1);
+  }
+
+  return canvas.toDataURL("image/jpeg", 0.93);
 };
 
 /**
  * Renders all four formats in parallel and returns them keyed by id.
  */
 export const renderAllFormats = async (
-  sourceDataUrl: string
+  sourceDataUrl: string,
 ): Promise<Record<ExportFormatId, string>> => {
   const entries = await Promise.all(
-    EXPORT_FORMATS.map(async (f) => [f.id, await renderFormat(sourceDataUrl, f)] as const)
+    EXPORT_FORMATS.map(
+      async (f) => [f.id, await renderFormat(sourceDataUrl, f)] as const,
+    ),
   );
   return Object.fromEntries(entries) as Record<ExportFormatId, string>;
 };
@@ -144,8 +188,7 @@ const triggerDownload = (dataUrl: string, filename: string): void => {
 
 /**
  * Downloads formats. Browsers throttle multiple downloads from a single user
- * gesture, so we space them out 250ms apart — reliable in Chrome, Edge,
- * Safari, and Firefox.
+ * gesture, so we space them out 250ms apart.
  * @param formatIds optional subset; defaults to all four export sizes
  */
 export const downloadAllFormats = async (
