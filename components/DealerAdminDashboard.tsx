@@ -905,6 +905,27 @@ const DealerTeamCard: React.FC = () => {
         </Button>
       </div>
 
+      {oneTimeCode && (
+        <div className="rounded-xl border border-primary-500/30 bg-primary-500/10 px-3 py-3 text-sm text-primary-50">
+          <div className="font-semibold">{oneTimeCode.name} added</div>
+          <p className="mt-1 text-xs text-primary-100/80">
+            Share this access code privately — it won’t show in the list again.
+          </p>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <span className="font-mono text-lg tracking-[0.3em]">
+              {oneTimeCode.pin}
+            </span>
+            <button
+              type="button"
+              className="text-xs font-semibold text-primary-200 underline-offset-2 hover:underline"
+              onClick={() => setOneTimeCode(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs">
           {error}
