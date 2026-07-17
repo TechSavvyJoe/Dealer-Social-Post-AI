@@ -7,10 +7,10 @@
  *  - 1.91:1  1200×628   Facebook Marketplace / OG
  *  - 4:3     1200×900   Google Business Profile
  *
- * Fit mode is CONTAIN (letterbox), not cover-crop. Cover was chopping store
- * nameplates, logos, and faces on fun-mode / branded posts. Empty space is
- * filled with a blurred, darkened copy of the creative so the frame still
- * looks like a premium social asset rather than a hard black bar.
+ * Strategy: CONTAIN the full creative (never crop store text / faces), and
+ * fill empty margins with a blurred cover of the same image — not hard black
+ * bars. Blur is implemented via downscale/upscale (reliable across browsers;
+ * ctx.filter blur is flaky with data-URL sources).
  */
 
 export type ExportFormatId =
@@ -89,6 +89,88 @@ export const computeContainRect = (
   return { drawW, drawH, dx, dy, scale };
 };
 
+/** Cover layout — fills the frame (used only for the blurred backdrop). */
+export const computeCoverRect = (
+  srcW: number,
+  srcH: number,
+  dstW: number,
+  dstH: number,
+): { drawW: number; drawH: number; dx: number; dy: number } => {
+  const scale = Math.max(dstW / srcW, dstH / srcH) * 1.12;
+  const drawW = Math.round(srcW * scale);
+  const drawH = Math.round(srcH * scale);
+  const dx = Math.round((dstW - drawW) / 2);
+  const dy = Math.round((dstH - drawH) / 2);
+  return { drawW, drawH, dx, dy };
+};
+
+/**
+ * Reliable soft blur fill: draw cover image to a tiny canvas, then scale up.
+ * Avoids ctx.filter which often fails on data-URL creatives and leaves black.
+ */
+const drawBlurredCoverBackground = (
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  dstW: number,
+  dstH: number,
+): void => {
+  // Base tone from a sample so edges never look pure black even if blur fails
+  try {
+    const sample = document.createElement("canvas");
+    sample.width = 8;
+    sample.height = 8;
+    const sctx = sample.getContext("2d");
+    if (sctx) {
+      sctx.drawImage(img, 0, 0, 8, 8);
+      const data = sctx.getImageData(0, 0, 8, 8).data;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let n = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        r += data[i];
+        g += data[i + 1];
+        b += data[i + 2];
+        n++;
+      }
+      if (n > 0) {
+        r = Math.round((r / n) * 0.35);
+        g = Math.round((g / n) * 0.35);
+        b = Math.round((b / n) * 0.35);
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(0, 0, dstW, dstH);
+      }
+    }
+  } catch {
+    ctx.fillStyle = "#1a1520";
+    ctx.fillRect(0, 0, dstW, dstH);
+  }
+
+  // Downscale heavily, then upscale = soft blur without CSS filter
+  const tiny = document.createElement("canvas");
+  const tinyW = Math.max(24, Math.round(dstW / 32));
+  const tinyH = Math.max(24, Math.round(dstH / 32));
+  tiny.width = tinyW;
+  tiny.height = tinyH;
+  const tctx = tiny.getContext("2d");
+  if (!tctx) return;
+
+  const cover = computeCoverRect(img.width, img.height, tinyW, tinyH);
+  tctx.imageSmoothingEnabled = true;
+  tctx.imageSmoothingQuality = "low";
+  tctx.drawImage(img, cover.dx, cover.dy, cover.drawW, cover.drawH);
+
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.globalAlpha = 1;
+  ctx.drawImage(tiny, 0, 0, dstW, dstH);
+  // Darken so the sharp creative plate pops
+  ctx.fillStyle = "rgba(0,0,0,0.42)";
+  ctx.fillRect(0, 0, dstW, dstH);
+  ctx.restore();
+};
+
 /**
  * Draw the full creative into the target canvas using contain + soft blur pad.
  * Never crops store text, faces, or vehicle out of the designed post.
@@ -116,51 +198,39 @@ export const renderFormat = async (
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
 
-  // Soft premium backdrop: cover-fill with the source, blur, darken.
-  // Falls back to near-black if filter is unsupported.
-  try {
-    const coverScale = Math.max(
-      format.width / img.width,
-      format.height / img.height,
-    );
-    const bgW = Math.round(img.width * coverScale * 1.08);
-    const bgH = Math.round(img.height * coverScale * 1.08);
-    const bgX = Math.round((format.width - bgW) / 2);
-    const bgY = Math.round((format.height - bgH) / 2);
-    ctx.save();
-    ctx.filter = "blur(28px) brightness(0.45) saturate(1.05)";
-    ctx.drawImage(img, bgX, bgY, bgW, bgH);
-    ctx.restore();
-  } catch {
-    ctx.fillStyle = "#0a0a0c";
-    ctx.fillRect(0, 0, format.width, format.height);
-  }
+  // Always paint a premium fill first (never leave default transparent → black JPEG)
+  drawBlurredCoverBackground(ctx, img, format.width, format.height);
 
-  // Subtle vignette so the letterbox edges feel intentional
+  // Soft vignette toward edges
   const vignette = ctx.createRadialGradient(
     format.width / 2,
     format.height / 2,
-    Math.min(format.width, format.height) * 0.25,
+    Math.min(format.width, format.height) * 0.2,
     format.width / 2,
     format.height / 2,
-    Math.max(format.width, format.height) * 0.7,
+    Math.max(format.width, format.height) * 0.72,
   );
   vignette.addColorStop(0, "rgba(0,0,0,0)");
-  vignette.addColorStop(1, "rgba(0,0,0,0.35)");
+  vignette.addColorStop(1, "rgba(0,0,0,0.28)");
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, format.width, format.height);
 
-  // Full creative, uncropped
+  // Full creative, uncropped — centered
   ctx.drawImage(img, dx, dy, drawW, drawH);
 
-  // Hairline edge on the creative plate so it reads as a placed asset
-  if (drawW < format.width - 2 || drawH < format.height - 2) {
-    ctx.strokeStyle = "rgba(255,255,255,0.08)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(dx + 0.5, dy + 0.5, drawW - 1, drawH - 1);
+  // Soft shadow plate under the creative for depth when letterboxed
+  if (drawW < format.width - 4 || drawH < format.height - 4) {
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.45)";
+    ctx.shadowBlur = 28;
+    ctx.shadowOffsetY = 8;
+    ctx.strokeStyle = "rgba(255,255,255,0.12)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(dx + 1, dy + 1, drawW - 2, drawH - 2);
+    ctx.restore();
   }
 
-  return canvas.toDataURL("image/jpeg", 0.93);
+  return canvas.toDataURL("image/jpeg", 0.94);
 };
 
 /**

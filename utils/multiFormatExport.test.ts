@@ -31,6 +31,15 @@ describe("computeContainRect", () => {
   });
 });
 
+describe("computeCoverRect", () => {
+  it("fills 9:16 from landscape by overflowing height (backdrop only)", async () => {
+    const { computeCoverRect } = await import("./multiFormatExport");
+    const r = computeCoverRect(1920, 1080, 1080, 1920);
+    expect(r.drawW).toBeGreaterThanOrEqual(1080);
+    expect(r.drawH).toBeGreaterThanOrEqual(1920);
+  });
+});
+
 describe("EXPORT_FORMATS", () => {
   it("lists story before feed for mobile-first dealership traffic", () => {
     expect(EXPORT_FORMATS[0].id).toBe("story_vertical");

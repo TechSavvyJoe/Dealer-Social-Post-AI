@@ -165,12 +165,19 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
                     : "flex flex-col rounded-2xl border border-white/10 bg-white/5 overflow-hidden"
                 }
               >
-                <div className="aspect-[4/3] bg-black flex items-center justify-center overflow-hidden relative">
+                {/* Preview uses the real export aspect so black side bars aren't
+                    a UI artifact from forcing 9:16 into a 4:3 box. */}
+                <div
+                  className="w-full bg-surface-950 flex items-center justify-center overflow-hidden relative max-h-[280px]"
+                  style={{
+                    aspectRatio: `${fmt.width} / ${fmt.height}`,
+                  }}
+                >
                   {preview ? (
                     <img
                       src={preview}
                       alt={fmt.label}
-                      className="max-w-full max-h-full object-contain"
+                      className="h-full w-full object-cover"
                     />
                   ) : (
                     <div className="flex flex-col items-center gap-2 text-surface-400">
