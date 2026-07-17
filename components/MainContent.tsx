@@ -144,8 +144,16 @@ export const MainContent: React.FC<MainContentProps> = ({
     switch (displayedStep) {
       case AppStep.LOGIN:
         return (
-          <Suspense fallback={suspenseFallback("Loading login")}>
-            <LazyLoginScreen onLogin={onLogin} />
+          <Suspense
+            fallback={
+              <div className="flex min-h-0 flex-1 items-center justify-center">
+                {suspenseFallback("Loading login")}
+              </div>
+            }
+          >
+            <div className="flex min-h-0 w-full flex-1 flex-col">
+              <LazyLoginScreen onLogin={onLogin} />
+            </div>
           </Suspense>
         );
       case AppStep.ADMIN:
@@ -245,7 +253,9 @@ export const MainContent: React.FC<MainContentProps> = ({
 
   return (
     <PageTransition pageKey={String(displayedStep)}>
-      <div className="w-full flex-1 flex flex-col h-full">{stepContent()}</div>
+      <div className="flex h-full min-h-0 w-full flex-1 flex-col">
+        {stepContent()}
+      </div>
     </PageTransition>
   );
 };

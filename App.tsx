@@ -147,9 +147,13 @@ const AppContent: React.FC = () => {
 
       <main
         id="main-content"
-        className={`flex-1 flex flex-col transition-all duration-300 ease-in-out ${
-          compactMode ? "pt-4 sm:pt-6" : "pt-6 sm:pt-8"
-        } pb-4 sm:pb-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto w-full`}
+        className={`flex min-h-0 flex-1 flex-col transition-all duration-300 ease-in-out ${
+          step === AppStep.LOGIN
+            ? "max-w-7xl mx-auto w-full px-3 py-0 sm:px-6 sm:py-4 lg:px-8 lg:py-6"
+            : compactMode
+              ? "pt-4 sm:pt-6 pb-4 sm:pb-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto w-full"
+              : "pt-6 sm:pt-8 pb-4 sm:pb-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto w-full"
+        }`}
       >
         <AnimatePresence mode="wait">
           <MainContent

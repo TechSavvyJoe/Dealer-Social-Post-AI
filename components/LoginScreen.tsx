@@ -128,8 +128,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     return () => cancelAnimationFrame(frame);
   }, [entryMode, isLoading, isSuccess]);
 
-  // Preserve fast physical-keyboard entry while making the same admin path
-  // fully available through the visible touch input.
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -190,13 +188,20 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
   return (
     <motion.section
-      className="relative mx-auto flex w-full max-w-6xl flex-1 items-center justify-center py-1 sm:py-3 lg:py-1"
+      className="relative mx-auto flex h-full min-h-0 w-full max-w-6xl flex-1 items-center justify-center overflow-hidden"
       initial={{ opacity: 0, y: shouldReduceMotion ? 0 : 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={motionTransition}
       aria-label="Dealer access"
     >
-      <div className="relative grid w-full overflow-hidden rounded-[1.5rem] border border-white/[0.09] bg-[#0b1017] shadow-[0_24px_80px_rgba(0,0,0,0.38)] lg:grid-cols-[minmax(0,1.08fr)_minmax(23rem,0.92fr)]">
+      <div
+        className={cn(
+          "relative grid w-full overflow-hidden border border-white/[0.09] bg-[#0b1017] shadow-[0_24px_80px_rgba(0,0,0,0.38)]",
+          // Mobile: fill the viewport card without forcing overflow height
+          "h-full max-h-[100dvh] rounded-none border-x-0 sm:max-h-[min(40rem,calc(100dvh-1.5rem))] sm:rounded-[1.5rem] sm:border-x",
+          "lg:h-auto lg:max-h-none lg:grid-cols-[minmax(0,1.08fr)_minmax(23rem,0.92fr)]",
+        )}
+      >
         <div
           className="absolute inset-x-0 top-0 z-20 h-px bg-[var(--brand-primary)] opacity-80"
           aria-hidden="true"
@@ -253,17 +258,21 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         </aside>
 
         <div
-          className="flex min-h-[34rem] flex-col justify-center px-5 py-5 sm:px-8 sm:py-7 lg:min-h-[38rem] lg:px-10 lg:py-8"
+          className={cn(
+            "flex min-h-0 flex-1 flex-col justify-center overflow-hidden",
+            // Compact padding on phone so keypad stays in view
+            "px-4 py-3 sm:px-8 sm:py-7 lg:min-h-[38rem] lg:px-10 lg:py-8",
+          )}
           aria-live="polite"
           aria-busy={isLoading}
         >
-          <Logo className="mb-4 h-auto w-[210px] lg:hidden" />
+          <Logo className="mb-2 h-auto w-[140px] shrink-0 sm:mb-4 sm:w-[210px] lg:hidden" />
 
           <AnimatePresence mode="wait">
             {isSuccess ? (
               <motion.div
                 key="success"
-                className="flex min-h-[27rem] flex-col items-center justify-center text-center"
+                className="flex flex-1 flex-col items-center justify-center text-center"
                 initial={{ opacity: 0, scale: shouldReduceMotion ? 1 : 0.96 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0 }}
@@ -285,7 +294,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             ) : isLoading ? (
               <motion.div
                 key="loading"
-                className="flex min-h-[27rem] flex-col items-center justify-center text-center"
+                className="flex flex-1 flex-col items-center justify-center text-center"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -308,33 +317,34 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             ) : (
               <motion.div
                 key="login-form"
+                className="flex min-h-0 flex-1 flex-col justify-center"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={motionTransition}
               >
-                <div className="mb-4 flex items-start gap-3">
-                  <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
+                <div className="mb-2 flex shrink-0 items-start gap-2.5 sm:mb-4 sm:gap-3">
+                  <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] sm:h-10 sm:w-10">
                     <ShieldCheck
-                      className="h-5 w-5 text-primary-300"
+                      className="h-4 w-4 text-primary-300 sm:h-5 sm:w-5"
                       aria-hidden="true"
                     />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <h1
                       id="login-heading"
-                      className="text-2xl font-semibold tracking-[-0.025em] text-surface-50 sm:text-3xl"
+                      className="text-xl font-semibold tracking-[-0.025em] text-surface-50 sm:text-3xl"
                     >
                       Sign in
                     </h1>
-                    <p className="mt-1.5 text-base leading-relaxed text-surface-300">
+                    <p className="mt-0.5 text-sm leading-snug text-surface-300 sm:mt-1.5 sm:text-base sm:leading-relaxed">
                       Tap your 4-digit code. We sign you in automatically.
                     </p>
                   </div>
                 </div>
 
                 <div
-                  className="mb-5 grid grid-cols-2 gap-1 rounded-2xl border border-white/[0.08] bg-black/25 p-1.5"
+                  className="mb-3 grid shrink-0 grid-cols-2 gap-1 rounded-2xl border border-white/[0.08] bg-black/25 p-1 sm:mb-5 sm:p-1.5"
                   role="group"
                   aria-label="Access type"
                 >
@@ -343,7 +353,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     onClick={() => selectMode("personal")}
                     aria-pressed={entryMode === "personal"}
                     className={cn(
-                      "min-h-12 rounded-xl px-3 text-sm font-semibold transition-colors",
+                      "min-h-11 rounded-xl px-3 text-sm font-semibold transition-colors sm:min-h-12",
                       entryMode === "personal"
                         ? "bg-primary-600 text-white shadow-md"
                         : "text-surface-300 hover:text-surface-100",
@@ -356,7 +366,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     onClick={() => selectMode("system")}
                     aria-pressed={entryMode === "system"}
                     className={cn(
-                      "min-h-12 rounded-xl px-3 text-sm font-semibold transition-colors",
+                      "min-h-11 rounded-xl px-3 text-sm font-semibold transition-colors sm:min-h-12",
                       entryMode === "system"
                         ? "bg-primary-600 text-white shadow-md"
                         : "text-surface-300 hover:text-surface-100",
@@ -367,9 +377,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 </div>
 
                 {entryMode === "personal" ? (
-                  <div>
+                  <div className="flex min-h-0 flex-1 flex-col justify-center">
                     <div
-                      className="mb-4 flex items-center justify-center gap-4 py-2"
+                      className="mb-2 flex shrink-0 items-center justify-center gap-3 py-1 sm:mb-4 sm:gap-4 sm:py-2"
                       role="status"
                       aria-label={`${dealerCode.length} of ${PERSON_CODE_LENGTH} digits entered`}
                     >
@@ -380,7 +390,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                             key={index}
                             aria-hidden="true"
                             className={cn(
-                              "h-4 w-4 rounded-full border-2 transition-colors sm:h-5 sm:w-5",
+                              "h-3.5 w-3.5 rounded-full border-2 transition-colors sm:h-5 sm:w-5",
                               index < dealerCode.length
                                 ? "border-primary-400 bg-primary-400"
                                 : index === dealerCode.length
@@ -393,7 +403,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     </div>
 
                     <p
-                      className="mb-4 text-center text-sm text-surface-400"
+                      className="mb-2 shrink-0 text-center text-xs text-surface-400 sm:mb-4 sm:text-sm"
                       aria-live="polite"
                     >
                       {dealerCode.length > 0
@@ -401,18 +411,22 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                         : "4 digits · from your manager"}
                     </p>
 
-                    <Dialpad onKeyPress={handleDialpadKeyPress} />
+                    {/* Compact pad on phones so the full keypad is on-screen without scroll */}
+                    <Dialpad
+                      onKeyPress={handleDialpadKeyPress}
+                      compact
+                    />
                   </div>
                 ) : (
                   <form
-                    className="flex min-h-[18.5rem] flex-col justify-center"
+                    className="flex min-h-0 flex-1 flex-col justify-center overflow-y-auto"
                     onSubmit={(event) => {
                       event.preventDefault();
                       void submitCode(adminCode, "system");
                     }}
                   >
-                    <div className="rounded-2xl border border-white/[0.08] bg-[#101722] p-4 sm:p-5">
-                      <div className="mb-4 flex items-start gap-3">
+                    <div className="rounded-2xl border border-white/[0.08] bg-[#101722] p-3 sm:p-5">
+                      <div className="mb-3 flex items-start gap-3 sm:mb-4">
                         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300">
                           <KeyRound className="h-5 w-5" aria-hidden="true" />
                         </div>
@@ -459,7 +473,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                         size="lg"
                         fullWidth
                         disabled={adminCode.length < ADMIN_CODE_MIN_LENGTH}
-                        className="mt-4 min-h-14"
+                        className="mt-4 min-h-12 sm:min-h-14"
                         rightIcon={<ArrowRight className="h-4 w-4" />}
                       >
                         Continue to system admin

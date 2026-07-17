@@ -54,7 +54,7 @@ export const PageTransition: React.FC<PageTransitionProps> = ({
         initial="initial"
         animate="animate"
         exit="exit"
-        style={{ width: "100%", height: "100%" }}
+        className="flex h-full min-h-0 w-full flex-1 flex-col"
       >
         {children}
       </motion.div>
