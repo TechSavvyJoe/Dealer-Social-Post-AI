@@ -294,21 +294,32 @@ export const PostResult: React.FC<PostResultProps> = ({
     text: string;
     categories: string[];
   } | null>(null);
+  /** Local edits to per-platform pack captions (share + tab switch must honor these). */
+  const [packOverrides, setPackOverrides] = useState<Record<string, string>>(
+    {},
+  );
   // Reset override whenever the source post changes (regenerate, new post).
   useEffect(() => {
     setDisclosureOverride(null);
+    setPackOverrides({});
     setHasSavedMedia(false);
     setHasCopiedCaption(false);
     setActiveCaptionPlatform(null);
   }, [post.image, post.text, post.platformCaptions]);
 
+  const effectivePack = useMemo(() => {
+    if (!post.platformCaptions && Object.keys(packOverrides).length === 0) {
+      return undefined;
+    }
+    return { ...(post.platformCaptions || {}), ...packOverrides };
+  }, [post.platformCaptions, packOverrides]);
+
   const platformCaptionTabs = useMemo(() => {
-    const pack = post.platformCaptions;
+    const pack = effectivePack;
     if (!pack || Object.keys(pack).length === 0) return [];
     const orderedIds =
       post.platformIds?.filter((id) => Boolean(pack[id])) ??
       Object.keys(pack);
-    // Include any pack keys missing from platformIds
     for (const id of Object.keys(pack)) {
       if (!orderedIds.includes(id)) orderedIds.push(id);
     }
@@ -317,7 +328,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       label: resolvePlatformOption(id)?.shortLabel || id,
       caption: pack[id],
     }));
-  }, [post.platformCaptions, post.platformIds]);
+  }, [effectivePack, post.platformIds]);
 
   const exportPriorityFormatIds = useMemo(
     () => preferredExportFormatIds(post.platformIds ?? []),
@@ -583,8 +594,8 @@ export const PostResult: React.FC<PostResultProps> = ({
   // picked an alternative from the CaptionAlternativesModal (each variant
   // may trigger a different compliance language set).
   const sourceCaptionForActive =
-    activeCaptionPlatform && post.platformCaptions?.[activeCaptionPlatform]
-      ? post.platformCaptions[activeCaptionPlatform]
+    activeCaptionPlatform && effectivePack?.[activeCaptionPlatform]
+      ? effectivePack[activeCaptionPlatform]
       : post.text;
   const captionWasEdited = editedText !== sourceCaptionForActive;
   const activeDisclosures = (
@@ -606,13 +617,28 @@ export const PostResult: React.FC<PostResultProps> = ({
   };
   const captionWithDisclosures = appendDisclosures(editedText);
 
-  /** Pack captions with original post disclosures for ShareDialog per-target text. */
+  // Persist textarea edits into the active pack slot so Share uses salesperson edits.
+  useEffect(() => {
+    if (!activeCaptionPlatform) return;
+    const trimmed = editedText.trim();
+    if (!trimmed) return;
+    setPackOverrides((prev) => {
+      if (prev[activeCaptionPlatform] === trimmed) return prev;
+      return { ...prev, [activeCaptionPlatform]: trimmed };
+    });
+  }, [editedText, activeCaptionPlatform]);
+
+  /** Pack captions (with local overrides) + disclosures for ShareDialog. */
   const sharePlatformCaptions = useMemo(() => {
-    if (!post.platformCaptions) return undefined;
+    if (!effectivePack) return undefined;
     const baseDisc = (post.disclosures ?? "").trim();
     const out: Record<string, string> = {};
-    for (const [id, cap] of Object.entries(post.platformCaptions)) {
-      const base = cap?.trim();
+    for (const [id, cap] of Object.entries(effectivePack)) {
+      // Active platform: use live editor text (includes in-progress edits)
+      const base =
+        id === activeCaptionPlatform
+          ? editedText.trim()
+          : cap?.trim();
       if (!base) continue;
       if (!baseDisc) {
         out[id] = base;
@@ -625,14 +651,25 @@ export const PostResult: React.FC<PostResultProps> = ({
       }
     }
     return Object.keys(out).length > 0 ? out : undefined;
-  }, [post.platformCaptions, post.disclosures]);
+  }, [
+    effectivePack,
+    post.disclosures,
+    activeCaptionPlatform,
+    editedText,
+  ]);
 
   const selectCaptionPlatform = useCallback(
     (platformId: string | null) => {
+      // Flush current editor into pack before switching
+      if (activeCaptionPlatform && editedText.trim()) {
+        setPackOverrides((prev) => ({
+          ...prev,
+          [activeCaptionPlatform]: editedText.trim(),
+        }));
+      }
+      const pack = { ...(post.platformCaptions || {}), ...packOverrides };
       const nextText =
-        platformId && post.platformCaptions?.[platformId]
-          ? post.platformCaptions[platformId]
-          : post.text;
+        platformId && pack[platformId] ? pack[platformId] : post.text;
       setActiveCaptionPlatform(platformId);
       setEditedText(nextText);
       setTextHistory([nextText]);
@@ -640,7 +677,13 @@ export const PostResult: React.FC<PostResultProps> = ({
       setHasCopiedCaption(false);
       triggerHapticFeedback();
     },
-    [post.platformCaptions, post.text],
+    [
+      activeCaptionPlatform,
+      editedText,
+      packOverrides,
+      post.platformCaptions,
+      post.text,
+    ],
   );
 
   const handleCopy = async () => {
@@ -929,6 +972,7 @@ export const PostResult: React.FC<PostResultProps> = ({
           videoUrl: videoUrl || undefined,
         }}
         platformCaptions={sharePlatformCaptions}
+        selectedPlatformIds={post.platformIds}
       />
       <Modal
         isOpen={leaveConfirm !== null}

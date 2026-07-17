@@ -9,9 +9,10 @@ import {
   styles as videoStyles,
 } from "./video-director/constants";
 
-// Get top recommended styles for quick selection
+// Recommended = photo-locked campaign motion only
 const QUICK_STYLES = videoStyles.filter((s) => s.recommended).slice(0, 4);
-const ALL_STYLES = videoStyles.slice(0, 8); // Show first 8 styles for "More" section
+// Experimental styles can still morph — keep behind an explicit disclosure
+const EXPERIMENTAL_STYLES = videoStyles.filter((s) => !s.recommended);
 
 interface VideoDirectorModalProps {
   isOpen: boolean;
@@ -111,7 +112,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
           </div>
         </div>
 
-        {/* More Styles - Collapsible */}
+        {/* Experimental styles — may reinterpret the photo; not recommended */}
         <div className="border-t border-white/10 pt-2">
           <button
             onClick={() => {
@@ -120,7 +121,9 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
             }}
             className="w-full px-2 py-3 flex items-center justify-between text-sm text-white/70 hover:text-white hover:bg-white/5 transition-colors touch-manipulation rounded-lg"
           >
-            <span>{showMore ? "Hide" : "Show"} more styles</span>
+            <span>
+              {showMore ? "Hide" : "Show"} experimental styles
+            </span>
             <Icon
               type="chevron-down"
               className={`w-5 h-5 transition-transform duration-200 ${
@@ -138,8 +141,12 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
                 transition={{ duration: 0.2 }}
                 className="overflow-hidden"
               >
-                <div className="pt-2 pb-2 grid grid-cols-2 gap-3">
-                  {ALL_STYLES.filter((s) => !s.recommended).map(
+                <p className="px-1 pb-2 text-[11px] text-warning-200/90 leading-snug">
+                  These effects may reinterpret the photo. Prefer recommended
+                  styles for a locked delivery moment.
+                </p>
+                <div className="pt-1 pb-2 grid grid-cols-2 gap-3">
+                  {EXPERIMENTAL_STYLES.map(
                     ({ style, icon, description }) => (
                       <StyleButton
                         key={style}
@@ -159,7 +166,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
         {/* Footer hint */}
         <div className="mt-6 pt-4 border-t border-white/10">
           <p className="text-xs text-center text-white/50">
-            Videos are 6 seconds • Optimized for Instagram Reels
+            6s photo-locked clips · Instagram Reels, TikTok &amp; Stories
           </p>
         </div>
       </Modal>

@@ -19,12 +19,6 @@ const LazyImageCropModal = React.lazy(() =>
     default: mod.ImageCropModal,
   })),
 );
-const LazyVideoDirectorModal = React.lazy(() =>
-  import("./components/VideoDirectorModal").then((mod) => ({
-    default: mod.VideoDirectorModal,
-  })),
-);
-
 const AppContent: React.FC = () => {
   const {
     step,
@@ -210,16 +204,7 @@ const AppContent: React.FC = () => {
         />
       </Suspense>
 
-      <Suspense fallback={null}>
-        <LazyVideoDirectorModal
-          isOpen={isVideoDirectorOpen}
-          onClose={() => setIsVideoDirectorOpen(false)}
-          onSelectStyle={(style, options) => {
-            // This is handled inside PostResult usually, but if we needed a global modal:
-            setIsVideoDirectorOpen(false);
-          }}
-        />
-      </Suspense>
+      {/* Video director lives on PostResult — global no-op modal removed */}
     </div>
   );
 };

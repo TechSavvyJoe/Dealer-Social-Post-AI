@@ -148,6 +148,42 @@ export const normalizeCaptionHashtags = (text: string): string => {
   return out;
 };
 
+/**
+ * Fit a caption into a platform character budget without mid-hashtag cuts.
+ * Prefers dropping trailing hashtags first, then soft-trims the body.
+ */
+export const fitCaptionToBudget = (
+  text: string,
+  maxChars: number,
+): string => {
+  const normalized = normalizeCaptionHashtags(text ?? "").trim();
+  if (!normalized || maxChars <= 0) return normalized;
+  if (normalized.length <= maxChars) return normalized;
+
+  const lines = normalized.split("\n");
+  const lastLine = lines[lines.length - 1]?.trim() ?? "";
+  const tags = lastLine.match(/#[A-Za-z0-9_]+/g) || [];
+  const lastIsTagLine =
+    tags.length >= 1 &&
+    lastLine.replace(/#[A-Za-z0-9_]+/g, "").replace(/\s+/g, "").length <= 2;
+
+  if (lastIsTagLine && lines.length >= 2) {
+    const body = lines.slice(0, -1).join("\n").trimEnd();
+    let kept = [...tags];
+    while (kept.length > 0) {
+      const candidate = `${body}\n${kept.join(" ")}`.trim();
+      if (candidate.length <= maxChars) return candidate;
+      kept = kept.slice(0, -1);
+    }
+    if (body.length <= maxChars) return body;
+    return body.slice(0, Math.max(0, maxChars - 1)).trimEnd() + "…";
+  }
+
+  // No clean hashtag line — hard trim with ellipsis
+  if (normalized.length <= maxChars) return normalized;
+  return normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd() + "…";
+};
+
 /** Recommended hashtag counts for dealership marketing (2025–2026). */
 export const HASHTAG_BUDGET: Record<
   string,

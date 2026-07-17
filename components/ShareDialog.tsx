@@ -37,12 +37,13 @@ const LinkedinGlyph: React.FC<{ className?: string }> = ({ className }) => (
 );
 import { Modal } from "./ui/Modal";
 import {
-  PUBLISH_TARGETS,
+  orderPublishTargets,
   publishTo,
   PublishStatus,
   PublishContent,
   PublishTarget,
 } from "../services/publishTargets";
+import { fitCaptionToBudget } from "../utils/hashtags";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { logEvent } from "../utils/telemetry";
 import { cn } from "../utils/classNames";
@@ -56,6 +57,8 @@ interface ShareDialogProps {
    * each share tile uses its matching caption (still falls back to content.text).
    */
   platformCaptions?: Record<string, string>;
+  /** Platforms selected at generate time — shown first with a “selected” badge. */
+  selectedPlatformIds?: string[];
 }
 
 const ICON_MAP: Record<PublishTarget["icon"], React.ComponentType<{ className?: string }>> = {
@@ -83,6 +86,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
   onClose,
   content,
   platformCaptions,
+  selectedPlatformIds,
 }) => {
   const [busy, setBusy] = useState<string | null>(null);
   const [status, setStatus] = useState<{
@@ -90,10 +94,19 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     status: PublishStatus;
   } | null>(null);
 
+  const selectedSet = React.useMemo(
+    () => new Set((selectedPlatformIds || []).filter(Boolean)),
+    [selectedPlatformIds],
+  );
+  const orderedTargets = React.useMemo(
+    () => orderPublishTargets(selectedPlatformIds),
+    [selectedPlatformIds],
+  );
+
   const captionForTarget = useCallback(
-    (targetId: string): string => {
+    (targetId: string, budget: number): string => {
       const packCaption = platformCaptions?.[targetId]?.trim();
-      return packCaption || content.text;
+      return fitCaptionToBudget(packCaption || content.text, budget);
     },
     [content.text, platformCaptions],
   );
@@ -107,7 +120,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       try {
         const targetContent: PublishContent = {
           ...content,
-          text: captionForTarget(target.id),
+          text: captionForTarget(target.id, target.charBudget),
         };
         const result = await publishTo(target.id, targetContent);
         setStatus({ targetId: target.id, status: result });
@@ -136,12 +149,12 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title="Share post"
-      description="Pick where to publish. The caption + image are pre-sized for each platform and the text is copied to your clipboard automatically."
+      description="Instagram, Facebook, and TikTok first. Caption is fitted and copied; image is sized for each platform."
       size="lg"
     >
       <div className="space-y-3">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {PUBLISH_TARGETS.map((target) => {
+          {orderedTargets.map((target) => {
             const Icon = ICON_MAP[target.icon];
             const isBusy = busy === target.id;
             const isDone =
@@ -151,10 +164,13 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
               status.status.kind === "fallback";
             const isError =
               status?.targetId === target.id && status.status.kind === "error";
+            const isSelected = selectedSet.has(target.id);
 
-            // Compute caption fit against this platform's budget so the user
-            // can see at a glance which platforms it fits. Prefer pack caption.
-            const targetCaption = captionForTarget(target.id);
+            // Prefer pack caption; fit to budget for the meter.
+            const targetCaption = captionForTarget(
+              target.id,
+              target.charBudget,
+            );
             const captionLen = targetCaption.length;
             const overBudget = captionLen > target.charBudget;
             const hasPackCaption = Boolean(platformCaptions?.[target.id]);
@@ -169,7 +185,9 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                 whileTap={{ scale: 0.98 }}
                 className={cn(
                   "relative flex flex-col items-start gap-2 p-3 rounded-xl border text-left transition-colors overflow-hidden",
-                  "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20",
+                  isSelected
+                    ? "bg-primary-500/10 border-primary-400/40 hover:bg-primary-500/15"
+                    : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20",
                   "disabled:opacity-60 disabled:cursor-not-allowed"
                 )}
                 style={{
@@ -195,7 +213,11 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                       <Icon className="w-4 h-4" />
                     )}
                   </div>
-                  {target.directApiConnected ? (
+                  {isSelected ? (
+                    <span className="text-[9px] uppercase tracking-wide text-primary-200 font-semibold">
+                      selected
+                    </span>
+                  ) : target.directApiConnected ? (
                     <span className="text-[9px] uppercase tracking-wide text-success-300 font-semibold inline-flex items-center gap-1">
                       <Sparkles className="w-2.5 h-2.5" /> direct
                     </span>

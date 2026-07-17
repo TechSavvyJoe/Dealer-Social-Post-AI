@@ -143,17 +143,26 @@ const triggerDownload = (dataUrl: string, filename: string): void => {
 };
 
 /**
- * Downloads all four formats. Browsers throttle multiple downloads from a
- * single user gesture, so we space them out 250ms apart — reliable in Chrome,
- * Edge, Safari, and Firefox.
+ * Downloads formats. Browsers throttle multiple downloads from a single user
+ * gesture, so we space them out 250ms apart — reliable in Chrome, Edge,
+ * Safari, and Firefox.
+ * @param formatIds optional subset; defaults to all four export sizes
  */
-export const downloadAllFormats = async (sourceDataUrl: string): Promise<void> => {
+export const downloadAllFormats = async (
+  sourceDataUrl: string,
+  formatIds?: ExportFormatId[],
+): Promise<void> => {
   const rendered = await renderAllFormats(sourceDataUrl);
-  for (let i = 0; i < EXPORT_FORMATS.length; i++) {
-    const fmt = EXPORT_FORMATS[i];
+  const formats =
+    formatIds && formatIds.length > 0
+      ? formatIds
+          .map((id) => EXPORT_FORMATS.find((f) => f.id === id))
+          .filter((f): f is ExportFormat => Boolean(f))
+      : EXPORT_FORMATS;
+  for (let i = 0; i < formats.length; i++) {
+    const fmt = formats[i];
     triggerDownload(rendered[fmt.id], fmt.filename);
-    // Small gap so browsers don't drop subsequent downloads
-    if (i < EXPORT_FORMATS.length - 1) {
+    if (i < formats.length - 1) {
       await new Promise((r) => setTimeout(r, 250));
     }
   }

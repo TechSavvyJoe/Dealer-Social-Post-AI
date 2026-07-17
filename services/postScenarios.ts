@@ -84,7 +84,7 @@ export const POST_SCENARIOS: PostScenario[] = [
 Lead with the customer (by first name when provided), not the vehicle spec sheet.
 Tone: celebratory, brief, warm. Imply community ("welcome to the family / the {Dealer} crew").`,
     suggestedHashtags: ["#NewRide", "#HappyCustomer", "#DeliveryDay"],
-    defaultVideoStyle: VideoStyle.EpicReveal,
+    defaultVideoStyle: VideoStyle.GoldenRadiance,
     defaultFunStyle: "pixar",
   },
   {
@@ -119,7 +119,7 @@ Frame as a "first look" / "fresh on the floor" reveal. Emphasize availability �
 Mention specific year/make/model/trim when the VIN data confirms it.`,
     suggestedHashtags: ["#NewArrival", "#JustIn", "#FirstLook"],
     starterCaption: "Just rolled onto the lot.",
-    defaultVideoStyle: VideoStyle.EpicReveal,
+    defaultVideoStyle: VideoStyle.GoldenRadiance,
   },
   {
     id: "trade_in_spotlight",
@@ -196,7 +196,7 @@ Do not embellish or invent — use the quote verbatim. If no quote is provided, 
 Lead with the salesperson's first name and a quick credit ("{Salesperson} just put another family in their dream ride…"). Customer first-name appears next.
 Tone: proud + warm. Avoid making it sound like a brag — focus on the customer's win.`,
     suggestedHashtags: ["#TeamWin", "#SoldBy"],
-    defaultVideoStyle: VideoStyle.JumpingForJoy,
+    defaultVideoStyle: VideoStyle.PartyTime,
     defaultFunStyle: "superhero",
   },
   {
@@ -213,7 +213,7 @@ Tone: proud + warm. Avoid making it sound like a brag — focus on the customer'
 Convey urgency without making compliance-risky claims ("limited supply" / "selection won't last" — fine; "guaranteed lowest price" — never).
 End with CTA to visit or message for availability. Avoid specific prices unless provided.`,
     suggestedHashtags: ["#YearEnd", "#ModelYearEnd", "#ClearanceEvent"],
-    defaultVideoStyle: VideoStyle.CometStrike,
+    defaultVideoStyle: VideoStyle.VintageFilm,
   },
   {
     id: "community_event",
@@ -259,7 +259,7 @@ No sales CTA unless explicitly added.`,
 Lead with the feel of the drive — quick, sensory ("feel the torque", "smooth ride", "the cabin is quieter than your living room"). Soft CTA to schedule.
 Don't invent equipment not present on the actual vehicle.`,
     suggestedHashtags: ["#TestDrive", "#ComeDriveIt"],
-    defaultVideoStyle: VideoStyle.SpeedLines,
+    defaultVideoStyle: VideoStyle.Spotlight,
   },
 ];
 
@@ -388,8 +388,8 @@ export const scenarioToCreativeBrief = (
     parseCustomScenarios(customScenariosJson).find((s) => s.id === id);
   if (!scenario) return "";
   const hashtagLine = scenario.suggestedHashtags.length
-    ? `Scenario hashtags (in addition to dealer defaults): ${scenario.suggestedHashtags.join(
-        " "
+    ? `Scenario hashtags (in addition to dealer defaults; each is one #PascalCase token, space-separated): ${scenario.suggestedHashtags.join(
+        " ",
       )}.`
     : "";
   return [

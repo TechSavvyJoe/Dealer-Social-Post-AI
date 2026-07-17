@@ -15,6 +15,7 @@
  */
 import { ExportFormatId, renderFormat, EXPORT_FORMATS } from "../utils/multiFormatExport";
 import { dataUrlToBlob } from "../utils/imageUtils";
+import { fitCaptionToBudget } from "../utils/hashtags";
 
 export type PublishStatus =
   | { kind: "shared"; via: "web-share" | "direct-api" }
@@ -59,20 +60,8 @@ export interface PublishTarget {
   webIntentUrl?: (content: PublishContent) => string | null;
 }
 
+/** Dealership-first order: Instagram, Facebook, TikTok, Google — then secondary. */
 export const PUBLISH_TARGETS: PublishTarget[] = [
-  {
-    id: "facebook_feed",
-    label: "Facebook Feed",
-    icon: "facebook",
-    accent: "#1877F2",
-    format: "feed_square",
-    charBudget: 63206,
-    supportsVideo: true,
-    directApiConnected: false,
-    hint: "1:1 image · long captions OK · web-share to FB app",
-    webIntentUrl: (c) =>
-      `https://www.facebook.com/sharer/sharer.php?quote=${encodeURIComponent(c.text)}`,
-  },
   {
     id: "instagram_feed",
     label: "Instagram Feed",
@@ -96,6 +85,19 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
     directApiConnected: false,
     hint: "9:16 image or video · share to IG Stories",
     webIntentUrl: () => null,
+  },
+  {
+    id: "facebook_feed",
+    label: "Facebook Feed",
+    icon: "facebook",
+    accent: "#1877F2",
+    format: "feed_square",
+    charBudget: 63206,
+    supportsVideo: true,
+    directApiConnected: false,
+    hint: "1:1 image · long captions OK · web-share to FB app",
+    webIntentUrl: (c) =>
+      `https://www.facebook.com/sharer/sharer.php?quote=${encodeURIComponent(c.text)}`,
   },
   {
     id: "tiktok",
@@ -123,17 +125,16 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
       "https://business.google.com/posts/",
   },
   {
-    id: "x_twitter",
-    label: "X / Twitter",
-    icon: "twitter",
-    accent: "#1DA1F2",
-    format: "feed_square",
-    charBudget: 280,
-    supportsVideo: true,
+    id: "marketplace",
+    label: "FB Marketplace",
+    icon: "facebook",
+    accent: "#1877F2",
+    format: "marketplace",
+    charBudget: 9999,
+    supportsVideo: false,
     directApiConnected: false,
-    hint: "1:1 image · 280-char limit · tweet intent",
-    webIntentUrl: (c) =>
-      `https://twitter.com/intent/tweet?text=${encodeURIComponent(c.text.slice(0, 280))}`,
+    hint: "1.91:1 image · best for listings · share sheet",
+    webIntentUrl: () => "https://www.facebook.com/marketplace/create/item/",
   },
   {
     id: "linkedin",
@@ -149,16 +150,19 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
       `https://www.linkedin.com/shareArticle?mini=true&summary=${encodeURIComponent(c.text)}`,
   },
   {
-    id: "marketplace",
-    label: "FB Marketplace",
-    icon: "facebook",
-    accent: "#1877F2",
-    format: "marketplace",
-    charBudget: 9999,
-    supportsVideo: false,
+    id: "x_twitter",
+    label: "X / Twitter",
+    icon: "twitter",
+    accent: "#1DA1F2",
+    format: "feed_square",
+    charBudget: 280,
+    supportsVideo: true,
     directApiConnected: false,
-    hint: "1.91:1 image · best for listings · share sheet",
-    webIntentUrl: () => "https://www.facebook.com/marketplace/create/item/",
+    hint: "Optional · most dealerships skip X · 280-char limit",
+    webIntentUrl: (c) =>
+      `https://twitter.com/intent/tweet?text=${encodeURIComponent(
+        fitCaptionToBudget(c.text, 280),
+      )}`,
   },
   {
     id: "native_share",
@@ -173,6 +177,25 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
     webIntentUrl: () => null,
   },
 ];
+
+/** Order targets for Share UI: selected dealer platforms first, then the rest. */
+export const orderPublishTargets = (
+  selectedPlatformIds?: string[] | null,
+): PublishTarget[] => {
+  const selected = new Set(
+    (selectedPlatformIds || []).filter(Boolean),
+  );
+  if (selected.size === 0) return [...PUBLISH_TARGETS];
+  const primary: PublishTarget[] = [];
+  const secondary: PublishTarget[] = [];
+  for (const t of PUBLISH_TARGETS) {
+    if (t.id === "native_share") continue;
+    if (selected.has(t.id)) primary.push(t);
+    else secondary.push(t);
+  }
+  const more = PUBLISH_TARGETS.find((t) => t.id === "native_share");
+  return more ? [...primary, ...secondary, more] : [...primary, ...secondary];
+};
 
 const findTarget = (id: string): PublishTarget | undefined =>
   PUBLISH_TARGETS.find((t) => t.id === id);
@@ -263,10 +286,15 @@ export const publishTo = async (
       }
     }
 
-    // Always copy the caption to clipboard before sharing so the user can
-    // paste if the share sheet target drops text.
-    const captionForShare = content.text.slice(0, target.charBudget);
+    // Fit caption to platform budget (drop hashtags first — never mid-tag cut).
+    const captionForShare = fitCaptionToBudget(
+      content.text,
+      target.charBudget,
+    );
     await copyTextToClipboard(captionForShare);
+
+    // Prefer fitted text for intents as well
+    content = { ...content, text: captionForShare };
 
     // Attempt Web Share API
     if (

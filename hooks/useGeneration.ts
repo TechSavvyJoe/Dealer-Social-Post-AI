@@ -542,11 +542,13 @@ export const useGeneration = () => {
     onMutate: () => setError(null),
     onSuccess: (prepared) => {
       if (!generatedPost) return;
+      // Primary caption changed — drop stale platform pack so Share isn't wrong.
       setGeneratedPost({
         ...generatedPost,
         text: prepared.caption,
         disclosures: prepared.disclosures,
         disclosureCategories: prepared.disclosureCategories,
+        platformCaptions: undefined,
       });
     },
     onError: (err) => {
@@ -608,6 +610,7 @@ export const useGeneration = () => {
         text: prepared.caption,
         disclosures: prepared.disclosures,
         disclosureCategories: prepared.disclosureCategories,
+        platformCaptions: undefined,
       });
     },
     onError: (err) => {

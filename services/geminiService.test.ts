@@ -262,7 +262,7 @@ describe("GeminiService model routing", () => {
 
     const result = await generatePostVideo(
       "data:image/jpeg;base64,fake",
-      VideoStyle.EpicReveal,
+      VideoStyle.GoldenRadiance,
       {
         durationSeconds: 8,
         aspectPreference: "auto",

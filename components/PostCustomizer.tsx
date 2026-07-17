@@ -61,6 +61,7 @@ import {
   platformsToCreativeBrief,
   type PlatformId,
 } from "../services/platformCopy";
+import { brandHashtagFromName, formatHashtag } from "../utils/hashtags";
 
 interface PostCustomizerProps {
   imageSrc: string;
@@ -385,16 +386,23 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
       );
     }
 
-    // Default hashtags + footer get appended to the final caption rather than
-    // injected as suggestion text — guarantees they actually show up.
+    // Default hashtags + footer — sanitize to #PascalCase so IG/FB/TikTok
+    // recognize every tag (spaces inside #tags break platforms).
     const dealerHashtags = (currentDealer?.default_hashtags || "")
       .split(/[\n,]+/)
       .map((h) => h.trim())
       .filter(Boolean)
-      .map((h) => (h.startsWith("#") ? h : `#${h}`));
-    if (dealerHashtags.length > 0) {
+      .map((h) => formatHashtag(h))
+      .filter(Boolean);
+    const brandTag = currentDealer?.name
+      ? brandHashtagFromName(currentDealer.name)
+      : "";
+    const requiredTags = Array.from(
+      new Set([brandTag, ...dealerHashtags].filter(Boolean)),
+    );
+    if (requiredTags.length > 0) {
       briefParts.push(
-        `Required hashtags (include these exact hashtags in the post): ${dealerHashtags.join(
+        `Required hashtags (each is one continuous #PascalCase token, space-separated on the last line): ${requiredTags.join(
           " ",
         )}.`,
       );

@@ -88,6 +88,32 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
     logEvent("export.multiformat.single", { format: id });
   };
 
+  const matchedIds = useMemo(() => {
+    if (priorityFormatIds && priorityFormatIds.length > 0) {
+      return priorityFormatIds;
+    }
+    return EXPORT_FORMATS.map((f) => f.id);
+  }, [priorityFormatIds]);
+
+  const handleDownloadMatched = async () => {
+    if (isDownloadingAll) return;
+    triggerHapticFeedback();
+    setIsDownloadingAll(true);
+    try {
+      await downloadAllFormats(sourceImageUrl, matchedIds);
+      setIndividuallyDownloaded((prev) => {
+        const next = new Set(prev);
+        matchedIds.forEach((id) => next.add(id));
+        return next;
+      });
+      logEvent("export.multiformat.matched", { count: matchedIds.length });
+    } catch (err) {
+      setRenderError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsDownloadingAll(false);
+    }
+  };
+
   const handleDownloadAll = async () => {
     if (isDownloadingAll) return;
     triggerHapticFeedback();
@@ -107,11 +133,11 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Export for every platform"
+      title="Export for your platforms"
       description={
         priorityFormatIds && priorityFormatIds.length > 0
-          ? "Same post, four sizes — formats for your selected platforms are listed first."
-          : "Same post, four sizes. Download all at once or pick what you need."
+          ? "Sizes matched to your Share-to selection are listed first. Download matched or all four."
+          : "Same post, four sizes for Instagram, Facebook, TikTok, Marketplace, and Google."
       }
       size="xl"
     >
@@ -201,11 +227,24 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
                 <Download className="h-4 w-4" />
               )
             }
-            onClick={handleDownloadAll}
+            onClick={handleDownloadMatched}
             disabled={!rendered || isDownloadingAll}
           >
-            {isDownloadingAll ? "Downloading…" : "Download all 4 formats"}
+            {isDownloadingAll
+              ? "Downloading…"
+              : `Download matched (${matchedIds.length})`}
           </Button>
+          {matchedIds.length < EXPORT_FORMATS.length ? (
+            <Button
+              variant="outline"
+              size="md"
+              fullWidth
+              onClick={handleDownloadAll}
+              disabled={!rendered || isDownloadingAll}
+            >
+              All 4 sizes
+            </Button>
+          ) : null}
           <Button variant="ghost" size="md" onClick={onClose}>
             Done
           </Button>
@@ -213,7 +252,7 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
 
         <p className="text-[11px] text-surface-500 leading-relaxed">
           Tip: your browser may ask to allow multiple downloads — click "Allow"
-          once and all four files save to your Downloads folder.
+          once and files save to your Downloads folder.
         </p>
       </div>
     </Modal>

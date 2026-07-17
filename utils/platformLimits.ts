@@ -22,21 +22,21 @@ export interface PlatformLimit {
  * not always hard platform API caps — Instagram guidance is 3–5 relevant tags;
  * Facebook benefits from 0–3; TikTok 3–5.
  */
+/** Dealer-first order for meters and UI: IG → FB → TikTok → Google → secondary. */
 export const PLATFORM_LIMITS: PlatformLimit[] = [
-  { id: "x", label: "X / Twitter", maxChars: 280, maxHashtags: 2 },
-  {
-    id: "facebook",
-    label: "Facebook Feed",
-    maxChars: 63206,
-    softFoldChars: 477, // about ~3 lines on desktop before "See more"
-    maxHashtags: 3,
-  },
   {
     id: "instagram",
     label: "Instagram",
     maxChars: 2200,
     softFoldChars: 125, // characters visible before "...more"
     maxHashtags: 5,
+  },
+  {
+    id: "facebook",
+    label: "Facebook Feed",
+    maxChars: 63206,
+    softFoldChars: 477, // about ~3 lines on desktop before "See more"
+    maxHashtags: 3,
   },
   {
     id: "tiktok",
@@ -59,6 +59,7 @@ export const PLATFORM_LIMITS: PlatformLimit[] = [
     softFoldChars: 300,
     maxHashtags: 1,
   },
+  { id: "x", label: "X / Twitter", maxChars: 280, maxHashtags: 2 },
 ];
 
 export type CountState = "ok" | "fold" | "over";

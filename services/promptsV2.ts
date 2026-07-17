@@ -151,7 +151,15 @@ Ground the caption in what is actually visible — authenticity beats generic hy
     )
   );
 
-  const storeTag = dealershipName.replace(/[^A-Za-z0-9]+/g, "");
+  // Import at module level would cycle; inline brand tag from name (same rules as utils/hashtags).
+  const storeTag =
+    dealershipName
+      .replace(/[^A-Za-z0-9]+/g, " ")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join("") || "OurDealership";
   sections.push(
     xmlBlock(
       "channels",

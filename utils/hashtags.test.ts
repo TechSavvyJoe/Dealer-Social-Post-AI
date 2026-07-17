@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   brandHashtagFromName,
   collapseSpacedHashtags,
+  fitCaptionToBudget,
   formatHashtag,
   normalizeCaptionHashtags,
   sanitizeHashtagBody,
@@ -71,5 +72,20 @@ describe("brandHashtagFromName", () => {
     expect(brandHashtagFromName("Sunrise Ford of Howell")).toBe(
       "#SunriseFordOfHowell",
     );
+  });
+});
+
+describe("fitCaptionToBudget", () => {
+  it("drops trailing hashtags before cutting the body", () => {
+    const body = "Short hook.\nVisit the store today.";
+    const caption = `${body}\n#Brand #One #Two #Three #Four`;
+    const fitted = fitCaptionToBudget(caption, body.length + 12);
+    expect(fitted.startsWith("Short hook")).toBe(true);
+    expect(fitted.length).toBeLessThanOrEqual(body.length + 12);
+  });
+
+  it("returns unchanged text when under budget", () => {
+    const t = "Hello\n#A #B";
+    expect(fitCaptionToBudget(t, 500)).toBe(t);
   });
 });
