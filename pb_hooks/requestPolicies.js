@@ -627,26 +627,25 @@ function buildGenerateContentRequest(model, input) {
   if (
     !hasOnlyKeys(
       generationConfig,
-      ["responseModalities", "responseFormat", "maxOutputTokens"],
-      ["responseModalities", "responseFormat", "maxOutputTokens"],
+      ["responseModalities", "imageConfig", "maxOutputTokens"],
+      ["responseModalities", "imageConfig", "maxOutputTokens"],
     ) ||
     generationConfig.maxOutputTokens !== 4096 ||
     !Array.isArray(generationConfig.responseModalities) ||
     generationConfig.responseModalities.length !== 2 ||
     generationConfig.responseModalities[0] !== "TEXT" ||
     generationConfig.responseModalities[1] !== "IMAGE" ||
-    !hasOnlyKeys(generationConfig.responseFormat, ["image"], ["image"]) ||
-    !hasOnlyKeys(
-      generationConfig.responseFormat.image,
-      ["imageSize"],
-      ["imageSize"],
-    )
+    !generationConfig.imageConfig ||
+    typeof generationConfig.imageConfig !== "object" ||
+    !hasOnlyKeys(generationConfig.imageConfig, ["imageSize"], ["imageSize"])
   ) {
     return null;
   }
 
+  // imageConfig.imageSize is a free string: "512" | "1K" | "2K" | "4K".
+  // Do not send these under responseFormat.image.imageSize (protobuf enum).
   const requiredSize = model === "gemini-3.1-flash-lite-image" ? "1K" : "2K";
-  if (generationConfig.responseFormat.image.imageSize !== requiredSize) {
+  if (generationConfig.imageConfig.imageSize !== requiredSize) {
     return null;
   }
 
@@ -656,7 +655,7 @@ function buildGenerateContentRequest(model, input) {
     contents: contents,
     generationConfig: {
       responseModalities: ["TEXT", "IMAGE"],
-      responseFormat: { image: { imageSize: requiredSize } },
+      imageConfig: { imageSize: requiredSize },
       maxOutputTokens: 4096,
     },
   };

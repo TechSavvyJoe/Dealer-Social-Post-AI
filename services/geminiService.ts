@@ -179,16 +179,17 @@ const cleanGeneratedText = (inputText: string): string => {
 };
 
 /**
- * Gemini 3 image models default to 1K. Use a production-quality 2K render for
- * the premium and standard tiers while keeping the Lite emergency model on
- * the only resolution it supports.
+ * Gemini 3 image models default to 1K. Prefer production-quality 2K for the
+ * premium/standard tiers; Lite only supports 1K.
+ *
+ * Size must live under `imageConfig.imageSize` as the string tokens
+ * `"512" | "1K" | "2K" | "4K"`. The nested `responseFormat.image.imageSize`
+ * field is a protobuf enum (`IMAGE_SIZE_*`) and rejects bare `"2K"`.
  */
 const imageGenerationConfig = (modelId: string, params: GenerationParams) => ({
   responseModalities: ["TEXT" as any, "IMAGE" as any],
-  responseFormat: {
-    image: {
-      imageSize: modelId === MODELS.image.emergency ? "1K" : "2K",
-    },
+  imageConfig: {
+    imageSize: modelId === MODELS.image.emergency ? "1K" : "2K",
   },
   ...params,
 });

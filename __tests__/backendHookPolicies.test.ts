@@ -62,7 +62,7 @@ function imageRequest(imageSize: "1K" | "2K" | "4K" = "2K") {
     ],
     generationConfig: {
       responseModalities: ["TEXT", "IMAGE"],
-      responseFormat: { image: { imageSize } },
+      imageConfig: { imageSize },
       maxOutputTokens: 4096,
     },
   };

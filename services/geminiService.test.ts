@@ -115,7 +115,7 @@ describe("GeminiService model routing", () => {
     expect(imageCall, `expected a call with model=${expected}`).toBeDefined();
     expect(imageCall?.[0].generationConfig).toMatchObject({
       responseModalities: ["TEXT", "IMAGE"],
-      responseFormat: { image: { imageSize: "2K" } },
+      imageConfig: { imageSize: "2K" },
       maxOutputTokens: 4096,
     });
   });
@@ -182,7 +182,7 @@ describe("GeminiService model routing", () => {
       (call) => call[0].model === MODELS.image.emergency,
     );
     expect(liteCall?.[0].generationConfig).toMatchObject({
-      responseFormat: { image: { imageSize: "1K" } },
+      imageConfig: { imageSize: "1K" },
     });
   });
 
