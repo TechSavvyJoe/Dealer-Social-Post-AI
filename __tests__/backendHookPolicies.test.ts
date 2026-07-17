@@ -271,6 +271,20 @@ describe("PocketBase request policies", () => {
       policies.buildGeminiProxyRequest(liteImagePath, imageRequest("1K")),
     ).toEqual(imageRequest("1K"));
 
+    // Legacy responseFormat.image.imageSize must be rewritten to imageConfig
+    // before it hits Gemini (which rejects bare "2K" as an ImageSize enum).
+    const legacy = {
+      contents: imageRequest("2K").contents,
+      generationConfig: {
+        responseModalities: ["TEXT", "IMAGE"],
+        responseFormat: { image: { imageSize: "2K" } },
+        maxOutputTokens: 4096,
+      },
+    };
+    expect(policies.buildGeminiProxyRequest(proImagePath, legacy)).toEqual(
+      imageRequest("2K"),
+    );
+
     const twoImageRequest = imageRequest("2K");
     twoImageRequest.contents[0].parts.push(inlineImage as never);
     expect(
