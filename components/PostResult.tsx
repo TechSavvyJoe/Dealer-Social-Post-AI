@@ -47,7 +47,6 @@ import {
   getPostApprovalStatus,
   markPostVideoGenerated,
 } from "../services/posts";
-import { imageFileExtension } from "../utils/imageUtils";
 import {
   analyzeCaptionForDelivery,
   prohibitedClaimsMessage,
@@ -56,6 +55,11 @@ import {
   preferredExportFormatIds,
   resolvePlatformOption,
 } from "../services/platformCopy";
+import {
+  isMobilePhotoDevice,
+  saveMediaToLibrary,
+  saveResultToastMessage,
+} from "../utils/mediaSave";
 import { useAppStore } from "../stores/appStore";
 
 // Lazy load modals for performance
@@ -581,27 +585,42 @@ export const PostResult: React.FC<PostResultProps> = ({
     setHasSavedMedia(false);
   }, [videoUrl]);
 
+  const saveKind = videoUrl ? "video" : "image";
+  const saveToPhotos = isMobilePhotoDevice();
+  const saveButtonLabel = saveToPhotos
+    ? "Save to Photos"
+    : saveKind === "video"
+      ? "Save video"
+      : "Save image";
+  const saveAriaLabel = (locked: boolean) =>
+    locked
+      ? `Save ${saveKind} (${deliveryLockLabel.toLowerCase()})`
+      : saveButtonLabel;
+
   const handleSave = async () => {
     triggerHapticFeedback();
     if (deliveryLocked) {
       toast.warning(deliveryGateMessage);
       return;
     }
-    const link = document.createElement("a");
 
-    if (videoUrl) {
-      link.href = videoUrl;
-      link.download = "social-media-video.mp4";
-    } else {
-      link.href = post.image;
-      link.download = `social-media-post.${imageFileExtension(post.image)}`;
+    const result = await saveMediaToLibrary({
+      sourceUrl: videoUrl || post.image,
+      kind: videoUrl ? "video" : "image",
+      basename: videoUrl ? "social-media-video" : "social-media-post",
+    });
+
+    if (result.method === "cancelled") {
+      toast.warning(saveResultToastMessage(result));
+      return;
+    }
+    if (result.method === "error") {
+      toast.error(saveResultToastMessage(result));
+      return;
     }
 
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
     setHasSavedMedia(true);
-    toast.success(`${videoUrl ? "Video" : "Image"} saved to your device.`);
+    toast.success(saveResultToastMessage(result));
 
     if (!shouldReduceMotion) {
       confetti({
@@ -1971,22 +1990,18 @@ export const PostResult: React.FC<PostResultProps> = ({
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={handleSave}
+                  onClick={() => {
+                    void handleSave();
+                  }}
                   disabled={imageBusy || deliveryLocked}
                   loading={imageBusy}
-                  aria-label={
-                    deliveryLocked
-                      ? `Save ${videoUrl ? "video" : "image"} (${deliveryLockLabel.toLowerCase()})`
-                      : `Save ${videoUrl ? "video" : "image"}`
-                  }
+                  aria-label={saveAriaLabel(deliveryLocked)}
                   leftIcon={<Download className="h-4 w-4" />}
                   className="border-success-500/35 text-success-100 hover:border-success-400/60 hover:bg-success-500/10"
                   fullWidth
                   disableHaptics
                 >
-                  {deliveryLocked
-                    ? deliveryLockLabel
-                    : `Save ${videoUrl ? "video" : "image"}`}
+                  {deliveryLocked ? deliveryLockLabel : saveButtonLabel}
                 </Button>
               </div>
             ) : null}
@@ -2105,20 +2120,22 @@ export const PostResult: React.FC<PostResultProps> = ({
             </Button>
             <Button
               variant="outline"
-              onClick={handleSave}
+              onClick={() => {
+                void handleSave();
+              }}
               disabled={imageBusy || deliveryLocked}
               loading={imageBusy}
-              aria-label={
-                deliveryLocked
-                  ? `Save ${videoUrl ? "video" : "image"} (${deliveryLockLabel.toLowerCase()})`
-                  : `Save ${videoUrl ? "video" : "image"}`
-              }
+              aria-label={saveAriaLabel(deliveryLocked)}
               leftIcon={<Download className="h-4 w-4" />}
               className="border-success-500/35 text-success-100 hover:border-success-400/60 hover:bg-success-500/10"
               fullWidth
               disableHaptics
             >
-              {deliveryLocked ? deliveryLockLabel : "Save"}
+              {deliveryLocked
+                ? deliveryLockLabel
+                : saveToPhotos
+                  ? "Photos"
+                  : "Save"}
             </Button>
           </div>
         </div>
