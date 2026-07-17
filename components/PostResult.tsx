@@ -36,6 +36,7 @@ import { normalizeError, recoveryHint } from "../utils/errorHandler";
 import { MultiFormatExportModal } from "./MultiFormatExportModal";
 import { LayoutGrid } from "lucide-react";
 import { PlatformLimitMeter } from "./PlatformLimitMeter";
+import { CaptionStudio } from "./CaptionStudio";
 import { ShareDialog } from "./ShareDialog";
 import { CaptionAlternativesModal } from "./CaptionAlternativesModal";
 import { ProgressiveImage } from "./ui/ProgressiveImage";
@@ -1675,12 +1676,12 @@ export const PostResult: React.FC<PostResultProps> = ({
                   id="caption-delivery-heading"
                   className="text-xl font-semibold text-surface-50"
                 >
-                  Caption and delivery
+                  Caption studio
                 </h3>
                 <p className="mt-0.5 text-xs text-surface-400">
                   {creativeLockedForReview
                     ? "Review copy is locked to the exact creative submitted to the manager."
-                    : "Edit directly. Required disclosures stay attached automatically."}
+                    : "Edit the body and hashtags separately. Platform tips update with each tab. Disclosures attach automatically on copy/share."}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-1">
@@ -1721,7 +1722,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                   aria-selected={activeCaptionPlatform === null}
                   onClick={() => selectCaptionPlatform(null)}
                   className={cn(
-                    "min-h-[36px] rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
+                    "min-h-[40px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
                     activeCaptionPlatform === null
                       ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
@@ -1738,7 +1739,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     aria-selected={activeCaptionPlatform === tab.id}
                     onClick={() => selectCaptionPlatform(tab.id)}
                     className={cn(
-                      "min-h-[36px] rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
+                      "min-h-[40px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
                       activeCaptionPlatform === tab.id
                         ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
@@ -1756,25 +1757,15 @@ export const PostResult: React.FC<PostResultProps> = ({
               {captionWasEdited && (
                 <div className="mb-2 flex items-center gap-2 text-xs text-warning-300">
                   <Edit3 className="w-3 h-3" />
-                  <span>Text has been edited</span>
+                  <span>Caption edited for this platform</span>
                 </div>
               )}
-              <textarea
-                aria-label="Generated social post text"
-                aria-invalid={claimLocked || undefined}
-                aria-describedby={
-                  claimLocked ? "caption-compliance-alert" : undefined
-                }
+              <CaptionStudio
                 value={editedText}
-                onChange={(e) => handleTextChange(e.target.value)}
+                onChange={handleTextChange}
                 disabled={isTextLoading || creativeLockedForReview}
-                className={cn(
-                  "h-48 w-full lg:h-60 lg:max-h-[24rem]",
-                  "bg-surface-800/50 text-surface-300 p-4 rounded-xl text-sm",
-                  "resize-y border-2 border-transparent leading-relaxed",
-                  "focus:border-primary-400 focus:ring-2 focus:ring-primary-400",
-                  "outline-none transition-all duration-300",
-                )}
+                platformId={activeCaptionPlatform}
+                claimLocked={claimLocked}
               />
             </div>
 

@@ -88,16 +88,17 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
   },
   {
     id: "facebook_feed",
-    label: "Facebook Feed",
+    label: "Facebook",
     icon: "facebook",
     accent: "#1877F2",
     format: "feed_square",
     charBudget: 63206,
     supportsVideo: true,
     directApiConnected: false,
-    hint: "1:1 image · long captions OK · web-share to FB app",
-    webIntentUrl: (c) =>
-      `https://www.facebook.com/sharer/sharer.php?quote=${encodeURIComponent(c.text)}`,
+    hint: "Facebook feed · caption copied · open FB app or site to paste",
+    // Quote-only sharer.php is unreliable without a public URL. Open Facebook
+    // and rely on clipboard caption + downloaded image (same path as IG).
+    webIntentUrl: () => "https://www.facebook.com/",
   },
   {
     id: "tiktok",
@@ -177,23 +178,48 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
   },
 ];
 
-/** Order targets for Share UI: selected dealer platforms first, then the rest. */
+/**
+ * Always-on core share destinations for dealerships.
+ * Facebook is intentionally included so it never gets buried or filtered out.
+ */
+export const CORE_PUBLISH_IDS = [
+  "instagram_feed",
+  "facebook_feed",
+  "tiktok",
+] as const;
+
+/**
+ * Order targets for Share UI:
+ * 1) Core dealer channels (IG Feed, Facebook, TikTok) — always first
+ * 2) Other platforms the user selected at generate time
+ * 3) Remaining destinations
+ * 4) Native "More…" last
+ */
 export const orderPublishTargets = (
   selectedPlatformIds?: string[] | null,
 ): PublishTarget[] => {
-  const selected = new Set(
-    (selectedPlatformIds || []).filter(Boolean),
-  );
-  if (selected.size === 0) return [...PUBLISH_TARGETS];
-  const primary: PublishTarget[] = [];
-  const secondary: PublishTarget[] = [];
+  const selected = new Set((selectedPlatformIds || []).filter(Boolean));
+  const byId = new Map(PUBLISH_TARGETS.map((t) => [t.id, t]));
+  const used = new Set<string>();
+  const result: PublishTarget[] = [];
+
+  const push = (id: string) => {
+    if (used.has(id) || id === "native_share") return;
+    const t = byId.get(id);
+    if (!t) return;
+    used.add(id);
+    result.push(t);
+  };
+
+  for (const id of CORE_PUBLISH_IDS) push(id);
+  for (const id of selected) push(id);
   for (const t of PUBLISH_TARGETS) {
     if (t.id === "native_share") continue;
-    if (selected.has(t.id)) primary.push(t);
-    else secondary.push(t);
+    push(t.id);
   }
-  const more = PUBLISH_TARGETS.find((t) => t.id === "native_share");
-  return more ? [...primary, ...secondary, more] : [...primary, ...secondary];
+  const more = byId.get("native_share");
+  if (more) result.push(more);
+  return result;
 };
 
 const findTarget = (id: string): PublishTarget | undefined =>

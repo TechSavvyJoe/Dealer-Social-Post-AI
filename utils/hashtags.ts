@@ -227,6 +227,134 @@ export const HASHTAG_BUDGET: Record<
   },
 };
 
+/** Deduplicate formatted hashtags (case-insensitive). */
+export const uniqueFormattedHashtags = (tags: string[]): string[] => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of tags) {
+    const formatted = formatHashtag(t);
+    if (!formatted) continue;
+    const key = formatted.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(formatted);
+  }
+  return out;
+};
+
+/**
+ * Split a caption into editable body vs trailing hashtags.
+ * Prefers a pure last-line hashtag block; also peels trailing tags from the
+ * final prose line so the studio can edit each part independently.
+ */
+export const splitCaptionBodyAndTags = (
+  text: string,
+): { body: string; tags: string[] } => {
+  const normalized = normalizeCaptionHashtags(text ?? "");
+  if (!normalized.trim()) return { body: "", tags: [] };
+
+  const lines = normalized.split("\n");
+  let lastIdx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].trim()) {
+      lastIdx = i;
+      break;
+    }
+  }
+  if (lastIdx < 0) return { body: "", tags: [] };
+
+  const lastLine = lines[lastIdx].trim();
+  const tagMatches = lastLine.match(/#[A-Za-z0-9_]+/g) || [];
+  const withoutTags = lastLine
+    .replace(/#[A-Za-z0-9_]+/g, "")
+    .replace(/\s+/g, "");
+
+  // Pure (or nearly pure) hashtag line
+  if (tagMatches.length >= 1 && withoutTags.length <= 2) {
+    const body = lines.slice(0, lastIdx).join("\n").trimEnd();
+    return { body, tags: uniqueFormattedHashtags(tagMatches) };
+  }
+
+  // Trailing hashtag run on the last prose line: "CTA here #A #B"
+  const trailing = lastLine.match(/((?:\s*#[A-Za-z0-9_]+)+)\s*$/);
+  if (trailing && tagMatches.length >= 1) {
+    const before = lastLine.slice(0, trailing.index ?? 0).trimEnd();
+    const peeled = uniqueFormattedHashtags(
+      (trailing[0].match(/#[A-Za-z0-9_]+/g) as string[]) || [],
+    );
+    if (peeled.length > 0) {
+      const body =
+        before.length > 0
+          ? [...lines.slice(0, lastIdx), before].join("\n").trimEnd()
+          : lines.slice(0, lastIdx).join("\n").trimEnd();
+      return { body, tags: peeled };
+    }
+  }
+
+  return { body: normalized.trimEnd(), tags: [] };
+};
+
+/** Reassemble body + hashtag chips into a paste-ready caption. */
+export const joinCaptionBodyAndTags = (
+  body: string,
+  tags: string[],
+): string => {
+  const cleanBody = (body ?? "").replace(/\s+$/g, "");
+  const unique = uniqueFormattedHashtags(tags);
+  if (unique.length === 0) return cleanBody.trimEnd();
+  if (!cleanBody.trim()) return unique.join(" ");
+  return `${cleanBody.trimEnd()}\n${unique.join(" ")}`;
+};
+
+/**
+ * Parse freeform hashtag input.
+ * - Comma/semicolon lists: each segment is one tag (spaces inside → PascalCase)
+ * - `#Tag` tokens: split on whitespace
+ * - Plain phrase without #: one PascalCase tag (e.g. "New Car" → #NewCar)
+ */
+export const parseHashtagInput = (raw: string): string[] => {
+  if (!raw?.trim()) return [];
+  const separated = separateGluedHashtags(raw.trim());
+
+  if (/[,;]/.test(separated)) {
+    const tokens = separated
+      .split(/[,;]+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+    return uniqueFormattedHashtags(tokens);
+  }
+
+  if (/#/.test(separated)) {
+    const tokens = separated.split(/\s+/).filter(Boolean);
+    return uniqueFormattedHashtags(tokens);
+  }
+
+  // Single multi-word phrase without # → one tag
+  return uniqueFormattedHashtags([separated]);
+};
+
+/** Resolve hashtag budget for a platform id (publish target or limit id). */
+export const hashtagBudgetForPlatform = (
+  platformId: string | null | undefined,
+): { min: number; max: number; note: string } | null => {
+  if (!platformId) {
+    return {
+      min: 3,
+      max: 5,
+      note: "Primary caption: aim for 3–5 tags that work across Instagram and TikTok; use fewer on Facebook.",
+    };
+  }
+  if (HASHTAG_BUDGET[platformId]) return HASHTAG_BUDGET[platformId];
+  // Map limit meter ids
+  const alias: Record<string, string> = {
+    instagram: "instagram_feed",
+    facebook: "facebook_feed",
+    x: "x_twitter",
+  };
+  const mapped = alias[platformId] || platformId;
+  return HASHTAG_BUDGET[mapped] ?? null;
+};
+
 /**
  * Shared instruction block for model prompts — dealership social reality:
  * Instagram, Facebook, TikTok (and Google) matter; X is optional/low priority.

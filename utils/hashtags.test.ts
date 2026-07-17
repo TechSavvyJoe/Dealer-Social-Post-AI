@@ -4,9 +4,12 @@ import {
   collapseSpacedHashtags,
   fitCaptionToBudget,
   formatHashtag,
+  joinCaptionBodyAndTags,
   normalizeCaptionHashtags,
+  parseHashtagInput,
   sanitizeHashtagBody,
   separateGluedHashtags,
+  splitCaptionBodyAndTags,
 } from "./hashtags";
 
 describe("sanitizeHashtagBody / formatHashtag", () => {
@@ -87,5 +90,51 @@ describe("fitCaptionToBudget", () => {
   it("returns unchanged text when under budget", () => {
     const t = "Hello\n#A #B";
     expect(fitCaptionToBudget(t, 500)).toBe(t);
+  });
+});
+
+describe("splitCaptionBodyAndTags / joinCaptionBodyAndTags", () => {
+  it("splits a pure trailing hashtag line from the body", () => {
+    const { body, tags } = splitCaptionBodyAndTags(
+      "Keys ready.\nVisit us today.\n#SunriseFord #HappyCustomer #NewCar",
+    );
+    expect(body).toBe("Keys ready.\nVisit us today.");
+    expect(tags).toEqual(["#SunriseFord", "#HappyCustomer", "#NewCar"]);
+  });
+
+  it("peels trailing tags from the last prose line", () => {
+    const { body, tags } = splitCaptionBodyAndTags(
+      "Come see us today #LocalDealer #TestDrive",
+    );
+    expect(body).toBe("Come see us today");
+    expect(tags).toEqual(["#LocalDealer", "#TestDrive"]);
+  });
+
+  it("round-trips body + tags", () => {
+    const joined = joinCaptionBodyAndTags("Hook line.\nCTA here.", [
+      "#Brand",
+      "happy customer",
+    ]);
+    expect(joined).toBe("Hook line.\nCTA here.\n#Brand #HappyCustomer");
+    const again = splitCaptionBodyAndTags(joined);
+    expect(again.body).toBe("Hook line.\nCTA here.");
+    expect(again.tags).toEqual(["#Brand", "#HappyCustomer"]);
+  });
+});
+
+describe("parseHashtagInput", () => {
+  it("treats a plain phrase as one PascalCase tag", () => {
+    expect(parseHashtagInput("New Car Delivery")).toEqual(["#NewCarDelivery"]);
+  });
+
+  it("splits comma-separated and # tokens", () => {
+    expect(parseHashtagInput("New Car, Local Dealer")).toEqual([
+      "#NewCar",
+      "#LocalDealer",
+    ]);
+    expect(parseHashtagInput("#HappyCustomer #TestDrive")).toEqual([
+      "#HappyCustomer",
+      "#TestDrive",
+    ]);
   });
 });

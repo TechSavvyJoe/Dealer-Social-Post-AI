@@ -33,7 +33,7 @@ export const PLATFORM_LIMITS: PlatformLimit[] = [
   },
   {
     id: "facebook",
-    label: "Facebook Feed",
+    label: "Facebook",
     maxChars: 63206,
     softFoldChars: 477, // about ~3 lines on desktop before "See more"
     maxHashtags: 3,

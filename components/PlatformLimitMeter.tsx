@@ -5,6 +5,7 @@ import {
   evaluate,
   countHashtags,
 } from "../utils/platformLimits";
+import { hashtagBudgetForPlatform } from "../utils/hashtags";
 import { cn } from "../utils/classNames";
 
 /** Map publish / Share-to ids → PLATFORM_LIMITS row ids. */
@@ -95,35 +96,50 @@ export const PlatformLimitMeter: React.FC<PlatformLimitMeterProps> = ({
           const klass = stateClasses[state];
           const hashtagWarning =
             limit.maxHashtags !== undefined && hashtags > limit.maxHashtags;
+          const budget = hashtagBudgetForPlatform(limit.id);
           return (
-            <div key={limit.id} className="flex items-center gap-2">
-              <div className={cn("w-1.5 h-1.5 rounded-full", klass.dot)} />
-              <span className={cn("text-[11px] flex-shrink-0 w-28", klass.label)}>
-                {limit.label}
-              </span>
-              <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden">
-                <div
-                  className={cn("h-full rounded-full transition-all", klass.bar)}
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-              <span
-                className={cn(
-                  "text-[10px] font-mono tabular-nums flex-shrink-0 w-16 text-right",
-                  klass.label
+            <div key={limit.id} className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <div className={cn("w-1.5 h-1.5 rounded-full", klass.dot)} />
+                <span className={cn("text-[11px] flex-shrink-0 w-28", klass.label)}>
+                  {limit.label}
+                </span>
+                <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden">
+                  <div
+                    className={cn("h-full rounded-full transition-all", klass.bar)}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <span
+                  className={cn(
+                    "text-[10px] font-mono tabular-nums flex-shrink-0 w-16 text-right",
+                    klass.label
+                  )}
+                >
+                  {count}/{limit.maxChars}
+                </span>
+                {(state === "over" || hashtagWarning) && (
+                  <AlertTriangle
+                    className="w-3 h-3 text-error-400 flex-shrink-0"
+                    aria-label={
+                      state === "over"
+                        ? `Over the ${limit.label} limit`
+                        : `Too many hashtags for ${limit.label}`
+                    }
+                  />
                 )}
-              >
-                {count}/{limit.maxChars}
-              </span>
-              {(state === "over" || hashtagWarning) && (
-                <AlertTriangle
-                  className="w-3 h-3 text-error-400 flex-shrink-0"
-                  aria-label={
-                    state === "over"
-                      ? `Over the ${limit.label} limit`
-                      : `Too many hashtags for ${limit.label}`
-                  }
-                />
+              </div>
+              {budget && (
+                <p
+                  className={cn(
+                    "pl-3.5 text-[10px] leading-snug",
+                    hashtagWarning ? "text-error-300" : "text-surface-500",
+                  )}
+                >
+                  Tags: {hashtags}
+                  {budget.max != null ? ` · best ${budget.min}–${budget.max}` : ""}
+                  {hashtagWarning ? " · trim a few" : ""}
+                </p>
               )}
             </div>
           );

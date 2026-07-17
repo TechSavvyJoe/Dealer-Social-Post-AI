@@ -37,6 +37,7 @@ const LinkedinGlyph: React.FC<{ className?: string }> = ({ className }) => (
 );
 import { Modal } from "./ui/Modal";
 import {
+  CORE_PUBLISH_IDS,
   orderPublishTargets,
   publishTo,
   PublishStatus,
@@ -97,15 +98,14 @@ const ICON_MAP: Record<PublishTarget["icon"], React.ComponentType<{ className?: 
   share2: Share2,
 };
 
+const CORE_SET = new Set<string>(CORE_PUBLISH_IDS);
+
 /**
- * Per-platform share dialog. Each tile pre-formats the caption + image for
- * its destination, copies text to clipboard, and triggers the native share
- * sheet with the rendered file — so the user lands inside the target app
- * with the post almost done.
+ * Per-platform share dialog. Core dealer channels (Instagram, Facebook, TikTok)
+ * always appear in the first row so Facebook cannot get lost below the fold.
  *
- * Direct API publishing is stubbed on every target today; when Joe wires up
- * the Meta Business API / TikTok Content Posting / GBP API, only the
- * `publishTo()` dispatcher swaps — this dialog stays the same.
+ * Direct API publishing is stubbed today; when Meta / TikTok / GBP APIs land,
+ * only `publishTo()` swaps — this dialog stays the same.
  */
 export const ShareDialog: React.FC<ShareDialogProps> = ({
   isOpen,
@@ -139,6 +139,15 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     [selectedPlatformIds],
   );
 
+  const coreTargets = React.useMemo(
+    () => orderedTargets.filter((t) => CORE_SET.has(t.id)),
+    [orderedTargets],
+  );
+  const moreTargets = React.useMemo(
+    () => orderedTargets.filter((t) => !CORE_SET.has(t.id)),
+    [orderedTargets],
+  );
+
   const captionForTarget = useCallback(
     (targetId: string, budget: number): string => {
       const packCaption = platformCaptions?.[targetId]?.trim();
@@ -165,137 +174,172 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
           kind: result.kind,
           via:
             result.kind === "shared" || result.kind === "fallback"
-              ? (result as any).via
+              ? (result as { via?: string }).via
               : undefined,
           usedPackCaption: Boolean(platformCaptions?.[target.id]),
         });
         if (result.kind === "shared") {
-          // Brief success display, then close
           window.setTimeout(() => onClose(), 1500);
         }
       } finally {
         setBusy(null);
       }
     },
-    [busy, captionForTarget, content, onClose, platformCaptions]
+    [busy, captionForTarget, content, onClose, platformCaptions],
   );
+
+  const renderTile = (target: PublishTarget, emphasized = false) => {
+    const Icon = ICON_MAP[target.icon];
+    const isBusy = busy === target.id;
+    const isDone =
+      status?.targetId === target.id && status.status.kind === "shared";
+    const isFallback =
+      status?.targetId === target.id && status.status.kind === "fallback";
+    const isError =
+      status?.targetId === target.id && status.status.kind === "error";
+    const isSelected = selectedSet.has(target.id);
+    const targetCaption = captionForTarget(target.id, target.charBudget);
+    const captionLen = targetCaption.length;
+    const overBudget = captionLen > target.charBudget;
+    const hasPackCaption = Boolean(platformCaptions?.[target.id]);
+    const isFacebook = target.id === "facebook_feed";
+
+    return (
+      <motion.button
+        key={target.id}
+        type="button"
+        onClick={() => handlePick(target)}
+        disabled={!!busy}
+        whileHover={{ scale: busy ? 1 : 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        className={cn(
+          "relative flex flex-col items-start gap-2 p-3 rounded-xl border text-left transition-colors overflow-hidden min-h-[7.5rem]",
+          emphasized || isFacebook
+            ? "bg-[#1877F2]/10 border-[#1877F2]/45 hover:bg-[#1877F2]/15 sm:min-h-[8rem]"
+            : isSelected
+              ? "bg-primary-500/10 border-primary-400/40 hover:bg-primary-500/15"
+              : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20",
+          isFacebook && !emphasized ? "ring-1 ring-[#1877F2]/30" : null,
+          "disabled:opacity-60 disabled:cursor-not-allowed",
+        )}
+        style={{
+          boxShadow: isDone
+            ? `0 0 24px ${target.accent}30`
+            : isFacebook
+              ? `0 0 0 1px ${target.accent}40`
+              : undefined,
+        }}
+        aria-label={`Share to ${target.label}`}
+      >
+        <div
+          className="absolute inset-0 opacity-0 hover:opacity-10 pointer-events-none transition-opacity"
+          style={{ background: target.accent }}
+        />
+        <div className="flex items-center justify-between w-full">
+          <div
+            className="w-10 h-10 rounded-lg flex items-center justify-center text-white shrink-0"
+            style={{ background: target.accent }}
+          >
+            {isBusy ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : isDone ? (
+              <Check className="w-4 h-4" />
+            ) : (
+              <Icon className="w-4 h-4" />
+            )}
+          </div>
+          {isSelected ? (
+            <span className="text-[9px] uppercase tracking-wide text-primary-200 font-semibold">
+              selected
+            </span>
+          ) : target.directApiConnected ? (
+            <span className="text-[9px] uppercase tracking-wide text-success-300 font-semibold inline-flex items-center gap-1">
+              <Sparkles className="w-2.5 h-2.5" /> direct
+            </span>
+          ) : (
+            <span className="text-[9px] uppercase tracking-wide text-surface-500">
+              via share
+            </span>
+          )}
+        </div>
+        <div className="space-y-0.5 w-full">
+          <div className="text-sm font-semibold text-surface-50">
+            {target.label}
+          </div>
+          <div className="text-[10px] text-surface-400 leading-tight">
+            {hintWithDealerHandle(target, handles)}
+          </div>
+        </div>
+        <div
+          className={cn(
+            "text-[10px] font-mono tabular-nums",
+            overBudget ? "text-error-300" : "text-surface-500",
+          )}
+        >
+          {captionLen}/{target.charBudget}
+          {overBudget && " · over"}
+          {hasPackCaption && !overBudget ? " · tailored" : ""}
+        </div>
+        {(isFallback || isError) && (
+          <div
+            className={cn(
+              "text-[10px] mt-1 leading-snug",
+              isError ? "text-error-300" : "text-warning-200",
+            )}
+          >
+            {status?.status.kind === "fallback" && status.status.message}
+            {status?.status.kind === "error" && status.status.message}
+          </div>
+        )}
+      </motion.button>
+    );
+  };
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
       title="Share post"
-      description="Instagram, Facebook, and TikTok first. Caption is fitted and copied; image is sized for each platform."
-      size="lg"
+      description="Instagram, Facebook, and TikTok first. Caption is fitted and copied; media is sized for each platform."
+      size="xl"
     >
-      <div className="space-y-3">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {orderedTargets.map((target) => {
-            const Icon = ICON_MAP[target.icon];
-            const isBusy = busy === target.id;
-            const isDone =
-              status?.targetId === target.id && status.status.kind === "shared";
-            const isFallback =
-              status?.targetId === target.id &&
-              status.status.kind === "fallback";
-            const isError =
-              status?.targetId === target.id && status.status.kind === "error";
-            const isSelected = selectedSet.has(target.id);
+      <div className="space-y-4">
+        <section aria-labelledby="share-core-heading" className="space-y-2">
+          <div className="flex items-baseline justify-between gap-2">
+            <h3
+              id="share-core-heading"
+              className="text-xs font-semibold uppercase tracking-wide text-surface-300"
+            >
+              Core dealership channels
+            </h3>
+            <span className="text-[10px] text-surface-500">
+              Always available
+            </span>
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {coreTargets.map((t) => renderTile(t, t.id === "facebook_feed"))}
+          </div>
+          <p className="text-[11px] leading-relaxed text-surface-500">
+            <strong className="text-surface-300">Facebook:</strong> taps copy
+            your caption and open the system share sheet (or Facebook.com). Paste
+            the caption when composing the post — image/video downloads if the
+            share sheet is unavailable.
+          </p>
+        </section>
 
-            // Prefer pack caption; fit to budget for the meter.
-            const targetCaption = captionForTarget(
-              target.id,
-              target.charBudget,
-            );
-            const captionLen = targetCaption.length;
-            const overBudget = captionLen > target.charBudget;
-            const hasPackCaption = Boolean(platformCaptions?.[target.id]);
-
-            return (
-              <motion.button
-                key={target.id}
-                type="button"
-                onClick={() => handlePick(target)}
-                disabled={!!busy}
-                whileHover={{ scale: busy ? 1 : 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className={cn(
-                  "relative flex flex-col items-start gap-2 p-3 rounded-xl border text-left transition-colors overflow-hidden",
-                  isSelected
-                    ? "bg-primary-500/10 border-primary-400/40 hover:bg-primary-500/15"
-                    : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20",
-                  "disabled:opacity-60 disabled:cursor-not-allowed"
-                )}
-                style={{
-                  boxShadow: isDone
-                    ? `0 0 24px ${target.accent}30`
-                    : undefined,
-                }}
-              >
-                <div
-                  className="absolute inset-0 opacity-0 hover:opacity-10 pointer-events-none transition-opacity"
-                  style={{ background: target.accent }}
-                />
-                <div className="flex items-center justify-between w-full">
-                  <div
-                    className="w-9 h-9 rounded-lg flex items-center justify-center text-white"
-                    style={{ background: target.accent }}
-                  >
-                    {isBusy ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : isDone ? (
-                      <Check className="w-4 h-4" />
-                    ) : (
-                      <Icon className="w-4 h-4" />
-                    )}
-                  </div>
-                  {isSelected ? (
-                    <span className="text-[9px] uppercase tracking-wide text-primary-200 font-semibold">
-                      selected
-                    </span>
-                  ) : target.directApiConnected ? (
-                    <span className="text-[9px] uppercase tracking-wide text-success-300 font-semibold inline-flex items-center gap-1">
-                      <Sparkles className="w-2.5 h-2.5" /> direct
-                    </span>
-                  ) : (
-                    <span className="text-[9px] uppercase tracking-wide text-surface-500">
-                      via share
-                    </span>
-                  )}
-                </div>
-                <div className="space-y-0.5 w-full">
-                  <div className="text-sm font-semibold text-surface-50">
-                    {target.label}
-                  </div>
-                  <div className="text-[10px] text-surface-400 leading-tight">
-                    {hintWithDealerHandle(target, handles)}
-                  </div>
-                </div>
-                <div
-                  className={cn(
-                    "text-[10px] font-mono tabular-nums",
-                    overBudget ? "text-error-300" : "text-surface-500"
-                  )}
-                >
-                  {captionLen}/{target.charBudget}
-                  {overBudget && " · over"}
-                  {hasPackCaption && !overBudget ? " · tailored" : ""}
-                </div>
-                {(isFallback || isError) && (
-                  <div
-                    className={cn(
-                      "text-[10px] mt-1 leading-snug",
-                      isError ? "text-error-300" : "text-warning-200"
-                    )}
-                  >
-                    {status?.status.kind === "fallback" && status.status.message}
-                    {status?.status.kind === "error" && status.status.message}
-                  </div>
-                )}
-              </motion.button>
-            );
-          })}
-        </div>
+        {moreTargets.length > 0 && (
+          <section aria-labelledby="share-more-heading" className="space-y-2">
+            <h3
+              id="share-more-heading"
+              className="text-xs font-semibold uppercase tracking-wide text-surface-400"
+            >
+              More destinations
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {moreTargets.map((t) => renderTile(t, false))}
+            </div>
+          </section>
+        )}
 
         <AnimatePresence>
           {status?.status.kind === "shared" && (
@@ -307,6 +351,20 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
             >
               <Check className="w-4 h-4" />
               Opened the share sheet — finish posting in the target app.
+            </motion.div>
+          )}
+          {status?.status.kind === "fallback" && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              className="rounded-xl border border-warning-500/40 bg-warning-500/10 text-warning-100 px-3 py-2 text-xs flex items-start gap-2"
+            >
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                {status.status.message ||
+                  "Caption is on your clipboard and media was downloaded. Paste into the app to finish."}
+              </span>
             </motion.div>
           )}
           {status?.status.kind === "cancelled" && (
@@ -325,7 +383,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
 
         <div className="pt-2 border-t border-white/10 text-[11px] text-surface-500 leading-relaxed">
           <strong className="text-surface-300">Today:</strong> each platform
-          opens your device's share sheet with the image (or video) attached
+          opens your device&apos;s share sheet with the image (or video) attached
           and the caption on your clipboard.{" "}
           <strong className="text-surface-300">Coming later:</strong> direct
           one-tap publishing once Meta App Review, TikTok Content Posting, and
