@@ -15,6 +15,7 @@ import { useToast } from "../components/ui/Toast";
 import { normalizeError, recoveryHint } from "../utils/errorHandler";
 import { logPost } from "../services/posts";
 import { prepareCaptionForDelivery } from "../utils/complianceDisclosures";
+import type { DealerBrandKit } from "../utils/brandKit";
 import { logEvent, logError } from "../utils/telemetry";
 import {
   CapturedRelease,
@@ -27,6 +28,16 @@ import {
   shouldGenerateCaptionPack,
   type PlatformId,
 } from "../services/platformCopy";
+import type { Dealer } from "../types";
+
+const brandKitFromDealer = (dealer?: Dealer | null): DealerBrandKit | null => {
+  if (!dealer) return null;
+  return {
+    name: dealer.name,
+    default_hashtags: dealer.default_hashtags,
+    default_footer: dealer.default_footer,
+  };
+};
 
 export interface GenerationMeta {
   salespersonName?: string;
@@ -216,6 +227,7 @@ export const useGeneration = () => {
         preparedCaption = prepareCaptionForDelivery(
           result.text,
           currentDealer?.banned_phrases,
+          brandKitFromDealer(currentDealer),
         );
       } catch (err) {
         const message =
@@ -280,6 +292,7 @@ export const useGeneration = () => {
               const prepared = prepareCaptionForDelivery(
                 caption,
                 currentDealer.banned_phrases,
+                brandKitFromDealer(currentDealer),
               );
               cleaned[id] = prepared.caption;
             } catch {
@@ -522,6 +535,70 @@ export const useGeneration = () => {
     [editImageMutation],
   );
 
+  /** Rebuild multi-platform pack for the current primary caption (non-fatal). */
+  const rebuildCaptionPack = useCallback(
+    async (
+      primaryCaption: string,
+      platformIds: string[],
+    ): Promise<Record<string, string> | undefined> => {
+      if (
+        !shouldGenerateCaptionPack(platformIds) ||
+        !selectedImage ||
+        !currentDealer
+      ) {
+        return undefined;
+      }
+      try {
+        const packBrief = platformsToCaptionPackBrief(
+          platformIds,
+          currentDealer.name,
+          primaryCaption,
+        );
+        const { generateSocialPostText } = await loadGeminiService();
+        const rawPack = await runGeminiTask("ai.caption.pack", () =>
+          generateSocialPostText(
+            selectedImage,
+            generationParams?.tone || preferredTone,
+            currentDealer.name,
+            generationParams?.customerName,
+            true,
+            packBrief,
+          ),
+        );
+        const parsed = parsePlatformCaptionPack(rawPack, platformIds);
+        const cleaned: Record<string, string> = {};
+        const kit = brandKitFromDealer(currentDealer);
+        for (const [id, caption] of Object.entries(parsed)) {
+          try {
+            const prepared = prepareCaptionForDelivery(
+              caption,
+              currentDealer.banned_phrases,
+              kit,
+            );
+            cleaned[id] = prepared.caption;
+          } catch {
+            /* skip prohibited variant */
+          }
+        }
+        return Object.keys(cleaned).length > 0 ? cleaned : undefined;
+      } catch (err) {
+        logError("caption.pack_rebuild_failed", {
+          message: err instanceof Error ? err.message : String(err),
+          platforms: platformIds,
+        });
+        return undefined;
+      }
+    },
+    [
+      selectedImage,
+      currentDealer,
+      generationParams,
+      preferredTone,
+      loadGeminiService,
+      runGeminiTask,
+    ],
+  );
+
   const regenerateTextMutation = useMutation({
     mutationFn: async () => {
       if (!selectedImage || !generationParams || !currentDealer)
@@ -537,18 +614,31 @@ export const useGeneration = () => {
           generationParams.creativeBrief,
         ),
       );
-      return prepareCaptionForDelivery(newText, currentDealer.banned_phrases);
+      const prepared = prepareCaptionForDelivery(
+        newText,
+        currentDealer.banned_phrases,
+        brandKitFromDealer(currentDealer),
+      );
+      const platformIds =
+        generationParams.platformIds ??
+        generatedPost?.platformIds ??
+        [];
+      const pack = await rebuildCaptionPack(prepared.caption, platformIds);
+      return { prepared, pack, platformIds };
     },
     onMutate: () => setError(null),
-    onSuccess: (prepared) => {
+    onSuccess: ({ prepared, pack, platformIds }) => {
       if (!generatedPost) return;
-      // Primary caption changed — drop stale platform pack so Share isn't wrong.
       setGeneratedPost({
         ...generatedPost,
         text: prepared.caption,
         disclosures: prepared.disclosures,
         disclosureCategories: prepared.disclosureCategories,
-        platformCaptions: undefined,
+        platformCaptions: pack,
+        platformIds:
+          platformIds.length > 0
+            ? platformIds
+            : generatedPost.platformIds,
       });
     },
     onError: (err) => {
@@ -581,8 +671,12 @@ export const useGeneration = () => {
         generationParams.creativeBrief,
       ),
     );
-    prepareCaptionForDelivery(variant, currentDealer.banned_phrases);
-    return variant;
+    const prepared = prepareCaptionForDelivery(
+      variant,
+      currentDealer.banned_phrases,
+      brandKitFromDealer(currentDealer),
+    );
+    return prepared.caption;
   }, [
     selectedImage,
     generationParams,
@@ -600,17 +694,24 @@ export const useGeneration = () => {
       const newText = await runGeminiTask("ai.edit.text", () =>
         editSocialPostText(generatedPost.text, editPrompt, tone),
       );
-      return prepareCaptionForDelivery(newText, currentDealer?.banned_phrases);
+      const prepared = prepareCaptionForDelivery(
+        newText,
+        currentDealer?.banned_phrases,
+        brandKitFromDealer(currentDealer),
+      );
+      const platformIds = generatedPost.platformIds ?? [];
+      const pack = await rebuildCaptionPack(prepared.caption, platformIds);
+      return { prepared, pack };
     },
     onMutate: () => setError(null),
-    onSuccess: (prepared) => {
+    onSuccess: ({ prepared, pack }) => {
       if (!generatedPost) return;
       setGeneratedPost({
         ...generatedPost,
         text: prepared.caption,
         disclosures: prepared.disclosures,
         disclosureCategories: prepared.disclosureCategories,
-        platformCaptions: undefined,
+        platformCaptions: pack,
       });
     },
     onError: (err) => {

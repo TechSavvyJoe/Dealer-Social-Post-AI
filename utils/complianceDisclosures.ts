@@ -14,6 +14,10 @@
  */
 
 import { normalizeCaptionHashtags } from "./hashtags";
+import {
+  applyDealerBrandKit,
+  type DealerBrandKit,
+} from "./brandKit";
 
 export type DisclosureCategory =
   | "financing_apr"
@@ -261,10 +265,11 @@ export const applyDisclosures = (
 export const analyzeCaptionForDelivery = (
   text: string,
   bannedPhrases?: DealerBannedPhrases,
+  brandKit?: DealerBrandKit | null,
 ): DeliveryCaption => {
-  // Fix glued/spaced hashtags before compliance so delivery copy is paste-ready
-  // for Instagram / Facebook / TikTok (#New Car is not a valid tag).
-  const normalized = normalizeCaptionHashtags(text ?? "");
+  // Brand kit first (footer + required tags), then hashtag normalize, then compliance.
+  const withBrand = applyDealerBrandKit(text ?? "", brandKit);
+  const normalized = normalizeCaptionHashtags(withBrand);
   const compliance = applyDisclosures(normalized, bannedPhrases);
   const markerIndex = compliance.text.indexOf("— Disclosures —");
   const caption =
@@ -295,8 +300,9 @@ export const analyzeCaptionForDelivery = (
 export const prepareCaptionForDelivery = (
   text: string,
   bannedPhrases?: DealerBannedPhrases,
+  brandKit?: DealerBrandKit | null,
 ): DeliveryCaption => {
-  const result = analyzeCaptionForDelivery(text, bannedPhrases);
+  const result = analyzeCaptionForDelivery(text, bannedPhrases, brandKit);
   if (result.compliance.prohibited.length > 0) {
     throw new Error(prohibitedClaimsMessage(result.compliance.prohibited));
   }

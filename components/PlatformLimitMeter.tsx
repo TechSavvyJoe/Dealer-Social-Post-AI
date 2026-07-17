@@ -7,10 +7,24 @@ import {
 } from "../utils/platformLimits";
 import { cn } from "../utils/classNames";
 
+/** Map publish / Share-to ids → PLATFORM_LIMITS row ids. */
+const PLATFORM_ID_MAP: Record<string, string> = {
+  instagram_feed: "instagram",
+  instagram_story: "instagram",
+  facebook_feed: "facebook",
+  tiktok: "tiktok",
+  gbp: "gbp",
+  marketplace: "marketplace",
+  x_twitter: "x",
+  linkedin: "facebook", // no dedicated LI meter — approximate with FB length
+};
+
 interface PlatformLimitMeterProps {
   /** The text that will actually be posted (caption + disclosures + hashtags). */
   text: string;
   className?: string;
+  /** When set, only show meters for these Share-to platforms (plus always IG/FB/TikTok core if empty). */
+  platformIds?: string[];
 }
 
 const stateClasses: Record<
@@ -37,8 +51,25 @@ const stateClasses: Record<
 export const PlatformLimitMeter: React.FC<PlatformLimitMeterProps> = ({
   text,
   className,
+  platformIds,
 }) => {
   const hashtags = countHashtags(text);
+
+  const limits = (() => {
+    if (!platformIds?.length) {
+      // Dealer-first defaults: IG, Facebook, TikTok, Google — hide X by default
+      return PLATFORM_LIMITS.filter((l) => l.id !== "x");
+    }
+    const wanted = new Set(
+      platformIds
+        .map((id) => PLATFORM_ID_MAP[id] || id)
+        .filter(Boolean),
+    );
+    const filtered = PLATFORM_LIMITS.filter((l) => wanted.has(l.id));
+    return filtered.length > 0
+      ? filtered
+      : PLATFORM_LIMITS.filter((l) => l.id !== "x");
+  })();
 
   return (
     <div
@@ -58,7 +89,7 @@ export const PlatformLimitMeter: React.FC<PlatformLimitMeterProps> = ({
       </div>
 
       <div className="space-y-1.5">
-        {PLATFORM_LIMITS.map((limit) => {
+        {limits.map((limit) => {
           const { count, state } = evaluate(text, limit);
           const pct = Math.min(100, (count / limit.maxChars) * 100);
           const klass = stateClasses[state];

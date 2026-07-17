@@ -3,6 +3,7 @@ import React, {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
   Suspense,
 } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
@@ -54,6 +55,7 @@ import {
   preferredExportFormatIds,
   resolvePlatformOption,
 } from "../services/platformCopy";
+import { useAppStore } from "../stores/appStore";
 
 // Lazy load modals for performance
 const LazyImagePreviewModal = React.lazy(() =>
@@ -298,6 +300,9 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [packOverrides, setPackOverrides] = useState<Record<string, string>>(
     {},
   );
+  /** Prior image versions after regen/fun/edit (local compare stack, max 5). */
+  const [imageVersions, setImageVersions] = useState<string[]>([]);
+  const prevImageRef = useRef(post.image);
   // Reset override whenever the source post changes (regenerate, new post).
   useEffect(() => {
     setDisclosureOverride(null);
@@ -306,6 +311,18 @@ export const PostResult: React.FC<PostResultProps> = ({
     setHasCopiedCaption(false);
     setActiveCaptionPlatform(null);
   }, [post.image, post.text, post.platformCaptions]);
+
+  // Push previous creative onto a small version stack when image is replaced.
+  useEffect(() => {
+    const prev = prevImageRef.current;
+    if (prev && prev !== post.image) {
+      setImageVersions((stack) => {
+        const next = [prev, ...stack.filter((u) => u !== prev && u !== post.image)];
+        return next.slice(0, 5);
+      });
+    }
+    prevImageRef.current = post.image;
+  }, [post.image]);
 
   const effectivePack = useMemo(() => {
     if (!post.platformCaptions && Object.keys(packOverrides).length === 0) {
@@ -1286,12 +1303,50 @@ export const PostResult: React.FC<PostResultProps> = ({
               )}
             </div>
 
+            {imageVersions.length > 0 && !videoUrl && !creativeLockedForReview ? (
+              <div className="w-full">
+                <p className="mb-1.5 text-[10px] uppercase tracking-wide text-surface-500">
+                  Previous versions — tap to restore
+                </p>
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {imageVersions.map((url, i) => (
+                    <button
+                      key={`${i}-${url.slice(0, 24)}`}
+                      type="button"
+                      onClick={() => {
+                        triggerHapticFeedback();
+                        const current = post.image;
+                        useAppStore.getState().setGeneratedPost({
+                          ...post,
+                          image: url,
+                        });
+                        setImageVersions((stack) => {
+                          const rest = stack.filter((u) => u !== url);
+                          return current
+                            ? [current, ...rest].slice(0, 5)
+                            : rest.slice(0, 5);
+                        });
+                      }}
+                      className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-white/15 bg-surface-950 ring-offset-2 ring-offset-surface-900 hover:ring-2 hover:ring-primary-400/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                      aria-label={`Restore previous image version ${i + 1}`}
+                    >
+                      <img
+                        src={url}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             <div className="w-full space-y-3">
               <button
                 type="button"
                 onClick={() => setIsToolsOpen((open) => !open)}
                 aria-expanded={isToolsOpen}
-                aria-controls="result-creative-tools"
+                aria-controls="creative-tools-panel"
                 className="flex min-h-[48px] w-full items-center gap-3 rounded-xl border border-white/10 bg-surface-950/35 px-3 text-left transition-colors hover:border-white/20 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
               >
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-500/15 text-primary-300">
@@ -1315,7 +1370,7 @@ export const PostResult: React.FC<PostResultProps> = ({
               </button>
 
               <div
-                id="result-creative-tools"
+                id="creative-tools-panel"
                 data-testid="creative-tools-panel"
                 hidden={!isToolsOpen}
                 className={cn(
@@ -1323,6 +1378,43 @@ export const PostResult: React.FC<PostResultProps> = ({
                   !isToolsOpen && "hidden",
                 )}
               >
+                <ActionTile
+                  icon={Film}
+                  iconClassName={TILE_ICON_ACCENT}
+                  tooltip="Turn your image into a video"
+                  disabled={
+                    imageBusy || isVideoLoading || creativeLockedForReview
+                  }
+                  busy={isVideoLoading}
+                  label={
+                    isVideoLoading
+                      ? "Rendering…"
+                      : videoUrl
+                        ? "New video"
+                        : "Animate with AI"
+                  }
+                  onClick={() => setIsVideoDirectorOpen(true)}
+                />
+
+                <ActionTile
+                  icon={LayoutGrid}
+                  iconClassName="text-amber-300"
+                  tooltip={
+                    deliveryLocked
+                      ? deliveryGateMessage
+                      : "Export Story, Feed, Marketplace & Google sizes — full creative, no crop"
+                  }
+                  disabled={imageBusy || deliveryLocked}
+                  label="Export sizes"
+                  onClick={() => {
+                    if (deliveryLocked) {
+                      toast.warning(deliveryGateMessage);
+                      return;
+                    }
+                    setIsMultiFormatOpen(true);
+                  }}
+                />
+
                 <ActionTile
                   icon={RefreshCw}
                   iconClassName="text-surface-300"
@@ -1353,16 +1445,6 @@ export const PostResult: React.FC<PostResultProps> = ({
                         : "AI image edit"
                   }
                   onClick={() => setIsImageEditing(!isImageEditing)}
-                />
-
-                <ActionTile
-                  icon={Sparkles}
-                  iconClassName="text-primary-300"
-                  tooltip="Artistic transformations"
-                  disabled={imageBusy || !!videoUrl || creativeLockedForReview}
-                  busy={imageBusy}
-                  label={imageBusy ? "Working..." : "Fun mode"}
-                  onClick={() => setIsFunModeDirectorOpen(true)}
                 />
 
                 <ActionTile
@@ -1403,40 +1485,13 @@ export const PostResult: React.FC<PostResultProps> = ({
                 ) : null}
 
                 <ActionTile
-                  icon={Film}
-                  iconClassName={TILE_ICON_ACCENT}
-                  tooltip="Turn your image into a video"
-                  disabled={
-                    imageBusy || isVideoLoading || creativeLockedForReview
-                  }
-                  busy={isVideoLoading}
-                  label={
-                    isVideoLoading
-                      ? "Rendering…"
-                      : videoUrl
-                        ? "New video"
-                        : "Animate with AI"
-                  }
-                  onClick={() => setIsVideoDirectorOpen(true)}
-                />
-
-                <ActionTile
-                  icon={LayoutGrid}
-                  iconClassName="text-amber-300"
-                  tooltip={
-                    deliveryLocked
-                      ? deliveryGateMessage
-                      : "Export Story, Feed, Marketplace & Google sizes — full creative, no crop"
-                  }
-                  disabled={imageBusy || !!videoUrl || deliveryLocked}
-                  label="Export sizes"
-                  onClick={() => {
-                    if (deliveryLocked) {
-                      toast.warning(deliveryGateMessage);
-                      return;
-                    }
-                    setIsMultiFormatOpen(true);
-                  }}
+                  icon={Sparkles}
+                  iconClassName="text-primary-300"
+                  tooltip="Artistic style (optional — may change the look)"
+                  disabled={imageBusy || !!videoUrl || creativeLockedForReview}
+                  busy={imageBusy}
+                  label={imageBusy ? "Working..." : "Fun mode"}
+                  onClick={() => setIsFunModeDirectorOpen(true)}
                 />
               </div>
               <AnimatePresence>
@@ -1812,6 +1867,7 @@ export const PostResult: React.FC<PostResultProps> = ({
 
             <PlatformLimitMeter
               text={captionWithDisclosures}
+              platformIds={post.platformIds}
               className="mb-4"
             />
 
