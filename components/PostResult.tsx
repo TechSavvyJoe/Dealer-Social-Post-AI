@@ -822,20 +822,30 @@ export const PostResult: React.FC<PostResultProps> = ({
     setIsVideoLoading(true);
 
     const messages = [
-      "Setting up the virtual studio...",
-      "Directing the AI animator...",
-      "Adding special effects...",
-      "Rendering the final cut...",
-      "This can take a minute or two...",
+      "Setting up the virtual studio…",
+      "Directing the AI animator…",
+      "Rendering motion on your delivery photo…",
+      "Still working — AI video often takes 1–3 minutes…",
+      "Almost there — keep this screen open…",
     ];
     let messageIndex = 0;
     let allowRotation = true;
-    setVideoLoadingMessage(messages[messageIndex]);
+    const startedAt = Date.now();
+    const formatElapsed = () => {
+      const s = Math.floor((Date.now() - startedAt) / 1000);
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return m > 0 ? `${m}m ${r}s` : `${r}s`;
+    };
+    setVideoLoadingMessage(`${messages[messageIndex]} (${formatElapsed()})`);
     const intervalId = setInterval(() => {
       if (!allowRotation) return;
-      messageIndex = (messageIndex + 1) % messages.length;
-      setVideoLoadingMessage(messages[messageIndex]);
-    }, 4000);
+      // Advance copy every ~5s; always show elapsed so the wait feels tracked.
+      if ((Date.now() - startedAt) % 5000 < 1100) {
+        messageIndex = (messageIndex + 1) % messages.length;
+      }
+      setVideoLoadingMessage(`${messages[messageIndex]} (${formatElapsed()})`);
+    }, 1000);
 
     const jobId = existingJobId || `video-${Date.now()}`;
     if (!existingJobId) {

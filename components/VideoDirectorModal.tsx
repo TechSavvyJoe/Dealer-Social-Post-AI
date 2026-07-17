@@ -90,11 +90,15 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
         onClose={onClose}
         size="lg"
         title="Create video"
-        description="Locked to your delivery photo — subtle campaign motion only."
+        description="Locked to your delivery photo — subtle campaign motion only. Usually about 1–3 minutes; keep this screen open."
         className="bg-surface-900 border-surface-800"
       >
         {/* Recommended Styles - Main Section */}
         <div className="mb-4">
+          <p className="mb-3 text-xs leading-relaxed text-surface-400">
+            AI video is slower than still photos — that wait is normal. When it
+            finishes, the clip appears here ready to play and save.
+          </p>
           <p className="text-xs font-semibold text-primary-300/80 uppercase tracking-wide mb-3">
             Recommended
           </p>

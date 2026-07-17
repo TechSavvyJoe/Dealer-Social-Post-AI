@@ -59,9 +59,12 @@ export const MODELS = {
   // `-preview` suffix. The GA `-001` IDs belong to Vertex / Gemini Enterprise
   // Agent Platform and return 404 on this transport.
   video: {
-    primary: "veo-3.1-generate-preview",
-    fallback: "veo-3.1-fast-generate-preview",
+    // Prefer Fast on the sales floor — full quality Veo often takes several
+    // minutes; Fast is usually enough for IG/TikTok delivery clips.
+    primary: "veo-3.1-fast-generate-preview",
+    fallback: "veo-3.1-generate-preview",
     fast: "veo-3.1-fast-generate-preview",
+    quality: "veo-3.1-generate-preview",
   },
 } as const;
 
@@ -175,7 +178,7 @@ export const TASKS: Record<string, TaskConfig> = {
   },
   video: {
     primary: MODELS.video.primary,
-    fallback: MODELS.video.fast,
+    fallback: MODELS.video.fallback,
     params: TASK_PARAMS.video_prompt,
   },
 };

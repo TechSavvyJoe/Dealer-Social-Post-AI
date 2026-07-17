@@ -196,8 +196,8 @@ describe("GeminiService model routing", () => {
     expect(MODELS.image.primary).toBe("gemini-3-pro-image");
     expect(MODELS.image.fallback).toBe("gemini-3.1-flash-image");
     expect(MODELS.image.emergency).toBe("gemini-3.1-flash-lite-image");
-    expect(MODELS.video.primary).toBe("veo-3.1-generate-preview");
-    expect(MODELS.video.fallback).toBe("veo-3.1-fast-generate-preview");
+    expect(MODELS.video.primary).toBe("veo-3.1-fast-generate-preview");
+    expect(MODELS.video.fallback).toBe("veo-3.1-generate-preview");
 
     expect(JSON.stringify(MODELS.text)).not.toContain("preview");
     expect(JSON.stringify(MODELS.image)).not.toContain("preview");
@@ -281,7 +281,7 @@ describe("GeminiService model routing", () => {
       expect.any(Object),
     );
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("veo-3.1-generate-preview"),
+      expect.stringContaining(MODELS.video.primary),
       expect.objectContaining({
         body: expect.stringMatching(
           /"image":\{"bytesBase64Encoded":"[^"]+","mimeType":"image\/jpeg"\}/,
@@ -289,7 +289,7 @@ describe("GeminiService model routing", () => {
       }),
     );
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("veo-3.1-generate-preview"),
+      expect.stringContaining(MODELS.video.primary),
       expect.objectContaining({
         body: expect.stringContaining('"resolution":"720p"'),
       }),
