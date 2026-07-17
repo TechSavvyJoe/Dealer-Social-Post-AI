@@ -1,18 +1,56 @@
-import React, { useEffect, useState, useCallback, memo } from "react";
+import React, { useState, useCallback, memo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { VideoStyle, VideoRequestOptions } from "../types";
 import { Icon } from "./Icons";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Modal } from "./ui/Modal";
+import { cn } from "../utils/classNames";
 import {
   defaultResolution,
+  durations,
+  soundtracks,
+  aspectRatios,
   styles as videoStyles,
 } from "./video-director/constants";
 
 // Recommended = photo-locked campaign motion only
 const QUICK_STYLES = videoStyles.filter((s) => s.recommended).slice(0, 4);
-// Experimental styles can still morph — keep behind an explicit disclosure
 const EXPERIMENTAL_STYLES = videoStyles.filter((s) => !s.recommended);
+
+/** One-tap formats for the channels dealerships actually post to. */
+const FORMAT_PRESETS: Array<{
+  id: string;
+  label: string;
+  sub: string;
+  aspect: VideoRequestOptions["aspectPreference"];
+  soundtrack: VideoRequestOptions["soundtrack"];
+  duration: number;
+}> = [
+  {
+    id: "vertical",
+    label: "Vertical 9:16",
+    sub: "Reels · TikTok · Stories",
+    aspect: "9:16",
+    soundtrack: "cinematic",
+    duration: 6,
+  },
+  {
+    id: "horizontal",
+    label: "Wide 16:9",
+    sub: "YouTube · Facebook feed",
+    aspect: "16:9",
+    soundtrack: "cinematic",
+    duration: 6,
+  },
+  {
+    id: "square",
+    label: "Square-friendly",
+    sub: "Feed posts (letterboxed)",
+    aspect: "1:1",
+    soundtrack: "cinematic",
+    duration: 6,
+  },
+];
 
 interface VideoDirectorModalProps {
   isOpen: boolean;
@@ -20,7 +58,6 @@ interface VideoDirectorModalProps {
   onSelectStyle: (style: VideoStyle, options: VideoRequestOptions) => void;
 }
 
-// Memoized style button for performance
 const StyleButton = memo(
   ({
     style,
@@ -36,6 +73,7 @@ const StyleButton = memo(
     onSelect: (style: VideoStyle) => void;
   }) => (
     <button
+      type="button"
       onClick={() => {
         triggerHapticFeedback();
         onSelect(style);
@@ -66,23 +104,40 @@ const StyleButton = memo(
 export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
   ({ isOpen, onClose, onSelectStyle }) => {
     const [showMore, setShowMore] = useState(false);
+    // Default vertical + music for dealership Reels/TikTok (not silent landscape).
+    const [aspectPreference, setAspectPreference] =
+      useState<VideoRequestOptions["aspectPreference"]>("9:16");
+    const [soundtrack, setSoundtrack] =
+      useState<VideoRequestOptions["soundtrack"]>("cinematic");
+    const [duration, setDuration] = useState(6);
+    const [activePreset, setActivePreset] = useState("vertical");
 
-    // Match source photo aspect (letterboxed server-side). Cinematic pacing
-    // avoids snappy zoom morphs that invent a second car.
-    const defaultOptions: VideoRequestOptions = {
-      durationSeconds: 6,
-      soundtrack: "cinematic",
-      aspectPreference: "auto",
-      resolution: defaultResolution,
-      pacing: "cinematic",
-    };
+    const buildOptions = useCallback((): VideoRequestOptions => {
+      return {
+        durationSeconds: duration,
+        soundtrack,
+        aspectPreference,
+        resolution: defaultResolution,
+        pacing: "cinematic",
+      };
+    }, [aspectPreference, duration, soundtrack]);
 
     const handleStyleSelect = useCallback(
       (style: VideoStyle) => {
-        onSelectStyle(style, defaultOptions);
+        onSelectStyle(style, buildOptions());
       },
-      [onSelectStyle],
+      [buildOptions, onSelectStyle],
     );
+
+    const applyPreset = (presetId: string) => {
+      const preset = FORMAT_PRESETS.find((p) => p.id === presetId);
+      if (!preset) return;
+      triggerHapticFeedback();
+      setActivePreset(preset.id);
+      setAspectPreference(preset.aspect);
+      setSoundtrack(preset.soundtrack);
+      setDuration(preset.duration);
+    };
 
     return (
       <Modal
@@ -90,17 +145,130 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
         onClose={onClose}
         size="lg"
         title="Create video"
-        description="Locked to your delivery photo — subtle campaign motion only. Usually about 1–3 minutes; keep this screen open."
+        description="Pick format (vertical/wide), sound, then a style. Usually 1–3 minutes."
         className="bg-surface-900 border-surface-800"
       >
-        {/* Recommended Styles - Main Section */}
-        <div className="mb-4">
-          <p className="mb-3 text-xs leading-relaxed text-surface-400">
-            AI video is slower than still photos — that wait is normal. When it
-            finishes, the clip appears here ready to play and save.
+        <div className="mb-4 space-y-4">
+          <p className="text-xs leading-relaxed text-surface-400">
+            Choose the shape your platform needs first (Reels/TikTok = vertical).
+            Music is generated by AI when enabled — unmute the player after it
+            finishes.
           </p>
+
+          {/* Platform format presets */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-primary-300/80">
+              Format for
+            </h3>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {FORMAT_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => applyPreset(p.id)}
+                  className={cn(
+                    "rounded-xl border px-3 py-2.5 text-left transition-colors",
+                    activePreset === p.id
+                      ? "border-primary-400 bg-primary-500/20 text-white"
+                      : "border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50",
+                  )}
+                >
+                  <div className="text-sm font-semibold">{p.label}</div>
+                  <div className="text-[11px] opacity-80">{p.sub}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Aspect + sound + duration */}
+          <div className="space-y-3 rounded-xl border border-white/10 bg-surface-950/40 p-3">
+            <div className="space-y-2">
+              <h3 className="text-xs font-semibold text-white/80">
+                Aspect ratio
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {aspectRatios.map(({ value, label, description }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    title={description}
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setAspectPreference(value);
+                      setActivePreset("");
+                    }}
+                    className={cn(
+                      "min-h-10 flex-1 rounded-lg border px-2 py-2 text-sm font-medium transition-all sm:min-w-[4.5rem]",
+                      aspectPreference === value
+                        ? "border-primary-400 bg-primary-500/20 text-white"
+                        : "border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-surface-500">
+                Veo renders{" "}
+                <strong className="text-surface-300">9:16</strong> (vertical) or{" "}
+                <strong className="text-surface-300">16:9</strong> (wide). Square
+                uses letterboxing into a supported ratio.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-xs font-semibold text-white/80">Sound</h3>
+              <div className="flex gap-2">
+                {soundtracks.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setSoundtrack(value);
+                    }}
+                    className={cn(
+                      "min-h-10 flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all",
+                      soundtrack === value
+                        ? "border-primary-400 bg-primary-500/20 text-white"
+                        : "border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-xs font-semibold text-white/80">Length</h3>
+              <div className="flex gap-2">
+                {durations.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setDuration(value);
+                    }}
+                    className={cn(
+                      "min-h-10 flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all",
+                      duration === value
+                        ? "border-primary-400 bg-primary-500/20 text-white"
+                        : "border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mb-4">
           <p className="text-xs font-semibold text-primary-300/80 uppercase tracking-wide mb-3">
-            Recommended
+            Style
           </p>
           <div className="grid grid-cols-2 gap-3">
             {QUICK_STYLES.map(({ style, icon, description }) => (
@@ -116,9 +284,9 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
           </div>
         </div>
 
-        {/* Experimental styles — may reinterpret the photo; not recommended */}
         <div className="border-t border-white/10 pt-2">
           <button
+            type="button"
             onClick={() => {
               triggerHapticFeedback();
               setShowMore(!showMore);
@@ -166,14 +334,9 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
             )}
           </AnimatePresence>
         </div>
-
-        {/* Footer hint */}
-        <div className="mt-6 pt-4 border-t border-white/10">
-          <p className="text-xs text-center text-white/50">
-            6s photo-locked clips · Instagram Reels, TikTok &amp; Stories
-          </p>
-        </div>
       </Modal>
     );
   },
 );
+
+VideoDirectorModal.displayName = "VideoDirectorModal";

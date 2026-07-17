@@ -260,6 +260,8 @@ export const PostResult: React.FC<PostResultProps> = ({
   /** Browser is buffering / decoding the blob after generation finishes. */
   const [isVideoBuffering, setIsVideoBuffering] = useState(false);
   const [videoPlayError, setVideoPlayError] = useState<string | null>(null);
+  /** Start muted for autoplay policy; user can enable sound with one tap. */
+  const [videoMuted, setVideoMuted] = useState(true);
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   /** Own blob URLs so we only revoke the previous one when replacing/unmounting. */
   const activeVideoBlobRef = useRef<string | null>(null);
@@ -558,6 +560,8 @@ export const PostResult: React.FC<PostResultProps> = ({
     setVideoUrl(url);
     setVideoPlayError(null);
     setIsVideoBuffering(Boolean(url));
+    // New clips start muted so autoplay works; prompt user to unmute.
+    setVideoMuted(true);
   }, []);
 
   // Unmount-only revoke (avoid React Strict Mode / effect re-runs killing the
@@ -1346,7 +1350,7 @@ export const PostResult: React.FC<PostResultProps> = ({
               ) : null}
 
               {videoUrl ? (
-                <div className="w-full">
+                <div className="w-full space-y-2">
                   <video
                     ref={videoElRef}
                     key={videoUrl}
@@ -1356,7 +1360,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     preload="auto"
                     autoPlay={!shouldReduceMotion}
                     loop={!shouldReduceMotion}
-                    muted
+                    muted={videoMuted}
                     onLoadStart={() => setIsVideoBuffering(true)}
                     onLoadedData={() => {
                       setIsVideoBuffering(false);
@@ -1372,6 +1376,9 @@ export const PostResult: React.FC<PostResultProps> = ({
                         });
                       }
                     }}
+                    onVolumeChange={(e) => {
+                      setVideoMuted(e.currentTarget.muted);
+                    }}
                     onError={() => {
                       setIsVideoBuffering(false);
                       setVideoPlayError(
@@ -1380,8 +1387,24 @@ export const PostResult: React.FC<PostResultProps> = ({
                     }}
                     className="max-h-[70dvh] w-full rounded-xl object-contain shadow-2xl bg-black"
                   />
+                  {videoMuted && !videoPlayError ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        triggerHapticFeedback();
+                        const el = videoElRef.current;
+                        if (!el) return;
+                        el.muted = false;
+                        setVideoMuted(false);
+                        void el.play().catch(() => undefined);
+                      }}
+                      className="flex w-full min-h-11 items-center justify-center gap-2 rounded-xl border border-primary-400/40 bg-primary-500/15 px-3 py-2 text-sm font-semibold text-primary-50"
+                    >
+                      Tap for sound
+                    </button>
+                  ) : null}
                   {videoPlayError ? (
-                    <div className="mt-2 space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 px-3 py-2 text-xs text-error-100">
+                    <div className="space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 px-3 py-2 text-xs text-error-100">
                       <p>{videoPlayError}</p>
                       <div className="flex flex-wrap gap-2">
                         <button

@@ -45,12 +45,17 @@ export const soundtracks: Array<{
   {
     value: "cinematic",
     label: "Music On",
-    description: "Polished soundtrack that auto-matches the pacing.",
+    description: "AI-generated score + ambience in the MP4.",
+  },
+  {
+    value: "celebration",
+    label: "Upbeat",
+    description: "Higher-energy original music for delivery moments.",
   },
   {
     value: "none",
-    label: "No Music",
-    description: "Generate a silent cut you can score later.",
+    label: "Silent",
+    description: "No music — score later in your editor if needed.",
   },
 ];
 
@@ -60,24 +65,24 @@ export const aspectRatios: Array<{
   description: string;
 }> = [
   {
-    value: "auto",
-    label: "Auto",
-    description: "Match photo + letterbox for Veo (recommended).",
-  },
-  {
     value: "9:16",
-    label: "9:16",
-    description: "Ideal for Reels, Shorts, and TikTok.",
+    label: "9:16 Vertical",
+    description: "Reels, TikTok, Stories, Shorts.",
   },
   {
     value: "16:9",
-    label: "16:9",
-    description: "Best for YouTube & horizontal ads.",
+    label: "16:9 Wide",
+    description: "YouTube, Facebook landscape, ads.",
   },
   {
     value: "1:1",
-    label: "1:1",
-    description: "Square feed posts and carousels.",
+    label: "Square-ish",
+    description: "Feed-friendly (letterboxed into Veo 9:16/16:9).",
+  },
+  {
+    value: "auto",
+    label: "Auto",
+    description: "Follow the photo orientation.",
   },
 ];
 
@@ -262,11 +267,11 @@ export const presets: VideoPreset[] = [
     label: "Instagram Reels",
     platform: "IG",
     badge: "Recommended",
-    description: "Auto · 6s · music · cinematic (letterboxed)",
+    description: "9:16 · 6s · music · vertical",
     values: {
       durationSeconds: 6,
       soundtrack: "cinematic",
-      aspectPreference: "auto",
+      aspectPreference: "9:16",
       resolution: defaultResolution,
       pacing: "cinematic",
     },
@@ -274,22 +279,22 @@ export const presets: VideoPreset[] = [
   {
     label: "TikTok Hype",
     platform: "TikTok",
-    description: "Auto · 6s · music · cinematic",
+    description: "9:16 · 6s · music · vertical",
     values: {
       durationSeconds: 6,
-      soundtrack: "cinematic",
-      aspectPreference: "auto",
+      soundtrack: "celebration",
+      aspectPreference: "9:16",
       resolution: defaultResolution,
       pacing: "cinematic",
     },
   },
   {
-    label: "LinkedIn Pro",
-    platform: "LinkedIn",
-    description: "16:9 · 6s · no music · cinematic",
+    label: "Facebook / YouTube",
+    platform: "FB",
+    description: "16:9 · 6s · music · wide",
     values: {
       durationSeconds: 6,
-      soundtrack: "none",
+      soundtrack: "cinematic",
       aspectPreference: "16:9",
       resolution: defaultResolution,
       pacing: "cinematic",
@@ -298,23 +303,23 @@ export const presets: VideoPreset[] = [
   {
     label: "YouTube Short",
     platform: "YouTube",
-    description: "Auto · 6s · music · cinematic",
+    description: "9:16 · 6s · music · vertical",
     values: {
       durationSeconds: 6,
       soundtrack: "cinematic",
-      aspectPreference: "auto",
+      aspectPreference: "9:16",
       resolution: defaultResolution,
       pacing: "cinematic",
     },
   },
   {
-    label: "Square Carousel",
+    label: "Square Feed",
     platform: "Instagram",
-    description: "Auto · 4s · music · cinematic",
+    description: "1:1 · 4s · music (letterboxed)",
     values: {
       durationSeconds: 4,
       soundtrack: "cinematic",
-      aspectPreference: "auto",
+      aspectPreference: "1:1",
       resolution: defaultResolution,
       pacing: "cinematic",
     },
@@ -322,11 +327,11 @@ export const presets: VideoPreset[] = [
   {
     label: "Quick Loop",
     badge: "Fast",
-    description: "Auto · 4s · music · cinematic",
+    description: "9:16 · 4s · music · vertical",
     values: {
       durationSeconds: 4,
       soundtrack: "cinematic",
-      aspectPreference: "auto",
+      aspectPreference: "9:16",
       resolution: defaultResolution,
       pacing: "cinematic",
     },
@@ -334,7 +339,7 @@ export const presets: VideoPreset[] = [
   {
     label: "Showroom Highlight",
     badge: "Cinematic",
-    description: "16:9 · 6s · music · cinematic",
+    description: "16:9 · 6s · music · wide",
     values: {
       durationSeconds: 6,
       soundtrack: "cinematic",
@@ -345,11 +350,11 @@ export const presets: VideoPreset[] = [
   },
   {
     label: "Silent Story",
-    description: "Auto · 6s · no music · cinematic",
+    description: "9:16 · 6s · no music · vertical",
     values: {
       durationSeconds: 6,
       soundtrack: "none",
-      aspectPreference: "auto",
+      aspectPreference: "9:16",
       resolution: defaultResolution,
       pacing: "cinematic",
     },

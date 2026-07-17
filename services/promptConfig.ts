@@ -1254,14 +1254,14 @@ export const generateVideoPrompt = (
 
   const soundtrackInstruction =
     options.soundtrack === "none"
-      ? "No background audio is required; focus on crisp visuals that can loop cleanly without sound."
+      ? "Silent video only — no music, dialogue, or score."
       : options.soundtrack === "celebration"
-      ? "Incorporate rhythmic motion that matches an upbeat, celebratory clap-driven track."
+      ? "NATIVE AUDIO REQUIRED: generate upbeat celebratory original music + light ambient sound baked into the file (not silent)."
       : options.soundtrack === "cinematic"
-      ? "Design the animation with smooth, cinematic pacing that swells in sync with an ambient score."
+      ? "NATIVE AUDIO REQUIRED: generate a smooth cinematic original score + subtle ambient audio baked into the file (not silent)."
       : options.soundtrack === "anthemic"
-      ? "Sync motion to an anthemedic stadium beat with big hits and lifts; make it feel heroic."
-      : "Lean into groove-forward motion that matches a funky, bass-led track.";
+      ? "NATIVE AUDIO REQUIRED: generate an anthemic original score with energy lifts baked into the file (not silent)."
+      : "NATIVE AUDIO REQUIRED: generate a funky, bass-led original score baked into the file (not silent).";
 
   const pacingInstruction =
     options.pacing === "snappy"

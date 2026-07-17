@@ -769,9 +769,16 @@ export const generatePostVideo = async (
       aspectRatio: aspectRatio,
       personGeneration: "allow_adult", // Required for image-to-video with people
       durationSeconds: durationSeconds,
-      resolution: options.resolution,
+      resolution: options.resolution || "720p",
     },
   };
+
+  // Veo 3.1 bakes native audio from the prompt (no separate track upload).
+  // When soundtrack !== none, the prompt requires score/ambience so the MP4
+  // is not silent. Log for support when diagnosing "no sound" reports.
+  console.log(
+    `[VideoGen] Options: aspect=${aspectRatio} duration=${durationSeconds}s soundtrack=${options.soundtrack || "cinematic"}`,
+  );
 
   let lastError: any = null;
 

@@ -458,8 +458,12 @@ Do not interpret the style name as permission to morph, reveal a second car, or 
     xmlBlock(
       "soundtrack",
       options.soundtrack === "none"
-        ? `No audio required; design a silent loop-friendly visual.`
-        : `Mood for audio (do not name copyrighted tracks): ${options.soundtrack}. Visual pacing should support that mood without changing the subjects.`
+        ? `Silent video only — no music, no dialogue, no ambient score. Visual loop-friendly.`
+        : `NATIVE AUDIO REQUIRED (critical): Generate a full soundtrack baked into the video file — not silent.
+Audio mood: ${options.soundtrack} (original score only; never name or copy copyrighted songs).
+Include light ambient dealership/outdoor atmosphere + tasteful underscore that matches the pacing.
+No spoken dialogue unless it is ambient crowd murmur. Keep subjects photo-locked while audio plays.
+Silent output is a failure when music is requested.`
     ),
     baseCaption
       ? xmlBlock(
