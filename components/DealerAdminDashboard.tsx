@@ -705,6 +705,10 @@ const DealerTeamCard: React.FC = () => {
   const [newName, setNewName] = useState("");
   const [newPin, setNewPin] = useState("");
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
+  const [oneTimeCode, setOneTimeCode] = useState<{
+    name: string;
+    pin: string;
+  } | null>(null);
   const dealer = useAppStore((s) => s.currentDealer);
 
   const load = React.useCallback(async () => {
@@ -781,13 +785,17 @@ const DealerTeamCard: React.FC = () => {
         setSaving(false);
         return;
       }
-      await m.addSalesperson({
+      const created = await m.addSalesperson({
         name: newName.trim(),
         pin: newPin.trim() || undefined,
         role: "salesperson",
       });
       setNewName("");
       setNewPin("");
+      if (created.pin) {
+        setError(null);
+        setOneTimeCode({ name: created.name, pin: created.pin });
+      }
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -936,9 +944,16 @@ const DealerTeamCard: React.FC = () => {
                       inactive
                     </span>
                   )}
-                  {p.pin && (
-                    <span className="text-[10px] font-mono text-surface-400">
-                      PIN {p.pin}
+                  {p.id && (
+                    <span
+                      className={cn(
+                        "text-[10px] uppercase tracking-wide font-semibold rounded-full px-2 py-0.5",
+                        p.pin
+                          ? "bg-success-500/10 text-success-300"
+                          : "bg-surface-800 text-surface-500",
+                      )}
+                    >
+                      {p.pin ? "Code set" : "No code"}
                     </span>
                   )}
                 </div>

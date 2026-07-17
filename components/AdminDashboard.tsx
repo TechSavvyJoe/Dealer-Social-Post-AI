@@ -251,16 +251,19 @@ export const AdminDashboard: React.FC = () => {
     }
     setSavingPerson(true);
     try {
-      await addPerson({
+      const created = await addPerson({
         name: personForm.name.trim(),
         pin: personForm.pin || undefined,
         role: peopleRole,
         dealer: selectedDealerId,
       });
+      const oneTimeCode = created.pin?.trim();
       toast.success(
-        peopleRole === "manager"
-          ? `Manager added to ${selectedDealer.name}.`
-          : `User added to ${selectedDealer.name}.`,
+        oneTimeCode
+          ? `${created.name} added. Access code: ${oneTimeCode} — share privately, it won’t show in the list.`
+          : peopleRole === "manager"
+            ? `Manager added to ${selectedDealer.name}.`
+            : `User added to ${selectedDealer.name}.`,
       );
       setPersonForm({ name: "", pin: "" });
       await refetchPeople();
@@ -651,8 +654,9 @@ export const AdminDashboard: React.FC = () => {
                 : `Add salesperson · ${selectedDealer.name}`}
             </h3>
             <p className="mt-1 text-xs text-surface-400">
-              New people are created only for this dealership. Each gets a
-              unique 4-digit sign-in code (leave blank to auto-generate).
+              New people are scoped to this dealership only. Leave the code blank
+              to auto-generate a secure 4-digit PIN — shown once after create,
+              never in the roster.
             </p>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
               <div className="flex-1">
@@ -671,8 +675,8 @@ export const AdminDashboard: React.FC = () => {
                   }
                 />
               </div>
-              <div className="sm:w-28">
-                <label className={labelClassName}>Code</label>
+              <div className="sm:w-36">
+                <label className={labelClassName}>Code (optional)</label>
                 <input
                   value={personForm.pin}
                   onChange={(e) =>
@@ -685,11 +689,13 @@ export const AdminDashboard: React.FC = () => {
                   placeholder="auto"
                   inputMode="numeric"
                   maxLength={4}
+                  autoComplete="new-password"
                 />
               </div>
               <Button
                 variant="primary"
                 disabled={savingPerson}
+                className="min-h-12"
                 leftIcon={
                   savingPerson ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -724,16 +730,18 @@ export const AdminDashboard: React.FC = () => {
                       </span>
                     )}
                   </div>
-                  <div className="mt-0.5 text-xs text-surface-400">
-                    {selectedDealer.name}
-                    {person.pin ? (
-                      <>
-                        {" · "}
-                        <span className="font-mono text-primary-300">
-                          {person.pin}
-                        </span>
-                      </>
-                    ) : null}
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-surface-400">
+                    <span>{selectedDealer.name}</span>
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                        person.pin
+                          ? "bg-success-500/10 text-success-300 ring-1 ring-success-500/20"
+                          : "bg-surface-800 text-surface-500 ring-1 ring-white/10",
+                      )}
+                    >
+                      {person.pin ? "Code set" : "No code"}
+                    </span>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
