@@ -1029,6 +1029,42 @@ export const funStyleCatalog: FunStyleMeta[] = funStyles.map((style) => {
   };
 });
 
+/**
+ * Curated top Fun Mode styles for dealerships — high engagement, car-friendly.
+ * Full catalog remains available behind "Show all" for power users / admin config.
+ * Chosen for: car silhouette readability, social shareability, and sales-floor fun.
+ */
+export const FEATURED_FUN_STYLE_IDS = [
+  "superhero",
+  "action",
+  "pixar",
+  "anime",
+  "lego",
+  "gta",
+  "popart",
+  "cyberpunk",
+  "filmnoir",
+  "vaporwave",
+  "blueprint",
+  "graffiti",
+] as const;
+
+const FEATURED_FUN_STYLE_ID_SET = new Set<string>(FEATURED_FUN_STYLE_IDS);
+
+// Ensure featured styles surface as "Hot" even if their category map omitted popular.
+for (const style of funStyleCatalog) {
+  if (FEATURED_FUN_STYLE_ID_SET.has(style.id)) {
+    style.popular = true;
+    if (!style.tags?.includes("top-pick")) {
+      style.tags = [...(style.tags || []), "top-pick"];
+    }
+  }
+}
+
+export const featuredFunStyleCatalog: FunStyleMeta[] = FEATURED_FUN_STYLE_IDS.map(
+  (id) => funStyleCatalog.find((s) => s.id === id),
+).filter((s): s is FunStyleMeta => Boolean(s));
+
 export const funStyleCategories = Array.from(
   new Set(funStyleCatalog.map((style) => style.category))
 );

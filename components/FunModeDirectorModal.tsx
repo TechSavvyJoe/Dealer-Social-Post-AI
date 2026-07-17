@@ -2,7 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, Shuffle, Star, Search, Clock3 } from "lucide-react";
 import { triggerHapticFeedback } from "../utils/haptics";
-import { funStyleCatalog, funStyleCategories } from "../services/promptConfig";
+import {
+  featuredFunStyleCatalog,
+  funStyleCatalog,
+  funStyleCategories,
+} from "../services/promptConfig";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
 
@@ -31,9 +35,11 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
 }) => {
   const [selectedStyle, setSelectedStyle] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [category, setCategory] = useState<string>("All");
+  /** Default to top popular styles only — full library behind "All styles". */
+  const [category, setCategory] = useState<string>("Top picks");
   const [favorites, setFavorites] = useState<string[]>([]);
   const [recent, setRecent] = useState<string[]>([]);
+  const [showFullLibrary, setShowFullLibrary] = useState(false);
 
   const handleStyleSelect = (styleId: string) => {
     setSelectedStyle(styleId);
@@ -80,16 +86,22 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
   );
 
   const catalog = useMemo(() => {
-    if (!allowedIds) return funStyleCatalog;
-    const filtered = funStyleCatalog.filter((s) => allowedIds.has(s.id));
-    // Fall back to full catalog if config ids don't match any style
-    return filtered.length > 0 ? filtered : funStyleCatalog;
-  }, [allowedIds]);
+    const base = showFullLibrary ? funStyleCatalog : featuredFunStyleCatalog;
+    if (!allowedIds) return base;
+    const filtered = base.filter((s) => allowedIds.has(s.id));
+    // Fall back if dealer config ids don't match any style in the active set
+    if (filtered.length > 0) return filtered;
+    if (!showFullLibrary) {
+      const fullFiltered = funStyleCatalog.filter((s) => allowedIds.has(s.id));
+      return fullFiltered.length > 0 ? fullFiltered : featuredFunStyleCatalog;
+    }
+    return funStyleCatalog;
+  }, [allowedIds, showFullLibrary]);
 
   const filteredStyles = useMemo(() => {
     return catalog.filter((style) => {
       const matchesCategory =
-        category === "All"
+        category === "All" || category === "Top picks"
           ? true
           : category === "Favorites"
             ? favorites.includes(style.id)
@@ -126,8 +138,8 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       size="xl"
-      title="Fun mode director"
-      description="Choose an art direction for this vehicle photo."
+      title="Fun mode"
+      description="Top styles only — bold campaign looks that still keep your real car and customers."
       className="bg-gradient-to-br from-surface-900 to-surface-800 p-0 overflow-hidden border-white/10"
       footer={
         <>
@@ -147,17 +159,38 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
             className="flex-1"
             leftIcon={<Sparkles className="w-4 h-4" />}
           >
-            Generate Selected Style
+            Generate style
           </Button>
         </>
       }
     >
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-white/60">
+          Showing {catalog.length} {showFullLibrary ? "styles" : "top picks"}
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            triggerHapticFeedback();
+            setShowFullLibrary((v) => !v);
+            setCategory(showFullLibrary ? "Top picks" : "All");
+          }}
+          className="text-xs font-semibold text-primary-300 hover:text-primary-200 underline-offset-2 hover:underline"
+        >
+          {showFullLibrary ? "Show top picks only" : "Show all styles"}
+        </button>
+      </div>
+
       {/* Filters & Search */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-6">
         <div className="flex flex-wrap gap-2">
-          {["All", "Popular", "Favorites", ...funStyleCategories].map((cat) => (
+          {(showFullLibrary
+            ? ["All", "Popular", "Favorites", ...funStyleCategories]
+            : ["Top picks", "Favorites"]
+          ).map((cat) => (
             <button
               key={cat}
+              type="button"
               onClick={() => setCategory(cat)}
               className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
                 category === cat

@@ -3,6 +3,8 @@ import { IconProps } from "../Icons";
 
 export type VideoStyleMeta = {
   style: VideoStyle;
+  /** Salesperson-facing marketing name */
+  label: string;
   icon: IconProps["type"];
   description: string;
   category: "Cinematic" | "Modern" | "Fun" | "Artistic" | "Transitions";
@@ -24,17 +26,15 @@ export type VideoPreset = {
   };
 };
 
-// 720p supports every exposed 4s/6s preset. Google restricts 1080p to 8s,
-// so selecting it implicitly would make the quick presets invalid.
 export const defaultResolution: VideoRequestOptions["resolution"] = "720p";
 
 export const durations = [
   {
     value: 4,
     label: "4s",
-    description: "Perfect for looping stories and reels.",
+    description: "Quick loop for Stories.",
   },
-  { value: 6, label: "6s", description: "Adds room for dramatic reveals." },
+  { value: 6, label: "6s", description: "Best for Reels / TikTok delivery posts." },
 ];
 
 export const soundtracks: Array<{
@@ -104,153 +104,106 @@ export const pacingOptions: Array<{
 ];
 
 /**
- * Recommended styles are photo-locked micro-motion only.
- * Avoid "reveal / materialize / zoom" as primary picks — those morph.
+ * Creator Mode — top automotive marketing motion recipes only.
+ * Identity-locked living photography for real delivery photos.
  */
 export const styles: VideoStyleMeta[] = [
   {
     style: VideoStyle.GoldenRadiance,
+    label: "Golden Delivery",
     icon: "sun",
-    description: "Warm light sweep on the real paint and faces.",
+    description: "Warm paint sheen + slow push — premium OEM handover.",
     category: "Cinematic",
     recommended: true,
-    tags: ["premium", "highlight"],
+    tags: ["default", "premium", "delivery"],
+  },
+  {
+    style: VideoStyle.Spotlight,
+    label: "Keys & Smile",
+    icon: "sun",
+    description: "Soft spotlight on faces + car nose — intimate delivery day.",
+    category: "Cinematic",
+    recommended: true,
+    tags: ["people", "premium"],
+  },
+  {
+    style: VideoStyle.VintageFilm,
+    label: "Living Still",
+    icon: "film",
+    description: "Gentle Ken Burns — honest, scroll-stopping living photo.",
+    category: "Artistic",
+    recommended: true,
+    tags: ["authentic"],
+  },
+  {
+    style: VideoStyle.RoadTrip,
+    label: "Lot Parallax",
+    icon: "map",
+    description: "Background drift only — ready-for-the-road energy.",
+    category: "Transitions",
+    recommended: true,
+    tags: ["outdoor"],
   },
   {
     style: VideoStyle.PartyTime,
+    label: "Tasteful Confetti",
     icon: "confetti",
-    description: "Tasteful confetti in empty space; photo stays locked.",
+    description: "Light celebration particles in empty space only.",
     category: "Fun",
     recommended: true,
     tags: ["celebration"],
   },
   {
-    style: VideoStyle.VintageFilm,
-    icon: "film",
-    description: "Film grain + micro handheld over the same frame.",
-    category: "Artistic",
-    recommended: true,
-    tags: ["retro"],
-  },
-  {
-    style: VideoStyle.Spotlight,
-    icon: "sun",
-    description: "Soft spotlight brightens the existing subjects.",
-    category: "Cinematic",
-    recommended: true,
-    tags: ["premium"],
-  },
-  {
-    style: VideoStyle.EpicReveal,
-    icon: "starburst",
-    description: "Locked framing with gentle light wrap — no hard zoom.",
-    category: "Cinematic",
-    tags: ["hero", "premium"],
-  },
-  {
-    style: VideoStyle.FireEmbers,
-    icon: "fire",
-    description: "Soft rising embers in empty space only.",
-    category: "Cinematic",
-    tags: ["dramatic"],
-  },
-  {
-    style: VideoStyle.CarSketch,
-    icon: "edit",
-    description: "Brief sketch overlay that dissolves into the real photo.",
-    category: "Artistic",
-    tags: ["hand-drawn"],
-  },
-  {
-    style: VideoStyle.Blueprint,
-    icon: "ruler",
-    description: "Thin blueprint lines over the real delivery photo.",
-    category: "Artistic",
-    tags: ["technical"],
-  },
-  {
-    style: VideoStyle.HolographicScan,
-    icon: "cpu-chip",
-    description: "Soft scan lines that resolve to the same photo.",
-    category: "Modern",
-    tags: ["tech", "futuristic"],
-  },
-  {
-    style: VideoStyle.NeonPulse,
-    icon: "zap",
-    description: "Soft edge glow pulse on existing car lines.",
-    category: "Modern",
-    tags: ["digital"],
-  },
-  {
-    style: VideoStyle.GlitchPop,
-    icon: "zap",
-    description: "One tasteful micro-glitch that resolves immediately.",
-    category: "Modern",
-    tags: ["trendy"],
-  },
-  {
     style: VideoStyle.LiquidChrome,
+    label: "Paint Sheen",
     icon: "droplet",
-    description: "Specular roll across existing paint only.",
+    description: "Specular roll on real paint — product-hero luxury.",
     category: "Modern",
-    tags: ["premium", "sleek"],
-  },
-  {
-    style: VideoStyle.CometStrike,
-    icon: "shooting-star",
-    description: "Stardust in empty background regions only.",
-    category: "Transitions",
-    tags: ["sparkle"],
-  },
-  {
-    style: VideoStyle.SmokeReveal,
-    icon: "cloud",
-    description: "Edge haze that clears to the same delivery photo.",
-    category: "Transitions",
-    tags: ["moody"],
-  },
-  {
-    style: VideoStyle.SpeedLines,
-    icon: "zap",
-    description: "Faint edge streaks; car and people stay sharp.",
-    category: "Transitions",
-    tags: ["speed"],
-  },
-  {
-    style: VideoStyle.RoadTrip,
-    icon: "map",
-    description: "Gentle background parallax; hero still locked.",
-    category: "Transitions",
-    tags: ["story"],
-  },
-  {
-    style: VideoStyle.HappyDance,
-    icon: "music-note",
-    description: "Micro frame pulse — people stay planted.",
-    category: "Fun",
-    tags: ["character"],
-  },
-  {
-    style: VideoStyle.JumpingForJoy,
-    icon: "arrow-up",
-    description: "Energy on existing smiles only — no invented jump.",
-    category: "Fun",
-    tags: ["character"],
+    recommended: true,
+    tags: ["car-forward", "premium"],
   },
   {
     style: VideoStyle.StickerSlap,
+    label: "Badge Pop",
     icon: "tag",
-    description: "Small badges in empty corners only.",
+    description: "Small SOLD/keys badges in empty corners — TikTok-native.",
     category: "Fun",
-    tags: ["playful"],
+    recommended: true,
+    tags: ["engagement"],
   },
   {
-    style: VideoStyle.GraffitiReveal,
-    icon: "swatch",
-    description: "Brief color wash at edges; composition unchanged.",
-    category: "Fun",
-    tags: ["urban"],
+    style: VideoStyle.EpicReveal,
+    label: "Soft Hero Light",
+    icon: "starburst",
+    description: "Gentle light wrap — high-budget social hero without morph.",
+    category: "Cinematic",
+    recommended: true,
+    tags: ["hero"],
+  },
+  // Optional / secondary — not shown in primary grid unless expanded
+  {
+    style: VideoStyle.CarSketch,
+    label: "Soft Resolve",
+    icon: "edit",
+    description: "Brief sketch that dissolves into the real photo.",
+    category: "Artistic",
+    tags: ["optional"],
+  },
+  {
+    style: VideoStyle.Blueprint,
+    label: "Blueprint Fade",
+    icon: "ruler",
+    description: "Thin blueprint lines dissolving to the real car.",
+    category: "Artistic",
+    tags: ["optional"],
+  },
+  {
+    style: VideoStyle.SpeedLines,
+    label: "Edge Energy",
+    icon: "zap",
+    description: "Faint edge streaks; car and people stay sharp.",
+    category: "Transitions",
+    tags: ["optional"],
   },
 ];
 
@@ -313,44 +266,8 @@ export const presets: VideoPreset[] = [
     },
   },
   {
-    label: "Square Feed",
-    platform: "Instagram",
-    description: "1:1 · 4s · music (letterboxed)",
-    values: {
-      durationSeconds: 4,
-      soundtrack: "cinematic",
-      aspectPreference: "1:1",
-      resolution: defaultResolution,
-      pacing: "cinematic",
-    },
-  },
-  {
-    label: "Quick Loop",
-    badge: "Fast",
-    description: "9:16 · 4s · music · vertical",
-    values: {
-      durationSeconds: 4,
-      soundtrack: "cinematic",
-      aspectPreference: "9:16",
-      resolution: defaultResolution,
-      pacing: "cinematic",
-    },
-  },
-  {
-    label: "Showroom Highlight",
-    badge: "Cinematic",
-    description: "16:9 · 6s · music · wide",
-    values: {
-      durationSeconds: 6,
-      soundtrack: "cinematic",
-      aspectPreference: "16:9",
-      resolution: defaultResolution,
-      pacing: "cinematic",
-    },
-  },
-  {
     label: "Silent Story",
-    description: "9:16 · 6s · no music · vertical",
+    description: "9:16 · 6s · silent · vertical",
     values: {
       durationSeconds: 6,
       soundtrack: "none",

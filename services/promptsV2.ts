@@ -322,30 +322,34 @@ export const generateFunPromptV2 = (
   requestedStyleName?: string
 ): string => {
   return [
-    `You are a premium campaign artist applying a stylized LOOK to a real delivery photo — like a limited Marvel/LEGO/superhero campaign treatment over photography, not a full redraw that invents a new car or new people.
+    `You are a senior campaign artist for a high-budget automotive dealership social unit.
+Apply a stylized LOOK to a REAL delivery photo — limited Marvel / poster / LEGO energy over photography, not a full scene rebuild.
 ${campaignQualityBar}`,
     xmlBlock(
       "style",
       `${requestedStyleName ? `Style: ${requestedStyleName}\n` : ""}${styleSummary}
 
-Keep the treatment fun and iconic (Marvel energy, Superman poster polish, LEGO charm, nostalgic comic) but HOLLYWOOD-STUDIO professional — not cheesy clip-art.
-The original photo composition stays: same people positions, same vehicle, same location. Stylize colors, linework overlays, and texture ON TOP of that composition.`
+Keep it fun and iconic but HOLLYWOOD-STUDIO professional — not cheesy clip-art.
+Composition stays: same people positions, same vehicle, same location. Stylize color, line, texture ON TOP of that composition.`
     ),
     xmlBlock(
       "subject_lock",
-      `CRITICAL: The real customers and the real car must remain clearly the same subjects from the source photo.
-Do not swap the vehicle. Do not invent a different car flying through a highway blur. Do not replace faces.
-Mild stylization of skin/line is ok; identity must still match the photo at a glance.`
+      `CRITICAL: The real customers and the real car must remain clearly the same subjects.
+No vehicle swap, no different car on a highway, no face replacement.
+Mild line/skin stylization OK; identity must match the photo at a glance.`
     ),
     xmlBlock(
-      "store_identity",
-      hasLogo
-        ? `Place the logo small in a corner AND render the full store name "${dealershipName}" as readable campaign text.`
-        : `Include the full store name "${dealershipName}" as a clear signature/lockup — exact spelling.`
+      "marketing_overlays",
+      `Add premium campaign graphic overlays suitable for Instagram/Facebook:
+- Full store name "${dealershipName}" as a clean lockup (exact spelling)
+- Optional short hook badge in empty space only (e.g. "DELIVERED", "KEYS DAY", "WELCOME") — max 2 words, bold sans
+- Optional small secondary line if space allows (e.g. "Your turn next") — never over faces or the car badge
+${hasLogo ? "- Place the store logo small in a corner" : ""}
+Do not invent prices, APR, or "lowest price" claims.`
     ),
     xmlBlock(
       "safe_zones",
-      `Text must not cover faces, hands, or the vehicle nameplate.`
+      `Text/logo must not cover faces, hands, license plate, or vehicle nameplate. Keep top/bottom margins for social UI.`
     ),
   ].join("\n\n");
 };
@@ -365,52 +369,52 @@ const videoMotionForStyle = (
 ): string => {
   const snappy = pacing === "snappy";
   const base = snappy
-    ? "Keep motion short, confident, and controlled — still premium, not chaotic."
-    : "Keep motion slow, smooth, and high-end commercial.";
+    ? "Motion starts immediately. Keep it short, confident, and premium — not chaotic."
+    : "Motion starts immediately. Slow, smooth, high-end automotive commercial feel.";
 
   switch (style) {
-    case VideoStyle.EpicReveal:
-      return `${base} Camera locked or ≤1–2% micro-drift only — no push-in, no zoom toward the car. Gentle light wrap on existing paint and faces. No second vehicle.`;
-    case VideoStyle.PartyTime:
-      return `${base} Soft confetti or sparkle particles in empty sky/pavement only. Tiny smile/energy on the people already present. Camera almost locked.`;
-    case VideoStyle.VintageFilm:
-      return `${base} Subtle handheld micro-shake and warm film grain over the SAME frame. No scene change.`;
-    case VideoStyle.NeonPulse:
-      return `${base} Soft edge glow that pulses once on the existing car body lines. Minimal camera drift.`;
-    case VideoStyle.CometStrike:
-      return `${base} Fine stardust particles drifting in empty background regions only. Locked framing.`;
-    case VideoStyle.HappyDance:
-      return `${base} Micro scale pulse (1–2%) of the whole frame — never re-pose people or the car.`;
-    case VideoStyle.JumpingForJoy:
-      return `${base} People stay planted; add a brief upward energy on existing smiles only. Do not make anyone leave the ground or leave the car.`;
-    case VideoStyle.SpeedLines:
-      return `${base} Faint speed streaks in empty edge regions only; car and people stay rock-still and sharp.`;
-    case VideoStyle.CarSketch:
-      return `${base} Brief line-sketch overlay that fades INTO the real photo within 1s — the real car and people must already match the photo.`;
     case VideoStyle.GoldenRadiance:
-      return `${base} Warm golden highlight sweep across existing paint and faces. Classy auto ad.`;
-    case VideoStyle.GlitchPop:
-      return `${base} One or two tasteful micro-glitches that resolve immediately; identity never changes.`;
-    case VideoStyle.SmokeReveal:
-      return `${base} Thin atmospheric haze at the edges that clears to the SAME photo — never cover and replace with a different car.`;
+      return `${base} GOLDEN DELIVERY: very slow push-in (≤8% scale over the clip). Warm specular roll left→right across real paint and glass. Soft lens kiss. Classy OEM pride. No second car.`;
     case VideoStyle.Spotlight:
-      return `${base} Soft spotlight falloff that gently brightens the existing subjects without dark-to-different-scene transitions.`;
-    case VideoStyle.FireEmbers:
-      return `${base} Soft rising ember particles in empty space; warm grade; no fire covering faces or inventing a new scene.`;
-    case VideoStyle.LiquidChrome:
-      return `${base} Subtle specular roll across existing metal surfaces only — no liquid morph into another car.`;
-    case VideoStyle.StickerSlap:
-      return `${base} 1–2 small celebratory badges animate into empty corners only; photo underneath stays fixed.`;
-    case VideoStyle.GraffitiReveal:
-      return `${base} Brief color wash at edges that settles into the real photo; composition unchanged.`;
-    case VideoStyle.HolographicScan:
-      return `${base} Soft scan-line pass that resolves to the full-color source photo; no body swap.`;
+      return `${base} KEYS & SMILE: camera nearly locked. Soft spotlight falloff brightens existing faces and car nose. Intimate handover energy. No confetti storm.`;
+    case VideoStyle.VintageFilm:
+      return `${base} LIVING STILL: gentle Ken Burns (micro pan + micro push) over the SAME frame; light film grain optional. Documentary-premium, not shaky home video.`;
     case VideoStyle.RoadTrip:
-      return `${base} Gentle parallax on background only; people and car locked as the hero still.`;
+      return `${base} LOT PARALLAX: background-only depth (sky/trees/building drift); car + people stay a fixed hero plate. Ready-for-the-road without fake driving.`;
+    case VideoStyle.PartyTime:
+      return `${base} TASTEFUL CONFETTI: almost locked camera. Light confetti/sparkle only in empty sky or pavement — never over faces or the car badge.`;
+    case VideoStyle.LiquidChrome:
+      return `${base} PAINT SHEEN: micro truck or locked camera. Specular roll only on existing chrome/paint — no liquid morph into another vehicle.`;
+    case VideoStyle.StickerSlap:
+      return `${base} BADGE POP: photo micro-jiggle on hit. 1–2 small badges (SOLD / keys / star) slap into EMPTY corners only. TikTok-native, small and classy.`;
+    case VideoStyle.EpicReveal:
+      return `${base} SOFT HERO LIGHT: locked or ≤2% drift. Gentle light wrap on existing paint and faces. No push-zoom inventing detail. No second vehicle.`;
+    case VideoStyle.CarSketch:
+      return `${base} SOFT RESOLVE: brief line-sketch overlay that dissolves into the real photo within ~1s — identity already matches the photo.`;
     case VideoStyle.Blueprint:
-      return `${base} Thin blueprint overlay that quickly dissolves to the real delivery photo already shown.`;
+      return `${base} Thin blueprint lines that dissolve to the real delivery photo within 1s.`;
+    case VideoStyle.NeonPulse:
+      return `${base} Soft edge glow pulse once on existing body lines. Minimal drift.`;
+    case VideoStyle.CometStrike:
+      return `${base} Fine stardust in empty background only. Locked framing.`;
+    case VideoStyle.HappyDance:
+      return `${base} Micro 1–2% frame pulse only — never re-pose people or the car.`;
+    case VideoStyle.JumpingForJoy:
+      return `${base} People planted; brief energy on existing smiles only. No leaving the ground.`;
+    case VideoStyle.SpeedLines:
+      return `${base} Faint edge streaks in empty margins; car and people rock-still.`;
+    case VideoStyle.GlitchPop:
+      return `${base} One tasteful micro-glitch that resolves instantly; identity never changes.`;
+    case VideoStyle.SmokeReveal:
+      return `${base} Thin edge haze that clears to the SAME photo — never replace the car.`;
+    case VideoStyle.FireEmbers:
+      return `${base} Soft embers in empty space only; warm grade; no fire on faces.`;
+    case VideoStyle.GraffitiReveal:
+      return `${base} Brief color wash at edges that settles into the real photo.`;
+    case VideoStyle.HolographicScan:
+      return `${base} Soft scan-line pass that resolves to the full-color source photo.`;
     default:
-      return `${base} Locked camera, natural light shimmer on the car, subjects locked. No zoom inventing detail.`;
+      return `${base} Locked camera, natural light shimmer on paint, subjects locked.`;
   }
 };
 
@@ -424,57 +428,68 @@ export const generateVideoPromptV2 = (
     options.aspectPreference === "auto"
       ? "match the source photo aspect"
       : options.aspectPreference === "1:1"
-        ? "16:9 (letterbox if needed — never crop faces or the vehicle)"
+        ? "9:16 or 16:9 letterbox (never crop faces or the vehicle)"
         : String(options.aspectPreference);
 
   return [
-    `Image-to-video for a premium automotive dealership social campaign.
-The attached image is the FIRST FRAME and the ONLY scene. Animate that exact photograph.`,
+    `You are directing a premium automotive dealership SOCIAL video (Reels/TikTok/Facebook).
+Image-to-video ONLY. The attached photo is frame 1 and the only scene — a real customer delivery moment.
+Goal: scroll-stopping living photography that feels like a high-budget OEM campaign spot, not random AI morphs.`,
     xmlBlock(
       "hard_locks",
-      `This is NOT text-to-video and NOT a new scene generation.
-- Frame 1 = the attached photo. The last frame must still clearly be that same photo (same people, same car, same place).
-- Do not invent a second car, a different color car, a showroom swap, a highway plate, or a stock hero vehicle.
-- Do not morph faces or replace customers.
-- Do not zoom so hard that you invent detail that was not in the photo.
-- Do not push the photo away to reveal a different car underneath.
-- Keep the full vehicle and all people visible for the entire ${duration}s.
-- Prefer subtle camera moves (slow push / gentle drift) over aggressive zooms, whip pans, or snap cuts.`
+      `NON-NEGOTIABLE:
+- Frame 1 = attached photo. Last frame still clearly that same photo (same people, same car, same place).
+- No second car, color swap, showroom swap, highway plate, or stock hero vehicle.
+- No face morph, re-pose, dance, or people leaving the ground.
+- No extreme zoom inventing detail that was not in the photo.
+- Full vehicle + all people visible for all ${duration}s.
+- Motion starts immediately (no long black fade into a different scene).`
     ),
     xmlBlock(
       "campaign_quality",
       `${campaignQualityBar}
-For video: motion should feel intentional and brief, like a high-budget social spot — not a random AI morph, zoom-into-another-car, or scene swap.
-Even playful styles keep the real photo sacred.`
+Automotive marketing bar: confidence, warmth, trust. Delivery-day authenticity > CGI spectacle.
+One primary move only (push OR light sweep OR particles — not all aggressive at once).
+Loop-friendly settle at the end.`
     ),
     xmlBlock(
       "motion",
-      `Motion recipe: ${style.replace(/\s+/g, "_").toLowerCase()}_locked_photo
-Duration: ${duration} seconds. Aspect: ${aspect}. Resolution target: ${options.resolution}.
+      `Named recipe: ${style}
+Duration: ${duration}s. Frame: ${aspect}. Resolution: ${options.resolution}.
 Pacing: ${options.pacing}.
 ${videoMotionForStyle(style, options.pacing)}
-Do not interpret the style name as permission to morph, reveal a second car, or rebuild the scene.`
+Style name is a MOTION RECIPE only — never permission to rebuild the scene.`
+    ),
+    xmlBlock(
+      "marketing_graphics",
+      `Dealership social proof overlays (EMPTY safe space only — never on faces, hands, license plate, or car nameplate):
+- Prefer 0–2 tiny motion badges max: "DELIVERED", "SOLD", keys icon, star burst, or "WELCOME" — bold sans, 1–2 words.
+- Badge Pop / Tasteful Confetti may animate badges into lower corners or sky/pavement gaps.
+- Other styles: prioritize light, sheen, and parallax; badges optional and tiny.
+- Do NOT paint long captions, prices, APR, payment claims, phone numbers, or paragraphs into frames.
+- Keep top ~12% and bottom ~18% relatively clean for Instagram/TikTok UI + caption text added in-app.
+Industry bar: short-form delivery social proof that feels authentic and premium — not stock CGI inventory ads.`
     ),
     xmlBlock(
       "soundtrack",
       options.soundtrack === "none"
-        ? `Silent video only — no music, no dialogue, no ambient score. Visual loop-friendly.`
-        : `NATIVE AUDIO REQUIRED (critical): Generate a full soundtrack baked into the video file — not silent.
-Audio mood: ${options.soundtrack} (original score only; never name or copy copyrighted songs).
-Include light ambient dealership/outdoor atmosphere + tasteful underscore that matches the pacing.
-No spoken dialogue unless it is ambient crowd murmur. Keep subjects photo-locked while audio plays.
+        ? `Silent video only — no music, dialogue, or score.`
+        : `NATIVE AUDIO REQUIRED: full original score baked into the file (not silent).
+Mood: ${options.soundtrack} — warm pride / delivery-day celebration; original music only (no copyrighted tracks).
+Light lot/outdoor ambience + tasteful underscore that peaks mid-clip. No fake customer dialogue.
 Silent output is a failure when music is requested.`
     ),
     baseCaption
       ? xmlBlock(
-          "mood_only",
-          `Companion caption mood (do not put caption text into the video frames): "${baseCaption.trim().slice(0, 280)}"`
+          "caption_mood_only",
+          `Post caption mood (do NOT paint this text into frames): "${baseCaption.trim().slice(0, 220)}"`
         )
       : "",
     xmlBlock(
       "success_criteria",
-      `A viewer who saw the original photo must instantly recognize the same delivery moment.
-If the car or people change identity at any frame, the output is a failure.`
+      `A viewer who saw the original photo instantly recognizes the same delivery moment.
+If car or people identity drifts at any frame → failure.
+Feels like a paid dealership social ad someone would be proud to post.`
     ),
   ]
     .filter(Boolean)
