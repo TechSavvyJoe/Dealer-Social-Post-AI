@@ -188,7 +188,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
   return (
     <motion.section
-      className="relative mx-auto flex h-full min-h-0 w-full max-w-6xl flex-1 items-center justify-center overflow-hidden"
+      className="relative mx-auto flex h-full min-h-0 w-full max-w-6xl flex-1 items-center justify-center"
       initial={{ opacity: 0, y: shouldReduceMotion ? 0 : 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={motionTransition}
@@ -196,9 +196,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     >
       <div
         className={cn(
-          "relative grid w-full overflow-hidden border border-white/[0.09] bg-[#0b1017] shadow-[0_24px_80px_rgba(0,0,0,0.38)]",
-          // Mobile: fill the viewport card without forcing overflow height
-          "h-full max-h-[100dvh] rounded-none border-x-0 sm:max-h-[min(40rem,calc(100dvh-1.5rem))] sm:rounded-[1.5rem] sm:border-x",
+          "relative grid w-full border border-white/[0.09] bg-[#0b1017] shadow-[0_24px_80px_rgba(0,0,0,0.38)]",
+          // Mobile: fill available height, center content; soft corners on larger phones
+          "h-full max-h-[100dvh] overflow-hidden rounded-none border-x-0",
+          "min-[400px]:rounded-2xl min-[400px]:border-x min-[400px]:max-h-[min(42rem,calc(100dvh-1rem))]",
+          "sm:max-h-[min(42rem,calc(100dvh-2rem))] sm:rounded-[1.5rem]",
           "lg:h-auto lg:max-h-none lg:grid-cols-[minmax(0,1.08fr)_minmax(23rem,0.92fr)]",
         )}
       >
@@ -259,14 +261,20 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
         <div
           className={cn(
-            "flex min-h-0 flex-1 flex-col justify-center overflow-hidden",
-            // Compact padding on phone so keypad stays in view
-            "px-4 py-3 sm:px-8 sm:py-7 lg:min-h-[38rem] lg:px-10 lg:py-8",
+            "flex min-h-0 flex-1 flex-col justify-center",
+            // Comfortable padding that scales down only on short viewports
+            "px-5 py-5 sm:px-8 sm:py-8 lg:min-h-[38rem] lg:px-10 lg:py-8",
+            "max-[700px]:py-4 max-[640px]:px-4",
           )}
           aria-live="polite"
           aria-busy={isLoading}
         >
-          <Logo className="mb-2 h-auto w-[140px] shrink-0 sm:mb-4 sm:w-[210px] lg:hidden" />
+          <Logo
+            className={cn(
+              "mb-4 h-auto w-[min(200px,52vw)] shrink-0 lg:hidden",
+              "max-[640px]:mb-3 max-[640px]:w-[min(168px,48vw)]",
+            )}
+          />
 
           <AnimatePresence mode="wait">
             {isSuccess ? (
@@ -323,28 +331,28 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 exit={{ opacity: 0 }}
                 transition={motionTransition}
               >
-                <div className="mb-2 flex shrink-0 items-start gap-2.5 sm:mb-4 sm:gap-3">
-                  <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] sm:h-10 sm:w-10">
+                <div className="mb-4 flex shrink-0 items-start gap-3 max-[640px]:mb-3 max-[640px]:gap-2.5">
+                  <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] max-[640px]:h-10 max-[640px]:w-10">
                     <ShieldCheck
-                      className="h-4 w-4 text-primary-300 sm:h-5 sm:w-5"
+                      className="h-5 w-5 text-primary-300"
                       aria-hidden="true"
                     />
                   </div>
                   <div className="min-w-0">
                     <h1
                       id="login-heading"
-                      className="text-xl font-semibold tracking-[-0.025em] text-surface-50 sm:text-3xl"
+                      className="text-2xl font-semibold tracking-[-0.025em] text-surface-50 max-[640px]:text-xl sm:text-3xl"
                     >
                       Sign in
                     </h1>
-                    <p className="mt-0.5 text-sm leading-snug text-surface-300 sm:mt-1.5 sm:text-base sm:leading-relaxed">
+                    <p className="mt-1.5 text-base leading-relaxed text-surface-300 max-[640px]:mt-1 max-[640px]:text-sm max-[640px]:leading-snug">
                       Tap your 4-digit code. We sign you in automatically.
                     </p>
                   </div>
                 </div>
 
                 <div
-                  className="mb-3 grid shrink-0 grid-cols-2 gap-1 rounded-2xl border border-white/[0.08] bg-black/25 p-1 sm:mb-5 sm:p-1.5"
+                  className="mb-5 grid shrink-0 grid-cols-2 gap-1 rounded-2xl border border-white/[0.08] bg-black/25 p-1.5 max-[640px]:mb-3.5 max-[640px]:p-1"
                   role="group"
                   aria-label="Access type"
                 >
@@ -353,7 +361,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     onClick={() => selectMode("personal")}
                     aria-pressed={entryMode === "personal"}
                     className={cn(
-                      "min-h-11 rounded-xl px-3 text-sm font-semibold transition-colors sm:min-h-12",
+                      "min-h-12 rounded-xl px-3 text-sm font-semibold transition-colors max-[640px]:min-h-11",
                       entryMode === "personal"
                         ? "bg-primary-600 text-white shadow-md"
                         : "text-surface-300 hover:text-surface-100",
@@ -366,7 +374,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     onClick={() => selectMode("system")}
                     aria-pressed={entryMode === "system"}
                     className={cn(
-                      "min-h-11 rounded-xl px-3 text-sm font-semibold transition-colors sm:min-h-12",
+                      "min-h-12 rounded-xl px-3 text-sm font-semibold transition-colors max-[640px]:min-h-11",
                       entryMode === "system"
                         ? "bg-primary-600 text-white shadow-md"
                         : "text-surface-300 hover:text-surface-100",
@@ -379,7 +387,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 {entryMode === "personal" ? (
                   <div className="flex min-h-0 flex-1 flex-col justify-center">
                     <div
-                      className="mb-2 flex shrink-0 items-center justify-center gap-3 py-1 sm:mb-4 sm:gap-4 sm:py-2"
+                      className="mb-3 flex shrink-0 items-center justify-center gap-4 py-2 max-[640px]:mb-2 max-[640px]:gap-3.5 max-[640px]:py-1"
                       role="status"
                       aria-label={`${dealerCode.length} of ${PERSON_CODE_LENGTH} digits entered`}
                     >
@@ -390,7 +398,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                             key={index}
                             aria-hidden="true"
                             className={cn(
-                              "h-3.5 w-3.5 rounded-full border-2 transition-colors sm:h-5 sm:w-5",
+                              "h-4 w-4 rounded-full border-2 transition-colors sm:h-5 sm:w-5",
                               index < dealerCode.length
                                 ? "border-primary-400 bg-primary-400"
                                 : index === dealerCode.length
@@ -403,7 +411,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     </div>
 
                     <p
-                      className="mb-2 shrink-0 text-center text-xs text-surface-400 sm:mb-4 sm:text-sm"
+                      className="mb-4 shrink-0 text-center text-sm text-surface-400 max-[640px]:mb-3 max-[640px]:text-xs"
                       aria-live="polite"
                     >
                       {dealerCode.length > 0
@@ -411,22 +419,18 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                         : "4 digits · from your manager"}
                     </p>
 
-                    {/* Compact pad on phones so the full keypad is on-screen without scroll */}
-                    <Dialpad
-                      onKeyPress={handleDialpadKeyPress}
-                      compact
-                    />
+                    <Dialpad onKeyPress={handleDialpadKeyPress} />
                   </div>
                 ) : (
                   <form
-                    className="flex min-h-0 flex-1 flex-col justify-center overflow-y-auto"
+                    className="flex min-h-0 flex-1 flex-col justify-center overflow-y-auto overscroll-contain"
                     onSubmit={(event) => {
                       event.preventDefault();
                       void submitCode(adminCode, "system");
                     }}
                   >
-                    <div className="rounded-2xl border border-white/[0.08] bg-[#101722] p-3 sm:p-5">
-                      <div className="mb-3 flex items-start gap-3 sm:mb-4">
+                    <div className="rounded-2xl border border-white/[0.08] bg-[#101722] p-4 sm:p-5">
+                      <div className="mb-4 flex items-start gap-3">
                         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300">
                           <KeyRound className="h-5 w-5" aria-hidden="true" />
                         </div>

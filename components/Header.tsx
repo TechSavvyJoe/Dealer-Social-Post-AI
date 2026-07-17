@@ -79,10 +79,10 @@ export const Header: React.FC<HeaderProps> = ({
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
       >
-        <div className="mx-auto flex w-full max-w-screen-2xl items-center justify-between gap-2 px-3 py-2 sm:gap-3 sm:px-6 sm:py-3 lg:px-10">
+        <div className="mx-auto flex w-full max-w-screen-2xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6 sm:py-3 lg:px-10">
           {/* Dealer Info */}
           <motion.div
-            className="flex min-w-0 items-center gap-2 sm:gap-3"
+            className="flex min-w-0 items-center gap-3"
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.1, duration: 0.4 }}
@@ -98,13 +98,13 @@ export const Header: React.FC<HeaderProps> = ({
                 <img
                   src={dealer.logo}
                   alt={`${dealer.name} logo`}
-                  className="relative h-9 w-9 object-contain rounded-xl bg-white/[0.07] p-1 ring-1 ring-white/10 shadow-sm transition-all duration-200 group-hover:ring-white/20 sm:h-11 sm:w-11 sm:rounded-2xl sm:p-1.5"
+                  className="relative h-10 w-10 object-contain rounded-2xl bg-white/[0.07] p-1.5 ring-1 ring-white/10 shadow-sm transition-all duration-200 group-hover:ring-white/20 sm:h-11 sm:w-11"
                 />
               ) : (
                 <div
                   className={cn(
-                    "flex h-9 w-9 items-center justify-center rounded-xl sm:h-11 sm:w-11 sm:rounded-2xl",
-                    "font-semibold text-[color:var(--brand-foreground)] text-lg sm:text-xl",
+                    "flex h-10 w-10 items-center justify-center rounded-2xl sm:h-11 sm:w-11",
+                    "font-semibold text-[color:var(--brand-foreground)] text-xl",
                     "ring-1 ring-white/10 shadow-sm",
                   )}
                   style={{ backgroundColor: "var(--brand-primary)" }}
@@ -117,8 +117,8 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Dealer name + product label, sentence case (Dealer Trust) */}
             <div className="flex min-w-0 flex-col">
-              <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
-                <span className="truncate text-sm font-semibold tracking-tight leading-tight text-surface-50 sm:text-lg">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-base font-semibold tracking-tight leading-tight text-surface-50 sm:text-lg">
                   {dealer.name}
                 </span>
                 {dealer.requires_approval && (
@@ -128,12 +128,12 @@ export const Header: React.FC<HeaderProps> = ({
                     uppercase={false}
                     className="shrink-0"
                   >
+                    <span className="max-sm:hidden">Approval required</span>
                     <span className="sm:hidden">Review</span>
-                    <span className="hidden sm:inline">Approval required</span>
                   </Badge>
                 )}
               </div>
-              <span className="hidden sm:inline text-xs font-medium text-surface-300 mt-0.5 tracking-tight">
+              <span className="mt-0.5 hidden text-xs font-medium tracking-tight text-surface-300 sm:inline">
                 Social post studio
               </span>
             </div>

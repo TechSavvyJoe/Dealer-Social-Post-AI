@@ -469,7 +469,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   });
 
   return (
-    <div className="flex flex-1 items-start justify-center px-0 py-1 sm:px-2 sm:py-3">
+    <div className="flex flex-1 items-start justify-center px-0 py-2 sm:px-2 sm:py-4">
       <motion.div
         className={cn(
           "mx-auto w-full",
@@ -477,9 +477,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             ? "max-w-6xl grid grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)] gap-6 items-start"
             : "max-w-2xl",
         )}
-        initial={{ opacity: 0, y: 12 }}
+        initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.25 }}
+        transition={{ duration: 0.3 }}
       >
         {isDesktopLayout && (
           <section className="sticky top-24 overflow-hidden rounded-[1.75rem] border border-white/10 bg-surface-950 shadow-2xl shadow-black/30">
@@ -515,12 +515,12 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           elevation={2}
           className="relative overflow-hidden border-white/10 bg-surface-900"
         >
-          <CardHeader className="relative pb-2 sm:pb-3">
-            <div className="flex items-center gap-2.5 sm:gap-3">
+          <CardHeader className="relative pb-3">
+            <div className="flex items-center gap-3">
               {/* Compact image preview */}
               <motion.div
                 className={cn(
-                  "h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-white/20 shadow-lg sm:h-20 sm:w-20",
+                  "h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-white/20 shadow-lg sm:h-20 sm:w-20",
                   isDesktopLayout && "hidden",
                 )}
                 whileHover={{ scale: 1.05 }}
@@ -532,17 +532,17 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 />
               </motion.div>
               <div className="min-w-0 flex-1">
-                <CardTitle className="text-base sm:text-xl">
+                <CardTitle className="text-lg sm:text-xl">
                   Create your post
                 </CardTitle>
                 <CardDescription className="text-xs sm:text-sm">
-                  Style, platforms, then generate
+                  Pick a style — AI handles the rest
                 </CardDescription>
               </div>
             </div>
           </CardHeader>
 
-          <CardContent className="relative space-y-4 pt-0 sm:space-y-5">
+          <CardContent className="relative space-y-5 pt-0">
             {/* Post scenario — selects which kind of post this is (delivery,
                 pre-owned spotlight, service promo, etc). Tunes prompt + defaults. */}
             <ScenarioPicker

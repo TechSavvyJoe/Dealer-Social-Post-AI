@@ -18,27 +18,28 @@ export type DialpadKey =
 
 interface DialpadProps {
   onKeyPress: (key: DialpadKey) => void;
-  /** Compact for short mobile viewports so the full pad fits without scroll. */
-  compact?: boolean;
 }
 
+/**
+ * Fluid keypad: keys scale with viewport so phones stay tappable and balanced
+ * without looking tiny on large screens or overflowing short ones.
+ */
 const DialpadButton: React.FC<{
   onClick: () => void;
   children: React.ReactNode;
   className?: string;
   ariaLabel: string;
-  compact?: boolean;
-}> = ({ onClick, children, className, ariaLabel, compact }) => (
+}> = ({ onClick, children, className, ariaLabel }) => (
   <button
     type="button"
     onClick={onClick}
     aria-label={ariaLabel}
     className={cn(
       "flex w-full touch-manipulation select-none items-center justify-center rounded-2xl",
-      compact
-        ? "min-h-[3rem] aspect-square max-h-[4.25rem] text-xl"
-        : "aspect-square min-h-[var(--spacing-touch-target,2.75rem)] text-2xl",
-      "border border-white/[0.09] bg-[#171d29] font-semibold tabular-nums text-surface-50",
+      // Fluid size: ~48–64px keys depending on viewport width/height
+      "aspect-square min-h-[2.75rem]",
+      "text-[clamp(1.15rem,4.2vmin,1.55rem)] font-semibold tabular-nums text-surface-50",
+      "border border-white/[0.09] bg-[#171d29]",
       "shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-[background-color,border-color,transform] duration-150",
       "hover:border-white/20 hover:bg-[#202838] active:translate-y-px active:bg-[#252e40]",
       "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b1017]",
@@ -51,25 +52,19 @@ const DialpadButton: React.FC<{
 
 const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
 
-export const Dialpad: React.FC<DialpadProps> = ({
-  onKeyPress,
-  compact = false,
-}) => (
+export const Dialpad: React.FC<DialpadProps> = ({ onKeyPress }) => (
   <div
     className={cn(
       "mx-auto flex w-full flex-col items-stretch",
-      compact
-        ? "max-w-[17.5rem] gap-2 sm:max-w-[20rem] sm:gap-3"
-        : "max-w-[20rem] gap-3 sm:max-w-[22rem]",
+      "max-w-[min(20.5rem,88vw)] gap-[clamp(0.5rem,1.6vmin,0.75rem)]",
     )}
     role="group"
     aria-label="Four digit access code keypad"
   >
-    <div className={cn("grid grid-cols-3", compact ? "gap-2 sm:gap-3" : "gap-3")}>
+    <div className="grid grid-cols-3 gap-[clamp(0.5rem,1.6vmin,0.75rem)]">
       {DIGITS.map((digit) => (
         <DialpadButton
           key={digit}
-          compact={compact}
           onClick={() => onKeyPress(digit)}
           ariaLabel={`Digit ${digit}`}
         >
@@ -78,28 +73,25 @@ export const Dialpad: React.FC<DialpadProps> = ({
       ))}
     </div>
 
-    <div className={cn("grid grid-cols-3", compact ? "gap-2 sm:gap-3" : "gap-3")}>
+    <div className="grid grid-cols-3 gap-[clamp(0.5rem,1.6vmin,0.75rem)]">
       <DialpadButton
-        compact={compact}
         onClick={() => onKeyPress("clear")}
         ariaLabel="Clear code"
-        className="text-[10px] font-semibold uppercase tracking-[0.16em] text-surface-400 sm:text-xs"
+        className="text-[clamp(0.65rem,2.4vmin,0.8rem)] font-semibold uppercase tracking-[0.16em] text-surface-400"
       >
         Clear
       </DialpadButton>
-      <DialpadButton
-        compact={compact}
-        onClick={() => onKeyPress("0")}
-        ariaLabel="Digit 0"
-      >
+      <DialpadButton onClick={() => onKeyPress("0")} ariaLabel="Digit 0">
         0
       </DialpadButton>
       <DialpadButton
-        compact={compact}
         onClick={() => onKeyPress("backspace")}
         ariaLabel="Delete last digit"
       >
-        <Icon type="backspace" className={compact ? "h-5 w-5" : "h-6 w-6"} />
+        <Icon
+          type="backspace"
+          className="h-[clamp(1.25rem,4vmin,1.5rem)] w-[clamp(1.25rem,4vmin,1.5rem)]"
+        />
       </DialpadButton>
     </div>
   </div>

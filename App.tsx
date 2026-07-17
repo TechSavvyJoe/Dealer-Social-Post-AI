@@ -149,9 +149,9 @@ const AppContent: React.FC = () => {
         id="main-content"
         className={
           step === AppStep.LOGIN
-            ? "mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-3 py-0 sm:overflow-y-auto sm:px-6 sm:py-4 lg:px-8 lg:py-6"
-            : // Mobile-first: tight padding, one scrollport, safe-area bottom for home indicator
-              "mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-y-auto overscroll-y-contain px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-6 sm:pb-6 sm:pt-4 lg:px-8 lg:pb-8 lg:pt-6"
+            ? "mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-3 py-1 min-[400px]:py-2 sm:overflow-y-auto sm:px-6 sm:py-4 lg:px-8 lg:py-6"
+            : // Comfortable mobile padding that still leaves room for sticky bars
+              "mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-y-auto overscroll-y-contain px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-6 sm:pt-5 lg:px-8 lg:pb-8 lg:pt-6"
         }
       >
         <AnimatePresence mode="wait">
