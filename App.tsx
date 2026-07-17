@@ -147,13 +147,12 @@ const AppContent: React.FC = () => {
 
       <main
         id="main-content"
-        className={`flex min-h-0 flex-1 flex-col transition-all duration-300 ease-in-out ${
+        className={
           step === AppStep.LOGIN
-            ? "max-w-7xl mx-auto w-full px-3 py-0 sm:px-6 sm:py-4 lg:px-8 lg:py-6"
-            : compactMode
-              ? "pt-4 sm:pt-6 pb-4 sm:pb-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto w-full"
-              : "pt-6 sm:pt-8 pb-4 sm:pb-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto w-full"
-        }`}
+            ? "mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-3 py-0 sm:overflow-y-auto sm:px-6 sm:py-4 lg:px-8 lg:py-6"
+            : // Mobile-first: tight padding, one scrollport, safe-area bottom for home indicator
+              "mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-y-auto overscroll-y-contain px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-6 sm:pb-6 sm:pt-4 lg:px-8 lg:pb-8 lg:pt-6"
+        }
       >
         <AnimatePresence mode="wait">
           <MainContent

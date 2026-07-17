@@ -89,23 +89,23 @@ export const DealerAdminDashboard: React.FC = () => {
   };
 
   return (
-    <div className="w-full max-w-5xl mx-auto p-2 sm:p-4 space-y-6">
+    <div className="mx-auto w-full max-w-5xl space-y-4 p-0 sm:space-y-6 sm:p-2 lg:p-4">
       {/* Header with dealership identity + role chip */}
       <motion.div
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between gap-3 flex-wrap"
+        className="flex flex-wrap items-center justify-between gap-2 sm:gap-3"
       >
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
           {dealer.logo ? (
             <img
               src={dealer.logo}
               alt={`${dealer.name} logo`}
-              className="w-12 h-12 rounded-xl object-contain bg-white/10 p-1 ring-1 ring-white/10"
+              className="h-10 w-10 shrink-0 rounded-xl object-contain bg-white/10 p-1 ring-1 ring-white/10 sm:h-12 sm:w-12"
             />
           ) : (
             <div
-              className="w-12 h-12 rounded-xl flex items-center justify-center font-bold text-white text-xl shadow-lg"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg font-bold text-white shadow-lg sm:h-12 sm:w-12 sm:text-xl"
               style={{
                 background:
                   "linear-gradient(135deg, var(--brand-primary-500), var(--brand-primary))",
@@ -114,10 +114,12 @@ export const DealerAdminDashboard: React.FC = () => {
               {dealer.name.charAt(0)}
             </div>
           )}
-          <div>
-            <div className="text-xl font-bold text-surface-50">{dealer.name}</div>
+          <div className="min-w-0">
+            <div className="truncate text-lg font-bold text-surface-50 sm:text-xl">
+              {dealer.name}
+            </div>
             <div className="flex items-center gap-2 text-[11px] text-surface-400">
-              <ShieldCheck className="w-3 h-3 text-success-300" />
+              <ShieldCheck className="h-3 w-3 text-success-300" />
               Manager dashboard
             </div>
           </div>
@@ -139,35 +141,37 @@ export const DealerAdminDashboard: React.FC = () => {
         />
       )}
 
-      {/* Tabs */}
-      <div className="flex gap-1 p-1 bg-surface-950/60 rounded-xl border border-surface-800 w-full sm:w-auto sm:inline-flex">
-        {(
-          [
-            { key: "overview", label: "Overview", icon: Trophy },
-            { key: "settings", label: "Settings", icon: Settings },
-            { key: "team", label: "Team", icon: Users },
-          ] as Array<{ key: Tab; label: string; icon: typeof Trophy }>
-        ).map((t) => {
-          const Icon = t.icon;
-          return (
-            <button
-              key={t.key}
-              onClick={() => {
-                triggerHapticFeedback();
-                setTab(t.key);
-              }}
-              className={cn(
-                "flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors",
-                tab === t.key
-                  ? "bg-primary-500/30 text-primary-100"
-                  : "text-surface-400 hover:text-surface-200"
-              )}
-            >
-              <Icon className="w-4 h-4" />
-              {t.label}
-            </button>
-          );
-        })}
+      {/* Tabs — sticky on mobile so managers can switch without scrolling up */}
+      <div className="sticky top-0 z-20 -mx-0 bg-surface-950/90 py-1 backdrop-blur-md sm:static sm:bg-transparent sm:py-0 sm:backdrop-blur-none">
+        <div className="flex w-full gap-1 rounded-xl border border-surface-800 bg-surface-950/60 p-1 sm:inline-flex sm:w-auto">
+          {(
+            [
+              { key: "overview", label: "Overview", icon: Trophy },
+              { key: "settings", label: "Settings", icon: Settings },
+              { key: "team", label: "Team", icon: Users },
+            ] as Array<{ key: Tab; label: string; icon: typeof Trophy }>
+          ).map((t) => {
+            const Icon = t.icon;
+            return (
+              <button
+                key={t.key}
+                onClick={() => {
+                  triggerHapticFeedback();
+                  setTab(t.key);
+                }}
+                className={cn(
+                  "flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors sm:min-h-0 sm:flex-none sm:gap-2 sm:px-4",
+                  tab === t.key
+                    ? "bg-primary-500/30 text-primary-100"
+                    : "text-surface-400 hover:text-surface-200",
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {tab === "overview" && (

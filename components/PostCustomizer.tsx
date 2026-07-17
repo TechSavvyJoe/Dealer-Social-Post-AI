@@ -469,17 +469,17 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   });
 
   return (
-    <div className="flex-1 flex items-start justify-center py-2 sm:py-4 px-2 sm:px-4">
+    <div className="flex flex-1 items-start justify-center px-0 py-1 sm:px-2 sm:py-3">
       <motion.div
         className={cn(
-          "w-full mx-auto",
+          "mx-auto w-full",
           isDesktopLayout
             ? "max-w-6xl grid grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)] gap-6 items-start"
             : "max-w-2xl",
         )}
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
+        transition={{ duration: 0.25 }}
       >
         {isDesktopLayout && (
           <section className="sticky top-24 overflow-hidden rounded-[1.75rem] border border-white/10 bg-surface-950 shadow-2xl shadow-black/30">
@@ -515,12 +515,12 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           elevation={2}
           className="relative overflow-hidden border-white/10 bg-surface-900"
         >
-          <CardHeader className="pb-3 relative">
-            <div className="flex items-center gap-3">
+          <CardHeader className="relative pb-2 sm:pb-3">
+            <div className="flex items-center gap-2.5 sm:gap-3">
               {/* Compact image preview */}
               <motion.div
                 className={cn(
-                  "w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border border-white/20 flex-shrink-0 shadow-lg",
+                  "h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-white/20 shadow-lg sm:h-20 sm:w-20",
                   isDesktopLayout && "hidden",
                 )}
                 whileHover={{ scale: 1.05 }}
@@ -528,21 +528,21 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 <ProgressiveImage
                   src={imageSrc}
                   alt="Preview"
-                  className="w-full h-full object-cover"
+                  className="h-full w-full object-cover"
                 />
               </motion.div>
-              <div className="flex-1 min-w-0">
-                <CardTitle className="text-lg sm:text-xl">
-                  Create Your Post
+              <div className="min-w-0 flex-1">
+                <CardTitle className="text-base sm:text-xl">
+                  Create your post
                 </CardTitle>
                 <CardDescription className="text-xs sm:text-sm">
-                  Pick a style — AI handles the rest
+                  Style, platforms, then generate
                 </CardDescription>
               </div>
             </div>
           </CardHeader>
 
-          <CardContent className="space-y-5 pt-0 relative">
+          <CardContent className="relative space-y-4 pt-0 sm:space-y-5">
             {/* Post scenario — selects which kind of post this is (delivery,
                 pre-owned spotlight, service promo, etc). Tunes prompt + defaults. */}
             <ScenarioPicker
@@ -780,7 +780,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   Pick all that apply
                 </span>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="mobile-h-scroll -mx-1 px-1 pb-1 sm:flex-wrap sm:overflow-visible">
                 {platformOptions.map((p) => {
                   const on = selectedPlatforms.includes(p.id);
                   return (
@@ -790,7 +790,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       aria-pressed={on}
                       onClick={() => togglePlatform(p.id)}
                       className={cn(
-                        "min-h-11 rounded-full border px-3.5 py-2 text-left transition-colors",
+                        "min-h-11 shrink-0 snap-start rounded-full border px-3.5 py-2 text-left transition-colors",
                         on
                           ? "border-primary-400 bg-primary-500/25 text-primary-50"
                           : "border-white/10 bg-white/5 text-surface-300 hover:border-primary-400/40",
@@ -817,7 +817,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
                 Tone
               </label>
-              <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 custom-scrollbar scroll-smooth snap-x snap-mandatory">
+              <div className="mobile-h-scroll -mx-1 px-1 pb-2">
                 {Object.values(ToneOption).map((option) => {
                   const info = TONE_INFO[option];
                   const isActive = option === tone;

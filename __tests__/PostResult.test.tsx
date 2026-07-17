@@ -146,7 +146,7 @@ describe("PostResult job-first flow", () => {
     const user = userEvent.setup();
     renderResult();
 
-    await user.click(screen.getByRole("button", { name: "Remix this photo" }));
+    await user.click(screen.getByRole("button", { name: /^Remix$/i }));
     expect(callbacks.onRemix).not.toHaveBeenCalled();
     // Dialog may still be mid-enter animation (opacity 0); presence is enough.
     expect(

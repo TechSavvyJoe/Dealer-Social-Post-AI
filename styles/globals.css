@@ -117,6 +117,8 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    /* Prevent horizontal rubber-band that shifts the whole app on phones */
+    overflow-x: hidden;
     /* Enable advanced OpenType features */
     font-feature-settings:
       "liga" 1,
@@ -153,11 +155,42 @@
       color-mix(in srgb, var(--brand-primary) 8%, transparent),
       transparent 70%
     );
-    background-attachment: fixed;
+    /* fixed attachment janks scroll on many mobile browsers */
+    background-attachment: scroll;
     min-height: 100vh;
     min-height: 100dvh;
     overflow-x: hidden;
+    overscroll-behavior-y: none;
     position: relative;
+    /* Momentum scrolling on iOS for nested overflow regions */
+    -webkit-overflow-scrolling: touch;
+    /* Tap highlight tone matches brand instead of default blue flash */
+    -webkit-tap-highlight-color: color-mix(
+      in srgb,
+      var(--brand-primary) 22%,
+      transparent
+    );
+  }
+
+  /* Primary app scrollport — keeps layout chrome stable while content scrolls */
+  #main-content {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    scroll-behavior: smooth;
+  }
+
+  /* Horizontal chip rows (platforms, scenarios, tabs) */
+  .mobile-h-scroll {
+    display: flex;
+    gap: 0.5rem;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+  .mobile-h-scroll::-webkit-scrollbar {
+    display: none;
   }
 
   body::selection,

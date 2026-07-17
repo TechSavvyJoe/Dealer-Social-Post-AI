@@ -308,7 +308,7 @@ export const AdminDashboard: React.FC = () => {
   ];
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6 p-2 sm:p-4">
+    <div className="mx-auto w-full max-w-5xl space-y-4 p-0 sm:space-y-6 sm:p-2 lg:p-4">
       <SystemHealthPanel />
 
       <div className="rounded-2xl border border-white/10 bg-surface-900/45 p-5 shadow-elevation-2 backdrop-blur-xl sm:p-6">

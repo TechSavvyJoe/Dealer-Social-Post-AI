@@ -151,12 +151,12 @@ export const Modal: React.FC<ModalProps> = ({
 
             {/* Header */}
             {(title || description || showCloseButton) && (
-              <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
-                <div>
+              <div className="flex items-start justify-between gap-3 border-b border-white/5 px-4 py-3 sm:items-center sm:px-6 sm:py-4">
+                <div className="min-w-0">
                   {title && (
                     <h2
                       id={titleId}
-                      className="text-xl font-semibold text-surface-50"
+                      className="text-lg font-semibold text-surface-50 sm:text-xl"
                     >
                       {title}
                     </h2>
@@ -164,7 +164,7 @@ export const Modal: React.FC<ModalProps> = ({
                   {description && (
                     <p
                       id={descriptionId}
-                      className="text-sm text-surface-400 mt-1"
+                      className="mt-0.5 text-xs text-surface-400 sm:mt-1 sm:text-sm"
                     >
                       {description}
                     </p>
@@ -175,7 +175,7 @@ export const Modal: React.FC<ModalProps> = ({
                     type="button"
                     onClick={onClose}
                     aria-label="Close dialog"
-                    className="p-2 -mr-2 text-surface-400 hover:text-surface-50 hover:bg-white/5 rounded-full transition-colors"
+                    className="min-h-11 min-w-11 shrink-0 -mr-1 rounded-full p-2 text-surface-400 transition-colors hover:bg-white/5 hover:text-surface-50 sm:-mr-2"
                   >
                     <X className="w-5 h-5" />
                   </button>

@@ -1077,22 +1077,22 @@ export const PostResult: React.FC<PostResultProps> = ({
       </Suspense>
       <motion.section
         className={cn(
-          "mx-auto w-full max-w-screen-2xl flex-1 space-y-5 px-2 py-4 sm:px-4 sm:py-6 md:px-6",
+          "mx-auto w-full max-w-screen-2xl flex-1 space-y-3 px-0 py-2 sm:space-y-5 sm:px-2 sm:py-4 md:px-4 md:py-6",
           // Room for the fixed mobile delivery bar + home-indicator inset.
-          !isDesktopLayout && "pb-28",
+          !isDesktopLayout && "pb-[calc(5.5rem+env(safe-area-inset-bottom))]",
         )}
-        initial={shouldReduceMotion ? false : { opacity: 0, y: 12 }}
+        initial={shouldReduceMotion ? false : { opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: shouldReduceMotion ? 0 : 0.35 }}
+        transition={{ duration: shouldReduceMotion ? 0 : 0.28 }}
         aria-busy={imageBusy || textBusy}
       >
-        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-primary-300">
-              <CircleCheck className="h-4 w-4" aria-hidden="true" />
+        <header className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
+          <div className="min-w-0">
+            <div className="mb-0.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-primary-300 sm:mb-1 sm:gap-2 sm:text-xs">
+              <CircleCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden="true" />
               Post workspace
             </div>
-            <h2 className="text-2xl font-semibold tracking-tight text-surface-50 sm:text-3xl">
+            <h2 className="text-xl font-semibold tracking-tight text-surface-50 sm:text-3xl">
               {claimLocked
                 ? "Caption claim needs attention"
                 : releaseLocked
@@ -1105,23 +1105,23 @@ export const PostResult: React.FC<PostResultProps> = ({
                         : "Ready for manager review"
                     : "Ready to publish"}
             </h2>
-            <p className="mt-1 text-sm text-surface-400">
-              Review the media and caption, then copy, share, or save.
+            <p className="mt-0.5 text-xs text-surface-400 sm:mt-1 sm:text-sm">
+              Review, then copy, share, or save.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto">
             <button
               type="button"
               onClick={handleRemixRequest}
-              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-primary-400/35 bg-primary-500/10 px-4 text-sm font-semibold text-primary-100 transition-colors hover:border-primary-400/55 hover:bg-primary-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
+              className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-primary-400/35 bg-primary-500/10 px-3 text-sm font-semibold text-primary-100 transition-colors hover:border-primary-400/55 hover:bg-primary-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 sm:min-h-[44px] sm:flex-none sm:px-4"
             >
               <Sparkles className="h-4 w-4" aria-hidden="true" />
-              Remix this photo
+              Remix
             </button>
             <button
               type="button"
               onClick={handleCreateAnotherRequest}
-              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-surface-200 transition-colors hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
+              className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-sm font-semibold text-surface-200 transition-colors hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 sm:min-h-[44px] sm:flex-none sm:px-4"
             >
               <Camera className="h-4 w-4" aria-hidden="true" />
               New photo
@@ -1913,11 +1913,11 @@ export const PostResult: React.FC<PostResultProps> = ({
         <div
           className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-surface-950/95 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur-md"
           style={{
-            paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))",
+            paddingBottom: "max(0.4rem, env(safe-area-inset-bottom))",
           }}
         >
           <div
-            className="mx-auto grid max-w-lg grid-cols-3 gap-2 px-3 pt-2"
+            className="mx-auto grid max-w-lg grid-cols-3 gap-1.5 px-2.5 pt-1.5 sm:gap-2 sm:px-3 sm:pt-2"
             aria-label="Post delivery actions"
           >
             <Button
