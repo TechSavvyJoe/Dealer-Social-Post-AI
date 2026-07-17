@@ -149,9 +149,10 @@ const AppContent: React.FC = () => {
         id="main-content"
         className={
           step === AppStep.LOGIN
-            ? "mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-3 py-1 min-[400px]:py-2 sm:overflow-y-auto sm:px-6 sm:py-4 lg:px-8 lg:py-6"
-            : // Comfortable mobile padding that still leaves room for sticky bars
-              "mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-y-auto overscroll-y-contain px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-6 sm:pt-5 lg:px-8 lg:pb-8 lg:pt-6"
+            ? // Zero vertical chrome on mobile login — #root already owns safe-area
+              "mx-auto flex h-full min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-0 py-0 sm:px-6 sm:py-4 lg:px-8 lg:py-6"
+            : // Non-login: one scrollport; bottom pad only for content (safe-area on #root)
+              "mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-y-auto overscroll-y-contain px-4 pb-4 pt-3 sm:px-6 sm:pb-6 sm:pt-5 lg:px-8 lg:pb-8 lg:pt-6"
         }
       >
         <AnimatePresence mode="wait">

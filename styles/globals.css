@@ -306,11 +306,10 @@
     }
   }
 
-  /* On standalone iOS PWA, the status bar overlaps content unless we pad.
-     We already use --sat in index.html; make sure no descendant breaks the chain. */
+  /* Standalone PWA safe-area is owned by #root in index.html — do not double-pad body. */
   @media (display-mode: standalone) {
     body {
-      padding-top: env(safe-area-inset-top);
+      padding-top: 0;
     }
   }
 

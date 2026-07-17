@@ -1913,11 +1913,13 @@ export const PostResult: React.FC<PostResultProps> = ({
         <div
           className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-surface-950/95 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur-md"
           style={{
-            paddingBottom: "max(0.4rem, env(safe-area-inset-bottom))",
+            paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))",
+            paddingLeft: "env(safe-area-inset-left)",
+            paddingRight: "env(safe-area-inset-right)",
           }}
         >
           <div
-            className="mx-auto grid max-w-lg grid-cols-3 gap-1.5 px-2.5 pt-1.5 sm:gap-2 sm:px-3 sm:pt-2"
+            className="mx-auto grid max-w-lg grid-cols-3 gap-2 px-3 pt-2"
             aria-label="Post delivery actions"
           >
             <Button

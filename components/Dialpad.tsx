@@ -20,10 +20,6 @@ interface DialpadProps {
   onKeyPress: (key: DialpadKey) => void;
 }
 
-/**
- * Fluid keypad: keys scale with viewport so phones stay tappable and balanced
- * without looking tiny on large screens or overflowing short ones.
- */
 const DialpadButton: React.FC<{
   onClick: () => void;
   children: React.ReactNode;
@@ -35,10 +31,9 @@ const DialpadButton: React.FC<{
     onClick={onClick}
     aria-label={ariaLabel}
     className={cn(
-      "flex w-full touch-manipulation select-none items-center justify-center rounded-2xl",
-      // Fluid size: ~48–64px keys depending on viewport width/height
-      "aspect-square min-h-[2.75rem]",
-      "text-[clamp(1.15rem,4.2vmin,1.55rem)] font-semibold tabular-nums text-surface-50",
+      // Fill the grid cell — height comes from parent remaining space
+      "flex h-full min-h-0 w-full touch-manipulation select-none items-center justify-center rounded-2xl",
+      "text-[clamp(1.1rem,2.8dvh,1.5rem)] font-semibold tabular-nums text-surface-50",
       "border border-white/[0.09] bg-[#171d29]",
       "shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-[background-color,border-color,transform] duration-150",
       "hover:border-white/20 hover:bg-[#202838] active:translate-y-px active:bg-[#252e40]",
@@ -52,17 +47,18 @@ const DialpadButton: React.FC<{
 
 const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
 
+/**
+ * Height-aware keypad: 4 equal rows fill the parent (`minmax(0,1fr)` chain).
+ * Never forces overflow via aspect-square keys.
+ */
 export const Dialpad: React.FC<DialpadProps> = ({ onKeyPress }) => (
   <div
-    className={cn(
-      "mx-auto flex w-full flex-col items-stretch",
-      "max-w-[min(20.5rem,88vw)] gap-[clamp(0.5rem,1.6vmin,0.75rem)]",
-    )}
+    className="mx-auto grid h-full min-h-0 w-full max-w-[min(20rem,86vw)] grid-rows-[repeat(4,minmax(0,1fr))] gap-[clamp(0.4rem,1.2dvh,0.7rem)]"
     role="group"
     aria-label="Four digit access code keypad"
   >
-    <div className="grid grid-cols-3 gap-[clamp(0.5rem,1.6vmin,0.75rem)]">
-      {DIGITS.map((digit) => (
+    <div className="grid min-h-0 grid-cols-3 gap-[clamp(0.4rem,1.2dvh,0.7rem)]">
+      {DIGITS.slice(0, 3).map((digit) => (
         <DialpadButton
           key={digit}
           onClick={() => onKeyPress(digit)}
@@ -72,12 +68,33 @@ export const Dialpad: React.FC<DialpadProps> = ({ onKeyPress }) => (
         </DialpadButton>
       ))}
     </div>
-
-    <div className="grid grid-cols-3 gap-[clamp(0.5rem,1.6vmin,0.75rem)]">
+    <div className="grid min-h-0 grid-cols-3 gap-[clamp(0.4rem,1.2dvh,0.7rem)]">
+      {DIGITS.slice(3, 6).map((digit) => (
+        <DialpadButton
+          key={digit}
+          onClick={() => onKeyPress(digit)}
+          ariaLabel={`Digit ${digit}`}
+        >
+          {digit}
+        </DialpadButton>
+      ))}
+    </div>
+    <div className="grid min-h-0 grid-cols-3 gap-[clamp(0.4rem,1.2dvh,0.7rem)]">
+      {DIGITS.slice(6, 9).map((digit) => (
+        <DialpadButton
+          key={digit}
+          onClick={() => onKeyPress(digit)}
+          ariaLabel={`Digit ${digit}`}
+        >
+          {digit}
+        </DialpadButton>
+      ))}
+    </div>
+    <div className="grid min-h-0 grid-cols-3 gap-[clamp(0.4rem,1.2dvh,0.7rem)]">
       <DialpadButton
         onClick={() => onKeyPress("clear")}
         ariaLabel="Clear code"
-        className="text-[clamp(0.65rem,2.4vmin,0.8rem)] font-semibold uppercase tracking-[0.16em] text-surface-400"
+        className="text-[clamp(0.65rem,1.8dvh,0.8rem)] font-semibold uppercase tracking-[0.14em] text-surface-400"
       >
         Clear
       </DialpadButton>
@@ -88,10 +105,7 @@ export const Dialpad: React.FC<DialpadProps> = ({ onKeyPress }) => (
         onClick={() => onKeyPress("backspace")}
         ariaLabel="Delete last digit"
       >
-        <Icon
-          type="backspace"
-          className="h-[clamp(1.25rem,4vmin,1.5rem)] w-[clamp(1.25rem,4vmin,1.5rem)]"
-        />
+        <Icon type="backspace" className="h-[1.35em] w-[1.35em]" />
       </DialpadButton>
     </div>
   </div>
