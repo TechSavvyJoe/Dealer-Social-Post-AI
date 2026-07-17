@@ -97,17 +97,17 @@ export const OPENAI_MODELS = {
  * Google recommends leaving Gemini 3.x sampling parameters at their defaults.
  */
 export const TASK_PARAMS: Record<string, GenerationParams> = {
-  // Agency-grade caption: hook + story + CTA + hashtags (~220–420 body chars).
+  // Caption text is short, but Gemini 3.x may spend tokens on internal
+  // reasoning before the visible caption — keep headroom so MAX_TOKENS
+  // never truncates the actual post body to empty.
   text_caption: {
-    maxOutputTokens: 900,
+    maxOutputTokens: 2048,
   },
-  // Retry/regenerate needs room for a full alternate draft, not a stub.
   text_caption_regenerate: {
-    maxOutputTokens: 900,
+    maxOutputTokens: 2048,
   },
-  // The edit prompt constrains the model to the user's requested change.
   text_caption_edit: {
-    maxOutputTokens: 900,
+    maxOutputTokens: 2048,
   },
   // Image models manage their own reasoning and composition defaults.
   image_generate: {

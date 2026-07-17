@@ -95,7 +95,7 @@ describe("GeminiService model routing", () => {
     );
     expect(textCall, `expected a call with model=${expected}`).toBeDefined();
     expect(textCall?.[0].generationConfig).toEqual({
-      maxOutputTokens: 900,
+      maxOutputTokens: 2048,
     });
     expect(textCall?.[0].generationConfig).not.toHaveProperty("temperature");
     expect(textCall?.[0].generationConfig).not.toHaveProperty("topK");

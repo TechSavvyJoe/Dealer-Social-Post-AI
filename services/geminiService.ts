@@ -173,6 +173,93 @@ const cleanGeneratedText = (inputText: string): string => {
   return cleanSocialCaption(inputText ?? "");
 };
 
+/** Pull a data-URL image out of a generateContent response, if any. */
+const extractGeneratedImageDataUrl = (response: unknown): string | null => {
+  const parts =
+    (response as { candidates?: Array<{ content?: { parts?: unknown[] } }> })
+      ?.candidates?.[0]?.content?.parts ?? [];
+  for (const part of parts) {
+    const inline = (part as { inlineData?: { mimeType?: string; data?: string } })
+      ?.inlineData;
+    if (inline?.data) {
+      return `data:${inline.mimeType || "image/png"};base64,${inline.data}`;
+    }
+  }
+  return null;
+};
+
+/** Human-readable reason when a model answers without an image. */
+const imageFailureReason = (response: unknown): string => {
+  const cand = (
+    response as {
+      candidates?: Array<{ finishReason?: string; finishMessage?: string }>;
+      promptFeedback?: { blockReason?: string };
+    }
+  )?.candidates?.[0];
+  const block = (response as { promptFeedback?: { blockReason?: string } })
+    ?.promptFeedback?.blockReason;
+  return (
+    cand?.finishReason ||
+    cand?.finishMessage ||
+    block ||
+    "empty image response"
+  );
+};
+
+/**
+ * Run image generation across the model ladder. Treats "HTTP 200 but no
+ * image bytes" (IMAGE_RECITATION, SAFETY, empty parts) as a failure so the
+ * next model is tried — previously that silent empty success aborted the
+ * whole post with a generic error.
+ */
+const generateImageWithFallback = async (
+  task: "image_generate" | "image_edit" | "image_fun",
+  imageParts: unknown[],
+  imagePromptForOpenAI?: string,
+): Promise<string> => {
+  const client = getGeminiClient();
+  try {
+    const response = await withFallbackChain(task, async (modelId) => {
+      const res = await client.models.generateContent({
+        model: modelId,
+        contents: { parts: imageParts },
+        generationConfig: imageGenerationConfig(modelId, TASKS[task].params),
+      } as any);
+      const dataUrl = extractGeneratedImageDataUrl(res);
+      if (!dataUrl) {
+        throw new Error(
+          `No image from ${modelId} (${imageFailureReason(res)})`,
+        );
+      }
+      return res;
+    });
+    const dataUrl = extractGeneratedImageDataUrl(response);
+    if (dataUrl) return dataUrl;
+    throw new Error("Image model returned no image data.");
+  } catch (err) {
+    if (shouldFallbackToOpenAI(err) && imagePromptForOpenAI) {
+      console.warn(
+        `[${task}] All Gemini image models exhausted; falling back to OpenAI`,
+        err,
+      );
+      logTelemetry("image.fallback.openai", {
+        reason: err instanceof Error ? err.message : String(err),
+        task,
+      });
+      try {
+        return await generateImageViaOpenAI({
+          prompt: imagePromptForOpenAI,
+          size: "1024x1024",
+          quality: "high",
+        });
+      } catch (openaiErr) {
+        console.warn(`[${task}] OpenAI image fallback also failed`, openaiErr);
+      }
+    }
+    throw err;
+  }
+};
+
 /**
  * Gemini 3 image models default to 1K. Prefer production-quality 2K for the
  * premium/standard tiers; Lite only supports 1K.
@@ -212,33 +299,7 @@ export const generateFunSocialPostImage = async (
     imageParts.push(logoImagePart);
   }
 
-  const client = getGeminiClient();
-  const imageResponse = await withFallbackChain(
-    "image_fun",
-    async (modelId) => {
-      return await client.models.generateContent({
-        model: modelId,
-        contents: { parts: imageParts },
-        generationConfig: imageGenerationConfig(
-          modelId,
-          TASKS.image_fun.params,
-        ),
-      } as any);
-    },
-  );
-
-  // With responseModalities ["TEXT","IMAGE"], the model often returns the text
-  // part first and the image at parts[1]. Scan for the inlineData part instead
-  // of assuming index 0, or a successful image gets reported as a failure.
-  const funParts = imageResponse.candidates?.[0]?.content?.parts ?? [];
-  const imageContentPart = funParts.find((p: any) => p?.inlineData);
-  if (imageContentPart && imageContentPart.inlineData) {
-    const generatedImageMime = imageContentPart.inlineData.mimeType;
-    const generatedImageData = imageContentPart.inlineData.data;
-    return `data:${generatedImageMime};base64,${generatedImageData}`;
-  }
-
-  throw new Error("Failed to generate fun mode image from AI.");
+  return await generateImageWithFallback("image_fun", imageParts, funPrompt);
 };
 
 export const editSocialPostImage = async (
@@ -264,37 +325,11 @@ export const editSocialPostImage = async (
     imageParts.push(logoImagePart);
   }
 
-  const client = getGeminiClient();
-  const imageResponse = await withFallbackChain(
+  return await generateImageWithFallback(
     "image_edit",
-    async (modelId) => {
-      return await client.models.generateContent({
-        model: modelId,
-        contents: { parts: imageParts },
-        generationConfig: imageGenerationConfig(
-          modelId,
-          TASKS.image_edit.params,
-        ),
-      } as any);
-    },
+    imageParts,
+    editInstruction,
   );
-
-  let newImageBase64 = "";
-  // Scan parts for the inlineData (the image may be at parts[1] after a text
-  // part) rather than hard-indexing parts[0].
-  const responseParts = imageResponse.candidates?.[0]?.content?.parts ?? [];
-  const imageContentPart = responseParts.find((p: any) => p?.inlineData);
-  if (imageContentPart && imageContentPart.inlineData) {
-    const generatedImageMime = imageContentPart.inlineData.mimeType;
-    const generatedImageData = imageContentPart.inlineData.data;
-    newImageBase64 = `data:${generatedImageMime};base64,${generatedImageData}`;
-  }
-
-  if (!newImageBase64) {
-    throw new Error("Failed to generate edited image from AI.");
-  }
-
-  return newImageBase64;
 };
 
 export const generateSocialPostText = async (
@@ -360,22 +395,34 @@ export const generateSocialPostText = async (
         "[generateSocialPostText] Gemini exhausted; falling back to Claude",
         err,
       );
-      // Claude doesn't see the image, so include a one-liner that frames it.
-      const claudePrompt = `${textPrompt}\n\n(Note: image was not transmitted to fallback model. Use the creative brief above to infer scene; do not invent specific visual details you cannot verify.)`;
-      text = cleanGeneratedText(
-        await generateTextViaClaude(claudePrompt, {
-          model: taskConfig.claudeFallback,
-          temperature: taskConfig.claudeTemperature,
-          maxTokens: taskConfig.params.maxOutputTokens,
-        }),
-      );
+      try {
+        // Claude doesn't see the image, so include a one-liner that frames it.
+        const claudePrompt = `${textPrompt}\n\n(Note: image was not transmitted to fallback model. Use the creative brief above to infer scene; do not invent specific visual details you cannot verify.)`;
+        text = cleanGeneratedText(
+          await generateTextViaClaude(claudePrompt, {
+            model: taskConfig.claudeFallback,
+            temperature: taskConfig.claudeTemperature,
+            maxTokens: taskConfig.params.maxOutputTokens,
+          }),
+        );
+      } catch (claudeErr) {
+        console.warn(
+          "[generateSocialPostText] Claude fallback failed; using safe template",
+          claudeErr,
+        );
+        text = "";
+      }
     } else {
-      throw err;
+      console.warn(
+        "[generateSocialPostText] Gemini failed; using safe template caption",
+        err,
+      );
+      text = "";
     }
   }
 
-  // Quality gate: if the model returned gibberish/labels, ship a clean
-  // template post instead of showing junk to the salesperson.
+  // Quality gate: if the model returned empty/gibberish/labels, ship a clean
+  // template post instead of failing the whole generate for the salesperson.
   const usable = ensureUsableCaption(text, {
     storeName: dealershipName,
     customerName,
@@ -383,12 +430,17 @@ export const generateSocialPostText = async (
   text = usable.caption;
   if (usable.usedFallback) {
     console.warn(
-      "[generateSocialPostText] Low-quality model caption replaced with safe template",
+      "[generateSocialPostText] Low-quality/empty model caption replaced with safe template",
     );
   }
 
   if (!text) {
-    throw new Error("Failed to generate post text from AI.");
+    // ensureUsableCaption always returns a template when given a store name —
+    // this is a last-ditch guard.
+    text = ensureUsableCaption("", {
+      storeName: dealershipName || "our dealership",
+      customerName,
+    }).caption;
   }
   if (cacheKey) {
     // 5 minute cache — captions are pretty hot when iterating styles.
@@ -507,94 +559,37 @@ export const generateSocialPost = async (
     imageParts.push(logoImagePart);
   }
 
-  const client = getGeminiClient();
-  // Route through the fallback chain so an Imagen / preview-model outage
-  // automatically tries the next Gemini model in the ladder. If ALL Gemini
-  // image models exhaust AND the OpenAI flag is on, drop to OpenAI as the
-  // last-tier cross-vendor fallback (returns a fresh generated image rather
-  // than edit-of-source — degraded mode but still ships something).
+  // Image ladder → OpenAI → original photo. Never hard-fail a delivery post
+  // just because the retoucher model blocked/recited the image.
   const imagePromise = (async () => {
     try {
-      return await withFallbackChain("image_generate", async (modelId) =>
-        client.models.generateContent({
-          model: modelId,
-          contents: { parts: imageParts },
-          generationConfig: imageGenerationConfig(
-            modelId,
-            TASKS.image_generate.params,
-          ),
-        } as any),
+      return await generateImageWithFallback(
+        "image_generate",
+        imageParts,
+        imagePrompt,
       );
     } catch (err) {
-      if (shouldFallbackToOpenAI(err)) {
-        console.warn(
-          "[generateSocialPost] All Gemini image models exhausted; falling back to OpenAI",
-          err,
-        );
-        logTelemetry("image.fallback.openai", {
-          reason: err instanceof Error ? err.message : String(err),
-        });
-        const openaiImage = await generateImageViaOpenAI({
-          prompt: imagePrompt,
-          size: "1024x1024",
-          quality: "high",
-        });
-        // Synthesize a Gemini-shaped response so downstream extraction works.
-        // Throw (don't substitute "") if the data URL is unparseable — an empty
-        // base64 string is truthy downstream and would ship a broken/blank
-        // image as if generation succeeded.
-        const match = openaiImage.match(/^data:([^;]+);base64,(.+)$/);
-        if (!match) {
-          throw new Error(
-            "OpenAI image fallback returned an unparseable image.",
-          );
-        }
-        return {
-          candidates: [
-            {
-              content: {
-                parts: [
-                  {
-                    inlineData: {
-                      mimeType: match[1] || "image/png",
-                      data: match[2],
-                    },
-                  },
-                ],
-              },
-            },
-          ],
-        } as any;
-      }
-      throw new Error(
-        `Failed to generate image content: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
+      console.warn(
+        "[generateSocialPost] AI image failed; shipping original photo with caption",
+        err,
       );
+      logTelemetry("image.fallback.original", {
+        reason: err instanceof Error ? err.message : String(err),
+      });
+      return normalisedImage;
     }
   })();
 
-  const [textResult, imageResponse] = await Promise.all([
+  const [textResult, imageResult] = await Promise.all([
     textPromise,
     imagePromise,
   ]);
 
-  let newImageBase64 = "";
-  // Scan parts for the inlineData (the image may be at parts[1] after a text
-  // part) rather than hard-indexing parts[0].
-  const responseParts = imageResponse.candidates?.[0]?.content?.parts ?? [];
-  const imageContentPart = responseParts.find((p: any) => p?.inlineData);
-  if (imageContentPart && imageContentPart.inlineData) {
-    const generatedImageMime = imageContentPart.inlineData.mimeType;
-    const generatedImageData = imageContentPart.inlineData.data;
-    newImageBase64 = `data:${generatedImageMime};base64,${generatedImageData}`;
+  if (!textResult) {
+    throw new Error("Failed to generate social post caption.");
   }
 
-  if (!textResult || !newImageBase64) {
-    throw new Error("Failed to generate social post content from AI.");
-  }
-
-  return { image: newImageBase64, text: textResult };
+  return { image: imageResult || normalisedImage, text: textResult };
 };
 
 const getImageDimensions = (

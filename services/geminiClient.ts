@@ -45,9 +45,18 @@ class ProxiedGeminiClient {
           ...rawResponse,
           text: () => {
             const parts = rawResponse?.candidates?.[0]?.content?.parts ?? [];
-            return parts
+            // Gemini 2.5/3 thinking models may return `thought: true` parts —
+            // those are internal reasoning, not the caption. Prefer non-thought
+            // text; if only thought parts exist, fall back to all text.
+            const nonThought = parts.filter(
+              (part: { text?: string; thought?: boolean }) =>
+                part?.text && !part.thought,
+            );
+            const useParts = nonThought.length > 0 ? nonThought : parts;
+            return useParts
               .map((part: { text?: string }) => part?.text || "")
-              .join("");
+              .join("")
+              .trim();
           },
         };
       },
