@@ -31,12 +31,16 @@ test.describe("Dealer Social Post AI Flow", () => {
 
     await page.goto("/");
 
+    // Login was simplified for mobile: primary heading is "Sign in".
     await expect(
-      page.getByRole("heading", { name: /open your post studio/i }),
+      page.getByRole("heading", { name: /^sign in$/i }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /my code/i }),
     ).toBeVisible();
 
-    // Dialpad buttons use accessible names like "Digit 9".
-    for (let i = 0; i < 6; i++) {
+    // Personal access codes are 4 digits; dialpad buttons use names like "Digit 9".
+    for (let i = 0; i < 4; i++) {
       await page.getByRole("button", { name: "Digit 9" }).click();
     }
 
