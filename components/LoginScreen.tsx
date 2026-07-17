@@ -13,6 +13,7 @@ import { Logo } from "./Logo";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Dialpad, type DialpadKey } from "./Dialpad";
 import { Input } from "./ui/Input";
+import { Button } from "./ui/Button";
 import { useToast } from "./ui/Toast";
 import { cn } from "../utils/classNames";
 
@@ -324,17 +325,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       id="login-heading"
                       className="text-2xl font-semibold tracking-[-0.025em] text-surface-50 sm:text-3xl"
                     >
-                      Open your post studio
+                      Sign in
                     </h1>
-                    <p className="mt-1 text-sm leading-relaxed text-surface-400">
-                      Enter your personal 4-digit code. Managers and salespeople
-                      each have their own access.
+                    <p className="mt-1.5 text-base leading-relaxed text-surface-300">
+                      Tap your 4-digit code. We sign you in automatically.
                     </p>
                   </div>
                 </div>
 
                 <div
-                  className="mb-4 grid grid-cols-2 rounded-xl border border-white/[0.08] bg-black/20 p-1"
+                  className="mb-5 grid grid-cols-2 gap-1 rounded-2xl border border-white/[0.08] bg-black/25 p-1.5"
                   role="group"
                   aria-label="Access type"
                 >
@@ -343,23 +343,23 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     onClick={() => selectMode("personal")}
                     aria-pressed={entryMode === "personal"}
                     className={cn(
-                      "min-h-11 rounded-lg px-3 text-sm font-semibold transition-colors",
+                      "min-h-12 rounded-xl px-3 text-sm font-semibold transition-colors",
                       entryMode === "personal"
-                        ? "bg-surface-700 text-white shadow-sm"
-                        : "text-surface-400 hover:text-surface-200",
+                        ? "bg-primary-600 text-white shadow-md"
+                        : "text-surface-300 hover:text-surface-100",
                     )}
                   >
-                    Personal code
+                    My code
                   </button>
                   <button
                     type="button"
                     onClick={() => selectMode("system")}
                     aria-pressed={entryMode === "system"}
                     className={cn(
-                      "min-h-11 rounded-lg px-3 text-sm font-semibold transition-colors",
+                      "min-h-12 rounded-xl px-3 text-sm font-semibold transition-colors",
                       entryMode === "system"
-                        ? "bg-surface-700 text-white shadow-sm"
-                        : "text-surface-400 hover:text-surface-200",
+                        ? "bg-primary-600 text-white shadow-md"
+                        : "text-surface-300 hover:text-surface-100",
                     )}
                   >
                     System admin
@@ -369,7 +369,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 {entryMode === "personal" ? (
                   <div>
                     <div
-                      className="mb-3 flex items-center justify-center gap-3 py-1.5"
+                      className="mb-4 flex items-center justify-center gap-4 py-2"
                       role="status"
                       aria-label={`${dealerCode.length} of ${PERSON_CODE_LENGTH} digits entered`}
                     >
@@ -380,11 +380,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                             key={index}
                             aria-hidden="true"
                             className={cn(
-                              "h-3.5 w-3.5 rounded-full border transition-colors",
+                              "h-4 w-4 rounded-full border-2 transition-colors sm:h-5 sm:w-5",
                               index < dealerCode.length
                                 ? "border-primary-400 bg-primary-400"
                                 : index === dealerCode.length
-                                  ? "border-primary-400 bg-transparent ring-4 ring-primary-500/10"
+                                  ? "border-primary-400 bg-transparent ring-4 ring-primary-500/15"
                                   : "border-surface-600 bg-surface-800",
                             )}
                           />
@@ -393,12 +393,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     </div>
 
                     <p
-                      className="mb-3 text-center text-xs text-surface-400"
+                      className="mb-4 text-center text-sm text-surface-400"
                       aria-live="polite"
                     >
                       {dealerCode.length > 0
-                        ? `${PERSON_CODE_LENGTH - dealerCode.length} digits remaining`
-                        : "Enter your 4-digit code. Sign-in starts automatically."}
+                        ? `${PERSON_CODE_LENGTH - dealerCode.length} left`
+                        : "4 digits · from your manager"}
                     </p>
 
                     <Dialpad onKeyPress={handleDialpadKeyPress} />
@@ -453,14 +453,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                         fullWidth
                       />
 
-                      <button
+                      <Button
                         type="submit"
+                        variant="primary"
+                        size="lg"
+                        fullWidth
                         disabled={adminCode.length < ADMIN_CODE_MIN_LENGTH}
-                        className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary-600 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:bg-surface-700 disabled:text-surface-400"
+                        className="mt-4 min-h-14"
+                        rightIcon={<ArrowRight className="h-4 w-4" />}
                       >
                         Continue to system admin
-                        <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                      </button>
+                      </Button>
                     </div>
                   </form>
                 )}

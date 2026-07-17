@@ -25,7 +25,16 @@ export interface ExportFormat {
   description: string;
 }
 
+/** Story/vertical first — most salesperson traffic is phone Stories/Reels. */
 export const EXPORT_FORMATS: ExportFormat[] = [
+  {
+    id: "story_vertical",
+    label: "Story / Reel (9:16)",
+    filename: "post-story-9x16.jpg",
+    width: 1080,
+    height: 1920,
+    description: "IG Story, IG Reels, TikTok, YouTube Shorts — recommended",
+  },
   {
     id: "feed_square",
     label: "Feed (1:1)",
@@ -33,14 +42,6 @@ export const EXPORT_FORMATS: ExportFormat[] = [
     width: 1080,
     height: 1080,
     description: "Facebook Feed, Instagram Feed",
-  },
-  {
-    id: "story_vertical",
-    label: "Story / Reel (9:16)",
-    filename: "post-story-9x16.jpg",
-    width: 1080,
-    height: 1920,
-    description: "IG Story, IG Reels, TikTok, YouTube Shorts",
   },
   {
     id: "marketplace",

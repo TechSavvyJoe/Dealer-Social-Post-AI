@@ -55,6 +55,12 @@ import {
 } from "../services/postScenarios";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { ProgressiveImage } from "./ui/ProgressiveImage";
+import {
+  DEFAULT_PLATFORM_IDS,
+  getPlatformOptions,
+  platformsToCreativeBrief,
+  type PlatformId,
+} from "../services/platformCopy";
 
 interface PostCustomizerProps {
   imageSrc: string;
@@ -170,6 +176,10 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 }) => {
   const [customerName, setCustomerName] = useState("");
   const [style, setStyle] = useState<StyleOption>(defaultStyle);
+  const [selectedPlatforms, setSelectedPlatforms] = useState<PlatformId[]>(
+    () => [...DEFAULT_PLATFORM_IDS],
+  );
+  const platformOptions = useMemo(() => getPlatformOptions(), []);
   const [tone, setTone] = useState<ToneOption>(defaultTone);
   const [customMessage, setCustomMessage] = useState("");
   const [captionSource, setCaptionSource] = useState<CaptionSource>("ai");
@@ -258,6 +268,18 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     [allowedStyles],
   );
 
+  const togglePlatform = useCallback((id: PlatformId) => {
+    triggerHapticFeedback();
+    setSelectedPlatforms((prev) => {
+      if (prev.includes(id)) {
+        // Keep at least one platform selected
+        if (prev.length === 1) return prev;
+        return prev.filter((p) => p !== id);
+      }
+      return [...prev, id];
+    });
+  }, []);
+
   // Notify parent
   useEffect(() => {
     onStyleToneChange(style, tone);
@@ -294,6 +316,14 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     );
     if (scenarioBlock) {
       briefParts.push(scenarioBlock);
+    }
+
+    const platformBrief = platformsToCreativeBrief(
+      selectedPlatforms,
+      dealershipName,
+    );
+    if (platformBrief) {
+      briefParts.push(platformBrief);
     }
 
     // Inject decoded vehicle context if a VIN was scanned. This grounds the
@@ -405,6 +435,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     currentDealer,
     scenarioId,
     activeScenario.requiresCustomer,
+    selectedPlatforms,
+    dealershipName,
     onGenerate,
   ]);
 
@@ -719,6 +751,48 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   );
                 })}
               </div>
+            </div>
+
+            {/* Where they'll post — drives caption length + export bias */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+                  Share to
+                </label>
+                <span className="text-[10px] text-surface-500">
+                  Pick all that apply
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {platformOptions.map((p) => {
+                  const on = selectedPlatforms.includes(p.id);
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => togglePlatform(p.id)}
+                      className={cn(
+                        "min-h-11 rounded-full border px-3.5 py-2 text-left transition-colors",
+                        on
+                          ? "border-primary-400 bg-primary-500/25 text-primary-50"
+                          : "border-white/10 bg-white/5 text-surface-300 hover:border-primary-400/40",
+                      )}
+                    >
+                      <span className="block text-sm font-semibold">
+                        {p.shortLabel}
+                      </span>
+                      <span className="block text-[10px] leading-tight opacity-80">
+                        {p.verticalPreferred ? "9:16 story-ready" : "Feed"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] leading-snug text-surface-500">
+                Captions are tailored to these platforms. Stories and TikTok
+                prefer vertical (9:16) exports.
+              </p>
             </div>
 
             {/* Tone Selection - Horizontal Scroll on Mobile with Snap */}

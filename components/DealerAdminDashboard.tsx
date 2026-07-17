@@ -11,7 +11,10 @@ import {
   Loader2,
   Save,
   ShieldCheck,
+  Pencil,
 } from "lucide-react";
+import { PersonEditModal } from "./PersonEditModal";
+import type { Person } from "../services/salespeople";
 import { Button } from "./ui/Button";
 import { Input, Textarea } from "./ui/Input";
 import { Leaderboard } from "./Leaderboard";
@@ -701,6 +704,8 @@ const DealerTeamCard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [newPin, setNewPin] = useState("");
+  const [editingPerson, setEditingPerson] = useState<Person | null>(null);
+  const dealer = useAppStore((s) => s.currentDealer);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -952,25 +957,45 @@ const DealerTeamCard: React.FC = () => {
                   {p.count}
                 </span>
                 {p.id ? (
-                  <button
-                    type="button"
-                    onClick={() => p.id && handleToggleActive(p.id, p.active)}
-                    className={cn(
-                      "text-[11px] px-2 py-1 rounded-md transition-colors",
-                      p.active
-                        ? "bg-white/5 hover:bg-white/10 text-surface-300"
-                        : "bg-success-500/20 hover:bg-success-500/30 text-success-100"
-                    )}
-                    title={p.active ? "Deactivate" : "Reactivate"}
-                  >
-                    {p.active ? "Deactivate" : "Reactivate"}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditingPerson({
+                          id: p.id!,
+                          dealer: dealer?.id || "",
+                          name: p.name,
+                          pin: p.pin,
+                          active: p.active,
+                          role: "salesperson",
+                        })
+                      }
+                      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md bg-white/5 text-surface-300 hover:bg-white/10"
+                      title="Edit profile"
+                      aria-label={`Edit ${p.name}`}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => p.id && handleToggleActive(p.id, p.active)}
+                      className={cn(
+                        "min-h-11 text-[11px] px-3 py-2 rounded-md transition-colors",
+                        p.active
+                          ? "bg-white/5 hover:bg-white/10 text-surface-300"
+                          : "bg-success-500/20 hover:bg-success-500/30 text-success-100",
+                      )}
+                      title={p.active ? "Deactivate" : "Reactivate"}
+                    >
+                      {p.active ? "Deactivate" : "Reactivate"}
+                    </button>
+                  </>
                 ) : (
                   <button
                     type="button"
                     onClick={() => handlePromoteLoose(p.name)}
                     disabled={saving}
-                    className="text-[11px] px-2 py-1 rounded-md bg-primary-500/20 hover:bg-primary-500/30 text-primary-100 transition-colors disabled:opacity-50"
+                    className="min-h-11 text-[11px] px-3 py-2 rounded-md bg-primary-500/20 hover:bg-primary-500/30 text-primary-100 transition-colors disabled:opacity-50"
                     title="Add this person to the formal roster"
                   >
                     Add to roster
@@ -981,6 +1006,18 @@ const DealerTeamCard: React.FC = () => {
           ))}
         </ul>
       )}
+
+      <PersonEditModal
+        isOpen={!!editingPerson}
+        person={editingPerson}
+        storeName={dealer?.name}
+        allowRoleEdit={false}
+        onClose={() => setEditingPerson(null)}
+        onSaved={() => {
+          setEditingPerson(null);
+          void load();
+        }}
+      />
     </motion.div>
   );
 };

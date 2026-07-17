@@ -16,7 +16,9 @@ import {
   Users,
   Eye,
   Loader2,
+  UserCog,
 } from "lucide-react";
+import { PersonEditModal } from "./PersonEditModal";
 import { SystemHealthPanel } from "./SystemHealthPanel";
 import { ConfirmationModal } from "./ConfirmationModal";
 import { useAppStore } from "../stores/appStore";
@@ -75,6 +77,7 @@ export const AdminDashboard: React.FC = () => {
   });
   const [savingPerson, setSavingPerson] = useState(false);
   const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
+  const [editingPerson, setEditingPerson] = useState<Person | null>(null);
 
   const { data, error, isPending, refetch } = useQuery({
     queryKey: ["dealers"],
@@ -735,6 +738,14 @@ export const AdminDashboard: React.FC = () => {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={<UserCog className="h-3.5 w-3.5" />}
+                    onClick={() => setEditingPerson(person)}
+                  >
+                    Edit
+                  </Button>
+                  <Button
                     variant="primary"
                     size="sm"
                     disabled={!person.active || impersonatingId === person.id}
@@ -780,6 +791,19 @@ export const AdminDashboard: React.FC = () => {
           }
         }}
         itemName={dealerPendingDelete?.name || "dealership"}
+      />
+
+      <PersonEditModal
+        isOpen={!!editingPerson}
+        person={editingPerson}
+        storeName={selectedDealer?.name}
+        allowRoleEdit
+        onClose={() => setEditingPerson(null)}
+        onSaved={() => {
+          setEditingPerson(null);
+          void refetchPeople();
+          toast.success("Profile updated.");
+        }}
       />
     </div>
   );
