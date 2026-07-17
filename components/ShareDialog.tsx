@@ -8,6 +8,7 @@ import {
   Check,
   AlertCircle,
   ClipboardPaste,
+  ExternalLink,
 } from "lucide-react";
 
 const FacebookGlyph: React.FC<{ className?: string }> = ({ className }) => (
@@ -35,6 +36,8 @@ const LinkedinGlyph: React.FC<{ className?: string }> = ({ className }) => (
 import { Modal } from "./ui/Modal";
 import {
   CORE_PUBLISH_IDS,
+  isMobileShareDevice,
+  openNativeAppOrWeb,
   orderPublishTargets,
   publishTo,
   PublishStatus,
@@ -45,7 +48,6 @@ import { fitCaptionToBudget } from "../utils/hashtags";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { logEvent } from "../utils/telemetry";
 import { cn } from "../utils/classNames";
-import { useAppStore } from "../stores/appStore";
 
 interface ShareDialogProps {
   isOpen: boolean;
@@ -67,7 +69,12 @@ const ICON_MAP: Record<PublishTarget["icon"], React.ComponentType<{ className?: 
 
 const CORE_SET = new Set<string>(CORE_PUBLISH_IDS);
 
-/** Simple, salesperson-first share sheet. */
+const META_APP_IDS = new Set(["facebook_feed", "marketplace"]);
+
+/**
+ * Salesperson-first share: prefer native social apps (existing logins),
+ * never force a slow Facebook website re-login on the phone.
+ */
 export const ShareDialog: React.FC<ShareDialogProps> = ({
   isOpen,
   onClose,
@@ -80,7 +87,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     targetId: string;
     status: PublishStatus;
   } | null>(null);
-  const dealer = useAppStore((s) => s.currentDealer);
+  const onPhone = React.useMemo(() => isMobileShareDevice(), []);
 
   const orderedTargets = React.useMemo(
     () => orderPublishTargets(selectedPlatformIds),
@@ -127,21 +134,30 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     [busy, captionForTarget, content],
   );
 
+  const openFacebookApp = useCallback(() => {
+    triggerHapticFeedback();
+    openNativeAppOrWeb("fb://feed", null);
+  }, []);
+
   const msg = (() => {
     const s = status?.status;
     if (!s) return null;
     if (s.kind === "error") return s.message;
     if (s.kind === "cancelled") {
-      return "Cancelled. Caption is still copied — paste when you are ready.";
+      return s.message || "Cancelled. Caption is still on your clipboard.";
     }
     if (s.kind === "shared" || s.kind === "fallback") {
-      return (
-        s.message ||
-        "Caption copied. In the app: create post → long-press → Paste → add the photo."
-      );
+      return s.message || "Caption copied. Finish in the social app.";
     }
     return null;
   })();
+
+  const showMetaChecklist =
+    status &&
+    META_APP_IDS.has(status.targetId) &&
+    (status.status.kind === "shared" ||
+      status.status.kind === "fallback" ||
+      status.status.kind === "cancelled");
 
   const tile = (target: PublishTarget) => {
     const Icon = ICON_MAP[target.icon];
@@ -150,6 +166,17 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     const ok =
       isActive &&
       (status?.status.kind === "shared" || status?.status.kind === "fallback");
+
+    const shortHint =
+      target.id === "facebook_feed"
+        ? onPhone
+          ? "Use Facebook app · paste caption · add from Photos"
+          : "Caption copied · open Facebook · paste"
+        : target.id.startsWith("instagram")
+          ? "Share photo · open Instagram · paste caption"
+          : target.id === "tiktok"
+            ? "Share media · open TikTok · paste caption"
+            : target.hint;
 
     return (
       <button
@@ -181,22 +208,19 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
             )}
           </div>
           <span className="text-[10px] font-semibold uppercase tracking-wide text-surface-400">
-            {target.handoff === "clipboard-open" ? "Open app" : "Share"}
+            {target.handoff === "photos-then-app" ||
+            target.handoff === "clipboard-open"
+              ? "App"
+              : target.handoff === "share-file"
+                ? "Share"
+                : "Share"}
           </span>
         </div>
         <div>
           <div className="text-base font-semibold text-surface-50">
             {target.label}
           </div>
-          <div className="mt-0.5 text-xs text-surface-400">
-            {target.id === "facebook_feed"
-              ? "Copies caption · opens Facebook · paste there"
-              : target.id.startsWith("instagram")
-                ? "Sends photo · paste caption in Instagram"
-                : target.id === "tiktok"
-                  ? "Sends media · paste caption in TikTok"
-                  : target.hint}
-          </div>
+          <div className="mt-0.5 text-xs text-surface-400">{shortHint}</div>
         </div>
       </button>
     );
@@ -207,19 +231,25 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title="Share"
-      description="1) Tap a network  2) Paste caption in the app  3) Add the photo"
+      description="Post from the Facebook / Instagram / TikTok apps you already use — not a slow website login."
       size="lg"
     >
       <div className="space-y-4">
-        <div className="flex items-start gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs text-surface-300">
+        <div className="flex items-start gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs leading-relaxed text-surface-300">
           <ClipboardPaste className="mt-0.5 h-4 w-4 shrink-0 text-primary-300" />
-          <p>
-            <strong className="text-surface-100">Caption is copied for you.</strong>{" "}
-            Apps like Facebook and Instagram never auto-fill text from a browser —
-            long-press the post box and choose <strong className="text-surface-100">Paste</strong>.
-            On iPhone, Facebook usually will not appear in the system share list —
-            use the Facebook button here instead.
-          </p>
+          <div className="space-y-1">
+            <p>
+              <strong className="text-surface-100">Caption is copied</strong> for
+              Paste in the app. We cannot auto-fill Facebook or Instagram (phone
+              security).
+            </p>
+            <p>
+              <strong className="text-surface-100">Use the app icons</strong>{" "}
+              (Facebook, Instagram, TikTok) you already log into. Website tabs
+              may ask you to log in again and feel slow — that is Safari/Chrome,
+              not your Facebook app session.
+            </p>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -241,25 +271,59 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         )}
 
         <AnimatePresence>
-          {msg && (
+          {(msg || showMetaChecklist) && status && (
             <motion.div
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               className={cn(
-                "flex items-start gap-2 rounded-xl border px-3 py-2.5 text-xs leading-relaxed",
-                status?.status.kind === "error"
+                "rounded-xl border px-3 py-2.5 text-xs leading-relaxed space-y-2",
+                status.status.kind === "error"
                   ? "border-error-500/40 bg-error-500/10 text-error-100"
-                  : "border-success-500/40 bg-success-500/10 text-success-100",
+                  : status.status.kind === "cancelled"
+                    ? "border-surface-600 bg-surface-900/60 text-surface-300"
+                    : "border-success-500/40 bg-success-500/10 text-success-100",
               )}
               role="status"
             >
-              {status?.status.kind === "error" ? (
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              ) : (
-                <Check className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="flex items-start gap-2">
+                {status.status.kind === "error" ? (
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                ) : (
+                  <Check className="mt-0.5 h-4 w-4 shrink-0" />
+                )}
+                <span>{msg}</span>
+              </div>
+
+              {showMetaChecklist && (
+                <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-surface-100">
+                  <p className="mb-1.5 font-semibold text-surface-50">
+                    Finish in the Facebook app
+                  </p>
+                  <ol className="list-decimal space-y-1 pl-4 text-[11px] text-surface-300">
+                    <li>Caption is already on your clipboard</li>
+                    <li>
+                      Save/share the photo into Photos if the sheet offered it
+                    </li>
+                    <li>
+                      Open the <strong className="text-surface-100">Facebook app</strong>{" "}
+                      (blue icon) — not a browser tab
+                    </li>
+                    <li>New post → long-press → Paste</li>
+                    <li>Add photo from your library</li>
+                  </ol>
+                  {onPhone && (
+                    <button
+                      type="button"
+                      onClick={openFacebookApp}
+                      className="mt-2 inline-flex min-h-10 items-center gap-2 rounded-lg border border-[#1877F2]/50 bg-[#1877F2]/20 px-3 py-2 text-xs font-semibold text-white"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      Open Facebook app
+                    </button>
+                  )}
+                </div>
               )}
-              <span>{msg}</span>
             </motion.div>
           )}
         </AnimatePresence>

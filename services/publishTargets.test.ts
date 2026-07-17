@@ -6,11 +6,11 @@ import {
 } from "./publishTargets";
 
 describe("publishTargets handoff strategy", () => {
-  it("never sends Facebook through the Apple share-sheet path", () => {
+  it("uses photos-then-app for Facebook so web re-login is not the happy path", () => {
     const fb = PUBLISH_TARGETS.find((t) => t.id === "facebook_feed");
-    expect(fb?.handoff).toBe("clipboard-open");
+    expect(fb?.handoff).toBe("photos-then-app");
     const market = PUBLISH_TARGETS.find((t) => t.id === "marketplace");
-    expect(market?.handoff).toBe("clipboard-open");
+    expect(market?.handoff).toBe("photos-then-app");
   });
 
   it("uses share-file for Instagram and TikTok so media can hit the sheet", () => {

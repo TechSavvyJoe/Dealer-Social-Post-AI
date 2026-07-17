@@ -47,12 +47,15 @@ export interface PublishContent {
 
 /**
  * How media + caption are handed to the destination app.
- * - clipboard-open: copy caption, save media, open app/site (Facebook — share sheet unreliable)
- * - share-file: system share sheet with media file; caption stays on clipboard for paste
+ * - photos-then-app: copy caption, put media on share/save path, open native app
+ *   (Facebook / Marketplace — do NOT open facebook.com on phones)
+ * - share-file: system share sheet with media file (IG / TikTok)
  * - share-any: generic share sheet (More…)
- * - share-or-intent: try share sheet, then web intent URL
+ * - share-or-intent: try share sheet, then web intent (GBP / LinkedIn / X)
+ * - clipboard-open: legacy alias for photos-then-app
  */
 export type ShareHandoff =
+  | "photos-then-app"
   | "clipboard-open"
   | "share-file"
   | "share-any"
@@ -127,9 +130,9 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
     charBudget: 63206,
     supportsVideo: true,
     directApiConnected: false,
-    // Facebook almost never appears in Safari/PWA share sheets for web images.
-    handoff: "clipboard-open",
-    hint: "Caption copied · opens Facebook · paste + add photo",
+    // Prefer native FB app + Photos — never force facebook.com login in Safari.
+    handoff: "photos-then-app",
+    hint: "Copy · share/save photo · open Facebook app · paste",
     appSchemeUrl: "fb://feed",
     webIntentUrl: () => "https://www.facebook.com/",
   },
@@ -169,8 +172,8 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
     charBudget: 9999,
     supportsVideo: false,
     directApiConnected: false,
-    handoff: "clipboard-open",
-    hint: "Caption copied · opens Marketplace · paste + photos",
+    handoff: "photos-then-app",
+    hint: "Copy · save photo · Facebook app → Marketplace → Sell",
     appSchemeUrl: "fb://marketplace",
     webIntentUrl: () => "https://www.facebook.com/marketplace/create/item/",
   },
@@ -319,34 +322,53 @@ export const isAppleTouchDevice = (): boolean => {
   );
 };
 
-/** Best-effort open of native app scheme, then https. */
-const openAppOrWeb = (appScheme: string | undefined, webUrl: string | null) => {
-  if (typeof window === "undefined") return;
-  if (webUrl) {
-    // Prefer https in a new tab — more reliable than app schemes in Safari.
-    // Try app scheme first only on touch devices; fall through quickly.
-    if (appScheme && isAppleTouchDevice()) {
-      try {
-        // Hidden iframe avoids navigating the PWA away if scheme fails.
-        const iframe = document.createElement("iframe");
-        iframe.style.display = "none";
-        iframe.src = appScheme;
-        document.body.appendChild(iframe);
-        window.setTimeout(() => {
-          try {
-            document.body.removeChild(iframe);
-          } catch {
-            /* ignore */
-          }
-        }, 1500);
-      } catch {
-        /* ignore */
-      }
+export const isMobileShareDevice = (): boolean => {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  if (/iPhone|iPad|iPod|Android/i.test(ua)) return true;
+  return isAppleTouchDevice();
+};
+
+/**
+ * Open the native app when possible. On phones we NEVER auto-open Meta web
+ * (facebook.com / instagram.com) — that forces a slow browser re-login and
+ * does not use the logged-in Facebook/Instagram apps salespeople already use.
+ *
+ * Desktop may open the web URL as a fallback.
+ */
+export const openNativeAppOrWeb = (
+  appScheme: string | undefined,
+  webUrl: string | null,
+  opts?: { allowWebOnMobile?: boolean },
+): "native" | "web" | "none" => {
+  if (typeof window === "undefined") return "none";
+  const mobile = isMobileShareDevice();
+  const allowWebOnMobile = opts?.allowWebOnMobile === true;
+
+  if (mobile && appScheme) {
+    try {
+      // location.href is more reliable than a hidden iframe for many iOS builds.
+      window.location.href = appScheme;
+      return "native";
+    } catch {
+      /* fall through */
     }
-    window.open(webUrl, "_blank", "noopener,noreferrer");
-  } else if (appScheme) {
-    window.location.href = appScheme;
   }
+
+  if (webUrl && (!mobile || allowWebOnMobile)) {
+    window.open(webUrl, "_blank", "noopener,noreferrer");
+    return "web";
+  }
+
+  if (!mobile && appScheme) {
+    try {
+      window.location.href = appScheme;
+      return "native";
+    } catch {
+      return "none";
+    }
+  }
+  return "none";
 };
 
 const pasteHintFor = (label: string): string =>
@@ -474,23 +496,87 @@ export const publishTo = async (
       ? ""
       : " (Clipboard copy may have failed — use Copy caption on the post screen first.)";
 
-    // ── Facebook / Marketplace: never depend on Apple Share Sheet ──────────
-    if (target.handoff === "clipboard-open") {
-      downloadFile();
-      openAppOrWeb(target.appSchemeUrl, webUrl);
+    // ── Facebook / Marketplace: Photos + native app (no Safari re-login) ───
+    if (
+      target.handoff === "clipboard-open" ||
+      target.handoff === "photos-then-app"
+    ) {
+      const mobile = isMobileShareDevice();
+      let mediaNote = "";
+
+      if (file && mobile) {
+        // Share sheet: user can Save Image (Photos) or pick Facebook if it appears.
+        const shareResult = await tryWebShareFile(
+          file,
+          captionForShare,
+          `Share ${target.label} photo`,
+          { includeText: false },
+        );
+        if (shareResult === "shared") {
+          await copyTextToClipboard(captionForShare);
+          // Best-effort open native app after share (user may already be in FB).
+          openNativeAppOrWeb(target.appSchemeUrl, null);
+          return {
+            kind: "shared",
+            via: "web-share",
+            pasteRequired: true,
+            message: [
+              `${target.label}: caption is on your clipboard.`,
+              "If you chose Save Image/Video, the media is in Photos.",
+              "If you chose Facebook, finish the post in the Facebook app.",
+              "In Facebook: New post → long-press → Paste → add photo from library.",
+              "Use the Facebook app (not Safari) so you stay logged in.",
+            ].join(" "),
+          };
+        }
+        if (shareResult === "cancelled") {
+          await copyTextToClipboard(captionForShare);
+          return {
+            kind: "cancelled",
+            pasteRequired: true,
+            message: `Cancelled. Caption is still copied — open the Facebook app when ready and Paste.`,
+          };
+        }
+        downloadFile();
+        mediaNote =
+          "Photo/video was downloaded. Save it to Photos if needed, then add it in the Facebook app.";
+      } else {
+        downloadFile();
+        mediaNote = file
+          ? "Photo/video was downloaded — attach it when composing."
+          : "";
+      }
+
+      if (mobile) {
+        openNativeAppOrWeb(target.appSchemeUrl, null);
+        return {
+          kind: "fallback",
+          via: "clipboard-open",
+          pasteRequired: true,
+          message: [
+            `${target.label}: caption copied.${copyWarn}`,
+            mediaNote,
+            "Open the Facebook app (blue icon) — not the website — so your existing login is used.",
+            "New post → Paste caption → add photo from Photos.",
+            isAppleTouchDevice()
+              ? "Facebook often does not appear in Apple’s share list for web apps; that is normal."
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        };
+      }
+
+      // Desktop: download + optional web is fine
+      openNativeAppOrWeb(undefined, webUrl);
       return {
         kind: "fallback",
-        via: "clipboard-open",
+        via: "url-intent",
         pasteRequired: true,
         message: [
-          `${target.label} is ready.`,
-          pasteMsg + copyWarn,
-          file
-            ? "Photo/video was downloaded — add it from Downloads or Photos when composing."
-            : "Add your photo from the post screen if needed.",
-          isAppleTouchDevice()
-            ? "Note: Facebook usually does not appear in Apple’s Share Sheet for web apps — that’s an iOS/Meta limit, not a missing button. This path opens Facebook directly."
-            : "",
+          `${target.label}: caption copied.${copyWarn}`,
+          mediaNote,
+          pasteMsg,
         ]
           .filter(Boolean)
           .join(" "),
@@ -509,7 +595,7 @@ export const publishTo = async (
           kind: "shared",
           via: "web-share",
           pasteRequired: true,
-          message: `${target.label}: media sent to the share sheet. ${pasteMsg}`,
+          message: `${target.label}: media sent to the share sheet. ${pasteMsg} Prefer the app (not the website) so you stay logged in.`,
         };
       }
       if (result === "cancelled") {
@@ -520,9 +606,24 @@ export const publishTo = async (
           message: `Share cancelled. ${pasteMsg}`,
         };
       }
-      // Fallback: download + open app/web
+      // Fallback: native app only on phone — do not force web re-login
       downloadFile();
-      openAppOrWeb(target.appSchemeUrl, webUrl);
+      if (isMobileShareDevice()) {
+        openNativeAppOrWeb(target.appSchemeUrl, null);
+        return {
+          kind: "fallback",
+          via: "download-copy",
+          pasteRequired: true,
+          message: [
+            `Caption copied.${copyWarn}`,
+            file ? "Media downloaded / ready to attach from Photos." : "",
+            `Open the ${target.label} app → new post → Paste → pick media from library.`,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        };
+      }
+      openNativeAppOrWeb(undefined, webUrl);
       return {
         kind: "fallback",
         via: webUrl ? "url-intent" : "download-copy",
