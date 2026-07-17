@@ -8,6 +8,8 @@ import {
   Check,
   AlertCircle,
   Sparkles,
+  ClipboardPaste,
+  Info,
 } from "lucide-react";
 
 // lucide-react v1 doesn't ship brand-name icons (trademark policy). Inline
@@ -38,6 +40,7 @@ const LinkedinGlyph: React.FC<{ className?: string }> = ({ className }) => (
 import { Modal } from "./ui/Modal";
 import {
   CORE_PUBLISH_IDS,
+  isAppleTouchDevice,
   orderPublishTargets,
   publishTo,
   PublishStatus,
@@ -100,12 +103,25 @@ const ICON_MAP: Record<PublishTarget["icon"], React.ComponentType<{ className?: 
 
 const CORE_SET = new Set<string>(CORE_PUBLISH_IDS);
 
+const handoffBadge = (target: PublishTarget): string => {
+  switch (target.handoff) {
+    case "clipboard-open":
+      return "copy + open";
+    case "share-file":
+      return "share photo";
+    case "share-any":
+      return "share sheet";
+    default:
+      return "share";
+  }
+};
+
 /**
- * Per-platform share dialog. Core dealer channels (Instagram, Facebook, TikTok)
- * always appear in the first row so Facebook cannot get lost below the fold.
+ * Per-platform share dialog.
  *
- * Direct API publishing is stubbed today; when Meta / TikTok / GBP APIs land,
- * only `publishTo()` swaps — this dialog stays the same.
+ * Captions are always copied to the clipboard — browsers cannot inject text
+ * into Facebook/Instagram composers. Facebook is opened directly (not via the
+ * Apple Share Sheet) because Meta apps almost never appear there for web shares.
  */
 export const ShareDialog: React.FC<ShareDialogProps> = ({
   isOpen,
@@ -120,6 +136,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     status: PublishStatus;
   } | null>(null);
   const dealer = useAppStore((s) => s.currentDealer);
+  const onApple = React.useMemo(() => isAppleTouchDevice(), []);
   const handles = React.useMemo(
     () => ({
       instagram: dealer?.instagram_handle,
@@ -172,27 +189,44 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         logEvent("share.attempt", {
           target: target.id,
           kind: result.kind,
+          handoff: target.handoff,
           via:
             result.kind === "shared" || result.kind === "fallback"
-              ? (result as { via?: string }).via
+              ? result.via
               : undefined,
           usedPackCaption: Boolean(platformCaptions?.[target.id]),
         });
-        if (result.kind === "shared") {
-          window.setTimeout(() => onClose(), 1500);
-        }
+        // Keep the dialog open so paste instructions stay visible — Meta apps
+        // never auto-fill captions from a browser.
       } finally {
         setBusy(null);
       }
     },
-    [busy, captionForTarget, content, onClose, platformCaptions],
+    [busy, captionForTarget, content, platformCaptions],
   );
+
+  const statusMessage = (s: PublishStatus | undefined): string | null => {
+    if (!s) return null;
+    if (s.kind === "shared") {
+      return (
+        s.message ||
+        "Share sheet opened. Paste the caption in the app after the photo is attached."
+      );
+    }
+    if (s.kind === "fallback") return s.message;
+    if (s.kind === "cancelled") {
+      return s.message || "Share cancelled. Caption is still on your clipboard.";
+    }
+    if (s.kind === "error") return s.message;
+    return null;
+  };
 
   const renderTile = (target: PublishTarget, emphasized = false) => {
     const Icon = ICON_MAP[target.icon];
     const isBusy = busy === target.id;
     const isDone =
-      status?.targetId === target.id && status.status.kind === "shared";
+      status?.targetId === target.id &&
+      (status.status.kind === "shared" || status.status.kind === "fallback");
     const isFallback =
       status?.targetId === target.id && status.status.kind === "fallback";
     const isError =
@@ -258,7 +292,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
             </span>
           ) : (
             <span className="text-[9px] uppercase tracking-wide text-surface-500">
-              via share
+              {handoffBadge(target)}
             </span>
           )}
         </div>
@@ -280,30 +314,73 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
           {overBudget && " · over"}
           {hasPackCaption && !overBudget ? " · tailored" : ""}
         </div>
-        {(isFallback || isError) && (
+        {(isFallback || isError) && status?.targetId === target.id && (
           <div
             className={cn(
               "text-[10px] mt-1 leading-snug",
               isError ? "text-error-300" : "text-warning-200",
             )}
           >
-            {status?.status.kind === "fallback" && status.status.message}
-            {status?.status.kind === "error" && status.status.message}
+            {isError
+              ? status.status.kind === "error" && status.status.message
+              : "Ready — paste caption in the app"}
           </div>
         )}
       </motion.button>
     );
   };
 
+  const activeMsg = statusMessage(status?.status);
+
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
       title="Share post"
-      description="Instagram, Facebook, and TikTok first. Caption is fitted and copied; media is sized for each platform."
+      description="Caption is always copied for Paste. Facebook opens directly (not via Apple’s list)."
       size="xl"
     >
       <div className="space-y-4">
+        <div className="rounded-xl border border-primary-500/25 bg-primary-500/10 px-3 py-2.5 text-[11px] leading-relaxed text-primary-50/95">
+          <div className="flex gap-2">
+            <ClipboardPaste className="mt-0.5 h-4 w-4 shrink-0 text-primary-200" />
+            <div className="space-y-1">
+              <p className="font-semibold text-primary-50">
+                Paste the caption yourself in the app
+              </p>
+              <p className="text-primary-100/85">
+                Browsers cannot drop text into Facebook, Instagram, or TikTok
+                composers. Every share copies the full caption first — in the
+                app, long-press the text box and choose{" "}
+                <strong className="text-primary-50">Paste</strong>.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {onApple && (
+          <div className="rounded-xl border border-warning-500/30 bg-warning-500/10 px-3 py-2.5 text-[11px] leading-relaxed text-warning-50/95">
+            <div className="flex gap-2">
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-warning-200" />
+              <div className="space-y-1">
+                <p className="font-semibold text-warning-50">
+                  Why Facebook is missing from the Apple Share Sheet
+                </p>
+                <p className="text-warning-100/90">
+                  iPhone only lists apps that accept that share type. Facebook
+                  usually <strong>does not</strong> register for photos shared
+                  from Safari or web apps, so Messages, Mail, and Photos show up
+                  while Facebook does not. That is an Apple/Meta limit — not a
+                  missing install. Tap the{" "}
+                  <strong className="text-warning-50">Facebook</strong> button
+                  below instead: we copy the caption, save the image, and open
+                  Facebook for you.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <section aria-labelledby="share-core-heading" className="space-y-2">
           <div className="flex items-baseline justify-between gap-2">
             <h3
@@ -319,12 +396,18 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             {coreTargets.map((t) => renderTile(t, t.id === "facebook_feed"))}
           </div>
-          <p className="text-[11px] leading-relaxed text-surface-500">
-            <strong className="text-surface-300">Facebook:</strong> taps copy
-            your caption and open the system share sheet (or Facebook.com). Paste
-            the caption when composing the post — image/video downloads if the
-            share sheet is unavailable.
-          </p>
+          <ol className="list-decimal space-y-1 pl-4 text-[11px] leading-relaxed text-surface-400">
+            <li>
+              <strong className="text-surface-200">Facebook</strong> — copies
+              caption, downloads photo, opens Facebook. Create post → Paste →
+              add photo from Downloads/Photos.
+            </li>
+            <li>
+              <strong className="text-surface-200">Instagram / TikTok</strong> —
+              may open the system share sheet with the photo. If the app
+              appears, pick it; then Paste the caption in the compose box.
+            </li>
+          </ol>
         </section>
 
         {moreTargets.length > 0 && (
@@ -338,56 +421,48 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {moreTargets.map((t) => renderTile(t, false))}
             </div>
+            <p className="text-[10px] leading-relaxed text-surface-500">
+              <strong className="text-surface-300">More…</strong> opens Apple’s
+              or Android’s full share sheet. Expect Messages, Mail, Photos,
+              AirDrop — not always Facebook. Use the Facebook tile for FB.
+            </p>
           </section>
         )}
 
         <AnimatePresence>
-          {status?.status.kind === "shared" && (
+          {activeMsg && status && (
             <motion.div
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
-              className="rounded-xl border border-success-500/40 bg-success-500/10 text-success-100 px-3 py-2 text-xs flex items-center gap-2"
+              className={cn(
+                "rounded-xl border px-3 py-2.5 text-xs flex items-start gap-2",
+                status.status.kind === "shared" ||
+                  status.status.kind === "fallback"
+                  ? "border-success-500/40 bg-success-500/10 text-success-100"
+                  : status.status.kind === "error"
+                    ? "border-error-500/40 bg-error-500/10 text-error-100"
+                    : "border-surface-700 bg-surface-900/60 text-surface-300",
+              )}
+              role="status"
             >
-              <Check className="w-4 h-4" />
-              Opened the share sheet — finish posting in the target app.
-            </motion.div>
-          )}
-          {status?.status.kind === "fallback" && (
-            <motion.div
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              className="rounded-xl border border-warning-500/40 bg-warning-500/10 text-warning-100 px-3 py-2 text-xs flex items-start gap-2"
-            >
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>
-                {status.status.message ||
-                  "Caption is on your clipboard and media was downloaded. Paste into the app to finish."}
-              </span>
-            </motion.div>
-          )}
-          {status?.status.kind === "cancelled" && (
-            <motion.div
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              className="rounded-xl border border-surface-700 bg-surface-900/60 text-surface-300 px-3 py-2 text-xs flex items-center gap-2"
-            >
-              <AlertCircle className="w-4 h-4" />
-              Share cancelled. Caption is still on your clipboard if you want
-              to paste it manually.
+              {status.status.kind === "shared" ||
+              status.status.kind === "fallback" ? (
+                <Check className="w-4 h-4 shrink-0 mt-0.5" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              )}
+              <span className="leading-relaxed">{activeMsg}</span>
             </motion.div>
           )}
         </AnimatePresence>
 
         <div className="pt-2 border-t border-white/10 text-[11px] text-surface-500 leading-relaxed">
-          <strong className="text-surface-300">Today:</strong> each platform
-          opens your device&apos;s share sheet with the image (or video) attached
-          and the caption on your clipboard.{" "}
-          <strong className="text-surface-300">Coming later:</strong> direct
-          one-tap publishing once Meta App Review, TikTok Content Posting, and
-          Google Business Profile API connections are wired in.
+          <strong className="text-surface-300">Today:</strong> clipboard +
+          media handoff (no browser can auto-post into Meta apps).{" "}
+          <strong className="text-surface-300">Coming later:</strong> true
+          one-tap publish after Meta App Review, TikTok Content Posting, and
+          Google Business Profile API connections.
         </div>
       </div>
     </Modal>
