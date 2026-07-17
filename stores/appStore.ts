@@ -376,18 +376,26 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   reset: () => {
     const dealerId = get().currentDealer?.id;
+    const role = get().role;
+    // Managers/super-admin return to their dashboards; sales floor → capture.
+    const nextStep =
+      role === "super_admin"
+        ? AppStep.ADMIN
+        : role === "dealer_admin"
+          ? AppStep.DEALER_ADMIN
+          : AppStep.CAPTURE;
     set({
       generatedPost: null,
       selectedImage: null,
       error: null,
-      step: AppStep.CAPTURE,
+      step: nextStep,
     });
     // Don't clear session entirely, just reset flow
     const { currentDealer } = get();
     if (currentDealer) {
       saveSession({
         dealerId: currentDealer.id,
-        step: AppStep.CAPTURE,
+        step: nextStep,
         selectedImage: undefined,
         generatedPost: undefined,
         generationParams: undefined,

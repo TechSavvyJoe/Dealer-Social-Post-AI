@@ -224,6 +224,9 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [copied, setCopied] = useState(false);
   const toast = useToast();
   const shouldReduceMotion = useReducedMotion();
+  const enabledFunStyles = useAppStore(
+    (s) => s.currentDealer?.enabled_fun_styles,
+  );
 
   const [isImageEditing, setIsImageEditing] = useState(false);
   const [imageEditPrompt, setImageEditPrompt] = useState("");
@@ -1058,6 +1061,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         <LazyFunModeDirectorModal
           isOpen={isFunModeDirectorOpen && !creativeLockedForReview}
           onClose={() => setIsFunModeDirectorOpen(false)}
+          enabledFunStyles={enabledFunStyles}
           onSelectStyle={(styleName) => {
             setIsFunModeDirectorOpen(false);
             handleImageAction(

@@ -47,6 +47,7 @@ import { fitCaptionToBudget } from "../utils/hashtags";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { logEvent } from "../utils/telemetry";
 import { cn } from "../utils/classNames";
+import { useAppStore } from "../stores/appStore";
 
 interface ShareDialogProps {
   isOpen: boolean;
@@ -60,6 +61,31 @@ interface ShareDialogProps {
   /** Platforms selected at generate time — shown first with a “selected” badge. */
   selectedPlatformIds?: string[];
 }
+
+/** Append optional @handle / profile hints for dealers that configured socials. */
+const hintWithDealerHandle = (
+  target: PublishTarget,
+  handles: {
+    instagram?: string;
+    facebook?: string;
+    tiktok?: string;
+    gbp?: string;
+  },
+): string => {
+  if (target.id.startsWith("instagram") && handles.instagram) {
+    return `${target.hint} · @${handles.instagram.replace(/^@/, "")}`;
+  }
+  if (target.id === "facebook_feed" && handles.facebook) {
+    return `${target.hint} · ${handles.facebook.replace(/^https?:\/\//, "")}`;
+  }
+  if (target.id === "tiktok" && handles.tiktok) {
+    return `${target.hint} · @${handles.tiktok.replace(/^@/, "")}`;
+  }
+  if (target.id === "gbp" && handles.gbp) {
+    return `${target.hint} · profile linked`;
+  }
+  return target.hint;
+};
 
 const ICON_MAP: Record<PublishTarget["icon"], React.ComponentType<{ className?: string }>> = {
   facebook: FacebookGlyph,
@@ -93,6 +119,16 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     targetId: string;
     status: PublishStatus;
   } | null>(null);
+  const dealer = useAppStore((s) => s.currentDealer);
+  const handles = React.useMemo(
+    () => ({
+      instagram: dealer?.instagram_handle,
+      facebook: dealer?.facebook_url,
+      tiktok: dealer?.tiktok_handle,
+      gbp: dealer?.gbp_url,
+    }),
+    [dealer],
+  );
 
   const selectedSet = React.useMemo(
     () => new Set((selectedPlatformIds || []).filter(Boolean)),
@@ -232,7 +268,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                     {target.label}
                   </div>
                   <div className="text-[10px] text-surface-400 leading-tight">
-                    {target.hint}
+                    {hintWithDealerHandle(target, handles)}
                   </div>
                 </div>
                 <div

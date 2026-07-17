@@ -1804,21 +1804,29 @@ routerAdd("POST", "/api/app/posts", (c) => {
       }
     }
 
+    // Creative archive: accept image for any post so History can reopen for
+    // re-share/export. Approval-pending still requires caption + image.
     let creativeFile = null;
-    if (approvalStatus === "pending") {
-      try {
-        const header = c.formFile("creative_image");
-        if (header) creativeFile = $filesystem.fileFromMultipart(header);
-      } catch (_e) {}
-      if (!creativeFile) {
-        return c.json(400, { error: "Review image is required" });
-      }
+    try {
+      const header = c.formFile("creative_image");
+      if (header) creativeFile = $filesystem.fileFromMultipart(header);
+    } catch (_e) {}
+    if (approvalStatus === "pending" && !creativeFile) {
+      return c.json(400, { error: "Review image is required" });
     }
 
     // Load only the server-approved text fields, then attach the parsed upload
     // explicitly. This avoids trusting multipart filename strings as record
     // values and keeps all tenant/policy/audit fields server-controlled.
     const token = helpers.readSessionToken(c);
+    // Store caption/disclosures whenever provided (library reopen); always
+    // required for pending approval.
+    const storeCaption =
+      approvalStatus === "pending" || caption
+        ? caption
+        : "";
+    const storeDisclosures =
+      approvalStatus === "pending" || disclosures ? disclosures : "";
     form.loadData({
       dealer: dealer.id,
       salesperson_name: helpers.assertString(
@@ -1843,8 +1851,8 @@ routerAdd("POST", "/api/app/posts", (c) => {
       approval_status: approvalStatus,
       approved_by: "",
       approved_at: "",
-      caption: approvalStatus === "pending" ? caption : "",
-      disclosures: approvalStatus === "pending" ? disclosures : "",
+      caption: storeCaption,
+      disclosures: storeDisclosures,
       // Every derived artifact (approval polling, protected creative, video
       // completion) is bound to the opaque browser session that logged it.
       owner_session_hash: token ? helpers.hashSessionToken(token) : "",

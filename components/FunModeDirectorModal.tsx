@@ -10,12 +10,24 @@ interface FunModeDirectorModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectStyle: (styleName: string) => void;
+  /** Comma/newline-separated fun style ids; empty = all styles available. */
+  enabledFunStyles?: string;
 }
+
+const parseEnabledFunStyles = (raw?: string): Set<string> | null => {
+  if (!raw?.trim()) return null;
+  const ids = raw
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return ids.length > 0 ? new Set(ids) : null;
+};
 
 export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
   isOpen,
   onClose,
   onSelectStyle,
+  enabledFunStyles,
 }) => {
   const [selectedStyle, setSelectedStyle] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -62,8 +74,20 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
     });
   };
 
+  const allowedIds = useMemo(
+    () => parseEnabledFunStyles(enabledFunStyles),
+    [enabledFunStyles],
+  );
+
+  const catalog = useMemo(() => {
+    if (!allowedIds) return funStyleCatalog;
+    const filtered = funStyleCatalog.filter((s) => allowedIds.has(s.id));
+    // Fall back to full catalog if config ids don't match any style
+    return filtered.length > 0 ? filtered : funStyleCatalog;
+  }, [allowedIds]);
+
   const filteredStyles = useMemo(() => {
-    return funStyleCatalog.filter((style) => {
+    return catalog.filter((style) => {
       const matchesCategory =
         category === "All"
           ? true
@@ -80,7 +104,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
         style.tags?.some((tag) => tag.toLowerCase().includes(q));
       return matchesCategory && matchesSearch;
     });
-  }, [category, searchQuery, favorites]);
+  }, [catalog, category, searchQuery, favorites]);
 
   const handleConfirm = () => {
     if (selectedStyle) {
@@ -90,7 +114,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
   };
 
   const handleSurpriseMe = () => {
-    const pool = filteredStyles.length ? filteredStyles : funStyleCatalog;
+    const pool = filteredStyles.length ? filteredStyles : catalog;
     const choice = pool[Math.floor(Math.random() * pool.length)];
     triggerHapticFeedback();
     onSelectStyle(choice.id);
@@ -164,7 +188,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
           <span>Recent:</span>
           <div className="flex gap-1 flex-wrap">
             {recent.map((id) => {
-              const style = funStyleCatalog.find((s) => s.id === id);
+              const style = catalog.find((s) => s.id === id);
               if (!style) return null;
               return (
                 <button

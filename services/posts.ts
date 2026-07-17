@@ -107,12 +107,16 @@ export const logPost = async (
     form.append("has_release", input.hasRelease ? "true" : "false");
     form.append("has_video", input.hasVideo ? "true" : "false");
 
-    // Review media is uploaded only for dealerships that use the approval
-    // gate. Non-approval post logs remain small operational records.
-    if (input.requiresApproval) {
-      if (!input.caption?.trim() || !input.imageDataUrl) {
-        throw new Error("Approval submission is missing its creative");
-      }
+    // Persist caption + creative whenever available so History can reopen
+    // for re-share/export without regenerating. Approval-gated posts still
+    // require both fields (server enforces).
+    if (input.caption?.trim()) {
+      form.append("caption", input.caption.trim());
+    }
+    if (input.disclosures?.trim()) {
+      form.append("disclosures", input.disclosures.trim());
+    }
+    if (input.imageDataUrl) {
       const image = await dataUrlToBlob(input.imageDataUrl);
       const extension =
         image.type === "image/png"
@@ -120,9 +124,12 @@ export const logPost = async (
           : image.type === "image/webp"
             ? "webp"
             : "jpg";
-      form.append("caption", input.caption.trim());
-      form.append("disclosures", input.disclosures?.trim() || "");
-      form.append("creative_image", image, `approval-creative.${extension}`);
+      form.append("creative_image", image, `post-creative.${extension}`);
+    } else if (input.requiresApproval) {
+      throw new Error("Approval submission is missing its creative");
+    }
+    if (input.requiresApproval && !input.caption?.trim()) {
+      throw new Error("Approval submission is missing its creative");
     }
 
     const res = await fetch("/api/app/posts", {
@@ -170,6 +177,31 @@ export const markPostVideoGenerated = async (
     `/api/app/posts/${encodeURIComponent(postId)}/video-generated`,
     { method: "POST" },
   );
+
+/**
+ * Load a stored creative image as a data URL (session-authenticated).
+ * Used by History → reopen for share/export without regenerating.
+ */
+export const fetchPostCreativeDataUrl = async (
+  creativeImageUrl: string,
+): Promise<string> => {
+  const res = await fetch(creativeImageUrl, { credentials: "include" });
+  if (!res.ok) {
+    throw new Error(`Could not load creative (${res.status})`);
+  }
+  const blob = await res.blob();
+  if (!blob.type.startsWith("image/") && blob.type !== "application/octet-stream") {
+    throw new Error("Creative is not an image");
+  }
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  const mime = blob.type.startsWith("image/") ? blob.type : "image/jpeg";
+  return `data:${mime};base64,${btoa(binary)}`;
+};
 
 export const setApprovalStatus = async (
   postId: string,

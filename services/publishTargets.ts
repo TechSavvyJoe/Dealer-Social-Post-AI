@@ -72,7 +72,7 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
     supportsVideo: true,
     directApiConnected: false,
     hint: "1:1 image · caption auto-copied · share to IG app",
-    webIntentUrl: () => null,
+    webIntentUrl: () => "https://www.instagram.com/",
   },
   {
     id: "instagram_story",
@@ -84,7 +84,7 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
     supportsVideo: true,
     directApiConnected: false,
     hint: "9:16 image or video · share to IG Stories",
-    webIntentUrl: () => null,
+    webIntentUrl: () => "https://www.instagram.com/",
   },
   {
     id: "facebook_feed",
@@ -109,7 +109,7 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
     supportsVideo: true,
     directApiConnected: false,
     hint: "9:16 video preferred · share to TikTok",
-    webIntentUrl: () => null,
+    webIntentUrl: () => "https://www.tiktok.com/upload",
   },
   {
     id: "gbp",
@@ -121,8 +121,7 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
     supportsVideo: false,
     directApiConnected: false,
     hint: "4:3 image · post to your GBP profile",
-    webIntentUrl: () =>
-      "https://business.google.com/posts/",
+    webIntentUrl: () => "https://business.google.com/posts/",
   },
   {
     id: "marketplace",

@@ -11,15 +11,23 @@ import {
   XCircle,
   History,
   Download,
+  ExternalLink,
+  Image as ImageIcon,
 } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
 import { EmptyState } from "./ui/EmptyState";
 import { ErrorBanner } from "./ui/ErrorBanner";
 import { Skeleton } from "./ui/Skeleton";
-import { PostRecord, ApprovalStatus } from "../services/posts";
+import {
+  PostRecord,
+  ApprovalStatus,
+  fetchPostCreativeDataUrl,
+} from "../services/posts";
 import { useAppStore } from "../stores/appStore";
+import { AppStep, GeneratedPost } from "../types";
 import { cn } from "../utils/classNames";
+import { useToast } from "./ui/Toast";
 
 const STATUS_FILTERS: Array<{ key: ApprovalStatus | "all"; label: string }> = [
   { key: "all", label: "All" },
@@ -75,20 +83,23 @@ const statusBadge = (status?: ApprovalStatus): React.ReactElement | null => {
 };
 
 /**
- * Searchable, filterable history of every post logged against the current
- * dealership. Lives inside AdminDashboard. Backs onto the session-gated
- * /api/app/posts endpoint (server-side parameterized filters, no injection).
+ * Searchable history of posts for the current dealership.
+ * Posts with a stored creative can be reopened for share/export without regen.
  */
 export const PostHistory: React.FC = () => {
   const dealer = useAppStore((s) => s.currentDealer);
+  const setGeneratedPost = useAppStore((s) => s.setGeneratedPost);
+  const setStep = useAppStore((s) => s.setStep);
+  const { success: toastSuccess, error: toastError } = useToast();
   const [items, setItems] = useState<PostRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ApprovalStatus | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<ApprovalStatus | "all">(
+    "all",
+  );
+  const [openingId, setOpeningId] = useState<string | null>(null);
 
-  // Monotonic request id: toggling `statusFilter` fast can resolve responses
-  // out of order — only the most recent request is allowed to write state.
   const reqIdRef = useRef(0);
   const load = useCallback(async () => {
     if (!dealer) return;
@@ -127,6 +138,7 @@ export const PostHistory: React.FC = () => {
         p.style,
         p.tone,
         p.approved_by,
+        p.caption,
       ]
         .filter(Boolean)
         .join(" ")
@@ -134,6 +146,39 @@ export const PostHistory: React.FC = () => {
       return haystack.includes(q);
     });
   }, [items, query]);
+
+  const openCreative = useCallback(
+    async (post: PostRecord) => {
+      if (!post.creative_image_url) {
+        toastError("No stored image for this post — only caption logs exist.");
+        return;
+      }
+      setOpeningId(post.id);
+      try {
+        const image = await fetchPostCreativeDataUrl(post.creative_image_url);
+        const approval =
+          (post.approval_status as GeneratedPost["approvalStatus"]) || "n_a";
+        const generated: GeneratedPost = {
+          image,
+          text: (post.caption || "").trim() || "—",
+          disclosures: post.disclosures || undefined,
+          postId: post.id,
+          approvalStatus: approval,
+          releaseStatus: post.has_release ? "saved" : "not_required",
+        };
+        setGeneratedPost(generated);
+        setStep(AppStep.RESULT);
+        toastSuccess("Creative reopened — share or export without regenerating.");
+      } catch (err) {
+        toastError(
+          err instanceof Error ? err.message : "Could not open this creative.",
+        );
+      } finally {
+        setOpeningId(null);
+      }
+    },
+    [setGeneratedPost, setStep, toastError, toastSuccess],
+  );
 
   const exportCsv = useCallback(() => {
     const rows = [
@@ -149,6 +194,7 @@ export const PostHistory: React.FC = () => {
         "approval_status",
         "approved_by",
         "approved_at",
+        "has_creative",
       ],
       ...filtered.map((p) => [
         p.generated_at || "",
@@ -162,6 +208,7 @@ export const PostHistory: React.FC = () => {
         p.approval_status || "",
         p.approved_by || "",
         p.approved_at || "",
+        p.creative_image_url ? "true" : "false",
       ]),
     ];
     const csv = rows
@@ -169,14 +216,10 @@ export const PostHistory: React.FC = () => {
         r
           .map((cell) => {
             let s = String(cell);
-            // CSV formula-injection guard: a cell beginning with = + - @ (or a
-            // control char) is executed as a formula when the export is opened
-            // in Excel/Sheets. These fields are salesperson-controlled free
-            // text, so neutralize with a leading apostrophe.
             if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
             return `"${s.replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
           })
-          .join(",")
+          .join(","),
       )
       .join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -215,7 +258,8 @@ export const PostHistory: React.FC = () => {
             </h3>
             <p className="text-xs text-surface-400">
               {filtered.length} of {items.length}{" "}
-              {items.length === 1 ? "post" : "posts"} shown
+              {items.length === 1 ? "post" : "posts"} · open creatives to
+              re-share
             </p>
           </div>
         </div>
@@ -240,7 +284,7 @@ export const PostHistory: React.FC = () => {
             label=""
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name, VIN, salesperson, style…"
+            placeholder="Search by name, VIN, salesperson, style, caption…"
             fullWidth
             className="bg-white/5 border-white/10 focus:border-primary-400 pl-9"
           />
@@ -254,7 +298,7 @@ export const PostHistory: React.FC = () => {
                 "px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap",
                 statusFilter === f.key
                   ? "bg-primary-500/30 text-primary-100"
-                  : "text-surface-400 hover:text-surface-200"
+                  : "text-surface-400 hover:text-surface-200",
               )}
             >
               {f.label}
@@ -280,12 +324,12 @@ export const PostHistory: React.FC = () => {
                 key={i}
                 className="flex items-center gap-3 rounded-xl border border-surface-800 bg-surface-900/40 px-3 py-3"
               >
-                <Skeleton variant="rectangular" width={40} height={40} />
+                <Skeleton variant="rectangular" width={48} height={48} />
                 <div className="flex-1 space-y-2">
                   <Skeleton width="55%" height={12} />
                   <Skeleton width="35%" height={10} />
                 </div>
-                <Skeleton width={64} height={20} />
+                <Skeleton width={72} height={28} />
               </div>
             ))}
           </motion.div>
@@ -300,7 +344,7 @@ export const PostHistory: React.FC = () => {
               <EmptyState
                 icon={History}
                 title="No posts logged yet"
-                description="Posts your team generates for this dealership will show up here, with VIN, salesperson, and approval status."
+                description="Posts your team generates will show up here. New posts store the creative so you can reopen and share later."
               />
             ) : (
               <EmptyState
@@ -318,70 +362,129 @@ export const PostHistory: React.FC = () => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <table className="w-full text-sm min-w-[640px]">
+            <table className="w-full text-sm min-w-[720px]">
               <thead>
                 <tr className="text-[10px] uppercase tracking-wider text-surface-400">
+                  <th className="text-left py-2 px-2">Creative</th>
                   <th className="text-left py-2 px-2">When</th>
                   <th className="text-left py-2 px-2">Salesperson</th>
                   <th className="text-left py-2 px-2">Customer</th>
-                  <th className="text-left py-2 px-2">VIN</th>
                   <th className="text-left py-2 px-2">Style / Tone</th>
                   <th className="text-left py-2 px-2">Status</th>
+                  <th className="text-right py-2 px-2">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((p) => (
-                  <tr
-                    key={p.id}
-                    className="border-t border-white/5 hover:bg-white/[0.02] transition-colors"
-                  >
-                    <td className="py-2 px-2 text-surface-300 whitespace-nowrap">
-                      {formatWhen(p.generated_at)}
-                    </td>
-                    <td className="py-2 px-2 text-surface-50 font-semibold">
-                      {p.salesperson_name || (
-                        <span className="text-surface-500 italic">unattributed</span>
-                      )}
-                    </td>
-                    <td className="py-2 px-2 text-surface-200">
-                      {p.customer_name || "—"}
-                    </td>
-                    <td className="py-2 px-2 text-surface-400 font-mono text-[11px]">
-                      {p.vin || "—"}
-                    </td>
-                    <td className="py-2 px-2 text-surface-300">
-                      <span className="text-[11px]">
-                        {p.style || "—"}
-                        {p.tone ? ` · ${p.tone}` : ""}
-                      </span>
-                      <div className="flex items-center gap-2 text-[10px] mt-0.5">
-                        {p.has_video && (
-                          <span className="inline-flex items-center gap-1 text-primary-200">
-                            <Film className="h-3 w-3" /> video
+                {filtered.map((p) => {
+                  const canOpen = Boolean(p.creative_image_url);
+                  const isOpening = openingId === p.id;
+                  return (
+                    <tr
+                      key={p.id}
+                      className="border-t border-white/5 hover:bg-white/[0.02] transition-colors"
+                    >
+                      <td className="py-2 px-2">
+                        {p.creative_image_url ? (
+                          <button
+                            type="button"
+                            onClick={() => void openCreative(p)}
+                            disabled={isOpening}
+                            className="h-12 w-12 overflow-hidden rounded-lg border border-white/10 bg-surface-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                            aria-label="Open creative"
+                          >
+                            <img
+                              src={p.creative_image_url}
+                              alt=""
+                              className="h-full w-full object-cover"
+                              loading="lazy"
+                            />
+                          </button>
+                        ) : (
+                          <div
+                            className="flex h-12 w-12 items-center justify-center rounded-lg border border-white/5 bg-surface-950/80 text-surface-600"
+                            title="No image stored (older log)"
+                          >
+                            <ImageIcon className="h-4 w-4" />
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-2 px-2 text-surface-300 whitespace-nowrap">
+                        {formatWhen(p.generated_at)}
+                      </td>
+                      <td className="py-2 px-2 text-surface-50 font-semibold">
+                        {p.salesperson_name || (
+                          <span className="text-surface-500 italic">
+                            unattributed
                           </span>
                         )}
-                        {p.has_release && (
-                          <span className="inline-flex items-center gap-1 text-success-200">
-                            <ShieldCheck className="h-3 w-3" /> release
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-2 px-2">
-                      {statusBadge(p.approval_status)}
-                      {p.approved_by && (
-                        <div className="text-[10px] text-surface-500">
-                          by {p.approved_by}
+                      </td>
+                      <td className="py-2 px-2 text-surface-200">
+                        {p.customer_name || "—"}
+                      </td>
+                      <td className="py-2 px-2 text-surface-300">
+                        <span className="text-[11px]">
+                          {p.style || "—"}
+                          {p.tone ? ` · ${p.tone}` : ""}
+                        </span>
+                        <div className="flex items-center gap-2 text-[10px] mt-0.5">
+                          {p.has_video && (
+                            <span className="inline-flex items-center gap-1 text-primary-200">
+                              <Film className="h-3 w-3" /> video
+                            </span>
+                          )}
+                          {p.has_release && (
+                            <span className="inline-flex items-center gap-1 text-success-200">
+                              <ShieldCheck className="h-3 w-3" /> release
+                            </span>
+                          )}
                         </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="py-2 px-2">
+                        {statusBadge(p.approval_status)}
+                        {p.approved_by && (
+                          <div className="text-[10px] text-surface-500">
+                            by {p.approved_by}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-2 px-2 text-right">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={canOpen ? "outline" : "ghost"}
+                          disabled={!canOpen || isOpening}
+                          leftIcon={
+                            isOpening ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <ExternalLink className="h-3.5 w-3.5" />
+                            )
+                          }
+                          onClick={() => void openCreative(p)}
+                          title={
+                            canOpen
+                              ? "Open for share / export"
+                              : "No creative image on this older log"
+                          }
+                        >
+                          {isOpening ? "Opening…" : "Open"}
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </motion.div>
         )}
       </AnimatePresence>
+
+      <p className="text-[11px] text-surface-500 leading-relaxed flex items-start gap-1.5">
+        <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+        Open loads the stored creative into the post studio for copy, share, and
+        multi-size export — no AI regeneration. Older rows without an image
+        cannot be reopened.
+      </p>
     </motion.div>
   );
 };
