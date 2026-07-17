@@ -314,6 +314,7 @@ export const generateSocialPostText = async (
   customerName?: string,
   isRegeneration = false,
   creativeBrief?: string,
+  style?: StyleOption,
 ): Promise<string> => {
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
@@ -324,6 +325,7 @@ export const generateSocialPostText = async (
     customerName,
     isRegeneration,
     creativeBrief,
+    style,
   );
 
   const task = isRegeneration ? "caption_regenerate" : "caption";
@@ -477,6 +479,7 @@ export const generateSocialPost = async (
           customerName,
           false,
           creativeBrief,
+          style,
         )
   ).catch((error) => {
     throw new Error(

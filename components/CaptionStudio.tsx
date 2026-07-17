@@ -259,7 +259,7 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
               value={body}
               onChange={(e) => handleBodyChange(e.target.value)}
               disabled={disabled}
-              placeholder="Hook, story, and call to action…"
+              placeholder="AI fills a full marketing caption here — hook, story, and store CTA…"
               className={cn(
                 "h-36 w-full lg:h-44 lg:max-h-[20rem]",
                 "bg-surface-800/50 text-surface-200 p-4 rounded-xl text-sm",
@@ -320,7 +320,8 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
               </ul>
             ) : (
               <p className="text-[11px] text-surface-500">
-                No hashtags yet — add a few relevant ones for this platform.
+                Hashtags appear automatically with each AI caption. Add more only
+                if you want a custom tag.
               </p>
             )}
 
@@ -361,8 +362,8 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
               </button>
             </div>
             <p className="text-[10px] leading-relaxed text-surface-500">
-              Tags auto-format to single #PascalCase tokens (no spaces). Separate
-              multiple with spaces or commas. Tap a chip to remove it.
+              AI ships 4–5 discovery tags plus your store brand tag. Optional:
+              type a phrase and press Enter to add. Tap a chip to remove.
             </p>
           </div>
         </>

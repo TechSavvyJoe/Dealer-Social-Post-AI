@@ -107,11 +107,11 @@ export const platformsToCreativeBrief = (
     ...lines,
     `Always name the store exactly as "${dealershipName}" so multi-location traffic hits the right rooftop.`,
     anyVertical && anyFeed
-      ? `Structure: 1 hook sentence, 1 CTA with store name, then 3–5 hashtags on the last line. Keep the first line story-ready (under ~90 characters).`
+      ? `Structure: hook + 2 story sentences + CTA with store name + 4–5 hashtags on the last line. First line under ~90 characters for story previews.`
       : anyVertical
-        ? `Structure for Stories/Reels/TikTok: ultra-short hook, store name CTA, 0–5 hashtags (Stories lean 0–2; Reels/TikTok 3–5).`
-        : `Structure for Feed: hook + story, CTA with store name, 3–5 hashtags (Facebook can use fewer).`,
-    `HASHTAG RULES: each tag is one #PascalCase token with NO spaces inside; separate tags with a single space; never glue #TagA#TagB; never write #New Car.`,
+        ? `Structure for Stories/Reels/TikTok: punchy hook, short story beat, store name CTA, 3–5 hashtags (Stories lean 0–2 when tagged separately).`
+        : `Structure for Feed: full agency caption — hook + story + CTA with store name + 4–5 hashtags.`,
+    `HASHTAG RULES: each tag is one #PascalCase token with NO spaces inside; separate tags with a single space; never glue #TagA#TagB; never write #New Car. Always include a store brand tag.`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -126,13 +126,13 @@ export const platformCopyGuidance = (platformId: PlatformId): string => {
     "Hashtags: #PascalCase only (no spaces inside), single space between tags, never #A#B glued.";
   switch (platformId) {
     case "instagram_feed":
-      return `IG Feed (primary dealer channel): hook in first line, warm storytelling, CTA with store name, exactly 3–5 relevant hashtags on the last line. Aim ≤400 chars for the body before hashtags. ${tagFmt}`;
+      return `IG Feed (primary dealer channel): COMPLETE agency caption — hook, 2 story sentences, CTA with store name, exactly 4–5 relevant hashtags on the last line. Aim 220–400 chars for the body before hashtags. Paste-ready, no stubs. ${tagFmt}`;
     case "instagram_story":
-      return `IG Story: ultra-short (≤90 chars ideal). One punchy line + store name. 0–2 hashtags or none — Stories are not hashtag discovery. ${tagFmt}`;
+      return `IG Story: short but complete (hook + store name CTA). 0–2 hashtags or none — Stories are not hashtag discovery. ${tagFmt}`;
     case "facebook_feed":
-      return `Facebook Feed (primary dealer channel): conversational, slightly longer OK. Clear CTA with store name. 0–3 light hashtags only — excess looks spammy. ${tagFmt}`;
+      return `Facebook Feed (primary dealer channel): conversational, slightly longer story OK. Clear CTA with store name. 3–5 light hashtags (include brand tag). ${tagFmt}`;
     case "tiktok":
-      return `TikTok (primary dealer channel for short video): scroll-stopping first line, casual voice, 3–5 descriptive hashtags (niche + local + vehicle intent). Keep ≤150 chars before hashtags. ${tagFmt}`;
+      return `TikTok (primary dealer channel for short video): scroll-stopping first line, casual story beat, store CTA, 4–5 descriptive hashtags (niche + local + vehicle intent). Keep body punchy but complete (not a one-liner). ${tagFmt}`;
     case "x_twitter":
       return `X/Twitter is optional/low priority for most dealerships. If used: hard cap 280 chars total, 0–2 hashtags, punchy. ${tagFmt}`;
     case "gbp":

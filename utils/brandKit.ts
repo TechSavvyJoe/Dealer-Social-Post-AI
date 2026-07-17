@@ -1,12 +1,14 @@
 /**
  * Deterministic dealer brand kit for captions.
  * Model prompts *suggest* footer/hashtags; this layer *guarantees* them on
- * every delivery path (primary, pack, regen, alts).
+ * every delivery path (primary, pack, regen, alts) so salespeople never get
+ * a thin body or empty hashtag line.
  */
 import {
   brandHashtagFromName,
   formatHashtag,
   normalizeCaptionHashtags,
+  uniqueFormattedHashtags,
 } from "./hashtags";
 
 export interface DealerBrandKit {
@@ -15,12 +17,33 @@ export interface DealerBrandKit {
   default_footer?: string;
 }
 
+/**
+ * Agency discovery tags used when AI or dealer kit leave a caption under-tagged.
+ * Ordered by dealership marketing usefulness (delivery → social proof → intent).
+ */
+export const AGENCY_DISCOVERY_HASHTAGS = [
+  "#NewCarDelivery",
+  "#HappyCustomer",
+  "#JustDelivered",
+  "#CarShopping",
+  "#KeysInHand",
+  "#NewRide",
+] as const;
+
+/** Soft floor for body prose so paste-ready posts never look unfinished. */
+export const MIN_MARKETING_BODY_CHARS = 120;
+
+/** Target hashtag count for primary multi-channel posts (IG/TikTok/FB). */
+export const TARGET_HASHTAG_COUNT = 5;
+
 const parseHashtagList = (raw?: string): string[] => {
   if (!raw?.trim()) return [];
-  return raw
-    .split(/[\n,]+/)
-    .map((h) => formatHashtag(h.trim()))
-    .filter(Boolean);
+  return uniqueFormattedHashtags(
+    raw
+      .split(/[\n,]+/)
+      .map((h) => h.trim())
+      .filter(Boolean),
+  );
 };
 
 const splitBodyAndTags = (
@@ -44,55 +67,113 @@ const splitBodyAndTags = (
   if (tags.length >= 1 && withoutTags.length <= 2) {
     return {
       body: lines.slice(0, lastIdx).join("\n").trimEnd(),
-      tags,
+      tags: uniqueFormattedHashtags(tags),
     };
   }
+
+  // Trailing tags on last prose line
+  const trailing = last.match(/((?:\s*#[A-Za-z0-9_]+)+)\s*$/);
+  if (trailing && tags.length >= 1) {
+    const before = last.slice(0, trailing.index ?? 0).trimEnd();
+    const peeled = uniqueFormattedHashtags(
+      (trailing[0].match(/#[A-Za-z0-9_]+/g) as string[]) || [],
+    );
+    if (peeled.length > 0) {
+      const body =
+        before.length > 0
+          ? [...lines.slice(0, lastIdx), before].join("\n").trimEnd()
+          : lines.slice(0, lastIdx).join("\n").trimEnd();
+      return { body, tags: peeled };
+    }
+  }
+
   return { body: normalized, tags: [] };
 };
 
 /**
- * Ensure store brand tag, dealer default hashtags, and default footer appear
- * exactly once. Footer sits after body prose, before the hashtag line.
+ * If the model returned a stub, append a warm agency CTA that names the store.
+ * Does not invent vehicle facts — only store-visit invitation language.
+ */
+const ensureMarketingBodyFloor = (
+  body: string,
+  storeName?: string,
+): string => {
+  const trimmed = (body ?? "").trim();
+  const proseLen = trimmed.replace(/\s+/g, " ").length;
+  if (proseLen >= MIN_MARKETING_BODY_CHARS) return trimmed;
+
+  const name = storeName?.trim();
+  if (!name) {
+    if (!trimmed) {
+      return "Another great delivery day in the books. Ready for your keys? Visit us this week and find the ride that feels like yours.";
+    }
+    return `${trimmed} Ready for your next delivery day? Stop by and let's find the one.`;
+  }
+
+  if (!trimmed) {
+    return `Keys, smiles, and a new chapter. Thank you for trusting ${name} — stop by this week and let's find the ride that feels like yours.`;
+  }
+
+  if (!trimmed.toLowerCase().includes(name.toLowerCase())) {
+    return `${trimmed}\n\nVisit ${name} this week and let's get you behind the wheel.`;
+  }
+
+  return `${trimmed} Stop by this week — we'd love to help you find the one.`;
+};
+
+/**
+ * Ensure store brand tag, dealer defaults, and agency discovery tags appear.
+ * Footer sits after body prose, before the hashtag line.
  */
 export const applyDealerBrandKit = (
   caption: string,
   kit?: DealerBrandKit | null,
 ): string => {
-  if (!kit) return normalizeCaptionHashtags(caption ?? "");
-
   let { body, tags } = splitBodyAndTags(caption ?? "");
-  const footer = (kit.default_footer || "").trim();
+  const footer = (kit?.default_footer || "").trim();
+  const storeName = kit?.name?.trim();
+
+  body = ensureMarketingBodyFloor(body, storeName);
 
   // Strip existing footer if already present (avoid doubles on re-apply)
   if (footer) {
     const footerNorm = footer.replace(/\s+/g, " ").trim();
     const bodyNorm = body.replace(/\s+/g, " ");
-    if (bodyNorm.includes(footerNorm)) {
-      // leave body as-is (already has footer)
-    } else {
+    if (!bodyNorm.includes(footerNorm)) {
       body = body ? `${body.trimEnd()}\n\n${footer}` : footer;
     }
   }
 
   const required: string[] = [];
-  if (kit.name?.trim()) {
-    const brand = brandHashtagFromName(kit.name);
+  if (storeName) {
+    const brand = brandHashtagFromName(storeName);
     if (brand) required.push(brand);
   }
-  required.push(...parseHashtagList(kit.default_hashtags));
+  required.push(...parseHashtagList(kit?.default_hashtags));
 
   const seen = new Set<string>();
   const merged: string[] = [];
-  for (const t of [...required, ...tags]) {
-    const key = t.toLowerCase();
+  for (const t of [...required, ...tags, ...AGENCY_DISCOVERY_HASHTAGS]) {
+    const formatted = formatHashtag(t);
+    if (!formatted) continue;
+    const key = formatted.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    merged.push(t);
+    merged.push(formatted);
+    if (merged.length >= TARGET_HASHTAG_COUNT) break;
   }
-  // Soft cap for IG/TikTok best practice
-  const capped = merged.slice(0, 8);
+  // Always keep at least brand + 3 discovery if possible
+  if (merged.length < 4) {
+    for (const t of AGENCY_DISCOVERY_HASHTAGS) {
+      const key = t.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(t);
+      if (merged.length >= 4) break;
+    }
+  }
 
   const parts = [body.trimEnd()];
-  if (capped.length > 0) parts.push(capped.join(" "));
+  if (merged.length > 0) parts.push(merged.join(" "));
   return normalizeCaptionHashtags(parts.filter(Boolean).join("\n"));
 };

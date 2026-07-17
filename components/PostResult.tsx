@@ -1670,8 +1670,8 @@ export const PostResult: React.FC<PostResultProps> = ({
             aria-labelledby="caption-delivery-heading"
             aria-busy={textBusy}
           >
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
+            <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
                 <h3
                   id="caption-delivery-heading"
                   className="text-xl font-semibold text-surface-50"
@@ -1681,15 +1681,59 @@ export const PostResult: React.FC<PostResultProps> = ({
                 <p className="mt-0.5 text-xs text-surface-400">
                   {creativeLockedForReview
                     ? "Review copy is locked to the exact creative submitted to the manager."
-                    : "Edit the body and hashtags separately. Platform tips update with each tab. Disclosures attach automatically on copy/share."}
+                    : "AI writes full marketing copy and hashtags — no typing required. Tap New caption for a fresh agency angle."}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-1">
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleTextAction(onRegenerateText).catch(
+                      () => undefined,
+                    );
+                  }}
+                  disabled={textBusy || creativeLockedForReview}
+                  className={cn(
+                    "inline-flex min-h-11 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors",
+                    "border-primary-400/45 bg-primary-500/15 text-primary-50",
+                    "hover:border-primary-400/65 hover:bg-primary-500/25",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
+                    "disabled:cursor-not-allowed disabled:opacity-40",
+                  )}
+                  title="Generate a full new marketing caption and hashtags"
+                  aria-label="New caption"
+                >
+                  {textBusy ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  {textBusy ? "Writing..." : "New caption"}
+                </button>
+                {onGenerateCaptionVariant ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsCaptionAltsOpen(true)}
+                    disabled={textBusy || creativeLockedForReview}
+                    className={cn(
+                      "inline-flex min-h-11 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors",
+                      "border-white/10 bg-white/[0.04] text-surface-200",
+                      "hover:border-white/20 hover:bg-white/[0.08]",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
+                      "disabled:cursor-not-allowed disabled:opacity-40",
+                    )}
+                    title="Generate three full caption options"
+                    aria-label="Three caption ideas"
+                  >
+                    <Sparkles className="h-4 w-4 text-primary-300" />
+                    3 options
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={handleUndo}
                   disabled={historyIndex === 0 || creativeLockedForReview}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-surface-200 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 disabled:cursor-not-allowed disabled:opacity-30"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-surface-200 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 disabled:cursor-not-allowed disabled:opacity-30"
                   title="Undo (Ctrl+Z)"
                   aria-label="Undo caption change"
                 >
@@ -1702,7 +1746,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     historyIndex === textHistory.length - 1 ||
                     creativeLockedForReview
                   }
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-surface-200 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 disabled:cursor-not-allowed disabled:opacity-30"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-surface-200 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 disabled:cursor-not-allowed disabled:opacity-30"
                   title="Redo (Ctrl+Y)"
                   aria-label="Redo caption change"
                 >

@@ -227,7 +227,8 @@ export const generateTextPrompt = (
   dealershipName: string,
   customerName?: string,
   isRegeneration = false,
-  creativeBrief?: string
+  creativeBrief?: string,
+  style?: StyleOption,
 ): string => {
   if (FLAGS.useV2Prompts) {
     return generateTextPromptV2(
@@ -235,7 +236,8 @@ export const generateTextPrompt = (
       dealershipName,
       customerName,
       isRegeneration,
-      creativeBrief
+      creativeBrief,
+      style,
     );
   }
   const nameInfo = customerName
