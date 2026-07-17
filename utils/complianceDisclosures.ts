@@ -13,6 +13,8 @@
  * be reviewed by the dealer's compliance officer / counsel.
  */
 
+import { normalizeCaptionHashtags } from "./hashtags";
+
 export type DisclosureCategory =
   | "financing_apr"
   | "zero_down"
@@ -260,7 +262,10 @@ export const analyzeCaptionForDelivery = (
   text: string,
   bannedPhrases?: DealerBannedPhrases,
 ): DeliveryCaption => {
-  const compliance = applyDisclosures(text, bannedPhrases);
+  // Fix glued/spaced hashtags before compliance so delivery copy is paste-ready
+  // for Instagram / Facebook / TikTok (#New Car is not a valid tag).
+  const normalized = normalizeCaptionHashtags(text ?? "");
+  const compliance = applyDisclosures(normalized, bannedPhrases);
   const markerIndex = compliance.text.indexOf("— Disclosures —");
   const caption =
     markerIndex >= 0

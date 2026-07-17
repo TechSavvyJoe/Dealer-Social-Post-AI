@@ -313,10 +313,10 @@ Before writing, quickly analyze the photo:
 **POST STRUCTURE:**
 1.  **The Hook + Story (1-2 sentences MAX):** Congratulate briefly, mention the car. ${nameInfo}
 2.  **Quick CTA:** Invite others to '${dealershipName}' - keep this brief!
-3.  **Hashtags:** ONLY 3-4 relevant hashtags. Include #${dealershipName.replace(
-    /\\s/g,
-    ""
-  )} and 2-3 others.
+3.  **Hashtags:** Exactly 3–5 tags on the LAST line only. Each tag is one continuous #PascalCase token with NO spaces inside. Separate tags with a single space (e.g. #${dealershipName.replace(
+    /[^A-Za-z0-9]+/g,
+    "",
+  )} #NewCarDelivery #HappyCustomer). Never glue tags (#A#B) and never write #New Car.
 
 **TONE:**
 - Required tone: **${tone}**

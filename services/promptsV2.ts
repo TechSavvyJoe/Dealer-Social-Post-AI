@@ -154,15 +154,34 @@ Ground the caption in what is actually visible — authenticity beats generic hy
   const storeTag = dealershipName.replace(/[^A-Za-z0-9]+/g, "");
   sections.push(
     xmlBlock(
+      "channels",
+      `Primary dealership channels: Instagram (Feed + Reels/Stories), Facebook, TikTok, and Google Business when relevant.
+Do not optimize for X/Twitter — most rooftops do not use it for deliveries.
+Write mobile-first copy salespeople paste into IG/FB/TikTok.`
+    )
+  );
+
+  sections.push(
+    xmlBlock(
       "rules",
       `Length: 1–2 short hook sentences + 1 CTA. Three sentences max. Mobile-first — scannable on a phone screen.
 Hook must earn the scroll-stop in the first 8–12 words (specificity > vague excitement).
 Always name the store exactly as "${dealershipName}" in the body or CTA (not a shortened brand-only name) so multi-location traffic goes to the right rooftop.
-Hashtags: 4–6 total, space-separated:
-  - #${storeTag} (required)
-  - 1 location/market tag if you can infer city/region from the store name (e.g. #HowellMI)
-  - 2–3 high-intent automotive discovery tags (e.g. #NewCarDelivery #HappyCustomer #CarShopping) — no spam stuffing
-  - Optional OEM tag only if the vehicle brand is certain from the photo/brief
+
+HASHTAGS (platform-critical):
+- Exactly 3–5 hashtags for a general/primary caption (Instagram + TikTok sweet spot; Facebook still OK at this count if light).
+- Each tag is ONE continuous token after # — NO SPACES inside a hashtag.
+  Correct: #NewCarDelivery #HappyCustomer #${storeTag}
+  Wrong: #New Car Delivery   (spaces kill the tag — only #New would count)
+  Wrong: #NewCar#HappyCustomer  (glued tags — must separate with a space)
+- Separate tags with a single space on their own final line.
+- Required mix:
+  - #${storeTag} (branded store tag)
+  - 1 local/market tag if you can infer city/region (e.g. #HowellMI #DetroitCars)
+  - 1–3 high-intent auto discovery tags: #NewCarDelivery #HappyCustomer #CarShopping #JustDelivered
+  - Optional OEM tag only if vehicle brand is certain from photo/brief
+- No spam stuffing, no 10+ tags, no irrelevant viral tags.
+
 Emoji: 0–2, never leading. Prefer none for Professional/Luxury feel.
 No prices, APR, "guaranteed", "lowest", "no credit check", "best deal in town".
 Avoid clichés: "dream machine", "sold!", "another happy customer!!", all-caps hype.
@@ -175,7 +194,8 @@ ${isRegeneration ? "REGENERATION: different opening + different hashtag mix than
   sections.push(
     xmlBlock(
       "output_format",
-      `Hook + story (1–2 sentences). Newline. CTA that includes "${dealershipName}" (1 sentence). Newline. Hashtags on one line.
+      `Hook + story (1–2 sentences). Newline. CTA that includes "${dealershipName}" (1 sentence). Newline. Hashtags only on the last line, each #Tag separated by one space.
+Example last line: #${storeTag} #NewCarDelivery #HappyCustomer
 No preamble. No quotes. Caption only.`
     )
   );
@@ -205,6 +225,7 @@ export const editTextPromptV2 = (
       "rules",
       `Apply ONLY the edit the user requested. Do not rewrite untouched portions.
 Preserve hashtag count and order unless the edit asks otherwise.
+Hashtags must stay as #PascalCase tokens with a single space between tags — never spaces inside a tag, never #A#B glued.
 Keep length within 10% of the original word count unless asked to shorten/extend.
 Do not introduce compliance triggers ("0% APR", "$0 down", "guaranteed", etc).`
     ),

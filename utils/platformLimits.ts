@@ -16,39 +16,48 @@ export interface PlatformLimit {
   maxHashtags?: number;
 }
 
+/**
+ * Character + hashtag budgets for dealership social.
+ * Hashtag max values are recommended marketing ceilings (2025–2026 practice),
+ * not always hard platform API caps — Instagram guidance is 3–5 relevant tags;
+ * Facebook benefits from 0–3; TikTok 3–5.
+ */
 export const PLATFORM_LIMITS: PlatformLimit[] = [
-  { id: "x", label: "X / Twitter", maxChars: 280 },
+  { id: "x", label: "X / Twitter", maxChars: 280, maxHashtags: 2 },
   {
     id: "facebook",
     label: "Facebook Feed",
     maxChars: 63206,
     softFoldChars: 477, // about ~3 lines on desktop before "See more"
+    maxHashtags: 3,
   },
   {
     id: "instagram",
     label: "Instagram",
     maxChars: 2200,
     softFoldChars: 125, // characters visible before "...more"
-    maxHashtags: 30,
+    maxHashtags: 5,
   },
   {
     id: "tiktok",
     label: "TikTok",
     maxChars: 2200,
     softFoldChars: 100,
-    maxHashtags: 30,
+    maxHashtags: 5,
   },
   {
     id: "gbp",
     label: "Google Business",
     maxChars: 1500,
     softFoldChars: 250,
+    maxHashtags: 2,
   },
   {
     id: "marketplace",
     label: "FB Marketplace",
     maxChars: 9999,
     softFoldChars: 300,
+    maxHashtags: 1,
   },
 ];
 
