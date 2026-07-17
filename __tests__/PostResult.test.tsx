@@ -220,7 +220,7 @@ describe("PostResult job-first flow", () => {
     renderResult({ bannedPhrases: "lowest price guaranteed" });
 
     const caption = screen.getByRole("textbox", {
-      name: "Caption body without hashtags",
+      name: "Full caption text",
     });
     fireEvent.change(caption, {
       target: { value: "The LOWEST—PRICE GUARANTEED on every vehicle." },
@@ -272,7 +272,7 @@ describe("PostResult job-first flow", () => {
     expect(screen.getByText("Manager approved")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save image" })).toBeEnabled();
     expect(
-      screen.getByRole("textbox", { name: "Caption body without hashtags" }),
+      screen.getByRole("textbox", { name: "Full caption text" }),
     ).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: /creative tools/i }));

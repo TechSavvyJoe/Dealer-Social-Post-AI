@@ -414,12 +414,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
       );
     }
 
-    // Agency standard — model must ship a full paste-ready post, not a stub.
-    briefParts.push(
-      "Agency caption standard: write a COMPLETE social post salespeople paste with zero typing — (1) scroll-stopping hook, (2) two story sentences grounded in the photo/vehicle facts, (3) CTA that names the store exactly, (4) final line with exactly 4–5 #PascalCase hashtags including the store brand tag. Target 220–420 characters of body prose before hashtags. Never return a thin one-liner.",
-    );
-
-    const creativeBrief = briefParts.join(" ");
+    // Keep brief short — long instruction dumps make models emit gibberish.
+    const creativeBrief = briefParts.join(" ").slice(0, 1400);
 
     if (captionSource === "custom" && customMessage.trim()) {
       preparedText = customMessage.trim();

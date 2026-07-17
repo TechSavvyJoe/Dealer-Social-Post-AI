@@ -18,6 +18,7 @@ import {
   applyDealerBrandKit,
   type DealerBrandKit,
 } from "./brandKit";
+import { cleanSocialCaption } from "./captionQuality";
 
 export type DisclosureCategory =
   | "financing_apr"
@@ -267,8 +268,9 @@ export const analyzeCaptionForDelivery = (
   bannedPhrases?: DealerBannedPhrases,
   brandKit?: DealerBrandKit | null,
 ): DeliveryCaption => {
-  // Brand kit first (footer + required tags), then hashtag normalize, then compliance.
-  const withBrand = applyDealerBrandKit(text ?? "", brandKit);
+  // Clean model junk first, then brand kit (footer + required tags), then compliance.
+  const cleaned = cleanSocialCaption(text ?? "");
+  const withBrand = applyDealerBrandKit(cleaned, brandKit);
   const normalized = normalizeCaptionHashtags(withBrand);
   const compliance = applyDisclosures(normalized, bannedPhrases);
   const markerIndex = compliance.text.indexOf("— Disclosures —");

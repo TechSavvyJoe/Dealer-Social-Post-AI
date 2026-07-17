@@ -110,49 +110,8 @@ export const generateTextPromptV2 = (
   creativeBrief?: string,
   style?: StyleOption
 ): string => {
-  const sections: string[] = [];
-
-  sections.push(
-    `You are the lead social copywriter at a full-service automotive marketing agency.
-Your client is a retail dealership. Salespeople will paste your caption into Instagram, Facebook, and TikTok with ZERO edits — so it must be complete, hashtag-ready, and campaign-grade.
-Quality bar: copy that could run next to a luxury OEM campaign — confident, human, data-aware, never cheesy dealership cliché.
-Output the caption ONLY — no preamble, no labels, no commentary.`
-  );
-
-  sections.push(
-    xmlBlock(
-      "context",
-      `Dealership: ${dealershipName}
-Customer: ${customerName?.trim() || "(name not provided — refer to them as 'our latest happy customer' or similar)"}
-${style ? `Visual style of the post: ${style} — ${styleHint(style)}` : ""}
-End user: a salesperson on the lot with one tap — not a professional copywriter.`
-    )
-  );
-
-  sections.push(xmlBlock("voice", TONE_FINGERPRINTS[tone]));
-  sections.push(xmlBlock("campaign_quality", campaignQualityBar));
-
-  if (creativeBrief?.trim()) {
-    sections.push(
-      xmlBlock(
-        "creative_brief",
-        `${creativeBrief.trim()}\n\nThe brief may contain vehicle facts, brand-voice direction, platforms, required hashtags, and forbidden phrases. Treat these as binding constraints, ranked higher than your default style.`
-      )
-    );
-  }
-
-  sections.push(
-    xmlBlock(
-      "image_analysis",
-      `Study the photo before writing — this is your research.
-- The car: if you can identify make+model with certainty, name it once. If not, use "their new ride" / "this beauty". Wrong ID is worse than generic.
-- The people: count, vibe (family / couple / solo), mood, celebration cues (keys, smiles, balloons).
-- The scene: showroom floor, lot, outdoor delivery — use one concrete visual detail.
-Ground every line in what is visible. Authenticity beats generic hype.`
-    )
-  );
-
-  // Inline brand tag from name (same rules as utils/hashtags).
+  // Keep this prompt SHORT. Long multi-block prompts cause models to emit
+  // labels, XML, or gibberish. Salespeople need plain English posts only.
   const storeTag =
     dealershipName
       .replace(/[^A-Za-z0-9]+/g, " ")
@@ -161,80 +120,47 @@ Ground every line in what is visible. Authenticity beats generic hype.`
       .filter(Boolean)
       .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
       .join("") || "OurDealership";
-  sections.push(
-    xmlBlock(
-      "channels",
-      `Primary dealership channels: Instagram (Feed + Reels), Facebook Feed, TikTok.
-Do not optimize for X/Twitter.
-Write mobile-first copy a salesperson pastes in one motion — full post body + hashtags included.`
-    )
-  );
 
-  sections.push(
-    xmlBlock(
-      "structure",
-      `ALWAYS produce a COMPLETE agency caption with all four slots filled. Never ship a thin one-liner or body-only stub.
+  const customer =
+    customerName?.trim() || "our newest customer";
+  const toneLine = TONE_FINGERPRINTS[tone] || TONE_FINGERPRINTS[ToneOption.Professional];
 
-1) HOOK (1 sentence, ~8–14 words)
-   Scroll-stopper grounded in the photo. Specificity beats vague excitement.
-2) STORY (2 sentences)
-   Customer moment + vehicle (if known) + emotion or soft social proof. Warm, human, campaign polish.
-3) CTA (1 sentence)
-   Must include the store name exactly as "${dealershipName}". Invite a visit / DM / stop-by this week — no prices or APR.
-4) HASHTAG LINE (final line only)
-   Exactly 4–5 tags, space-separated, #PascalCase only.
+  // Cap brief length — only facts help; long briefs get echoed as junk.
+  const brief = (creativeBrief || "").trim().slice(0, 900);
 
-Target body length (before hashtags): roughly 220–420 characters — full enough to feel premium, short enough for mobile.
-Minimum body: never under ~140 characters of prose. If you drafted something thinner, expand the story and CTA before finishing.`
-    )
-  );
+  return `Write a real Instagram / Facebook caption for a car dealership delivery photo.
 
-  sections.push(
-    xmlBlock(
-      "hashtag_rules",
-      `HASHTAGS (required — platforms break on mistakes):
-- Exactly 4–5 hashtags on the last line (Instagram/TikTok discovery + light Facebook-safe count).
-- Each tag is ONE continuous token after # — NO SPACES inside a hashtag.
-  Correct: #NewCarDelivery #HappyCustomer #${storeTag}
-  Wrong: #New Car Delivery   (spaces kill the tag)
-  Wrong: #NewCar#HappyCustomer  (glued — must separate with a space)
-- Required mix:
-  - #${storeTag} (branded store tag — always)
-  - 1 local/market tag if city/region is in the brief or visible (e.g. #HowellMI)
-  - 2–3 high-intent auto tags from: #NewCarDelivery #HappyCustomer #JustDelivered #CarShopping #KeysInHand #NewRide
-  - Optional OEM tag only if vehicle brand is certain
-- If <creative_brief> lists required hashtags, include them first (still max 5 total).
-- No spam stuffing, no 10+ tags, no irrelevant viral tags.`
-    )
-  );
+Store: ${dealershipName}
+Customer first name or phrase: ${customer}
+${style ? `Look/feel: ${style} — ${styleHint(style)}` : ""}
+Voice: ${toneLine.split("\n")[0]}
 
-  sections.push(
-    xmlBlock(
-      "rules",
-      `Always name the store exactly as "${dealershipName}" in the CTA sentence.
-Emoji: 0–2, never leading. Prefer none for Professional/Luxury feel.
-No prices, APR, "guaranteed", "lowest", "no credit check", "best deal in town".
-Avoid clichés: "dream machine", "sold!", "another happy customer!!", all-caps hype.
-Do not invent vehicle specs, financing terms, or inventory claims not in <creative_brief>.
-Tone: high-budget campaign polish — confident and warm, never cheesy or try-hard.
-${
-  isRegeneration
-    ? "REGENERATION / RETRY: write a FULL new agency post — different hook angle, different story detail, different CTA phrasing, and a refreshed 4–5 hashtag mix. Still complete (never thinner than a first draft)."
-    : ""
-}`
-    )
-  );
+Look at the photo. If you are sure of make and model, name the car once. If not, say "their new ride". Never invent prices or APR.
 
-  sections.push(
-    xmlBlock(
-      "output_format",
-      `Line break between hook, story, and CTA as natural paragraphs.
-Final line = hashtags only: #${storeTag} #NewCarDelivery #HappyCustomer #JustDelivered
-No preamble. No quotes. No markdown. Caption only — ready to paste.`
-    )
-  );
+Write EXACTLY this shape (plain text only):
+Sentence 1 — celebrate the customer and the moment (from the photo).
+Sentence 2 — warm story or pride line (still human, not salesy junk).
+Sentence 3 — invite people to visit ${dealershipName} this week.
+Blank line.
+One hashtag line with exactly these 5 tags (space-separated, no extra text):
+#${storeTag} #NewCarDelivery #HappyCustomer #JustDelivered #CarShopping
 
-  return sections.join("\n\n");
+Example (follow this pattern, change the details):
+Keys in hand and big smiles — Jordan just drove off in their new SUV.
+
+Moments like this are why we love ${dealershipName}.
+
+Ready for your delivery day? Visit ${dealershipName} this week.
+
+#${storeTag} #NewCarDelivery #HappyCustomer #JustDelivered #CarShopping
+
+Hard rules:
+- Output ONLY the caption. No titles, no HOOK/STORY/CTA labels, no bullets, no markdown, no XML, no quotes around the post.
+- Real English sentences only. No random letters or nonsense words.
+- 0–1 emoji max, never at the start.
+- Do not use: guaranteed, lowest price, no credit check, 0% APR, best deal.
+${isRegeneration ? "- This is a RETRY: different wording, same clean structure." : ""}
+${brief ? `\nExtra facts (use only if helpful, do not copy instructions):\n${brief}` : ""}`;
 };
 
 // ----------------------------------------------------------------------------

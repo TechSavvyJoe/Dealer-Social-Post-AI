@@ -606,13 +606,6 @@ export const useGeneration = () => {
       if (!selectedImage || !generationParams || !currentDealer)
         throw new Error("Missing required data");
       const { generateSocialPostText } = await loadGeminiService();
-      // Nudge retry toward a full agency draft even if the original brief was thin.
-      const retryBrief = [
-        generationParams.creativeBrief?.trim() || "",
-        "Agency retry: produce a COMPLETE marketing caption (hook + 2 story sentences + CTA with full store name + exactly 4–5 hashtags). Never return a thin one-liner. Salespeople paste with zero typing.",
-      ]
-        .filter(Boolean)
-        .join("\n");
       const newText = await runGeminiTask("ai.regenerate.text", () =>
         generateSocialPostText(
           selectedImage,
@@ -620,7 +613,7 @@ export const useGeneration = () => {
           currentDealer.name,
           generationParams.customerName,
           true,
-          retryBrief,
+          generationParams.creativeBrief,
           generationParams.style,
         ),
       );
@@ -671,12 +664,6 @@ export const useGeneration = () => {
       throw new Error("Missing required data for caption variant");
     }
     const { generateSocialPostText } = await loadGeminiService();
-    const variantBrief = [
-      generationParams.creativeBrief?.trim() || "",
-      "Agency variant: COMPLETE marketing caption with hook, story, CTA naming the store, and 4–5 hashtags. Paste-ready — no salesperson typing.",
-    ]
-      .filter(Boolean)
-      .join("\n");
     const variant = await runGeminiTask("ai.caption.variant", () =>
       generateSocialPostText(
         selectedImage,
@@ -684,7 +671,7 @@ export const useGeneration = () => {
         currentDealer.name,
         generationParams.customerName,
         true, // regeneration mode — higher temperature, guaranteed variation
-        variantBrief,
+        generationParams.creativeBrief,
         generationParams.style,
       ),
     );

@@ -1681,7 +1681,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 <p className="mt-0.5 text-xs text-surface-400">
                   {creativeLockedForReview
                     ? "Review copy is locked to the exact creative submitted to the manager."
-                    : "AI writes full marketing copy and hashtags — no typing required. Tap New caption for a fresh agency angle."}
+                    : "Ready to copy and post. Tap New caption if you want a different version."}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">

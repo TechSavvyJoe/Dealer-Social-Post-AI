@@ -7,14 +7,9 @@ import {
   Loader2,
   Check,
   AlertCircle,
-  Sparkles,
   ClipboardPaste,
-  Info,
 } from "lucide-react";
 
-// lucide-react v1 doesn't ship brand-name icons (trademark policy). Inline
-// minimal SVG glyphs in solid white so each tile still reads as the right
-// platform without depending on third-party icon sets.
 const FacebookGlyph: React.FC<{ className?: string }> = ({ className }) => (
   <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
     <path d="M13.5 21v-7.5h2.5l.5-3h-3v-2c0-.9.3-1.5 1.5-1.5H17V4.2c-.7-.1-1.5-.2-2.4-.2-2.4 0-4.1 1.5-4.1 4.1V10.5H8v3h2.5V21h3z" />
@@ -40,7 +35,6 @@ const LinkedinGlyph: React.FC<{ className?: string }> = ({ className }) => (
 import { Modal } from "./ui/Modal";
 import {
   CORE_PUBLISH_IDS,
-  isAppleTouchDevice,
   orderPublishTargets,
   publishTo,
   PublishStatus,
@@ -57,39 +51,9 @@ interface ShareDialogProps {
   isOpen: boolean;
   onClose: () => void;
   content: PublishContent;
-  /**
-   * Optional per-platform captions keyed by publish target id. When present,
-   * each share tile uses its matching caption (still falls back to content.text).
-   */
   platformCaptions?: Record<string, string>;
-  /** Platforms selected at generate time — shown first with a “selected” badge. */
   selectedPlatformIds?: string[];
 }
-
-/** Append optional @handle / profile hints for dealers that configured socials. */
-const hintWithDealerHandle = (
-  target: PublishTarget,
-  handles: {
-    instagram?: string;
-    facebook?: string;
-    tiktok?: string;
-    gbp?: string;
-  },
-): string => {
-  if (target.id.startsWith("instagram") && handles.instagram) {
-    return `${target.hint} · @${handles.instagram.replace(/^@/, "")}`;
-  }
-  if (target.id === "facebook_feed" && handles.facebook) {
-    return `${target.hint} · ${handles.facebook.replace(/^https?:\/\//, "")}`;
-  }
-  if (target.id === "tiktok" && handles.tiktok) {
-    return `${target.hint} · @${handles.tiktok.replace(/^@/, "")}`;
-  }
-  if (target.id === "gbp" && handles.gbp) {
-    return `${target.hint} · profile linked`;
-  }
-  return target.hint;
-};
 
 const ICON_MAP: Record<PublishTarget["icon"], React.ComponentType<{ className?: string }>> = {
   facebook: FacebookGlyph,
@@ -103,26 +67,7 @@ const ICON_MAP: Record<PublishTarget["icon"], React.ComponentType<{ className?: 
 
 const CORE_SET = new Set<string>(CORE_PUBLISH_IDS);
 
-const handoffBadge = (target: PublishTarget): string => {
-  switch (target.handoff) {
-    case "clipboard-open":
-      return "copy + open";
-    case "share-file":
-      return "share photo";
-    case "share-any":
-      return "share sheet";
-    default:
-      return "share";
-  }
-};
-
-/**
- * Per-platform share dialog.
- *
- * Captions are always copied to the clipboard — browsers cannot inject text
- * into Facebook/Instagram composers. Facebook is opened directly (not via the
- * Apple Share Sheet) because Meta apps almost never appear there for web shares.
- */
+/** Simple, salesperson-first share sheet. */
 export const ShareDialog: React.FC<ShareDialogProps> = ({
   isOpen,
   onClose,
@@ -136,26 +81,11 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     status: PublishStatus;
   } | null>(null);
   const dealer = useAppStore((s) => s.currentDealer);
-  const onApple = React.useMemo(() => isAppleTouchDevice(), []);
-  const handles = React.useMemo(
-    () => ({
-      instagram: dealer?.instagram_handle,
-      facebook: dealer?.facebook_url,
-      tiktok: dealer?.tiktok_handle,
-      gbp: dealer?.gbp_url,
-    }),
-    [dealer],
-  );
 
-  const selectedSet = React.useMemo(
-    () => new Set((selectedPlatformIds || []).filter(Boolean)),
-    [selectedPlatformIds],
-  );
   const orderedTargets = React.useMemo(
     () => orderPublishTargets(selectedPlatformIds),
     [selectedPlatformIds],
   );
-
   const coreTargets = React.useMemo(
     () => orderedTargets.filter((t) => CORE_SET.has(t.id)),
     [orderedTargets],
@@ -180,290 +110,159 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       setBusy(target.id);
       setStatus(null);
       try {
-        const targetContent: PublishContent = {
+        const result = await publishTo(target.id, {
           ...content,
           text: captionForTarget(target.id, target.charBudget),
-        };
-        const result = await publishTo(target.id, targetContent);
+        });
         setStatus({ targetId: target.id, status: result });
         logEvent("share.attempt", {
           target: target.id,
           kind: result.kind,
           handoff: target.handoff,
-          via:
-            result.kind === "shared" || result.kind === "fallback"
-              ? result.via
-              : undefined,
-          usedPackCaption: Boolean(platformCaptions?.[target.id]),
         });
-        // Keep the dialog open so paste instructions stay visible — Meta apps
-        // never auto-fill captions from a browser.
       } finally {
         setBusy(null);
       }
     },
-    [busy, captionForTarget, content, platformCaptions],
+    [busy, captionForTarget, content],
   );
 
-  const statusMessage = (s: PublishStatus | undefined): string | null => {
+  const msg = (() => {
+    const s = status?.status;
     if (!s) return null;
-    if (s.kind === "shared") {
+    if (s.kind === "error") return s.message;
+    if (s.kind === "cancelled") {
+      return "Cancelled. Caption is still copied — paste when you are ready.";
+    }
+    if (s.kind === "shared" || s.kind === "fallback") {
       return (
         s.message ||
-        "Share sheet opened. Paste the caption in the app after the photo is attached."
+        "Caption copied. In the app: create post → long-press → Paste → add the photo."
       );
     }
-    if (s.kind === "fallback") return s.message;
-    if (s.kind === "cancelled") {
-      return s.message || "Share cancelled. Caption is still on your clipboard.";
-    }
-    if (s.kind === "error") return s.message;
     return null;
-  };
+  })();
 
-  const renderTile = (target: PublishTarget, emphasized = false) => {
+  const tile = (target: PublishTarget) => {
     const Icon = ICON_MAP[target.icon];
     const isBusy = busy === target.id;
-    const isDone =
-      status?.targetId === target.id &&
-      (status.status.kind === "shared" || status.status.kind === "fallback");
-    const isFallback =
-      status?.targetId === target.id && status.status.kind === "fallback";
-    const isError =
-      status?.targetId === target.id && status.status.kind === "error";
-    const isSelected = selectedSet.has(target.id);
-    const targetCaption = captionForTarget(target.id, target.charBudget);
-    const captionLen = targetCaption.length;
-    const overBudget = captionLen > target.charBudget;
-    const hasPackCaption = Boolean(platformCaptions?.[target.id]);
-    const isFacebook = target.id === "facebook_feed";
+    const isActive = status?.targetId === target.id;
+    const ok =
+      isActive &&
+      (status?.status.kind === "shared" || status?.status.kind === "fallback");
 
     return (
-      <motion.button
+      <button
         key={target.id}
         type="button"
         onClick={() => handlePick(target)}
         disabled={!!busy}
-        whileHover={{ scale: busy ? 1 : 1.02 }}
-        whileTap={{ scale: 0.98 }}
         className={cn(
-          "relative flex flex-col items-start gap-2 p-3 rounded-xl border text-left transition-colors overflow-hidden min-h-[7.5rem]",
-          emphasized || isFacebook
-            ? "bg-[#1877F2]/10 border-[#1877F2]/45 hover:bg-[#1877F2]/15 sm:min-h-[8rem]"
-            : isSelected
-              ? "bg-primary-500/10 border-primary-400/40 hover:bg-primary-500/15"
-              : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20",
-          isFacebook && !emphasized ? "ring-1 ring-[#1877F2]/30" : null,
-          "disabled:opacity-60 disabled:cursor-not-allowed",
+          "flex min-h-[5.5rem] flex-col items-start gap-2 rounded-2xl border p-4 text-left transition-colors",
+          target.id === "facebook_feed"
+            ? "border-[#1877F2]/50 bg-[#1877F2]/15 hover:bg-[#1877F2]/20"
+            : "border-white/10 bg-white/5 hover:bg-white/10",
+          "disabled:cursor-not-allowed disabled:opacity-50",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
         )}
-        style={{
-          boxShadow: isDone
-            ? `0 0 24px ${target.accent}30`
-            : isFacebook
-              ? `0 0 0 1px ${target.accent}40`
-              : undefined,
-        }}
         aria-label={`Share to ${target.label}`}
       >
-        <div
-          className="absolute inset-0 opacity-0 hover:opacity-10 pointer-events-none transition-opacity"
-          style={{ background: target.accent }}
-        />
-        <div className="flex items-center justify-between w-full">
+        <div className="flex w-full items-center justify-between gap-2">
           <div
-            className="w-10 h-10 rounded-lg flex items-center justify-center text-white shrink-0"
+            className="flex h-11 w-11 items-center justify-center rounded-xl text-white"
             style={{ background: target.accent }}
           >
             {isBusy ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : isDone ? (
-              <Check className="w-4 h-4" />
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : ok ? (
+              <Check className="h-5 w-5" />
             ) : (
-              <Icon className="w-4 h-4" />
+              <Icon className="h-5 w-5" />
             )}
           </div>
-          {isSelected ? (
-            <span className="text-[9px] uppercase tracking-wide text-primary-200 font-semibold">
-              selected
-            </span>
-          ) : target.directApiConnected ? (
-            <span className="text-[9px] uppercase tracking-wide text-success-300 font-semibold inline-flex items-center gap-1">
-              <Sparkles className="w-2.5 h-2.5" /> direct
-            </span>
-          ) : (
-            <span className="text-[9px] uppercase tracking-wide text-surface-500">
-              {handoffBadge(target)}
-            </span>
-          )}
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-surface-400">
+            {target.handoff === "clipboard-open" ? "Open app" : "Share"}
+          </span>
         </div>
-        <div className="space-y-0.5 w-full">
-          <div className="text-sm font-semibold text-surface-50">
+        <div>
+          <div className="text-base font-semibold text-surface-50">
             {target.label}
           </div>
-          <div className="text-[10px] text-surface-400 leading-tight">
-            {hintWithDealerHandle(target, handles)}
+          <div className="mt-0.5 text-xs text-surface-400">
+            {target.id === "facebook_feed"
+              ? "Copies caption · opens Facebook · paste there"
+              : target.id.startsWith("instagram")
+                ? "Sends photo · paste caption in Instagram"
+                : target.id === "tiktok"
+                  ? "Sends media · paste caption in TikTok"
+                  : target.hint}
           </div>
         </div>
-        <div
-          className={cn(
-            "text-[10px] font-mono tabular-nums",
-            overBudget ? "text-error-300" : "text-surface-500",
-          )}
-        >
-          {captionLen}/{target.charBudget}
-          {overBudget && " · over"}
-          {hasPackCaption && !overBudget ? " · tailored" : ""}
-        </div>
-        {(isFallback || isError) && status?.targetId === target.id && (
-          <div
-            className={cn(
-              "text-[10px] mt-1 leading-snug",
-              isError ? "text-error-300" : "text-warning-200",
-            )}
-          >
-            {isError
-              ? status.status.kind === "error" && status.status.message
-              : "Ready — paste caption in the app"}
-          </div>
-        )}
-      </motion.button>
+      </button>
     );
   };
-
-  const activeMsg = statusMessage(status?.status);
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Share post"
-      description="Caption is always copied for Paste. Facebook opens directly (not via Apple’s list)."
-      size="xl"
+      title="Share"
+      description="1) Tap a network  2) Paste caption in the app  3) Add the photo"
+      size="lg"
     >
       <div className="space-y-4">
-        <div className="rounded-xl border border-primary-500/25 bg-primary-500/10 px-3 py-2.5 text-[11px] leading-relaxed text-primary-50/95">
-          <div className="flex gap-2">
-            <ClipboardPaste className="mt-0.5 h-4 w-4 shrink-0 text-primary-200" />
-            <div className="space-y-1">
-              <p className="font-semibold text-primary-50">
-                Paste the caption yourself in the app
-              </p>
-              <p className="text-primary-100/85">
-                Browsers cannot drop text into Facebook, Instagram, or TikTok
-                composers. Every share copies the full caption first — in the
-                app, long-press the text box and choose{" "}
-                <strong className="text-primary-50">Paste</strong>.
-              </p>
-            </div>
-          </div>
+        <div className="flex items-start gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs text-surface-300">
+          <ClipboardPaste className="mt-0.5 h-4 w-4 shrink-0 text-primary-300" />
+          <p>
+            <strong className="text-surface-100">Caption is copied for you.</strong>{" "}
+            Apps like Facebook and Instagram never auto-fill text from a browser —
+            long-press the post box and choose <strong className="text-surface-100">Paste</strong>.
+            On iPhone, Facebook usually will not appear in the system share list —
+            use the Facebook button here instead.
+          </p>
         </div>
 
-        {onApple && (
-          <div className="rounded-xl border border-warning-500/30 bg-warning-500/10 px-3 py-2.5 text-[11px] leading-relaxed text-warning-50/95">
-            <div className="flex gap-2">
-              <Info className="mt-0.5 h-4 w-4 shrink-0 text-warning-200" />
-              <div className="space-y-1">
-                <p className="font-semibold text-warning-50">
-                  Why Facebook is missing from the Apple Share Sheet
-                </p>
-                <p className="text-warning-100/90">
-                  iPhone only lists apps that accept that share type. Facebook
-                  usually <strong>does not</strong> register for photos shared
-                  from Safari or web apps, so Messages, Mail, and Photos show up
-                  while Facebook does not. That is an Apple/Meta limit — not a
-                  missing install. Tap the{" "}
-                  <strong className="text-warning-50">Facebook</strong> button
-                  below instead: we copy the caption, save the image, and open
-                  Facebook for you.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <section aria-labelledby="share-core-heading" className="space-y-2">
-          <div className="flex items-baseline justify-between gap-2">
-            <h3
-              id="share-core-heading"
-              className="text-xs font-semibold uppercase tracking-wide text-surface-300"
-            >
-              Core dealership channels
-            </h3>
-            <span className="text-[10px] text-surface-500">
-              Always available
-            </span>
-          </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            {coreTargets.map((t) => renderTile(t, t.id === "facebook_feed"))}
-          </div>
-          <ol className="list-decimal space-y-1 pl-4 text-[11px] leading-relaxed text-surface-400">
-            <li>
-              <strong className="text-surface-200">Facebook</strong> — copies
-              caption, downloads photo, opens Facebook. Create post → Paste →
-              add photo from Downloads/Photos.
-            </li>
-            <li>
-              <strong className="text-surface-200">Instagram / TikTok</strong> —
-              may open the system share sheet with the photo. If the app
-              appears, pick it; then Paste the caption in the compose box.
-            </li>
-          </ol>
-        </section>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {coreTargets.map(tile)}
+        </div>
 
         {moreTargets.length > 0 && (
-          <section aria-labelledby="share-more-heading" className="space-y-2">
-            <h3
-              id="share-more-heading"
-              className="text-xs font-semibold uppercase tracking-wide text-surface-400"
-            >
-              More destinations
-            </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {moreTargets.map((t) => renderTile(t, false))}
+          <details className="group rounded-xl border border-white/10 bg-surface-950/40">
+            <summary className="cursor-pointer list-none px-3 py-2.5 text-sm font-semibold text-surface-200 marker:content-none [&::-webkit-details-marker]:hidden">
+              More options
+              <span className="ml-2 text-xs font-normal text-surface-500 group-open:hidden">
+                (Google, Marketplace, …)
+              </span>
+            </summary>
+            <div className="grid grid-cols-2 gap-2 border-t border-white/5 p-3 sm:grid-cols-3">
+              {moreTargets.map(tile)}
             </div>
-            <p className="text-[10px] leading-relaxed text-surface-500">
-              <strong className="text-surface-300">More…</strong> opens Apple’s
-              or Android’s full share sheet. Expect Messages, Mail, Photos,
-              AirDrop — not always Facebook. Use the Facebook tile for FB.
-            </p>
-          </section>
+          </details>
         )}
 
         <AnimatePresence>
-          {activeMsg && status && (
+          {msg && (
             <motion.div
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
+              exit={{ opacity: 0 }}
               className={cn(
-                "rounded-xl border px-3 py-2.5 text-xs flex items-start gap-2",
-                status.status.kind === "shared" ||
-                  status.status.kind === "fallback"
-                  ? "border-success-500/40 bg-success-500/10 text-success-100"
-                  : status.status.kind === "error"
-                    ? "border-error-500/40 bg-error-500/10 text-error-100"
-                    : "border-surface-700 bg-surface-900/60 text-surface-300",
+                "flex items-start gap-2 rounded-xl border px-3 py-2.5 text-xs leading-relaxed",
+                status?.status.kind === "error"
+                  ? "border-error-500/40 bg-error-500/10 text-error-100"
+                  : "border-success-500/40 bg-success-500/10 text-success-100",
               )}
               role="status"
             >
-              {status.status.kind === "shared" ||
-              status.status.kind === "fallback" ? (
-                <Check className="w-4 h-4 shrink-0 mt-0.5" />
+              {status?.status.kind === "error" ? (
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               ) : (
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <Check className="mt-0.5 h-4 w-4 shrink-0" />
               )}
-              <span className="leading-relaxed">{activeMsg}</span>
+              <span>{msg}</span>
             </motion.div>
           )}
         </AnimatePresence>
-
-        <div className="pt-2 border-t border-white/10 text-[11px] text-surface-500 leading-relaxed">
-          <strong className="text-surface-300">Today:</strong> clipboard +
-          media handoff (no browser can auto-post into Meta apps).{" "}
-          <strong className="text-surface-300">Coming later:</strong> true
-          one-tap publish after Meta App Review, TikTok Content Posting, and
-          Google Business Profile API connections.
-        </div>
       </div>
     </Modal>
   );

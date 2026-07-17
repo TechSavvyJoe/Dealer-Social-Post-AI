@@ -35,6 +35,10 @@ import {
 } from "./openaiAdapter";
 import { requestCache } from "../utils/requestCache";
 import { logEvent as logTelemetry } from "../utils/telemetry";
+import {
+  cleanSocialCaption,
+  ensureUsableCaption,
+} from "../utils/captionQuality";
 
 /**
  * Tries each model in the fallback chain for a given task. The action
@@ -164,23 +168,9 @@ const optionalLogoImagePart = async (source?: string) => {
   }
 };
 
+/** Clean model text; never return labeled/XML junk to the UI. */
 const cleanGeneratedText = (inputText: string): string => {
-  if (!inputText) return "";
-  const lines = inputText.trim().split("\n");
-  const firstLine = lines[0].toLowerCase();
-
-  const isPreamble =
-    firstLine.includes("here is") ||
-    firstLine.includes("here's") ||
-    firstLine.startsWith("sure") ||
-    firstLine.startsWith("certainly") ||
-    (firstLine.includes("post") && firstLine.includes("for you"));
-
-  if (lines.length > 1 && isPreamble) {
-    return lines.slice(1).join("\n").trim();
-  }
-
-  return inputText.trim();
+  return cleanSocialCaption(inputText ?? "");
 };
 
 /**
@@ -382,6 +372,19 @@ export const generateSocialPostText = async (
     } else {
       throw err;
     }
+  }
+
+  // Quality gate: if the model returned gibberish/labels, ship a clean
+  // template post instead of showing junk to the salesperson.
+  const usable = ensureUsableCaption(text, {
+    storeName: dealershipName,
+    customerName,
+  });
+  text = usable.caption;
+  if (usable.usedFallback) {
+    console.warn(
+      "[generateSocialPostText] Low-quality model caption replaced with safe template",
+    );
   }
 
   if (!text) {
