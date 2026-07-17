@@ -85,31 +85,35 @@ interface PostCustomizerProps {
 // identically across OS/browser, sit on the baseline, and share one stroke weight.
 const STYLE_INFO: Record<
   StyleOption,
-  { icon: LucideIcon; desc: string; aiHint: string }
+  { icon: LucideIcon; desc: string; detail: string; aiHint: string }
 > = {
   [StyleOption.Luxury]: {
     icon: Gem,
     desc: "Elegant & refined",
+    detail: "Premium grade · real photo stays · clean type",
     aiHint:
-      "Deliver a luxurious, editorial layout with elevated metallic detailing.",
+      "Soft luxury grade and elegant type over the real delivery photo — no car swap.",
   },
   [StyleOption.Modern]: {
     icon: Zap,
     desc: "Bold & futuristic",
+    detail: "High contrast · sharp sans · subtle overlays",
     aiHint:
-      "Create an avant-garde, high-contrast composition with geometric overlays.",
+      "Crisp modern type and contrast on the real photo — keep people and vehicle locked.",
   },
   [StyleOption.Friendly]: {
     icon: PartyPopper,
     desc: "Warm & playful",
+    detail: "Bright · welcoming · community energy",
     aiHint:
-      "Deliver a cheerful, handcrafted layout with warm colors and lively motion.",
+      "Warm, friendly polish on the real moment — lively without cartoon rebuilds.",
   },
   [StyleOption.Sporty]: {
     icon: Gauge,
     desc: "Dynamic & energetic",
+    detail: "Bold type · athletic energy · same car",
     aiHint:
-      "Produce a high-energy layout with motion trails and glowing accents.",
+      "Sporty type energy while preserving the exact car and customers from the photo.",
   },
 };
 
@@ -694,13 +698,21 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         </div>
                         <span
                           className={cn(
-                            "text-[11px] block truncate transition-colors",
+                            "text-[11px] block leading-snug transition-colors",
                             isActive
                               ? "text-primary-200/80"
                               : "text-surface-400",
                           )}
                         >
                           {info.desc}
+                        </span>
+                        <span
+                          className={cn(
+                            "mt-0.5 text-[10px] block leading-snug transition-colors",
+                            isActive ? "text-primary-200/60" : "text-surface-500",
+                          )}
+                        >
+                          {info.detail}
                         </span>
                       </div>
                     </motion.button>

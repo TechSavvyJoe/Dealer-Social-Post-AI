@@ -73,7 +73,10 @@ function veoRequest(durationSeconds = 6, resolution = "720p") {
     instances: [
       {
         prompt: "A polished cinematic vehicle reveal",
-        image: inlineImage,
+        image: {
+          bytesBase64Encoded: inlineImage.inlineData.data,
+          mimeType: inlineImage.inlineData.mimeType,
+        },
       },
     ],
     parameters: {

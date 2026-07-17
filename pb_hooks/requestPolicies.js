@@ -717,12 +717,45 @@ function buildVeoRequest(input) {
     typeof instance.prompt !== "string" ||
     !instance.prompt.trim() ||
     instance.prompt.length > MAX_PROMPT_CHARS ||
-    !hasOnlyKeys(instance.image, ["inlineData"], ["inlineData"])
+    !instance.image ||
+    typeof instance.image !== "object"
   ) {
     return null;
   }
-  const image = sanitizeInlineImage({ inlineData: instance.image.inlineData });
-  if (!image) return null;
+
+  // Accept either Veo-native { bytesBase64Encoded, mimeType } or legacy
+  // Gemini-style { inlineData: { data, mimeType } }, always emit Veo-native.
+  let veoImage = null;
+  if (
+    hasOnlyKeys(instance.image, ["bytesBase64Encoded", "mimeType"], [
+      "bytesBase64Encoded",
+      "mimeType",
+    ])
+  ) {
+    const sanitized = sanitizeInlineImage({
+      inlineData: {
+        mimeType: instance.image.mimeType,
+        data: instance.image.bytesBase64Encoded,
+      },
+    });
+    if (sanitized) {
+      veoImage = {
+        bytesBase64Encoded: sanitized.inlineData.data,
+        mimeType: sanitized.inlineData.mimeType,
+      };
+    }
+  } else if (hasOnlyKeys(instance.image, ["inlineData"], ["inlineData"])) {
+    const sanitized = sanitizeInlineImage({
+      inlineData: instance.image.inlineData,
+    });
+    if (sanitized) {
+      veoImage = {
+        bytesBase64Encoded: sanitized.inlineData.data,
+        mimeType: sanitized.inlineData.mimeType,
+      };
+    }
+  }
+  if (!veoImage) return null;
 
   const parameters = input.parameters;
   if (
@@ -744,7 +777,7 @@ function buildVeoRequest(input) {
     instances: [
       {
         prompt: instance.prompt,
-        image: image,
+        image: veoImage,
       },
     ],
     parameters: {

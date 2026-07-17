@@ -681,17 +681,16 @@ export const generatePostVideo = async (
     requestedDuration <= 5 ? 4 : requestedDuration <= 7 ? 6 : 8;
   if (options.resolution === "1080p") durationSeconds = 8;
 
-  // Veo 3.1 uses the predictLongRunning endpoint with instances/parameters format
-  // Per official docs: https://ai.google.dev/gemini-api/docs/video
+  // Veo 3.x predictLongRunning expects image as { bytesBase64Encoded, mimeType }.
+  // Gemini generateContent-style { inlineData: { data, mimeType } } returns 400
+  // "inlineData isn't supported by this model".
   const body = {
     instances: [
       {
         prompt: prompt,
         image: {
-          inlineData: {
-            mimeType,
-            data: base64Data,
-          },
+          bytesBase64Encoded: base64Data,
+          mimeType,
         },
       },
     ],

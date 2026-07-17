@@ -279,7 +279,7 @@ describe("GeminiService model routing", () => {
       expect.stringContaining("veo-3.1-generate-preview"),
       expect.objectContaining({
         body: expect.stringContaining(
-          '"image":{"inlineData":{"mimeType":"image/jpeg","data":"fake-data"}}',
+          '"image":{"bytesBase64Encoded":"fake-data","mimeType":"image/jpeg"}',
         ),
       }),
     );
@@ -290,7 +290,7 @@ describe("GeminiService model routing", () => {
       }),
     );
     expect(vi.mocked(global.fetch).mock.calls[0]?.[1]?.body).not.toContain(
-      "bytesBase64Encoded",
+      "inlineData",
     );
     expect(global.fetch).toHaveBeenCalledWith(
       "/api/proxy/v1beta/files/test-video:download",

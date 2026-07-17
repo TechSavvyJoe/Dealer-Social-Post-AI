@@ -24,10 +24,25 @@ Maintain a 12% margin (minimum 32px) between any text/logo and the bounding box 
 Do not cross people, hands, faces, license plates, dealer signage, or vehicle nameplates with text.
 Keep everything 100% inside the image canvas.`;
 
-const subjectPreservation = `This is photo editing, not generation. The input photo is the canvas.
-Preserve the exact pixels for: every person's face/body/hair/clothing/pose, the vehicle's make/model/color/trim, the background scene, and the camera angle.
-You may adjust: exposure, color grading, vibrancy, contrast, sharpening, and add text/badge overlays.
-You may not: replace people, change the car, alter the location, or add hallucinated subjects.`;
+const subjectPreservation = `This is PHOTO EDITING of the attached delivery photo — not a new illustration and not a scene rebuild.
+
+LOCK these from the source photo (pixel-faithful, same framing):
+- Every person's face, body, hair, clothing, expression, and pose
+- The exact vehicle (make, model, color, trim, angle, position in frame)
+- The real background / location and camera angle
+
+ALLOWED only:
+- Subtle color grade, exposure, contrast, sharpening
+- Tasteful text overlays, badges, and a small logo/watermark in empty space
+- Light cinematic polish that does NOT invent a new car, new people, or a new lot
+
+FORBIDDEN (instant failure):
+- Replacing, regenerating, or "beautifying" faces into different people
+- Swapping the car, moving the car, or inventing motion-blur highway backgrounds
+- Full-scene redraws (comic, LEGO, poster stock, stock-car composites)
+- Covering faces, hands, or the vehicle with oversized graphics
+
+If you cannot place text without violating these rules, use a thin bottom/top banner over empty sky or pavement — never over the car or people.`;
 
 // ----------------------------------------------------------------------------
 // TEXT — Caption
@@ -69,16 +84,15 @@ const styleHint = (style: StyleOption): string => {
 const imageStyleHint = (style: StyleOption): string => {
   switch (style) {
     case StyleOption.Luxury:
-      return "High-end automotive brochure. Aggressive use of negative space. Cinematic, moody color grading with dodge and burn. Razor-thin elegant serif typography.";
+      return "Boutique automotive campaign polish — restrained color grade, soft highlight control, elegant serif or refined sans type. Think Apple keynote + premium auto brochure, not stock-photo composites.";
     case StyleOption.Modern:
-      return "Tech-event keynote aesthetic. Heavy, tracking-tight sans-serifs. Sleek minimalist geometry. High contrast lighting with glassmorphism overlays.";
+      return "Clean Meta/Google ads polish — crisp contrast, confident sans type, minimal shapes. Keep the real photo dominant; overlays stay secondary.";
     case StyleOption.Friendly:
-      return "Modern direct-to-consumer lifestyle brand. Soft, warm golden-hour lighting. Rounded, approachable but premium typography. Vibrant, cheerful color palette.";
+      return "Warm community-dealership energy — slight warmth/brightness, friendly rounded type. Still the real customers and real car, not a cartoon.";
     case StyleOption.Sporty:
-      return "Action sports/energy drink ad. Aggressive forward-leaning italics. Gritty high-contrast HDR processing. Dynamic editorial grid layout with motion blur elements.";
+      return "Athletic campaign energy — tighter contrast, bold italics, red/blue accent type. No fake motion-blur highways or replacement vehicles.";
     default:
-      // Safe fallback for an out-of-enum style (see styleHint above).
-      return "Clean, professional automotive marketing photography. Balanced composition, natural lighting, modern typography.";
+      return "Professional automotive social creative: real photo first, studio-grade type and grade second.";
   }
 };
 
@@ -126,23 +140,30 @@ ${style ? `Visual style of the post: ${style} — ${styleHint(style)}` : ""}`
     )
   );
 
+  const storeTag = dealershipName.replace(/[^A-Za-z0-9]+/g, "");
   sections.push(
     xmlBlock(
       "rules",
-      `Length: 1–2 short sentences for the hook + 1 short CTA. Three sentences total max.
-Hashtags: exactly 3–4. One of them is #${dealershipName.replace(/\s+/g, "")}.
-Emoji: 0–2 total, only if they earn their place. Never as the first character.
-Do not use prices, APR claims, "guaranteed", "lowest", "no credit check", or anything that could trigger a compliance footer the user has to delete.
-Do not invent vehicle specs not present in <creative_brief>.
-${isRegeneration ? "REGENERATION: This is a new variant. Use a different opening word, different image, and different hashtag-mix from any previous version." : ""}`
+      `Length: 1–2 short hook sentences + 1 CTA. Three sentences max. Mobile-first — scannable on a phone screen.
+Always name the store exactly as "${dealershipName}" in the body or CTA (not a shortened brand-only name) so multi-location traffic goes to the right rooftop.
+Hashtags: 4–6 total, space-separated:
+  - #${storeTag} (required)
+  - 1 location/market tag if you can infer city/region from the store name (e.g. #HowellMI)
+  - 2–3 high-intent automotive discovery tags (e.g. #NewCarDelivery #HappyCustomer #CarShopping) — no spam stuffing
+  - Optional OEM tag only if the vehicle brand is certain from the photo/brief
+Emoji: 0–2, never leading.
+No prices, APR, "guaranteed", "lowest", "no credit check".
+Do not invent vehicle specs not in <creative_brief>.
+Tone: lively Hollywood marketing polish — confident and fun, never cheesy or try-hard.
+${isRegeneration ? "REGENERATION: different opening + different hashtag mix than a prior draft." : ""}`
     )
   );
 
   sections.push(
     xmlBlock(
       "output_format",
-      `Hook + story (1–2 sentences). Newline. CTA inviting visitors to ${dealershipName} (1 sentence). Newline. Hashtags space-separated on one line.
-No "Here is" preamble. No quotes around the caption. Just the caption.`
+      `Hook + story (1–2 sentences). Newline. CTA that includes "${dealershipName}" (1 sentence). Newline. Hashtags on one line.
+No preamble. No quotes. Caption only.`
     )
   );
 
@@ -203,9 +224,9 @@ export const generateImagePromptV2 = (
       "style_direction",
       `Style: ${style}
 ${imageStyleHint(style)}
-Color & Grading: Apply cinematic color grading (LUTs) to naturally draw the viewer's eye to the customer and the car, subtly darkening distracting background elements. Match ambient lighting.
-Typography & Layout: Abandon generic center-aligned text. Utilize expert editorial grid systems (e.g., Swiss Design), typography pairings, overlapping planes, and dynamic angles.
-Compositing & Effects: Analyze the light source in the original photo and cast realistic drop shadows or ambient occlusion from any 3D text onto the environment (the ground, a wall). Seamlessly integrate text into the depth-of-field.`
+Color & grading: subtle cinematic grade only — lift faces slightly, keep paint accurate, do not invent a new environment.
+Typography: editorial hierarchy (hero line + short support line). Prefer open sky/pavement/wall safe zones. Avoid cheesy 3D chrome explosions or full-frame graphic takeover.
+Compositing: light text shadows ok; no stock-car pastes, no background replacement, no re-posed people.`
     )
   );
 
@@ -229,10 +250,17 @@ Compositing & Effects: Analyze the light source in the original photo and cast r
 
   sections.push(
     xmlBlock(
-      "watermark",
-      hasLogo
-        ? `A second image is the dealership logo. Place it as a small, tasteful watermark in a lower-corner safe zone. Do not distort. Do not also add the dealership name as text — the logo is enough.`
-        : `Render the dealership name "${dealershipName}" as a small, tasteful text watermark in a lower-corner safe zone. Use the exact spelling.`
+      "store_identity",
+      `This store's full legal/marketing name is exactly:
+"${dealershipName}"
+
+You MUST show this full name clearly in the design (not abbreviated to a brand family only). Multi-location groups (e.g. several Ford stores + Lincoln) need the specific location name so customers know which store to visit.
+
+${
+  hasLogo
+    ? `A second image is the store logo — place it small in a lower corner safe zone AND still include the full name "${dealershipName}" as readable text (badge, banner, or caption line). Logo alone is not enough.`
+    : `Render "${dealershipName}" as a clear, tasteful text lockup in a safe zone (lower third or corner). Exact spelling required.`
+}`
     )
   );
 
@@ -295,25 +323,29 @@ export const generateFunPromptV2 = (
   requestedStyleName?: string
 ): string => {
   return [
-    `You are an artistic transformation engine. Take the attached customer-delivery photo and re-render it in the requested artistic style while keeping the subjects recognizable.`,
+    `You are a premium campaign artist applying a stylized LOOK to a real delivery photo — like a limited Marvel/LEGO/superhero campaign treatment over photography, not a full redraw that invents a new car or new people.`,
     xmlBlock(
       "style",
-      `${requestedStyleName ? `Style: ${requestedStyleName}\n` : ""}${styleSummary}`
+      `${requestedStyleName ? `Style: ${requestedStyleName}\n` : ""}${styleSummary}
+
+Keep the treatment fun and iconic (Marvel energy, Superman poster polish, LEGO charm, nostalgic comic) but HOLLYWOOD-STUDIO professional — not cheesy clip-art.
+The original photo composition stays: same people positions, same vehicle, same location. Stylize colors, linework overlays, and texture ON TOP of that composition.`
     ),
     xmlBlock(
-      "subject_recognition",
-      `Subjects must remain RECOGNIZABLE as the same people and the same car — not photorealistic, but unmistakably them.
-Faces stay clear and uncovered. Hands stay intact. Vehicle silhouette stays correct.`
+      "subject_lock",
+      `CRITICAL: The real customers and the real car must remain clearly the same subjects from the source photo.
+Do not swap the vehicle. Do not invent a different car flying through a highway blur. Do not replace faces.
+Mild stylization of skin/line is ok; identity must still match the photo at a glance.`
     ),
     xmlBlock(
-      "watermark",
+      "store_identity",
       hasLogo
-        ? `Place the supplied logo subtly in a lower corner. Allow it to take on the artistic style if doing so doesn't distort the logo's readability.`
-        : `Stylize the dealership name "${dealershipName}" as a signature element in a lower corner, matching the artistic medium.`
+        ? `Place the logo small in a corner AND render the full store name "${dealershipName}" as readable campaign text.`
+        : `Include the full store name "${dealershipName}" as a clear signature/lockup — exact spelling.`
     ),
     xmlBlock(
       "safe_zones",
-      `Any text in the transformed art must not cover faces, hands, or the vehicle nameplate.`
+      `Text must not cover faces, hands, or the vehicle nameplate.`
     ),
   ].join("\n\n");
 };
