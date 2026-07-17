@@ -77,6 +77,7 @@ interface PostCustomizerProps {
       hasRelease?: boolean;
       capturedRelease?: CapturedRelease;
     },
+    platformIds?: PlatformId[],
   ) => Promise<void> | void;
   onBack: () => void;
   dealershipName: string;
@@ -413,13 +414,21 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
     setIsSubmitting(true);
     try {
-      await onGenerate(style, tone, customerName, preparedText, creativeBrief, {
-        salespersonName: salesperson.name.trim() || undefined,
-        salespersonId: salesperson.id,
-        vin: decodedVehicle?.vin,
-        hasRelease: !!capturedRelease,
-        capturedRelease: capturedRelease || undefined,
-      });
+      await onGenerate(
+        style,
+        tone,
+        customerName,
+        preparedText,
+        creativeBrief,
+        {
+          salespersonName: salesperson.name.trim() || undefined,
+          salespersonId: salesperson.id,
+          vin: decodedVehicle?.vin,
+          hasRelease: !!capturedRelease,
+          capturedRelease: capturedRelease || undefined,
+        },
+        selectedPlatforms,
+      );
     } finally {
       setIsSubmitting(false);
     }

@@ -76,6 +76,77 @@ export const fileToDataUrl = (file: File): Promise<string> => {
 };
 
 /**
+ * Veo only accepts 16:9 or 9:16. Pad the source with letterbox (contain) so the
+ * model is not forced to invent vertical/horizontal pixels by cropping/zooming.
+ * Returns the original data URL unchanged if canvas is unavailable or the
+ * source already matches the target aspect within a small tolerance.
+ */
+export const letterboxImageForVideo = async (
+  dataUrl: string,
+  aspect: "16:9" | "9:16",
+  longEdge = 1280,
+): Promise<string> => {
+  if (typeof document === "undefined") return dataUrl;
+
+  const targetRatio = aspect === "16:9" ? 16 / 9 : 9 / 16;
+  const outW =
+    aspect === "16:9" ? longEdge : Math.round(longEdge * (9 / 16));
+  const outH =
+    aspect === "16:9" ? Math.round(longEdge * (9 / 16)) : longEdge;
+
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("Could not load image for letterbox."));
+    el.src = dataUrl;
+  });
+
+  const srcRatio = img.width / Math.max(img.height, 1);
+  if (Math.abs(srcRatio - targetRatio) < 0.04) {
+    return dataUrl;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return dataUrl;
+
+  // Soft dark pad — premium social letterbox, not pure black cutout
+  ctx.fillStyle = "#0a0a0c";
+  ctx.fillRect(0, 0, outW, outH);
+
+  const scale = Math.min(outW / img.width, outH / img.height);
+  const dw = Math.round(img.width * scale);
+  const dh = Math.round(img.height * scale);
+  const dx = Math.round((outW - dw) / 2);
+  const dy = Math.round((outH - dh) / 2);
+  ctx.drawImage(img, dx, dy, dw, dh);
+
+  try {
+    return canvas.toDataURL("image/jpeg", 0.92);
+  } catch {
+    return dataUrl;
+  }
+};
+
+/**
+ * Pick Veo aspect from source dimensions. Social-first: portrait → 9:16,
+ * landscape → 16:9, square → 9:16 (Stories/Reels) after letterbox.
+ */
+export const resolveVeoAspect = (
+  width: number,
+  height: number,
+  preference: "auto" | "16:9" | "9:16" | "1:1",
+): "16:9" | "9:16" => {
+  if (preference === "16:9" || preference === "1:1") return "16:9";
+  if (preference === "9:16") return "9:16";
+  if (height > width * 1.08) return "9:16";
+  if (width > height * 1.08) return "16:9";
+  return "9:16";
+};
+
+/**
  * Detects the EXIF orientation value (1-8) from a JPEG file.
  * Returns 1 if orientation can't be determined or file isn't a JPEG.
  */

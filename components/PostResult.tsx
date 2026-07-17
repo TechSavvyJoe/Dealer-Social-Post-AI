@@ -12,7 +12,6 @@ import {
   Sparkles,
   Download,
   Film,
-  RotateCcw,
   Share2,
   Copy,
   Check,
@@ -22,6 +21,7 @@ import {
   Redo2,
   ChevronDown,
   CircleCheck,
+  Camera,
   type LucideIcon,
 } from "lucide-react";
 import confetti from "canvas-confetti";
@@ -50,6 +50,10 @@ import {
   analyzeCaptionForDelivery,
   prohibitedClaimsMessage,
 } from "../utils/complianceDisclosures";
+import {
+  preferredExportFormatIds,
+  resolvePlatformOption,
+} from "../services/platformCopy";
 
 // Lazy load modals for performance
 const LazyImagePreviewModal = React.lazy(() =>
@@ -144,6 +148,8 @@ const ActionTile: React.FC<{
 interface PostResultProps {
   post: GeneratedPost;
   onStartOver: () => void;
+  /** Same-photo remix — keep capture, return to CUSTOMIZE. */
+  onRemix: () => void;
   onRegenerateImage: () => Promise<void>;
   onEditImage: (prompt: string) => Promise<void>;
   onRegenerateText: () => Promise<void>;
@@ -200,6 +206,7 @@ const BusyOverlay: React.FC<{ message: string; progress?: number }> =
 export const PostResult: React.FC<PostResultProps> = ({
   post,
   onStartOver,
+  onRemix,
   onRegenerateImage,
   onEditImage,
   onRegenerateText,
@@ -226,6 +233,10 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [editedText, setEditedText] = useState(post.text);
   const [isTextEditing, setIsTextEditing] = useState(false);
   const [isTextLoading, setIsTextLoading] = useState(false);
+  /** Active caption-pack platform tab; null = primary post.text. */
+  const [activeCaptionPlatform, setActiveCaptionPlatform] = useState<
+    string | null
+  >(null);
 
   // Text history for undo/redo
   const [textHistory, setTextHistory] = useState<string[]>([post.text]);
@@ -257,7 +268,10 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [isMultiFormatOpen, setIsMultiFormatOpen] = useState(false);
   const [isCaptionAltsOpen, setIsCaptionAltsOpen] = useState(false);
   const [isToolsOpen, setIsToolsOpen] = useState(isDesktopLayout);
-  const [isStartOverConfirmOpen, setIsStartOverConfirmOpen] = useState(false);
+  /** Guarded navigation away from this result: full reset or same-photo remix. */
+  const [leaveConfirm, setLeaveConfirm] = useState<"startOver" | "remix" | null>(
+    null,
+  );
   const [hasSavedMedia, setHasSavedMedia] = useState(false);
   const [hasCopiedCaption, setHasCopiedCaption] = useState(false);
   const [approvalStatus, setApprovalStatus] = useState<
@@ -285,7 +299,30 @@ export const PostResult: React.FC<PostResultProps> = ({
     setDisclosureOverride(null);
     setHasSavedMedia(false);
     setHasCopiedCaption(false);
-  }, [post.image, post.text]);
+    setActiveCaptionPlatform(null);
+  }, [post.image, post.text, post.platformCaptions]);
+
+  const platformCaptionTabs = useMemo(() => {
+    const pack = post.platformCaptions;
+    if (!pack || Object.keys(pack).length === 0) return [];
+    const orderedIds =
+      post.platformIds?.filter((id) => Boolean(pack[id])) ??
+      Object.keys(pack);
+    // Include any pack keys missing from platformIds
+    for (const id of Object.keys(pack)) {
+      if (!orderedIds.includes(id)) orderedIds.push(id);
+    }
+    return orderedIds.map((id) => ({
+      id,
+      label: resolvePlatformOption(id)?.shortLabel || id,
+      caption: pack[id],
+    }));
+  }, [post.platformCaptions, post.platformIds]);
+
+  const exportPriorityFormatIds = useMemo(
+    () => preferredExportFormatIds(post.platformIds ?? []),
+    [post.platformIds],
+  );
 
   useEffect(() => {
     setIsToolsOpen(isDesktopLayout);
@@ -545,7 +582,11 @@ export const PostResult: React.FC<PostResultProps> = ({
   // disclosureOverride takes precedence over post.disclosures when the user
   // picked an alternative from the CaptionAlternativesModal (each variant
   // may trigger a different compliance language set).
-  const captionWasEdited = editedText !== post.text;
+  const sourceCaptionForActive =
+    activeCaptionPlatform && post.platformCaptions?.[activeCaptionPlatform]
+      ? post.platformCaptions[activeCaptionPlatform]
+      : post.text;
+  const captionWasEdited = editedText !== sourceCaptionForActive;
   const activeDisclosures = (
     captionWasEdited
       ? captionAnalysis.disclosures
@@ -554,15 +595,53 @@ export const PostResult: React.FC<PostResultProps> = ({
   const activeDisclosureCategories = captionWasEdited
     ? captionAnalysis.disclosureCategories
     : (disclosureOverride?.categories ?? post.disclosureCategories ?? []);
-  const captionWithDisclosures = (() => {
-    const cap = editedText.trim();
+  const appendDisclosures = (caption: string): string => {
+    const cap = caption.trim();
     if (!activeDisclosures) return cap;
     return `${cap}\n\n${
       activeDisclosures.startsWith("— Disclosures —")
         ? activeDisclosures
         : `— Disclosures —\n${activeDisclosures}`
     }`;
-  })();
+  };
+  const captionWithDisclosures = appendDisclosures(editedText);
+
+  /** Pack captions with original post disclosures for ShareDialog per-target text. */
+  const sharePlatformCaptions = useMemo(() => {
+    if (!post.platformCaptions) return undefined;
+    const baseDisc = (post.disclosures ?? "").trim();
+    const out: Record<string, string> = {};
+    for (const [id, cap] of Object.entries(post.platformCaptions)) {
+      const base = cap?.trim();
+      if (!base) continue;
+      if (!baseDisc) {
+        out[id] = base;
+      } else {
+        out[id] = `${base}\n\n${
+          baseDisc.startsWith("— Disclosures —")
+            ? baseDisc
+            : `— Disclosures —\n${baseDisc}`
+        }`;
+      }
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  }, [post.platformCaptions, post.disclosures]);
+
+  const selectCaptionPlatform = useCallback(
+    (platformId: string | null) => {
+      const nextText =
+        platformId && post.platformCaptions?.[platformId]
+          ? post.platformCaptions[platformId]
+          : post.text;
+      setActiveCaptionPlatform(platformId);
+      setEditedText(nextText);
+      setTextHistory([nextText]);
+      setHistoryIndex(0);
+      setHasCopiedCaption(false);
+      triggerHapticFeedback();
+    },
+    [post.platformCaptions, post.text],
+  );
 
   const handleCopy = async () => {
     triggerHapticFeedback();
@@ -793,28 +872,36 @@ export const PostResult: React.FC<PostResultProps> = ({
   const hasWorkAtRisk =
     !hasSavedMedia ||
     !hasCopiedCaption ||
-    editedText !== post.text ||
+    captionWasEdited ||
     imageEditPrompt.trim().length > 0 ||
     videoJobs.length > 0;
 
-  const handleCreateAnotherRequest = () => {
+  const requestLeaveResult = (mode: "startOver" | "remix") => {
     triggerHapticFeedback();
     if (imageBusy || textBusy) {
       toast.warning(
-        "Wait for the current update to finish before starting another post.",
+        mode === "remix"
+          ? "Wait for the current update to finish before remixing this photo."
+          : "Wait for the current update to finish before starting another post.",
       );
       return;
     }
     if (hasWorkAtRisk) {
-      setIsStartOverConfirmOpen(true);
+      setLeaveConfirm(mode);
       return;
     }
-    onStartOver();
+    if (mode === "remix") onRemix();
+    else onStartOver();
   };
 
-  const confirmCreateAnother = () => {
-    setIsStartOverConfirmOpen(false);
-    onStartOver();
+  const handleCreateAnotherRequest = () => requestLeaveResult("startOver");
+  const handleRemixRequest = () => requestLeaveResult("remix");
+
+  const confirmLeaveResult = () => {
+    const mode = leaveConfirm;
+    setLeaveConfirm(null);
+    if (mode === "remix") onRemix();
+    else if (mode === "startOver") onStartOver();
   };
 
   return (
@@ -831,6 +918,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         isOpen={isMultiFormatOpen && !deliveryLocked}
         onClose={() => setIsMultiFormatOpen(false)}
         sourceImageUrl={post.image}
+        priorityFormatIds={exportPriorityFormatIds}
       />
       <ShareDialog
         isOpen={isShareDialogOpen && !deliveryLocked}
@@ -840,31 +928,37 @@ export const PostResult: React.FC<PostResultProps> = ({
           imageDataUrl: post.image,
           videoUrl: videoUrl || undefined,
         }}
+        platformCaptions={sharePlatformCaptions}
       />
       <Modal
-        isOpen={isStartOverConfirmOpen}
-        onClose={() => setIsStartOverConfirmOpen(false)}
+        isOpen={leaveConfirm !== null}
+        onClose={() => setLeaveConfirm(null)}
         size="sm"
-        title="Create another post?"
+        title={
+          leaveConfirm === "remix"
+            ? "Remix this photo?"
+            : "Create another post?"
+        }
         description="This result is not fully preserved yet."
         footer={
           <>
             <Button
               variant="outline"
-              onClick={() => setIsStartOverConfirmOpen(false)}
+              onClick={() => setLeaveConfirm(null)}
               fullWidth
             >
               Keep editing
             </Button>
-            <Button variant="danger" onClick={confirmCreateAnother} fullWidth>
+            <Button variant="danger" onClick={confirmLeaveResult} fullWidth>
               Discard and continue
             </Button>
           </>
         }
       >
         <p className="text-sm leading-relaxed text-surface-300">
-          Save the media and copy the caption first if you want to keep both.
-          Starting another post replaces this workspace.
+          {leaveConfirm === "remix"
+            ? "Save the media and copy the caption first if you want to keep both. Remixing keeps this photo and returns you to style setup with a fresh result."
+            : "Save the media and copy the caption first if you want to keep both. Starting another post replaces this workspace."}
         </p>
       </Modal>
       {onGenerateCaptionVariant && (
@@ -917,7 +1011,11 @@ export const PostResult: React.FC<PostResultProps> = ({
         />
       </Suspense>
       <motion.section
-        className="mx-auto w-full max-w-screen-2xl flex-1 space-y-5 px-2 py-4 sm:px-4 sm:py-6 md:px-6"
+        className={cn(
+          "mx-auto w-full max-w-screen-2xl flex-1 space-y-5 px-2 py-4 sm:px-4 sm:py-6 md:px-6",
+          // Room for the fixed mobile delivery bar + home-indicator inset.
+          !isDesktopLayout && "pb-28",
+        )}
         initial={shouldReduceMotion ? false : { opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: shouldReduceMotion ? 0 : 0.35 }}
@@ -946,14 +1044,24 @@ export const PostResult: React.FC<PostResultProps> = ({
               Review the media and caption, then copy, share, or save.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handleCreateAnotherRequest}
-            className="inline-flex min-h-[44px] items-center justify-center gap-2 self-start rounded-xl border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-surface-200 transition-colors hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 sm:self-auto"
-          >
-            <RotateCcw className="h-4 w-4" aria-hidden="true" />
-            Create another
-          </button>
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={handleRemixRequest}
+              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-primary-400/35 bg-primary-500/10 px-4 text-sm font-semibold text-primary-100 transition-colors hover:border-primary-400/55 hover:bg-primary-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
+            >
+              <Sparkles className="h-4 w-4" aria-hidden="true" />
+              Remix this photo
+            </button>
+            <button
+              type="button"
+              onClick={handleCreateAnotherRequest}
+              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-surface-200 transition-colors hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
+            >
+              <Camera className="h-4 w-4" aria-hidden="true" />
+              New photo
+            </button>
+          </div>
         </header>
         {claimLocked && (
           <motion.div
@@ -1498,9 +1606,51 @@ export const PostResult: React.FC<PostResultProps> = ({
                 </button>
               </div>
             </div>
+            {platformCaptionTabs.length > 0 && (
+              <div
+                className="mb-3 flex flex-wrap gap-2"
+                role="tablist"
+                aria-label="Platform captions"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeCaptionPlatform === null}
+                  onClick={() => selectCaptionPlatform(null)}
+                  className={cn(
+                    "min-h-[36px] rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
+                    activeCaptionPlatform === null
+                      ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
+                      : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
+                  )}
+                >
+                  Primary
+                </button>
+                {platformCaptionTabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeCaptionPlatform === tab.id}
+                    onClick={() => selectCaptionPlatform(tab.id)}
+                    className={cn(
+                      "min-h-[36px] rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
+                      activeCaptionPlatform === tab.id
+                        ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
+                        : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
+                    )}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="relative mb-4">
               {isTextLoading && <BusyOverlay message="Updating caption..." />}
-              {editedText !== post.text && (
+              {captionWasEdited && (
                 <div className="mb-2 flex items-center gap-2 text-xs text-warning-300">
                   <Edit3 className="w-3 h-3" />
                   <span>Text has been edited</span>
@@ -1525,77 +1675,80 @@ export const PostResult: React.FC<PostResultProps> = ({
               />
             </div>
 
-            <div
-              className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3"
-              aria-label="Post delivery actions"
-            >
-              <Button
-                variant="outline"
-                onClick={handleCopy}
-                disabled={deliveryLocked}
-                aria-label={
-                  deliveryLocked
-                    ? `Copy caption (${deliveryLockLabel.toLowerCase()})`
-                    : "Copy caption"
-                }
-                leftIcon={
-                  copied ? (
-                    <Check className="h-4 w-4" />
-                  ) : (
-                    <Copy className="h-4 w-4" />
-                  )
-                }
-                fullWidth
-                disableHaptics
+            {/* Desktop: delivery actions sit with the caption panel. */}
+            {isDesktopLayout ? (
+              <div
+                className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3"
+                aria-label="Post delivery actions"
               >
-                <span aria-live="polite">
+                <Button
+                  variant="outline"
+                  onClick={handleCopy}
+                  disabled={deliveryLocked}
+                  aria-label={
+                    deliveryLocked
+                      ? `Copy caption (${deliveryLockLabel.toLowerCase()})`
+                      : "Copy caption"
+                  }
+                  leftIcon={
+                    copied ? (
+                      <Check className="h-4 w-4" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )
+                  }
+                  fullWidth
+                  disableHaptics
+                >
+                  <span aria-live="polite">
+                    {deliveryLocked
+                      ? deliveryLockLabel
+                      : copied
+                        ? "Copied"
+                        : "Copy caption"}
+                  </span>
+                </Button>
+                <Button
+                  variant="filled"
+                  onClick={() => {
+                    if (deliveryLocked) {
+                      toast.warning(deliveryGateMessage);
+                      return;
+                    }
+                    setIsShareDialogOpen(true);
+                  }}
+                  disabled={deliveryLocked}
+                  aria-label={
+                    deliveryLocked
+                      ? `Share post (${deliveryLockLabel.toLowerCase()})`
+                      : "Share post"
+                  }
+                  leftIcon={<Share2 className="h-4 w-4" />}
+                  fullWidth
+                >
+                  {deliveryLocked ? deliveryLockLabel : "Share post"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleSave}
+                  disabled={imageBusy || deliveryLocked}
+                  loading={imageBusy}
+                  aria-label={
+                    deliveryLocked
+                      ? `Save ${videoUrl ? "video" : "image"} (${deliveryLockLabel.toLowerCase()})`
+                      : `Save ${videoUrl ? "video" : "image"}`
+                  }
+                  leftIcon={<Download className="h-4 w-4" />}
+                  className="border-success-500/35 text-success-100 hover:border-success-400/60 hover:bg-success-500/10"
+                  fullWidth
+                  disableHaptics
+                >
                   {deliveryLocked
                     ? deliveryLockLabel
-                    : copied
-                      ? "Copied"
-                      : "Copy caption"}
-                </span>
-              </Button>
-              <Button
-                variant="filled"
-                onClick={() => {
-                  if (deliveryLocked) {
-                    toast.warning(deliveryGateMessage);
-                    return;
-                  }
-                  setIsShareDialogOpen(true);
-                }}
-                disabled={deliveryLocked}
-                aria-label={
-                  deliveryLocked
-                    ? `Share post (${deliveryLockLabel.toLowerCase()})`
-                    : "Share post"
-                }
-                leftIcon={<Share2 className="h-4 w-4" />}
-                fullWidth
-              >
-                {deliveryLocked ? deliveryLockLabel : "Share post"}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={handleSave}
-                disabled={imageBusy || deliveryLocked}
-                loading={imageBusy}
-                aria-label={
-                  deliveryLocked
-                    ? `Save ${videoUrl ? "video" : "image"} (${deliveryLockLabel.toLowerCase()})`
-                    : `Save ${videoUrl ? "video" : "image"}`
-                }
-                leftIcon={<Download className="h-4 w-4" />}
-                className="border-success-500/35 text-success-100 hover:border-success-400/60 hover:bg-success-500/10"
-                fullWidth
-                disableHaptics
-              >
-                {deliveryLocked
-                  ? deliveryLockLabel
-                  : `Save ${videoUrl ? "video" : "image"}`}
-              </Button>
-            </div>
+                    : `Save ${videoUrl ? "video" : "image"}`}
+                </Button>
+              </div>
+            ) : null}
 
             {requiresApproval ? (
               <p
@@ -1649,6 +1802,83 @@ export const PostResult: React.FC<PostResultProps> = ({
           </motion.section>
         </div>
       </motion.section>
+
+      {/* Mobile/narrow: sticky bottom delivery bar (Copy · Share · Save).
+          Creative tools stay collapsed above; desktop keeps in-panel CTAs. */}
+      {!isDesktopLayout ? (
+        <div
+          className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-surface-950/95 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur-md"
+          style={{
+            paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))",
+          }}
+        >
+          <div
+            className="mx-auto grid max-w-lg grid-cols-3 gap-2 px-3 pt-2"
+            aria-label="Post delivery actions"
+          >
+            <Button
+              variant="outline"
+              onClick={handleCopy}
+              disabled={deliveryLocked}
+              aria-label={
+                deliveryLocked
+                  ? `Copy caption (${deliveryLockLabel.toLowerCase()})`
+                  : "Copy caption"
+              }
+              leftIcon={
+                copied ? (
+                  <Check className="h-4 w-4" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )
+              }
+              fullWidth
+              disableHaptics
+            >
+              <span aria-live="polite">
+                {deliveryLocked ? deliveryLockLabel : copied ? "Copied" : "Copy"}
+              </span>
+            </Button>
+            <Button
+              variant="filled"
+              onClick={() => {
+                if (deliveryLocked) {
+                  toast.warning(deliveryGateMessage);
+                  return;
+                }
+                setIsShareDialogOpen(true);
+              }}
+              disabled={deliveryLocked}
+              aria-label={
+                deliveryLocked
+                  ? `Share post (${deliveryLockLabel.toLowerCase()})`
+                  : "Share post"
+              }
+              leftIcon={<Share2 className="h-4 w-4" />}
+              fullWidth
+            >
+              {deliveryLocked ? deliveryLockLabel : "Share"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleSave}
+              disabled={imageBusy || deliveryLocked}
+              loading={imageBusy}
+              aria-label={
+                deliveryLocked
+                  ? `Save ${videoUrl ? "video" : "image"} (${deliveryLockLabel.toLowerCase()})`
+                  : `Save ${videoUrl ? "video" : "image"}`
+              }
+              leftIcon={<Download className="h-4 w-4" />}
+              className="border-success-500/35 text-success-100 hover:border-success-400/60 hover:bg-success-500/10"
+              fullWidth
+              disableHaptics
+            >
+              {deliveryLocked ? deliveryLockLabel : "Save"}
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 };

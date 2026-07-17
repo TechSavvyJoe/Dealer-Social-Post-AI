@@ -53,6 +53,8 @@ interface MainContentProps {
   onLogin: (dealerId: string) => Promise<boolean>;
   onImageSelected: (image: string) => void;
   onReset: () => void;
+  /** Same-photo remix — keep capture, re-open CUSTOMIZE. */
+  onRemix: () => void;
   onDismissError: () => void;
   onGenerate: (
     style: StyleOption,
@@ -71,6 +73,7 @@ interface MainContentProps {
         vin?: string;
       };
     },
+    platformIds?: string[],
   ) => Promise<void>;
   onBackToCapture: () => void;
   onStyleToneChange: (style: StyleOption, tone: ToneOption) => void;
@@ -102,6 +105,7 @@ export const MainContent: React.FC<MainContentProps> = ({
   onLogin,
   onImageSelected,
   onReset,
+  onRemix,
   onDismissError,
   onGenerate,
   onBackToCapture,
@@ -219,6 +223,7 @@ export const MainContent: React.FC<MainContentProps> = ({
             <LazyPostResult
               post={generatedPost}
               onStartOver={onReset}
+              onRemix={onRemix}
               onRegenerateImage={onRegenerateImage}
               onEditImage={onEditImage}
               onRegenerateText={onRegenerateText}

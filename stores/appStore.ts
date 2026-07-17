@@ -60,6 +60,12 @@ interface AppState {
   login: (dealerId: string) => Promise<boolean>;
   logout: () => Promise<void>;
   reset: () => void;
+  /**
+   * Same-photo remix: keep the selected capture (and any still-valid session
+   * metadata) but discard the generated result so the user can re-pick style
+   * and generate again from CUSTOMIZE.
+   */
+  startRemix: () => void;
   restoreSession: () => Promise<void>;
   applyAuthPayload: (body: {
     role?: string;
@@ -388,6 +394,34 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     }
     if (dealerId) void clearDealerCreatives(dealerId);
+  },
+
+  startRemix: () => {
+    const { currentDealer, selectedImage, generationParams } = get();
+    // Without a capture there is nothing to remix — fall back to a full reset.
+    if (!selectedImage) {
+      get().reset();
+      return;
+    }
+    set({
+      generatedPost: null,
+      error: null,
+      step: AppStep.CUSTOMIZE,
+    });
+    if (currentDealer) {
+      saveSession({
+        dealerId: currentDealer.id,
+        step: AppStep.CUSTOMIZE,
+        selectedImage,
+        generatedPost: undefined,
+        // Style/tone/customerName still useful as soft defaults if the
+        // customizer later re-hydrates from session; preferredStyle/Tone
+        // already cover the main picker defaults.
+        generationParams: generationParams || undefined,
+      });
+      // Drop only the generated creative; keep the selected capture on disk.
+      void saveDealerCreative(currentDealer.id, "generated", null);
+    }
   },
 
   restoreSession: async () => {

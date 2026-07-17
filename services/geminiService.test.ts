@@ -34,6 +34,8 @@ vi.mock("./geminiClient", () => ({
 vi.mock("../utils/imageUtils", () => ({
   parseDataUrl: () => ({ mimeType: "image/jpeg", data: "fake-data" }),
   urlToDataUrl: () => Promise.resolve("data:image/jpeg;base64,fake-data"),
+  letterboxImageForVideo: (dataUrl: string) => Promise.resolve(dataUrl),
+  resolveVeoAspect: () => "9:16" as const,
 }));
 
 /**
@@ -121,13 +123,16 @@ describe("GeminiService model routing", () => {
   });
 
   it("loads a same-origin dealer logo with the authenticated session", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
     const fetchMock = vi.fn(async () =>
-      Promise.resolve(
-        new Response(new Uint8Array([1, 2, 3]), {
-          status: 200,
-          headers: { "Content-Type": "image/png" },
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        blob: async () => ({
+          type: "image/png",
+          arrayBuffer: async () => bytes.buffer,
         }),
-      ),
+      }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -278,8 +283,8 @@ describe("GeminiService model routing", () => {
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining("veo-3.1-generate-preview"),
       expect.objectContaining({
-        body: expect.stringContaining(
-          '"image":{"bytesBase64Encoded":"fake-data","mimeType":"image/jpeg"}',
+        body: expect.stringMatching(
+          /"image":\{"bytesBase64Encoded":"[^"]+","mimeType":"image\/jpeg"\}/,
         ),
       }),
     );

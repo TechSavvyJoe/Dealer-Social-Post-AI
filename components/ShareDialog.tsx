@@ -51,6 +51,11 @@ interface ShareDialogProps {
   isOpen: boolean;
   onClose: () => void;
   content: PublishContent;
+  /**
+   * Optional per-platform captions keyed by publish target id. When present,
+   * each share tile uses its matching caption (still falls back to content.text).
+   */
+  platformCaptions?: Record<string, string>;
 }
 
 const ICON_MAP: Record<PublishTarget["icon"], React.ComponentType<{ className?: string }>> = {
@@ -77,12 +82,21 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
   isOpen,
   onClose,
   content,
+  platformCaptions,
 }) => {
   const [busy, setBusy] = useState<string | null>(null);
   const [status, setStatus] = useState<{
     targetId: string;
     status: PublishStatus;
   } | null>(null);
+
+  const captionForTarget = useCallback(
+    (targetId: string): string => {
+      const packCaption = platformCaptions?.[targetId]?.trim();
+      return packCaption || content.text;
+    },
+    [content.text, platformCaptions],
+  );
 
   const handlePick = useCallback(
     async (target: PublishTarget) => {
@@ -91,7 +105,11 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       setBusy(target.id);
       setStatus(null);
       try {
-        const result = await publishTo(target.id, content);
+        const targetContent: PublishContent = {
+          ...content,
+          text: captionForTarget(target.id),
+        };
+        const result = await publishTo(target.id, targetContent);
         setStatus({ targetId: target.id, status: result });
         logEvent("share.attempt", {
           target: target.id,
@@ -100,6 +118,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
             result.kind === "shared" || result.kind === "fallback"
               ? (result as any).via
               : undefined,
+          usedPackCaption: Boolean(platformCaptions?.[target.id]),
         });
         if (result.kind === "shared") {
           // Brief success display, then close
@@ -109,7 +128,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         setBusy(null);
       }
     },
-    [busy, content, onClose]
+    [busy, captionForTarget, content, onClose, platformCaptions]
   );
 
   return (
@@ -134,9 +153,11 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
               status?.targetId === target.id && status.status.kind === "error";
 
             // Compute caption fit against this platform's budget so the user
-            // can see at a glance which platforms it fits.
-            const captionLen = content.text.length;
+            // can see at a glance which platforms it fits. Prefer pack caption.
+            const targetCaption = captionForTarget(target.id);
+            const captionLen = targetCaption.length;
             const overBudget = captionLen > target.charBudget;
+            const hasPackCaption = Boolean(platformCaptions?.[target.id]);
 
             return (
               <motion.button
@@ -200,6 +221,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                 >
                   {captionLen}/{target.charBudget}
                   {overBudget && " · over"}
+                  {hasPackCaption && !overBudget ? " · tailored" : ""}
                 </div>
                 {(isFallback || isError) && (
                   <div

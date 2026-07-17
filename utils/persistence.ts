@@ -20,6 +20,7 @@ interface PersistedState {
     customerName: string;
     customText?: string;
     creativeBrief?: string;
+    platformIds?: string[];
   };
 }
 

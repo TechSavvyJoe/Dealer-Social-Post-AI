@@ -389,7 +389,7 @@ const videoMotionForStyle = (
 
   switch (style) {
     case VideoStyle.EpicReveal:
-      return `${base} Very slow push-in toward the group and the car already in the photo. Gentle light wrap on paint and faces. No second vehicle.`;
+      return `${base} Camera locked or ≤1–2% micro-drift only — no push-in, no zoom toward the car. Gentle light wrap on existing paint and faces. No second vehicle.`;
     case VideoStyle.PartyTime:
       return `${base} Soft confetti or sparkle particles in empty sky/pavement only. Tiny smile/energy on the people already present. Camera almost locked.`;
     case VideoStyle.VintageFilm:
@@ -429,7 +429,7 @@ const videoMotionForStyle = (
     case VideoStyle.Blueprint:
       return `${base} Thin blueprint overlay that quickly dissolves to the real delivery photo already shown.`;
     default:
-      return `${base} Slow push-in, natural light shimmer on the car, subjects locked.`;
+      return `${base} Locked camera, natural light shimmer on the car, subjects locked. No zoom inventing detail.`;
   }
 };
 
@@ -468,10 +468,11 @@ Even playful styles keep the real photo sacred.`
     ),
     xmlBlock(
       "motion",
-      `Style label: ${style}
+      `Motion recipe: ${style.replace(/\s+/g, "_").toLowerCase()}_locked_photo
 Duration: ${duration} seconds. Aspect: ${aspect}. Resolution target: ${options.resolution}.
 Pacing: ${options.pacing}.
-${videoMotionForStyle(style, options.pacing)}`
+${videoMotionForStyle(style, options.pacing)}
+Do not interpret the style name as permission to morph, reveal a second car, or rebuild the scene.`
     ),
     xmlBlock(
       "soundtrack",

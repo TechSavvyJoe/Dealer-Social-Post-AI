@@ -76,6 +76,17 @@ export interface GeneratedPost {
    * Categories of disclosures detected, surfaced as compliance pills.
    */
   disclosureCategories?: string[];
+  /**
+   * Platforms selected on the generate screen ("Share to"). Used to prioritize
+   * multi-format export and to label the caption pack.
+   */
+  platformIds?: string[];
+  /**
+   * Per-platform caption variants keyed by publish target id
+   * (e.g. `instagram_feed`, `tiktok`). Absent when only the primary caption
+   * was generated (0–1 platforms or pack step failed).
+   */
+  platformCaptions?: Record<string, string>;
 }
 
 export interface DealershipSettings {
@@ -162,4 +173,6 @@ export interface GenerationParams {
   customerName: string;
   customText?: string;
   creativeBrief?: string;
+  /** Platforms selected in PostCustomizer ("Share to") for caption packs + export priority. */
+  platformIds?: string[];
 }

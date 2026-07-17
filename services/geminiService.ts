@@ -1,4 +1,9 @@
-import { parseDataUrl, urlToDataUrl } from "../utils/imageUtils";
+import {
+  parseDataUrl,
+  urlToDataUrl,
+  letterboxImageForVideo,
+  resolveVeoAspect,
+} from "../utils/imageUtils";
 import {
   StyleOption,
   ToneOption,
@@ -659,27 +664,34 @@ export const generatePostVideo = async (
   const videoModels = getFallbackChain("video");
 
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
-  const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
-  const prompt = generateVideoPrompt(style, options);
 
-  // Measure the SAME bytes we send to Veo (the normalized data URL), not the
-  // raw input — passing a remote/blob URL here triggers a second fetch that can
-  // diverge from (or fail independently of) what the model receives.
+  // Resolve final Veo params FIRST so the prompt matches the wire body.
+  // Veo 3.1 accepts only 16:9 | 9:16 and duration 4 | 6 | 8 (1080p → 8s).
   const { width, height } = await getImageDimensions(normalisedImage);
-  const derivedAspect =
-    width === height ? "16:9" : width > height ? "16:9" : "9:16"; // Veo 3.1 only supports 16:9 and 9:16
-  const aspectRatio =
-    options.aspectPreference === "auto"
-      ? derivedAspect
-      : options.aspectPreference === "1:1"
-        ? "16:9" // Convert 1:1 to 16:9 for Veo 3.1
-        : options.aspectPreference;
-
-  // Veo 3.1 accepts exactly 4, 6, or 8 seconds. 1080p is limited to 8s.
+  const aspectRatio = resolveVeoAspect(
+    width,
+    height,
+    options.aspectPreference || "auto",
+  );
   const requestedDuration = options.durationSeconds || 6;
   let durationSeconds =
     requestedDuration <= 5 ? 4 : requestedDuration <= 7 ? 6 : 8;
   if (options.resolution === "1080p") durationSeconds = 8;
+
+  // Letterbox so Veo never has to invent crop margins (root cause of morph/
+  // second-car frames when a square branded post is forced into 9:16).
+  const letterboxed = await letterboxImageForVideo(
+    normalisedImage,
+    aspectRatio,
+  );
+  const { mimeType, data: base64Data } = parseDataUrl(letterboxed);
+
+  const prompt = generateVideoPrompt(style, {
+    ...options,
+    durationSeconds,
+    aspectPreference: aspectRatio,
+    pacing: options.pacing || "cinematic",
+  });
 
   // Veo 3.x predictLongRunning expects image as { bytesBase64Encoded, mimeType }.
   // Gemini generateContent-style { inlineData: { data, mimeType } } returns 400

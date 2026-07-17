@@ -28,6 +28,7 @@ export const useAppController = () => {
     login,
     logout,
     reset,
+    startRemix,
     restoreSession,
   } = useAppStore(
     useShallow((state) => ({
@@ -48,6 +49,7 @@ export const useAppController = () => {
       login: state.login,
       logout: state.logout,
       reset: state.reset,
+      startRemix: state.startRemix,
       restoreSession: state.restoreSession,
     })),
   );
@@ -118,6 +120,7 @@ export const useAppController = () => {
     setPreferences,
     logout,
     reset,
+    startRemix,
     isSettingsOpen,
     setIsSettingsOpen,
     isVideoDirectorOpen,

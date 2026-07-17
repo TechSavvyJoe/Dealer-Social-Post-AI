@@ -44,6 +44,7 @@ Object.defineProperty(window, "matchMedia", {
 
 const callbacks = {
   onStartOver: vi.fn(),
+  onRemix: vi.fn(),
   onRegenerateImage: vi.fn(async () => undefined),
   onEditImage: vi.fn(async () => undefined),
   onRegenerateText: vi.fn(async () => undefined),
@@ -128,7 +129,7 @@ describe("PostResult job-first flow", () => {
     const user = userEvent.setup();
     renderResult();
 
-    await user.click(screen.getByRole("button", { name: "Create another" }));
+    await user.click(screen.getByRole("button", { name: "New photo" }));
     expect(callbacks.onStartOver).not.toHaveBeenCalled();
     expect(
       screen.getByRole("dialog", { name: "Create another post?" }),
@@ -138,6 +139,44 @@ describe("PostResult job-first flow", () => {
       screen.getByRole("button", { name: "Discard and continue" }),
     );
     expect(callbacks.onStartOver).toHaveBeenCalledTimes(1);
+    expect(callbacks.onRemix).not.toHaveBeenCalled();
+  });
+
+  it("confirms before remixing the same photo when work is at risk", async () => {
+    const user = userEvent.setup();
+    renderResult();
+
+    await user.click(screen.getByRole("button", { name: "Remix this photo" }));
+    expect(callbacks.onRemix).not.toHaveBeenCalled();
+    // Dialog may still be mid-enter animation (opacity 0); presence is enough.
+    expect(
+      await screen.findByRole("dialog", { name: "Remix this photo?" }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Discard and continue" }),
+    );
+    expect(callbacks.onRemix).toHaveBeenCalledTimes(1);
+    expect(callbacks.onStartOver).not.toHaveBeenCalled();
+  });
+
+  it("exposes sticky mobile delivery actions while creative tools stay collapsed", () => {
+    renderResult({ isDesktopLayout: false });
+
+    const delivery = screen.getByLabelText("Post delivery actions");
+    expect(delivery).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Copy caption" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Share post" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Save image" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /creative tools/i }),
+    ).toHaveAttribute("aria-expanded", "false");
   });
 
   it("gates every delivery path while approval is pending", () => {

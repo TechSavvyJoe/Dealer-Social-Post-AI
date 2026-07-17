@@ -41,6 +41,7 @@ const AppContent: React.FC = () => {
     setPreferences,
     logout,
     reset,
+    startRemix,
     isSettingsOpen,
     setIsSettingsOpen,
     isVideoDirectorOpen,
@@ -173,6 +174,7 @@ const AppContent: React.FC = () => {
             onLogin={handleLogin}
             onImageSelected={handleImageSelected}
             onReset={reset}
+            onRemix={startRemix}
             onDismissError={() => setError(null)}
             onGenerate={handleGenerate}
             onBackToCapture={() => setStep(AppStep.CAPTURE)}

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Download, Loader2, Check, Image as ImageIcon } from "lucide-react";
 import { Modal } from "./ui/Modal";
@@ -9,6 +9,7 @@ import {
   downloadAllFormats,
   renderAllFormats,
 } from "../utils/multiFormatExport";
+import { orderExportFormatsByPreference } from "../services/platformCopy";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { logEvent } from "../utils/telemetry";
 
@@ -16,21 +17,33 @@ interface MultiFormatExportModalProps {
   isOpen: boolean;
   onClose: () => void;
   sourceImageUrl: string;
+  /**
+   * Preferred export format order from selected "Share to" platforms.
+   * Formats not listed still appear after the preferred ones.
+   */
+  priorityFormatIds?: ExportFormatId[];
 }
 
 export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
   isOpen,
   onClose,
   sourceImageUrl,
+  priorityFormatIds,
 }) => {
   const [rendered, setRendered] = useState<Record<ExportFormatId, string> | null>(
-    null
+    null,
   );
   const [renderError, setRenderError] = useState<string | null>(null);
   const [isDownloadingAll, setIsDownloadingAll] = useState(false);
   const [individuallyDownloaded, setIndividuallyDownloaded] = useState<
     Set<ExportFormatId>
   >(new Set());
+
+  const orderedFormats = useMemo(
+    () =>
+      orderExportFormatsByPreference(EXPORT_FORMATS, priorityFormatIds ?? []),
+    [priorityFormatIds],
+  );
 
   // Render previews when the modal opens.
   useEffect(() => {
@@ -95,7 +108,11 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title="Export for every platform"
-      description="Same post, four sizes. Download all at once or pick what you need."
+      description={
+        priorityFormatIds && priorityFormatIds.length > 0
+          ? "Same post, four sizes — formats for your selected platforms are listed first."
+          : "Same post, four sizes. Download all at once or pick what you need."
+      }
       size="xl"
     >
       <div className="space-y-5">
@@ -106,15 +123,21 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {EXPORT_FORMATS.map((fmt) => {
+          {orderedFormats.map((fmt) => {
             const preview = rendered?.[fmt.id];
             const downloaded = individuallyDownloaded.has(fmt.id);
+            const isPreferred =
+              !!priorityFormatIds?.length && priorityFormatIds.includes(fmt.id);
             return (
               <motion.div
                 key={fmt.id}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="flex flex-col rounded-2xl border border-white/10 bg-white/5 overflow-hidden"
+                className={
+                  isPreferred
+                    ? "flex flex-col rounded-2xl border border-primary-400/30 bg-primary-500/5 overflow-hidden"
+                    : "flex flex-col rounded-2xl border border-white/10 bg-white/5 overflow-hidden"
+                }
               >
                 <div className="aspect-[4/3] bg-black flex items-center justify-center overflow-hidden relative">
                   {preview ? (
@@ -135,6 +158,11 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
                     <div className="text-sm font-semibold text-surface-50 flex items-center gap-2">
                       <ImageIcon className="h-3.5 w-3.5 text-primary-300" />
                       {fmt.label}
+                      {isPreferred ? (
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-primary-300">
+                          matched
+                        </span>
+                      ) : null}
                     </div>
                     <div className="text-[11px] text-surface-400 truncate">
                       {fmt.width}×{fmt.height} · {fmt.description}

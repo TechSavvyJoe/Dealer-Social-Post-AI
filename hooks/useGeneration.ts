@@ -21,6 +21,12 @@ import {
   linkReleaseToPost,
   runWithPersistedPhotoRelease,
 } from "../services/photoReleases";
+import {
+  parsePlatformCaptionPack,
+  platformsToCaptionPackBrief,
+  shouldGenerateCaptionPack,
+  type PlatformId,
+} from "../services/platformCopy";
 
 export interface GenerationMeta {
   salespersonName?: string;
@@ -99,6 +105,7 @@ export const useGeneration = () => {
       customerName: string;
       customText?: string;
       creativeBrief?: string;
+      platformIds?: PlatformId[];
       meta?: GenerationMeta;
     }) => {
       if (!selectedImage || !currentDealer)
@@ -129,7 +136,14 @@ export const useGeneration = () => {
       setError(null);
       setGenerationProgress(0);
       setProgressMessage("Analyzing your image...");
-      setGenerationParams(variables);
+      setGenerationParams({
+        style: variables.style,
+        tone: variables.tone,
+        customerName: variables.customerName,
+        customText: variables.customText,
+        creativeBrief: variables.creativeBrief,
+        platformIds: variables.platformIds,
+      });
 
       progressIntervalRef.current = setInterval(() => {
         setGenerationProgress((prev) => {
@@ -224,12 +238,64 @@ export const useGeneration = () => {
           ),
         });
       }
+      const platformIds = variables.platformIds?.filter(Boolean) ?? [];
       const finalPost: GeneratedPost = {
         ...result,
         text: preparedCaption.caption,
         disclosures: preparedCaption.disclosures,
         disclosureCategories: preparedCaption.disclosureCategories,
+        platformIds: platformIds.length > 0 ? platformIds : undefined,
       };
+
+      // Optional multi-platform caption pack. Never blocks the primary post:
+      // 0–1 platforms keep primary text only; pack failures are non-fatal.
+      if (
+        shouldGenerateCaptionPack(platformIds) &&
+        selectedImage &&
+        currentDealer
+      ) {
+        try {
+          setProgressMessage("Tailoring captions per platform...");
+          const packBrief = platformsToCaptionPackBrief(
+            platformIds,
+            currentDealer.name,
+            preparedCaption.caption,
+          );
+          const { generateSocialPostText } = await loadGeminiService();
+          const rawPack = await runGeminiTask("ai.caption.pack", () =>
+            generateSocialPostText(
+              selectedImage,
+              variables.tone,
+              currentDealer.name,
+              variables.customerName,
+              true,
+              packBrief,
+            ),
+          );
+          const parsed = parsePlatformCaptionPack(rawPack, platformIds);
+          // Compliance-scan each variant; drop any that fail hard.
+          const cleaned: Record<string, string> = {};
+          for (const [id, caption] of Object.entries(parsed)) {
+            try {
+              const prepared = prepareCaptionForDelivery(
+                caption,
+                currentDealer.banned_phrases,
+              );
+              cleaned[id] = prepared.caption;
+            } catch {
+              // Skip prohibited variants; primary caption remains usable.
+            }
+          }
+          if (Object.keys(cleaned).length > 0) {
+            finalPost.platformCaptions = cleaned;
+          }
+        } catch (err) {
+          logError("caption.pack_failed", {
+            message: err instanceof Error ? err.message : String(err),
+            platforms: platformIds,
+          });
+        }
+      }
 
       // Log post + (if a release was captured) link the already-persisted
       // release to it. The signature was durably saved before the provider
@@ -334,6 +400,7 @@ export const useGeneration = () => {
       customText?: string,
       creativeBrief?: string,
       meta?: GenerationMeta,
+      platformIds?: PlatformId[],
     ) => {
       await generateMutation.mutateAsync({
         style,
@@ -341,6 +408,7 @@ export const useGeneration = () => {
         customerName,
         customText,
         creativeBrief,
+        platformIds,
         meta,
       });
     },

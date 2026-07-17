@@ -66,13 +66,14 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
   ({ isOpen, onClose, onSelectStyle }) => {
     const [showMore, setShowMore] = useState(false);
 
-    // Default options for quick generation
+    // Match source photo aspect (letterboxed server-side). Cinematic pacing
+    // avoids snappy zoom morphs that invent a second car.
     const defaultOptions: VideoRequestOptions = {
       durationSeconds: 6,
       soundtrack: "cinematic",
-      aspectPreference: "9:16",
+      aspectPreference: "auto",
       resolution: defaultResolution,
-      pacing: "snappy",
+      pacing: "cinematic",
     };
 
     const handleStyleSelect = useCallback(
@@ -88,7 +89,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
         onClose={onClose}
         size="lg"
         title="Create video"
-        description="Choose a motion style for a six-second social clip."
+        description="Locked to your delivery photo — subtle campaign motion only."
         className="bg-surface-900 border-surface-800"
       >
         {/* Recommended Styles - Main Section */}
