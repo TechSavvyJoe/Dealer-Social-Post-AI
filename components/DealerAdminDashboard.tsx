@@ -12,9 +12,11 @@ import {
   Save,
   ShieldCheck,
   Pencil,
+  Check,
+  Copy,
 } from "lucide-react";
 import { PersonEditModal } from "./PersonEditModal";
-import type { Person } from "../services/salespeople";
+import type { CredentialResult, Person } from "../services/salespeople";
 import { Button } from "./ui/Button";
 import { Input, Textarea } from "./ui/Input";
 import { Leaderboard } from "./Leaderboard";
@@ -39,7 +41,7 @@ const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
 /**
  * Per-dealership admin dashboard. The GSM/GM lands here when they log in
- * with their dealership's `admin_code` (not the shared salesperson code).
+ * with their personal four-digit manager code.
  *
  * Scoped to their own dealership only — all the data on this screen
  * (leaderboard, approvals, history) is already filtered to the session
@@ -77,7 +79,7 @@ export const DealerAdminDashboard: React.FC = () => {
   const handleWizardSave = async (fields: Record<string, string | boolean>) => {
     const fd = new FormData();
     Object.entries(fields).forEach(([k, v]) =>
-      fd.append(k, typeof v === "boolean" ? (v ? "true" : "false") : v)
+      fd.append(k, typeof v === "boolean" ? (v ? "true" : "false") : v),
     );
     const updated = await db.updateDealerWithFile(dealer.id, fd);
     useAppStore.setState((s) => ({
@@ -219,24 +221,25 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
 
   // Social
   const [facebookUrl, setFacebookUrl] = useState(dealer.facebook_url || "");
-  const [instagramHandle, setInstagramHandle] = useState(
-    dealer.instagram_handle || ""
-  );
+  const [instagramHandle, setInstagramHandle] = useState(dealer.instagram_handle || "");
   const [tiktokHandle, setTiktokHandle] = useState(dealer.tiktok_handle || "");
   const [xHandle, setXHandle] = useState(dealer.x_handle || "");
   const [gbpUrl, setGbpUrl] = useState(dealer.gbp_url || "");
 
   // Generation defaults
-  const [defaultHashtags, setDefaultHashtags] = useState(
-    dealer.default_hashtags || ""
-  );
+  const [defaultHashtags, setDefaultHashtags] = useState(dealer.default_hashtags || "");
   const [defaultFooter, setDefaultFooter] = useState(dealer.default_footer || "");
 
   // Overlay preferences
   const [enabledStyles, setEnabledStyles] = useState<Set<string>>(() => {
     const raw = (dealer.enabled_styles || "").trim();
     return raw
-      ? new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))
+      ? new Set(
+          raw
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        )
       : new Set(Object.values(StyleOption));
   });
   const [defaultStyle, setDefaultStyle] = useState(dealer.default_style || "");
@@ -348,9 +351,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
 
       {/* ---- Contact + identity ---- */}
       <section className="space-y-2">
-        <div className="text-sm font-semibold text-surface-50">
-          Contact & identity
-        </div>
+        <div className="text-sm font-semibold text-surface-50">Contact & identity</div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <Input
             label="Website"
@@ -394,9 +395,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
 
       {/* ---- Social handles ---- */}
       <section className="space-y-2">
-        <div className="text-sm font-semibold text-surface-50">
-          Social presence
-        </div>
+        <div className="text-sm font-semibold text-surface-50">Social presence</div>
         <Input
           label="Facebook page URL"
           value={facebookUrl}
@@ -490,8 +489,8 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
           Image overlay styles
         </div>
         <p className="text-[11px] text-surface-400">
-          Pick which design styles your team can use. Star one to preselect it
-          when a salesperson opens the customizer.
+          Pick which design styles your team can use. Star one to preselect it when a
+          salesperson opens the customizer.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {Object.values(StyleOption).map((s) => {
@@ -504,13 +503,11 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
                   "rounded-xl border px-3 py-2.5 flex items-center justify-between gap-2",
                   enabled
                     ? "border-primary-500/40 bg-primary-500/5"
-                    : "border-white/10 bg-white/5 opacity-60"
+                    : "border-white/10 bg-white/5 opacity-60",
                 )}
               >
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-surface-50">
-                    {s}
-                  </div>
+                  <div className="text-sm font-semibold text-surface-50">{s}</div>
                   <div className="text-[10px] text-surface-400">
                     {enabled ? "available to salespeople" : "hidden"}
                   </div>
@@ -525,7 +522,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
                       isDefault
                         ? "bg-amber-500/30 text-amber-100"
                         : "bg-white/5 hover:bg-white/10 text-surface-300",
-                      !enabled && "opacity-30 cursor-not-allowed"
+                      !enabled && "opacity-30 cursor-not-allowed",
                     )}
                   >
                     {isDefault ? "★ default" : "Set default"}
@@ -537,7 +534,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
                       "text-[10px] px-2 py-1 rounded-md transition-colors",
                       enabled
                         ? "bg-white/5 hover:bg-white/10 text-surface-300"
-                        : "bg-success-500/20 hover:bg-success-500/30 text-success-100"
+                        : "bg-success-500/20 hover:bg-success-500/30 text-success-100",
                     )}
                   >
                     {enabled ? "Disable" : "Enable"}
@@ -599,9 +596,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
           </div>
         </div>
         <div className="space-y-2">
-          <div className="text-sm font-semibold text-surface-50">
-            OEM affiliation
-          </div>
+          <div className="text-sm font-semibold text-surface-50">OEM affiliation</div>
           <Input
             label=""
             aria-label="OEM affiliation"
@@ -615,9 +610,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
       </section>
 
       <section className="space-y-2">
-        <div className="text-sm font-semibold text-surface-50">
-          Manager approval
-        </div>
+        <div className="text-sm font-semibold text-surface-50">Manager approval</div>
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -626,7 +619,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
               "px-3 py-2 rounded-lg text-sm transition-colors border",
               !approval
                 ? "border-success-500/40 bg-success-500/10 text-success-100"
-                : "border-white/10 bg-white/5 text-surface-300"
+                : "border-white/10 bg-white/5 text-surface-300",
             )}
           >
             Auto-publish
@@ -638,7 +631,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
               "px-3 py-2 rounded-lg text-sm transition-colors border",
               approval
                 ? "border-warning-500/40 bg-warning-500/10 text-warning-100"
-                : "border-white/10 bg-white/5 text-surface-300"
+                : "border-white/10 bg-white/5 text-surface-300",
             )}
           >
             Require manager approval
@@ -660,8 +653,8 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
                 minute: "2-digit",
               })}`
             : dirty
-            ? "Unsaved changes"
-            : "Up to date"}
+              ? "Unsaved changes"
+              : "Up to date"}
         </div>
         <Button
           variant="filled"
@@ -692,12 +685,13 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
 // Listed members are deduped against the post log so the GSM can see who has
 // generated posts even if they haven't been added to the formal roster yet.
 // ----------------------------------------------------------------------------
-const DealerTeamCard: React.FC = () => {
+export const DealerTeamCard: React.FC = () => {
   const [roster, setRoster] = useState<
     Array<{
       id?: string;
       name: string;
-      pin?: string;
+      hasPin?: boolean;
+      pinNeedsDistribution?: boolean;
       active: boolean;
       count: number;
       lastAt?: string;
@@ -707,12 +701,14 @@ const DealerTeamCard: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
-  const [newPin, setNewPin] = useState("");
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
   const [oneTimeCode, setOneTimeCode] = useState<{
+    id: string;
     name: string;
     pin: string;
   } | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [codeBusy, setCodeBusy] = useState(false);
   const dealer = useAppStore((s) => s.currentDealer);
 
   const load = React.useCallback(async () => {
@@ -721,8 +717,8 @@ const DealerTeamCard: React.FC = () => {
     try {
       const [sp, postsRes] = await Promise.all([
         import("../services/salespeople").then((m) => m.listSalespeople(true)),
-        fetch("/api/app/posts?limit=1000", { credentials: "include" }).then(
-          (r) => (r.ok ? r.json() : { items: [] })
+        fetch("/api/app/posts?limit=1000", { credentials: "include" }).then((r) =>
+          r.ok ? r.json() : { items: [] },
         ),
       ]);
       const counts = new Map<string, { count: number; lastAt: string }>();
@@ -747,7 +743,8 @@ const DealerTeamCard: React.FC = () => {
       const rosterRows = sp.map((p) => ({
         id: p.id,
         name: p.name,
-        pin: p.pin,
+        hasPin: p.hasPin,
+        pinNeedsDistribution: p.pinNeedsDistribution,
         active: p.active,
         count: counts.get(p.id)?.count || 0,
         lastAt: counts.get(p.id)?.lastAt,
@@ -763,9 +760,7 @@ const DealerTeamCard: React.FC = () => {
           lastAt: v.lastAt,
         }));
 
-      const combined = [...rosterRows, ...looseRows].sort(
-        (a, b) => b.count - a.count
-      );
+      const combined = [...rosterRows, ...looseRows].sort((a, b) => b.count - a.count);
       setRoster(combined);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -784,21 +779,19 @@ const DealerTeamCard: React.FC = () => {
     setSaving(true);
     try {
       const m = await import("../services/salespeople");
-      if (newPin.trim() && !/^\d{4}$/.test(newPin.trim())) {
-        setError("Access code must be exactly 4 digits (or leave blank).");
-        setSaving(false);
-        return;
-      }
       const created = await m.addSalesperson({
         name: newName.trim(),
-        pin: newPin.trim() || undefined,
         role: "salesperson",
       });
       setNewName("");
-      setNewPin("");
       if (created.pin) {
         setError(null);
-        setOneTimeCode({ name: created.name, pin: created.pin });
+        setCodeCopied(false);
+        setOneTimeCode({
+          id: created.person.id,
+          name: created.person.name,
+          pin: created.pin,
+        });
       }
       await load();
     } catch (err) {
@@ -822,12 +815,77 @@ const DealerTeamCard: React.FC = () => {
     setSaving(true);
     try {
       const m = await import("../services/salespeople");
-      await m.addSalesperson({ name });
+      const created = await m.addSalesperson({ name, role: "salesperson" });
+      setCodeCopied(false);
+      setOneTimeCode({
+        id: created.person.id,
+        name: created.person.name,
+        pin: created.pin,
+      });
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handlePersonCommitted = React.useCallback((updated: Person) => {
+    setRoster((current) =>
+      current.map((person) =>
+        person.id === updated.id
+          ? {
+              ...person,
+              name: updated.name,
+              active: updated.active,
+              hasPin: updated.hasPin,
+              pinNeedsDistribution: updated.pinNeedsDistribution,
+            }
+          : person,
+      ),
+    );
+    setEditingPerson((current) =>
+      current?.id === updated.id ? { ...current, ...updated } : current,
+    );
+    if (!updated.pinNeedsDistribution) {
+      setOneTimeCode((current) => (current?.id === updated.id ? null : current));
+    }
+  }, []);
+
+  const handleCredentialIssued = React.useCallback((credential: CredentialResult) => {
+    setCodeCopied(false);
+    setOneTimeCode({
+      id: credential.person.id,
+      name: credential.person.name,
+      pin: credential.pin,
+    });
+  }, []);
+
+  const handleCopyOneTimeCode = async () => {
+    if (!oneTimeCode) return;
+    try {
+      await navigator.clipboard.writeText(oneTimeCode.pin);
+      setCodeCopied(true);
+    } catch {
+      setError("Could not copy the code. Write it down before marking it shared.");
+    }
+  };
+
+  const handleAcknowledgeOneTimeCode = async () => {
+    if (!oneTimeCode || codeBusy) return;
+    setCodeBusy(true);
+    setError(null);
+    try {
+      const m = await import("../services/salespeople");
+      const updated = await m.acknowledgePinDistribution(oneTimeCode.id);
+      handlePersonCommitted(updated);
+      setOneTimeCode(null);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not mark the code as shared.",
+      );
+    } finally {
+      setCodeBusy(false);
     }
   };
 
@@ -852,9 +910,9 @@ const DealerTeamCard: React.FC = () => {
             Your team
           </h3>
           <p className="text-xs text-surface-400">
-            Each salesperson gets a personal 4-digit code for sign-in and
-            appears in the showroom picker. Deactivate anyone who leaves —
-            historical posts stay intact.
+            Each salesperson gets a personal 4-digit code for sign-in and is tied to
+            their posts automatically. Deactivate anyone who leaves — historical posts
+            stay intact.
           </p>
         </div>
       </div>
@@ -870,22 +928,6 @@ const DealerTeamCard: React.FC = () => {
             onChange={(e) => setNewName(e.target.value.slice(0, 120))}
             placeholder="e.g. Sarah Chen"
             className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-surface-100 focus:border-primary-400 focus:outline-none"
-          />
-        </div>
-        <div className="sm:w-32">
-          <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
-            Code (4 dig.)
-          </label>
-          <input
-            type="text"
-            value={newPin}
-            onChange={(e) =>
-              setNewPin(e.target.value.replace(/\D/g, "").slice(0, 4))
-            }
-            placeholder="auto"
-            inputMode="numeric"
-            maxLength={4}
-            className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-surface-100 font-mono tracking-widest focus:border-primary-400 focus:outline-none"
           />
         </div>
         <Button
@@ -910,22 +952,54 @@ const DealerTeamCard: React.FC = () => {
       </div>
 
       {oneTimeCode && (
-        <div className="rounded-xl border border-primary-500/30 bg-primary-500/10 px-3 py-3 text-sm text-primary-50">
-          <div className="font-semibold">{oneTimeCode.name} added</div>
-          <p className="mt-1 text-xs text-primary-100/80">
-            Share this access code privately — it won’t show in the list again.
+        <div
+          className="rounded-xl border border-warning-400/30 bg-warning-500/10 px-3 py-3 text-sm text-warning-50"
+          role="status"
+          aria-label="Access code ready to share"
+        >
+          <div className="font-semibold">
+            {oneTimeCode.name}&apos;s access code is ready
+          </div>
+          <p className="mt-1 text-xs text-warning-100/80">
+            Copy this one-time access code and share it privately. This handoff stays
+            here until you mark it as shared.
           </p>
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <span className="font-mono text-lg tracking-[0.3em]">
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <span className="flex-1 rounded-lg border border-white/10 bg-surface-950/70 px-3 py-2.5 text-center font-mono text-lg tracking-[0.3em] text-surface-50">
               {oneTimeCode.pin}
             </span>
-            <button
-              type="button"
-              className="text-xs font-semibold text-primary-200 underline-offset-2 hover:underline"
-              onClick={() => setOneTimeCode(null)}
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-h-11"
+              disabled={codeBusy}
+              leftIcon={
+                codeCopied ? (
+                  <Check className="h-3.5 w-3.5" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )
+              }
+              onClick={() => void handleCopyOneTimeCode()}
             >
-              Dismiss
-            </button>
+              {codeCopied ? "Copied" : "Copy"}
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              className="min-h-11"
+              disabled={codeBusy}
+              leftIcon={
+                codeBusy ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Check className="h-3.5 w-3.5" />
+                )
+              }
+              onClick={() => void handleAcknowledgeOneTimeCode()}
+            >
+              {codeBusy ? "Updating…" : "Mark as shared"}
+            </Button>
           </div>
         </div>
       )}
@@ -952,8 +1026,10 @@ const DealerTeamCard: React.FC = () => {
               className={cn(
                 "flex items-center justify-between rounded-xl border px-3 py-2.5 transition-colors",
                 p.active
-                  ? "border-white/10 bg-surface-900/40"
-                  : "border-white/5 bg-surface-900/20 opacity-60"
+                  ? p.pinNeedsDistribution
+                    ? "border-warning-400/25 bg-warning-500/[0.06]"
+                    : "border-white/10 bg-surface-900/40"
+                  : "border-white/5 bg-surface-900/20 opacity-60",
               )}
             >
               <div className="min-w-0">
@@ -973,12 +1049,18 @@ const DealerTeamCard: React.FC = () => {
                     <span
                       className={cn(
                         "text-[10px] uppercase tracking-wide font-semibold rounded-full px-2 py-0.5",
-                        p.pin
-                          ? "bg-success-500/10 text-success-300"
-                          : "bg-surface-800 text-surface-500",
+                        p.pinNeedsDistribution
+                          ? "bg-warning-500/15 text-warning-200"
+                          : p.hasPin
+                            ? "bg-success-500/10 text-success-300"
+                            : "bg-surface-800 text-surface-500",
                       )}
                     >
-                      {p.pin ? "Code set" : "No code"}
+                      {p.pinNeedsDistribution
+                        ? "Code to share"
+                        : p.hasPin
+                          ? "Code set"
+                          : "No code"}
                     </span>
                   )}
                 </div>
@@ -1005,9 +1087,10 @@ const DealerTeamCard: React.FC = () => {
                           id: p.id!,
                           dealer: dealer?.id || "",
                           name: p.name,
-                          pin: p.pin,
                           active: p.active,
                           role: "salesperson",
+                          hasPin: Boolean(p.hasPin),
+                          pinNeedsDistribution: Boolean(p.pinNeedsDistribution),
                         })
                       }
                       className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md bg-white/5 text-surface-300 hover:bg-white/10"
@@ -1053,7 +1136,10 @@ const DealerTeamCard: React.FC = () => {
         storeName={dealer?.name}
         allowRoleEdit={false}
         onClose={() => setEditingPerson(null)}
-        onSaved={() => {
+        onCommitted={handlePersonCommitted}
+        onCredentialIssued={handleCredentialIssued}
+        onSaved={(updated) => {
+          handlePersonCommitted(updated);
           setEditingPerson(null);
           void load();
         }}

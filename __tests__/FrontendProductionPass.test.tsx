@@ -2,10 +2,7 @@ import React, { useState } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
-import {
-  ImageCropModal,
-  constrainImageDimensions,
-} from "../components/ImageCropModal";
+import { ImageCropModal, constrainImageDimensions } from "../components/ImageCropModal";
 import { LoginScreen } from "../components/LoginScreen";
 import { Input, Textarea } from "../components/ui/Input";
 import { Modal } from "../components/ui/Modal";
@@ -105,11 +102,7 @@ describe("frontend production pass", () => {
       const [isOpen, setIsOpen] = useState(true);
       useKeyboardShortcuts({ onCancel: globalCancel });
       return (
-        <Modal
-          isOpen={isOpen}
-          onClose={() => setIsOpen(false)}
-          title="Edit creative"
-        >
+        <Modal isOpen={isOpen} onClose={() => setIsOpen(false)} title="Edit creative">
           <button type="button">Apply</button>
         </Modal>
       );
@@ -124,7 +117,7 @@ describe("frontend production pass", () => {
   });
 
   it("offers touch-accessible system admin entry", async () => {
-    const onLogin = vi.fn().mockResolvedValue(false);
+    const onLogin = vi.fn().mockResolvedValue({ ok: true });
     const user = userEvent.setup();
     render(
       <ToastProvider>
@@ -134,13 +127,38 @@ describe("frontend production pass", () => {
 
     await user.click(screen.getByRole("button", { name: "System admin" }));
     const adminInput = await screen.findByLabelText("System admin code");
-    await user.type(adminInput, "admin99");
-    expect(adminInput).toHaveValue("ADMIN99");
+    await user.type(adminInput, "Admin9xQ2Z7p");
+    expect(adminInput).toHaveValue("Admin9xQ2Z7p");
 
-    await user.click(
-      screen.getByRole("button", { name: /Continue to system admin/i }),
+    await user.click(screen.getByRole("button", { name: /Continue to system admin/i }));
+    await waitFor(() =>
+      expect(onLogin).toHaveBeenCalledWith("Admin9xQ2Z7p", undefined),
     );
-    await waitFor(() => expect(onLogin).toHaveBeenCalledWith("ADMIN99"));
+  });
+
+  it("does not let global code shortcuts override a focused login control", async () => {
+    const onLogin = vi.fn().mockResolvedValue({ ok: false, code: "INVALID_CODE" });
+    const user = userEvent.setup();
+    render(
+      <ToastProvider>
+        <LoginScreen onLogin={onLogin} />
+      </ToastProvider>,
+    );
+
+    const systemAdminTab = screen.getByRole("button", { name: "System admin" });
+    systemAdminTab.focus();
+    await user.keyboard("A");
+
+    expect(systemAdminTab).toHaveFocus();
+    expect(screen.queryByLabelText("System admin code")).not.toBeInTheDocument();
+    expect(onLogin).not.toHaveBeenCalled();
+
+    await user.keyboard("{Enter}");
+    const adminCode = await screen.findByLabelText("System admin code");
+    await waitFor(() => expect(adminCode).toHaveFocus());
+    expect(
+      screen.getByText("Enter the exact 12-character system admin code."),
+    ).toBeVisible();
   });
 
   it("caps reviewed photo dimensions while preserving aspect ratio", () => {

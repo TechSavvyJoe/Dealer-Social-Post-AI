@@ -14,7 +14,7 @@ const trackedFiles = execFileSync(
   .filter(Boolean);
 
 const placeholders =
-  /^(?:|<[^>]+>|\$\{[^}]+\}|process\.env\..*|your[-_].*|example.*|placeholder.*|redacted.*|hidden|fake.*|test.*|changeme|admin@example\.com)$/i;
+  /^(?:|<[^>]+>|\$\{[^}]+\}|\$[A-Z_][A-Z0-9_]*|process\.env\..*|your[-_].*|example.*|placeholder.*|redacted.*|hidden|fake.*|test.*|changeme|admin@example\.com)$/i;
 
 const secretValuePatterns = [
   { label: "Google API key", pattern: /AIza[0-9A-Za-z_-]{20,}/ },
@@ -24,8 +24,7 @@ const secretValuePatterns = [
   },
   {
     label: "JWT-like token",
-    pattern:
-      /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
+    pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/,
   },
   {
     label: "provider access token",
@@ -36,7 +35,7 @@ const secretValuePatterns = [
 const assignment =
   /\b(?:GEMINI_API_KEY|VERTEX_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY|PROXY_ACCESS_TOKEN|VITE_PROXY_ACCESS_TOKEN|PB_ADMIN_EMAIL|PB_ADMIN_PASSWORD|ADMIN_EMAIL|ADMIN_PASSWORD|ADMIN_PASS|ADMIN_DEALER_CODE)\b\s*=\s*["']?([^\s"']+)["']?/i;
 const objectCredential =
-  /["']?(?:identity|password|client_secret|private_key|access_token|api_key)["']?\s*:\s*["']([^"'\n]+)["']/i;
+  /(?:^|[,{])\s*["']?(?:identity|password|client_secret|private_key|access_token|api_key)["']?\s*:\s*["']([^"'\n]+)["']/i;
 const publicRuleMutation =
   /\b(?:listRule|viewRule|createRule|updateRule|deleteRule)\s*:\s*["']{2}/;
 
@@ -84,15 +83,11 @@ for (const file of trackedFiles) {
 }
 
 if (findings.length > 0) {
-  console.error(
-    "Secret/safety scan failed. Matched values are intentionally hidden:",
-  );
+  console.error("Secret/safety scan failed. Matched values are intentionally hidden:");
   for (const finding of findings) {
     console.error(`- ${finding.file}:${finding.line} (${finding.label})`);
   }
   process.exit(1);
 }
 
-console.log(
-  `Secret/safety scan passed (${trackedFiles.length} repository files).`,
-);
+console.log(`Secret/safety scan passed (${trackedFiles.length} repository files).`);

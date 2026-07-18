@@ -2,6 +2,7 @@ import { normalizeError } from "../utils/errorHandler";
 import { retryWithBackoff } from "../utils/retry";
 import { performanceMonitor } from "../utils/performanceMonitor";
 import { withCircuitBreaker } from "../utils/circuitBreaker";
+import { MODEL_POLICY_VERSION, type ModelTaskName } from "./modelConfig";
 
 // Request tracking for debugging
 let requestCounter = 0;
@@ -18,11 +19,11 @@ export async function fetchFromProxy(
   method: "GET" | "POST",
   path: string,
   body: unknown,
+  task?: ModelTaskName,
+  attemptId?: string,
 ) {
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    throw normalizeError(
-      new Error("Offline: please reconnect to the internet."),
-    );
+    throw normalizeError(new Error("Offline: please reconnect to the internet."));
   }
 
   const requestId = ++requestCounter;
@@ -39,8 +40,7 @@ export async function fetchFromProxy(
     // the browser bundle.
     let serviceKey = "gemini-api";
     if (path.includes("image")) serviceKey = "gemini-image-api";
-    else if (path.includes("veo") || path.includes("video"))
-      serviceKey = "veo-api";
+    else if (path.includes("veo") || path.includes("video")) serviceKey = "veo-api";
 
     // Only network errors and 5xx responses count against the circuit and get
     // retried. A 4xx means the service answered successfully, so it is parsed
@@ -51,7 +51,16 @@ export async function fetchFromProxy(
           const res = await fetch(`/api/proxy/${path}`, {
             method,
             credentials: "include",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              ...(task
+                ? {
+                    "X-Generation-Task": task,
+                    "X-Model-Policy-Version": MODEL_POLICY_VERSION,
+                    ...(attemptId ? { "X-Generation-Attempt-ID": attemptId } : {}),
+                  }
+                : {}),
+            },
             body: method === "POST" ? JSON.stringify(body) : undefined,
             signal: controller.signal,
           });
@@ -75,9 +84,7 @@ export async function fetchFromProxy(
       );
     });
 
-    console.log(
-      `[GeminiProxy] [${requestId}] Response ${response.status} for ${path}`,
-    );
+    console.log(`[GeminiProxy] [${requestId}] Response ${response.status} for ${path}`);
 
     const responseText = await response.text();
 
@@ -103,8 +110,7 @@ export async function fetchFromProxy(
     }
 
     // Log performance
-    const duration =
-      performanceMonitor.measure(markName, `${markName}-start`) || 0;
+    const duration = performanceMonitor.measure(markName, `${markName}-start`) || 0;
     if (duration > 10000) {
       console.warn(`[GeminiProxy] [${requestId}] Slow request: ${duration}ms`);
     }

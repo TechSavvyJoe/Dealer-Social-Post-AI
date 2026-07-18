@@ -1,10 +1,6 @@
 import React from "react";
 import { AlertTriangle, Hash, Info } from "lucide-react";
-import {
-  PLATFORM_LIMITS,
-  evaluate,
-  countHashtags,
-} from "../utils/platformLimits";
+import { PLATFORM_LIMITS, evaluate, countHashtags } from "../utils/platformLimits";
 import { hashtagBudgetForPlatform } from "../utils/hashtags";
 import { cn } from "../utils/classNames";
 
@@ -62,21 +58,17 @@ export const PlatformLimitMeter: React.FC<PlatformLimitMeterProps> = ({
       return PLATFORM_LIMITS.filter((l) => l.id !== "x");
     }
     const wanted = new Set(
-      platformIds
-        .map((id) => PLATFORM_ID_MAP[id] || id)
-        .filter(Boolean),
+      platformIds.map((id) => PLATFORM_ID_MAP[id] || id).filter(Boolean),
     );
     const filtered = PLATFORM_LIMITS.filter((l) => wanted.has(l.id));
-    return filtered.length > 0
-      ? filtered
-      : PLATFORM_LIMITS.filter((l) => l.id !== "x");
+    return filtered.length > 0 ? filtered : PLATFORM_LIMITS.filter((l) => l.id !== "x");
   })();
 
   return (
     <div
       className={cn(
         "rounded-xl border border-white/10 bg-surface-900/40 p-3 space-y-2",
-        className
+        className,
       )}
     >
       <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-surface-400">
@@ -113,7 +105,7 @@ export const PlatformLimitMeter: React.FC<PlatformLimitMeterProps> = ({
                 <span
                   className={cn(
                     "text-[10px] font-mono tabular-nums flex-shrink-0 w-16 text-right",
-                    klass.label
+                    klass.label,
                   )}
                 >
                   {count}/{limit.maxChars}
@@ -133,7 +125,7 @@ export const PlatformLimitMeter: React.FC<PlatformLimitMeterProps> = ({
                 <p
                   className={cn(
                     "pl-3.5 text-[10px] leading-snug",
-                    hashtagWarning ? "text-error-300" : "text-surface-500",
+                    hashtagWarning ? "text-error-300" : "text-surface-400",
                   )}
                 >
                   Tags: {hashtags}

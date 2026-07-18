@@ -11,6 +11,7 @@ export enum AppStep {
 }
 
 export type UserRole = "salesperson" | "dealer_admin" | "super_admin";
+export type ImageQualityTier = "standard" | "studio";
 
 export enum StyleOption {
   Luxury = "Luxury & Elegance",
@@ -58,8 +59,7 @@ export interface GeneratedPost {
   /** Server record used for owner-scoped approval status polling. */
   postId?: string;
   /** `submission_failed` is client-only and keeps delivery locked safely. */
-  approvalStatus?:
-    "n_a" | "pending" | "approved" | "rejected" | "submission_failed";
+  approvalStatus?: "n_a" | "pending" | "approved" | "rejected" | "submission_failed";
   /**
    * A captured signature is not considered usable until the protected release
    * record has been saved. Failed persistence locks all delivery actions so a
@@ -87,6 +87,37 @@ export interface GeneratedPost {
    * was generated (0–1 platforms or pack step failed).
    */
   platformCaptions?: Record<string, string>;
+  /** User-visible provenance for the primary caption. */
+  captionSource?: "ai" | "basic_fallback" | "custom";
+  /** True when a safe local template was used instead of a provider result. */
+  isBasicFallback?: boolean;
+  /** Redacted generation diagnostics; never contains prompts or credentials. */
+  aiMeta?: {
+    captionSource: "ai" | "basic_fallback" | "custom";
+    selectedTier: "standard" | "studio";
+    model?: string;
+    fallbackCount: number;
+    lastSuccessfulGenerationAt?: string;
+    caption: {
+      task: string;
+      tier: "fast" | "quality" | "standard" | "studio";
+      provider: string;
+      model: string | null;
+      attemptId?: string;
+      fallbackCount: number;
+      lastSuccessAt: string | null;
+    };
+    image: {
+      task: string;
+      tier: "fast" | "quality" | "standard" | "studio";
+      provider: string;
+      model: string | null;
+      attemptId?: string;
+      fallbackCount: number;
+      lastSuccessAt: string | null;
+    };
+    modelPolicyVersion: string;
+  };
 }
 
 export interface DealershipSettings {

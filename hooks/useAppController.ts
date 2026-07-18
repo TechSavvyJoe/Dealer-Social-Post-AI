@@ -19,6 +19,7 @@ export const useAppController = () => {
     preferredStyle,
     preferredTone,
     compactMode,
+    imageQualityTier,
     isRestoringSession,
     setStep,
     setSelectedImage,
@@ -40,6 +41,7 @@ export const useAppController = () => {
       preferredStyle: state.preferredStyle,
       preferredTone: state.preferredTone,
       compactMode: state.compactMode,
+      imageQualityTier: state.imageQualityTier,
       isRestoringSession: state.isRestoringSession,
       setStep: state.setStep,
       setSelectedImage: state.setSelectedImage,
@@ -75,10 +77,10 @@ export const useAppController = () => {
   }, [restoreSession]);
 
   // Handlers
-  const handleLogin = async (dealerId: string) => {
+  const handleLogin = async (dealerCode: string, turnstileToken?: string) => {
     // The store distinguishes an invalid credential from an unavailable
     // backend. Do not overwrite that authoritative, user-actionable message.
-    return login(dealerId);
+    return login(dealerCode, turnstileToken);
   };
 
   const handleStyleToneChange = useCallback(
@@ -114,6 +116,7 @@ export const useAppController = () => {
     preferredStyle,
     preferredTone,
     compactMode,
+    imageQualityTier,
     isRestoringSession,
     setStep,
     setError,

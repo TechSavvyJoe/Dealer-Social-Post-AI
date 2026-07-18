@@ -29,6 +29,7 @@ const AppContent: React.FC = () => {
     preferredStyle,
     preferredTone,
     compactMode,
+    imageQualityTier,
     isRestoringSession,
     setStep,
     setError,
@@ -105,11 +106,7 @@ const AppContent: React.FC = () => {
         className="flex min-h-0 flex-1 items-center justify-center bg-surface-950 p-6 text-surface-50"
         aria-busy="true"
       >
-        <div
-          className="flex items-center gap-4"
-          role="status"
-          aria-live="polite"
-        >
+        <div className="flex items-center gap-4" role="status" aria-live="polite">
           <span
             className="h-10 w-10 rounded-xl border border-primary-400/40 bg-primary-500/10 grid place-items-center"
             aria-hidden="true"
@@ -139,9 +136,7 @@ const AppContent: React.FC = () => {
           dealer={currentDealer}
           onLogout={() => logout()}
           onShowSettings={() => setIsSettingsOpen(true)}
-          confirmBeforeLogout={
-            step === AppStep.RESULT && Boolean(generatedPost)
-          }
+          confirmBeforeLogout={step === AppStep.RESULT && Boolean(generatedPost)}
         />
       )}
 
@@ -193,8 +188,10 @@ const AppContent: React.FC = () => {
           isOpen={isSettingsOpen}
           onClose={() => setIsSettingsOpen(false)}
           compactMode={compactMode}
-          onToggleCompactMode={(value) =>
-            setPreferences({ compactMode: value })
+          imageQualityTier={imageQualityTier}
+          onToggleCompactMode={(value) => setPreferences({ compactMode: value })}
+          onImageQualityTierChange={(value) =>
+            setPreferences({ imageQualityTier: value })
           }
         />
       </Suspense>

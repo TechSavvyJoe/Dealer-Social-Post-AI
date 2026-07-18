@@ -31,7 +31,8 @@ function initialApprovalStatus(dealer) {
 }
 
 function isValidAdminDealerCode(value) {
-  return /^[A-Za-z0-9]{6,12}$/.test((value || "").toString().trim());
+  const raw = value === undefined || value === null ? "" : value.toString();
+  return /^[A-Za-z0-9]{12}$/.test(raw);
 }
 
 // Canonical disclosure templates for approval-bound social copy. These are an
@@ -118,9 +119,7 @@ function normalizeCompliancePhrase(value) {
 }
 
 function parseDealerBannedPhrases(value) {
-  const raw = Array.isArray(value)
-    ? value
-    : (value || "").toString().split(/[\n,]+/);
+  const raw = Array.isArray(value) ? value : (value || "").toString().split(/[\n,]+/);
   const phrases = [];
   const seen = {};
   for (let i = 0; i < raw.length; i++) {
@@ -164,9 +163,7 @@ function canonicalPostCompliance(caption, bannedPhrases) {
   const blockedPhrases = [];
   const dealerPhrases = parseDealerBannedPhrases(bannedPhrases);
   for (let i = 0; i < dealerPhrases.length; i++) {
-    if (
-      normalizedCaption.indexOf(" " + dealerPhrases[i].normalized + " ") !== -1
-    ) {
+    if (normalizedCaption.indexOf(" " + dealerPhrases[i].normalized + " ") !== -1) {
       blockedPhrases.push(dealerPhrases[i].original);
     }
   }
@@ -183,18 +180,14 @@ function canonicalPostCompliance(caption, bannedPhrases) {
 
 function validatePostCompliance(caption, disclosures, bannedPhrases) {
   const text = (caption || "").toString();
-  const supplied = (disclosures || "")
-    .toString()
-    .replace(/\r\n?/g, "\n")
-    .trim();
+  const supplied = (disclosures || "").toString().replace(/\r\n?/g, "\n").trim();
   const result = canonicalPostCompliance(text, bannedPhrases);
 
   if (text.indexOf("— Disclosures —") !== -1) {
     return {
       ...result,
       ok: false,
-      error:
-        "Compliance disclosures must be submitted separately from the caption",
+      error: "Compliance disclosures must be submitted separately from the caption",
     };
   }
   if (result.legal_prohibited || result.dealer_blocked_phrases.length > 0) {
@@ -219,18 +212,172 @@ function validatePostCompliance(caption, disclosures, bannedPhrases) {
   return { ...result, ok: true, error: "" };
 }
 
-const ALLOWED_GENERATE_CONTENT_MODELS = [
-  "gemini-3.5-flash",
-  "gemini-3.1-flash-lite",
-  "gemini-2.5-flash",
-  "gemini-3-pro-image",
-  "gemini-3.1-flash-image",
-  "gemini-3.1-flash-lite-image",
+// These filters are always injected by the server. Client payloads are not
+// allowed to contain `safetySettings`, so a browser cannot lower a threshold.
+const SERVER_SAFETY_SETTINGS = [
+  {
+    category: "HARM_CATEGORY_HATE_SPEECH",
+    threshold: "BLOCK_MEDIUM_AND_ABOVE",
+  },
+  {
+    category: "HARM_CATEGORY_HARASSMENT",
+    threshold: "BLOCK_MEDIUM_AND_ABOVE",
+  },
+  {
+    category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+    threshold: "BLOCK_MEDIUM_AND_ABOVE",
+  },
+  {
+    category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+    threshold: "BLOCK_MEDIUM_AND_ABOVE",
+  },
 ];
-const ALLOWED_VEO_MODELS = [
-  "veo-3.1-generate-preview",
-  "veo-3.1-fast-generate-preview",
-];
+
+// Language-neutral contract mirrored from config/gemini-model-policy.json.
+// `scripts/check-model-policy.mjs` and Vitest fail if this snapshot drifts.
+const GEMINI_MODEL_POLICY_SNAPSHOT = {
+  version: 1,
+  verifiedAt: "2026-07-17",
+  models: {
+    textQuality: "gemini-3.5-flash",
+    textFast: "gemini-3.1-flash-lite",
+    imageStandard: "gemini-3.1-flash-image",
+    imageStudio: "gemini-3-pro-image",
+    imageLite: "gemini-3.1-flash-lite-image",
+    videoStandard: "veo-3.1-fast-generate-preview",
+    videoQuality: "veo-3.1-generate-preview",
+  },
+  tasks: {
+    caption: {
+      kind: "text",
+      tier: "quality",
+      models: ["gemini-3.5-flash", "gemini-3.1-flash-lite"],
+      maxOutputTokens: 2048,
+    },
+    caption_regenerate: {
+      kind: "text",
+      tier: "quality",
+      models: ["gemini-3.5-flash", "gemini-3.1-flash-lite"],
+      maxOutputTokens: 2048,
+    },
+    caption_edit: {
+      kind: "text",
+      tier: "fast",
+      models: ["gemini-3.1-flash-lite", "gemini-3.5-flash"],
+      maxOutputTokens: 2048,
+    },
+    image_standard: {
+      kind: "image",
+      tier: "standard",
+      models: [
+        "gemini-3.1-flash-image",
+        "gemini-3-pro-image",
+        "gemini-3.1-flash-lite-image",
+      ],
+      maxOutputTokens: 4096,
+      imageSizes: {
+        "gemini-3.1-flash-image": "2K",
+        "gemini-3-pro-image": "2K",
+        "gemini-3.1-flash-lite-image": "1K",
+      },
+    },
+    image_studio: {
+      kind: "image",
+      tier: "studio",
+      models: [
+        "gemini-3-pro-image",
+        "gemini-3.1-flash-image",
+        "gemini-3.1-flash-lite-image",
+      ],
+      maxOutputTokens: 4096,
+      imageSizes: {
+        "gemini-3-pro-image": "2K",
+        "gemini-3.1-flash-image": "2K",
+        "gemini-3.1-flash-lite-image": "1K",
+      },
+    },
+    video_standard: {
+      kind: "video",
+      tier: "standard",
+      models: ["veo-3.1-fast-generate-preview"],
+      resolution: "720p",
+    },
+    video_quality: {
+      kind: "video",
+      tier: "quality",
+      models: ["veo-3.1-generate-preview"],
+      resolution: "1080p",
+    },
+  },
+  allowedRequestFields: {
+    generateContent: {
+      topLevel: ["contents", "generationConfig"],
+      content: ["parts"],
+      textPart: ["text"],
+      imagePart: ["inlineData"],
+      inlineData: ["mimeType", "data"],
+      textGenerationConfig: ["maxOutputTokens"],
+      imageGenerationConfig: ["responseModalities", "imageConfig", "maxOutputTokens"],
+      imageConfig: ["imageSize"],
+      legacyImageGenerationConfig: [
+        "responseModalities",
+        "responseFormat",
+        "maxOutputTokens",
+      ],
+      legacyResponseFormat: ["image"],
+      legacyResponseFormatImage: ["imageSize"],
+    },
+    veo: {
+      topLevel: ["instances", "parameters"],
+      instance: ["prompt", "image"],
+      image: ["bytesBase64Encoded", "mimeType"],
+      legacyImage: ["inlineData"],
+      parameters: ["aspectRatio", "personGeneration", "durationSeconds", "resolution"],
+    },
+  },
+  requestLimits: {
+    maxPromptChars: 20000,
+    maxInlineImageChars: 16 * 1024 * 1024,
+    maxTotalInlineImageChars: 20 * 1024 * 1024,
+    maxTextImages: 1,
+    maxImageTaskImages: 2,
+  },
+  safetySettings: SERVER_SAFETY_SETTINGS,
+};
+
+function geminiModelPolicySnapshot() {
+  return JSON.parse(JSON.stringify(GEMINI_MODEL_POLICY_SNAPSHOT));
+}
+
+function uniqueModelsForTasks(taskNames) {
+  const seen = {};
+  const models = [];
+  for (let i = 0; i < taskNames.length; i++) {
+    const task = GEMINI_MODEL_POLICY_SNAPSHOT.tasks[taskNames[i]];
+    for (let j = 0; j < task.models.length; j++) {
+      const model = task.models[j];
+      if (!seen[model]) {
+        seen[model] = true;
+        models.push(model);
+      }
+    }
+  }
+  return models;
+}
+
+const TEXT_GENERATE_CONTENT_MODELS = uniqueModelsForTasks([
+  "caption",
+  "caption_regenerate",
+  "caption_edit",
+]);
+const IMAGE_GENERATE_CONTENT_MODELS = uniqueModelsForTasks([
+  "image_standard",
+  "image_studio",
+]);
+const ALLOWED_GENERATE_CONTENT_MODELS = TEXT_GENERATE_CONTENT_MODELS.concat(
+  IMAGE_GENERATE_CONTENT_MODELS,
+);
+const ALLOWED_VEO_MODELS = uniqueModelsForTasks(["video_standard", "video_quality"]);
 
 /**
  * The client-side router is a preference, not an authorization boundary.
@@ -277,8 +424,7 @@ function isAllowedProxyRequest(path, method) {
   if (!isAllowedProxyPath(path)) return false;
   const normalizedMethod = (method || "").toString().toUpperCase();
   const isGenerationStart =
-    /:generateContent$/i.test(path || "") ||
-    /:predictLongRunning$/i.test(path || "");
+    /:generateContent$/i.test(path || "") || /:predictLongRunning$/i.test(path || "");
 
   if (normalizedMethod === "POST") return isGenerationStart;
   if (normalizedMethod === "GET") return !isGenerationStart;
@@ -337,9 +483,7 @@ function providerOperationFromName(name, provider) {
   }
 
   if (provider === "vertex") {
-    normalized = normalized
-      .replace(/^vertex\//i, "")
-      .replace(/^v1(?:beta1)?\//i, "");
+    normalized = normalized.replace(/^vertex\//i, "").replace(/^v1(?:beta1)?\//i, "");
     if (
       /^projects\/[a-z0-9._-]+\/locations\/[a-z0-9-]+\/operations\/[a-z0-9._~-]+$/i.test(
         normalized,
@@ -428,10 +572,7 @@ function providerResourcesFromResponse(path, responseBody) {
   if (!isObject(responseBody)) return [];
   const startProvider = providerOperationStartProvider(path, "POST");
   const requested = providerResourceRequest(path, "GET");
-  if (
-    !startProvider &&
-    (!requested || requested.resource_type !== "operation")
-  ) {
+  if (!startProvider && (!requested || requested.resource_type !== "operation")) {
     return [];
   }
 
@@ -440,11 +581,7 @@ function providerResourcesFromResponse(path, responseBody) {
   const add = (resource) => {
     if (!resource) return;
     const key =
-      resource.provider +
-      ":" +
-      resource.resource_type +
-      ":" +
-      resource.resource_id;
+      resource.provider + ":" + resource.resource_type + ":" + resource.resource_id;
     if (seen[key] || resources.length >= 32) return;
     seen[key] = true;
     resources.push(resource);
@@ -484,19 +621,11 @@ function providerResourcesFromResponse(path, responseBody) {
   return resources;
 }
 
-const TEXT_GENERATE_CONTENT_MODELS = [
-  "gemini-3.5-flash",
-  "gemini-3.1-flash-lite",
-  "gemini-2.5-flash",
-];
-const IMAGE_GENERATE_CONTENT_MODELS = [
-  "gemini-3-pro-image",
-  "gemini-3.1-flash-image",
-  "gemini-3.1-flash-lite-image",
-];
-const MAX_PROMPT_CHARS = 20000;
-const MAX_INLINE_IMAGE_CHARS = 16 * 1024 * 1024;
-const MAX_TOTAL_INLINE_IMAGE_CHARS = 20 * 1024 * 1024;
+const GEMINI_REQUEST_FIELDS = GEMINI_MODEL_POLICY_SNAPSHOT.allowedRequestFields;
+const GEMINI_REQUEST_LIMITS = GEMINI_MODEL_POLICY_SNAPSHOT.requestLimits;
+const MAX_PROMPT_CHARS = GEMINI_REQUEST_LIMITS.maxPromptChars;
+const MAX_INLINE_IMAGE_CHARS = GEMINI_REQUEST_LIMITS.maxInlineImageChars;
+const MAX_TOTAL_INLINE_IMAGE_CHARS = GEMINI_REQUEST_LIMITS.maxTotalInlineImageChars;
 const ALLOWED_INLINE_IMAGE_TYPES = [
   "image/jpeg",
   "image/png",
@@ -524,9 +653,10 @@ function hasOnlyKeys(value, allowedKeys, requiredKeys) {
 }
 
 function sanitizeInlineImage(part) {
-  if (!hasOnlyKeys(part, ["inlineData"], ["inlineData"])) return null;
+  const fields = GEMINI_REQUEST_FIELDS.generateContent;
+  if (!hasOnlyKeys(part, fields.imagePart, fields.imagePart)) return null;
   const inlineData = part.inlineData;
-  if (!hasOnlyKeys(inlineData, ["mimeType", "data"], ["mimeType", "data"])) {
+  if (!hasOnlyKeys(inlineData, fields.inlineData, fields.inlineData)) {
     return null;
   }
 
@@ -547,9 +677,10 @@ function sanitizeInlineImage(part) {
 }
 
 function sanitizeGenerateContentContents(input, minImages, maxImages) {
+  const fields = GEMINI_REQUEST_FIELDS.generateContent;
   if (!Array.isArray(input) || input.length !== 1) return null;
   const content = input[0];
-  if (!hasOnlyKeys(content, ["parts"], ["parts"])) return null;
+  if (!hasOnlyKeys(content, fields.content, fields.content)) return null;
   if (!Array.isArray(content.parts) || !content.parts.length) return null;
 
   let textCount = 0;
@@ -562,7 +693,7 @@ function sanitizeGenerateContentContents(input, minImages, maxImages) {
     if (!isObject(part)) return null;
 
     if (Object.prototype.hasOwnProperty.call(part, "text")) {
-      if (!hasOnlyKeys(part, ["text"], ["text"])) return null;
+      if (!hasOnlyKeys(part, fields.textPart, fields.textPart)) return null;
       if (
         typeof part.text !== "string" ||
         !part.text.trim() ||
@@ -579,10 +710,7 @@ function sanitizeGenerateContentContents(input, minImages, maxImages) {
     if (!imagePart) return null;
     imageCount += 1;
     totalImageChars += imagePart.inlineData.data.length;
-    if (
-      imageCount > maxImages ||
-      totalImageChars > MAX_TOTAL_INLINE_IMAGE_CHARS
-    ) {
+    if (imageCount > maxImages || totalImageChars > MAX_TOTAL_INLINE_IMAGE_CHARS) {
       return null;
     }
     parts.push(imagePart);
@@ -595,42 +723,48 @@ function sanitizeGenerateContentContents(input, minImages, maxImages) {
 }
 
 function buildGenerateContentRequest(model, input) {
-  if (
-    !hasOnlyKeys(
-      input,
-      ["contents", "generationConfig"],
-      ["contents", "generationConfig"],
-    )
-  ) {
+  const fields = GEMINI_REQUEST_FIELDS.generateContent;
+  // Deliberately omit `safetySettings` from the accepted client keys. The
+  // canonical server policy below is the only safety configuration forwarded.
+  if (!hasOnlyKeys(input, fields.topLevel, fields.topLevel)) {
     return null;
   }
 
   const generationConfig = input.generationConfig;
   if (TEXT_GENERATE_CONTENT_MODELS.indexOf(model) !== -1) {
+    const requiredMaxOutputTokens =
+      GEMINI_MODEL_POLICY_SNAPSHOT.tasks.caption.maxOutputTokens;
     if (
       !hasOnlyKeys(
         generationConfig,
-        ["maxOutputTokens"],
-        ["maxOutputTokens"],
+        fields.textGenerationConfig,
+        fields.textGenerationConfig,
       ) ||
-      [600, 800].indexOf(generationConfig.maxOutputTokens) === -1
+      generationConfig.maxOutputTokens !== requiredMaxOutputTokens
     ) {
       return null;
     }
 
-    const contents = sanitizeGenerateContentContents(input.contents, 0, 1);
+    const contents = sanitizeGenerateContentContents(
+      input.contents,
+      0,
+      GEMINI_REQUEST_LIMITS.maxTextImages,
+    );
     if (!contents) return null;
     return {
       contents: contents,
       generationConfig: {
         maxOutputTokens: generationConfig.maxOutputTokens,
       },
+      safetySettings: SERVER_SAFETY_SETTINGS,
     };
   }
 
   if (IMAGE_GENERATE_CONTENT_MODELS.indexOf(model) === -1) return null;
+  const requiredMaxOutputTokens =
+    GEMINI_MODEL_POLICY_SNAPSHOT.tasks.image_standard.maxOutputTokens;
   if (
-    generationConfig.maxOutputTokens !== 4096 ||
+    generationConfig.maxOutputTokens !== requiredMaxOutputTokens ||
     !Array.isArray(generationConfig.responseModalities) ||
     generationConfig.responseModalities.length !== 2 ||
     generationConfig.responseModalities[0] !== "TEXT" ||
@@ -643,30 +777,37 @@ function buildGenerateContentRequest(model, input) {
   // Legacy clients sent responseFormat.image.imageSize; Google now treats that
   // nested field as a protobuf enum and rejects bare "2K". Always rewrite to
   // imageConfig before proxying.
-  const requiredSize = model === "gemini-3.1-flash-lite-image" ? "1K" : "2K";
+  const requiredSize =
+    GEMINI_MODEL_POLICY_SNAPSHOT.tasks.image_standard.imageSizes[model] ||
+    GEMINI_MODEL_POLICY_SNAPSHOT.tasks.image_studio.imageSizes[model];
+  if (!requiredSize) return null;
   let requestedSize = "";
   const hasImageConfig =
     generationConfig.imageConfig &&
     typeof generationConfig.imageConfig === "object" &&
-    hasOnlyKeys(generationConfig.imageConfig, ["imageSize"], ["imageSize"]);
+    hasOnlyKeys(generationConfig.imageConfig, fields.imageConfig, fields.imageConfig);
   const hasLegacyResponseFormat =
     generationConfig.responseFormat &&
     typeof generationConfig.responseFormat === "object" &&
-    hasOnlyKeys(generationConfig.responseFormat, ["image"], ["image"]) &&
+    hasOnlyKeys(
+      generationConfig.responseFormat,
+      fields.legacyResponseFormat,
+      fields.legacyResponseFormat,
+    ) &&
     generationConfig.responseFormat.image &&
     typeof generationConfig.responseFormat.image === "object" &&
     hasOnlyKeys(
       generationConfig.responseFormat.image,
-      ["imageSize"],
-      ["imageSize"],
+      fields.legacyResponseFormatImage,
+      fields.legacyResponseFormatImage,
     );
 
   if (hasImageConfig) {
     if (
       !hasOnlyKeys(
         generationConfig,
-        ["responseModalities", "imageConfig", "maxOutputTokens"],
-        ["responseModalities", "imageConfig", "maxOutputTokens"],
+        fields.imageGenerationConfig,
+        fields.imageGenerationConfig,
       )
     ) {
       return null;
@@ -676,8 +817,8 @@ function buildGenerateContentRequest(model, input) {
     if (
       !hasOnlyKeys(
         generationConfig,
-        ["responseModalities", "responseFormat", "maxOutputTokens"],
-        ["responseModalities", "responseFormat", "maxOutputTokens"],
+        fields.legacyImageGenerationConfig,
+        fields.legacyImageGenerationConfig,
       )
     ) {
       return null;
@@ -691,25 +832,27 @@ function buildGenerateContentRequest(model, input) {
     return null;
   }
 
-  const contents = sanitizeGenerateContentContents(input.contents, 1, 2);
+  const contents = sanitizeGenerateContentContents(
+    input.contents,
+    1,
+    GEMINI_REQUEST_LIMITS.maxImageTaskImages,
+  );
   if (!contents) return null;
   return {
     contents: contents,
     generationConfig: {
       responseModalities: ["TEXT", "IMAGE"],
       imageConfig: { imageSize: requiredSize },
-      maxOutputTokens: 4096,
+      maxOutputTokens: requiredMaxOutputTokens,
     },
+    safetySettings: SERVER_SAFETY_SETTINGS,
   };
 }
 
-function buildVeoRequest(input) {
+function buildVeoRequest(model, input) {
+  const fields = GEMINI_REQUEST_FIELDS.veo;
   if (
-    !hasOnlyKeys(
-      input,
-      ["instances", "parameters"],
-      ["instances", "parameters"],
-    ) ||
+    !hasOnlyKeys(input, fields.topLevel, fields.topLevel) ||
     !Array.isArray(input.instances) ||
     input.instances.length !== 1
   ) {
@@ -718,7 +861,7 @@ function buildVeoRequest(input) {
 
   const instance = input.instances[0];
   if (
-    !hasOnlyKeys(instance, ["prompt", "image"], ["prompt", "image"]) ||
+    !hasOnlyKeys(instance, fields.instance, fields.instance) ||
     typeof instance.prompt !== "string" ||
     !instance.prompt.trim() ||
     instance.prompt.length > MAX_PROMPT_CHARS ||
@@ -731,12 +874,7 @@ function buildVeoRequest(input) {
   // Accept either Veo-native { bytesBase64Encoded, mimeType } or legacy
   // Gemini-style { inlineData: { data, mimeType } }, always emit Veo-native.
   let veoImage = null;
-  if (
-    hasOnlyKeys(instance.image, ["bytesBase64Encoded", "mimeType"], [
-      "bytesBase64Encoded",
-      "mimeType",
-    ])
-  ) {
+  if (hasOnlyKeys(instance.image, fields.image, fields.image)) {
     const sanitized = sanitizeInlineImage({
       inlineData: {
         mimeType: instance.image.mimeType,
@@ -749,7 +887,7 @@ function buildVeoRequest(input) {
         mimeType: sanitized.inlineData.mimeType,
       };
     }
-  } else if (hasOnlyKeys(instance.image, ["inlineData"], ["inlineData"])) {
+  } else if (hasOnlyKeys(instance.image, fields.legacyImage, fields.legacyImage)) {
     const sanitized = sanitizeInlineImage({
       inlineData: instance.image.inlineData,
     });
@@ -764,15 +902,17 @@ function buildVeoRequest(input) {
 
   const parameters = input.parameters;
   if (
-    !hasOnlyKeys(
-      parameters,
-      ["aspectRatio", "personGeneration", "durationSeconds", "resolution"],
-      ["aspectRatio", "personGeneration", "durationSeconds", "resolution"],
-    ) ||
+    !hasOnlyKeys(parameters, fields.parameters, fields.parameters) ||
     ["16:9", "9:16"].indexOf(parameters.aspectRatio) === -1 ||
     parameters.personGeneration !== "allow_adult" ||
     [4, 6, 8].indexOf(parameters.durationSeconds) === -1 ||
     ["720p", "1080p"].indexOf(parameters.resolution) === -1 ||
+    (model === GEMINI_MODEL_POLICY_SNAPSHOT.models.videoStandard &&
+      parameters.resolution !==
+        GEMINI_MODEL_POLICY_SNAPSHOT.tasks.video_standard.resolution) ||
+    (model === GEMINI_MODEL_POLICY_SNAPSHOT.models.videoQuality &&
+      parameters.resolution !==
+        GEMINI_MODEL_POLICY_SNAPSHOT.tasks.video_quality.resolution) ||
     (parameters.resolution === "1080p" && parameters.durationSeconds !== 8)
   ) {
     return null;
@@ -799,10 +939,7 @@ function buildGeminiProxyRequest(path, input) {
   const contentMatch = normalized.match(
     /^v1beta\/models\/([a-z0-9._-]+):generateContent$/i,
   );
-  if (
-    contentMatch &&
-    ALLOWED_GENERATE_CONTENT_MODELS.indexOf(contentMatch[1]) !== -1
-  ) {
+  if (contentMatch && ALLOWED_GENERATE_CONTENT_MODELS.indexOf(contentMatch[1]) !== -1) {
     return buildGenerateContentRequest(contentMatch[1], input);
   }
 
@@ -810,7 +947,7 @@ function buildGeminiProxyRequest(path, input) {
     /^v1beta\/models\/([a-z0-9._-]+):predictLongRunning$/i,
   );
   if (veoMatch && ALLOWED_VEO_MODELS.indexOf(veoMatch[1]) !== -1) {
-    return buildVeoRequest(input);
+    return buildVeoRequest(veoMatch[1], input);
   }
 
   return null;
@@ -903,9 +1040,7 @@ function proxyCostPolicy(path) {
 
   if (
     normalized.indexOf(":generateimages") !== -1 ||
-    /\/models\/[^/]*(?:image|imagen)[^/]*:(?:generatecontent|predict)$/.test(
-      normalized,
-    )
+    /\/models\/[^/]*(?:image|imagen)[^/]*:(?:generatecontent|predict)$/.test(normalized)
   ) {
     return { bucket: "image-start", maxRequests: 10, windowMs: 60 * 1000 };
   }
@@ -942,9 +1077,7 @@ function normalizeTrustedHostPattern(value) {
     /^\d+(?:\.\d+){0,3}$/.test(hostname) ||
     labels.some(
       (label) =>
-        !label ||
-        label.length > 63 ||
-        !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label),
+        !label || label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label),
     )
   ) {
     return null;
@@ -1020,4 +1153,5 @@ module.exports = {
   proxyCostPolicy,
   isAllowedImageProxyUrl,
   imageProxyHostPatterns,
+  geminiModelPolicySnapshot,
 };

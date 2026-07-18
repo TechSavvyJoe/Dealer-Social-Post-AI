@@ -10,12 +10,14 @@
  * route `/api/proxy/openai/v1/images/generations` in pb_hooks/main.pb.js
  * adds the auth header so the key never reaches the browser.
  */
-import { FLAGS, OPENAI_MODELS } from "./modelConfig";
+import { FLAGS, MODEL_POLICY_VERSION, OPENAI_MODELS } from "./modelConfig";
 
 const PROXY_PATH = "/api/proxy/openai/v1/images/generations";
 
 interface OpenAIImageOptions {
   prompt: string;
+  task?: "image_standard" | "image_studio";
+  attemptId?: string;
   /** Standard GPT Image sizes; GPT Image 2 also supports bounded custom sizes. */
   size?: "1024x1024" | "1024x1536" | "1536x1024";
   /** GPT Image quality tier. */
@@ -29,8 +31,18 @@ interface OpenAIImageResponse {
 
 // Auth: HttpOnly session cookie attached via credentials:"include" at the
 // fetch call site. VITE_PROXY_ACCESS_TOKEN removed 2026-05-28.
-const proxyHeaders = (): Record<string, string> => ({
+const proxyHeaders = (
+  task?: OpenAIImageOptions["task"],
+  attemptId?: string,
+): Record<string, string> => ({
   "Content-Type": "application/json",
+  ...(task
+    ? {
+        "X-Generation-Task": task,
+        "X-Model-Policy-Version": MODEL_POLICY_VERSION,
+        ...(attemptId ? { "X-Generation-Attempt-ID": attemptId } : {}),
+      }
+    : {}),
 });
 
 /**
@@ -62,7 +74,7 @@ export const generateImageViaOpenAI = async (
   const res = await fetch(PROXY_PATH, {
     method: "POST",
     credentials: "include",
-    headers: proxyHeaders(),
+    headers: proxyHeaders(options.task, options.attemptId),
     body: JSON.stringify(body),
   });
 

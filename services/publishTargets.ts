@@ -13,7 +13,11 @@
  * Direct API publishing (Meta Graph, TikTok Content Posting, GBP) is still
  * stubbed — swap only the publish path when OAuth is wired.
  */
-import { ExportFormatId, renderFormat, EXPORT_FORMATS } from "../utils/multiFormatExport";
+import {
+  ExportFormatId,
+  renderFormat,
+  EXPORT_FORMATS,
+} from "../utils/multiFormatExport";
 import { dataUrlToBlob } from "../utils/imageUtils";
 import { fitCaptionToBudget } from "../utils/hashtags";
 
@@ -55,17 +59,14 @@ export interface PublishContent {
  * - clipboard-open: legacy alias for photos-then-app
  */
 export type ShareHandoff =
-  | "photos-then-app"
-  | "clipboard-open"
-  | "share-file"
-  | "share-any"
-  | "share-or-intent";
+  "photos-then-app" | "clipboard-open" | "share-file" | "share-any" | "share-or-intent";
 
 export interface PublishTarget {
   id: string;
   label: string;
   /** Lucide icon name (rendered by the dialog). */
-  icon: "facebook" | "instagram" | "music" | "globe" | "twitter" | "linkedin" | "share2";
+  icon:
+    "facebook" | "instagram" | "music" | "globe" | "twitter" | "linkedin" | "share2";
   /** Color used for the platform's tile glow. Reads like the brand. */
   accent: string;
   /** Which canvas format from multiFormatExport to render for this platform. */
@@ -226,11 +227,7 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
  * Always-on core share destinations for dealerships.
  * Facebook is intentionally included so it never gets buried or filtered out.
  */
-export const CORE_PUBLISH_IDS = [
-  "instagram_feed",
-  "facebook_feed",
-  "tiktok",
-] as const;
+export const CORE_PUBLISH_IDS = ["instagram_feed", "facebook_feed", "tiktok"] as const;
 
 /**
  * Order targets for Share UI:
@@ -385,10 +382,7 @@ const tryWebShareFile = async (
   title: string,
   opts: { includeText: boolean },
 ): Promise<"shared" | "cancelled" | "unavailable"> => {
-  if (
-    typeof navigator === "undefined" ||
-    typeof navigator.share !== "function"
-  ) {
+  if (typeof navigator === "undefined" || typeof navigator.share !== "function") {
     return "unavailable";
   }
 
@@ -463,6 +457,125 @@ const buildShareFile = async (
   return null;
 };
 
+export interface PreparedPublishShare {
+  target: PublishTarget;
+  content: PublishContent;
+  caption: string;
+  file: File | null;
+  webUrl: string | null;
+}
+
+/**
+ * Expensive media work belongs before the user presses Share now. In
+ * particular, canvas rendering and video fetches can outlive Safari's
+ * transient user-activation window.
+ */
+export const preparePublishShare = async (
+  targetId: string,
+  content: PublishContent,
+): Promise<PreparedPublishShare> => {
+  const target = findTarget(targetId);
+  if (!target) throw new Error("Unknown publish target");
+  const caption = fitCaptionToBudget(content.text, target.charBudget);
+  const scopedContent = { ...content, text: caption };
+  const file = await buildShareFile(target, scopedContent);
+  return {
+    target,
+    content: scopedContent,
+    caption,
+    file,
+    webUrl: target.webIntentUrl?.(scopedContent) ?? null,
+  };
+};
+
+/**
+ * Invoke `navigator.share()` before the first await. Call this directly from a
+ * fresh click handler; doing so preserves WebKit transient user activation.
+ */
+export const sharePrepared = async (
+  prepared: PreparedPublishShare,
+): Promise<PublishStatus> => {
+  if (typeof navigator === "undefined" || typeof navigator.share !== "function") {
+    return {
+      kind: "fallback",
+      via: "download-copy",
+      pasteRequired: true,
+      message:
+        "System sharing is unavailable. Copy the caption, save the media, then open the app.",
+    };
+  }
+
+  const includeText =
+    prepared.target.handoff === "share-any" ||
+    prepared.target.handoff === "share-or-intent";
+  const shareData: ShareData = { title: prepared.target.label };
+  if (includeText) shareData.text = prepared.caption;
+  if (prepared.file) {
+    const canShareFile =
+      typeof navigator.canShare !== "function" ||
+      navigator.canShare({ files: [prepared.file] });
+    if (canShareFile) shareData.files = [prepared.file];
+  }
+  if (!shareData.files && !includeText) {
+    return {
+      kind: "fallback",
+      via: "download-copy",
+      pasteRequired: true,
+      message:
+        "This browser cannot share the prepared media. Save it, then open the app.",
+    };
+  }
+
+  try {
+    // Do not move any asynchronous preparation above this call.
+    const sharePromise = navigator.share(shareData);
+    const clipboardPromise = copyTextToClipboard(prepared.caption);
+    await sharePromise;
+    const copied = await clipboardPromise;
+    return {
+      kind: "shared",
+      via: "web-share",
+      pasteRequired: true,
+      message: copied
+        ? "Media sent to the share sheet. The caption is ready to paste in the destination app."
+        : "Media sent to the share sheet. Use Copy caption below before finishing the post.",
+    };
+  } catch (err) {
+    if ((err as DOMException)?.name === "AbortError") {
+      return {
+        kind: "cancelled",
+        pasteRequired: true,
+        message: "Share cancelled. The prepared media is still ready.",
+      };
+    }
+    return {
+      kind: "fallback",
+      via: "download-copy",
+      pasteRequired: true,
+      message: "The share sheet could not open. Save the media or open the app below.",
+    };
+  }
+};
+
+export const copyPreparedCaption = (prepared: PreparedPublishShare): Promise<boolean> =>
+  copyTextToClipboard(prepared.caption);
+
+export const downloadPreparedMedia = (prepared: PreparedPublishShare): boolean => {
+  if (!prepared.file) return false;
+  const url = URL.createObjectURL(prepared.file);
+  triggerDownload(url, prepared.file.name);
+  window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+  return true;
+};
+
+/** App/web handoff is intentionally a separate, explicit click after sharing. */
+export const openPreparedTarget = (
+  prepared: PreparedPublishShare,
+): "native" | "web" | "none" =>
+  openNativeAppOrWeb(prepared.target.appSchemeUrl, prepared.webUrl, {
+    allowWebOnMobile: false,
+  });
+
 /**
  * Publish via the appropriate path for this target.
  */
@@ -476,10 +589,7 @@ export const publishTo = async (
   try {
     const file = await buildShareFile(target, content);
 
-    const captionForShare = fitCaptionToBudget(
-      content.text,
-      target.charBudget,
-    );
+    const captionForShare = fitCaptionToBudget(content.text, target.charBudget);
     const copied = await copyTextToClipboard(captionForShare);
     content = { ...content, text: captionForShare };
 
@@ -497,10 +607,7 @@ export const publishTo = async (
       : " (Clipboard copy may have failed — use Copy caption on the post screen first.)";
 
     // ── Facebook / Marketplace: Photos + native app (no Safari re-login) ───
-    if (
-      target.handoff === "clipboard-open" ||
-      target.handoff === "photos-then-app"
-    ) {
+    if (target.handoff === "clipboard-open" || target.handoff === "photos-then-app") {
       const mobile = isMobileShareDevice();
       let mediaNote = "";
 
@@ -573,11 +680,7 @@ export const publishTo = async (
         kind: "fallback",
         via: "url-intent",
         pasteRequired: true,
-        message: [
-          `${target.label}: caption copied.${copyWarn}`,
-          mediaNote,
-          pasteMsg,
-        ]
+        message: [`${target.label}: caption copied.${copyWarn}`, mediaNote, pasteMsg]
           .filter(Boolean)
           .join(" "),
       };

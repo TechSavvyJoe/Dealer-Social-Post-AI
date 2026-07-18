@@ -14,15 +14,19 @@ The active text, image, and video workloads all use the Gemini API at `generativ
 
 ## Configured application models
 
-| Job          | Primary                    | Fallback                                                     |
-| ------------ | -------------------------- | ------------------------------------------------------------ |
-| Text/caption | `gemini-3.5-flash`         | `gemini-3.1-flash-lite`, then `gemini-2.5-flash`             |
-| Image/edit   | `gemini-3-pro-image`       | `gemini-3.1-flash-image`, then `gemini-3.1-flash-lite-image` |
-| Video        | `veo-3.1-generate-preview` | `veo-3.1-fast-generate-preview`                              |
+| Task                 | Tier     | Routing order                                                                   | Output contract            |
+| -------------------- | -------- | ------------------------------------------------------------------------------- | -------------------------- |
+| `caption`            | quality  | `gemini-3.5-flash` → `gemini-3.1-flash-lite`                                    | 2,048 tokens               |
+| `caption_regenerate` | quality  | `gemini-3.5-flash` → `gemini-3.1-flash-lite`                                    | 2,048 tokens               |
+| `caption_edit`       | fast     | `gemini-3.1-flash-lite` → `gemini-3.5-flash`                                    | 2,048 tokens               |
+| `image_standard`     | standard | `gemini-3.1-flash-image` → `gemini-3-pro-image` → `gemini-3.1-flash-lite-image` | 2K → 2K → 1K; 4,096 tokens |
+| `image_studio`       | studio   | `gemini-3-pro-image` → `gemini-3.1-flash-image` → `gemini-3.1-flash-lite-image` | 2K → 2K → 1K; 4,096 tokens |
+| `video_standard`     | standard | `veo-3.1-fast-generate-preview`                                                 | 720p                       |
+| `video_quality`      | quality  | `veo-3.1-generate-preview`                                                      | 1080p                      |
 
-The canonical configuration is `services/modelConfig.ts`. The Veo IDs above are the Gemini API identifiers. Vertex-hosted stable `-001` model IDs are not interchangeable with them.
+The canonical configuration is `config/gemini-model-policy.json`; `services/modelConfig.ts` consumes it and PocketBase enforces the same policy. The standard image route starts with Flash, while only the explicit Studio preference starts with Pro. Standard and quality video are separate one-model routes. The Veo IDs above are Gemini API identifiers; Vertex-hosted `-001` model IDs are not interchangeable with them.
 
-The premium and standard image models request 2K output; the Lite emergency model is pinned to its supported 1K output.
+Both image tiers request 2K from Flash and Pro, then 1K from the Lite image fallback. Run `npm run model-policy:check` to reject policy drift before deployment.
 
 ## Vertex status
 
@@ -42,6 +46,7 @@ After configuring `GEMINI_API_KEY`, run:
 
 ```bash
 npm run security:secrets
+npm run model-policy:check
 npm run typecheck
 npm test
 npm run build

@@ -1,11 +1,4 @@
-import React, {
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Check, ChevronsUpDown, Loader2, Search, User } from "lucide-react";
 import { Salesperson, listSalespeople } from "../services/salespeople";
@@ -29,9 +22,7 @@ export const salespersonStorageKey = (dealerId: string): string =>
 
 type PersistedSalesperson = { id?: string; name: string };
 
-const parsePersistedSalesperson = (
-  raw: string | null,
-): PersistedSalesperson | null => {
+const parsePersistedSalesperson = (raw: string | null): PersistedSalesperson | null => {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Partial<PersistedSalesperson>;
@@ -61,9 +52,7 @@ const canonicalRosterMatch = (
   const matches = roster.filter(
     (person) => person.name.trim().toLocaleLowerCase() === normalizedName,
   );
-  return matches.length === 1
-    ? { id: matches[0].id, name: matches[0].name }
-    : null;
+  return matches.length === 1 ? { id: matches[0].id, name: matches[0].name } : null;
 };
 
 /**
@@ -199,10 +188,7 @@ export const SalespersonPicker: React.FC<SalespersonPickerProps> = ({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     };
@@ -213,11 +199,7 @@ export const SalespersonPicker: React.FC<SalespersonPickerProps> = ({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return roster;
-    return roster.filter(
-      (s) =>
-        s.name.toLowerCase().includes(q) ||
-        (s.pin || "").toLowerCase().includes(q),
-    );
+    return roster.filter((s) => s.name.toLowerCase().includes(q));
   }, [roster, query]);
 
   const handlePick = useCallback(
@@ -399,17 +381,8 @@ export const SalespersonPicker: React.FC<SalespersonPickerProps> = ({
                             : "hover:bg-white/5 text-surface-100",
                         )}
                       >
-                        <span className="flex items-center gap-2">
-                          <span className="font-medium">{s.name}</span>
-                          {s.pin && (
-                            <span className="text-[10px] font-mono text-surface-400">
-                              PIN {s.pin}
-                            </span>
-                          )}
-                        </span>
-                        {active && (
-                          <Check className="h-3.5 w-3.5 text-primary-300" />
-                        )}
+                        <span className="font-medium">{s.name}</span>
+                        {active && <Check className="h-3.5 w-3.5 text-primary-300" />}
                       </button>
                     </li>
                   );
@@ -423,9 +396,7 @@ export const SalespersonPicker: React.FC<SalespersonPickerProps> = ({
                 label=""
                 aria-label="Unlisted salesperson name"
                 value={value.id ? "" : value.name}
-                onChange={(e) =>
-                  onChange({ id: undefined, name: e.target.value })
-                }
+                onChange={(e) => onChange({ id: undefined, name: e.target.value })}
                 placeholder="Or type your name (unlisted)"
                 fullWidth
                 className="bg-white/5 border-white/10 focus:border-primary-400 text-sm"

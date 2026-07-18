@@ -7,6 +7,7 @@ import {
   ToneOption,
   GenerationParams,
   UserRole,
+  ImageQualityTier,
 } from "../types";
 import { loadSession, saveSession, clearSession } from "../utils/persistence";
 // Removed duplicate import
@@ -17,18 +18,31 @@ import {
   loadDealerCreative,
   saveDealerCreative,
 } from "../utils/creativeStorage";
-import type { Person } from "../services/salespeople";
+import type { PersonSummary } from "../services/salespeople";
 import {
   exitImpersonation as exitImpersonationApi,
   impersonatePerson as impersonatePersonApi,
 } from "../services/salespeople";
+import {
+  ApiError,
+  asSessionErrorCode,
+  readApiError,
+  type SessionErrorCode,
+} from "../services/apiErrors";
+
+export interface LoginResult {
+  ok: boolean;
+  code?: SessionErrorCode;
+  message?: string;
+  retryAfterSeconds?: number;
+}
 
 interface AppState {
   // Core State
   step: AppStep;
   currentDealer: Dealer | null;
   role: UserRole;
-  currentPerson: Person | null;
+  currentPerson: PersonSummary | null;
   isImpersonating: boolean;
   selectedImage: string | null;
   generatedPost: GeneratedPost | null;
@@ -40,6 +54,7 @@ interface AppState {
   preferredStyle: StyleOption;
   preferredTone: ToneOption;
   compactMode: boolean;
+  imageQualityTier: ImageQualityTier;
 
   // Actions
   setStep: (step: AppStep) => void;
@@ -53,11 +68,12 @@ interface AppState {
       preferredStyle: StyleOption;
       preferredTone: ToneOption;
       compactMode: boolean;
+      imageQualityTier: ImageQualityTier;
     }>,
   ) => void;
 
   // Complex Actions
-  login: (dealerId: string) => Promise<boolean>;
+  login: (dealerCode: string, turnstileToken?: string) => Promise<LoginResult>;
   logout: () => Promise<void>;
   reset: () => void;
   /**
@@ -70,7 +86,7 @@ interface AppState {
   applyAuthPayload: (body: {
     role?: string;
     dealer?: Dealer;
-    person?: Person | null;
+    person?: PersonSummary | null;
     is_impersonation?: boolean;
   }) => void;
   impersonatePerson: (personId: string) => Promise<void>;
@@ -152,6 +168,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   preferredStyle: StyleOption.Modern,
   preferredTone: ToneOption.Excited,
   compactMode: false,
+  imageQualityTier: "standard",
 
   applyAuthPayload: (body) => {
     const dealer = body.dealer || null;
@@ -178,6 +195,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         generatedPost: undefined,
         generationParams: undefined,
         compactMode: preferences.compactMode,
+        imageQualityTier: preferences.imageQualityTier,
         preferredStyle: preferences.preferredStyle,
         preferredTone: preferences.preferredTone,
       });
@@ -243,11 +261,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ generatedPost: post });
     const { currentDealer, step, selectedImage } = get();
     if (currentDealer) {
-      void saveDealerCreative(
-        currentDealer.id,
-        "generated",
-        post?.image || null,
-      );
+      void saveDealerCreative(currentDealer.id, "generated", post?.image || null);
       saveSession({
         generatedPost: post || undefined,
         dealerId: currentDealer.id,
@@ -279,6 +293,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const newState = { ...state, ...prefs };
       saveSession({
         compactMode: newState.compactMode,
+        imageQualityTier: newState.imageQualityTier,
         preferredStyle: newState.preferredStyle,
         preferredTone: newState.preferredTone,
       });
@@ -286,29 +301,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
-  login: async (dealerCode: string) => {
+  login: async (dealerCode: string, turnstileToken?: string) => {
     try {
       const res = await fetchSession({
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dealerCode }),
+        body: JSON.stringify({
+          dealerCode,
+          ...(turnstileToken ? { turnstileToken } : {}),
+        }),
       });
 
       if (!res.ok) {
-        let serverMessage = "";
-        try {
-          const body = await res.json();
-          serverMessage = (body?.error || "").toString();
-        } catch {
-          /* not json */
-        }
-        if (res.status === 400 || res.status === 401) {
-          throw new Error("INVALID_DEALER_CODE");
-        }
-        if (res.status === 429 && serverMessage) {
-          throw new Error(serverMessage);
-        }
-        throw new Error("SIGN_IN_UNAVAILABLE");
+        throw await readApiError(res);
       }
 
       const body = await res.json();
@@ -327,29 +332,46 @@ export const useAppStore = create<AppState>((set, get) => ({
           person: body.person || null,
           is_impersonation: !!body.is_impersonation,
         });
-        return true;
+        return { ok: true };
       }
-      return false;
+      throw new ApiError("Sign-in response did not include a dealership.", {
+        code: "UNAVAILABLE",
+        status: 503,
+      });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
+      const isTimeout = err instanceof DOMException && err.name === "AbortError";
+      const code = isTimeout
+        ? "UNAVAILABLE"
+        : err instanceof ApiError
+          ? asSessionErrorCode(err.code)
+          : "UNAVAILABLE";
+      const retryAfterSeconds =
+        err instanceof ApiError ? err.retryAfterSeconds : undefined;
       logError("app.login.failed", {
-        message: errorMessage,
+        errorCode: code,
         codeLength: dealerCode.length,
       });
-      const isTimeout =
-        err instanceof DOMException && err.name === "AbortError";
       const userMessage =
-        errorMessage === "INVALID_DEALER_CODE"
+        code === "INVALID_CODE"
           ? "That access code was not recognized. Check it and try again."
-          : isTimeout ||
-              errorMessage === "SIGN_IN_UNAVAILABLE" ||
-              err instanceof TypeError
-            ? "The secure sign-in service is unavailable right now. Check your connection and try again."
-            : errorMessage;
+          : code === "CHALLENGE_REQUIRED"
+            ? "Complete the security check to continue."
+            : code === "LOCKED"
+              ? "Too many attempts. Sign-in is temporarily locked."
+              : "The secure sign-in service is unavailable right now. Check your connection and try again.";
       set({
         error: userMessage,
       });
-      return false;
+      return {
+        ok: false,
+        code,
+        message:
+          code === "UNAVAILABLE" && errorMessage && !isTimeout
+            ? userMessage
+            : userMessage,
+        retryAfterSeconds,
+      };
     }
   },
 
@@ -473,7 +495,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           set({
             currentDealer: dealer,
             role: serverRole,
-            currentPerson: (body.person as Person | undefined) || null,
+            currentPerson: (body.person as PersonSummary | undefined) || null,
             isImpersonating: !!body.is_impersonation,
             selectedImage: restoredSelectedImage,
             generatedPost: restoredGeneratedPost,
@@ -482,6 +504,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               : null) as GenerationParams | null,
             step: restoredStep,
             compactMode: session?.compactMode ?? false,
+            imageQualityTier: session?.imageQualityTier ?? "standard",
             // Restore saved style/tone for authenticated users too. These were
             // previously only restored in the unauthenticated fall-through
             // (which returns early above), so a logged-in user's preferences
@@ -512,6 +535,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       // always release the blocking startup screen.
       if (session?.compactMode !== undefined) {
         set({ compactMode: session.compactMode });
+      }
+      if (session?.imageQualityTier) {
+        set({ imageQualityTier: session.imageQualityTier });
       }
       if (session?.preferredStyle) {
         set({ preferredStyle: session.preferredStyle as StyleOption });

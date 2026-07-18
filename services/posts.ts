@@ -32,6 +32,16 @@ export interface LogPostInput {
   disclosures?: string;
   /** The exact generated image submitted for review. */
   imageDataUrl?: string;
+  /** Prompt-free generation provenance used only for aggregate diagnostics. */
+  captionSource?: "ai" | "custom" | "basic_fallback";
+  generationTier?: "standard" | "studio";
+  generationModel?: string;
+  generationFallbackCount?: number;
+  generationLastSuccessAt?: string;
+  modelPolicyVersion?: string;
+  /** Opaque server-event correlations; not credentials and never user-visible. */
+  captionAttemptId?: string;
+  imageAttemptId?: string;
 }
 
 export interface PostRecord {
@@ -68,10 +78,7 @@ export interface PostVideoStatus {
   has_video: true;
 }
 
-const jsonRequest = async <T>(
-  url: string,
-  init: RequestInit = {},
-): Promise<T> => {
+const jsonRequest = async <T>(url: string, init: RequestInit = {}): Promise<T> => {
   const res = await fetch(url, {
     ...init,
     credentials: "include",
@@ -93,9 +100,7 @@ const jsonRequest = async <T>(
   return (await res.json()) as T;
 };
 
-export const logPost = async (
-  input: LogPostInput,
-): Promise<PostRecord | null> => {
+export const logPost = async (input: LogPostInput): Promise<PostRecord | null> => {
   try {
     const form = new FormData();
     form.append("salesperson_name", input.salespersonName || "");
@@ -106,6 +111,30 @@ export const logPost = async (
     form.append("vin", input.vin || "");
     form.append("has_release", input.hasRelease ? "true" : "false");
     form.append("has_video", input.hasVideo ? "true" : "false");
+    if (input.captionSource) {
+      form.append("caption_source", input.captionSource);
+    }
+    if (input.generationTier) {
+      form.append("generation_tier", input.generationTier);
+    }
+    if (input.generationModel) {
+      form.append("generation_model", input.generationModel);
+    }
+    if (typeof input.generationFallbackCount === "number") {
+      form.append("generation_fallback_count", String(input.generationFallbackCount));
+    }
+    if (input.generationLastSuccessAt) {
+      form.append("generation_last_success_at", input.generationLastSuccessAt);
+    }
+    if (input.modelPolicyVersion) {
+      form.append("model_policy_version", input.modelPolicyVersion);
+    }
+    if (input.captionAttemptId) {
+      form.append("caption_attempt_id", input.captionAttemptId);
+    }
+    if (input.imageAttemptId) {
+      form.append("image_attempt_id", input.imageAttemptId);
+    }
 
     // Persist caption + creative whenever available so History can reopen
     // for re-share/export without regenerating. Approval-gated posts still

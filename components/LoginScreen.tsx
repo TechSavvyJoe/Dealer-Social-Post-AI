@@ -4,8 +4,11 @@ import {
   ArrowRight,
   Camera,
   CheckCircle2,
+  Eye,
+  EyeOff,
   KeyRound,
   Loader2,
+  ShieldAlert,
   ShieldCheck,
   WandSparkles,
 } from "lucide-react";
@@ -16,15 +19,16 @@ import { Input } from "./ui/Input";
 import { Button } from "./ui/Button";
 import { useToast } from "./ui/Toast";
 import { cn } from "../utils/classNames";
+import { TurnstileChallenge } from "./TurnstileChallenge";
+import type { LoginResult } from "../stores/appStore";
 
 /** Personal manager / user access codes are exactly 4 digits. */
 const PERSON_CODE_LENGTH = 4;
 /** Super-admin env secret may be longer alphanumeric. */
-const ADMIN_CODE_MAX_LENGTH = 12;
-const ADMIN_CODE_MIN_LENGTH = 4;
+const ADMIN_CODE_LENGTH = 12;
 
 interface LoginScreenProps {
-  onLogin: (dealerId: string) => Promise<boolean>;
+  onLogin: (dealerCode: string, turnstileToken?: string) => Promise<LoginResult>;
 }
 
 type EntryMode = "personal" | "system";
@@ -41,24 +45,35 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [adminCode, setAdminCode] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [showAdminCode, setShowAdminCode] = useState(false);
+  const [pendingAttempt, setPendingAttempt] = useState<{
+    code: string;
+    mode: EntryMode;
+  } | null>(null);
+  const [challengeNonce, setChallengeNonce] = useState(0);
+  const [lockoutUntil, setLockoutUntil] = useState(0);
+  const [clockNow, setClockNow] = useState(() => Date.now());
   const adminInputRef = useRef<HTMLInputElement>(null);
   const shouldReduceMotion = useReducedMotion();
   const toast = useToast();
 
   const submitCode = useCallback(
-    async (codeToSubmit: string, mode: EntryMode) => {
+    async (codeToSubmit: string, mode: EntryMode, turnstileToken?: string) => {
       const normalizedCode =
-        mode === "personal"
-          ? codeToSubmit.trim()
-          : codeToSubmit.trim().toUpperCase();
-      const minLen =
-        mode === "personal" ? PERSON_CODE_LENGTH : ADMIN_CODE_MIN_LENGTH;
-      if (isLoading || isSuccess || normalizedCode.length < minLen) {
-        if (normalizedCode.length > 0 && normalizedCode.length < minLen) {
+        mode === "personal" ? codeToSubmit.trim() : codeToSubmit.trim();
+      const requiredLength =
+        mode === "personal" ? PERSON_CODE_LENGTH : ADMIN_CODE_LENGTH;
+      if (
+        isLoading ||
+        isSuccess ||
+        lockoutUntil > Date.now() ||
+        normalizedCode.length !== requiredLength
+      ) {
+        if (normalizedCode.length > 0 && normalizedCode.length !== requiredLength) {
           toast.info(
             mode === "personal"
               ? "Enter your 4-digit access code."
-              : "Enter your system admin code.",
+              : "Enter the complete 12-character system admin code.",
           );
         }
         return;
@@ -66,22 +81,52 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
       setIsLoading(true);
       try {
-        const loginSuccess = await onLogin(normalizedCode);
-        if (loginSuccess) {
+        const result = await onLogin(normalizedCode, turnstileToken);
+        if (result.ok) {
+          setPendingAttempt(null);
           setIsSuccess(true);
           toast.success("Access confirmed.");
           await new Promise((resolve) =>
             setTimeout(resolve, shouldReduceMotion ? 150 : 650),
           );
         } else {
-          toast.error("Code not recognized. Check the code and try again.");
-          if (mode === "personal") {
-            setDealerCode("");
-          } else {
-            setAdminCode(normalizedCode);
+          switch (result.code) {
+            case "CHALLENGE_REQUIRED":
+              setPendingAttempt({ code: normalizedCode, mode });
+              if (turnstileToken) {
+                // Tokens are single-use. Guarantee a fresh widget even when
+                // React batches the loading state around a fast rejection.
+                setChallengeNonce((current) => current + 1);
+              }
+              toast.info("Complete the security check to continue.");
+              break;
+            case "LOCKED": {
+              const retryAfter = Math.max(1, result.retryAfterSeconds || 900);
+              setPendingAttempt(null);
+              setClockNow(Date.now());
+              setLockoutUntil(Date.now() + retryAfter * 1000);
+              toast.error("Sign-in is temporarily locked.");
+              break;
+            }
+            case "INVALID_CODE":
+              setPendingAttempt(null);
+              toast.error("Code not recognized. Check the code and try again.");
+              if (mode === "personal") setDealerCode("");
+              break;
+            default:
+              if (turnstileToken) {
+                setChallengeNonce((current) => current + 1);
+              }
+              toast.error(
+                result.message ||
+                  "The secure sign-in service is unavailable. Try again.",
+              );
           }
         }
       } catch {
+        if (turnstileToken) {
+          setChallengeNonce((current) => current + 1);
+        }
         toast.error(
           "We could not verify this code. Check your connection and try again.",
         );
@@ -89,8 +134,23 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         setIsLoading(false);
       }
     },
-    [isLoading, isSuccess, onLogin, shouldReduceMotion, toast],
+    [isLoading, isSuccess, lockoutUntil, onLogin, shouldReduceMotion, toast],
   );
+
+  const lockoutSeconds = Math.max(0, Math.ceil((lockoutUntil - clockNow) / 1000));
+
+  useEffect(() => {
+    if (!lockoutUntil) return;
+    const interval = window.setInterval(() => {
+      const next = Date.now();
+      setClockNow(next);
+      if (next >= lockoutUntil) {
+        setLockoutUntil(0);
+        window.clearInterval(interval);
+      }
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [lockoutUntil]);
 
   const handleDialpadKeyPress = useCallback(
     async (key: DialpadKey) => {
@@ -120,7 +180,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const selectMode = useCallback((mode: EntryMode) => {
     triggerHapticFeedback();
     setEntryMode(mode);
+    setPendingAttempt(null);
   }, []);
+
+  const returnToCodeEntry = useCallback(() => {
+    if (!pendingAttempt) return;
+    setEntryMode(pendingAttempt.mode);
+    setPendingAttempt(null);
+  }, [pendingAttempt]);
 
   useEffect(() => {
     if (entryMode !== "system" || isLoading || isSuccess) return;
@@ -130,12 +197,22 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.target instanceof HTMLInputElement ||
-        event.target instanceof HTMLTextAreaElement ||
-        isLoading ||
-        isSuccess
-      ) {
+      const target = event.target;
+      const isInteractiveTarget =
+        target instanceof HTMLElement &&
+        (target.matches(
+          'input, textarea, select, button, a[href], [role="button"], [role="tab"], [contenteditable="true"]',
+        ) ||
+          target.isContentEditable);
+      if (isInteractiveTarget || isLoading || isSuccess) {
+        return;
+      }
+
+      if (pendingAttempt) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          returnToCodeEntry();
+        }
         return;
       }
 
@@ -152,17 +229,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       } else if (/^[a-zA-Z]$/.test(event.key)) {
         event.preventDefault();
         setEntryMode("system");
-        setAdminCode((current) =>
-          `${current}${event.key.toUpperCase()}`.slice(
-            0,
-            ADMIN_CODE_MAX_LENGTH,
-          ),
-        );
+        setAdminCode((current) => `${current}${event.key}`.slice(0, ADMIN_CODE_LENGTH));
       } else if (/^\d$/.test(event.key)) {
         event.preventDefault();
         if (entryMode === "system") {
           setAdminCode((current) =>
-            `${current}${event.key}`.slice(0, ADMIN_CODE_MAX_LENGTH),
+            `${current}${event.key}`.slice(0, ADMIN_CODE_LENGTH),
           );
         } else {
           void handleDialpadKeyPress(event.key as DialpadKey);
@@ -179,6 +251,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     handleDialpadKeyPress,
     isLoading,
     isSuccess,
+    pendingAttempt,
+    returnToCodeEntry,
     submitCode,
   ]);
 
@@ -234,8 +308,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               From vehicle photo to social-ready story.
             </p>
             <p className="mt-5 max-w-md text-base leading-relaxed text-surface-300">
-              A focused workspace for dealership teams to create polished posts
-              while the delivery moment is still fresh.
+              A focused workspace for dealership teams to create polished posts while
+              the delivery moment is still fresh.
             </p>
 
             <ol className="mt-8 grid grid-cols-3 gap-3 border-t border-white/[0.08] pt-5">
@@ -247,10 +321,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       0{index + 1}
                     </span>
                   </div>
-                  <p className="text-sm font-semibold text-surface-100">
-                    {label}
-                  </p>
-                  <p className="mt-0.5 text-xs leading-snug text-surface-500">
+                  <p className="text-sm font-semibold text-surface-100">{label}</p>
+                  <p className="mt-0.5 text-xs leading-snug text-surface-400">
                     {detail}
                   </p>
                 </li>
@@ -265,7 +337,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             "grid h-full min-h-0 w-full grid-rows-[auto_minmax(0,1fr)]",
             "px-5 pt-4 pb-3 sm:px-8 sm:pt-7 sm:pb-6 lg:min-h-[38rem] lg:px-10 lg:py-8",
           )}
-          aria-live="polite"
           aria-busy={isLoading}
         >
           <Logo className="mb-3 h-auto w-[min(188px,50vw)] shrink-0 justify-self-start lg:hidden" />
@@ -279,6 +350,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0 }}
                 transition={motionTransition}
+                role="status"
+                aria-live="polite"
               >
                 <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-success-500/35 bg-success-500/10">
                   <CheckCircle2
@@ -340,7 +413,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       Sign in
                     </h1>
                     <p className="mt-1 text-sm leading-snug text-surface-300 sm:mt-1.5 sm:text-base sm:leading-relaxed">
-                      Tap your 4-digit code. We sign you in automatically.
+                      {entryMode === "personal"
+                        ? "Tap your 4-digit code. We sign you in automatically."
+                        : "Enter the exact 12-character system admin code."}
                     </p>
                   </div>
                 </div>
@@ -378,36 +453,70 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   </button>
                 </div>
 
-                {entryMode === "personal" ? (
+                {lockoutSeconds > 0 ? (
+                  <div className="flex min-h-0 flex-col items-center justify-center rounded-2xl border border-error-400/20 bg-error-500/[0.07] p-5 text-center">
+                    <p className="sr-only" role="alert">
+                      Sign-in is temporarily locked. Try again after the on-screen
+                      countdown.
+                    </p>
+                    <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-error-400/25 bg-error-500/10 text-error-300">
+                      <ShieldAlert className="h-6 w-6" aria-hidden="true" />
+                    </span>
+                    <h2 className="mt-4 text-lg font-semibold text-surface-100">
+                      Sign-in temporarily locked
+                    </h2>
+                    <p className="mt-2 max-w-sm text-sm leading-relaxed text-surface-400">
+                      Too many unsuccessful attempts. You can try again in
+                      <time
+                        dateTime={`PT${lockoutSeconds}S`}
+                        className="ml-1 font-mono font-semibold tabular-nums text-surface-100"
+                      >
+                        {Math.floor(lockoutSeconds / 60)}:
+                        {String(lockoutSeconds % 60).padStart(2, "0")}
+                      </time>
+                      .
+                    </p>
+                  </div>
+                ) : pendingAttempt ? (
+                  <TurnstileChallenge
+                    key={`turnstile-${challengeNonce}`}
+                    onToken={(token) =>
+                      void submitCode(pendingAttempt.code, pendingAttempt.mode, token)
+                    }
+                    onExpired={() =>
+                      toast.info("Security check expired. Complete it again.")
+                    }
+                    onError={() =>
+                      toast.error(
+                        "The security check could not load. Check your connection.",
+                      )
+                    }
+                    onBack={returnToCodeEntry}
+                  />
+                ) : entryMode === "personal" ? (
                   <div className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-2 sm:gap-3">
                     <div
                       className="flex shrink-0 items-center justify-center gap-4 py-1"
                       role="status"
                       aria-label={`${dealerCode.length} of ${PERSON_CODE_LENGTH} digits entered`}
                     >
-                      {Array.from(
-                        { length: PERSON_CODE_LENGTH },
-                        (_, index) => (
-                          <span
-                            key={index}
-                            aria-hidden="true"
-                            className={cn(
-                              "h-4 w-4 rounded-full border-2 transition-colors sm:h-5 sm:w-5",
-                              index < dealerCode.length
-                                ? "border-primary-400 bg-primary-400"
-                                : index === dealerCode.length
-                                  ? "border-primary-400 bg-transparent ring-4 ring-primary-500/15"
-                                  : "border-surface-600 bg-surface-800",
-                            )}
-                          />
-                        ),
-                      )}
+                      {Array.from({ length: PERSON_CODE_LENGTH }, (_, index) => (
+                        <span
+                          key={index}
+                          aria-hidden="true"
+                          className={cn(
+                            "h-4 w-4 rounded-full border-2 transition-colors sm:h-5 sm:w-5",
+                            index < dealerCode.length
+                              ? "border-primary-400 bg-primary-400"
+                              : index === dealerCode.length
+                                ? "border-primary-400 bg-transparent ring-4 ring-primary-500/15"
+                                : "border-surface-600 bg-surface-800",
+                          )}
+                        />
+                      ))}
                     </div>
 
-                    <p
-                      className="shrink-0 text-center text-sm text-surface-400"
-                      aria-live="polite"
-                    >
+                    <p className="shrink-0 text-center text-sm text-surface-400">
                       {dealerCode.length > 0
                         ? `${PERSON_CODE_LENGTH - dealerCode.length} left`
                         : "4 digits · from your manager"}
@@ -444,26 +553,44 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                         ref={adminInputRef}
                         label="System admin code"
                         value={adminCode}
+                        type={showAdminCode ? "text" : "password"}
                         onChange={(event) =>
                           setAdminCode(
                             event.target.value
                               .replace(/[^a-zA-Z0-9]/g, "")
-                              .toUpperCase()
-                              .slice(0, ADMIN_CODE_MAX_LENGTH),
+                              .slice(0, ADMIN_CODE_LENGTH),
                           )
                         }
                         onKeyDown={(event) => {
                           if (event.key === "Escape") setAdminCode("");
                         }}
                         leftIcon={<KeyRound />}
-                        autoComplete="off"
-                        autoCapitalize="characters"
+                        rightAction={
+                          <button
+                            type="button"
+                            className="flex h-9 w-9 items-center justify-center rounded-lg text-surface-400 transition hover:bg-white/[0.06] hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                            onClick={() => setShowAdminCode((value) => !value)}
+                            aria-label={
+                              showAdminCode
+                                ? "Hide system admin code"
+                                : "Show system admin code"
+                            }
+                          >
+                            {showAdminCode ? (
+                              <EyeOff className="h-4 w-4" aria-hidden="true" />
+                            ) : (
+                              <Eye className="h-4 w-4" aria-hidden="true" />
+                            )}
+                          </button>
+                        }
+                        autoComplete="current-password"
+                        autoCapitalize="none"
                         autoCorrect="off"
                         spellCheck={false}
                         inputMode="text"
                         enterKeyHint="go"
-                        maxLength={ADMIN_CODE_MAX_LENGTH}
-                        helperText={`${adminCode.length}/${ADMIN_CODE_MAX_LENGTH} characters`}
+                        maxLength={ADMIN_CODE_LENGTH}
+                        helperText={`Exact case · ${adminCode.length}/${ADMIN_CODE_LENGTH} characters`}
                         fullWidth
                       />
 
@@ -472,7 +599,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                         variant="primary"
                         size="lg"
                         fullWidth
-                        disabled={adminCode.length < ADMIN_CODE_MIN_LENGTH}
+                        disabled={adminCode.length !== ADMIN_CODE_LENGTH}
                         className="mt-4 min-h-12 sm:min-h-14"
                         rightIcon={<ArrowRight className="h-4 w-4" />}
                       >

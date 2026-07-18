@@ -5,17 +5,18 @@ import {
   generatePostVideo,
 } from "./geminiService";
 import { StyleOption, ToneOption, VideoStyle } from "../types";
-import { MODELS, TASKS } from "./modelConfig";
+import { MODEL_POLICY_VERSION, MODELS, TASKS } from "./modelConfig";
 
 // Hoist the mocks so they can be used in the mock factory
-const { mockGenerateContent, mockGenerateVideos, mockGetVideosOperation } =
-  vi.hoisted(() => {
+const { mockGenerateContent, mockGenerateVideos, mockGetVideosOperation } = vi.hoisted(
+  () => {
     return {
       mockGenerateContent: vi.fn(),
       mockGenerateVideos: vi.fn(),
       mockGetVideosOperation: vi.fn(),
     };
-  });
+  },
+);
 
 // Mock dependencies
 vi.mock("./geminiClient", () => ({
@@ -49,7 +50,8 @@ describe("GeminiService model routing", () => {
     vi.clearAllMocks();
 
     mockGenerateContent.mockResolvedValue({
-      text: () => "Generated text",
+      text: () =>
+        "A fresh set of keys and a picture-perfect delivery day at Test Dealer. Congratulations on the new ride! #TestDealer",
       candidates: [
         {
           content: {
@@ -69,9 +71,7 @@ describe("GeminiService model routing", () => {
     mockGenerateVideos.mockResolvedValue({
       done: true,
       response: {
-        generatedVideos: [
-          { video: { uri: "http://fake-video-url.com/video.mp4" } },
-        ],
+        generatedVideos: [{ video: { uri: "http://fake-video-url.com/video.mp4" } }],
       },
     });
   });
@@ -102,7 +102,7 @@ describe("GeminiService model routing", () => {
     expect(textCall?.[0].generationConfig).not.toHaveProperty("topP");
   });
 
-  it("routes image generation through the image_generate task's primary model", async () => {
+  it("routes standard image generation through Flash Image first", async () => {
     await generateSocialPost(
       "data:image/jpeg;base64,fake",
       StyleOption.Modern,
@@ -110,7 +110,7 @@ describe("GeminiService model routing", () => {
       "Test Dealer",
     );
 
-    const expected = TASKS.image_generate.primary;
+    const expected = TASKS.image_standard.primary;
     const imageCall = mockGenerateContent.mock.calls.find(
       (call) => call[0].model === expected,
     );
@@ -145,14 +145,32 @@ describe("GeminiService model routing", () => {
       "/api/files/dealers/dealer-id/logo.png",
     );
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/files/dealers/dealer-id/logo.png",
-      { credentials: "include" },
-    );
+    expect(fetchMock).toHaveBeenCalledWith("/api/files/dealers/dealer-id/logo.png", {
+      credentials: "include",
+    });
     const imageCall = mockGenerateContent.mock.calls.find(
-      (call) => call[0].model === TASKS.image_generate.primary,
+      (call) => call[0].model === TASKS.image_standard.primary,
     );
     expect(imageCall?.[0].contents.parts).toHaveLength(3);
+  });
+
+  it("routes the single studio preference through Pro Image first", async () => {
+    await generateSocialPost(
+      "data:image/jpeg;base64,fake",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Studio Test Dealer",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "studio",
+    );
+
+    const firstImageCall = mockGenerateContent.mock.calls.find((call) =>
+      call[0].generationConfig?.responseModalities?.includes("IMAGE"),
+    );
+    expect(firstImageCall?.[0].model).toBe(TASKS.image_studio.primary);
   });
 
   it("keeps the Lite image fallback on its supported 1K output", async () => {
@@ -178,10 +196,7 @@ describe("GeminiService model routing", () => {
       });
     });
 
-    await generateFunSocialPostImage(
-      "data:image/jpeg;base64,fake",
-      "Test Dealer",
-    );
+    await generateFunSocialPostImage("data:image/jpeg;base64,fake", "Test Dealer");
 
     const liteCall = mockGenerateContent.mock.calls.find(
       (call) => call[0].model === MODELS.image.emergency,
@@ -193,14 +208,113 @@ describe("GeminiService model routing", () => {
 
   it("uses production-stable Google model identifiers", () => {
     expect(MODELS.text.primary).toBe("gemini-3.5-flash");
-    expect(MODELS.image.primary).toBe("gemini-3-pro-image");
-    expect(MODELS.image.fallback).toBe("gemini-3.1-flash-image");
+    expect(MODELS.text.fallback).toBe("gemini-3.1-flash-lite");
+    expect(MODELS.image.primary).toBe("gemini-3.1-flash-image");
+    expect(MODELS.image.studio).toBe("gemini-3-pro-image");
+    expect(MODELS.image.fallback).toBe("gemini-3-pro-image");
     expect(MODELS.image.emergency).toBe("gemini-3.1-flash-lite-image");
     expect(MODELS.video.primary).toBe("veo-3.1-fast-generate-preview");
     expect(MODELS.video.fallback).toBe("veo-3.1-generate-preview");
 
     expect(JSON.stringify(MODELS.text)).not.toContain("preview");
     expect(JSON.stringify(MODELS.image)).not.toContain("preview");
+    expect(JSON.stringify(MODELS)).not.toContain("gemini-2.5");
+  });
+
+  it("records fallback provenance without exposing prompts or credentials", async () => {
+    mockGenerateContent.mockImplementation(({ model, generationConfig }) => {
+      if (generationConfig?.responseModalities?.includes("IMAGE")) {
+        return Promise.resolve({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType: "image/png",
+                      data: "generated-image-data",
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      }
+      if (model === TASKS.caption.primary) {
+        return Promise.reject(new Error("503 model unavailable"));
+      }
+      return Promise.resolve({
+        text: () =>
+          "New keys, a new adventure, and one very happy driver at Provenance Motors. Congratulations on your beautiful new ride! #ProvenanceMotors",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,fake",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Provenance Motors",
+    );
+
+    expect(result.captionSource).toBe("ai");
+    expect(result.aiMeta).toMatchObject({
+      captionSource: "ai",
+      selectedTier: "standard",
+      model: TASKS.caption.fallback,
+      fallbackCount: 1,
+      modelPolicyVersion: MODEL_POLICY_VERSION,
+      caption: {
+        provider: "gemini",
+        model: TASKS.caption.fallback,
+        fallbackCount: 1,
+      },
+      image: {
+        provider: "gemini",
+        model: TASKS.image_standard.primary,
+        fallbackCount: 0,
+      },
+    });
+    expect(result.aiMeta.lastSuccessfulGenerationAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(JSON.stringify(result.aiMeta)).not.toContain("Provenance Motors");
+    expect(JSON.stringify(result.aiMeta).toLowerCase()).not.toContain("key");
+  });
+
+  it("labels a safe local caption as a basic fallback", async () => {
+    mockGenerateContent.mockImplementation(({ generationConfig }) => {
+      if (generationConfig?.responseModalities?.includes("IMAGE")) {
+        return Promise.resolve({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType: "image/png",
+                      data: "generated-image-data",
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      }
+      return Promise.reject(new Error("503 upstream unavailable"));
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,fake",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Fallback Motors",
+    );
+
+    expect(result.captionSource).toBe("basic_fallback");
+    expect(result.aiMeta.captionSource).toBe("basic_fallback");
+    expect(result.aiMeta.caption.provider).toBe("basic_fallback");
+    expect(result.aiMeta.caption.fallbackCount).toBe(TASKS.caption.models.length);
+    expect(result.text).toContain("Fallback Motors");
   });
 
   it("hits the Veo predictLongRunning endpoint for video generation", async () => {
@@ -238,14 +352,10 @@ describe("GeminiService model routing", () => {
         .mockResolvedValueOnce({
           ok: true,
           blob: () =>
-            Promise.resolve(
-              new Blob(["fake-video-data"], { type: "video/mp4" }),
-            ),
+            Promise.resolve(new Blob(["fake-video-data"], { type: "video/mp4" })),
         }),
     );
-    vi.spyOn(global.URL, "createObjectURL").mockReturnValue(
-      "blob:fake-video-url",
-    );
+    vi.spyOn(global.URL, "createObjectURL").mockReturnValue("blob:fake-video-url");
 
     vi.stubGlobal(
       "Image",

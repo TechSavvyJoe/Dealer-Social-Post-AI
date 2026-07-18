@@ -15,6 +15,8 @@ const CIRCULAR_VALUE = "[CIRCULAR]";
 const TRUNCATED_VALUE = "[TRUNCATED]";
 const UNSUPPORTED_VALUE = "[UNSUPPORTED]";
 const MAX_SANITIZE_DEPTH = 10;
+const TELEMETRY_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+const API_CONTRACT_VERSION = "2026-07-17.v2";
 
 // VINs exclude I, O, and Q. Explicit non-VIN boundaries also catch values
 // beside underscores, where a regular `\b` boundary would miss them.
@@ -22,15 +24,12 @@ const VIN_LIKE_PATTERN =
   /(^|[^A-HJ-NPR-Z0-9])([A-HJ-NPR-Z0-9]{17})(?=$|[^A-HJ-NPR-Z0-9])/gi;
 
 const redactVinLikeStrings = (value: string) =>
-  value.replace(
-    VIN_LIKE_PATTERN,
-    (match, prefix: string, candidate: string) => {
-      // Real VINs contain numeric positions. Requiring a digit prevents ordinary
-      // 17-letter identifiers (for example, property names) from being mangled.
-      if (!/\d/.test(candidate)) return match;
-      return `${prefix}${REDACTED_VIN}`;
-    },
-  );
+  value.replace(VIN_LIKE_PATTERN, (match, prefix: string, candidate: string) => {
+    // Real VINs contain numeric positions. Requiring a digit prevents ordinary
+    // 17-letter identifiers (for example, property names) from being mangled.
+    if (!/\d/.test(candidate)) return match;
+    return `${prefix}${REDACTED_VIN}`;
+  });
 
 const isSensitiveTelemetryKey = (key: string) => {
   const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -73,11 +72,7 @@ const sanitizeValue = (
 ): unknown => {
   if (key && isSensitiveTelemetryKey(key)) return REDACTED_VALUE;
   if (typeof value === "string") return redactVinLikeStrings(value);
-  if (
-    value === null ||
-    typeof value === "boolean" ||
-    typeof value === "number"
-  ) {
+  if (value === null || typeof value === "boolean" || typeof value === "number") {
     return value;
   }
   if (typeof value === "bigint") {
@@ -179,8 +174,7 @@ const isTelemetryEvent = (value: unknown): value is TelemetryEvent => {
   );
 };
 
-const generateId = () =>
-  `evt_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`;
+const generateId = () => `evt_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`;
 
 const getBuffer = (): TelemetryEvent[] => {
   if (typeof window === "undefined") return [];
@@ -191,6 +185,7 @@ const getBuffer = (): TelemetryEvent[] => {
     if (!Array.isArray(parsed)) return [];
     const safeEvents = parsed
       .filter(isTelemetryEvent)
+      .filter((event) => event.timestamp >= Date.now() - TELEMETRY_RETENTION_MS)
       .slice(-200)
       .map(sanitizeTelemetryEvent);
     const safeSerialized = JSON.stringify(safeEvents);
@@ -220,6 +215,7 @@ const enqueue = (event: TelemetryEvent) => {
   persistBuffer(buffer);
 
   if (
+    safeEvent.level === "error" &&
     typeof navigator !== "undefined" &&
     typeof navigator.sendBeacon === "function"
   ) {
@@ -243,7 +239,14 @@ const log = (
     id: generateId(),
     level,
     name: redactVinLikeStrings(name),
-    payload: safePayload,
+    payload: {
+      ...(safePayload || {}),
+      releaseSha:
+        import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA ||
+        import.meta.env.VITE_RELEASE_SHA ||
+        "development",
+      apiContractVersion: API_CONTRACT_VERSION,
+    },
     timestamp: Date.now(),
   };
 
@@ -256,9 +259,7 @@ const log = (
     consolePayload ? ` ${consolePayload}` : ""
   }`;
   // eslint-disable-next-line no-console
-  console[level === "error" ? "error" : level === "warn" ? "warn" : "log"](
-    message,
-  );
+  console[level === "error" ? "error" : level === "warn" ? "warn" : "log"](message);
 };
 
 export const logEvent = (name: string, payload?: Record<string, unknown>) =>

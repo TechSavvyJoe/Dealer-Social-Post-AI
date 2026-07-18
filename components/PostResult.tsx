@@ -43,10 +43,7 @@ import { ProgressiveImage } from "./ui/ProgressiveImage";
 import { useToast } from "./ui/Toast";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
-import {
-  getPostApprovalStatus,
-  markPostVideoGenerated,
-} from "../services/posts";
+import { getPostApprovalStatus, markPostVideoGenerated } from "../services/posts";
 import {
   analyzeCaptionForDelivery,
   prohibitedClaimsMessage,
@@ -162,10 +159,7 @@ interface PostResultProps {
   onRegenerateText: () => Promise<void>;
   onEditText: (prompt: string) => Promise<void>;
   onFunMode: (styleName?: string) => Promise<void>;
-  onGenerateVideo: (
-    style: VideoStyle,
-    options: VideoRequestOptions,
-  ) => Promise<string>;
+  onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
   /** One-shot caption generator for the 3-variant alternatives modal. */
   onGenerateCaptionVariant?: () => Promise<string>;
   error?: string | null;
@@ -175,8 +169,8 @@ interface PostResultProps {
   bannedPhrases?: string;
 }
 
-const BusyOverlay: React.FC<{ message: string; progress?: number }> =
-  React.memo(({ message, progress }) => {
+const BusyOverlay: React.FC<{ message: string; progress?: number }> = React.memo(
+  ({ message, progress }) => {
     const shouldReduceMotion = useReducedMotion();
 
     return (
@@ -208,7 +202,8 @@ const BusyOverlay: React.FC<{ message: string; progress?: number }> =
         ) : null}
       </div>
     );
-  });
+  },
+);
 
 export const PostResult: React.FC<PostResultProps> = ({
   post,
@@ -229,24 +224,22 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [copied, setCopied] = useState(false);
   const toast = useToast();
   const shouldReduceMotion = useReducedMotion();
-  const enabledFunStyles = useAppStore(
-    (s) => s.currentDealer?.enabled_fun_styles,
-  );
+  const enabledFunStyles = useAppStore((s) => s.currentDealer?.enabled_fun_styles);
 
   const [isImageEditing, setIsImageEditing] = useState(false);
   const [imageEditPrompt, setImageEditPrompt] = useState("");
   const [isImageLoading, setIsImageLoading] = useState(false);
-  const [imageLoadingMessage, setImageLoadingMessage] =
-    useState("Updating Image...");
+  const [imageLoadingMessage, setImageLoadingMessage] = useState("Updating Image...");
   const [imageLoadingProgress, setImageLoadingProgress] = useState(0);
 
   const [editedText, setEditedText] = useState(post.text);
   const [isTextEditing, setIsTextEditing] = useState(false);
   const [isTextLoading, setIsTextLoading] = useState(false);
   /** Active caption-pack platform tab; null = primary post.text. */
-  const [activeCaptionPlatform, setActiveCaptionPlatform] = useState<
-    string | null
-  >(null);
+  const [activeCaptionPlatform, setActiveCaptionPlatform] = useState<string | null>(
+    null,
+  );
+  const captionTabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   // Text history for undo/redo
   const [textHistory, setTextHistory] = useState<string[]>([post.text]);
@@ -287,24 +280,16 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [isCaptionAltsOpen, setIsCaptionAltsOpen] = useState(false);
   const [isToolsOpen, setIsToolsOpen] = useState(isDesktopLayout);
   /** Guarded navigation away from this result: full reset or same-photo remix. */
-  const [leaveConfirm, setLeaveConfirm] = useState<"startOver" | "remix" | null>(
-    null,
-  );
+  const [leaveConfirm, setLeaveConfirm] = useState<"startOver" | "remix" | null>(null);
   const [hasSavedMedia, setHasSavedMedia] = useState(false);
   const [hasCopiedCaption, setHasCopiedCaption] = useState(false);
   const [approvalStatus, setApprovalStatus] = useState<
     NonNullable<GeneratedPost["approvalStatus"]>
   >(
     post.approvalStatus ??
-      (requiresApproval
-        ? post.postId
-          ? "pending"
-          : "submission_failed"
-        : "n_a"),
+      (requiresApproval ? (post.postId ? "pending" : "submission_failed") : "n_a"),
   );
-  const [approvalCheckError, setApprovalCheckError] = useState<string | null>(
-    null,
-  );
+  const [approvalCheckError, setApprovalCheckError] = useState<string | null>(null);
   // Local override for the disclosure footer + categories — set when the
   // user picks an alternative caption from the modal so the displayed
   // compliance block matches the chosen variant.
@@ -313,9 +298,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     categories: string[];
   } | null>(null);
   /** Local edits to per-platform pack captions (share + tab switch must honor these). */
-  const [packOverrides, setPackOverrides] = useState<Record<string, string>>(
-    {},
-  );
+  const [packOverrides, setPackOverrides] = useState<Record<string, string>>({});
   /** Prior image versions after regen/fun/edit (local compare stack, max 5). */
   const [imageVersions, setImageVersions] = useState<string[]>([]);
   const prevImageRef = useRef(post.image);
@@ -351,8 +334,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     const pack = effectivePack;
     if (!pack || Object.keys(pack).length === 0) return [];
     const orderedIds =
-      post.platformIds?.filter((id) => Boolean(pack[id])) ??
-      Object.keys(pack);
+      post.platformIds?.filter((id) => Boolean(pack[id])) ?? Object.keys(pack);
     for (const id of Object.keys(pack)) {
       if (!orderedIds.includes(id)) orderedIds.push(id);
     }
@@ -412,11 +394,7 @@ export const PostResult: React.FC<PostResultProps> = ({
   useEffect(() => {
     setApprovalStatus(
       post.approvalStatus ??
-        (requiresApproval
-          ? post.postId
-            ? "pending"
-            : "submission_failed"
-          : "n_a"),
+        (requiresApproval ? (post.postId ? "pending" : "submission_failed") : "n_a"),
     );
     setApprovalCheckError(null);
   }, [post.postId, post.approvalStatus, requiresApproval]);
@@ -457,10 +435,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         }
         schedule();
       } catch (err) {
-        if (
-          !active ||
-          (err instanceof DOMException && err.name === "AbortError")
-        ) {
+        if (!active || (err instanceof DOMException && err.name === "AbortError")) {
           return;
         }
         setApprovalCheckError(
@@ -491,10 +466,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       const isTyping =
         target instanceof HTMLElement &&
         (target.matches("input, textarea, select") || target.isContentEditable);
-      if (
-        isTyping ||
-        document.querySelector('[role="dialog"][aria-modal="true"]')
-      ) {
+      if (isTyping || document.querySelector('[role="dialog"][aria-modal="true"]')) {
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
@@ -597,9 +569,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       ? "Save video"
       : "Save image";
   const saveAriaLabel = (locked: boolean) =>
-    locked
-      ? `Save ${saveKind} (${deliveryLockLabel.toLowerCase()})`
-      : saveButtonLabel;
+    locked ? `Save ${saveKind} (${deliveryLockLabel.toLowerCase()})` : saveButtonLabel;
 
   const handleSave = async () => {
     triggerHapticFeedback();
@@ -706,10 +676,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     const out: Record<string, string> = {};
     for (const [id, cap] of Object.entries(effectivePack)) {
       // Active platform: use live editor text (includes in-progress edits)
-      const base =
-        id === activeCaptionPlatform
-          ? editedText.trim()
-          : cap?.trim();
+      const base = id === activeCaptionPlatform ? editedText.trim() : cap?.trim();
       if (!base) continue;
       if (!baseDisc) {
         out[id] = base;
@@ -722,12 +689,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       }
     }
     return Object.keys(out).length > 0 ? out : undefined;
-  }, [
-    effectivePack,
-    post.disclosures,
-    activeCaptionPlatform,
-    editedText,
-  ]);
+  }, [effectivePack, post.disclosures, activeCaptionPlatform, editedText]);
 
   const selectCaptionPlatform = useCallback(
     (platformId: string | null) => {
@@ -739,8 +701,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         }));
       }
       const pack = { ...(post.platformCaptions || {}), ...packOverrides };
-      const nextText =
-        platformId && pack[platformId] ? pack[platformId] : post.text;
+      const nextText = platformId && pack[platformId] ? pack[platformId] : post.text;
       setActiveCaptionPlatform(platformId);
       setEditedText(nextText);
       setTextHistory([nextText]);
@@ -756,6 +717,36 @@ export const PostResult: React.FC<PostResultProps> = ({
       post.text,
     ],
   );
+
+  const handleCaptionTabKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>, currentIndex: number) => {
+      const tabCount = platformCaptionTabs.length + 1;
+      let nextIndex: number | null = null;
+
+      if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabCount;
+      if (event.key === "ArrowLeft") {
+        nextIndex = (currentIndex - 1 + tabCount) % tabCount;
+      }
+      if (event.key === "Home") nextIndex = 0;
+      if (event.key === "End") nextIndex = tabCount - 1;
+      if (nextIndex === null) return;
+
+      event.preventDefault();
+      const nextPlatformId =
+        nextIndex === 0 ? null : platformCaptionTabs[nextIndex - 1]?.id || null;
+      selectCaptionPlatform(nextPlatformId);
+      requestAnimationFrame(() => captionTabRefs.current[nextIndex]?.focus());
+    },
+    [platformCaptionTabs, selectCaptionPlatform],
+  );
+
+  const activeCaptionTabIndex =
+    activeCaptionPlatform === null
+      ? 0
+      : Math.max(
+          0,
+          platformCaptionTabs.findIndex(({ id }) => id === activeCaptionPlatform) + 1,
+        );
 
   const handleCopy = async () => {
     triggerHapticFeedback();
@@ -891,9 +882,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     // Mark job as processing
     setVideoJobs((prev) =>
       prev.map((job) =>
-        job.id === jobId
-          ? { ...job, status: "processing", error: undefined }
-          : job,
+        job.id === jobId ? { ...job, status: "processing", error: undefined } : job,
       ),
     );
 
@@ -952,9 +941,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         setVideoLoadingMessage(finalMessage);
         setVideoJobs((prev) =>
           prev.map((job) =>
-            job.id === jobId
-              ? { ...job, status: "failed", error: finalMessage }
-              : job,
+            job.id === jobId ? { ...job, status: "failed", error: finalMessage } : job,
           ),
         );
         throw normalized;
@@ -1062,19 +1049,11 @@ export const PostResult: React.FC<PostResultProps> = ({
         isOpen={leaveConfirm !== null}
         onClose={() => setLeaveConfirm(null)}
         size="sm"
-        title={
-          leaveConfirm === "remix"
-            ? "Remix this photo?"
-            : "Create another post?"
-        }
+        title={leaveConfirm === "remix" ? "Remix this photo?" : "Create another post?"}
         description="This result is not fully preserved yet."
         footer={
           <>
-            <Button
-              variant="outline"
-              onClick={() => setLeaveConfirm(null)}
-              fullWidth
-            >
+            <Button variant="outline" onClick={() => setLeaveConfirm(null)} fullWidth>
               Keep editing
             </Button>
             <Button variant="danger" onClick={confirmLeaveResult} fullWidth>
@@ -1192,6 +1171,46 @@ export const PostResult: React.FC<PostResultProps> = ({
             </button>
           </div>
         </header>
+        {post.isBasicFallback || post.captionSource === "basic_fallback" ? (
+          <motion.div
+            className="mx-auto flex max-w-3xl flex-col gap-3 rounded-2xl border border-warning-500/30 bg-warning-500/10 px-4 py-4 text-warning-100 shadow-lg shadow-black/10 sm:flex-row sm:items-center"
+            initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
+            role="status"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-semibold">Basic caption used</p>
+                <Badge variant="warning" uppercase={false}>
+                  AI was unavailable
+                </Badge>
+              </div>
+              <p className="mt-1 text-sm leading-relaxed text-warning-100/80">
+                Your post is safe to use, but this caption came from a basic template.
+                Try AI again when the connection is ready.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-h-11 shrink-0 border-warning-300/30 text-warning-50"
+              disabled={textBusy || creativeLockedForReview}
+              leftIcon={
+                textBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )
+              }
+              onClick={() =>
+                void handleTextAction(onRegenerateText).catch(() => undefined)
+              }
+            >
+              Try AI again
+            </Button>
+          </motion.div>
+        ) : null}
         {claimLocked && (
           <motion.div
             id="caption-compliance-alert"
@@ -1306,8 +1325,9 @@ export const PostResult: React.FC<PostResultProps> = ({
             initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.3 }}
+            role="alert"
           >
-            <AlertCircle className="w-5 h-5" />
+            <AlertCircle className="w-5 h-5" aria-hidden="true" />
             <span>{error}</span>
           </motion.div>
         )}
@@ -1337,15 +1357,20 @@ export const PostResult: React.FC<PostResultProps> = ({
             <div className="relative w-full overflow-hidden rounded-xl bg-surface-950/60">
               {(isImageLoading || isVideoLoading) && (
                 <BusyOverlay
-                  message={
-                    isVideoLoading ? videoLoadingMessage : imageLoadingMessage
-                  }
+                  message={isVideoLoading ? videoLoadingMessage : imageLoadingMessage}
                   progress={isVideoLoading ? undefined : imageLoadingProgress}
                 />
               )}
               {videoUrl && isVideoBuffering && !isVideoLoading && !videoPlayError ? (
-                <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center bg-surface-950/40">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary-300" />
+                <div
+                  className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center bg-surface-950/40"
+                  role="status"
+                  aria-label="Loading video preview"
+                >
+                  <Loader2
+                    className="h-8 w-8 animate-spin text-primary-300"
+                    aria-hidden="true"
+                  />
                 </div>
               ) : null}
 
@@ -1361,6 +1386,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     autoPlay={!shouldReduceMotion}
                     loop={!shouldReduceMotion}
                     muted={videoMuted}
+                    aria-label="Generated social media video preview"
                     onLoadStart={() => setIsVideoBuffering(true)}
                     onLoadedData={() => {
                       setIsVideoBuffering(false);
@@ -1400,11 +1426,14 @@ export const PostResult: React.FC<PostResultProps> = ({
                       }}
                       className="flex w-full min-h-11 items-center justify-center gap-2 rounded-xl border border-primary-400/40 bg-primary-500/15 px-3 py-2 text-sm font-semibold text-primary-50"
                     >
-                      Tap for sound
+                      Turn on sound
                     </button>
                   ) : null}
                   {videoPlayError ? (
-                    <div className="space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 px-3 py-2 text-xs text-error-100">
+                    <div
+                      className="space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 px-3 py-2 text-xs text-error-100"
+                      role="alert"
+                    >
                       <p>{videoPlayError}</p>
                       <div className="flex flex-wrap gap-2">
                         <button
@@ -1480,11 +1509,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                       className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-white/15 bg-surface-950 ring-offset-2 ring-offset-surface-900 hover:ring-2 hover:ring-primary-400/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
                       aria-label={`Restore previous image version ${i + 1}`}
                     >
-                      <img
-                        src={url}
-                        alt=""
-                        className="h-full w-full object-cover"
-                      />
+                      <img src={url} alt="" className="h-full w-full object-cover" />
                     </button>
                   ))}
                 </div>
@@ -1532,9 +1557,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                   icon={Film}
                   iconClassName={TILE_ICON_ACCENT}
                   tooltip="Turn your image into a video"
-                  disabled={
-                    imageBusy || isVideoLoading || creativeLockedForReview
-                  }
+                  disabled={imageBusy || isVideoLoading || creativeLockedForReview}
                   busy={isVideoLoading}
                   label={
                     isVideoLoading
@@ -1603,13 +1626,9 @@ export const PostResult: React.FC<PostResultProps> = ({
                   tooltip="Generate a new caption"
                   disabled={textBusy || creativeLockedForReview}
                   busy={textBusy}
-                  label={
-                    textBusy ? "Updating caption..." : "Regenerate caption"
-                  }
+                  label={textBusy ? "Updating caption..." : "Regenerate caption"}
                   onClick={() => {
-                    void handleTextAction(onRegenerateText).catch(
-                      () => undefined,
-                    );
+                    void handleTextAction(onRegenerateText).catch(() => undefined);
                   }}
                 />
 
@@ -1648,9 +1667,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 {isToolsOpen && isImageEditing && (
                   <motion.div
                     className="space-y-2 rounded-xl border border-white/10 bg-surface-800/50 p-3"
-                    initial={
-                      shouldReduceMotion ? false : { opacity: 0, height: 0 }
-                    }
+                    initial={shouldReduceMotion ? false : { opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: "auto" }}
                     exit={{ opacity: 0, height: 0 }}
                     transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
@@ -1710,26 +1727,17 @@ export const PostResult: React.FC<PostResultProps> = ({
                       role="status"
                       aria-live="polite"
                     >
-                      {
-                        videoJobs.filter((job) => job.status === "processing")
-                          .length
-                      }{" "}
+                      {videoJobs.filter((job) => job.status === "processing").length}{" "}
                       active
                     </span>
                   </div>
-                  <ul
-                    className="space-y-2"
-                    role="list"
-                    aria-label="Video queue list"
-                  >
+                  <ul className="space-y-2" role="list" aria-label="Video queue list">
                     {videoJobs.map((job) => (
                       <motion.li
                         key={job.id}
                         className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-surface-900/40 px-3 py-2 text-xs"
                         initial={
-                          shouldReduceMotion
-                            ? false
-                            : { opacity: 0, scale: 0.95 }
+                          shouldReduceMotion ? false : { opacity: 0, scale: 0.95 }
                         }
                         animate={{ opacity: 1, scale: 1 }}
                         transition={{ duration: shouldReduceMotion ? 0 : 0.2 }}
@@ -1765,7 +1773,9 @@ export const PostResult: React.FC<PostResultProps> = ({
                           )}
                           {job.url && (
                             <button
+                              type="button"
                               onClick={() => adoptVideoUrl(job.url || null)}
+                              aria-label={`Preview ${job.style} video`}
                               className="text-[10px] font-semibold uppercase tracking-wide text-primary-200 hover:text-surface-50 transition-colors"
                             >
                               Preview
@@ -1773,14 +1783,18 @@ export const PostResult: React.FC<PostResultProps> = ({
                           )}
                           {job.status === "failed" && (
                             <button
+                              type="button"
                               onClick={() => handleRetryVideo(job.id)}
+                              aria-label={`Retry ${job.style} video`}
                               className="text-[10px] font-semibold uppercase tracking-wide text-amber-200 hover:text-amber-50 transition-colors"
                             >
                               Retry
                             </button>
                           )}
                           <button
+                            type="button"
                             onClick={() => handleRemoveVideoJob(job.id)}
+                            aria-label={`Remove ${job.style} video job`}
                             className="text-[10px] font-semibold uppercase tracking-wide text-surface-200/70 hover:text-surface-50 transition-colors"
                           >
                             Remove
@@ -1833,9 +1847,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    void handleTextAction(onRegenerateText).catch(
-                      () => undefined,
-                    );
+                    void handleTextAction(onRegenerateText).catch(() => undefined);
                   }}
                   disabled={textBusy || creativeLockedForReview}
                   className={cn(
@@ -1870,8 +1882,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     title="Generate three full caption options"
                     aria-label="Three caption ideas"
                   >
-                    <Sparkles className="h-4 w-4 text-primary-300" />
-                    3 options
+                    <Sparkles className="h-4 w-4 text-primary-300" />3 options
                   </button>
                 ) : null}
                 <button
@@ -1888,8 +1899,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                   type="button"
                   onClick={handleRedo}
                   disabled={
-                    historyIndex === textHistory.length - 1 ||
-                    creativeLockedForReview
+                    historyIndex === textHistory.length - 1 || creativeLockedForReview
                   }
                   className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-surface-200 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 disabled:cursor-not-allowed disabled:opacity-30"
                   title="Redo (Ctrl+Y)"
@@ -1906,10 +1916,17 @@ export const PostResult: React.FC<PostResultProps> = ({
                 aria-label="Platform captions"
               >
                 <button
+                  ref={(node) => {
+                    captionTabRefs.current[0] = node;
+                  }}
+                  id="caption-platform-tab-0"
                   type="button"
                   role="tab"
                   aria-selected={activeCaptionPlatform === null}
+                  aria-controls="caption-platform-panel"
+                  tabIndex={activeCaptionPlatform === null ? 0 : -1}
                   onClick={() => selectCaptionPlatform(null)}
+                  onKeyDown={(event) => handleCaptionTabKeyDown(event, 0)}
                   className={cn(
                     "min-h-[40px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
@@ -1920,13 +1937,20 @@ export const PostResult: React.FC<PostResultProps> = ({
                 >
                   Primary
                 </button>
-                {platformCaptionTabs.map((tab) => (
+                {platformCaptionTabs.map((tab, index) => (
                   <button
                     key={tab.id}
+                    ref={(node) => {
+                      captionTabRefs.current[index + 1] = node;
+                    }}
+                    id={`caption-platform-tab-${index + 1}`}
                     type="button"
                     role="tab"
                     aria-selected={activeCaptionPlatform === tab.id}
+                    aria-controls="caption-platform-panel"
+                    tabIndex={activeCaptionPlatform === tab.id ? 0 : -1}
                     onClick={() => selectCaptionPlatform(tab.id)}
+                    onKeyDown={(event) => handleCaptionTabKeyDown(event, index + 1)}
                     className={cn(
                       "min-h-[40px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
@@ -1941,7 +1965,16 @@ export const PostResult: React.FC<PostResultProps> = ({
               </div>
             )}
 
-            <div className="relative mb-4">
+            <div
+              id="caption-platform-panel"
+              role={platformCaptionTabs.length > 0 ? "tabpanel" : undefined}
+              aria-labelledby={
+                platformCaptionTabs.length > 0
+                  ? `caption-platform-tab-${activeCaptionTabIndex}`
+                  : undefined
+              }
+              className="relative mb-4"
+            >
               {isTextLoading && <BusyOverlay message="Updating caption..." />}
               {captionWasEdited && (
                 <div className="mb-2 flex items-center gap-2 text-xs text-warning-300">
@@ -2074,8 +2107,8 @@ export const PostResult: React.FC<PostResultProps> = ({
                   {activeDisclosures.replace(/^—\s*Disclosures\s*—\s*\n?/, "")}
                 </div>
                 <div className="text-xs text-warning-300/70 mt-2">
-                  Included automatically when you copy or share. Saving media
-                  downloads only the image or video, so copy the caption too.
+                  Included automatically when you copy or share. Saving media downloads
+                  only the image or video, so copy the caption too.
                 </div>
               </motion.div>
             )}
@@ -2108,11 +2141,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                   : "Copy caption"
               }
               leftIcon={
-                copied ? (
-                  <Check className="h-4 w-4" />
-                ) : (
-                  <Copy className="h-4 w-4" />
-                )
+                copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />
               }
               fullWidth
               disableHaptics
@@ -2154,11 +2183,7 @@ export const PostResult: React.FC<PostResultProps> = ({
               fullWidth
               disableHaptics
             >
-              {deliveryLocked
-                ? deliveryLockLabel
-                : saveToPhotos
-                  ? "Photos"
-                  : "Save"}
+              {deliveryLocked ? deliveryLockLabel : saveToPhotos ? "Photos" : "Save"}
             </Button>
           </div>
         </div>

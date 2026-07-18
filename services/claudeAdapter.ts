@@ -10,7 +10,7 @@
  * `pb_hooks/main.pb.js` adds a /api/proxy/anthropic/* route that forwards to
  * api.anthropic.com so the key never reaches the browser.
  */
-import { CLAUDE_MODELS, FLAGS } from "./modelConfig";
+import { CLAUDE_MODELS, FLAGS, MODEL_POLICY_VERSION } from "./modelConfig";
 
 const PROXY_PATH = "/api/proxy/anthropic/v1/messages";
 
@@ -20,6 +20,8 @@ interface ClaudeMessageOptions {
   maxTokens?: number;
   /** Optional system prompt (preferred over stuffing it into user content). */
   system?: string;
+  task?: "caption" | "caption_regenerate" | "caption_edit";
+  attemptId?: string;
 }
 
 interface ClaudeMessageResponse {
@@ -32,8 +34,18 @@ interface ClaudeMessageResponse {
 // Auth: HttpOnly session cookie attached via credentials:"include" at the
 // fetch call site. VITE_PROXY_ACCESS_TOKEN removed 2026-05-28 (bundled
 // secret → bypassable per-dealer rate limits).
-const proxyHeaders = (): Record<string, string> => ({
+const proxyHeaders = (
+  task?: ClaudeMessageOptions["task"],
+  attemptId?: string,
+): Record<string, string> => ({
   "Content-Type": "application/json",
+  ...(task
+    ? {
+        "X-Generation-Task": task,
+        "X-Model-Policy-Version": MODEL_POLICY_VERSION,
+        ...(attemptId ? { "X-Generation-Attempt-ID": attemptId } : {}),
+      }
+    : {}),
 });
 
 /**
@@ -69,7 +81,7 @@ export const generateTextViaClaude = async (
   const res = await fetch(PROXY_PATH, {
     method: "POST",
     credentials: "include",
-    headers: proxyHeaders(),
+    headers: proxyHeaders(options.task, options.attemptId),
     body: JSON.stringify(body),
   });
 

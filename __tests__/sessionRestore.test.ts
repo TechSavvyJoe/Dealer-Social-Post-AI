@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  fetchSession,
-  resolveRestoredStep,
-  useAppStore,
-} from "../stores/appStore";
+import { fetchSession, resolveRestoredStep, useAppStore } from "../stores/appStore";
 import { AppStep } from "../types";
 
 const localStorageMock = (() => {
@@ -45,33 +41,33 @@ afterEach(() => {
 
 describe("session restore navigation", () => {
   it("never restores a result step without a complete generated post", () => {
-    expect(
-      resolveRestoredStep("salesperson", AppStep.RESULT, false, false),
-    ).toBe(AppStep.CAPTURE);
-    expect(
-      resolveRestoredStep("salesperson", AppStep.RESULT, true, false),
-    ).toBe(AppStep.CUSTOMIZE);
+    expect(resolveRestoredStep("salesperson", AppStep.RESULT, false, false)).toBe(
+      AppStep.CAPTURE,
+    );
+    expect(resolveRestoredStep("salesperson", AppStep.RESULT, true, false)).toBe(
+      AppStep.CUSTOMIZE,
+    );
   });
 
   it("recovers interrupted generation to the retained customization", () => {
-    expect(
-      resolveRestoredStep("salesperson", AppStep.GENERATING, true, false),
-    ).toBe(AppStep.CUSTOMIZE);
+    expect(resolveRestoredStep("salesperson", AppStep.GENERATING, true, false)).toBe(
+      AppStep.CUSTOMIZE,
+    );
   });
 
   it("restores a complete result and clamps admin steps to server roles", () => {
     expect(resolveRestoredStep("salesperson", AppStep.RESULT, true, true)).toBe(
       AppStep.RESULT,
     );
-    expect(
-      resolveRestoredStep("salesperson", AppStep.ADMIN, false, false),
-    ).toBe(AppStep.CAPTURE);
-    expect(
-      resolveRestoredStep("dealer_admin", AppStep.RESULT, true, true),
-    ).toBe(AppStep.DEALER_ADMIN);
-    expect(
-      resolveRestoredStep("super_admin", AppStep.CAPTURE, false, false),
-    ).toBe(AppStep.ADMIN);
+    expect(resolveRestoredStep("salesperson", AppStep.ADMIN, false, false)).toBe(
+      AppStep.CAPTURE,
+    );
+    expect(resolveRestoredStep("dealer_admin", AppStep.RESULT, true, true)).toBe(
+      AppStep.DEALER_ADMIN,
+    );
+    expect(resolveRestoredStep("super_admin", AppStep.CAPTURE, false, false)).toBe(
+      AppStep.ADMIN,
+    );
   });
 
   it("aborts a session request that exceeds its startup budget", async () => {
@@ -125,7 +121,9 @@ describe("session restore navigation", () => {
       ),
     );
 
-    await expect(useAppStore.getState().login("222222")).resolves.toBe(true);
+    await expect(useAppStore.getState().login("2222")).resolves.toEqual({
+      ok: true,
+    });
 
     const state = useAppStore.getState();
     expect(state.currentDealer?.id).toBe("dealer-b");

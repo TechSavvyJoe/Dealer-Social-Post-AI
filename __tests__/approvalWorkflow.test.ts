@@ -15,26 +15,24 @@ afterEach(() => {
 describe("approval submission client", () => {
   it("uploads the exact review caption, disclosures, and creative image", async () => {
     let apiRequest: RequestInit | undefined;
-    const fetchMock = vi.fn(
-      async (input: RequestInfo | URL, init?: RequestInit) => {
-        if (String(input).startsWith("data:image/")) {
-          return new Response(new Uint8Array([1, 2, 3]), {
-            status: 200,
-            headers: { "Content-Type": "image/png" },
-          });
-        }
-        apiRequest = init;
-        return new Response(
-          JSON.stringify({
-            id: "post-review-1",
-            dealer: "dealer-1",
-            generated_at: "2026-07-15T12:00:00.000Z",
-            approval_status: "pending",
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      },
-    );
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).startsWith("data:image/")) {
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { "Content-Type": "image/png" },
+        });
+      }
+      apiRequest = init;
+      return new Response(
+        JSON.stringify({
+          id: "post-review-1",
+          dealer: "dealer-1",
+          generated_at: "2026-07-15T12:00:00.000Z",
+          approval_status: "pending",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await logPost({
@@ -101,10 +99,7 @@ describe("approval submission client", () => {
 
 describe("approval backend invariants", () => {
   it("binds status and creative reads to the dealer and submitting session", () => {
-    const hook = readFileSync(
-      resolve(process.cwd(), "pb_hooks/main.pb.js"),
-      "utf8",
-    );
+    const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
 
     expect(hook).toContain('"/api/app/posts/:id/status"');
     expect(hook).toContain('"/api/app/posts/:id/creative-image"');
@@ -113,8 +108,9 @@ describe("approval backend invariants", () => {
     expect(hook).toContain('record.getString("dealer") !== dealer.id');
     expect(hook).toContain("helpers.hashSessionToken(token)");
     expect(hook).toContain(
-      'owner_session_hash: token ? helpers.hashSessionToken(token) : ""',
+      'const ownerSessionHash = token ? helpers.hashSessionToken(token) : ""',
     );
+    expect(hook).toContain("owner_session_hash: ownerSessionHash");
     expect(hook).toContain('record.set("has_video", true)');
     expect(hook).toContain("has_video: false");
     expect(hook).toContain('error: "Post belongs to another session"');
@@ -125,10 +121,7 @@ describe("approval backend invariants", () => {
 
   it("repairs the original empty posts-to-dealers relation on fresh installs", () => {
     const migration = readFileSync(
-      resolve(
-        process.cwd(),
-        "pb_migrations/1750300200_add_approval_creative.js",
-      ),
+      resolve(process.cwd(), "pb_migrations/1750300200_add_approval_creative.js"),
       "utf8",
     );
 
@@ -140,10 +133,7 @@ describe("approval backend invariants", () => {
   });
 
   it("prevents blind manager approval and exposes review copy only to managers", () => {
-    const hook = readFileSync(
-      resolve(process.cwd(), "pb_hooks/main.pb.js"),
-      "utf8",
-    );
+    const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
     const queue = readFileSync(
       resolve(process.cwd(), "components/ApprovalQueue.tsx"),
       "utf8",
@@ -153,13 +143,15 @@ describe("approval backend invariants", () => {
       'error: "Cannot approve a post without reviewable creative"',
     );
     expect(hook).toContain('error: "This approval has already been decided"');
-    expect(hook).toContain('error: "Approver name is required"');
+    expect(hook).toContain(
+      'context.person ? context.person.getString("name") : "System Admin"',
+    );
+    expect(hook).not.toContain("body.approved_by");
     expect(hook).toContain("AND approval_status = 'pending'");
     expect(hook).toContain("result.rowsAffected() !== 1");
     expect(hook).toContain('record.getString("dealer") !== dealer.id');
     expect(hook).not.toContain("Super-admin bypasses for cross-tenant support");
-    expect(hook).toContain('"approved",');
-    expect(hook).toContain('"rejected",');
+    expect(hook).toContain('["approved", "rejected"]');
     expect(hook).toContain('caption: r.getString("caption")');
     expect(hook).toContain("creative_image_url:");
     expect(queue).toContain("post.creative_image_url");

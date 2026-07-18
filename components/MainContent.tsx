@@ -13,6 +13,7 @@ import { LoadingOverlay } from "./LoadingOverlay";
 import { PageTransition } from "./ui/PageTransition";
 import { Button } from "./ui/Button";
 import { Shimmer } from "./ui/Shimmer";
+import type { LoginResult } from "../stores/appStore";
 
 // Lazy load components
 const LazyLoginScreen = React.lazy(() =>
@@ -50,7 +51,7 @@ interface MainContentProps {
   progressMessage: string;
 
   // Handlers
-  onLogin: (dealerId: string) => Promise<boolean>;
+  onLogin: (dealerCode: string, turnstileToken?: string) => Promise<LoginResult>;
   onImageSelected: (image: string) => void;
   onReset: () => void;
   /** Same-photo remix — keep capture, re-open CUSTOMIZE. */
@@ -82,10 +83,7 @@ interface MainContentProps {
   onRegenerateText: () => Promise<void>;
   onEditText: (prompt: string) => Promise<void>;
   onFunMode: (styleName?: string) => Promise<void>;
-  onGenerateVideo: (
-    style: VideoStyle,
-    options: VideoRequestOptions,
-  ) => Promise<string>;
+  onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
   /** One-shot caption generator for the alternatives modal. */
   onGenerateCaptionVariant?: () => Promise<string>;
 }
@@ -171,10 +169,7 @@ export const MainContent: React.FC<MainContentProps> = ({
       case AppStep.CAPTURE:
         return (
           <Suspense fallback={suspenseFallback("Preparing camera")}>
-            <LazyImageInput
-              onImageSelected={onImageSelected}
-              onClose={onReset}
-            />
+            <LazyImageInput onImageSelected={onImageSelected} onClose={onReset} />
           </Suspense>
         );
       case AppStep.CUSTOMIZE:
@@ -220,10 +215,7 @@ export const MainContent: React.FC<MainContentProps> = ({
         ) : null;
       case AppStep.GENERATING:
         return (
-          <LoadingOverlay
-            progress={generationProgress}
-            message={progressMessage}
-          />
+          <LoadingOverlay progress={generationProgress} message={progressMessage} />
         );
       case AppStep.RESULT:
         return generatedPost ? (
@@ -253,9 +245,7 @@ export const MainContent: React.FC<MainContentProps> = ({
 
   return (
     <PageTransition pageKey={String(displayedStep)}>
-      <div className="flex h-full min-h-0 w-full flex-1 flex-col">
-        {stepContent()}
-      </div>
+      <div className="flex h-full min-h-0 w-full flex-1 flex-col">{stepContent()}</div>
     </PageTransition>
   );
 };

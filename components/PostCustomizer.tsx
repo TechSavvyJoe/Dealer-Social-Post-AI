@@ -27,13 +27,7 @@ import {
 import { StyleOption, ToneOption } from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Button } from "./ui/Button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "./ui/Card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { Input, Textarea, Select } from "./ui/Input";
 import { POST_TEMPLATES } from "./templates";
@@ -44,7 +38,6 @@ import { PhotoReleaseModal } from "./PhotoReleaseModal";
 import { useAppStore } from "../stores/appStore";
 import { ShieldCheck } from "lucide-react";
 import { CapturedRelease } from "../services/photoReleases";
-import { SalespersonPicker } from "./SalespersonPicker";
 import { ScenarioPicker } from "./ScenarioPicker";
 import {
   PostScenario,
@@ -178,9 +171,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 }) => {
   const [customerName, setCustomerName] = useState("");
   const [style, setStyle] = useState<StyleOption>(defaultStyle);
-  const [selectedPlatforms, setSelectedPlatforms] = useState<PlatformId[]>(
-    () => [...DEFAULT_PLATFORM_IDS],
-  );
+  const [selectedPlatforms, setSelectedPlatforms] = useState<PlatformId[]>(() => [
+    ...DEFAULT_PLATFORM_IDS,
+  ]);
   const platformOptions = useMemo(() => getPlatformOptions(), []);
   const [tone, setTone] = useState<ToneOption>(defaultTone);
   const [customMessage, setCustomMessage] = useState("");
@@ -189,17 +182,15 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [vinScannerOpen, setVinScannerOpen] = useState(false);
-  const [decodedVehicle, setDecodedVehicle] = useState<DecodedVehicle | null>(
-    null,
-  );
+  const [decodedVehicle, setDecodedVehicle] = useState<DecodedVehicle | null>(null);
   const [releaseModalOpen, setReleaseModalOpen] = useState(false);
   const [releaseValidationError, setReleaseValidationError] = useState(false);
   // Captured signature stays local until Generate. useGeneration durably saves
   // it before the customer photo is sent to an AI provider, then links that
   // same protected record to the created post.
-  const [capturedRelease, setCapturedRelease] =
-    useState<CapturedRelease | null>(null);
+  const [capturedRelease, setCapturedRelease] = useState<CapturedRelease | null>(null);
   const currentDealer = useAppStore((s) => s.currentDealer);
+  const currentPerson = useAppStore((s) => s.currentPerson);
 
   // Post scenario — drives prompt context + default style/tone. "customer_delivery"
   // is the implicit default; an undefined value also resolves to that.
@@ -222,23 +213,11 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         .map((s) => s.trim())
         .filter(Boolean),
     );
-    const filtered = Object.values(StyleOption).filter((s) =>
-      allowedSet.has(s),
-    );
+    const filtered = Object.values(StyleOption).filter((s) => allowedSet.has(s));
     return filtered.length > 0 ? filtered : Object.values(StyleOption);
   }, [currentDealer?.enabled_styles]);
 
-  const dealerDefaultStyle = currentDealer?.default_style as
-    StyleOption | undefined;
-
-  // Salesperson identity — picker pulls from the dealer's roster (if any),
-  // falls back to a free-text input when the roster is empty. Persists last
-  // selection in localStorage so the same iPad keeps the same identity.
-  const [salesperson, setSalesperson] = useState<{
-    id?: string;
-    name: string;
-  }>({ name: "" });
-  const salespersonName = salesperson.name;
+  const dealerDefaultStyle = currentDealer?.default_style as StyleOption | undefined;
 
   // Sync with defaults. Order of precedence:
   //   1. Dealer-set default_style (if it's in the enabled set)
@@ -320,10 +299,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
       briefParts.push(scenarioBlock);
     }
 
-    const platformBrief = platformsToCreativeBrief(
-      selectedPlatforms,
-      dealershipName,
-    );
+    const platformBrief = platformsToCreativeBrief(selectedPlatforms, dealershipName);
     if (platformBrief) {
       briefParts.push(platformBrief);
     }
@@ -430,8 +406,6 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         preparedText,
         creativeBrief,
         {
-          salespersonName: salesperson.name.trim() || undefined,
-          salespersonId: salesperson.id,
           vin: decodedVehicle?.vin,
           hasRelease: !!capturedRelease,
           capturedRelease: capturedRelease || undefined,
@@ -448,7 +422,6 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     customerName,
     customMessage,
     decodedVehicle,
-    salesperson,
     capturedRelease,
     currentDealer,
     scenarioId,
@@ -533,9 +506,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 />
               </motion.div>
               <div className="min-w-0 flex-1">
-                <CardTitle className="text-lg sm:text-xl">
-                  Create your post
-                </CardTitle>
+                <CardTitle className="text-lg sm:text-xl">Create your post</CardTitle>
                 <CardDescription className="text-xs sm:text-sm">
                   Pick a style — AI handles the rest
                 </CardDescription>
@@ -546,17 +517,27 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           <CardContent className="relative space-y-5 pt-0">
             {/* Post scenario — selects which kind of post this is (delivery,
                 pre-owned spotlight, service promo, etc). Tunes prompt + defaults. */}
-            <ScenarioPicker
-              value={scenarioId}
-              onChange={handleScenarioChange}
-            />
+            <ScenarioPicker value={scenarioId} onChange={handleScenarioChange} />
 
-            {/* Salesperson — searchable roster picker w/ unrostered fallback */}
-            <SalespersonPicker
-              dealerId={currentDealer?.id ?? ""}
-              value={salesperson}
-              onChange={setSalesperson}
-            />
+            <div
+              className="flex items-center gap-3 rounded-xl border border-primary-400/20 bg-primary-500/[0.07] px-3 py-2.5"
+              aria-label={`Posting as ${currentPerson?.name || "signed-in team member"}`}
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-primary-400/20 bg-primary-500/10 text-primary-300">
+                <Users className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-primary-300">
+                  Posting as
+                </p>
+                <p className="truncate text-sm font-semibold text-surface-100">
+                  {currentPerson?.name || "Signed-in team member"}
+                </p>
+              </div>
+              <Badge variant="success" size="sm" className="shrink-0">
+                Verified
+              </Badge>
+            </div>
 
             {/* Customer Name - Compact */}
             <Input
@@ -660,8 +641,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   className="rounded-lg border border-error-500/30 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100"
                   role="alert"
                 >
-                  This customer-focused post needs a signed photo release before
-                  the photo can be sent for AI processing.
+                  This customer-focused post needs a signed photo release before the
+                  photo can be sent for AI processing.
                 </p>
               ) : null}
             </div>
@@ -738,10 +719,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                             {option.split(" ")[0]}
                           </span>
                           {isActive && (
-                            <motion.div
-                              initial={{ scale: 0 }}
-                              animate={{ scale: 1 }}
-                            >
+                            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}>
                               <Check className="h-3.5 w-3.5 text-primary-400 flex-shrink-0" />
                             </motion.div>
                           )}
@@ -749,9 +727,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         <span
                           className={cn(
                             "text-[11px] block leading-snug transition-colors",
-                            isActive
-                              ? "text-primary-200/80"
-                              : "text-surface-400",
+                            isActive ? "text-primary-200/80" : "text-surface-400",
                           )}
                         >
                           {info.desc}
@@ -808,8 +784,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 })}
               </div>
               <p className="text-[11px] leading-snug text-surface-500">
-                Captions are tailored to these platforms. Stories and TikTok
-                prefer vertical (9:16) exports.
+                Captions are tailored to these platforms. Stories and TikTok prefer
+                vertical (9:16) exports.
               </p>
             </div>
 
@@ -876,8 +852,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   }}
                   className={cn(
                     "flex-1 rounded-lg",
-                    captionSource !== "ai" &&
-                      "text-surface-400 hover:text-surface-200",
+                    captionSource !== "ai" && "text-surface-400 hover:text-surface-200",
                   )}
                 >
                   AI Caption
@@ -975,10 +950,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                                   /\[Customer Name\]/g,
                                   customerName.trim() || "our amazing customer",
                                 )
-                                .replace(
-                                  /\[Dealership Name\]/g,
-                                  dealershipName,
-                                ),
+                                .replace(/\[Dealership Name\]/g, dealershipName),
                             );
                             setCaptionSource("custom");
                           }
@@ -1015,9 +987,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               <Button
                 variant="filled"
                 size="lg"
-                leftIcon={
-                  <Sparkles className={cn(isBusy && "animate-pulse")} />
-                }
+                leftIcon={<Sparkles className={cn(isBusy && "animate-pulse")} />}
                 rightIcon={!isBusy && <ChevronRight />}
                 onClick={handleGenerate}
                 disabled={isBusy}

@@ -1,14 +1,115 @@
-/**
- * Model configuration + routing.
- *
- * Each task has a primary model, a fallback model, and a small set of safe
- * generation limits. Gemini 3.x is optimized for its default sampling values,
- * so task behavior comes from explicit prompts instead of legacy temperature,
- * top-k, or top-p overrides. The router prefers `primary`; on transient failure
- * or rate limit it retries with `fallback`, then an emergency model.
- */
+import modelPolicyJson from "../config/gemini-model-policy.json";
 
-export type ModelTier = "fast" | "quality" | "premium";
+export type ModelTaskName =
+  | "caption"
+  | "caption_regenerate"
+  | "caption_edit"
+  | "image_standard"
+  | "image_studio"
+  | "video_standard"
+  | "video_quality";
+export type ModelTier = "fast" | "quality" | "standard" | "studio";
+export type ImageSize = "1K" | "2K" | "4K";
+
+interface ModelPolicyTask {
+  kind: "text" | "image" | "video";
+  tier: ModelTier;
+  models: readonly string[];
+  maxOutputTokens?: number;
+  imageSizes?: Readonly<Record<string, ImageSize>>;
+  resolution?: "720p" | "1080p";
+}
+
+interface ModelPolicyDocument {
+  version: number;
+  verifiedAt: string;
+  models: {
+    textQuality: string;
+    textFast: string;
+    imageStandard: string;
+    imageStudio: string;
+    imageLite: string;
+    videoStandard: string;
+    videoQuality: string;
+  };
+  tasks: Record<ModelTaskName, ModelPolicyTask>;
+  allowedRequestFields: Record<string, Record<string, readonly string[]>>;
+  requestLimits: Record<string, number>;
+  safetySettings: ReadonlyArray<{
+    category: string;
+    threshold: "BLOCK_MEDIUM_AND_ABOVE";
+  }>;
+}
+
+/**
+ * Runtime model policy. The JSON document is the language-neutral source of
+ * truth shared with the PocketBase policy contract and its drift checker.
+ */
+export const MODEL_POLICY = modelPolicyJson as ModelPolicyDocument;
+export const MODEL_POLICY_VERSION = String(MODEL_POLICY.version);
+
+export type ImageGenerationTier = "standard" | "studio";
+export type ModelProvider =
+  "gemini" | "anthropic" | "openai" | "custom" | "basic_fallback" | "original";
+export type CaptionSource = "ai" | "custom" | "basic_fallback";
+
+export interface ModelExecutionMetadata {
+  task: ModelTaskName;
+  tier: ModelTier;
+  provider: ModelProvider;
+  model: string | null;
+  /** Opaque correlation id for the exact server-recorded generation attempt. */
+  attemptId?: string;
+  /** Number of failed upstream choices traversed before this result. */
+  fallbackCount: number;
+  /** Most recent successful upstream response for this task in this session. */
+  lastSuccessAt: string | null;
+}
+
+/**
+ * Create a prompt-free correlation id for one logical model ladder. The id is
+ * not an authorization token; PocketBase accepts it only alongside the current
+ * HttpOnly session and uses it to prevent an older success from being attached
+ * to a later safe-template fallback.
+ */
+export const createGenerationAttemptId = (): string => {
+  const webCrypto = globalThis.crypto;
+  if (webCrypto?.randomUUID) return webCrypto.randomUUID().replace(/-/g, "");
+  if (webCrypto?.getRandomValues) {
+    const bytes = webCrypto.getRandomValues(new Uint8Array(16));
+    return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  }
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`.padEnd(
+    24,
+    "0",
+  );
+};
+
+export interface CaptionGenerationResult {
+  text: string;
+  captionSource: CaptionSource;
+  aiMeta: ModelExecutionMetadata;
+}
+
+export interface SocialPostGenerationMetadata {
+  /** Flattened compatibility fields persisted on GeneratedPost. */
+  captionSource: CaptionSource;
+  selectedTier: ImageGenerationTier;
+  model?: string;
+  fallbackCount: number;
+  lastSuccessfulGenerationAt?: string;
+  modelPolicyVersion: string;
+  /** Detailed per-modality provenance for internal diagnostics. */
+  caption: ModelExecutionMetadata;
+  image: ModelExecutionMetadata;
+}
+
+export interface SocialPostGenerationResult {
+  image: string;
+  text: string;
+  captionSource: CaptionSource;
+  aiMeta: SocialPostGenerationMetadata;
+}
 
 export interface GenerationParams {
   maxOutputTokens?: number;
@@ -17,10 +118,15 @@ export interface GenerationParams {
 }
 
 export interface TaskConfig {
+  kind: "text" | "image" | "video";
+  tier: ModelTier;
+  models: readonly string[];
   primary: string;
   fallback?: string;
   emergency?: string;
   params: GenerationParams;
+  imageSizes?: Readonly<Record<string, ImageSize>>;
+  resolution?: "720p" | "1080p";
   /** Optional Anthropic Claude model id used as cross-vendor fallback (set via env). */
   claudeFallback?: string;
   /** Claude-only sampling control; never forwarded to Gemini 3.x. */
@@ -31,7 +137,7 @@ export interface TaskConfig {
  * Canonical model identifiers. Keep this list in sync with what Google has
  * actually released — picking nonexistent ids breaks generation silently.
  *
- * Current as of 2026-07-15. Update only after checking Google's live model
+ * Current as of 2026-07-17. Update only after checking Google's live model
  * catalog and deprecation notices. Stable ids are preferred where Google
  * offers them; Veo remains on the Gemini API's documented preview ids because
  * its stable `-001` ids are Vertex-only.
@@ -39,19 +145,18 @@ export interface TaskConfig {
 export const MODELS = {
   // ---- Text + multimodal reasoning ----
   text: {
-    primary: "gemini-3.5-flash",
-    fallback: "gemini-3.1-flash-lite",
-    // 2.5 series stays available as emergency long-tail fallback in case 3.x has an outage.
-    emergency: "gemini-2.5-flash",
+    primary: MODEL_POLICY.models.textQuality,
+    fallback: MODEL_POLICY.models.textFast,
   },
   // ---- Image editing (multimodal: input image + prompt → image) ----
-  // Gemini 3 Pro Image is Google's professional-asset model and is the right
-  // quality-first default for branded dealer creative. Gemini 3.1 Flash Image
-  // is the current all-around, lower-latency fallback.
+  // Standard creation starts on Flash Image. The single Settings preference
+  // opts into Studio, where Pro Image leads the same bounded fallback ladder.
   image: {
-    primary: "gemini-3-pro-image",
-    fallback: "gemini-3.1-flash-image",
-    emergency: "gemini-3.1-flash-lite-image",
+    primary: MODEL_POLICY.models.imageStandard,
+    standard: MODEL_POLICY.models.imageStandard,
+    studio: MODEL_POLICY.models.imageStudio,
+    fallback: MODEL_POLICY.models.imageStudio,
+    emergency: MODEL_POLICY.models.imageLite,
   },
   // ---- Video (Veo through the Gemini API) ----
   // The Gemini API and Vertex expose different IDs. This app calls
@@ -61,10 +166,10 @@ export const MODELS = {
   video: {
     // Prefer Fast on the sales floor — full quality Veo often takes several
     // minutes; Fast is usually enough for IG/TikTok delivery clips.
-    primary: "veo-3.1-fast-generate-preview",
-    fallback: "veo-3.1-generate-preview",
-    fast: "veo-3.1-fast-generate-preview",
-    quality: "veo-3.1-generate-preview",
+    primary: MODEL_POLICY.models.videoStandard,
+    fallback: MODEL_POLICY.models.videoQuality,
+    fast: MODEL_POLICY.models.videoStandard,
+    quality: MODEL_POLICY.models.videoQuality,
   },
 } as const;
 
@@ -99,87 +204,99 @@ export const OPENAI_MODELS = {
  * Per-task output limits. Prompt instructions carry the tone and variation;
  * Google recommends leaving Gemini 3.x sampling parameters at their defaults.
  */
-export const TASK_PARAMS: Record<string, GenerationParams> = {
+export const TASK_PARAMS: Record<ModelTaskName, GenerationParams> = {
   // Caption text is short, but Gemini 3.x may spend tokens on internal
   // reasoning before the visible caption — keep headroom so MAX_TOKENS
   // never truncates the actual post body to empty.
-  text_caption: {
-    maxOutputTokens: 2048,
+  caption: {
+    maxOutputTokens: MODEL_POLICY.tasks.caption.maxOutputTokens,
   },
-  text_caption_regenerate: {
-    maxOutputTokens: 2048,
+  caption_regenerate: {
+    maxOutputTokens: MODEL_POLICY.tasks.caption_regenerate.maxOutputTokens,
   },
-  text_caption_edit: {
-    maxOutputTokens: 2048,
+  caption_edit: {
+    maxOutputTokens: MODEL_POLICY.tasks.caption_edit.maxOutputTokens,
   },
   // Image models manage their own reasoning and composition defaults.
-  image_generate: {
-    maxOutputTokens: 4096,
+  image_standard: {
+    maxOutputTokens: MODEL_POLICY.tasks.image_standard.maxOutputTokens,
   },
-  // Image edit (e.g. "make the text gold").
-  image_edit: {
-    maxOutputTokens: 4096,
+  image_studio: {
+    maxOutputTokens: MODEL_POLICY.tasks.image_studio.maxOutputTokens,
   },
-  // Fun-mode creativity is described by the selected art-direction prompt.
-  image_fun: {
-    maxOutputTokens: 4096,
-  },
-  // Video prompt distillation (text → Veo prompt).
-  video_prompt: {
-    maxOutputTokens: 800,
-  },
+  video_standard: {},
+  video_quality: {},
 };
 
 /**
  * Full per-task config: model id + params + fallback ladder.
  */
-export const TASKS: Record<string, TaskConfig> = {
+export const TASKS: Record<ModelTaskName, TaskConfig> = {
   caption: {
-    primary: MODELS.text.primary,
-    fallback: MODELS.text.fallback,
-    emergency: MODELS.text.emergency,
+    kind: "text",
+    tier: "quality",
+    models: MODEL_POLICY.tasks.caption.models,
+    primary: MODEL_POLICY.tasks.caption.models[0],
+    fallback: MODEL_POLICY.tasks.caption.models[1],
     claudeFallback: CLAUDE_MODELS.text_fast,
     claudeTemperature: 0.8,
-    params: TASK_PARAMS.text_caption,
+    params: TASK_PARAMS.caption,
   },
   caption_regenerate: {
-    primary: MODELS.text.primary,
-    fallback: MODELS.text.fallback,
-    emergency: MODELS.text.emergency,
+    kind: "text",
+    tier: "quality",
+    models: MODEL_POLICY.tasks.caption_regenerate.models,
+    primary: MODEL_POLICY.tasks.caption_regenerate.models[0],
+    fallback: MODEL_POLICY.tasks.caption_regenerate.models[1],
     claudeFallback: CLAUDE_MODELS.text_fast,
     claudeTemperature: 1,
-    params: TASK_PARAMS.text_caption_regenerate,
+    params: TASK_PARAMS.caption_regenerate,
   },
   caption_edit: {
-    primary: MODELS.text.fallback, // small model is plenty for edits; cheaper + faster
-    fallback: MODELS.text.primary,
-    emergency: MODELS.text.emergency,
+    kind: "text",
+    tier: "fast",
+    models: MODEL_POLICY.tasks.caption_edit.models,
+    primary: MODEL_POLICY.tasks.caption_edit.models[0],
+    fallback: MODEL_POLICY.tasks.caption_edit.models[1],
     claudeFallback: CLAUDE_MODELS.text_fast,
     claudeTemperature: 0.4,
-    params: TASK_PARAMS.text_caption_edit,
+    params: TASK_PARAMS.caption_edit,
   },
-  image_generate: {
-    primary: MODELS.image.primary,
-    fallback: MODELS.image.fallback,
-    emergency: MODELS.image.emergency,
-    params: TASK_PARAMS.image_generate,
+  image_standard: {
+    kind: "image",
+    tier: "standard",
+    models: MODEL_POLICY.tasks.image_standard.models,
+    primary: MODEL_POLICY.tasks.image_standard.models[0],
+    fallback: MODEL_POLICY.tasks.image_standard.models[1],
+    emergency: MODEL_POLICY.tasks.image_standard.models[2],
+    params: TASK_PARAMS.image_standard,
+    imageSizes: MODEL_POLICY.tasks.image_standard.imageSizes,
   },
-  image_edit: {
-    primary: MODELS.image.primary,
-    fallback: MODELS.image.fallback,
-    emergency: MODELS.image.emergency,
-    params: TASK_PARAMS.image_edit,
+  image_studio: {
+    kind: "image",
+    tier: "studio",
+    models: MODEL_POLICY.tasks.image_studio.models,
+    primary: MODEL_POLICY.tasks.image_studio.models[0],
+    fallback: MODEL_POLICY.tasks.image_studio.models[1],
+    emergency: MODEL_POLICY.tasks.image_studio.models[2],
+    params: TASK_PARAMS.image_studio,
+    imageSizes: MODEL_POLICY.tasks.image_studio.imageSizes,
   },
-  image_fun: {
-    primary: MODELS.image.primary,
-    fallback: MODELS.image.fallback,
-    emergency: MODELS.image.emergency,
-    params: TASK_PARAMS.image_fun,
+  video_standard: {
+    kind: "video",
+    tier: "standard",
+    models: MODEL_POLICY.tasks.video_standard.models,
+    primary: MODEL_POLICY.tasks.video_standard.models[0],
+    params: TASK_PARAMS.video_standard,
+    resolution: "720p",
   },
-  video: {
-    primary: MODELS.video.primary,
-    fallback: MODELS.video.fallback,
-    params: TASK_PARAMS.video_prompt,
+  video_quality: {
+    kind: "video",
+    tier: "quality",
+    models: MODEL_POLICY.tasks.video_quality.models,
+    primary: MODEL_POLICY.tasks.video_quality.models[0],
+    params: TASK_PARAMS.video_quality,
+    resolution: "1080p",
   },
 };
 
@@ -189,7 +306,15 @@ export const TASKS: Record<string, TaskConfig> = {
  */
 export const getModel = (
   type: keyof typeof MODELS,
-  variant: "primary" | "fallback" | "fast" | "lite" | "emergency" = "primary",
+  variant:
+    | "primary"
+    | "fallback"
+    | "fast"
+    | "quality"
+    | "standard"
+    | "studio"
+    | "lite"
+    | "emergency" = "primary",
 ): string => {
   const group = MODELS[type];
   if (!group) return "";
@@ -210,7 +335,7 @@ export const getTask = (task: keyof typeof TASKS): TaskConfig => {
  */
 export const getFallbackChain = (task: keyof typeof TASKS): string[] => {
   const t = TASKS[task];
-  return [t.primary, t.fallback, t.emergency].filter(Boolean) as string[];
+  return [...t.models];
 };
 
 /**

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { cn } from "../../utils/classNames";
@@ -34,6 +34,7 @@ export const Modal: React.FC<ModalProps> = ({
   const previouslyFocused = useRef<HTMLElement | null>(null);
   const titleId = React.useId();
   const descriptionId = React.useId();
+  const shouldReduceMotion = useReducedMotion();
 
   // Prevent body scroll when modal is open
   useEffect(() => {
@@ -111,10 +112,10 @@ export const Modal: React.FC<ModalProps> = ({
         <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center sm:p-4">
           {/* Backdrop */}
           <motion.div
-            initial={{ opacity: 0 }}
+            initial={shouldReduceMotion ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.2 }}
             className="absolute inset-0 bg-surface-950/80 backdrop-blur-sm"
             onClick={onClose}
             aria-hidden="true"
@@ -129,10 +130,14 @@ export const Modal: React.FC<ModalProps> = ({
             aria-label={title ? undefined : "Dialog"}
             aria-describedby={description ? descriptionId : undefined}
             tabIndex={-1}
-            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={{ type: "spring", duration: 0.4, bounce: 0 }}
+            transition={
+              shouldReduceMotion
+                ? { duration: 0 }
+                : { type: "spring", duration: 0.4, bounce: 0 }
+            }
             className={cn(
               "relative w-full bg-surface-900 border border-white/10 shadow-2xl overflow-hidden flex flex-col",
               "rounded-t-2xl sm:rounded-2xl", // Sheet-like on mobile

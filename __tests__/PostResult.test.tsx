@@ -8,12 +8,10 @@ import { ToastProvider } from "../components/ui/Toast";
 import { VideoStyle } from "../types";
 
 vi.mock("canvas-confetti", () => ({ default: vi.fn() }));
-const { mockGetPostApprovalStatus, mockMarkPostVideoGenerated } = vi.hoisted(
-  () => ({
-    mockGetPostApprovalStatus: vi.fn(),
-    mockMarkPostVideoGenerated: vi.fn(),
-  }),
-);
+const { mockGetPostApprovalStatus, mockMarkPostVideoGenerated } = vi.hoisted(() => ({
+  mockGetPostApprovalStatus: vi.fn(),
+  mockMarkPostVideoGenerated: vi.fn(),
+}));
 vi.mock("../services/posts", () => ({
   getPostApprovalStatus: mockGetPostApprovalStatus,
   markPostVideoGenerated: mockMarkPostVideoGenerated,
@@ -27,20 +25,6 @@ vi.mock("../components/ui/ProgressiveImage", () => ({
     <img src={src} alt={alt} className={className} />
   ),
 }));
-
-Object.defineProperty(window, "matchMedia", {
-  configurable: true,
-  value: vi.fn().mockImplementation((query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  })),
-});
 
 const callbacks = {
   onStartOver: vi.fn(),
@@ -94,15 +78,9 @@ describe("PostResult job-first flow", () => {
     const user = userEvent.setup();
     renderResult();
 
-    expect(
-      screen.getByRole("button", { name: "Copy caption" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Share post" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Save image" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy caption" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Share post" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save image" })).toBeInTheDocument();
 
     const disclosure = screen.getByRole("button", { name: /creative tools/i });
     const panel = screen.getByTestId("creative-tools-panel");
@@ -125,19 +103,49 @@ describe("PostResult job-first flow", () => {
     ).toBeInTheDocument();
   });
 
+  it("supports roving keyboard navigation across platform caption tabs", async () => {
+    renderResult({
+      post: {
+        image: "data:image/png;base64,aGVsbG8=",
+        text: "Primary caption",
+        platformIds: ["facebook_feed", "instagram_feed"],
+        platformCaptions: {
+          facebook_feed: "Facebook caption",
+          instagram_feed: "Instagram caption",
+        },
+      },
+    });
+
+    const primaryTab = screen.getByRole("tab", { name: "Primary" });
+    primaryTab.focus();
+    fireEvent.keyDown(primaryTab, { key: "ArrowRight" });
+
+    const facebookTab = screen.getByRole("tab", { name: /Facebook/i });
+    await waitFor(() => expect(facebookTab).toHaveFocus());
+    expect(facebookTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute(
+      "aria-labelledby",
+      facebookTab.id,
+    );
+    expect(screen.getByRole("textbox", { name: "Full caption text" })).toHaveValue(
+      "Facebook caption",
+    );
+
+    fireEvent.keyDown(facebookTab, { key: "End" });
+    const instagramTab = screen.getByRole("tab", { name: "IG Feed" });
+    await waitFor(() => expect(instagramTab).toHaveFocus());
+    expect(instagramTab).toHaveAttribute("tabindex", "0");
+  });
+
   it("confirms before replacing work with another post", async () => {
     const user = userEvent.setup();
     renderResult();
 
     await user.click(screen.getByRole("button", { name: "New photo" }));
     expect(callbacks.onStartOver).not.toHaveBeenCalled();
-    expect(
-      screen.getByRole("dialog", { name: "Create another post?" }),
-    ).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Create another post?" })).toBeVisible();
 
-    await user.click(
-      screen.getByRole("button", { name: "Discard and continue" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Discard and continue" }));
     expect(callbacks.onStartOver).toHaveBeenCalledTimes(1);
     expect(callbacks.onRemix).not.toHaveBeenCalled();
   });
@@ -153,9 +161,7 @@ describe("PostResult job-first flow", () => {
       await screen.findByRole("dialog", { name: "Remix this photo?" }),
     ).toBeInTheDocument();
 
-    await user.click(
-      screen.getByRole("button", { name: "Discard and continue" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Discard and continue" }));
     expect(callbacks.onRemix).toHaveBeenCalledTimes(1);
     expect(callbacks.onStartOver).not.toHaveBeenCalled();
   });
@@ -165,18 +171,13 @@ describe("PostResult job-first flow", () => {
 
     const delivery = screen.getByLabelText("Post delivery actions");
     expect(delivery).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Copy caption" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Share post" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Save image" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /creative tools/i }),
-    ).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "Copy caption" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Share post" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save image" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /creative tools/i })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
   });
 
   it("gates every delivery path while approval is pending", () => {
@@ -202,9 +203,7 @@ describe("PostResult job-first flow", () => {
       },
     });
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Photo release not saved",
-    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Photo release not saved");
     expect(
       screen.getByRole("button", { name: "Copy caption (release not saved)" }),
     ).toBeDisabled();
@@ -226,9 +225,7 @@ describe("PostResult job-first flow", () => {
       target: { value: "The LOWEST—PRICE GUARANTEED on every vehicle." },
     });
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Caption claim blocked",
-    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Caption claim blocked");
     expect(caption).toHaveAttribute("aria-invalid", "true");
     expect(
       screen.getByRole("button", { name: "Copy caption (claim blocked)" }),
@@ -271,14 +268,10 @@ describe("PostResult job-first flow", () => {
     );
     expect(screen.getByText("Manager approved")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save image" })).toBeEnabled();
-    expect(
-      screen.getByRole("textbox", { name: "Full caption text" }),
-    ).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Full caption text" })).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: /creative tools/i }));
-    expect(
-      screen.getByRole("button", { name: "Regenerate image" }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Regenerate image" })).toBeDisabled();
     expect(mockGetPostApprovalStatus).toHaveBeenCalledWith(
       "post-review-1",
       expect.any(AbortSignal),
@@ -294,10 +287,7 @@ describe("LoadingOverlay", () => {
     expect(status).toHaveAttribute("aria-live", "polite");
     expect(status).toHaveTextContent("Building your post");
     expect(status).toHaveTextContent("Checking caption tone");
-    expect(screen.getByRole("progressbar")).toHaveAttribute(
-      "aria-valuenow",
-      "62",
-    );
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "62");
     expect(
       screen.getByRole("list", { name: "Post generation stages" }),
     ).toBeInTheDocument();

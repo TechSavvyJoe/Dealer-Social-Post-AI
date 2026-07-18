@@ -12,6 +12,7 @@ interface PersistedState {
   step?: number;
   loginTimestamp?: number;
   compactMode?: boolean;
+  imageQualityTier?: "standard" | "studio";
   preferredStyle?: string;
   preferredTone?: string;
   generationParams?: {
@@ -62,10 +63,7 @@ export const saveSession = (state: PersistedState) => {
       ) {
         next.generatedPost = { ...next.generatedPost, image: undefined };
       }
-      if (
-        next.selectedImage &&
-        next.selectedImage.length > MAX_STORED_IMAGE_BYTES
-      ) {
+      if (next.selectedImage && next.selectedImage.length > MAX_STORED_IMAGE_BYTES) {
         next.selectedImage = undefined;
       }
       return next;

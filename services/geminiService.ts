@@ -4,12 +4,7 @@ import {
   letterboxImageForVideo,
   resolveVeoAspect,
 } from "../utils/imageUtils";
-import {
-  StyleOption,
-  ToneOption,
-  VideoStyle,
-  VideoRequestOptions,
-} from "../types";
+import { StyleOption, ToneOption, VideoStyle, VideoRequestOptions } from "../types";
 import {
   generateImagePrompt,
   generateTextPrompt,
@@ -22,48 +17,122 @@ import { normalizeError, recoveryHint } from "../utils/errorHandler";
 import { getGeminiClient } from "./geminiClient";
 import { GeminiVideoOperationSchema } from "../utils/schemas";
 import {
+  type CaptionGenerationResult,
+  createGenerationAttemptId,
   FLAGS,
   getFallbackChain,
+  type ImageGenerationTier,
+  type ModelExecutionMetadata,
+  type ModelProvider,
+  type ModelTaskName,
+  MODEL_POLICY_VERSION,
   MODELS,
+  type SocialPostGenerationResult,
   TASKS,
   type GenerationParams,
 } from "./modelConfig";
 import { generateTextViaClaude, shouldFallbackToClaude } from "./claudeAdapter";
-import {
-  generateImageViaOpenAI,
-  shouldFallbackToOpenAI,
-} from "./openaiAdapter";
+import { generateImageViaOpenAI, shouldFallbackToOpenAI } from "./openaiAdapter";
 import { requestCache } from "../utils/requestCache";
 import { logEvent as logTelemetry } from "../utils/telemetry";
-import {
-  cleanSocialCaption,
-  ensureUsableCaption,
-} from "../utils/captionQuality";
+import { cleanSocialCaption, ensureUsableCaption } from "../utils/captionQuality";
 
 /**
  * Tries each model in the fallback chain for a given task. The action
  * receives the resolved model id and should perform a single attempt.
  * Returns on first success; throws the last error if every model fails.
  */
+interface ModelRun<T> {
+  value: T;
+  aiMeta: ModelExecutionMetadata;
+}
+
+const lastSuccessfulAtByTask = new Map<ModelTaskName, string>();
+const lastExecutionByTask = new Map<ModelTaskName, ModelExecutionMetadata>();
+
+const recordExecution = (
+  task: ModelTaskName,
+  provider: ModelProvider,
+  model: string | null,
+  fallbackCount: number,
+  upstreamSucceeded: boolean,
+  attemptId?: string,
+): ModelExecutionMetadata => {
+  if (upstreamSucceeded) {
+    lastSuccessfulAtByTask.set(task, new Date().toISOString());
+  }
+  const metadata: ModelExecutionMetadata = {
+    task,
+    tier: TASKS[task].tier,
+    provider,
+    model,
+    ...(attemptId ? { attemptId } : {}),
+    fallbackCount,
+    lastSuccessAt: lastSuccessfulAtByTask.get(task) ?? null,
+  };
+  lastExecutionByTask.set(task, metadata);
+  return metadata;
+};
+
+/** Latest model-layer provenance for diagnostics and fallback-aware UI. */
+export const getLastModelExecutionMetadata = (
+  task: ModelTaskName,
+): ModelExecutionMetadata | null => lastExecutionByTask.get(task) ?? null;
+
+class ModelChainFailure extends Error {
+  readonly attemptedModels: number;
+
+  constructor(task: ModelTaskName, attemptedModels: number, cause: unknown) {
+    super(cause instanceof Error ? cause.message : `All models failed for ${task}`);
+    this.name = "ModelChainFailure";
+    this.attemptedModels = attemptedModels;
+    Object.defineProperty(this, "cause", { value: cause, enumerable: false });
+  }
+}
+
+const attemptedModelsFromError = (error: unknown): number =>
+  error instanceof ModelChainFailure ? error.attemptedModels : 0;
+
+const attemptIdFromError = (error: unknown): string | undefined =>
+  error && typeof error === "object" && "generationAttemptId" in error
+    ? String((error as { generationAttemptId?: unknown }).generationAttemptId || "") ||
+      undefined
+    : undefined;
+
+const latestSuccessfulGenerationAt = (
+  ...executions: ModelExecutionMetadata[]
+): string | undefined => {
+  const timestamps = executions
+    .map((execution) => execution.lastSuccessAt)
+    .filter((timestamp): timestamp is string => Boolean(timestamp))
+    .sort();
+  return timestamps.at(-1);
+};
+
 async function withFallbackChain<T>(
-  task: keyof typeof TASKS,
+  task: ModelTaskName,
+  attemptId: string,
   action: (modelId: string) => Promise<T>,
-): Promise<T> {
+): Promise<ModelRun<T>> {
   const chain = getFallbackChain(task);
   let lastErr: unknown;
-  for (const modelId of chain) {
+  let attemptedModels = 0;
+  for (let index = 0; index < chain.length; index += 1) {
+    const modelId = chain[index];
     try {
-      return await action(modelId);
+      attemptedModels += 1;
+      return {
+        value: await action(modelId),
+        aiMeta: recordExecution(task, "gemini", modelId, index, true, attemptId),
+      };
     } catch (err) {
       lastErr = err;
-      const msg = (
-        err instanceof Error ? err.message : String(err)
-      ).toLowerCase();
+      const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
       // Authentication and malformed requests will fail identically across
       // models, so stop. A 404 can be model-specific (regional rollout or a
       // retired endpoint), so it should advance through the configured chain.
       if (msg.includes("400") || msg.includes("401") || msg.includes("403")) {
-        throw err;
+        throw new ModelChainFailure(task, attemptedModels, err);
       }
       // Otherwise try the next model.
       console.warn(
@@ -72,7 +141,11 @@ async function withFallbackChain<T>(
       );
     }
   }
-  throw lastErr ?? new Error(`All models failed for task ${task}`);
+  throw new ModelChainFailure(
+    task,
+    attemptedModels,
+    lastErr ?? new Error(`All models failed for task ${task}`),
+  );
 }
 
 /**
@@ -198,12 +271,7 @@ const imageFailureReason = (response: unknown): string => {
   )?.candidates?.[0];
   const block = (response as { promptFeedback?: { blockReason?: string } })
     ?.promptFeedback?.blockReason;
-  return (
-    cand?.finishReason ||
-    cand?.finishMessage ||
-    block ||
-    "empty image response"
-  );
+  return cand?.finishReason || cand?.finishMessage || block || "empty image response";
 };
 
 /**
@@ -213,30 +281,36 @@ const imageFailureReason = (response: unknown): string => {
  * whole post with a generic error.
  */
 const generateImageWithFallback = async (
-  task: "image_generate" | "image_edit" | "image_fun",
+  task: "image_standard" | "image_studio",
   imageParts: unknown[],
   imagePromptForOpenAI?: string,
-): Promise<string> => {
+): Promise<ModelRun<string>> => {
   const client = getGeminiClient();
+  const attemptId = createGenerationAttemptId();
   try {
-    const response = await withFallbackChain(task, async (modelId) => {
+    const response = await withFallbackChain(task, attemptId, async (modelId) => {
       const res = await client.models.generateContent({
         model: modelId,
+        task,
+        attemptId,
         contents: { parts: imageParts },
-        generationConfig: imageGenerationConfig(modelId, TASKS[task].params),
+        generationConfig: imageGenerationConfig(
+          modelId,
+          TASKS[task].params,
+          TASKS[task].imageSizes,
+        ),
       } as any);
       const dataUrl = extractGeneratedImageDataUrl(res);
       if (!dataUrl) {
-        throw new Error(
-          `No image from ${modelId} (${imageFailureReason(res)})`,
-        );
+        throw new Error(`No image from ${modelId} (${imageFailureReason(res)})`);
       }
       return res;
     });
-    const dataUrl = extractGeneratedImageDataUrl(response);
-    if (dataUrl) return dataUrl;
+    const dataUrl = extractGeneratedImageDataUrl(response.value);
+    if (dataUrl) return { value: dataUrl, aiMeta: response.aiMeta };
     throw new Error("Image model returned no image data.");
   } catch (err) {
+    let terminalError = err;
     if (shouldFallbackToOpenAI(err) && imagePromptForOpenAI) {
       console.warn(
         `[${task}] All Gemini image models exhausted; falling back to OpenAI`,
@@ -247,16 +321,40 @@ const generateImageWithFallback = async (
         task,
       });
       try {
-        return await generateImageViaOpenAI({
+        const value = await generateImageViaOpenAI({
           prompt: imagePromptForOpenAI,
+          task,
+          attemptId,
           size: "1024x1024",
           quality: "high",
         });
+        return {
+          value,
+          aiMeta: recordExecution(
+            task,
+            "openai",
+            "gpt-image-2",
+            attemptedModelsFromError(err),
+            true,
+            attemptId,
+          ),
+        };
       } catch (openaiErr) {
         console.warn(`[${task}] OpenAI image fallback also failed`, openaiErr);
+        terminalError = new ModelChainFailure(
+          task,
+          attemptedModelsFromError(err) + 1,
+          openaiErr,
+        );
       }
     }
-    throw err;
+    if (terminalError && typeof terminalError === "object") {
+      Object.defineProperty(terminalError, "generationAttemptId", {
+        value: attemptId,
+        configurable: true,
+      });
+    }
+    throw terminalError;
   }
 };
 
@@ -268,19 +366,30 @@ const generateImageWithFallback = async (
  * `"512" | "1K" | "2K" | "4K"`. The nested `responseFormat.image.imageSize`
  * field is a protobuf enum (`IMAGE_SIZE_*`) and rejects bare `"2K"`.
  */
-const imageGenerationConfig = (modelId: string, params: GenerationParams) => ({
+const imageGenerationConfig = (
+  modelId: string,
+  params: GenerationParams,
+  imageSizes?: Readonly<Record<string, "1K" | "2K" | "4K">>,
+) => ({
   responseModalities: ["TEXT" as any, "IMAGE" as any],
   imageConfig: {
-    imageSize: modelId === MODELS.image.emergency ? "1K" : "2K",
+    imageSize:
+      imageSizes?.[modelId] ?? (modelId === MODELS.image.emergency ? "1K" : "2K"),
   },
   ...params,
 });
+
+const imageTaskForTier = (
+  tier: ImageGenerationTier,
+): "image_standard" | "image_studio" =>
+  tier === "studio" ? "image_studio" : "image_standard";
 
 export const generateFunSocialPostImage = async (
   originalImageBase64Url: string,
   dealershipName: string,
   logoBase64Url?: string,
   requestedStyle?: string, // Optional: specific style  name or 'random'
+  imageTier: ImageGenerationTier = "standard",
 ): Promise<string> => {
   const normalisedOriginal = await normaliseDataUrl(originalImageBase64Url);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedOriginal);
@@ -288,18 +397,16 @@ export const generateFunSocialPostImage = async (
 
   const logoImagePart = await optionalLogoImagePart(logoBase64Url);
 
-  const funPrompt = generateFunPrompt(
-    dealershipName,
-    logoBase64Url,
-    requestedStyle,
-  );
+  const funPrompt = generateFunPrompt(dealershipName, logoBase64Url, requestedStyle);
 
   const imageParts: any[] = [originalImagePart, { text: funPrompt }];
   if (logoImagePart) {
     imageParts.push(logoImagePart);
   }
 
-  return await generateImageWithFallback("image_fun", imageParts, funPrompt);
+  return (
+    await generateImageWithFallback(imageTaskForTier(imageTier), imageParts, funPrompt)
+  ).value;
 };
 
 export const editSocialPostImage = async (
@@ -307,6 +414,7 @@ export const editSocialPostImage = async (
   editPromptString: string,
   dealershipName: string,
   logoBase64Url?: string,
+  imageTier: ImageGenerationTier = "standard",
 ): Promise<string> => {
   const normalisedPrevious = await normaliseDataUrl(previousImageBase64Url);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedPrevious);
@@ -325,14 +433,16 @@ export const editSocialPostImage = async (
     imageParts.push(logoImagePart);
   }
 
-  return await generateImageWithFallback(
-    "image_edit",
-    imageParts,
-    editInstruction,
-  );
+  return (
+    await generateImageWithFallback(
+      imageTaskForTier(imageTier),
+      imageParts,
+      editInstruction,
+    )
+  ).value;
 };
 
-export const generateSocialPostText = async (
+export const generateSocialPostTextDetailed = async (
   imageBase64Url: string,
   tone: ToneOption,
   dealershipName: string,
@@ -340,7 +450,7 @@ export const generateSocialPostText = async (
   isRegeneration = false,
   creativeBrief?: string,
   style?: StyleOption,
-): Promise<string> => {
+): Promise<CaptionGenerationResult> => {
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
   const imagePart = { inlineData: { mimeType, data: base64Data } };
@@ -353,8 +463,11 @@ export const generateSocialPostText = async (
     style,
   );
 
-  const task = isRegeneration ? "caption_regenerate" : "caption";
+  const task: "caption" | "caption_regenerate" = isRegeneration
+    ? "caption_regenerate"
+    : "caption";
   const taskConfig = TASKS[task];
+  const attemptId = createGenerationAttemptId();
 
   // Cache key — never cache regenerations (the whole point is variation).
   // Hash the FULL image bytes, not just the first 256 base64 chars: two photos
@@ -362,18 +475,29 @@ export const generateSocialPostText = async (
   // collides and could serve one customer's caption for another's vehicle.
   const cacheKey =
     !isRegeneration && FLAGS.enableResponseCache
-      ? `caption:${await hashString(textPrompt + ":" + base64Data)}`
+      ? `caption:v2:${await hashString(textPrompt + ":" + base64Data)}`
       : null;
   if (cacheKey) {
-    const cached = requestCache.get<string>(cacheKey);
-    if (cached) return cached;
+    const cached = requestCache.get<CaptionGenerationResult>(cacheKey);
+    if (cached) {
+      lastExecutionByTask.set(task, cached.aiMeta);
+      if (cached.aiMeta.lastSuccessAt) {
+        lastSuccessfulAtByTask.set(task, cached.aiMeta.lastSuccessAt);
+      }
+      return {
+        ...cached,
+        aiMeta: { ...cached.aiMeta, attemptId: undefined },
+      };
+    }
   }
 
   const runOnGemini = () =>
-    withFallbackChain(task, async (modelId) => {
+    withFallbackChain(task, attemptId, async (modelId) => {
       const client = getGeminiClient();
       const response = await client.models.generateContent({
         model: modelId,
+        task,
+        attemptId,
         contents: { parts: [imagePart, { text: textPrompt }] },
         generationConfig: taskConfig.params,
       } as any);
@@ -383,13 +507,33 @@ export const generateSocialPostText = async (
       } catch {
         throw new Error("Failed to extract text from AI response.");
       }
-      return cleanGeneratedText(rawText);
+      const cleaned = cleanGeneratedText(rawText);
+      const qualityChecked = ensureUsableCaption(cleaned, {
+        storeName: dealershipName,
+        customerName,
+      });
+      if (qualityChecked.usedFallback) {
+        throw new Error("AI caption blocked by quality gate");
+      }
+      return qualityChecked.caption;
     });
 
   let text = "";
+  let captionSource: CaptionGenerationResult["captionSource"] = "ai";
+  let aiMeta: ModelExecutionMetadata | null = null;
+  let fallbackCount = 0;
+  let fallbackReason: "provider_error" | "quality_gate" = "provider_error";
   try {
-    text = await runOnGemini();
+    const generated = await runOnGemini();
+    text = generated.value;
+    aiMeta = generated.aiMeta;
+    fallbackCount = generated.aiMeta.fallbackCount;
   } catch (err) {
+    fallbackCount = attemptedModelsFromError(err);
+    fallbackReason =
+      err instanceof Error && err.message.toLowerCase().includes("quality gate")
+        ? "quality_gate"
+        : "provider_error";
     if (shouldFallbackToClaude(err) && taskConfig.claudeFallback) {
       console.warn(
         "[generateSocialPostText] Gemini exhausted; falling back to Claude",
@@ -400,16 +544,27 @@ export const generateSocialPostText = async (
         const claudePrompt = `${textPrompt}\n\n(Note: image was not transmitted to fallback model. Use the creative brief above to infer scene; do not invent specific visual details you cannot verify.)`;
         text = cleanGeneratedText(
           await generateTextViaClaude(claudePrompt, {
+            task,
+            attemptId,
             model: taskConfig.claudeFallback,
             temperature: taskConfig.claudeTemperature,
             maxTokens: taskConfig.params.maxOutputTokens,
           }),
+        );
+        aiMeta = recordExecution(
+          task,
+          "anthropic",
+          taskConfig.claudeFallback,
+          fallbackCount,
+          true,
+          attemptId,
         );
       } catch (claudeErr) {
         console.warn(
           "[generateSocialPostText] Claude fallback failed; using safe template",
           claudeErr,
         );
+        fallbackCount += 1;
         text = "";
       }
     } else {
@@ -429,9 +584,24 @@ export const generateSocialPostText = async (
   });
   text = usable.caption;
   if (usable.usedFallback) {
+    captionSource = "basic_fallback";
+    aiMeta = recordExecution(
+      task,
+      "basic_fallback",
+      null,
+      aiMeta ? aiMeta.fallbackCount + 1 : fallbackCount,
+      false,
+      attemptId,
+    );
     console.warn(
       "[generateSocialPostText] Low-quality/empty model caption replaced with safe template",
     );
+    logTelemetry("caption.fallback.basic", {
+      task,
+      tier: taskConfig.tier,
+      fallbackCount: aiMeta.fallbackCount,
+      reason: fallbackReason,
+    });
   }
 
   if (!text) {
@@ -441,27 +611,50 @@ export const generateSocialPostText = async (
       storeName: dealershipName || "our dealership",
       customerName,
     }).caption;
+    captionSource = "basic_fallback";
+    aiMeta = recordExecution(
+      task,
+      "basic_fallback",
+      null,
+      fallbackCount,
+      false,
+      attemptId,
+    );
   }
+  const result: CaptionGenerationResult = {
+    text,
+    captionSource,
+    aiMeta:
+      aiMeta ??
+      recordExecution(task, "basic_fallback", null, fallbackCount, false, attemptId),
+  };
   if (cacheKey) {
     // 5 minute cache — captions are pretty hot when iterating styles.
-    requestCache.set(cacheKey, text, 5 * 60 * 1000);
+    requestCache.set(cacheKey, result, 5 * 60 * 1000);
   }
-  return text;
+  return result;
 };
 
-export const editSocialPostText = async (
+export const generateSocialPostText = async (
+  ...args: Parameters<typeof generateSocialPostTextDetailed>
+): Promise<string> => (await generateSocialPostTextDetailed(...args)).text;
+
+export const editSocialPostTextDetailed = async (
   originalText: string,
   editPromptString: string,
   tone: ToneOption,
-): Promise<string> => {
+): Promise<CaptionGenerationResult> => {
   const prompt = editTextPrompt(originalText, editPromptString, tone);
   const taskConfig = TASKS["caption_edit"];
+  const attemptId = createGenerationAttemptId();
 
   const runOnGemini = () =>
-    withFallbackChain("caption_edit", async (modelId) => {
+    withFallbackChain("caption_edit", attemptId, async (modelId) => {
       const client = getGeminiClient();
       const response = await client.models.generateContent({
         model: modelId,
+        task: "caption_edit",
+        attemptId,
         contents: { parts: [{ text: prompt }] },
         generationConfig: taskConfig.params,
       } as any);
@@ -471,12 +664,19 @@ export const editSocialPostText = async (
       } catch {
         throw new Error("Failed to extract text from AI response.");
       }
-      return cleanGeneratedText(rawText);
+      const cleaned = cleanGeneratedText(rawText);
+      if (!cleaned) {
+        throw new Error("AI caption edit blocked by quality gate");
+      }
+      return cleaned;
     });
 
   let text = "";
+  let aiMeta: ModelExecutionMetadata | null = null;
   try {
-    text = await runOnGemini();
+    const generated = await runOnGemini();
+    text = generated.value;
+    aiMeta = generated.aiMeta;
   } catch (err) {
     if (shouldFallbackToClaude(err) && taskConfig.claudeFallback) {
       console.warn(
@@ -485,10 +685,20 @@ export const editSocialPostText = async (
       );
       text = cleanGeneratedText(
         await generateTextViaClaude(prompt, {
+          task: "caption_edit",
+          attemptId,
           model: taskConfig.claudeFallback,
           temperature: taskConfig.claudeTemperature,
           maxTokens: taskConfig.params.maxOutputTokens,
         }),
+      );
+      aiMeta = recordExecution(
+        "caption_edit",
+        "anthropic",
+        taskConfig.claudeFallback,
+        attemptedModelsFromError(err),
+        true,
+        attemptId,
       );
     } else {
       throw err;
@@ -498,8 +708,18 @@ export const editSocialPostText = async (
   if (!text) {
     throw new Error("Failed to edit post text with AI.");
   }
-  return text;
+  return {
+    text,
+    captionSource: "ai",
+    aiMeta:
+      aiMeta ??
+      recordExecution("caption_edit", "basic_fallback", null, 0, false, attemptId),
+  };
 };
+
+export const editSocialPostText = async (
+  ...args: Parameters<typeof editSocialPostTextDetailed>
+): Promise<string> => (await editSocialPostTextDetailed(...args)).text;
 
 export const generateSocialPost = async (
   imageBase64Url: string,
@@ -510,7 +730,8 @@ export const generateSocialPost = async (
   logoBase64Url?: string,
   initialText?: string,
   creativeBrief?: string,
-): Promise<{ image: string; text: string }> => {
+  imageTier: ImageGenerationTier = "standard",
+): Promise<SocialPostGenerationResult> => {
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
 
@@ -524,10 +745,14 @@ export const generateSocialPost = async (
   const logoImagePart = await optionalLogoImagePart(logoBase64Url);
 
   // Generate text (or use provided template/custom text) and the final image in parallel.
-  const textPromise = (
+  const textPromise: Promise<CaptionGenerationResult> = (
     initialText
-      ? Promise.resolve(initialText)
-      : generateSocialPostText(
+      ? Promise.resolve({
+          text: initialText,
+          captionSource: "custom" as const,
+          aiMeta: recordExecution("caption", "custom", null, 0, false),
+        })
+      : generateSocialPostTextDetailed(
           imageBase64Url,
           tone,
           dealershipName,
@@ -564,7 +789,7 @@ export const generateSocialPost = async (
   const imagePromise = (async () => {
     try {
       return await generateImageWithFallback(
-        "image_generate",
+        imageTaskForTier(imageTier),
         imageParts,
         imagePrompt,
       );
@@ -576,20 +801,49 @@ export const generateSocialPost = async (
       logTelemetry("image.fallback.original", {
         reason: err instanceof Error ? err.message : String(err),
       });
-      return normalisedImage;
+      const task = imageTaskForTier(imageTier);
+      return {
+        value: normalisedImage,
+        aiMeta: recordExecution(
+          task,
+          "original",
+          null,
+          attemptedModelsFromError(err),
+          false,
+          attemptIdFromError(err),
+        ),
+      };
     }
   })();
 
-  const [textResult, imageResult] = await Promise.all([
-    textPromise,
-    imagePromise,
-  ]);
+  const [textResult, imageResult] = await Promise.all([textPromise, imagePromise]);
 
-  if (!textResult) {
+  if (!textResult.text) {
     throw new Error("Failed to generate social post caption.");
   }
 
-  return { image: imageResult || normalisedImage, text: textResult };
+  return {
+    image: imageResult.value || normalisedImage,
+    text: textResult.text,
+    captionSource: textResult.captionSource,
+    aiMeta: {
+      captionSource: textResult.captionSource,
+      selectedTier: imageTier,
+      ...(textResult.aiMeta.model ? { model: textResult.aiMeta.model } : {}),
+      fallbackCount: textResult.aiMeta.fallbackCount + imageResult.aiMeta.fallbackCount,
+      ...(latestSuccessfulGenerationAt(textResult.aiMeta, imageResult.aiMeta)
+        ? {
+            lastSuccessfulGenerationAt: latestSuccessfulGenerationAt(
+              textResult.aiMeta,
+              imageResult.aiMeta,
+            ),
+          }
+        : {}),
+      modelPolicyVersion: MODEL_POLICY_VERSION,
+      caption: textResult.aiMeta,
+      image: imageResult.aiMeta,
+    },
+  };
 };
 
 const getImageDimensions = (
@@ -612,10 +866,7 @@ const looksLikeMp4 = (bytes: Uint8Array): boolean => {
   if (bytes.length < 12) return false;
   // ISO BMFF: size(4) + 'ftyp'(4) at offset 4
   return (
-    bytes[4] === 0x66 &&
-    bytes[5] === 0x74 &&
-    bytes[6] === 0x79 &&
-    bytes[7] === 0x70
+    bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70
   );
 };
 
@@ -687,9 +938,7 @@ const fetchVideoThroughProxy = async (videoUri: string): Promise<string> => {
           );
         }
         // Rebuild from the same bytes so MIME is definitely video/mp4
-        return URL.createObjectURL(
-          new Blob([buf], { type: "video/mp4" }),
-        );
+        return URL.createObjectURL(new Blob([buf], { type: "video/mp4" }));
       }
     } catch (validateErr) {
       if (
@@ -718,9 +967,10 @@ export const generatePostVideo = async (
   options: VideoRequestOptions,
   signal?: AbortSignal,
 ): Promise<string> => {
-  // Prefer the quality Veo 3.1 Gemini API model, then fail over to Fast when
-  // the primary is unavailable or overloaded.
-  const videoModels = getFallbackChain("video");
+  const videoTask: "video_standard" | "video_quality" =
+    options.resolution === "1080p" ? "video_quality" : "video_standard";
+  const videoModels = getFallbackChain(videoTask);
+  const resolvedResolution = TASKS[videoTask].resolution ?? "720p";
 
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
 
@@ -733,22 +983,19 @@ export const generatePostVideo = async (
     options.aspectPreference || "auto",
   );
   const requestedDuration = options.durationSeconds || 6;
-  let durationSeconds =
-    requestedDuration <= 5 ? 4 : requestedDuration <= 7 ? 6 : 8;
-  if (options.resolution === "1080p") durationSeconds = 8;
+  let durationSeconds = requestedDuration <= 5 ? 4 : requestedDuration <= 7 ? 6 : 8;
+  if (resolvedResolution === "1080p") durationSeconds = 8;
 
   // Letterbox so Veo never has to invent crop margins (root cause of morph/
   // second-car frames when a square branded post is forced into 9:16).
-  const letterboxed = await letterboxImageForVideo(
-    normalisedImage,
-    aspectRatio,
-  );
+  const letterboxed = await letterboxImageForVideo(normalisedImage, aspectRatio);
   const { mimeType, data: base64Data } = parseDataUrl(letterboxed);
 
   const prompt = generateVideoPrompt(style, {
     ...options,
     durationSeconds,
     aspectPreference: aspectRatio,
+    resolution: resolvedResolution,
     pacing: options.pacing || "cinematic",
   });
 
@@ -769,7 +1016,7 @@ export const generatePostVideo = async (
       aspectRatio: aspectRatio,
       personGeneration: "allow_adult", // Required for image-to-video with people
       durationSeconds: durationSeconds,
-      resolution: options.resolution || "720p",
+      resolution: resolvedResolution,
     },
   };
 
@@ -781,8 +1028,21 @@ export const generatePostVideo = async (
   );
 
   let lastError: any = null;
+  const generationAttemptId = createGenerationAttemptId();
 
-  for (const veoModel of videoModels) {
+  for (let modelIndex = 0; modelIndex < videoModels.length; modelIndex += 1) {
+    const veoModel = videoModels[modelIndex];
+    const finishVideo = (videoUrl: string): string => {
+      recordExecution(
+        videoTask,
+        "gemini",
+        veoModel,
+        modelIndex,
+        true,
+        generationAttemptId,
+      );
+      return videoUrl;
+    };
     for (let attempt = 1; attempt <= 3; attempt++) {
       if (signal?.aborted) {
         throw new DOMException("Video generation aborted", "AbortError");
@@ -802,6 +1062,9 @@ export const generatePostVideo = async (
           credentials: "include",
           headers: {
             "Content-Type": "application/json",
+            "X-Generation-Task": videoTask,
+            "X-Model-Policy-Version": MODEL_POLICY_VERSION,
+            "X-Generation-Attempt-ID": generationAttemptId,
           },
           body: JSON.stringify(body),
         });
@@ -838,12 +1101,14 @@ export const generatePostVideo = async (
         const operationName = json?.name;
         if (operationName) {
           console.log("[VideoGen] Async operation started; polling.");
-          return await pollGeminiVideoOperation(operationName, 360000, signal); // 6 minute timeout for Veo 3.1
+          return finishVideo(
+            await pollGeminiVideoOperation(operationName, 360000, signal),
+          ); // 6 minute timeout for Veo 3.1
         }
 
         // Check for immediate response (unlikely but handle it)
         if (json?.generatedVideos?.[0]) {
-          return extractVideoFromResponse(json);
+          return finishVideo(await extractVideoFromResponse(json));
         }
 
         // Try to extract video from response
@@ -855,16 +1120,16 @@ export const generatePostVideo = async (
               // Check for inline video data
               if (part.inlineData?.mimeType?.startsWith("video/")) {
                 console.log(`[VideoGen] Got inline video data`);
-                return createVideoBlobUrl(part.inlineData.data);
+                return finishVideo(createVideoBlobUrl(part.inlineData.data));
               }
               // Check for file URI
               if (part.fileData?.fileUri) {
-                return await fetchVideoThroughProxy(part.fileData.fileUri);
+                return finishVideo(await fetchVideoThroughProxy(part.fileData.fileUri));
               }
               // Check for video URI directly
               if (part.videoMetadata?.uri || part.uri) {
                 const uri = part.videoMetadata?.uri || part.uri;
-                return await fetchVideoThroughProxy(uri);
+                return finishVideo(await fetchVideoThroughProxy(uri));
               }
             }
           }
@@ -872,12 +1137,12 @@ export const generatePostVideo = async (
 
         // Check for generatedVideos format
         if (json?.generatedVideos || json?.videos) {
-          return extractVideoFromResponse(json);
+          return finishVideo(await extractVideoFromResponse(json));
         }
 
         // Check predictions format (fallback)
         if (json?.predictions?.[0]) {
-          return extractVideoFromPrediction(json.predictions[0]);
+          return finishVideo(await extractVideoFromPrediction(json.predictions[0]));
         }
 
         throw new Error(
@@ -996,8 +1261,7 @@ const pollGeminiVideoOperation = async (
           const resp = operation.response;
           // Check generateVideoResponse format (from predictLongRunning) - OFFICIAL FORMAT
           if (resp.generateVideoResponse?.generatedSamples?.[0]?.video?.uri) {
-            const videoUri =
-              resp.generateVideoResponse.generatedSamples[0].video.uri;
+            const videoUri = resp.generateVideoResponse.generatedSamples[0].video.uri;
             // Download video through proxy to handle auth
             return await fetchVideoThroughProxy(videoUri);
           }
@@ -1065,9 +1329,7 @@ const pollGeminiVideoOperation = async (
     }
   }
 
-  throw new Error(
-    `Video generation timed out after ${timeoutMs / 1000} seconds.`,
-  );
+  throw new Error(`Video generation timed out after ${timeoutMs / 1000} seconds.`);
 };
 
 /**
@@ -1086,8 +1348,7 @@ const extractVideoFromResponse = async (response: any): Promise<string> => {
     }
 
     // Check for base64 video data
-    const base64Data =
-      video?.video?.bytesBase64Encoded || video?.bytesBase64Encoded;
+    const base64Data = video?.video?.bytesBase64Encoded || video?.bytesBase64Encoded;
     if (base64Data) {
       return createVideoBlobUrl(base64Data);
     }
@@ -1142,9 +1403,7 @@ const createVideoBlobUrl = (base64Data: string): string => {
   const pure = base64Data.includes(",")
     ? base64Data.slice(base64Data.indexOf(",") + 1)
     : base64Data;
-  console.log(
-    `[VideoGen] Creating blob from base64 data (${pure.length} chars)`,
-  );
+  console.log(`[VideoGen] Creating blob from base64 data (${pure.length} chars)`);
   const bytes = atob(pure);
   const arr = new Uint8Array(bytes.length);
   for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);

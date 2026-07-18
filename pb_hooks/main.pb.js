@@ -18,26 +18,35 @@ var cachedAccessToken = null;
 var tokenExpiry = 0;
 
 // Rate limiting - using simple object instead of Map for PocketBase JSVM compatibility
-var _rateLimitData = {};
-
 const proxyHandler = (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const policies = require(__hooks + "/requestPolicies.js");
   // Rate limit configuration - defined inside handler for scope safety
   const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute window
   const RATE_LIMIT_MAX_REQUESTS = 60; // 60 requests per dealer per minute
 
-  const GEMINI_API_URL_BASE = "https://generativelanguage.googleapis.com/";
+  let GEMINI_API_URL_BASE = "https://generativelanguage.googleapis.com/";
+  const providerTestBase = ($os.getenv("GEMINI_API_URL_BASE") || "").trim();
+  const providerTestMode =
+    ($os.getenv("ALLOW_TEST_PROVIDER_ORIGIN") || "").trim().toLowerCase() === "true";
+  if (
+    providerTestMode &&
+    /^http:\/\/(127\.0\.0\.1|localhost|host\.docker\.internal):\d{2,5}\/$/.test(
+      providerTestBase,
+    )
+  ) {
+    // Deterministic CI-only upstream boundary; production cannot redirect
+    // provider traffic without both the explicit test flag and loopback host.
+    GEMINI_API_URL_BASE = providerTestBase;
+  }
   const VERTEX_AI_URL_BASE = "https://{LOCATION}-aiplatform.googleapis.com/";
 
   const geminiApiKey = $os.getenv("GEMINI_API_KEY");
   // Vertex API Key no longer used, we use Service Account
 
-  // Session-cookie auth is the primary gate. The shared PROXY_ACCESS_TOKEN
-  // remains as a fallback for server-to-server callers (cron jobs, monitoring)
-  // ONLY — the frontend no longer sends it. If the token env var is unset, we
-  // simply skip the fallback check.
-  const proxyAccessToken = ($os.getenv("PROXY_ACCESS_TOKEN") || "").trim();
-
   let path = null;
+  let generationAudit = null;
+  let generationAuditRecorded = false;
 
   // Multiple methods to extract path for PocketBase JSVM compatibility
   try {
@@ -86,49 +95,24 @@ const proxyHandler = (c) => {
   }
 
   try {
-    const helpers = require(__hooks + "/helpers.js");
-    const policies = require(__hooks + "/requestPolicies.js");
     const requestInfo = $apis.requestInfo(c);
-    const headers = requestInfo.headers || {};
 
-    // PRIMARY auth: session cookie. The frontend always carries it.
+    // Every billable provider request requires the same continuously validated
+    // browser session as the application routes. Public health has its own
+    // non-billable endpoint; a long-lived shared proxy token would bypass role,
+    // expiry, person, tenant, and credential-rotation checks.
     const dealer = helpers.dealerFromSession(c);
-    let rateLimitKey = null;
-
-    if (dealer) {
-      rateLimitKey = "dealer:" + dealer.id;
-    } else {
-      // FALLBACK auth: shared PROXY_ACCESS_TOKEN. Server-to-server only —
-      // the frontend does not send this. Kept so monitors / cron jobs can
-      // probe the proxy without holding a dealer session.
-      const incomingToken = (
-        headers["x_proxy_token"] ||
-        headers["x-proxy-token"] ||
-        c.request().header.get("X-Proxy-Token") ||
-        c.request().header.get("x-proxy-token") ||
-        ""
-      )
-        .toString()
-        .trim();
-
-      if (
-        !proxyAccessToken ||
-        !incomingToken ||
-        incomingToken !== proxyAccessToken
-      ) {
-        helpers.logAuthEvent("proxy_unauthorized", {
-          ip: helpers.clientIP(c),
-          userAgent: helpers.userAgent(c),
-          detail: "no session, no valid token",
-        });
-        return c.json(401, { error: "Unauthorized proxy request" });
-      }
-      // There is a single configured S2S token, so a constant bucket avoids
-      // retaining or logging any part of that credential.
-      rateLimitKey = "s2s-token";
+    if (!dealer) {
+      helpers.logAuthEvent("proxy_unauthorized", {
+        ip: helpers.clientIP(c),
+        userAgent: helpers.userAgent(c),
+        detail: "no authoritative session",
+      });
+      return c.json(401, { error: "Unauthorized proxy request" });
     }
+    const rateLimitKey = "dealer:" + dealer.id;
 
-    // Per-dealer (or per-token-prefix) sliding window. 60 req/min absorbs a
+    // Per-dealer sliding window. 60 req/min absorbs a
     // legitimate burst of poll requests for long-running video generation
     // while still capping a runaway script.
     const limit = helpers.checkProxyRateLimit(
@@ -143,10 +127,7 @@ const proxyHandler = (c) => {
         userAgent: helpers.userAgent(c),
         detail: "key=" + rateLimitKey + " count=" + limit.count,
       });
-      const retryAfter = Math.max(
-        1,
-        Math.ceil((limit.retryAfterMs || 60000) / 1000),
-      );
+      const retryAfter = Math.max(1, Math.ceil((limit.retryAfterMs || 60000) / 1000));
       c.response().header("Retry-After", String(retryAfter));
       return c.json(429, {
         error: "Rate limit exceeded",
@@ -168,6 +149,13 @@ const proxyHandler = (c) => {
     }
 
     const authorizedProxyPath = path;
+    if (dealer && (requestInfo.method || "").toString().toUpperCase() === "POST") {
+      generationAudit = {
+        dealer: dealer,
+        requestInfo: requestInfo,
+        path: authorizedProxyPath,
+      };
+    }
     const operationStartProvider = policies.providerOperationStartProvider(
       authorizedProxyPath,
       requestInfo.method,
@@ -177,14 +165,6 @@ const proxyHandler = (c) => {
       requestInfo.method,
     );
 
-    // Shared S2S credentials have no tenant identity and therefore cannot
-    // create, poll, or download dealer-owned provider resources. Stateful
-    // provider routes require a browser session resolved to one dealer.
-    if ((operationStartProvider || requestedProviderResource) && !dealer) {
-      return c.json(403, {
-        error: "Dealer session required for provider resource access",
-      });
-    }
     if (
       requestedProviderResource &&
       !helpers.dealerOwnsProviderResource(dealer.id, requestedProviderResource)
@@ -200,10 +180,7 @@ const proxyHandler = (c) => {
     // Polling and file-download GETs intentionally keep an empty body.
     let sanitizedProxyBody = "";
     if ((requestInfo.method || "").toString().toUpperCase() === "POST") {
-      const upstreamRequest = policies.buildGeminiProxyRequest(
-        path,
-        requestInfo.data,
-      );
+      const upstreamRequest = policies.buildGeminiProxyRequest(path, requestInfo.data);
       if (!upstreamRequest) {
         return c.json(400, {
           error: "Invalid or unsupported generation request",
@@ -225,10 +202,7 @@ const proxyHandler = (c) => {
           ip: helpers.clientIP(c),
           userAgent: helpers.userAgent(c),
           detail:
-            "generation_bucket=" +
-            costPolicy.bucket +
-            " count=" +
-            costLimit.count,
+            "generation_bucket=" + costPolicy.bucket + " count=" + costLimit.count,
         });
         const retryAfter = Math.max(
           1,
@@ -287,17 +261,14 @@ const proxyHandler = (c) => {
                 client_email: clientEmail,
                 client_id: $os.getenv("client_id") || "",
                 auth_uri:
-                  $os.getenv("auth_uri") ||
-                  "https://accounts.google.com/o/oauth2/auth",
+                  $os.getenv("auth_uri") || "https://accounts.google.com/o/oauth2/auth",
                 token_uri:
-                  $os.getenv("token_uri") ||
-                  "https://oauth2.googleapis.com/token",
+                  $os.getenv("token_uri") || "https://oauth2.googleapis.com/token",
                 auth_provider_x509_cert_url:
                   $os.getenv("auth_provider_x509_cert_url") ||
                   "https://www.googleapis.com/oauth2/v1/certs",
                 client_x509_cert_url: $os.getenv("client_x509_cert_url") || "",
-                universe_domain:
-                  $os.getenv("universe_domain") || "googleapis.com",
+                universe_domain: $os.getenv("universe_domain") || "googleapis.com",
               };
               console.log(
                 "[Vertex] Constructed service account from individual env vars",
@@ -369,10 +340,7 @@ const proxyHandler = (c) => {
                 chars.charAt(enc4);
             }
 
-            return output
-              .replace(/\+/g, "-")
-              .replace(/\//g, "_")
-              .replace(/=+$/, "");
+            return output.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
           };
 
           // Sign JWT. Temp filenames carry a per-request random suffix so
@@ -590,8 +558,7 @@ const proxyHandler = (c) => {
     // Always pin binary file downloads to alt=media so Google returns bytes,
     // not a JSON metadata envelope that browsers cannot play.
     const isFileDownloadPath =
-      cleanPath.indexOf("v1beta/files/") === 0 &&
-      cleanPath.indexOf(":download") !== -1;
+      cleanPath.indexOf("v1beta/files/") === 0 && cleanPath.indexOf(":download") !== -1;
     if (
       isFileDownloadPath &&
       (requestInfo.method || "").toString().toUpperCase() === "GET" &&
@@ -603,8 +570,7 @@ const proxyHandler = (c) => {
     // GET downloads must not send a JSON content-type or body — that can make
     // some upstreams return an error JSON body which then "plays" as a broken
     // video (infinite spinner on the play button).
-    const isGet =
-      (requestInfo.method || "").toString().toUpperCase() === "GET";
+    const isGet = (requestInfo.method || "").toString().toUpperCase() === "GET";
     const upstreamHeaders = isGet
       ? { ...authHeader }
       : { "Content-Type": "application/json", ...authHeader };
@@ -614,7 +580,7 @@ const proxyHandler = (c) => {
       method: requestInfo.method,
       body: isGet ? "" : sanitizedProxyBody,
       headers: upstreamHeaders,
-      timeout: 300000, // 5 minutes
+      timeout: 300, // PocketBase 0.22 uses seconds; allow 5 minutes for Veo.
     });
 
     console.log(`[Proxy] Upstream status: ${res.statusCode}`);
@@ -656,14 +622,25 @@ const proxyHandler = (c) => {
       return c.blob(res.statusCode, upstreamContentType, binaryBody);
     }
 
-    const body =
-      res.body ?? res.raw ?? (res.json ? JSON.stringify(res.json) : "");
+    const body = res.body ?? res.raw ?? (res.json ? JSON.stringify(res.json) : "");
 
     let jsonBody = null;
     try {
-      jsonBody =
-        res.json && typeof res.json === "object" ? res.json : JSON.parse(body);
+      jsonBody = res.json && typeof res.json === "object" ? res.json : JSON.parse(body);
     } catch (_e) {
+      if (!isGet) {
+        helpers.recordProxyGenerationEvent(
+          c,
+          dealer,
+          requestInfo,
+          authorizedProxyPath,
+          res.statusCode,
+          "gemini",
+          "",
+          null,
+        );
+        generationAuditRecorded = true;
+      }
       return c.string(res.statusCode, body);
     }
 
@@ -690,6 +667,17 @@ const proxyHandler = (c) => {
         typeof jsonBody.name === "string" &&
         !securedOperation
       ) {
+        helpers.recordProxyGenerationEvent(
+          c,
+          dealer,
+          requestInfo,
+          authorizedProxyPath,
+          502,
+          "gemini",
+          "",
+          jsonBody,
+        );
+        generationAuditRecorded = true;
         return c.json(502, { error: "Invalid provider operation response" });
       }
 
@@ -699,14 +687,50 @@ const proxyHandler = (c) => {
         }
       } catch (_e) {
         console.error("[Proxy] Provider resource ownership save failed");
+        helpers.recordProxyGenerationEvent(
+          c,
+          dealer,
+          requestInfo,
+          authorizedProxyPath,
+          502,
+          "gemini",
+          "",
+          jsonBody,
+        );
+        generationAuditRecorded = true;
         return c.json(502, { error: "Could not secure provider resource" });
       }
     }
 
+    if (!isGet) {
+      helpers.recordProxyGenerationEvent(
+        c,
+        dealer,
+        requestInfo,
+        authorizedProxyPath,
+        res.statusCode,
+        "gemini",
+        "",
+        jsonBody,
+      );
+      generationAuditRecorded = true;
+    }
+
     return c.json(res.statusCode, jsonBody);
   } catch (err) {
-    const apiType =
-      path && path.startsWith("vertex/") ? "Vertex AI" : "Gemini API";
+    if (generationAudit && !generationAuditRecorded) {
+      helpers.recordProxyGenerationEvent(
+        c,
+        generationAudit.dealer,
+        generationAudit.requestInfo,
+        generationAudit.path,
+        0,
+        "gemini",
+        "",
+        null,
+      );
+    }
+    const apiType = path && path.startsWith("vertex/") ? "Vertex AI" : "Gemini API";
     console.error(`[Proxy ${apiType}] Error:`, err);
     return c.json(500, {
       error: `${apiType} request failed`,
@@ -721,15 +745,14 @@ const proxyHandler = (c) => {
 // ----------------------------------------------------------------------------
 // OpenAI image-generation fallback proxy. Used by services/openaiAdapter.ts
 // when ALL Gemini image models in the fallback chain exhaust. Requires
-// OPENAI_API_KEY in env. Same PROXY_ACCESS_TOKEN gating as the other proxies.
+// OPENAI_API_KEY in env. The same authoritative browser session gate applies.
 // ----------------------------------------------------------------------------
 routerAdd("POST", "/api/proxy/openai/v1/images/generations", (c) => {
   const helpers = require(__hooks + "/helpers.js");
   const policies = require(__hooks + "/requestPolicies.js");
   const openaiKey = ($os.getenv("OPENAI_API_KEY") || "").trim();
   const enabled =
-    ($os.getenv("ENABLE_OPENAI_FALLBACK") || "").trim().toLowerCase() ===
-    "true";
+    ($os.getenv("ENABLE_OPENAI_FALLBACK") || "").trim().toLowerCase() === "true";
   // Session cookie required (same model as primary Gemini proxy).
   const dealer = helpers.dealerFromSession(c);
   if (!dealer) {
@@ -743,11 +766,7 @@ routerAdd("POST", "/api/proxy/openai/v1/images/generations", (c) => {
   if (!enabled || !openaiKey) {
     return c.json(503, { error: "OpenAI image fallback is not enabled" });
   }
-  const limit = helpers.checkProxyRateLimit(
-    "openai:" + dealer.id,
-    5,
-    60 * 1000,
-  );
+  const limit = helpers.checkProxyRateLimit("openai:" + dealer.id, 5, 60 * 1000);
   if (!limit.ok) {
     c.response().header("Retry-After", "60");
     return c.json(429, { error: "Rate limit exceeded" });
@@ -766,16 +785,48 @@ routerAdd("POST", "/api/proxy/openai/v1/images/generations", (c) => {
         Authorization: `Bearer ${openaiKey}`,
       },
       body: JSON.stringify(upstreamRequest),
-      timeout: 120000,
+      timeout: 120,
     });
-    const body =
-      res.body ?? res.raw ?? (res.json ? JSON.stringify(res.json) : "");
+    const body = res.body ?? res.raw ?? (res.json ? JSON.stringify(res.json) : "");
+    let parsedBody = null;
     try {
-      return c.json(res.statusCode, JSON.parse(body));
+      parsedBody =
+        res.json && typeof res.json === "object" ? res.json : JSON.parse(body);
     } catch (_e) {
+      helpers.recordProxyGenerationEvent(
+        c,
+        dealer,
+        requestInfo,
+        "openai/v1/images/generations",
+        res.statusCode,
+        "openai",
+        upstreamRequest.model,
+        null,
+      );
       return c.string(res.statusCode, body);
     }
+    helpers.recordProxyGenerationEvent(
+      c,
+      dealer,
+      requestInfo,
+      "openai/v1/images/generations",
+      res.statusCode,
+      "openai",
+      upstreamRequest.model,
+      parsedBody,
+    );
+    return c.json(res.statusCode, parsedBody);
   } catch (err) {
+    helpers.recordProxyGenerationEvent(
+      c,
+      dealer,
+      requestInfo,
+      "openai/v1/images/generations",
+      0,
+      "openai",
+      upstreamRequest.model,
+      null,
+    );
     console.error("[Proxy OpenAI] error", err);
     return c.json(500, {
       error: "Failed to proxy request to OpenAI",
@@ -788,8 +839,7 @@ routerAdd("POST", "/api/proxy/anthropic/v1/messages", (c) => {
   const policies = require(__hooks + "/requestPolicies.js");
   const anthropicKey = ($os.getenv("ANTHROPIC_API_KEY") || "").trim();
   const enabled =
-    ($os.getenv("ENABLE_CLAUDE_FALLBACK") || "").trim().toLowerCase() ===
-    "true";
+    ($os.getenv("ENABLE_CLAUDE_FALLBACK") || "").trim().toLowerCase() === "true";
   const dealer = helpers.dealerFromSession(c);
   if (!dealer) {
     helpers.logAuthEvent("proxy_unauthorized", {
@@ -802,19 +852,13 @@ routerAdd("POST", "/api/proxy/anthropic/v1/messages", (c) => {
   if (!enabled || !anthropicKey) {
     return c.json(503, { error: "Anthropic fallback is not enabled" });
   }
-  const limit = helpers.checkProxyRateLimit(
-    "anthropic:" + dealer.id,
-    15,
-    60 * 1000,
-  );
+  const limit = helpers.checkProxyRateLimit("anthropic:" + dealer.id, 15, 60 * 1000);
   if (!limit.ok) {
     c.response().header("Retry-After", "60");
     return c.json(429, { error: "Rate limit exceeded" });
   }
   const requestInfo = $apis.requestInfo(c);
-  const upstreamRequest = policies.buildAnthropicMessageRequest(
-    requestInfo.data,
-  );
+  const upstreamRequest = policies.buildAnthropicMessageRequest(requestInfo.data);
   if (!upstreamRequest) {
     return c.json(400, { error: "Invalid Anthropic message request" });
   }
@@ -828,16 +872,48 @@ routerAdd("POST", "/api/proxy/anthropic/v1/messages", (c) => {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify(upstreamRequest),
-      timeout: 120000,
+      timeout: 120,
     });
-    const body =
-      res.body ?? res.raw ?? (res.json ? JSON.stringify(res.json) : "");
+    const body = res.body ?? res.raw ?? (res.json ? JSON.stringify(res.json) : "");
+    let parsedBody = null;
     try {
-      return c.json(res.statusCode, JSON.parse(body));
+      parsedBody =
+        res.json && typeof res.json === "object" ? res.json : JSON.parse(body);
     } catch (_e) {
+      helpers.recordProxyGenerationEvent(
+        c,
+        dealer,
+        requestInfo,
+        "anthropic/v1/messages",
+        res.statusCode,
+        "anthropic",
+        upstreamRequest.model,
+        null,
+      );
       return c.string(res.statusCode, body);
     }
+    helpers.recordProxyGenerationEvent(
+      c,
+      dealer,
+      requestInfo,
+      "anthropic/v1/messages",
+      res.statusCode,
+      "anthropic",
+      upstreamRequest.model,
+      parsedBody,
+    );
+    return c.json(res.statusCode, parsedBody);
   } catch (err) {
+    helpers.recordProxyGenerationEvent(
+      c,
+      dealer,
+      requestInfo,
+      "anthropic/v1/messages",
+      0,
+      "anthropic",
+      upstreamRequest.model,
+      null,
+    );
     console.error("[Proxy Anthropic] error", err);
     return c.json(500, {
       error: "Failed to proxy request to Anthropic",
@@ -943,7 +1019,8 @@ routerAdd("GET", "/api/proxy-image", (c) => {
 routerAdd("GET", "/api/app/health", (c) => {
   const helpers = require(__hooks + "/helpers.js");
   const policies = require(__hooks + "/requestPolicies.js");
-  const isAuthedAdmin = helpers.sessionRoleFromCookie(c) === "super_admin";
+  const healthContext = helpers.sessionContext(c);
+  const isAuthedAdmin = !!healthContext && healthContext.role === "super_admin";
 
   const checks = {
     pocketbase: false,
@@ -953,11 +1030,77 @@ routerAdd("GET", "/api/app/health", (c) => {
     anthropic_key_set: false,
     openai_key_set: false,
     admin_dealer_code_set: false,
+    turnstile_enforcement_enabled: false,
+    turnstile_secret_set: false,
+    turnstile_site_key_set: false,
+    trusted_proxy_configured: false,
+    legacy_client_compatibility_enabled: false,
+    off_box_backup_configured: false,
+    off_box_restore_ready: false,
   };
+  const modelPolicy = policies.geminiModelPolicySnapshot();
+  const backupEnabled =
+    ($os.getenv("POCKETBASE_R2_BACKUPS_ENABLED") || "").trim().toLowerCase() === "true";
+  const backupVerifiedCandidate = (
+    $os.getenv("POCKETBASE_BACKUP_LAST_VERIFIED_AT") || ""
+  ).trim();
+  const backupVerifiedMillis = Date.parse(backupVerifiedCandidate);
+  const backupLastVerifiedAt = Number.isFinite(backupVerifiedMillis)
+    ? new Date(backupVerifiedMillis).toISOString()
+    : null;
+  const releaseSha = (
+    $os.getenv("RELEASE_SHA") ||
+    $os.getenv("FLY_IMAGE_REF") ||
+    "unknown"
+  )
+    .trim()
+    .slice(0, 120);
+  const backupVerifiedReleaseSha = (
+    $os.getenv("POCKETBASE_BACKUP_VERIFIED_RELEASE_SHA") || ""
+  )
+    .trim()
+    .slice(0, 120);
+  // A restore result is release evidence, not a permanent boolean. Seven days
+  // leaves room for a stable production release while still forcing stale or
+  // copied evidence out of readiness. Every deployment performs a fresh drill.
+  const backupVerificationMaxAgeHours = 7 * 24;
+  const backupVerificationAgeMillis = Number.isFinite(backupVerifiedMillis)
+    ? Date.now() - backupVerifiedMillis
+    : NaN;
+  const backupTimestampIsRecent =
+    Number.isFinite(backupVerificationAgeMillis) &&
+    backupVerificationAgeMillis >= -5 * 60 * 1000 &&
+    backupVerificationAgeMillis <= backupVerificationMaxAgeHours * 60 * 60 * 1000;
+  const releaseShaIsKnown = !!releaseSha && releaseSha !== "unknown";
+  const backupReleaseMatches =
+    releaseShaIsKnown && backupVerifiedReleaseSha === releaseSha;
+  let backupStatus = "verified";
+  if (!backupEnabled) {
+    backupStatus = "not_configured";
+  } else if (!backupLastVerifiedAt || !backupVerifiedReleaseSha) {
+    backupStatus = "verification_required";
+  } else if (!releaseShaIsKnown) {
+    backupStatus = "release_unknown";
+  } else if (!backupReleaseMatches) {
+    backupStatus = "release_mismatch";
+  } else if (!backupTimestampIsRecent) {
+    backupStatus = "stale";
+  }
+  const backupRestoreReady = backupStatus === "verified";
   const result = {
     ok: true,
     ts: new Date().toISOString(),
-    version: "1.0",
+    version: "2.0",
+    releaseSha: releaseSha,
+    apiContractVersion: "2026-07-17.v2",
+    modelPolicyVersion: String(modelPolicy.version),
+    backup: {
+      configured: backupEnabled,
+      lastVerifiedAt: backupLastVerifiedAt,
+      verifiedReleaseSha: backupVerifiedReleaseSha || null,
+      maxAgeHours: backupVerificationMaxAgeHours,
+      status: backupStatus,
+    },
   };
 
   // Aggregate tenant counts only for authenticated super-admins.
@@ -968,6 +1111,21 @@ routerAdd("GET", "/api/app/health", (c) => {
       posts_24h: 0,
       photo_releases_24h: 0,
     };
+    result.generation = {
+      aiSuccesses24h: 0,
+      basicFallbacks24h: 0,
+      fallbackAttempts24h: 0,
+      standardTier24h: 0,
+      studioTier24h: 0,
+      lastSuccessfulAt: null,
+      providerAttempts24h: 0,
+      providerFailures24h: 0,
+      lastProviderAttemptAt: null,
+    };
+    result.recentErrors = {
+      total24h: 0,
+      topActions: [],
+    };
   }
 
   try {
@@ -976,9 +1134,7 @@ routerAdd("GET", "/api/app/health", (c) => {
     checks.pocketbase = !!dealers;
     if (dealers && isAuthedAdmin) {
       try {
-        const all = $app
-          .dao()
-          .findRecordsByFilter("dealers", "1=1", "name", 1000, 0);
+        const all = $app.dao().findRecordsByFilter("dealers", "1=1", "name", 1000, 0);
         result.counts.dealers = all.length;
       } catch (_e) {
         /* ignore */
@@ -991,7 +1147,9 @@ routerAdd("GET", "/api/app/health", (c) => {
 
   if (isAuthedAdmin) {
     try {
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const since = helpers.databaseTimestamp(
+        new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      );
       const posts = $app
         .dao()
         .findRecordsByFilter(
@@ -1003,11 +1161,34 @@ routerAdd("GET", "/api/app/health", (c) => {
           { s: since },
         );
       result.counts.posts_24h = posts.length;
+      posts.forEach(function (post) {
+        const source = post.getString("caption_source");
+        const tier = post.getString("generation_tier");
+        const fallbackCount = post.getInt("generation_fallback_count") || 0;
+        const successfulAt = post.getString("generation_last_success_at");
+        const successfulAtIso = successfulAt.replace(" ", "T");
+        if (source === "ai") result.generation.aiSuccesses24h += 1;
+        if (source === "basic_fallback") {
+          result.generation.basicFallbacks24h += 1;
+        }
+        result.generation.fallbackAttempts24h += Math.max(0, fallbackCount);
+        if (tier === "standard") result.generation.standardTier24h += 1;
+        if (tier === "studio") result.generation.studioTier24h += 1;
+        if (
+          successfulAtIso &&
+          (!result.generation.lastSuccessfulAt ||
+            successfulAtIso > result.generation.lastSuccessfulAt)
+        ) {
+          result.generation.lastSuccessfulAt = successfulAtIso;
+        }
+      });
     } catch (_e) {
       /* posts collection may not exist yet */
     }
     try {
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const since = helpers.databaseTimestamp(
+        new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      );
       const releases = $app
         .dao()
         .findRecordsByFilter(
@@ -1022,30 +1203,117 @@ routerAdd("GET", "/api/app/health", (c) => {
     } catch (_e) {
       /* photo_releases may not exist yet */
     }
+    try {
+      const cutoff = helpers.databaseTimestamp(
+        new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      );
+      const attempts = $app
+        .dao()
+        .findRecordsByFilter(
+          "generation_events",
+          "occurred_at >= {:cutoff}",
+          "-occurred_at",
+          1000,
+          0,
+          { cutoff: cutoff },
+        );
+      result.generation.providerAttempts24h = attempts.length;
+      attempts.forEach(function (attempt) {
+        if (!attempt.getBool("succeeded")) {
+          result.generation.providerFailures24h += 1;
+        }
+      });
+      if (attempts.length) {
+        result.generation.lastProviderAttemptAt = attempts[0]
+          .getString("occurred_at")
+          .replace(" ", "T");
+      }
+    } catch (_e) {
+      /* generation_events may not exist until the forward migration */
+    }
+    try {
+      const cutoff = helpers.databaseTimestamp(
+        new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+      );
+      const errors = $app
+        .dao()
+        .findRecordsByFilter(
+          "client_error_events",
+          "occurred_at >= {:cutoff}",
+          "-occurred_at",
+          1000,
+          0,
+          { cutoff: cutoff },
+        );
+      const byAction = {};
+      errors.forEach(function (event) {
+        const name = event.getString("name") || "unknown";
+        byAction[name] = (byAction[name] || 0) + 1;
+      });
+      result.recentErrors.total24h = errors.length;
+      result.recentErrors.topActions = Object.keys(byAction)
+        .map(function (name) {
+          return { name: name, count: byAction[name] };
+        })
+        .sort(function (a, b) {
+          return b.count - a.count || a.name.localeCompare(b.name);
+        })
+        .slice(0, 5);
+    } catch (_e) {
+      /* client_error_events may not exist until the forward migration */
+    }
   }
 
   // Env presence (booleans only — never echo the values)
   checks.gemini_key_set = !!($os.getenv("GEMINI_API_KEY") || "").trim();
-  checks.proxy_token_set = !!($os.getenv("PROXY_ACCESS_TOKEN") || "").trim();
+  // Retained in the health contract for one compatibility release. Shared
+  // proxy tokens are intentionally unsupported; every paid route requires a
+  // continuously revalidated application session.
+  checks.proxy_token_set = false;
   checks.anthropic_key_set = !!($os.getenv("ANTHROPIC_API_KEY") || "").trim();
   checks.openai_key_set = !!($os.getenv("OPENAI_API_KEY") || "").trim();
   checks.claude_fallback_enabled =
     checks.anthropic_key_set &&
-    ($os.getenv("ENABLE_CLAUDE_FALLBACK") || "").trim().toLowerCase() ===
-      "true";
+    ($os.getenv("ENABLE_CLAUDE_FALLBACK") || "").trim().toLowerCase() === "true";
   checks.openai_fallback_enabled =
     checks.openai_key_set &&
-    ($os.getenv("ENABLE_OPENAI_FALLBACK") || "").trim().toLowerCase() ===
-      "true";
+    ($os.getenv("ENABLE_OPENAI_FALLBACK") || "").trim().toLowerCase() === "true";
   checks.admin_dealer_code_set = policies.isValidAdminDealerCode(
     $os.getenv("ADMIN_DEALER_CODE") || "",
   );
+  const flyRuntime = !!($os.getenv("FLY_APP_NAME") || "").trim();
+  const turnstileSecret = ($os.getenv("TURNSTILE_SECRET") || "").toString();
+  const turnstileSiteKey = ($os.getenv("TURNSTILE_SITE_KEY") || "").toString();
+  checks.turnstile_enforcement_enabled =
+    ($os.getenv("TURNSTILE_ENFORCEMENT_ENABLED") || "").trim().toLowerCase() === "true";
+  checks.turnstile_secret_set =
+    turnstileSecret.length >= 20 &&
+    (!flyRuntime || !helpers.isTurnstileTestSecret(turnstileSecret));
+  checks.turnstile_site_key_set =
+    /^[A-Za-z0-9_-]{20,}$/.test(turnstileSiteKey) &&
+    (!flyRuntime || !helpers.isTurnstileTestSiteKey(turnstileSiteKey));
+  checks.trusted_proxy_configured =
+    ($os.getenv("VERCEL_TO_FLY_PROXY_SECRET") || "").toString().length >= 32;
+  checks.legacy_client_compatibility_enabled =
+    ($os.getenv("LEGACY_CLIENT_COMPATIBILITY_ENABLED") || "")
+      .toString()
+      .trim()
+      .toLowerCase() === "true";
+  checks.off_box_backup_configured = backupEnabled;
+  checks.off_box_restore_ready = backupRestoreReady;
 
   // Top-level ok = critical checks must pass (uptime monitors hit this).
   if (
     !checks.pocketbase ||
     !checks.gemini_key_set ||
-    !checks.admin_dealer_code_set
+    !checks.admin_dealer_code_set ||
+    (flyRuntime &&
+      (!checks.trusted_proxy_configured ||
+        !checks.turnstile_secret_set ||
+        !checks.turnstile_site_key_set)) ||
+    (checks.turnstile_enforcement_enabled &&
+      (!checks.turnstile_secret_set || !checks.turnstile_site_key_set)) ||
+    !checks.off_box_restore_ready
   ) {
     result.ok = false;
   }
@@ -1053,88 +1321,11 @@ routerAdd("GET", "/api/app/health", (c) => {
   return c.json(result.ok ? 200 : 503, result);
 });
 
-function redactTelemetryVinStrings(value) {
-  return String(value).replace(
-    /(^|[^A-HJ-NPR-Z0-9])([A-HJ-NPR-Z0-9]{17})(?=$|[^A-HJ-NPR-Z0-9])/gi,
-    function (match, prefix, candidate) {
-      if (!/\d/.test(candidate)) return match;
-      return prefix + "[REDACTED_VIN]";
-    },
-  );
-}
-
-function isSensitiveTelemetryKey(key) {
-  const normalized = String(key)
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
-
-  if (
-    normalized === "vin" ||
-    normalized.endsWith("vehiclevin") ||
-    normalized.endsWith("attachedvin")
-  ) {
-    return true;
-  }
-
-  if (
-    normalized === "code" ||
-    normalized.endsWith("dealercode") ||
-    normalized.endsWith("admincode") ||
-    normalized.endsWith("accesscode") ||
-    normalized.endsWith("invitecode")
-  ) {
-    return true;
-  }
-
-  return (
-    normalized.indexOf("authorization") !== -1 ||
-    normalized.indexOf("cookie") !== -1 ||
-    normalized.indexOf("token") !== -1 ||
-    normalized.indexOf("signature") !== -1 ||
-    normalized.indexOf("password") !== -1 ||
-    normalized.indexOf("secret") !== -1 ||
-    normalized.indexOf("credential") !== -1 ||
-    normalized.endsWith("apikey")
-  );
-}
-
-function redactTelemetryValue(value, key, depth) {
-  if (key && isSensitiveTelemetryKey(key)) return "[REDACTED]";
-  if (typeof value === "string") return redactTelemetryVinStrings(value);
-  if (
-    value === null ||
-    typeof value === "boolean" ||
-    typeof value === "number"
-  ) {
-    return value;
-  }
-  if (depth >= 10) return "[TRUNCATED]";
-
-  if (Array.isArray(value)) {
-    return value.map(function (entry) {
-      return redactTelemetryValue(entry, "", depth + 1);
-    });
-  }
-
-  if (value && typeof value === "object") {
-    const redacted = {};
-    Object.keys(value).forEach(function (property) {
-      const safeProperty = redactTelemetryVinStrings(property);
-      redacted[safeProperty] = redactTelemetryValue(
-        value[property],
-        property,
-        depth + 1,
-      );
-    });
-    return redacted;
-  }
-
-  return "[UNSUPPORTED]";
-}
-
 routerAdd("POST", "/api/telemetry", (c) => {
+  let telemetryStage = "start";
   try {
     const helpers = require(__hooks + "/helpers.js");
+    c.response().header().set("Cache-Control", "no-store");
     // This endpoint is intentionally unauthenticated (it captures pre-login
     // client errors), so rate-limit per IP to stop log-injection / disk-fill
     // abuse: 30 events per IP per minute.
@@ -1145,19 +1336,68 @@ routerAdd("POST", "/api/telemetry", (c) => {
     );
     if (!rl.ok) return c.json(429, { success: false });
 
+    telemetryStage = "request_info";
     const rawBody = $apis.requestInfo(c).data || {};
-    // Redact before truncating so secrets cannot survive beyond the slice
-    // boundary, then apply a serialized-string VIN pass as defense in depth.
-    const redactedBody = redactTelemetryValue(rawBody, "", 0);
-    const serialized = redactTelemetryVinStrings(
-      JSON.stringify(redactedBody),
-    ).slice(0, 2000);
-    console.log("[Telemetry]", serialized);
+    const rawSerialized = JSON.stringify(rawBody);
+    if (!rawSerialized || rawSerialized.length > 8000) {
+      return c.json(413, { success: false });
+    }
+    // PocketBase exposes request data through a Go map proxy. Round-trip it
+    // into a plain JS object before recursively enumerating keys in Goja.
+    const plainBody = JSON.parse(rawSerialized);
+    telemetryStage = "parsed";
+    // Only actionable error-level events leave the browser. Info/warn events
+    // remain in the 14-day local ring buffer and cannot fill the server DB.
+    if (!plainBody || plainBody.level !== "error") {
+      return c.json(202, { success: true, stored: false });
+    }
+
+    // Persist an allowlisted diagnostic envelope, never arbitrary client text.
+    // Messages, VINs, names, codes, prompts, and credentials are discarded even
+    // if a malicious or outdated client bypasses the browser-side sanitizer.
+    const safeEnvelope = helpers.buildSafeTelemetryEnvelope(plainBody);
+    telemetryStage = "validated";
+
+    const collection = $app.dao().findCollectionByNameOrId("client_error_events");
+    const record = new Record(collection);
+    record.set("name", safeEnvelope.name);
+    record.set("payload", safeEnvelope.payload);
+    record.set("release_sha", safeEnvelope.releaseSha);
+    record.set("api_contract_version", safeEnvelope.apiContractVersion);
+    record.set("occurred_at", new Date().toISOString());
+    telemetryStage = "record_ready";
+    $app.dao().saveRecord(record);
     return c.json(200, { success: true });
   } catch (_err) {
-    console.error("Telemetry redaction error");
+    console.error("Telemetry persistence error at stage", telemetryStage);
     // Return 200 even on error to prevent client noise; do not echo details.
     return c.json(200, { success: false });
+  }
+});
+
+// Keep persisted client diagnostics for exactly the operational window in the
+// release plan. The collection has no public rules and only aggregate counts
+// are exposed to an authoritatively validated super-admin session.
+cronAdd("prune-client-error-events", "17 7 * * *", function () {
+  try {
+    const helpers = require(__hooks + "/helpers.js");
+    const cutoff = helpers.databaseTimestamp(
+      new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
+    );
+    $app
+      .dao()
+      .db()
+      .newQuery("DELETE FROM client_error_events WHERE occurred_at < {:cutoff}")
+      .bind({ cutoff: cutoff })
+      .execute();
+    $app
+      .dao()
+      .db()
+      .newQuery("DELETE FROM generation_events WHERE occurred_at < {:cutoff}")
+      .bind({ cutoff: cutoff })
+      .execute();
+  } catch (_err) {
+    // The first boot before the migration may not have the collection yet.
   }
 });
 
@@ -1173,163 +1413,262 @@ routerAdd("POST", "/api/telemetry", (c) => {
 // ============================================================================
 
 routerAdd("POST", "/api/app/session", (c) => {
+  let helpers = null;
+  let attemptReservationId = "";
   try {
     const LOGIN_FAIL_WINDOW_SECONDS = 15 * 60; // 15 min
     const LOGIN_FAIL_THRESHOLD = 10;
+    const TURNSTILE_AFTER_FAILURES = 3;
 
-    const helpers = require(__hooks + "/helpers.js");
-    const policies = require(__hooks + "/requestPolicies.js");
+    helpers = require(__hooks + "/helpers.js");
     const ip = helpers.clientIP(c);
     const ua = helpers.userAgent(c);
-
-    const recentFails = helpers.countRecentEvents(
-      "login_fail",
-      ip,
-      LOGIN_FAIL_WINDOW_SECONDS,
-    );
-    if (recentFails >= LOGIN_FAIL_THRESHOLD) {
+    c.response().header().set("Cache-Control", "private, no-store");
+    const unavailableResponse = function () {
+      return c.json(503, {
+        error: "UNAVAILABLE",
+        code: "UNAVAILABLE",
+        message: "The secure sign-in service is temporarily unavailable.",
+      });
+    };
+    const lockedResponse = function (state) {
       helpers.logAuthEvent("login_locked", {
         ip: ip,
         userAgent: ua,
-        detail: `${recentFails} fails in window`,
+        detail: (state.count || LOGIN_FAIL_THRESHOLD) + " fails in window",
       });
-      c.response().header("Retry-After", String(LOGIN_FAIL_WINDOW_SECONDS));
+      c.response().header().set("Retry-After", String(state.retryAfterSeconds));
       return c.json(429, {
-        error: "Too many login attempts. Try again in a few minutes.",
-        retry_after_seconds: LOGIN_FAIL_WINDOW_SECONDS,
+        error: "LOCKED",
+        code: "LOCKED",
+        message: "Too many login attempts. Sign-in is temporarily locked.",
+        retryAfterSeconds: state.retryAfterSeconds,
       });
-    }
+    };
+    const challengeRequiredResponse = function (message) {
+      return c.json(403, {
+        error: "CHALLENGE_REQUIRED",
+        code: "CHALLENGE_REQUIRED",
+        message: message || "Complete the security check to continue.",
+        action: helpers.TURNSTILE_ACTION,
+      });
+    };
+    const cancelReservedAttempt = function () {
+      if (!attemptReservationId) return;
+      helpers.cancelLoginAttempt(attemptReservationId);
+      attemptReservationId = "";
+    };
+
+    const failureState = helpers.loginFailureState(
+      ip,
+      LOGIN_FAIL_THRESHOLD,
+      LOGIN_FAIL_WINDOW_SECONDS,
+    );
+    const rejectInvalidCode = function (detail, credentialPresent) {
+      const failureStored = helpers.finalizeLoginAttempt(
+        attemptReservationId,
+        "login_fail",
+        {
+          credentialPresent: !!credentialPresent,
+          detail: detail || "",
+        },
+      );
+      attemptReservationId = "";
+      if (!failureStored) return unavailableResponse();
+      const updated = helpers.loginFailureState(
+        ip,
+        LOGIN_FAIL_THRESHOLD,
+        LOGIN_FAIL_WINDOW_SECONDS,
+      );
+      if (updated.unavailable) return unavailableResponse();
+      if (updated.locked) return lockedResponse(updated);
+      return c.json(401, {
+        error: "INVALID_CODE",
+        code: "INVALID_CODE",
+        message: "Invalid access code.",
+      });
+    };
+    if (failureState.unavailable) return unavailableResponse();
+    if (failureState.locked) return lockedResponse(failureState);
 
     const body = $apis.requestInfo(c).data || {};
-    const dealerCode = (body.dealerCode || "").toString().trim();
+    const dealerCode =
+      body.dealerCode === undefined || body.dealerCode === null
+        ? ""
+        : body.dealerCode.toString();
 
-    if (!dealerCode || dealerCode.length < 4 || dealerCode.length > 12) {
-      helpers.logAuthEvent("login_fail", {
-        credentialPresent: dealerCode.length > 0,
-        ip: ip,
-        userAgent: ua,
-        detail: "malformed code",
-      });
-      return c.json(400, { error: "Access code is required" });
+    // Keep Fly backward-compatible while the exact staged Vercel artifact is
+    // awaiting promotion. Enforcement is enabled only after the new client is
+    // live; once enabled, three credential failures remain frictionless and
+    // every later attempt requires a fresh managed Turnstile token.
+    const turnstileEnforcementEnabled =
+      ($os.getenv("TURNSTILE_ENFORCEMENT_ENABLED") || "")
+        .toString()
+        .trim()
+        .toLowerCase() === "true";
+    let challengeValidated = false;
+    if (turnstileEnforcementEnabled && failureState.count >= TURNSTILE_AFTER_FAILURES) {
+      const turnstileToken = (body.turnstileToken || "").toString();
+      if (!turnstileToken) {
+        return challengeRequiredResponse();
+      }
+      const challenge = helpers.verifyTurnstileToken(turnstileToken, ip);
+      if (challenge.unavailable) {
+        return c.json(503, {
+          error: "UNAVAILABLE",
+          code: "UNAVAILABLE",
+          message: "The secure sign-in service is temporarily unavailable.",
+        });
+      }
+      if (!challenge.ok) {
+        helpers.logAuthEvent("turnstile_fail", {
+          credentialPresent: dealerCode.length > 0,
+          ip: ip,
+          userAgent: ua,
+          detail: "challenge rejected",
+        });
+        return challengeRequiredResponse(
+          "The security check expired or was not accepted. Try again.",
+        );
+      }
+      challengeValidated = true;
+    }
+
+    // Reserve the comparison before validating syntax or touching either
+    // credential store. The transactional helper rechecks the bucket after its
+    // write, closing the parallel-request gap between this preflight and the
+    // actual comparison.
+    const reservation = helpers.reserveLoginAttempt({
+      ip: ip,
+      userAgent: ua,
+      credentialPresent: dealerCode.length > 0,
+      threshold: LOGIN_FAIL_THRESHOLD,
+      windowSeconds: LOGIN_FAIL_WINDOW_SECONDS,
+      challengeAfter: turnstileEnforcementEnabled
+        ? TURNSTILE_AFTER_FAILURES
+        : LOGIN_FAIL_THRESHOLD,
+      challengeValidated: challengeValidated,
+    });
+    if (!reservation || reservation.status === "unavailable") {
+      return unavailableResponse();
+    }
+    if (reservation.status === "locked") {
+      return lockedResponse(reservation);
+    }
+    if (reservation.status === "challenge_required") {
+      return challengeRequiredResponse();
+    }
+    attemptReservationId = reservation.attemptId;
+
+    if (!/^[A-Za-z0-9]{4,12}$/.test(dealerCode)) {
+      return rejectInvalidCode("malformed code", dealerCode.length > 0);
     }
 
     let role = "salesperson";
     let record;
     let personRecord = null;
+    let verifiedPersonPinFingerprint = "";
     // SECURITY: never fall back to a hardcoded admin code. If ADMIN_DEALER_CODE
     // is unset, super-admin login is simply unavailable.
-    const configuredAdminCode = ($os.getenv("ADMIN_DEALER_CODE") || "").trim();
-    const adminEnv = policies.isValidAdminDealerCode(configuredAdminCode)
-      ? configuredAdminCode
-      : "";
+    const adminEnv = helpers.configuredAdminSecret();
 
-    if (adminEnv && dealerCode.toLowerCase() === adminEnv.toLowerCase()) {
+    if (adminEnv && dealerCode === adminEnv) {
       role = "super_admin";
-      try {
-        record = $app.dao().findFirstRecordByData("dealers", "code", adminEnv);
-      } catch (_e) {}
+      record = helpers.findSystemDealer();
 
       if (!record) {
-        // Auto-provision only when ADMIN_DEALER_CODE is explicitly configured.
-        // Uses raw SQL so a still-migrating schema can't block bootstrap.
+        // The deployment secret is never copied into PocketBase. A stable
+        // marker identifies the one system tenant; the unique partial index in
+        // the integrity migration prevents multiple canonical records.
         try {
-          const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-          const id = helpers.secureRandomString(15, chars);
-          const now =
-            new Date().toISOString().replace("T", " ").substring(0, 19) + "Z";
-
-          $app
-            .dao()
-            .db()
-            .newQuery(
-              "INSERT INTO dealers (id, code, name, created, updated) VALUES ({:id}, {:code}, 'SYSTEM ADMIN', {:now}, {:now})",
-            )
-            .bind({ id: id, code: adminEnv, now: now })
-            .execute();
-
-          record = $app.dao().findRecordById("dealers", id);
+          const dealers = $app.dao().findCollectionByNameOrId("dealers");
+          const systemDealer = new Record(dealers, {
+            name: "SYSTEM ADMIN",
+            is_system: true,
+          });
+          $app.dao().saveRecord(systemDealer);
+          record = systemDealer;
         } catch (insertErr) {
-          console.log(
-            "[session] admin insert failed (likely duplicate), re-querying:",
-            insertErr,
-          );
-          try {
-            record = $app
-              .dao()
-              .findFirstRecordByData("dealers", "code", adminEnv);
-          } catch (_e2) {
-            console.error("[session] admin re-query also failed:", _e2);
-          }
+          console.log("[session] system dealer insert raced, re-querying:", insertErr);
+          record = helpers.findSystemDealer();
         }
       }
     } else {
       // Personal 4-digit codes on the people roster (managers + salespeople).
       // Shared dealer/admin codes are no longer accepted for store login.
-      personRecord = helpers.findActivePersonByPin(dealerCode);
+      const pinLookup = helpers.isValidPersonPin(dealerCode)
+        ? helpers.findActivePersonByPin(dealerCode)
+        : { status: "not_found", person: null };
+      if (pinLookup.status === "unavailable") {
+        cancelReservedAttempt();
+        return unavailableResponse();
+      }
+      personRecord = pinLookup.status === "found" ? pinLookup.person : null;
       if (personRecord) {
         role = helpers.personRoleToSessionRole(personRecord.getString("role"));
         try {
+          verifiedPersonPinFingerprint = helpers.personPinFingerprint(personRecord);
           record = $app
             .dao()
             .findRecordById("dealers", personRecord.getString("dealer"));
         } catch (_e) {
-          record = null;
+          cancelReservedAttempt();
+          return unavailableResponse();
         }
       }
     }
 
     if (role === "super_admin" && !record) {
-      helpers.logAuthEvent("login_fail", {
-        credentialPresent: true,
-        ip: ip,
-        userAgent: ua,
-        detail: "admin account unavailable",
-      });
+      cancelReservedAttempt();
       return c.json(503, {
-        error: "Administrative login is temporarily unavailable",
+        error: "UNAVAILABLE",
+        code: "UNAVAILABLE",
+        message: "Administrative login is temporarily unavailable.",
       });
     }
 
     if (!record) {
-      helpers.logAuthEvent("login_fail", {
-        credentialPresent: true,
-        ip: ip,
-        userAgent: ua,
-      });
-      return c.json(401, { error: "Invalid access code" });
+      return rejectInvalidCode("credential not recognized", true);
     }
 
     // Mint the opaque session token + persist row. Cookie carries ONLY the token.
-    let token, expiresAt;
+    let token;
+    let sessionId = "";
     try {
       const sessionOpts = {};
-      if (personRecord) sessionOpts.personId = personRecord.id;
-      const session = helpers.createSession(
-        record.id,
-        role,
-        ip,
-        ua,
-        sessionOpts,
-      );
+      if (personRecord) {
+        sessionOpts.personId = personRecord.id;
+        sessionOpts.expectedPersonPinFingerprint = verifiedPersonPinFingerprint;
+      }
+      const session = helpers.createSession(record.id, role, ip, ua, sessionOpts);
       token = session.token;
-      expiresAt = session.expiresAt;
+      sessionId = session.sessionId || "";
     } catch (err) {
       console.error("[session POST] createSession failed", err);
-      return c.json(500, { error: "Failed to start session" });
+      cancelReservedAttempt();
+      return unavailableResponse();
     }
 
-    c.response().header().add("Set-Cookie", helpers.buildSessionCookie(token));
+    // The reserved failure becomes a success before the new bearer is exposed.
+    // If the audit store cannot be finalized, the random orphan token is never
+    // returned and therefore cannot be used.
+    const successStored = helpers.finalizeLoginAttempt(
+      attemptReservationId,
+      "login_success",
+      {
+        dealerId: record.id,
+        credentialPresent: true,
+        detail:
+          "role=" +
+          role +
+          (personRecord ? " person=" + personRecord.id : "") +
+          (sessionId ? " session=" + sessionId : ""),
+      },
+    );
+    attemptReservationId = "";
+    if (!successStored) return unavailableResponse();
 
-    helpers.logAuthEvent("login_success", {
-      dealerId: record.id,
-      credentialPresent: true,
-      ip: ip,
-      userAgent: ua,
-      detail:
-        "role=" +
-        role +
-        (personRecord ? " person=" + personRecord.id : ""),
-    });
+    c.response().header().add("Set-Cookie", helpers.buildSessionCookie(token));
 
     const payload = {
       role: role,
@@ -1337,55 +1676,44 @@ routerAdd("POST", "/api/app/session", (c) => {
       is_impersonation: false,
     };
     if (personRecord) {
-      payload.person = helpers.serializePerson(personRecord);
+      payload.person = helpers.serializePersonSummary(personRecord);
     }
     return c.json(200, payload);
   } catch (e) {
+    if (helpers && attemptReservationId) {
+      helpers.cancelLoginAttempt(attemptReservationId);
+      attemptReservationId = "";
+    }
     console.error("SESSION ERROR:", e);
-    return c.json(500, { error: "Session request failed" });
+    return c.json(503, {
+      error: "UNAVAILABLE",
+      code: "UNAVAILABLE",
+      message: "The secure sign-in service is temporarily unavailable.",
+    });
   }
 });
 
 routerAdd("GET", "/api/app/session", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  const token = helpers.readSessionToken(c);
-  if (!token) return c.json(401, { error: "No active session" });
-
-  const session = helpers.findSessionByToken(token);
-  if (!session) return c.json(401, { error: "Invalid session" });
-
-  const role = session.getString("role") || "salesperson";
-  let record;
-  try {
-    record = $app.dao().findRecordById("dealers", session.getString("dealer"));
-  } catch (_e) {
-    return c.json(401, { error: "Invalid session" });
-  }
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "Invalid session" });
 
   // Sliding refresh — extend the authoritative database expiry and the cookie
   // together so an active dealer does not expire at the original login time.
   try {
-    helpers.refreshSession(session);
-    c.response().header().add("Set-Cookie", helpers.buildSessionCookie(token));
+    helpers.refreshSession(context.session);
+    c.response().header().add("Set-Cookie", helpers.buildSessionCookie(context.token));
   } catch (_e) {
     /* ignore */
   }
 
   const payload = {
-    role: role,
-    dealer: helpers.serializeDealer(record),
-    is_impersonation: !!(session.getBool
-      ? session.getBool("is_impersonation")
-      : session.get("is_impersonation")),
+    role: context.role,
+    dealer: helpers.serializeDealer(context.dealer),
+    is_impersonation: context.isImpersonating,
   };
-  const personId = session.getString("person");
-  if (personId) {
-    try {
-      const person = $app.dao().findRecordById("salespeople", personId);
-      payload.person = helpers.serializePerson(person);
-    } catch (_e) {
-      /* person removed */
-    }
+  if (context.person) {
+    payload.person = helpers.serializePersonSummary(context.person);
   }
   return c.json(200, payload);
 });
@@ -1393,19 +1721,10 @@ routerAdd("GET", "/api/app/session", (c) => {
 // Super-admin opens a store as a manager or salesperson without their pin.
 routerAdd("POST", "/api/app/session/impersonate", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  const token = helpers.readSessionToken(c);
-  if (!token) return c.json(401, { error: "No active session" });
-  const session = helpers.findSessionByToken(token);
-  if (!session) return c.json(401, { error: "Invalid session" });
-  if (session.getString("role") !== "super_admin") {
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "Invalid session" });
+  if (context.role !== "super_admin") {
     return c.json(403, { error: "Super admin only" });
-  }
-  if (
-    session.getBool
-      ? session.getBool("is_impersonation")
-      : session.get("is_impersonation")
-  ) {
-    return c.json(400, { error: "Already impersonating — exit first" });
   }
 
   const body = $apis.requestInfo(c).data || {};
@@ -1418,9 +1737,7 @@ routerAdd("POST", "/api/app/session/impersonate", (c) => {
   } catch (_e) {
     return c.json(404, { error: "Person not found" });
   }
-  const active = person.getBool
-    ? person.getBool("active")
-    : !!person.get("active");
+  const active = person.getBool ? person.getBool("active") : !!person.get("active");
   if (!active) return c.json(400, { error: "Person is inactive" });
 
   let dealer;
@@ -1439,16 +1756,14 @@ routerAdd("POST", "/api/app/session/impersonate", (c) => {
     minted = helpers.createSession(dealer.id, role, ip, ua, {
       personId: person.id,
       isImpersonation: true,
-      impersonatorSessionId: session.id,
+      impersonatorSessionId: context.session.id,
     });
   } catch (err) {
     console.error("[impersonate] createSession failed", err);
     return c.json(500, { error: "Failed to start impersonation" });
   }
 
-  c.response()
-    .header()
-    .add("Set-Cookie", helpers.buildSessionCookie(minted.token));
+  c.response().header().add("Set-Cookie", helpers.buildSessionCookie(minted.token));
 
   helpers.logAuthEvent("impersonate_start", {
     dealerId: dealer.id,
@@ -1461,87 +1776,44 @@ routerAdd("POST", "/api/app/session/impersonate", (c) => {
   return c.json(200, {
     role: role,
     dealer: helpers.serializeDealer(dealer),
-    person: helpers.serializePerson(person),
+    person: helpers.serializePersonSummary(person),
     is_impersonation: true,
   });
 });
 
 routerAdd("POST", "/api/app/session/exit-impersonate", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  const token = helpers.readSessionToken(c);
-  if (!token) return c.json(401, { error: "No active session" });
-  const session = helpers.findSessionByToken(token);
-  if (!session) return c.json(401, { error: "Invalid session" });
-
-  const isImpersonation = session.getBool
-    ? session.getBool("is_impersonation")
-    : !!session.get("is_impersonation");
-  if (!isImpersonation) {
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "Invalid session" });
+  if (!context.isImpersonating) {
     return c.json(400, { error: "Not impersonating" });
   }
-
-  const impersonatorId = session.getString("impersonator_session");
-  if (!impersonatorId) {
-    return c.json(400, { error: "Impersonation source missing" });
-  }
-
-  let adminSession;
-  try {
-    adminSession = $app.dao().findRecordById("sessions", impersonatorId);
-  } catch (_e) {
-    adminSession = null;
-  }
-  if (!adminSession || adminSession.getString("role") !== "super_admin") {
-    helpers.revokeSession(c);
-    c.response().header().add("Set-Cookie", helpers.buildClearCookie());
-    return c.json(401, {
-      error: "Super admin session expired — sign in again",
-    });
-  }
-
-  // Revoke the impersonation session; re-mint a fresh super-admin cookie so we
-  // never re-issue a stored plaintext token (only hashes are kept).
-  try {
-    $app.dao().deleteRecord(session);
-  } catch (_e) {
-    /* ignore */
-  }
-
-  let adminDealer;
-  try {
-    adminDealer = $app
-      .dao()
-      .findRecordById("dealers", adminSession.getString("dealer"));
-  } catch (_e) {
-    return c.json(401, { error: "Admin dealer unavailable" });
+  const adminSession = context.impersonatorSession;
+  const adminDealer = helpers.findSystemDealer();
+  if (!adminSession || !adminDealer) {
+    return c.json(401, { error: "Admin session unavailable" });
   }
 
   const ip = helpers.clientIP(c);
   const ua = helpers.userAgent(c);
   let minted;
   try {
-    minted = helpers.createSession(
-      adminDealer.id,
-      "super_admin",
+    minted = helpers.replaceImpersonationSession(
+      context.session.id,
+      adminSession.id,
       ip,
       ua,
-      {},
     );
   } catch (err) {
-    console.error("[exit-impersonate] createSession failed", err);
-    return c.json(500, { error: "Failed to restore admin session" });
+    console.error("[exit-impersonate] transactional replacement failed", err);
+    return c.json(503, {
+      error: "UNAVAILABLE",
+      code: "UNAVAILABLE",
+      message: "The admin session could not be restored safely.",
+    });
   }
 
-  // Drop the old super-admin session row that was parked during impersonation.
-  try {
-    $app.dao().deleteRecord(adminSession);
-  } catch (_e) {
-    /* ignore */
-  }
-
-  c.response()
-    .header()
-    .add("Set-Cookie", helpers.buildSessionCookie(minted.token));
+  c.response().header().add("Set-Cookie", helpers.buildSessionCookie(minted.token));
 
   helpers.logAuthEvent("impersonate_exit", {
     dealerId: adminDealer.id,
@@ -1560,16 +1832,22 @@ routerAdd("POST", "/api/app/session/exit-impersonate", (c) => {
 
 routerAdd("DELETE", "/api/app/session", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  // Best-effort: delete the row so the token is permanently dead even if
-  // the cookie sticks around somewhere.
+  c.response().header().set("Cache-Control", "private, no-store");
   try {
     helpers.revokeSession(c);
     helpers.logAuthEvent("session_revoked", {
       ip: helpers.clientIP(c),
       userAgent: helpers.userAgent(c),
     });
-  } catch (_e) {
-    /* ignore */
+  } catch (err) {
+    console.error("[session DELETE] authoritative revocation failed", err);
+    // Preserve the cookie so the browser can retry. Claiming success and
+    // clearing only the client copy would leave copied bearer tokens alive.
+    return c.json(503, {
+      error: "UNAVAILABLE",
+      code: "UNAVAILABLE",
+      message: "Sign-out could not be completed safely. Please try again.",
+    });
   }
   c.response().header().add("Set-Cookie", helpers.buildClearCookie());
   return c.json(200, { success: true });
@@ -1594,8 +1872,7 @@ routerAdd("POST", "/api/app/photo_releases", (c) => {
 
   try {
     const releases = $app.dao().findCollectionByNameOrId("photo_releases");
-    if (!releases)
-      return c.json(500, { error: "photo_releases collection missing" });
+    if (!releases) return c.json(500, { error: "photo_releases collection missing" });
 
     const body = $apis.requestInfo(c).data || {};
     const customerName = helpers.assertString(
@@ -1679,10 +1956,7 @@ routerAdd("POST", "/api/app/photo_releases/:id/link-post", (c) => {
   }
 
   const body = $apis.requestInfo(c).data || {};
-  const postId = helpers.assertString(
-    (body.post_id || "").toString().trim(),
-    64,
-  );
+  const postId = helpers.assertString((body.post_id || "").toString().trim(), 64);
   if (!postId) return c.json(400, { error: "post_id is required" });
 
   let post = null;
@@ -1699,10 +1973,7 @@ routerAdd("POST", "/api/app/photo_releases/:id/link-post", (c) => {
   // browser session, not another salesperson's post in the same dealership.
   const token = helpers.readSessionToken(c);
   const currentOwnerHash = token ? helpers.hashSessionToken(token) : "";
-  if (
-    !currentOwnerHash ||
-    currentOwnerHash !== post.getString("owner_session_hash")
-  ) {
+  if (!currentOwnerHash || currentOwnerHash !== post.getString("owner_session_hash")) {
     return c.json(403, { error: "Post belongs to another session" });
   }
 
@@ -1736,9 +2007,7 @@ routerAdd("POST", "/api/app/photo_releases/:id/link-post", (c) => {
         .execute();
 
       if (!result || result.rowsAffected() !== 1) {
-        const current = $app
-          .dao()
-          .findRecordById("photo_releases", release.id);
+        const current = $app.dao().findRecordById("photo_releases", release.id);
         if (current.getString("post_id") !== post.id) {
           return c.json(409, {
             error: "Photo release is already linked to another post",
@@ -1773,8 +2042,9 @@ routerAdd("POST", "/api/app/photo_releases/:id/link-post", (c) => {
 routerAdd("POST", "/api/app/posts", (c) => {
   const helpers = require(__hooks + "/helpers.js");
   const policies = require(__hooks + "/requestPolicies.js");
-  const dealer = helpers.dealerFromSession(c);
-  if (!dealer) return c.json(401, { error: "No active session" });
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  const dealer = context.dealer;
 
   try {
     const posts = $app.dao().findCollectionByNameOrId("posts");
@@ -1785,26 +2055,16 @@ routerAdd("POST", "/api/app/posts", (c) => {
     form.setFullManageAccess(true);
     const body = $apis.requestInfo(c).data || {};
 
-    // Validate optional salesperson_id is one of this dealership's records.
-    let salespersonId = "";
-    if (body.salesperson_id) {
-      try {
-        const sp = $app
-          .dao()
-          .findRecordById("salespeople", body.salesperson_id.toString());
-        if (sp && sp.getString("dealer") === dealer.id) {
-          salespersonId = sp.id;
-        }
-      } catch (_e) {
-        /* ignore — fall back to unattributed */
-      }
-    }
+    // Attribution comes exclusively from the centrally validated session.
+    // Legacy client fields are ignored so a browser cannot credit another
+    // salesperson or inject a free-text identity into history/leaderboards.
+    const salespersonId = context.person ? context.person.id : "";
+    const salespersonName = context.person
+      ? context.person.getString("name")
+      : "System Admin";
 
     const approvalStatus = policies.initialApprovalStatus(dealer);
-    const caption = helpers.assertString(
-      (body.caption || "").toString().trim(),
-      12000,
-    );
+    const caption = helpers.assertString((body.caption || "").toString().trim(), 12000);
     const disclosures = helpers.assertString(
       (body.disclosures || "").toString().trim(),
       12000,
@@ -1840,26 +2100,128 @@ routerAdd("POST", "/api/app/posts", (c) => {
     const token = helpers.readSessionToken(c);
     // Store caption/disclosures whenever provided (library reopen); always
     // required for pending approval.
-    const storeCaption =
-      approvalStatus === "pending" || caption
-        ? caption
-        : "";
+    const storeCaption = approvalStatus === "pending" || caption ? caption : "";
     const storeDisclosures =
       approvalStatus === "pending" || disclosures ? disclosures : "";
+    const modelPolicy = policies.geminiModelPolicySnapshot();
+    const ownerSessionHash = token ? helpers.hashSessionToken(token) : "";
+    const captionSourceCandidate = helpers.assertString(
+      (body.caption_source || "").toString(),
+      30,
+    );
+    // Operational provenance is derived from prompt-free proxy events bound to
+    // this exact session AND this exact logical model attempt. A broad recent
+    // session window allowed an older AI success to relabel a later local safe
+    // template, so attempt ids are now required for affirmative AI metadata.
+    const normalizeAttemptId = function (value) {
+      const candidate = (value || "").toString();
+      return /^[A-Za-z0-9_-]{16,80}$/.test(candidate) ? candidate : "";
+    };
+    const captionAttemptId = normalizeAttemptId(body.caption_attempt_id);
+    const imageAttemptId = normalizeAttemptId(body.image_attempt_id);
+    const eventCutoff = helpers.databaseTimestamp(
+      new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+    );
+    const loadAttemptEvents = function (attemptId) {
+      if (!ownerSessionHash || !attemptId) return [];
+      try {
+        return $app
+          .dao()
+          .findRecordsByFilter(
+            "generation_events",
+            "owner_session_hash = {:owner} && dealer = {:dealer} && attempt_id = {:attempt} && occurred_at >= {:cutoff}",
+            "-occurred_at",
+            20,
+            0,
+            {
+              owner: ownerSessionHash,
+              dealer: dealer.id,
+              attempt: attemptId,
+              cutoff: eventCutoff,
+            },
+          )
+          .filter(function (event) {
+            return !event.getString("consumed_post");
+          });
+      } catch (_e) {
+        return [];
+      }
+    };
+    const captionGenerationEvents = loadAttemptEvents(captionAttemptId);
+    const imageGenerationEvents =
+      imageAttemptId && imageAttemptId !== captionAttemptId
+        ? loadAttemptEvents(imageAttemptId)
+        : [];
+    const recentGenerationEvents =
+      captionGenerationEvents.concat(imageGenerationEvents);
+    const captionTasks = {
+      caption: true,
+      caption_regenerate: true,
+      caption_edit: true,
+    };
+    const imageTasks = { image_standard: true, image_studio: true };
+    let latestCaptionSuccess = null;
+    let latestImageSuccess = null;
+    let latestAnySuccess = null;
+    let serverFallbackCount = 0;
+    captionGenerationEvents.forEach(function (event) {
+      const task = event.getString("task");
+      const succeeded = event.getBool
+        ? event.getBool("succeeded")
+        : !!event.get("succeeded");
+      if (!succeeded) {
+        serverFallbackCount += 1;
+        return;
+      }
+      if (!latestAnySuccess) latestAnySuccess = event;
+      if (!latestCaptionSuccess && captionTasks[task]) {
+        latestCaptionSuccess = event;
+      }
+    });
+    imageGenerationEvents.forEach(function (event) {
+      const task = event.getString("task");
+      const succeeded = event.getBool
+        ? event.getBool("succeeded")
+        : !!event.get("succeeded");
+      if (!succeeded) {
+        serverFallbackCount += 1;
+        return;
+      }
+      if (!latestImageSuccess && imageTasks[task]) latestImageSuccess = event;
+      if (
+        !latestAnySuccess ||
+        event.getString("occurred_at") > latestAnySuccess.getString("occurred_at")
+      ) {
+        latestAnySuccess = event;
+      }
+    });
+    const captionSource =
+      captionSourceCandidate === "custom"
+        ? "custom"
+        : captionSourceCandidate === "basic_fallback"
+          ? "basic_fallback"
+          : latestCaptionSuccess
+            ? "ai"
+            : "";
+    const generationTier = latestImageSuccess
+      ? latestImageSuccess.getString("tier")
+      : "";
+    const generationModel = latestAnySuccess ? latestAnySuccess.getString("model") : "";
+    const generationFallbackCount = Math.min(20, serverFallbackCount);
+    const generationLastSuccessAt = latestAnySuccess
+      ? latestAnySuccess.getString("occurred_at")
+      : "";
+    const modelPolicyVersion = recentGenerationEvents.length
+      ? String(modelPolicy.version)
+      : "";
     form.loadData({
       dealer: dealer.id,
-      salesperson_name: helpers.assertString(
-        (body.salesperson_name || "").toString(),
-        120,
-      ),
+      salesperson_name: helpers.assertString(salespersonName, 120),
       salesperson_id: salespersonId,
       generated_at: new Date().toISOString(),
       style: helpers.assertString((body.style || "").toString(), 60),
       tone: helpers.assertString((body.tone || "").toString(), 60),
-      customer_name: helpers.assertString(
-        (body.customer_name || "").toString(),
-        120,
-      ),
+      customer_name: helpers.assertString((body.customer_name || "").toString(), 120),
       vin: helpers.assertString((body.vin || "").toString(), 17),
       // Release status is derived from a durably stored, same-dealer signature
       // by the photo-releases endpoint. Never trust a client assertion here.
@@ -1872,9 +2234,15 @@ routerAdd("POST", "/api/app/posts", (c) => {
       approved_at: "",
       caption: storeCaption,
       disclosures: storeDisclosures,
+      caption_source: captionSource,
+      generation_tier: generationTier,
+      generation_model: generationModel,
+      generation_fallback_count: generationFallbackCount,
+      generation_last_success_at: generationLastSuccessAt,
+      model_policy_version: modelPolicyVersion,
       // Every derived artifact (approval polling, protected creative, video
       // completion) is bound to the opaque browser session that logged it.
-      owner_session_hash: token ? helpers.hashSessionToken(token) : "",
+      owner_session_hash: ownerSessionHash,
     });
     if (creativeFile) form.addFiles("creative_image", creativeFile);
     form.submit();
@@ -1886,6 +2254,18 @@ routerAdd("POST", "/api/app/posts", (c) => {
       } catch (_e) {}
       return c.json(400, { error: "Review image is required" });
     }
+
+    // Correlation records are single-use. This prevents a valid event id from
+    // being replayed onto a different post while preserving retry safety when
+    // the post form itself fails before persistence.
+    recentGenerationEvents.forEach(function (event) {
+      try {
+        event.set("consumed_post", record.id);
+        $app.dao().saveRecord(event);
+      } catch (_e) {
+        console.error("[posts] generation correlation consumption failed");
+      }
+    });
 
     return c.json(200, {
       id: record.id,
@@ -1961,8 +2341,7 @@ routerAdd("GET", "/api/app/posts/:id/status", (c) => {
     const token = helpers.readSessionToken(c);
     const currentOwnerHash = token ? helpers.hashSessionToken(token) : "";
     const isOwner =
-      !!currentOwnerHash &&
-      currentOwnerHash === record.getString("owner_session_hash");
+      !!currentOwnerHash && currentOwnerHash === record.getString("owner_session_hash");
     if (!isOwner && !isManager) {
       return c.json(403, { error: "Post status belongs to another session" });
     }
@@ -1998,8 +2377,7 @@ routerAdd("GET", "/api/app/posts/:id/creative-image", (c) => {
     const token = helpers.readSessionToken(c);
     const currentOwnerHash = token ? helpers.hashSessionToken(token) : "";
     const isOwner =
-      !!currentOwnerHash &&
-      currentOwnerHash === record.getString("owner_session_hash");
+      !!currentOwnerHash && currentOwnerHash === record.getString("owner_session_hash");
     if (!isOwner && !isManager) {
       return c.json(403, { error: "Creative belongs to another session" });
     }
@@ -2036,8 +2414,8 @@ routerAdd("GET", "/api/app/posts", (c) => {
 
   try {
     const query = $apis.requestInfo(c).query || {};
-    const since = (query.since || "").toString();
-    const until = (query.until || "").toString();
+    const since = helpers.databaseTimestamp((query.since || "").toString());
+    const until = helpers.databaseTimestamp((query.until || "").toString());
     const status = (query.approval_status || "").toString();
     const limitRaw = parseInt((query.limit || "200").toString(), 10);
     const limit = Math.min(Math.max(limitRaw || 200, 1), 1000);
@@ -2078,9 +2456,7 @@ routerAdd("GET", "/api/app/posts", (c) => {
       tone: r.getString("tone"),
       customer_name: r.getString("customer_name"),
       vin: r.getString("vin"),
-      has_release: r.getBool
-        ? r.getBool("has_release")
-        : !!r.get("has_release"),
+      has_release: r.getBool ? r.getBool("has_release") : !!r.get("has_release"),
       has_video: r.getBool ? r.getBool("has_video") : !!r.get("has_video"),
       approval_status: r.getString("approval_status"),
       approved_by: r.getString("approved_by"),
@@ -2102,9 +2478,10 @@ routerAdd("GET", "/api/app/posts", (c) => {
 routerAdd("PATCH", "/api/app/posts/:id", (c) => {
   const helpers = require(__hooks + "/helpers.js");
   const policies = require(__hooks + "/requestPolicies.js");
-  const dealer = helpers.dealerFromSession(c);
-  if (!dealer) return c.json(401, { error: "No active session" });
-  const role = helpers.sessionRoleFromCookie(c);
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  const dealer = context.dealer;
+  const role = context.role;
   if (role !== "dealer_admin" && role !== "super_admin") {
     return c.json(403, {
       error: "Manager role required to set approval status",
@@ -2125,20 +2502,14 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
       });
     }
 
-    const decision = helpers.assertEnum(body.approval_status, [
-      "approved",
-      "rejected",
-    ]);
+    const decision = helpers.assertEnum(body.approval_status, ["approved", "rejected"]);
     if (record.getString("approval_status") !== "pending") {
       return c.json(409, { error: "This approval has already been decided" });
     }
     const approver = helpers.assertString(
-      (body.approved_by || "").toString().trim(),
+      context.person ? context.person.getString("name") : "System Admin",
       120,
     );
-    if (!approver) {
-      return c.json(400, { error: "Approver name is required" });
-    }
 
     if (
       decision === "approved" &&
@@ -2204,77 +2575,137 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
 
 routerAdd("GET", "/api/app/salespeople", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  const dealer = helpers.dealerFromSession(c);
-  if (!dealer) return c.json(401, { error: "No active session" });
-  const role = helpers.sessionRoleFromCookie(c);
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+
   try {
     const query = $apis.requestInfo(c).query || {};
-    const includeInactive =
-      (query.include_inactive || "").toString() === "true";
     const roleFilter = (query.role || "").toString().trim();
     const dealerFilter = (query.dealer || "").toString().trim();
+    const search = (query.q || "").toString().trim();
+    const cursor = (query.cursor || "").toString().trim();
+    const parsedLimit = parseInt((query.limit || "100").toString(), 10);
+    const limit = Math.min(Math.max(parsedLimit || 100, 1), 200);
+    const includeInactive =
+      context.role !== "salesperson" &&
+      (query.include_inactive || "").toString() === "true";
+    const codesToShare =
+      context.role !== "salesperson" &&
+      (query.pin_needs_distribution || "").toString() === "true";
+    const legacyCompatibility = helpers.legacyClientCompatibilityEnabled(c);
 
-    // Always tenant-scope people lists. Super admin must pass ?dealer= to
-    // pick a store — never return a mixed multi-dealer roster.
-    let scopeDealerId = dealer.id;
-    if (role === "super_admin") {
-      if (!dealerFilter) {
-        return c.json(400, {
-          error: "Select a dealership before listing admins or users",
-        });
-      }
-      try {
-        $app.dao().findRecordById("dealers", dealerFilter);
-      } catch (_e) {
-        return c.json(400, { error: "Invalid dealership" });
-      }
-      scopeDealerId = dealerFilter;
+    if (roleFilter && roleFilter !== "manager" && roleFilter !== "salesperson") {
+      return c.json(400, {
+        error: "INVALID_ROLE_FILTER",
+        code: "INVALID_ROLE_FILTER",
+        message: "role must be manager or salesperson.",
+      });
+    }
+    if (search.length > 120 || (cursor && !/^[A-Za-z0-9_-]{1,64}$/.test(cursor))) {
+      return c.json(400, {
+        error: "INVALID_ROSTER_QUERY",
+        code: "INVALID_ROSTER_QUERY",
+        message: "The roster query is invalid.",
+      });
     }
 
-    let filterParts = [];
+    const filterParts = [];
     const params = {};
-    filterParts.push("dealer = {:d}");
-    params.d = scopeDealerId;
-    if (!includeInactive) filterParts.push("active = true");
-    if (role === "super_admin") {
-      if (roleFilter === "manager" || roleFilter === "salesperson") {
+    if (context.role === "super_admin") {
+      if (dealerFilter) {
+        let targetDealer = null;
+        try {
+          targetDealer = $app.dao().findRecordById("dealers", dealerFilter);
+        } catch (_e) {}
+        if (
+          !targetDealer ||
+          (targetDealer.getBool && targetDealer.getBool("is_system"))
+        ) {
+          return c.json(400, {
+            error: "INVALID_DEALER_FILTER",
+            code: "INVALID_DEALER_FILTER",
+            message: "The selected dealership is invalid.",
+          });
+        }
+        filterParts.push("dealer = {:dealer}");
+        params.dealer = dealerFilter;
+      }
+      if (roleFilter) {
         filterParts.push("role = {:role}");
         params.role = roleFilter;
       }
     } else {
-      // Store managers and floor staff only list the salesperson roster
-      // (showroom picker + Team tab). Managers are system-admin only.
+      filterParts.push("dealer = {:dealer}");
       filterParts.push("role = {:role}");
+      params.dealer = context.dealer.id;
       params.role = "salesperson";
     }
+    if (!includeInactive) filterParts.push("active = true");
+    if (search) {
+      filterParts.push("name ~ {:search}");
+      params.search = search;
+    }
+    if (codesToShare) {
+      filterParts.push("pin_needs_distribution = true");
+    }
+    if (!filterParts.length) filterParts.push("1=1");
 
+    // The personal-code namespace caps this collection at 10,000 rows. Load
+    // the bounded, filtered id list once so `total` stays stable across cursor
+    // pages instead of reporting only the remaining tail.
     const records = $app
       .dao()
       .findRecordsByFilter(
         "salespeople",
         filterParts.join(" && "),
-        "name",
-        1000,
+        "id",
+        10001,
         0,
         params,
       );
-
-    // Salespeople never see pins of others; managers/super-admin need pins for ops.
-    const includePin = role === "super_admin" || role === "dealer_admin";
-    return c.json(200, {
-      items: records.map((r) => {
-        const item = {
-          id: r.id,
-          dealer: r.getString("dealer"),
-          name: r.getString("name"),
-          role: r.getString("role") || "salesperson",
-          active: r.getBool ? r.getBool("active") : !!r.get("active"),
-          created_at: r.getString("created_at"),
-        };
-        if (includePin) item.pin = r.getString("pin");
-        return item;
-      }),
+    if (records.length > 10000) {
+      return c.json(500, {
+        error: "ROSTER_CAPACITY_EXCEEDED",
+        code: "ROSTER_CAPACITY_EXCEEDED",
+        message: "The people roster exceeds the supported credential space.",
+      });
+    }
+    let startIndex = 0;
+    if (cursor) {
+      while (startIndex < records.length && records[startIndex].id <= cursor) {
+        startIndex++;
+      }
+    }
+    const page = records.slice(startIndex, startIndex + limit);
+    const hasMore = startIndex + page.length < records.length;
+    const dealerNames = {};
+    const items = page.map((record) => {
+      const item = helpers.serializePerson(record);
+      if (legacyCompatibility) {
+        // One-release bridge for the already-live UI. This is only a masked
+        // presence marker; the reusable credential never leaves PocketBase.
+        item.pin = item.hasPin ? "****" : "";
+      }
+      if (context.role === "super_admin") {
+        const dealerId = record.getString("dealer");
+        if (dealerNames[dealerId] === undefined) {
+          try {
+            dealerNames[dealerId] = $app
+              .dao()
+              .findRecordById("dealers", dealerId)
+              .getString("name");
+          } catch (_e) {
+            dealerNames[dealerId] = "Unknown dealership";
+          }
+        }
+        item.dealerName = dealerNames[dealerId];
+      }
+      return item;
     });
+    c.response().header().set("Cache-Control", "private, no-store");
+    const payload = { items: items, total: records.length };
+    if (hasMore && page.length) payload.nextCursor = page[page.length - 1].id;
+    return c.json(200, payload);
   } catch (err) {
     console.error("[/api/app/salespeople] list error", err);
     return c.json(500, { error: "Failed to list people" });
@@ -2283,170 +2714,395 @@ routerAdd("GET", "/api/app/salespeople", (c) => {
 
 routerAdd("POST", "/api/app/salespeople", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  const dealer = helpers.dealerFromSession(c);
-  if (!dealer) return c.json(401, { error: "No active session" });
-  const role = helpers.sessionRoleFromCookie(c);
-  if (role !== "dealer_admin" && role !== "super_admin") {
+  c.response().header().set("Cache-Control", "private, no-store");
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  if (context.role !== "dealer_admin" && context.role !== "super_admin") {
     return c.json(403, { error: "Manager role required" });
   }
+
   try {
     const body = $apis.requestInfo(c).data || {};
+    const legacyCompatibility = helpers.legacyClientCompatibilityEnabled(c);
     const name = (body.name || "").toString().trim();
-    if (!name) return c.json(400, { error: "name is required" });
+    if (!name) {
+      return c.json(400, {
+        error: "NAME_REQUIRED",
+        code: "NAME_REQUIRED",
+        message: "Name is required.",
+      });
+    }
 
     let personRole = (body.role || "salesperson").toString().trim();
     if (personRole !== "manager" && personRole !== "salesperson") {
-      return c.json(400, { error: "role must be manager or salesperson" });
+      return c.json(400, {
+        error: "INVALID_PERSON_ROLE",
+        code: "INVALID_PERSON_ROLE",
+        message: "role must be manager or salesperson.",
+      });
     }
-    // Only super-admin may create managers.
-    if (personRole === "manager" && role !== "super_admin") {
-      return c.json(403, { error: "Only system admin can create managers" });
+    if (personRole === "manager" && context.role !== "super_admin") {
+      return c.json(403, {
+        error: "MANAGER_CREATE_FORBIDDEN",
+        code: "MANAGER_CREATE_FORBIDDEN",
+        message: "Only system admin can create managers.",
+      });
     }
-    // Dealer admin can only create salespeople for their own store.
-    if (role === "dealer_admin") personRole = "salesperson";
+    if (context.role === "dealer_admin") personRole = "salesperson";
 
-    let targetDealerId = dealer.id;
-    if (role === "super_admin") {
-      targetDealerId = (body.dealer || "").toString().trim();
-      if (!targetDealerId) {
+    let targetDealer = context.dealer;
+    if (context.role === "super_admin") {
+      const targetDealerId = (body.dealer || "").toString().trim();
+      try {
+        targetDealer = $app.dao().findRecordById("dealers", targetDealerId);
+      } catch (_e) {
+        targetDealer = null;
+      }
+      if (
+        !targetDealer ||
+        (targetDealer.getBool && targetDealer.getBool("is_system"))
+      ) {
         return c.json(400, {
-          error: "dealer is required when creating people as system admin",
+          error: "INVALID_DEALER",
+          code: "INVALID_DEALER",
+          message: "Select a valid dealership.",
         });
       }
-      try {
-        $app.dao().findRecordById("dealers", targetDealerId);
-      } catch (_e) {
-        return c.json(400, { error: "Invalid dealer" });
-      }
     }
 
-    let pin = (body.pin || "").toString().trim();
-    if (!pin) {
-      pin = helpers.generateUniquePersonPin();
-    } else {
-      pin = helpers.assertPersonPinAvailable(pin, "");
+    let pin = helpers.generateUniquePersonPin();
+    if (
+      legacyCompatibility &&
+      body.pin !== undefined &&
+      body.pin !== null &&
+      body.pin.toString().trim()
+    ) {
+      pin = helpers.assertPersonPinAvailable(body.pin.toString().trim(), "");
     }
-
     const salespeople = $app.dao().findCollectionByNameOrId("salespeople");
     const record = new Record(salespeople, {
-      dealer: targetDealerId,
+      dealer: targetDealer.id,
       name: helpers.assertString(name, 120),
       pin: pin,
+      pin_needs_distribution: true,
       role: personRole,
       active: body.active === false ? false : true,
       created_at: new Date().toISOString(),
     });
+    const audited = helpers.logAuthEvent("person_pin_issued", {
+      dealerId: record.getString("dealer"),
+      credentialPresent: true,
+      ip: helpers.clientIP(c),
+      userAgent: helpers.userAgent(c),
+      detail: "person=" + (record.id || "pending") + " action=create",
+    });
+    if (!audited) {
+      return c.json(503, {
+        error: "AUDIT_UNAVAILABLE",
+        code: "UNAVAILABLE",
+        message: "The access code cannot be issued until auditing is available.",
+      });
+    }
     $app.dao().saveRecord(record);
-    return c.json(200, helpers.serializePerson(record));
+    const person = helpers.serializePerson(record);
+    return c.json(200, {
+      ...person,
+      person: person,
+      pin: pin,
+    });
   } catch (err) {
     console.error("[/api/app/salespeople] create error", err);
-    const msg = helpers.safeDealerMutationError(err);
     return c.json(400, {
-      error:
-        msg === "Failed to save dealer" ? "Failed to create person" : msg,
+      error: "PERSON_CREATE_FAILED",
+      code: "PERSON_CREATE_FAILED",
+      message: "Failed to create person.",
     });
   }
 });
 
 routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  const dealer = helpers.dealerFromSession(c);
-  if (!dealer) return c.json(401, { error: "No active session" });
-  const role = helpers.sessionRoleFromCookie(c);
-  if (role !== "dealer_admin" && role !== "super_admin") {
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  if (context.role !== "dealer_admin" && context.role !== "super_admin") {
     return c.json(403, { error: "Manager role required" });
   }
+
   try {
-    const id = c.pathParam("id");
-    const record = $app.dao().findRecordById("salespeople", id);
-    if (record.getString("dealer") !== dealer.id && role !== "super_admin") {
-      return c.json(403, { error: "Cross-dealer edit blocked" });
-    }
+    const record = $app.dao().findRecordById("salespeople", c.pathParam("id"));
     const existingRole = record.getString("role") || "salesperson";
-    if (existingRole === "manager" && role !== "super_admin") {
-      return c.json(403, { error: "Only system admin can edit managers" });
+    if (
+      (context.role !== "super_admin" &&
+        record.getString("dealer") !== context.dealer.id) ||
+      (context.role !== "super_admin" && existingRole === "manager")
+    ) {
+      return c.json(403, { error: "Person edit is not allowed" });
     }
 
     const body = $apis.requestInfo(c).data || {};
-    let pinRotated = false;
-    let deactivated = false;
-    if (typeof body.name === "string")
-      record.set("name", helpers.assertString(body.name.toString(), 120));
-    if (typeof body.pin === "string") {
-      const pin = helpers.assertPersonPinAvailable(body.pin.toString(), id);
-      if (pin !== record.getString("pin")) pinRotated = true;
-      record.set("pin", pin);
+    const legacyCompatibility = helpers.legacyClientCompatibilityEnabled(c);
+    if (body.pin !== undefined && !legacyCompatibility) {
+      return c.json(400, {
+        error: "USE_PIN_ROTATION",
+        code: "USE_PIN_ROTATION",
+        message: "Use the access-code rotation action.",
+      });
+    }
+
+    const wasActive = record.getBool
+      ? record.getBool("active")
+      : !!record.get("active");
+    let nextActive = wasActive;
+    let nextRole = existingRole;
+    let nextPin = record.getString("pin");
+    let pinChanged = false;
+    if (body.pin !== undefined) {
+      nextPin = helpers.assertPersonPinAvailable(body.pin.toString().trim(), record.id);
+      pinChanged = nextPin !== record.getString("pin");
+      if (pinChanged) {
+        record.set("pin", nextPin);
+        record.set("pin_needs_distribution", true);
+      }
+    }
+    if (body.name !== undefined) {
+      const name = body.name.toString().trim();
+      if (!name) return c.json(400, { error: "Name is required" });
+      record.set("name", helpers.assertString(name, 120));
     }
     if (typeof body.active === "boolean") {
-      if (body.active === false && (record.getBool
-        ? record.getBool("active")
-        : !!record.get("active"))) {
-        deactivated = true;
+      nextActive = body.active;
+      if (!wasActive && nextActive) {
+        helpers.assertPersonPinAvailable(record.getString("pin"), record.id);
       }
-      record.set("active", body.active);
+      record.set("active", nextActive);
     }
-    if (typeof body.role === "string" && role === "super_admin") {
-      const nextRole = body.role.toString().trim();
+    if (body.role !== undefined) {
+      if (context.role !== "super_admin") {
+        return c.json(403, { error: "Only system admin can change roles" });
+      }
+      nextRole = body.role.toString().trim();
       if (nextRole !== "manager" && nextRole !== "salesperson") {
         return c.json(400, { error: "role must be manager or salesperson" });
       }
       record.set("role", nextRole);
     }
+    const activeChanged = nextActive !== wasActive;
+    const roleChanged = nextRole !== existingRole;
+    if (pinChanged) {
+      const credentialAudited = helpers.logAuthEvent("person_pin_rotated", {
+        dealerId: record.getString("dealer"),
+        credentialPresent: true,
+        ip: helpers.clientIP(c),
+        userAgent: helpers.userAgent(c),
+        detail: "person=" + record.id + " action=legacy_patch",
+      });
+      if (!credentialAudited) {
+        return c.json(503, {
+          error: "AUDIT_UNAVAILABLE",
+          code: "UNAVAILABLE",
+          message: "The access code cannot be changed until auditing is available.",
+        });
+      }
+    }
+    let revoked = 0;
+    if (activeChanged || roleChanged || pinChanged) {
+      revoked = helpers.revokePersonSessions(record.id);
+    }
     $app.dao().saveRecord(record);
 
-    // New code or deactivation ends existing logins — next sign-in uses current code only.
-    if (pinRotated || deactivated) {
-      const revoked = helpers.revokePersonSessions(record.id);
-      helpers.logAuthEvent(
-        pinRotated ? "person_pin_rotated" : "person_deactivated",
-        {
-          dealerId: record.getString("dealer"),
-          credentialPresent: true,
-          ip: helpers.clientIP(c),
-          userAgent: helpers.userAgent(c),
-          detail:
-            "person=" +
-            record.id +
-            " sessions_revoked=" +
-            revoked,
-        },
-      );
+    if ((activeChanged || roleChanged) && !pinChanged) {
+      const eventKind = roleChanged
+        ? "person_role_changed"
+        : nextActive
+          ? "person_reactivated"
+          : "person_deactivated";
+      helpers.logAuthEvent(eventKind, {
+        dealerId: record.getString("dealer"),
+        ip: helpers.clientIP(c),
+        userAgent: helpers.userAgent(c),
+        detail: "person=" + record.id + " sessions_revoked=" + revoked,
+      });
     }
-
-    return c.json(200, helpers.serializePerson(record));
+    const person = helpers.serializePerson(record);
+    if (pinChanged) {
+      c.response().header().set("Cache-Control", "private, no-store");
+      return c.json(200, { ...person, person: person, pin: nextPin });
+    }
+    return c.json(200, person);
   } catch (err) {
     console.error("[/api/app/salespeople/:id] update error", err);
-    const msg = helpers.safeDealerMutationError(err);
+    const safeMessage = helpers.safeDealerMutationError(err);
     return c.json(400, {
-      error:
-        msg === "Failed to save dealer" ? "Failed to update person" : msg,
+      error: "PERSON_UPDATE_FAILED",
+      code: "PERSON_UPDATE_FAILED",
+      message:
+        safeMessage === "Failed to save dealer"
+          ? "Failed to update person."
+          : safeMessage,
     });
+  }
+});
+
+routerAdd("POST", "/api/app/salespeople/:id/rotate-pin", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  c.response().header().set("Cache-Control", "private, no-store");
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  if (context.role !== "dealer_admin" && context.role !== "super_admin") {
+    return c.json(403, { error: "Manager role required" });
+  }
+
+  try {
+    const record = $app.dao().findRecordById("salespeople", c.pathParam("id"));
+    if (
+      context.role !== "super_admin" &&
+      (record.getString("dealer") !== context.dealer.id ||
+        (record.getString("role") || "salesperson") !== "salesperson")
+    ) {
+      return c.json(403, {
+        error: "PIN_ROTATE_FORBIDDEN",
+        code: "PIN_ROTATE_FORBIDDEN",
+        message: "Access-code rotation is not allowed for this person.",
+      });
+    }
+
+    let pin = helpers.generateUniquePersonPin();
+    while (pin === record.getString("pin")) pin = helpers.generateUniquePersonPin();
+    const audited = helpers.logAuthEvent("person_pin_rotated", {
+      dealerId: record.getString("dealer"),
+      credentialPresent: true,
+      ip: helpers.clientIP(c),
+      userAgent: helpers.userAgent(c),
+      detail: "person=" + record.id + " action=rotate",
+    });
+    if (!audited) {
+      return c.json(503, {
+        error: "AUDIT_UNAVAILABLE",
+        code: "UNAVAILABLE",
+        message: "The access code cannot be returned until auditing is available.",
+      });
+    }
+    helpers.revokePersonSessions(record.id);
+    record.set("pin", pin);
+    record.set("pin_needs_distribution", true);
+    $app.dao().saveRecord(record);
+    return c.json(200, { person: helpers.serializePerson(record), pin: pin });
+  } catch (err) {
+    console.error("[/api/app/salespeople/:id/rotate-pin] error", err);
+    return c.json(400, {
+      error: "PIN_ROTATE_FAILED",
+      code: "PIN_ROTATE_FAILED",
+      message: "Failed to rotate the access code.",
+    });
+  }
+});
+
+routerAdd("POST", "/api/app/salespeople/:id/reveal-pin", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  c.response().header().set("Cache-Control", "private, no-store");
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  if (context.role !== "super_admin") {
+    return c.json(403, {
+      error: "PIN_REVEAL_FORBIDDEN",
+      code: "PIN_REVEAL_FORBIDDEN",
+      message: "Only system admin can reveal an access code.",
+    });
+  }
+
+  try {
+    const record = $app.dao().findRecordById("salespeople", c.pathParam("id"));
+    const pin = record.getString("pin");
+    if (!helpers.isValidPersonPin(pin)) {
+      return c.json(409, {
+        error: "PIN_UNAVAILABLE",
+        code: "PIN_UNAVAILABLE",
+        message: "This person does not have a valid access code.",
+      });
+    }
+    const audited = helpers.logAuthEvent("person_pin_revealed", {
+      dealerId: record.getString("dealer"),
+      credentialPresent: true,
+      ip: helpers.clientIP(c),
+      userAgent: helpers.userAgent(c),
+      detail: "person=" + record.id,
+    });
+    if (!audited) {
+      return c.json(503, {
+        error: "AUDIT_UNAVAILABLE",
+        code: "UNAVAILABLE",
+        message: "The access code cannot be revealed until auditing is available.",
+      });
+    }
+    return c.json(200, { person: helpers.serializePerson(record), pin: pin });
+  } catch (err) {
+    console.error("[/api/app/salespeople/:id/reveal-pin] error", err);
+    return c.json(404, {
+      error: "PERSON_NOT_FOUND",
+      code: "PERSON_NOT_FOUND",
+      message: "Person not found.",
+    });
+  }
+});
+
+routerAdd("POST", "/api/app/salespeople/:id/acknowledge-pin", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  if (context.role !== "dealer_admin" && context.role !== "super_admin") {
+    return c.json(403, { error: "Manager role required" });
+  }
+
+  try {
+    const record = $app.dao().findRecordById("salespeople", c.pathParam("id"));
+    if (
+      context.role !== "super_admin" &&
+      (record.getString("dealer") !== context.dealer.id ||
+        (record.getString("role") || "salesperson") !== "salesperson")
+    ) {
+      return c.json(403, { error: "Acknowledgement is not allowed" });
+    }
+    record.set("pin_needs_distribution", false);
+    $app.dao().saveRecord(record);
+    helpers.logAuthEvent("person_pin_acknowledged", {
+      dealerId: record.getString("dealer"),
+      ip: helpers.clientIP(c),
+      userAgent: helpers.userAgent(c),
+      detail: "person=" + record.id,
+    });
+    return c.json(200, helpers.serializePerson(record));
+  } catch (err) {
+    console.error("[/api/app/salespeople/:id/acknowledge-pin] error", err);
+    return c.json(404, { error: "Person not found" });
   }
 });
 
 routerAdd("DELETE", "/api/app/salespeople/:id", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  // Soft-delete: flip active=false. Hard delete would orphan posts.
-  const dealer = helpers.dealerFromSession(c);
-  if (!dealer) return c.json(401, { error: "No active session" });
-  const role = helpers.sessionRoleFromCookie(c);
-  if (role !== "dealer_admin" && role !== "super_admin") {
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  if (context.role !== "dealer_admin" && context.role !== "super_admin") {
     return c.json(403, { error: "Manager role required" });
   }
+
   try {
-    const id = c.pathParam("id");
-    const record = $app.dao().findRecordById("salespeople", id);
-    if (record.getString("dealer") !== dealer.id && role !== "super_admin") {
-      return c.json(403, { error: "Cross-dealer delete blocked" });
-    }
+    const record = $app.dao().findRecordById("salespeople", c.pathParam("id"));
     if (
-      (record.getString("role") || "salesperson") === "manager" &&
-      role !== "super_admin"
+      context.role !== "super_admin" &&
+      (record.getString("dealer") !== context.dealer.id ||
+        (record.getString("role") || "salesperson") === "manager")
     ) {
-      return c.json(403, { error: "Only system admin can deactivate managers" });
+      return c.json(403, { error: "Person deactivation is not allowed" });
     }
+    const revoked = helpers.revokePersonSessions(record.id);
     record.set("active", false);
     $app.dao().saveRecord(record);
+    helpers.logAuthEvent("person_deactivated", {
+      dealerId: record.getString("dealer"),
+      ip: helpers.clientIP(c),
+      userAgent: helpers.userAgent(c),
+      detail: "person=" + record.id + " sessions_revoked=" + revoked,
+    });
     return c.json(200, { success: true });
   } catch (err) {
     console.error("[/api/app/salespeople/:id] deactivate error", err);
@@ -2469,19 +3125,8 @@ routerAdd("POST", "/api/app/dealers", (c) => {
     const body = $apis.requestInfo(c).data || {};
     // Super-admin creates stores by name/brand only. Personal access codes live
     // on the people roster (managers / users), not on the dealer record.
-    const data = helpers.dealerMutationData(body, true, true);
+    const data = helpers.dealerMutationData(body, false, false);
     if (!data.name) return c.json(400, { error: "Dealer name is required" });
-    if (data.code) {
-      helpers.assertDealerCredentialAvailable(data.code, "");
-    }
-    if (data.admin_code) {
-      helpers.assertDealerCredentialAvailable(data.admin_code, "");
-    }
-    if (data.admin_code && data.code && data.admin_code === data.code) {
-      return c.json(400, {
-        error: "Dealer and manager codes must be different",
-      });
-    }
 
     const record = new Record(dealers);
     const form = new RecordUpsertForm($app, record);
@@ -2517,46 +3162,15 @@ routerAdd("PATCH", "/api/app/dealers/:id", (c) => {
 
   try {
     const target = $app.dao().findRecordById("dealers", id);
+    if (target.getBool && target.getBool("is_system")) {
+      return c.json(403, { error: "The system dealer cannot be edited" });
+    }
     helpers.restrictDealerLogoSchema(target.collection());
     const body = $apis.requestInfo(c).data || {};
-    const data = helpers.dealerMutationData(body, isSuperAdmin, isSuperAdmin);
+    const data = helpers.dealerMutationData(body, false, false);
     if (data.name !== undefined && !data.name) {
       return c.json(400, { error: "Dealer name is required" });
     }
-    if (
-      isSuperAdmin &&
-      target.id === dealer.id &&
-      data.code !== undefined &&
-      data.code !== target.getString("code")
-    ) {
-      return c.json(400, {
-        error:
-          "The system-admin dealer code must be rotated through the deployment secret runbook",
-      });
-    }
-    const finalCode =
-      data.code !== undefined ? data.code : target.getString("code");
-    const finalAdminCode =
-      data.admin_code !== undefined
-        ? data.admin_code
-        : target.getString("admin_code");
-    if (finalAdminCode && finalAdminCode === finalCode) {
-      return c.json(400, {
-        error: "Dealer and manager codes must be different",
-      });
-    }
-    if (data.code !== undefined) {
-      helpers.assertDealerCredentialAvailable(data.code, target.id);
-    }
-    if (data.admin_code) {
-      helpers.assertDealerCredentialAvailable(data.admin_code, target.id);
-    }
-    const codeRotated =
-      isSuperAdmin && !!data.code && data.code !== target.getString("code");
-    const adminCodeRotated =
-      isSuperAdmin &&
-      data.admin_code !== undefined &&
-      data.admin_code !== target.getString("admin_code");
 
     const form = new RecordUpsertForm($app, target);
     form.setFullManageAccess(true);
@@ -2565,28 +3179,6 @@ routerAdd("PATCH", "/api/app/dealers/:id", (c) => {
     if (logo) form.addFiles("logo", logo);
     form.submit();
 
-    if (codeRotated || adminCodeRotated) {
-      const preserveToken =
-        isSuperAdmin && target.id === dealer.id
-          ? helpers.readSessionToken(c)
-          : "";
-      const revokedSessions = helpers.revokeDealerSessions(
-        target.id,
-        preserveToken,
-      );
-      helpers.logAuthEvent("dealer_credentials_rotated", {
-        dealerId: target.id,
-        ip: helpers.clientIP(c),
-        userAgent: helpers.userAgent(c),
-        detail:
-          "rotated_by=super_admin code=" +
-          (codeRotated ? "yes" : "no") +
-          " manager_code=" +
-          (adminCodeRotated ? "yes" : "no") +
-          " sessions_revoked=" +
-          revokedSessions,
-      });
-    }
     return c.json(200, { id: target.id });
   } catch (err) {
     console.error("[/api/app/dealers/:id] patch error", err);
@@ -2610,6 +3202,9 @@ routerAdd("DELETE", "/api/app/dealers/:id", (c) => {
       });
     }
     const target = $app.dao().findRecordById("dealers", id);
+    if (target.getBool && target.getBool("is_system")) {
+      return c.json(400, { error: "The system dealer cannot be deleted" });
+    }
     $app.dao().deleteRecord(target);
     return c.json(200, { success: true });
   } catch (err) {
@@ -2627,41 +3222,39 @@ routerAdd("GET", "/api/app/dealers", (c) => {
     return c.json(403, { error: "Admin only" });
   }
   try {
-    const records = $app
-      .dao()
-      .findRecordsByFilter("dealers", "1=1", "name", 1000, 0);
-    const items = records.map((r) => ({
-      id: r.id,
-      name: r.getString("name"),
-      code: r.getString("code"),
-      logo: r.getString("logo")
-        ? `/api/files/dealers/${r.id}/${r.getString("logo")}`
-        : "",
-      brand_voice: r.getString("brand_voice"),
-      banned_phrases: r.getString("banned_phrases"),
-      oem_affiliation: r.getString("oem_affiliation"),
-      requires_approval: r.getBool
-        ? r.getBool("requires_approval")
-        : !!r.get("requires_approval"),
-      brand_color: r.getString("brand_color"),
-      admin_code: r.getString("admin_code"),
-      website: r.getString("website"),
-      phone: r.getString("phone"),
-      address: r.getString("address"),
-      hours: r.getString("hours"),
-      tagline: r.getString("tagline"),
-      facebook_url: r.getString("facebook_url"),
-      instagram_handle: r.getString("instagram_handle"),
-      tiktok_handle: r.getString("tiktok_handle"),
-      x_handle: r.getString("x_handle"),
-      gbp_url: r.getString("gbp_url"),
-      default_hashtags: r.getString("default_hashtags"),
-      default_footer: r.getString("default_footer"),
-      enabled_styles: r.getString("enabled_styles"),
-      default_style: r.getString("default_style"),
-      enabled_fun_styles: r.getString("enabled_fun_styles"),
-      custom_scenarios: r.getString("custom_scenarios"),
-    }));
+    const records = $app.dao().findRecordsByFilter("dealers", "1=1", "name", 1000, 0);
+    const items = records
+      .filter((r) => !(r.getBool && r.getBool("is_system")))
+      .map((r) => ({
+        id: r.id,
+        name: r.getString("name"),
+        logo: r.getString("logo")
+          ? `/api/files/dealers/${r.id}/${r.getString("logo")}`
+          : "",
+        brand_voice: r.getString("brand_voice"),
+        banned_phrases: r.getString("banned_phrases"),
+        oem_affiliation: r.getString("oem_affiliation"),
+        requires_approval: r.getBool
+          ? r.getBool("requires_approval")
+          : !!r.get("requires_approval"),
+        brand_color: r.getString("brand_color"),
+        website: r.getString("website"),
+        phone: r.getString("phone"),
+        address: r.getString("address"),
+        hours: r.getString("hours"),
+        tagline: r.getString("tagline"),
+        facebook_url: r.getString("facebook_url"),
+        instagram_handle: r.getString("instagram_handle"),
+        tiktok_handle: r.getString("tiktok_handle"),
+        x_handle: r.getString("x_handle"),
+        gbp_url: r.getString("gbp_url"),
+        default_hashtags: r.getString("default_hashtags"),
+        default_footer: r.getString("default_footer"),
+        enabled_styles: r.getString("enabled_styles"),
+        default_style: r.getString("default_style"),
+        enabled_fun_styles: r.getString("enabled_fun_styles"),
+        custom_scenarios: r.getString("custom_scenarios"),
+      }));
     return c.json(200, { items });
   } catch (err) {
     console.error("[/api/app/dealers] list error", err);

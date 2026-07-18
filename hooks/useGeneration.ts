@@ -10,6 +10,7 @@ import {
   VideoRequestOptions,
   AppStep,
   GeneratedPost,
+  ImageQualityTier,
 } from "../types";
 import { useToast } from "../components/ui/Toast";
 import { normalizeError, recoveryHint } from "../utils/errorHandler";
@@ -29,6 +30,8 @@ import {
   type PlatformId,
 } from "../services/platformCopy";
 import type { Dealer } from "../types";
+import type { CaptionGenerationResult } from "../services/modelConfig";
+import { MODEL_POLICY_VERSION } from "../services/modelConfig";
 
 const brandKitFromDealer = (dealer?: Dealer | null): DealerBrandKit | null => {
   if (!dealer) return null;
@@ -36,6 +39,51 @@ const brandKitFromDealer = (dealer?: Dealer | null): DealerBrandKit | null => {
     name: dealer.name,
     default_hashtags: dealer.default_hashtags,
     default_footer: dealer.default_footer,
+  };
+};
+
+const latestSuccessfulAt = (
+  ...values: Array<string | null | undefined>
+): string | undefined => {
+  const valid = values.filter((value): value is string => {
+    return typeof value === "string" && Number.isFinite(Date.parse(value));
+  });
+  return valid.sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+};
+
+/**
+ * Replace caption provenance after a regeneration while retaining the image
+ * provenance for the creative that is still on screen. Older saved posts may
+ * predate modality metadata; their existing image is represented as unknown
+ * instead of falsely attributing it to a provider or model.
+ */
+export const mergeCaptionProvenance = (
+  current: GeneratedPost["aiMeta"] | undefined,
+  captionResult: CaptionGenerationResult,
+  selectedTier: ImageQualityTier,
+): NonNullable<GeneratedPost["aiMeta"]> => {
+  const image = current?.image ?? {
+    task: selectedTier === "studio" ? "image_studio" : "image_standard",
+    tier: selectedTier,
+    provider: "unknown",
+    model: null,
+    fallbackCount: 0,
+    lastSuccessAt: null,
+  };
+  const lastSuccessfulGenerationAt = latestSuccessfulAt(
+    captionResult.aiMeta.lastSuccessAt,
+    image.lastSuccessAt,
+  );
+
+  return {
+    captionSource: captionResult.captionSource,
+    selectedTier: current?.selectedTier ?? selectedTier,
+    ...(captionResult.aiMeta.model ? { model: captionResult.aiMeta.model } : {}),
+    fallbackCount: captionResult.aiMeta.fallbackCount + image.fallbackCount,
+    ...(lastSuccessfulGenerationAt ? { lastSuccessfulGenerationAt } : {}),
+    caption: captionResult.aiMeta,
+    image,
+    modelPolicyVersion: current?.modelPolicyVersion ?? MODEL_POLICY_VERSION,
   };
 };
 
@@ -57,6 +105,7 @@ export const useGeneration = () => {
     generatedPost,
     generationParams,
     preferredTone,
+    imageQualityTier,
     setGeneratedPost,
     setGenerationParams,
     setError,
@@ -68,6 +117,7 @@ export const useGeneration = () => {
       generatedPost: state.generatedPost,
       generationParams: state.generationParams,
       preferredTone: state.preferredTone,
+      imageQualityTier: state.imageQualityTier,
       setGeneratedPost: state.setGeneratedPost,
       setGenerationParams: state.setGenerationParams,
       setError: state.setError,
@@ -119,8 +169,7 @@ export const useGeneration = () => {
       platformIds?: PlatformId[];
       meta?: GenerationMeta;
     }) => {
-      if (!selectedImage || !currentDealer)
-        throw new Error("Missing required data");
+      if (!selectedImage || !currentDealer) throw new Error("Missing required data");
 
       return runWithPersistedPhotoRelease(
         params.meta?.capturedRelease,
@@ -137,6 +186,7 @@ export const useGeneration = () => {
               currentDealer.logo,
               params.customText,
               params.creativeBrief,
+              imageQualityTier,
             ),
           );
         },
@@ -160,44 +210,29 @@ export const useGeneration = () => {
         setGenerationProgress((prev) => {
           if (prev >= 95) return prev;
           const remaining = 95 - prev;
-          const increment = Math.max(
-            0.1,
-            remaining * 0.05 * (Math.random() + 0.5),
-          );
+          const increment = Math.max(0.1, remaining * 0.05 * (Math.random() + 0.5));
           return prev + increment;
         });
       }, 800);
 
       timeoutsRef.current.push(
-        setTimeout(
-          () => setProgressMessage("Consulting the style guide..."),
-          2000,
-        ),
+        setTimeout(() => setProgressMessage("Consulting the style guide..."), 2000),
       );
       timeoutsRef.current.push(
-        setTimeout(
-          () => setProgressMessage("Crafting the perfect caption..."),
-          4500,
-        ),
+        setTimeout(() => setProgressMessage("Crafting the perfect caption..."), 4500),
       );
       timeoutsRef.current.push(
         setTimeout(() => setProgressMessage("Applying final polish..."), 7000),
       );
       timeoutsRef.current.push(
         setTimeout(
-          () =>
-            setProgressMessage(
-              "AI is thinking hard... this might take a moment.",
-            ),
+          () => setProgressMessage("AI is thinking hard... this might take a moment."),
           15000,
         ),
       );
       timeoutsRef.current.push(
         setTimeout(
-          () =>
-            setProgressMessage(
-              "Still working... generating high-quality content.",
-            ),
+          () => setProgressMessage("Still working... generating high-quality content."),
           30000,
         ),
       );
@@ -245,15 +280,14 @@ export const useGeneration = () => {
       const compliance = preparedCaption.compliance;
       if (compliance.changed && compliance.matches.length > 0) {
         logEvent("compliance.disclosures_detected", {
-          categories: Array.from(
-            new Set(compliance.matches.map((m) => m.category)),
-          ),
+          categories: Array.from(new Set(compliance.matches.map((m) => m.category))),
         });
       }
       const platformIds = variables.platformIds?.filter(Boolean) ?? [];
       const finalPost: GeneratedPost = {
         ...result,
         text: preparedCaption.caption,
+        isBasicFallback: result.captionSource === "basic_fallback",
         disclosures: preparedCaption.disclosures,
         disclosureCategories: preparedCaption.disclosureCategories,
         platformIds: platformIds.length > 0 ? platformIds : undefined,
@@ -261,11 +295,7 @@ export const useGeneration = () => {
 
       // Optional multi-platform caption pack. Never blocks the primary post:
       // 0–1 platforms keep primary text only; pack failures are non-fatal.
-      if (
-        shouldGenerateCaptionPack(platformIds) &&
-        selectedImage &&
-        currentDealer
-      ) {
+      if (shouldGenerateCaptionPack(platformIds) && selectedImage && currentDealer) {
         try {
           setProgressMessage("Tailoring captions per platform...");
           const packBrief = platformsToCaptionPackBrief(
@@ -322,8 +352,6 @@ export const useGeneration = () => {
           const captured = variables.meta?.capturedRelease;
           const post = await logPost({
             dealerId: currentDealer.id,
-            salespersonName: variables.meta?.salespersonName,
-            salespersonId: variables.meta?.salespersonId,
             style: variables.style,
             tone: variables.tone,
             customerName: variables.customerName,
@@ -337,9 +365,18 @@ export const useGeneration = () => {
             caption: finalPost.text,
             disclosures: finalPost.disclosures,
             imageDataUrl: finalPost.image,
+            captionSource: finalPost.captionSource,
+            generationTier: finalPost.aiMeta?.selectedTier,
+            generationModel: finalPost.aiMeta?.model,
+            generationFallbackCount: finalPost.aiMeta?.fallbackCount,
+            generationLastSuccessAt: finalPost.aiMeta?.lastSuccessfulGenerationAt,
+            modelPolicyVersion: finalPost.aiMeta?.modelPolicyVersion,
+            captionAttemptId: finalPost.aiMeta?.caption.attemptId,
+            imageAttemptId: finalPost.aiMeta?.image.attemptId,
           });
-          let releaseStatus: NonNullable<GeneratedPost["releaseStatus"]> =
-            captured ? "save_failed" : "not_required";
+          let releaseStatus: NonNullable<GeneratedPost["releaseStatus"]> = captured
+            ? "save_failed"
+            : "not_required";
           if (captured && releaseId && post) {
             try {
               await linkReleaseToPost(releaseId, post.id);
@@ -444,6 +481,7 @@ export const useGeneration = () => {
           currentDealer.logo,
           generationParams.customText || generatedPost?.text,
           generationParams.creativeBrief,
+          imageQualityTier,
         ),
       );
     },
@@ -470,8 +508,7 @@ export const useGeneration = () => {
 
   const funModeMutation = useMutation({
     mutationFn: async (styleName?: string) => {
-      if (!selectedImage || !currentDealer)
-        throw new Error("Missing required data");
+      if (!selectedImage || !currentDealer) throw new Error("Missing required data");
       const { generateFunSocialPostImage } = await loadGeminiService();
       return runGeminiTask("ai.fun", () =>
         generateFunSocialPostImage(
@@ -479,13 +516,13 @@ export const useGeneration = () => {
           currentDealer.name,
           currentDealer.logo,
           styleName,
+          imageQualityTier,
         ),
       );
     },
     onMutate: () => setError(null),
     onSuccess: (newImage) => {
-      if (generatedPost)
-        setGeneratedPost({ ...generatedPost, image: newImage });
+      if (generatedPost) setGeneratedPost({ ...generatedPost, image: newImage });
     },
     onError: (err) => {
       const normalized = normalizeError(err);
@@ -513,13 +550,13 @@ export const useGeneration = () => {
           editPrompt,
           currentDealer.name,
           currentDealer.logo,
+          imageQualityTier,
         ),
       );
     },
     onMutate: () => setError(null),
     onSuccess: (newImage) => {
-      if (generatedPost)
-        setGeneratedPost({ ...generatedPost, image: newImage });
+      if (generatedPost) setGeneratedPost({ ...generatedPost, image: newImage });
     },
     onError: (err) => {
       const normalized = normalizeError(err);
@@ -542,11 +579,7 @@ export const useGeneration = () => {
       primaryCaption: string,
       platformIds: string[],
     ): Promise<Record<string, string> | undefined> => {
-      if (
-        !shouldGenerateCaptionPack(platformIds) ||
-        !selectedImage ||
-        !currentDealer
-      ) {
+      if (!shouldGenerateCaptionPack(platformIds) || !selectedImage || !currentDealer) {
         return undefined;
       }
       try {
@@ -605,9 +638,9 @@ export const useGeneration = () => {
     mutationFn: async () => {
       if (!selectedImage || !generationParams || !currentDealer)
         throw new Error("Missing required data");
-      const { generateSocialPostText } = await loadGeminiService();
-      const newText = await runGeminiTask("ai.regenerate.text", () =>
-        generateSocialPostText(
+      const { generateSocialPostTextDetailed } = await loadGeminiService();
+      const captionResult = await runGeminiTask("ai.regenerate.text", () =>
+        generateSocialPostTextDetailed(
           selectedImage,
           generationParams.tone,
           currentDealer.name,
@@ -618,30 +651,32 @@ export const useGeneration = () => {
         ),
       );
       const prepared = prepareCaptionForDelivery(
-        newText,
+        captionResult.text,
         currentDealer.banned_phrases,
         brandKitFromDealer(currentDealer),
       );
       const platformIds =
-        generationParams.platformIds ??
-        generatedPost?.platformIds ??
-        [];
+        generationParams.platformIds ?? generatedPost?.platformIds ?? [];
       const pack = await rebuildCaptionPack(prepared.caption, platformIds);
-      return { prepared, pack, platformIds };
+      return { prepared, pack, platformIds, captionResult };
     },
     onMutate: () => setError(null),
-    onSuccess: ({ prepared, pack, platformIds }) => {
+    onSuccess: ({ prepared, pack, platformIds, captionResult }) => {
       if (!generatedPost) return;
       setGeneratedPost({
         ...generatedPost,
         text: prepared.caption,
+        captionSource: captionResult.captionSource,
+        isBasicFallback: captionResult.captionSource === "basic_fallback",
+        aiMeta: mergeCaptionProvenance(
+          generatedPost.aiMeta,
+          captionResult,
+          imageQualityTier,
+        ),
         disclosures: prepared.disclosures,
         disclosureCategories: prepared.disclosureCategories,
         platformCaptions: pack,
-        platformIds:
-          platformIds.length > 0
-            ? platformIds
-            : generatedPost.platformIds,
+        platformIds: platformIds.length > 0 ? platformIds : generatedPost.platformIds,
       });
     },
     onError: (err) => {
@@ -749,12 +784,7 @@ export const useGeneration = () => {
       videoAbortControllersRef.current.add(controller);
       try {
         return await runGeminiTask("ai.generate.video", () =>
-          generatePostVideo(
-            generatedPost.image,
-            style,
-            options,
-            controller.signal,
-          ),
+          generatePostVideo(generatedPost.image, style, options, controller.signal),
         );
       } finally {
         videoAbortControllersRef.current.delete(controller);
@@ -768,10 +798,7 @@ export const useGeneration = () => {
   });
 
   const handleGenerateVideo = useCallback(
-    async (
-      style: VideoStyle,
-      options: VideoRequestOptions,
-    ): Promise<string> => {
+    async (style: VideoStyle, options: VideoRequestOptions): Promise<string> => {
       return await generateVideoMutation.mutateAsync({ style, options });
     },
     [generateVideoMutation],
