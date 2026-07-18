@@ -108,7 +108,10 @@ class CircuitBreaker {
     stats.halfOpenInFlight = false;
     // Roll the failure window: if the last failure is older than the window,
     // start counting fresh so `failures` reflects a recent failure *rate*.
-    if (stats.lastFailure && now - stats.lastFailure > this.defaultOptions.failureWindow) {
+    if (
+      stats.lastFailure &&
+      now - stats.lastFailure > this.defaultOptions.failureWindow
+    ) {
       stats.failures = 0;
     }
     stats.failures++;
@@ -121,7 +124,7 @@ class CircuitBreaker {
     } else if (stats.failures >= this.defaultOptions.failureThreshold) {
       stats.state = "OPEN";
       console.log(
-        `[CircuitBreaker] ${service}: CLOSED -> OPEN (${stats.failures} failures)`
+        `[CircuitBreaker] ${service}: CLOSED -> OPEN (${stats.failures} failures)`,
       );
     }
   }
@@ -150,11 +153,11 @@ export const circuitBreaker = new CircuitBreaker();
  */
 export async function withCircuitBreaker<T>(
   service: string,
-  operation: () => Promise<T>
+  operation: () => Promise<T>,
 ): Promise<T> {
   if (!circuitBreaker.canRequest(service)) {
     throw new Error(
-      `Service ${service} is currently unavailable. Please try again later.`
+      `Service ${service} is currently unavailable. Please try again later.`,
     );
   }
 

@@ -44,11 +44,8 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
     message: string;
   } | null>(null);
 
-  const isImageReady = Boolean(
-    isOpen && imageSrc && loadedImageSrc === imageSrc,
-  );
-  const previewError =
-    reviewError?.imageSrc === imageSrc ? reviewError.message : null;
+  const isImageReady = Boolean(isOpen && imageSrc && loadedImageSrc === imageSrc);
+  const previewError = reviewError?.imageSrc === imageSrc ? reviewError.message : null;
 
   useEffect(() => {
     if (!isOpen) setIsExporting(false);
@@ -180,10 +177,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
           )}
 
           {/* Framing rails echo platform-safe crop guides without applying a crop. */}
-          <div
-            className="pointer-events-none absolute inset-4"
-            aria-hidden="true"
-          >
+          <div className="pointer-events-none absolute inset-4" aria-hidden="true">
             <span className="absolute left-0 top-0 h-8 w-8 border-l-2 border-t-2 border-white/70" />
             <span className="absolute right-0 top-0 h-8 w-8 border-r-2 border-t-2 border-white/70" />
             <span className="absolute bottom-0 left-0 h-8 w-8 border-b-2 border-l-2 border-white/70" />

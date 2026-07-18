@@ -19,9 +19,7 @@ interface ViewportInfo {
  * Useful for responsive layouts and mobile optimization
  */
 export const useViewport = (): ViewportInfo => {
-  const [viewport, setViewport] = useState<ViewportInfo>(() =>
-    getViewportInfo()
-  );
+  const [viewport, setViewport] = useState<ViewportInfo>(() => getViewportInfo());
 
   useEffect(() => {
     const handleResize = () => {
@@ -49,9 +47,7 @@ function getViewportInfo(): ViewportInfo {
 
   // Get safe area insets from CSS variables
   const computedStyle =
-    typeof document !== "undefined"
-      ? getComputedStyle(document.documentElement)
-      : null;
+    typeof document !== "undefined" ? getComputedStyle(document.documentElement) : null;
 
   const getSafeArea = (property: string): number => {
     if (!computedStyle) return 0;
@@ -86,7 +82,7 @@ interface ScrollInfo {
  * Hook for tracking scroll position and direction
  */
 export const useScrollInfo = (
-  elementRef?: React.RefObject<HTMLElement>
+  elementRef?: React.RefObject<HTMLElement>,
 ): ScrollInfo => {
   const [scrollInfo, setScrollInfo] = useState<ScrollInfo>({
     scrollY: 0,
@@ -108,14 +104,12 @@ export const useScrollInfo = (
         scrollY > lastScrollY.current
           ? "down"
           : scrollY < lastScrollY.current
-          ? "up"
-          : "none";
+            ? "up"
+            : "none";
 
       const scrollHeight =
-        elementRef?.current?.scrollHeight ??
-        document.documentElement.scrollHeight;
-      const clientHeight =
-        elementRef?.current?.clientHeight ?? window.innerHeight;
+        elementRef?.current?.scrollHeight ?? document.documentElement.scrollHeight;
+      const clientHeight = elementRef?.current?.clientHeight ?? window.innerHeight;
 
       setScrollInfo({
         scrollY,

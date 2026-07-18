@@ -40,11 +40,11 @@ describe("isMobilePhotoDevice", () => {
 
 describe("saveResultToastMessage", () => {
   it("guides users to Save Image / Save Video in the share sheet", () => {
-    expect(
-      saveResultToastMessage({ method: "photos-share", kind: "image" }),
-    ).toMatch(/Save Image/i);
-    expect(
-      saveResultToastMessage({ method: "photos-share", kind: "video" }),
-    ).toMatch(/Save Video/i);
+    expect(saveResultToastMessage({ method: "photos-share", kind: "image" })).toMatch(
+      /Save Image/i,
+    );
+    expect(saveResultToastMessage({ method: "photos-share", kind: "video" })).toMatch(
+      /Save Video/i,
+    );
   });
 });

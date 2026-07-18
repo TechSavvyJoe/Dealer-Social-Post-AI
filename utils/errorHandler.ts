@@ -37,29 +37,50 @@ export const normalizeError = (error: unknown): NormalizedError => {
     error instanceof Error
       ? error.message
       : typeof error === "string"
-      ? error
-      : "Unknown error";
+        ? error
+        : "Unknown error";
   const lower = message.toLowerCase();
 
   let kind: ErrorKind = "unknown";
   let retryable = true;
 
-  if (lower.includes("network") || lower.includes("failed to fetch") || lower.includes("offline")) {
+  if (
+    lower.includes("network") ||
+    lower.includes("failed to fetch") ||
+    lower.includes("offline")
+  ) {
     kind = "network";
   } else if (lower.includes("404") || lower.includes("not found")) {
     kind = "model_unavailable";
     retryable = false;
-  } else if (lower.includes("timeout") || lower.includes("timed out") || lower.includes("abort")) {
+  } else if (
+    lower.includes("timeout") ||
+    lower.includes("timed out") ||
+    lower.includes("abort")
+  ) {
     kind = "timeout";
   } else if (lower.includes("quota") || lower.includes("429")) {
     kind = "quota";
     retryable = false;
-  } else if (lower.includes("unauthorized") || lower.includes("forbidden") || lower.includes("401") || lower.includes("403")) {
+  } else if (
+    lower.includes("unauthorized") ||
+    lower.includes("forbidden") ||
+    lower.includes("401") ||
+    lower.includes("403")
+  ) {
     kind = "unauthorized";
     retryable = false;
-  } else if (lower.includes("unavailable") || lower.includes("overloaded") || lower.includes("busy")) {
+  } else if (
+    lower.includes("unavailable") ||
+    lower.includes("overloaded") ||
+    lower.includes("busy")
+  ) {
     kind = "model_unavailable";
-  } else if (lower.includes("invalid") || lower.includes("bad request") || lower.includes("400")) {
+  } else if (
+    lower.includes("invalid") ||
+    lower.includes("bad request") ||
+    lower.includes("400")
+  ) {
     kind = "validation";
     retryable = false;
   }

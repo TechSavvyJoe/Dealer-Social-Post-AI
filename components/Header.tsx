@@ -238,8 +238,8 @@ export const Header: React.FC<HeaderProps> = ({
         }
       >
         <p className="text-sm leading-relaxed text-surface-300">
-          Save the media and copy the caption first if you want to keep both.
-          Logging out clears this workspace.
+          Save the media and copy the caption first if you want to keep both. Logging
+          out clears this workspace.
         </p>
       </Modal>
     </>

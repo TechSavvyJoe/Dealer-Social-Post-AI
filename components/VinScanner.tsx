@@ -96,9 +96,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
   // down and re-acquired every time a decode starts/finishes.
   const isDecodingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
-  const [scanStatus, setScanStatus] = useState<string>(
-    "Point at the VIN barcode",
-  );
+  const [scanStatus, setScanStatus] = useState<string>("Point at the VIN barcode");
   const [lastDecoded, setLastDecoded] = useState<DecodedVehicle | null>(null);
 
   const stopCamera = useCallback(() => {
@@ -226,9 +224,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
                   return;
                 }
               }
-              setScanStatus(
-                `Detected "${candidate.slice(0, 24)}…" — keep aiming`,
-              );
+              setScanStatus(`Detected "${candidate.slice(0, 24)}…" — keep aiming`);
             }
           } catch {
             // detection errors are non-fatal; loop continues
@@ -337,13 +333,10 @@ export const VinScanner: React.FC<VinScannerProps> = ({
                   }}
                 />
               </div>
-              <p className="text-xs text-surface-300 text-center">
-                {scanStatus}
-              </p>
+              <p className="text-xs text-surface-300 text-center">{scanStatus}</p>
               <p className="text-[10px] text-surface-500 text-center leading-relaxed">
                 Tip: the VIN barcode is usually on the driver-side door jamb or
-                lower-left corner of the windshield. Hold steady, fill the
-                frame.
+                lower-left corner of the windshield. Hold steady, fill the frame.
               </p>
             </motion.div>
           )}

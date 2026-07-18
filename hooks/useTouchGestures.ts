@@ -52,8 +52,7 @@ export const useTouchGestures = ({
       if (!enabled || event.touches.length !== 1) return;
 
       const target = event.target;
-      if (target instanceof Element && target.closest(INTERACTIVE_SELECTOR))
-        return;
+      if (target instanceof Element && target.closest(INTERACTIVE_SELECTOR)) return;
 
       const touch = event.touches[0];
       touchStart.current = {

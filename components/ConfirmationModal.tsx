@@ -45,8 +45,8 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
           <Icon type="error" className="h-8 w-8 text-red-400" />
         </div>
         <p className="text-sm text-surface-300">
-          Are you sure? This action cannot be undone and will permanently remove
-          this item.
+          Are you sure? This action cannot be undone and will permanently remove this
+          item.
         </p>
       </div>
     </Modal>

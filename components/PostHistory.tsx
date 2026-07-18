@@ -95,9 +95,7 @@ export const PostHistory: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ApprovalStatus | "all">(
-    "all",
-  );
+  const [statusFilter, setStatusFilter] = useState<ApprovalStatus | "all">("all");
   const [openingId, setOpeningId] = useState<string | null>(null);
 
   const reqIdRef = useRef(0);
@@ -258,8 +256,7 @@ export const PostHistory: React.FC = () => {
             </h3>
             <p className="text-xs text-surface-400">
               {filtered.length} of {items.length}{" "}
-              {items.length === 1 ? "post" : "posts"} · open creatives to
-              re-share
+              {items.length === 1 ? "post" : "posts"} · open creatives to re-share
             </p>
           </div>
         </div>
@@ -413,9 +410,7 @@ export const PostHistory: React.FC = () => {
                       </td>
                       <td className="py-2 px-2 text-surface-50 font-semibold">
                         {p.salesperson_name || (
-                          <span className="text-surface-500 italic">
-                            unattributed
-                          </span>
+                          <span className="text-surface-500 italic">unattributed</span>
                         )}
                       </td>
                       <td className="py-2 px-2 text-surface-200">
@@ -482,8 +477,8 @@ export const PostHistory: React.FC = () => {
       <p className="text-[11px] text-surface-500 leading-relaxed flex items-start gap-1.5">
         <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
         Open loads the stored creative into the post studio for copy, share, and
-        multi-size export — no AI regeneration. Older rows without an image
-        cannot be reopened.
+        multi-size export — no AI regeneration. Older rows without an image cannot be
+        reopened.
       </p>
     </motion.div>
   );

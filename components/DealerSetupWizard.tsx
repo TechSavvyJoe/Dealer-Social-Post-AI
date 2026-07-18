@@ -90,9 +90,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
 
   // Social
   const [facebookUrl, setFacebookUrl] = useState(dealer.facebook_url || "");
-  const [instagramHandle, setInstagramHandle] = useState(
-    dealer.instagram_handle || ""
-  );
+  const [instagramHandle, setInstagramHandle] = useState(dealer.instagram_handle || "");
   const [tiktokHandle, setTiktokHandle] = useState(dealer.tiktok_handle || "");
   const [xHandle, setXHandle] = useState(dealer.x_handle || "");
   const [gbpUrl, setGbpUrl] = useState(dealer.gbp_url || "");
@@ -103,30 +101,25 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
   const [color, setColor] = useState(dealer.brand_color || "");
 
   // Generation defaults
-  const [defaultHashtags, setDefaultHashtags] = useState(
-    dealer.default_hashtags || ""
-  );
-  const [defaultFooter, setDefaultFooter] = useState(
-    dealer.default_footer || ""
-  );
+  const [defaultHashtags, setDefaultHashtags] = useState(dealer.default_hashtags || "");
+  const [defaultFooter, setDefaultFooter] = useState(dealer.default_footer || "");
 
   // Overlay preferences — parsed sets of enabled style ids
   const initialEnabledStyles = (() => {
     const raw = (dealer.enabled_styles || "").trim();
     return raw
-      ? new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))
+      ? new Set(
+          raw
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        )
       : new Set<string>(Object.values(StyleOption)); // default: all enabled
   })();
-  const [enabledStyles, setEnabledStyles] = useState<Set<string>>(
-    initialEnabledStyles
-  );
-  const [defaultStyle, setDefaultStyle] = useState<string>(
-    dealer.default_style || ""
-  );
+  const [enabledStyles, setEnabledStyles] = useState<Set<string>>(initialEnabledStyles);
+  const [defaultStyle, setDefaultStyle] = useState<string>(dealer.default_style || "");
 
-  const [requiresApproval, setRequiresApproval] = useState(
-    !!dealer.requires_approval
-  );
+  const [requiresApproval, setRequiresApproval] = useState(!!dealer.requires_approval);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -158,11 +151,8 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
     }
     setSaving(true);
     try {
-      const diff = <T extends string | boolean>(
-        key: string,
-        next: T,
-        prev: T
-      ) => (next !== prev ? { [key]: next } : {});
+      const diff = <T extends string | boolean>(key: string, next: T, prev: T) =>
+        next !== prev ? { [key]: next } : {};
       const fields: Record<string, string | boolean> = {
         ...diff("brand_voice", voice.trim(), dealer.brand_voice || ""),
         ...diff("banned_phrases", banned.trim(), dealer.banned_phrases || ""),
@@ -176,33 +166,29 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
         ...diff(
           "instagram_handle",
           instagramHandle.trim().replace(/^@/, ""),
-          (dealer.instagram_handle || "").replace(/^@/, "")
+          (dealer.instagram_handle || "").replace(/^@/, ""),
         ),
         ...diff(
           "tiktok_handle",
           tiktokHandle.trim().replace(/^@/, ""),
-          (dealer.tiktok_handle || "").replace(/^@/, "")
+          (dealer.tiktok_handle || "").replace(/^@/, ""),
         ),
         ...diff(
           "x_handle",
           xHandle.trim().replace(/^@/, ""),
-          (dealer.x_handle || "").replace(/^@/, "")
+          (dealer.x_handle || "").replace(/^@/, ""),
         ),
         ...diff("gbp_url", gbpUrl.trim(), dealer.gbp_url || ""),
         ...diff(
           "default_hashtags",
           defaultHashtags.trim(),
-          dealer.default_hashtags || ""
+          dealer.default_hashtags || "",
         ),
-        ...diff(
-          "default_footer",
-          defaultFooter.trim(),
-          dealer.default_footer || ""
-        ),
+        ...diff("default_footer", defaultFooter.trim(), dealer.default_footer || ""),
         ...diff(
           "enabled_styles",
           Array.from(enabledStyles).join(","),
-          dealer.enabled_styles || ""
+          dealer.enabled_styles || "",
         ),
         ...diff("default_style", defaultStyle, dealer.default_style || ""),
       };
@@ -250,7 +236,8 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
             Set up {dealer.name}
           </h3>
           <p className="text-xs text-surface-400">
-            90 seconds to make every post sound like your dealership instead of generic AI.
+            90 seconds to make every post sound like your dealership instead of generic
+            AI.
           </p>
         </div>
         {onDismiss && (
@@ -278,7 +265,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                   "flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] flex-shrink-0",
                   active && "bg-primary-500/20 text-primary-100",
                   done && "text-success-200",
-                  !active && !done && "text-surface-500"
+                  !active && !done && "text-surface-500",
                 )}
               >
                 <Icon className="h-3 w-3" />
@@ -288,7 +275,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 <div
                   className={cn(
                     "h-px flex-1 mx-1",
-                    done ? "bg-success-400/50" : "bg-white/10"
+                    done ? "bg-success-400/50" : "bg-white/10",
                   )}
                 />
               )}
@@ -309,9 +296,8 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
           {step.id === "contact" && (
             <div className="space-y-3">
               <p className="text-sm text-surface-200">
-                Contact info shown in posts, on receipts, and in your
-                dashboard. None of it is required — set whatever you want
-                surfaced.
+                Contact info shown in posts, on receipts, and in your dashboard. None of
+                it is required — set whatever you want surfaced.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <Input
@@ -339,11 +325,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 fullWidth
                 className="bg-white/5 border-white/10 focus:border-primary-400"
               />
-              <HoursPicker
-                value={hoursWeek}
-                onChange={setHoursWeek}
-                preview={hours}
-              />
+              <HoursPicker value={hoursWeek} onChange={setHoursWeek} preview={hours} />
               <Input
                 label="Tagline"
                 value={tagline}
@@ -358,8 +340,8 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
           {step.id === "social" && (
             <div className="space-y-3">
               <p className="text-sm text-surface-200">
-                Where you post. The Share dialog uses these to deep-link into
-                the right account when you publish.
+                Where you post. The Share dialog uses these to deep-link into the right
+                account when you publish.
               </p>
               <Input
                 label="Facebook page URL"
@@ -409,9 +391,9 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
           {step.id === "hashtags" && (
             <div className="space-y-3">
               <p className="text-sm text-surface-200">
-                Hashtags and a CTA the AI will weave into every post. One
-                hashtag per line. Footer is appended after the caption (e.g.
-                "Stop by 123 Main St — open until 9pm").
+                Hashtags and a CTA the AI will weave into every post. One hashtag per
+                line. Footer is appended after the caption (e.g. "Stop by 123 Main St —
+                open until 9pm").
               </p>
               <Textarea
                 label="Default hashtags"
@@ -437,9 +419,9 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
           {step.id === "overlays" && (
             <div className="space-y-3">
               <p className="text-sm text-surface-200">
-                Pick which design styles your team can use. Anything you
-                disable disappears from the salesperson picker. The starred
-                style is preselected when they open the customizer.
+                Pick which design styles your team can use. Anything you disable
+                disappears from the salesperson picker. The starred style is preselected
+                when they open the customizer.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {Object.values(StyleOption).map((s) => {
@@ -452,13 +434,11 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                         "rounded-xl border px-3 py-2.5 flex items-center justify-between gap-2",
                         enabled
                           ? "border-primary-500/40 bg-primary-500/5"
-                          : "border-white/10 bg-white/5 opacity-60"
+                          : "border-white/10 bg-white/5 opacity-60",
                       )}
                     >
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold text-surface-50">
-                          {s}
-                        </div>
+                        <div className="text-sm font-semibold text-surface-50">{s}</div>
                         <div className="text-[10px] text-surface-400">
                           {enabled ? "available to salespeople" : "hidden"}
                         </div>
@@ -473,7 +453,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                             isDefault
                               ? "bg-amber-500/30 text-amber-100"
                               : "bg-white/5 hover:bg-white/10 text-surface-300",
-                            !enabled && "opacity-30 cursor-not-allowed"
+                            !enabled && "opacity-30 cursor-not-allowed",
                           )}
                           title={
                             isDefault
@@ -490,7 +470,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                             "text-[10px] px-2 py-1 rounded-md transition-colors",
                             enabled
                               ? "bg-white/5 hover:bg-white/10 text-surface-300"
-                              : "bg-success-500/20 hover:bg-success-500/30 text-success-100"
+                              : "bg-success-500/20 hover:bg-success-500/30 text-success-100",
                           )}
                         >
                           {enabled ? "Disable" : "Enable"}
@@ -501,8 +481,8 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 })}
               </div>
               <p className="text-[11px] text-surface-500">
-                Fun Mode artistic transforms (cartoon / vintage / neon /
-                superhero, etc.) can be tuned later from the settings panel.
+                Fun Mode artistic transforms (cartoon / vintage / neon / superhero,
+                etc.) can be tuned later from the settings panel.
               </p>
             </div>
           )}
@@ -510,8 +490,8 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
           {step.id === "voice" && (
             <div className="space-y-2">
               <p className="text-sm text-surface-200">
-                Tell the AI how your dealership sounds. The more specific, the
-                less generic the captions.
+                Tell the AI how your dealership sounds. The more specific, the less
+                generic the captions.
               </p>
               <Textarea
                 label="Brand voice"
@@ -523,9 +503,9 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 className="bg-white/5 border-white/10 focus:border-primary-400"
               />
               <p className="text-[11px] text-surface-500">
-                Examples that work: tone words ("warm, no hype"), forbidden
-                clichés ("don't say 'amazing deal'"), local color ("we're a
-                Detroit shop — Tigers, Lions, never Buckeyes").
+                Examples that work: tone words ("warm, no hype"), forbidden clichés
+                ("don't say 'amazing deal'"), local color ("we're a Detroit shop —
+                Tigers, Lions, never Buckeyes").
               </p>
             </div>
           )}
@@ -545,9 +525,9 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 className="bg-white/5 border-white/10 focus:border-primary-400 font-mono text-sm"
               />
               <p className="text-[11px] text-surface-500">
-                FTC + most OEM brand standards prohibit "guaranteed approval",
-                "no credit check", "lowest price guaranteed". Pre-filled
-                suggestions above — keep them or replace.
+                FTC + most OEM brand standards prohibit "guaranteed approval", "no
+                credit check", "lowest price guaranteed". Pre-filled suggestions above —
+                keep them or replace.
               </p>
             </div>
           )}
@@ -555,8 +535,8 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
           {step.id === "color" && (
             <div className="space-y-2">
               <p className="text-sm text-surface-200">
-                Your dealership's primary brand color. Used to tint buttons +
-                accents across the app.
+                Your dealership's primary brand color. Used to tint buttons + accents
+                across the app.
               </p>
               <div className="flex items-center gap-3">
                 <input
@@ -577,10 +557,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
               </div>
               {color && HEX_RE.test(color) && (
                 <div className="flex items-center gap-2 mt-2 text-[11px] text-surface-400">
-                  <div
-                    className="h-4 w-4 rounded-full"
-                    style={{ background: color }}
-                  />
+                  <div className="h-4 w-4 rounded-full" style={{ background: color }} />
                   Preview
                 </div>
               )}
@@ -590,8 +567,8 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
           {step.id === "approval" && (
             <div className="space-y-3">
               <p className="text-sm text-surface-200">
-                Should every salesperson post require manager approval before
-                it's counted as published? You can change this anytime.
+                Should every salesperson post require manager approval before it's
+                counted as published? You can change this anytime.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <button
@@ -601,13 +578,13 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                     "p-3 rounded-xl border text-left text-sm transition-colors",
                     !requiresApproval
                       ? "border-success-500/50 bg-success-500/10 text-success-100"
-                      : "border-white/10 bg-white/5 text-surface-300 hover:border-white/20"
+                      : "border-white/10 bg-white/5 text-surface-300 hover:border-white/20",
                   )}
                 >
                   <div className="font-semibold">No review needed</div>
                   <div className="text-[11px] mt-1 opacity-80">
-                    Faster — salespeople post immediately. Best when the team
-                    is experienced.
+                    Faster — salespeople post immediately. Best when the team is
+                    experienced.
                   </div>
                 </button>
                 <button
@@ -617,13 +594,13 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                     "p-3 rounded-xl border text-left text-sm transition-colors",
                     requiresApproval
                       ? "border-warning-500/50 bg-warning-500/10 text-warning-100"
-                      : "border-white/10 bg-white/5 text-surface-300 hover:border-white/20"
+                      : "border-white/10 bg-white/5 text-surface-300 hover:border-white/20",
                   )}
                 >
                   <div className="font-semibold">Manager approves first</div>
                   <div className="text-[11px] mt-1 opacity-80">
-                    Safer — GSM reviews every post before it's marked
-                    published. Recommended for new teams.
+                    Safer — GSM reviews every post before it's marked published.
+                    Recommended for new teams.
                   </div>
                 </button>
               </div>

@@ -52,7 +52,7 @@ export const FAB: React.FC<FABProps> = ({
           className={cn(
             "fixed z-40 flex flex-col items-end gap-4 pointer-events-none",
             positionClasses[position],
-            className
+            className,
           )}
         >
           {/* Secondary Actions */}
@@ -76,8 +76,8 @@ export const FAB: React.FC<FABProps> = ({
                     action.variant === "danger"
                       ? "bg-error-500/80 hover:bg-error-600"
                       : action.variant === "success"
-                      ? "bg-success-500/80 hover:bg-success-600"
-                      : "bg-surface-800/80 hover:bg-surface-700"
+                        ? "bg-success-500/80 hover:bg-success-600"
+                        : "bg-surface-800/80 hover:bg-surface-700",
                   )}
                 >
                   {action.label}
@@ -100,7 +100,7 @@ export const FAB: React.FC<FABProps> = ({
               "pointer-events-auto w-14 h-14 rounded-full flex items-center justify-center shadow-xl shadow-primary-900/20",
               "bg-gradient-to-br from-primary-500 to-secondary-600 text-white",
               "border border-white/20 backdrop-blur-sm transition-shadow hover:shadow-glow-primary",
-              actions.length > 0 && isOpen && "rotate-45"
+              actions.length > 0 && isOpen && "rotate-45",
             )}
             style={{ WebkitTapHighlightColor: "transparent" }}
           >

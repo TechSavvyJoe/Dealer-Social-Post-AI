@@ -55,9 +55,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
     return Array.from(groups.entries());
   }, [allScenarios]);
 
-  const current = value
-    ? allScenarios.find((s) => s.id === value)
-    : allScenarios[0]; // first scenario (Customer Delivery by convention)
+  const current = value ? allScenarios.find((s) => s.id === value) : allScenarios[0]; // first scenario (Customer Delivery by convention)
 
   return (
     <div className={cn("space-y-1.5", className)}>
@@ -179,8 +177,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
             ))}
             <div className="border-t border-white/5 mt-1 pt-2 px-2 pb-1 text-[10px] text-surface-500 flex items-center gap-1">
               <Sparkles className="w-3 h-3" />
-              Picking a scenario tunes the prompt + defaults. Override anything
-              below.
+              Picking a scenario tunes the prompt + defaults. Override anything below.
             </div>
           </motion.div>
         )}

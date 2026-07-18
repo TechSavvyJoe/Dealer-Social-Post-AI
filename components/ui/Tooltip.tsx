@@ -7,11 +7,7 @@ interface TooltipProps {
   side?: "top" | "bottom" | "left" | "right";
 }
 
-export const Tooltip: React.FC<TooltipProps> = ({
-  label,
-  children,
-  side = "top",
-}) => {
+export const Tooltip: React.FC<TooltipProps> = ({ label, children, side = "top" }) => {
   const [open, setOpen] = useState(false);
   const [isTouchDevice] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -43,7 +39,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
         className={cn(
           "pointer-events-none absolute z-40 whitespace-nowrap rounded-md bg-slate-950/90 px-2 py-1 text-xs font-medium text-white shadow-lg transition-opacity",
           open ? "opacity-100" : "opacity-0",
-          positionClasses[side]
+          positionClasses[side],
         )}
         role="tooltip"
       >

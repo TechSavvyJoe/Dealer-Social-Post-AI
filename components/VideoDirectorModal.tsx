@@ -93,9 +93,7 @@ const StyleButton = memo(
         type={icon as any}
         className="w-10 h-10 sm:w-12 sm:h-12 text-primary-300 group-hover:text-primary-200 transition-colors"
       />
-      <span className="mt-2 font-semibold text-white text-sm text-center">
-        {label}
-      </span>
+      <span className="mt-2 font-semibold text-white text-sm text-center">{label}</span>
       <span className="mt-1 text-[11px] text-white/60 text-center line-clamp-2">
         {description}
       </span>
@@ -153,10 +151,9 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
         <div className="mb-4 space-y-4">
           <p className="text-xs leading-relaxed text-surface-400">
             Built for dealership social: living photography, paint sheen, tasteful
-            celebration — not fake CGI cars. Vertical 9:16 for Reels/TikTok.
-            Music on by default; tap{" "}
-            <strong className="text-surface-200">Tap for sound</strong> after
-            render.
+            celebration — not fake CGI cars. Vertical 9:16 for Reels/TikTok. Music on by
+            default; tap <strong className="text-surface-200">Tap for sound</strong>{" "}
+            after render.
           </p>
 
           {/* Platform format presets */}
@@ -187,9 +184,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
           {/* Aspect + sound + duration */}
           <div className="space-y-3 rounded-xl border border-white/10 bg-surface-950/40 p-3">
             <div className="space-y-2">
-              <h3 className="text-xs font-semibold text-white/80">
-                Aspect ratio
-              </h3>
+              <h3 className="text-xs font-semibold text-white/80">Aspect ratio</h3>
               <div className="flex flex-wrap gap-2">
                 {aspectRatios.map(({ value, label, description }) => (
                   <button
@@ -213,10 +208,9 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
                 ))}
               </div>
               <p className="text-[10px] text-surface-500">
-                Veo renders{" "}
-                <strong className="text-surface-300">9:16</strong> (vertical) or{" "}
-                <strong className="text-surface-300">16:9</strong> (wide). Square
-                uses letterboxing into a supported ratio.
+                Veo renders <strong className="text-surface-300">9:16</strong>{" "}
+                (vertical) or <strong className="text-surface-300">16:9</strong> (wide).
+                Square uses letterboxing into a supported ratio.
               </p>
             </div>
 
@@ -299,9 +293,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
               }}
               className="w-full px-2 py-3 flex items-center justify-between text-sm text-white/70 hover:text-white hover:bg-white/5 transition-colors touch-manipulation rounded-lg"
             >
-              <span>
-                {showMore ? "Hide" : "Show"} extra styles
-              </span>
+              <span>{showMore ? "Hide" : "Show"} extra styles</span>
               <Icon
                 type="chevron-down"
                 className={`w-5 h-5 transition-transform duration-200 ${
@@ -320,22 +312,20 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
                   className="overflow-hidden"
                 >
                   <p className="px-1 pb-2 text-[11px] text-surface-400 leading-snug">
-                    Optional extras. Prefer starred marketing styles for
-                    customer delivery photos.
+                    Optional extras. Prefer starred marketing styles for customer
+                    delivery photos.
                   </p>
                   <div className="pt-1 pb-2 grid grid-cols-2 gap-3">
-                    {EXPERIMENTAL_STYLES.map(
-                      ({ style, label, icon, description }) => (
-                        <StyleButton
-                          key={style}
-                          style={style}
-                          label={label}
-                          icon={icon}
-                          description={description}
-                          onSelect={handleStyleSelect}
-                        />
-                      ),
-                    )}
+                    {EXPERIMENTAL_STYLES.map(({ style, label, icon, description }) => (
+                      <StyleButton
+                        key={style}
+                        style={style}
+                        label={label}
+                        icon={icon}
+                        description={description}
+                        onSelect={handleStyleSelect}
+                      />
+                    ))}
                   </div>
                 </motion.div>
               )}

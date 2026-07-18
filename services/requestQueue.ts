@@ -36,7 +36,7 @@ const runNext = async () => {
       const result = await new Promise((resolveTask, rejectTask) => {
         const timer = setTimeout(
           () => rejectTask(new Error("Task timed out")),
-          options.timeoutMs
+          options.timeoutMs,
         );
         task()
           .then((value) => {
@@ -66,10 +66,7 @@ const runNext = async () => {
   }
 };
 
-export const enqueueTask = <T>(
-  task: Task<T>,
-  opts?: QueueOptions
-): Promise<T> => {
+export const enqueueTask = <T>(task: Task<T>, opts?: QueueOptions): Promise<T> => {
   const options: Required<QueueOptions> = {
     maxRetries: opts?.maxRetries ?? DEFAULT_OPTIONS.maxRetries,
     delayMs: opts?.delayMs ?? DEFAULT_OPTIONS.delayMs,

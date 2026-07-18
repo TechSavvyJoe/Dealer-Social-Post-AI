@@ -70,9 +70,9 @@ describe("platformCopy", () => {
 
   it("parses fenced JSON and delimited caption packs", () => {
     const fenced = '```json\n{"instagram_story":"Story line"}\n```';
-    expect(
-      parsePlatformCaptionPack(fenced, ["instagram_story"]).instagram_story,
-    ).toBe("Story line");
+    expect(parsePlatformCaptionPack(fenced, ["instagram_story"]).instagram_story).toBe(
+      "Story line",
+    );
 
     const delimited = `
 === instagram_feed ===
@@ -81,10 +81,7 @@ Feed body here
 === tiktok ===
 TikTok body
 `;
-    const pack = parsePlatformCaptionPack(delimited, [
-      "instagram_feed",
-      "tiktok",
-    ]);
+    const pack = parsePlatformCaptionPack(delimited, ["instagram_feed", "tiktok"]);
     expect(pack.instagram_feed).toBe("Feed body here");
     expect(pack.tiktok).toBe("TikTok body");
   });
@@ -92,9 +89,7 @@ TikTok body
   it("only recommends a pack when 2+ platforms are selected", () => {
     expect(shouldGenerateCaptionPack([])).toBe(false);
     expect(shouldGenerateCaptionPack(["instagram_feed"])).toBe(false);
-    expect(
-      shouldGenerateCaptionPack(["instagram_feed", "facebook_feed"]),
-    ).toBe(true);
+    expect(shouldGenerateCaptionPack(["instagram_feed", "facebook_feed"])).toBe(true);
   });
 
   it("orders export formats by preferred ids", () => {

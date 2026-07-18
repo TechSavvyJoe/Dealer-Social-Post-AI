@@ -19,8 +19,7 @@ interface StoredCreative {
 
 let databasePromise: Promise<IDBDatabase> | null = null;
 
-const assetKey = (dealerId: string, slot: CreativeSlot) =>
-  `${dealerId}:${slot}`;
+const assetKey = (dealerId: string, slot: CreativeSlot) => `${dealerId}:${slot}`;
 
 const openDatabase = (): Promise<IDBDatabase> => {
   if (databasePromise) return databasePromise;
@@ -101,9 +100,7 @@ export const loadDealerCreative = async (
     try {
       const database = await openDatabase();
       const transaction = database.transaction(STORE_NAME, "readonly");
-      const request = transaction
-        .objectStore(STORE_NAME)
-        .get(assetKey(dealerId, slot));
+      const request = transaction.objectStore(STORE_NAME).get(assetKey(dealerId, slot));
       const record = await new Promise<StoredCreative | undefined>(
         (resolve, reject) => {
           request.onsuccess = () => resolve(request.result as StoredCreative);
@@ -118,9 +115,7 @@ export const loadDealerCreative = async (
 
   return Promise.race([
     read(),
-    new Promise<null>((resolve) =>
-      setTimeout(() => resolve(null), READ_TIMEOUT_MS),
-    ),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), READ_TIMEOUT_MS)),
   ]);
 };
 

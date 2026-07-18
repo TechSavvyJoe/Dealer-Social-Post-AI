@@ -450,11 +450,7 @@ export const Icon: React.FC<IconProps> = React.memo(
             stroke="currentColor"
             strokeWidth="2"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M12 4v16m8-8H4"
-            />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
           </svg>
         );
       case "building-office":
@@ -701,5 +697,5 @@ export const Icon: React.FC<IconProps> = React.memo(
       default:
         return null;
     }
-  }
+  },
 );

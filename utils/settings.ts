@@ -1,6 +1,6 @@
-import { StyleOption, ToneOption } from '../types';
+import { StyleOption, ToneOption } from "../types";
 
-const STORAGE_KEY = 'dealer-social-post-ai.settings';
+const STORAGE_KEY = "dealer-social-post-ai.settings";
 
 export interface AppSettings {
   geminiApiKey?: string;
@@ -12,7 +12,7 @@ const DEFAULT_SETTINGS: AppSettings = {};
 
 let cachedSettings: AppSettings | null = null;
 
-const isBrowser = typeof window !== 'undefined' && typeof localStorage !== 'undefined';
+const isBrowser = typeof window !== "undefined" && typeof localStorage !== "undefined";
 
 const hydrateSettings = (): AppSettings => {
   if (!isBrowser) {
@@ -27,7 +27,7 @@ const hydrateSettings = (): AppSettings => {
     const parsed = JSON.parse(stored) as AppSettings;
     return { ...DEFAULT_SETTINGS, ...parsed };
   } catch (error) {
-    console.warn('Failed to parse saved settings. Falling back to defaults.', error);
+    console.warn("Failed to parse saved settings. Falling back to defaults.", error);
     return { ...DEFAULT_SETTINGS };
   }
 };
@@ -43,7 +43,7 @@ const persistSettings = (settings: AppSettings) => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
     }
   } catch (error) {
-    console.warn('Failed to persist settings.', error);
+    console.warn("Failed to persist settings.", error);
   }
 };
 
@@ -92,7 +92,7 @@ export const saveLastSelections = (style?: StyleOption, tone?: ToneOption) => {
   });
 };
 
-export const getLastSelections = (): Pick<AppSettings, 'lastStyle' | 'lastTone'> => {
+export const getLastSelections = (): Pick<AppSettings, "lastStyle" | "lastTone"> => {
   const { lastStyle, lastTone } = getSettings();
   return { lastStyle, lastTone };
 };

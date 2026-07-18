@@ -63,7 +63,7 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
       children,
       ...props
     },
-    ref
+    ref,
   ) => (
     <motion.span
       ref={ref}
@@ -75,7 +75,7 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
         "transition-all duration-200",
         variantStyles[variant],
         sizeStyles[size],
-        className
+        className,
       )}
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1 }}
@@ -90,14 +90,14 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
             size === "md" && "w-2 h-2",
             size === "lg" && "w-2.5 h-2.5",
             dotStyles[variant],
-            pulse && "animate-pulse-soft"
+            pulse && "animate-pulse-soft",
           )}
           aria-hidden="true"
         />
       )}
       {children as React.ReactNode}
     </motion.span>
-  )
+  ),
 );
 
 Badge.displayName = "Badge";

@@ -39,9 +39,14 @@ interface Variant {
  * caption. The disclosure footer is split per-variant (each generation may
  * trigger different compliance language) and travels with the selection.
  */
-export const CaptionAlternativesModal: React.FC<
-  CaptionAlternativesModalProps
-> = ({ isOpen, onClose, generateOne, onSelect, count = 3, bannedPhrases }) => {
+export const CaptionAlternativesModal: React.FC<CaptionAlternativesModalProps> = ({
+  isOpen,
+  onClose,
+  generateOne,
+  onSelect,
+  count = 3,
+  bannedPhrases,
+}) => {
   const [variants, setVariants] = useState<Variant[]>([]);
   const [picked, setPicked] = useState<number | null>(null);
 
@@ -124,9 +129,7 @@ export const CaptionAlternativesModal: React.FC<
                 type="button"
                 onClick={() => handlePick(v)}
                 disabled={v.loading || !!v.error || picked !== null}
-                whileHover={
-                  !v.loading && !v.error ? { scale: 1.01 } : undefined
-                }
+                whileHover={!v.loading && !v.error ? { scale: 1.01 } : undefined}
                 whileTap={!v.loading && !v.error ? { scale: 0.99 } : undefined}
                 className={cn(
                   "relative flex flex-col text-left rounded-xl border p-3 transition-colors min-h-[220px]",
@@ -167,8 +170,7 @@ export const CaptionAlternativesModal: React.FC<
                 )}
                 {v.disclosures && (
                   <div className="mt-2 text-[10px] text-warning-300/80 truncate">
-                    + compliance footer (
-                    {v.disclosureCategories?.join(", ") || "auto"})
+                    + compliance footer ({v.disclosureCategories?.join(", ") || "auto"})
                   </div>
                 )}
               </motion.button>

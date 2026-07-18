@@ -1,16 +1,16 @@
-import { useCallback } from 'react';
-import { enqueueTask } from '../services/requestQueue';
-import { logEvent, logError } from '../utils/telemetry';
+import { useCallback } from "react";
+import { enqueueTask } from "../services/requestQueue";
+import { logEvent, logError } from "../utils/telemetry";
 
 // Since the Gemini API key is now handled by the server-side proxy,
 // this hook is greatly simplified. It no longer needs to manage the key.
 
-type GeminiServiceModule = typeof import('../services/geminiService');
+type GeminiServiceModule = typeof import("../services/geminiService");
 let geminiServiceModulePromise: Promise<GeminiServiceModule> | null = null;
 
 const loadGeminiService = (): Promise<GeminiServiceModule> => {
   if (!geminiServiceModulePromise) {
-    geminiServiceModulePromise = import('../services/geminiService');
+    geminiServiceModulePromise = import("../services/geminiService");
   }
   return geminiServiceModulePromise;
 };
@@ -20,10 +20,10 @@ export const useGemini = () => {
   const isApiKeyConfigured = true;
 
   const runGeminiTask = useCallback(
-    async <T,>(
+    async <T>(
       name: string,
       task: () => Promise<T>,
-      metadata?: Record<string, unknown>
+      metadata?: Record<string, unknown>,
     ) => {
       logEvent(`${name}.start`, metadata);
       try {
@@ -41,7 +41,7 @@ export const useGemini = () => {
         throw error;
       }
     },
-    []
+    [],
   );
 
   return {

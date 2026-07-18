@@ -44,10 +44,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
   const handleStyleSelect = (styleId: string) => {
     setSelectedStyle(styleId);
     setRecent((prev) => {
-      const next = [styleId, ...prev.filter((id) => id !== styleId)].slice(
-        0,
-        6,
-      );
+      const next = [styleId, ...prev.filter((id) => id !== styleId)].slice(0, 6);
       localStorage.setItem("fun-mode-recent", JSON.stringify(next));
       return next;
     });
@@ -291,9 +288,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
                     aria-label={`${isFavorite ? "Remove" : "Add"} ${style.name} ${isFavorite ? "from" : "to"} favorites`}
                   >
                     <Star
-                      className={`w-3.5 h-3.5 ${
-                        isFavorite ? "fill-current" : ""
-                      }`}
+                      className={`w-3.5 h-3.5 ${isFavorite ? "fill-current" : ""}`}
                     />
                   </button>
                 </div>

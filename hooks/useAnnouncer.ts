@@ -33,10 +33,7 @@ export const useAnnouncer = () => {
    * @param message - The message to announce
    * @param priority - 'polite' (default) or 'assertive'
    */
-  const announce = (
-    message: string,
-    priority: "polite" | "assertive" = "polite"
-  ) => {
+  const announce = (message: string, priority: "polite" | "assertive" = "polite") => {
     if (!liveRegionRef.current) return;
 
     // Update aria-live attribute

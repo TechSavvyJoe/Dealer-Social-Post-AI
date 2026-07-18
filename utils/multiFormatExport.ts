@@ -13,11 +13,7 @@
  * ctx.filter blur is flaky with data-URL sources).
  */
 
-export type ExportFormatId =
-  | "feed_square"
-  | "story_vertical"
-  | "marketplace"
-  | "gbp";
+export type ExportFormatId = "feed_square" | "story_vertical" | "marketplace" | "gbp";
 
 export interface ExportFormat {
   id: ExportFormatId;

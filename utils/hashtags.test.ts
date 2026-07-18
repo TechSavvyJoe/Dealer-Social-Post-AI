@@ -27,9 +27,7 @@ describe("sanitizeHashtagBody / formatHashtag", () => {
 describe("separateGluedHashtags", () => {
   it("inserts spaces between glued tags", () => {
     expect(separateGluedHashtags("#A#B#C")).toBe("#A #B #C");
-    expect(separateGluedHashtags("Love it! #Sold#Happy")).toBe(
-      "Love it! #Sold #Happy",
-    );
+    expect(separateGluedHashtags("Love it! #Sold#Happy")).toBe("Love it! #Sold #Happy");
   });
 });
 
@@ -58,9 +56,7 @@ Visit Sunrise Ford today.
   });
 
   it("rebuilds a pure hashtag line with single spaces", () => {
-    const out = normalizeCaptionHashtags(
-      "Congrats!\n#TagOne   #TagTwo  #TagOne",
-    );
+    const out = normalizeCaptionHashtags("Congrats!\n#TagOne   #TagTwo  #TagOne");
     expect(out.endsWith("#TagOne #TagTwo")).toBe(true);
   });
 
@@ -72,9 +68,7 @@ Visit Sunrise Ford today.
 
 describe("brandHashtagFromName", () => {
   it("builds a continuous brand tag from a store name", () => {
-    expect(brandHashtagFromName("Sunrise Ford of Howell")).toBe(
-      "#SunriseFordOfHowell",
-    );
+    expect(brandHashtagFromName("Sunrise Ford of Howell")).toBe("#SunriseFordOfHowell");
   });
 });
 

@@ -38,12 +38,10 @@ export const usePullToRefresh = ({
       if (!enabled || isRefreshing || event.touches.length !== 1) return;
 
       const target = event.target;
-      if (target instanceof Element && target.closest(INTERACTIVE_SELECTOR))
-        return;
+      if (target instanceof Element && target.closest(INTERACTIVE_SELECTOR)) return;
 
       const element = event.currentTarget as HTMLElement | null;
-      const documentScrollTop =
-        document.scrollingElement?.scrollTop ?? window.scrollY;
+      const documentScrollTop = document.scrollingElement?.scrollTop ?? window.scrollY;
       if ((element?.scrollTop ?? 0) > 0 || documentScrollTop > 0) return;
 
       startY.current = event.touches[0].clientY;

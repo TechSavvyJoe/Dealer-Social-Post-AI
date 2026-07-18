@@ -30,8 +30,7 @@ export interface DecodedVehicle {
   empty: boolean;
 }
 
-const NHTSA_ENDPOINT =
-  "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues";
+const NHTSA_ENDPOINT = "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues";
 
 const VIN_REGEX = /^[A-HJ-NPR-Z0-9]{17}$/i;
 

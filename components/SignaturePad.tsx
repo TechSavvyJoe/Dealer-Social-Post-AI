@@ -39,7 +39,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
       className,
       onChange,
     },
-    ref
+    ref,
   ) => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const drawingRef = useRef(false);
@@ -65,18 +65,21 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
       }
     }, [width, height, strokeColor, strokeWidth]);
 
-    const getRelativePoint = useCallback(
-      (e: React.PointerEvent<HTMLCanvasElement>) => {
-        const canvas = canvasRef.current;
-        if (!canvas) return null;
-        const rect = canvas.getBoundingClientRect();
-        return {
-          x: ((e.clientX - rect.left) * canvas.width) / rect.width / (window.devicePixelRatio || 1),
-          y: ((e.clientY - rect.top) * canvas.height) / rect.height / (window.devicePixelRatio || 1),
-        };
-      },
-      []
-    );
+    const getRelativePoint = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return null;
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x:
+          ((e.clientX - rect.left) * canvas.width) /
+          rect.width /
+          (window.devicePixelRatio || 1),
+        y:
+          ((e.clientY - rect.top) * canvas.height) /
+          rect.height /
+          (window.devicePixelRatio || 1),
+      };
+    }, []);
 
     const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
       e.preventDefault();
@@ -145,7 +148,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
           return canvas.toDataURL("image/png");
         },
       }),
-      [clear, hasStrokes]
+      [clear, hasStrokes],
     );
 
     return (
@@ -189,7 +192,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
         </div>
       </div>
     );
-  }
+  },
 );
 
 SignaturePad.displayName = "SignaturePad";

@@ -16,18 +16,13 @@ const signatureDataUrl = "data:image/png;base64,AQID";
 
 describe("photo release consent gate", () => {
   it("wraps both Gemini module loading and execution behind the consent gate", () => {
-    const hook = readFileSync(
-      resolve(process.cwd(), "hooks/useGeneration.ts"),
-      "utf8",
-    );
+    const hook = readFileSync(resolve(process.cwd(), "hooks/useGeneration.ts"), "utf8");
     const mutation = hook.slice(
       hook.indexOf("const generateMutation"),
       hook.indexOf("onMutate:", hook.indexOf("const generateMutation")),
     );
 
-    expect(mutation.indexOf("runWithPersistedPhotoRelease(")).toBeGreaterThan(
-      -1,
-    );
+    expect(mutation.indexOf("runWithPersistedPhotoRelease(")).toBeGreaterThan(-1);
     expect(mutation.indexOf("runWithPersistedPhotoRelease(")).toBeLessThan(
       mutation.indexOf("await loadGeminiService()"),
     );
@@ -38,25 +33,23 @@ describe("photo release consent gate", () => {
 
   it("durably saves consent before starting the provider task", async () => {
     const order: string[] = [];
-    const fetchMock = vi.fn(
-      async (input: RequestInfo | URL): Promise<Response> => {
-        if (String(input).startsWith("data:image/")) {
-          return new Response(new Uint8Array([1, 2, 3]), {
-            status: 200,
-            headers: { "Content-Type": "image/png" },
-          });
-        }
-        order.push("release-saved");
-        return new Response(
-          JSON.stringify({
-            id: "release-1",
-            customer_name: "Alex",
-            signed_at: "2026-07-15T12:00:00.000Z",
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      },
-    );
+    const fetchMock = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+      if (String(input).startsWith("data:image/")) {
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { "Content-Type": "image/png" },
+        });
+      }
+      order.push("release-saved");
+      return new Response(
+        JSON.stringify({
+          id: "release-1",
+          customer_name: "Alex",
+          signed_at: "2026-07-15T12:00:00.000Z",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const captured: CapturedRelease = {
@@ -140,11 +133,7 @@ describe("photo release consent gate", () => {
     ).rejects.toThrow("provider unavailable");
 
     await expect(
-      runWithPersistedPhotoRelease(
-        captured,
-        "Example Motors",
-        async () => "retried",
-      ),
+      runWithPersistedPhotoRelease(captured, "Example Motors", async () => "retried"),
     ).resolves.toEqual({ result: "retried", releaseId: "release-retry" });
     expect(releaseCreates).toBe(1);
   });

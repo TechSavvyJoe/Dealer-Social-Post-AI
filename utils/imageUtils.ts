@@ -49,9 +49,7 @@ export const imageFileExtension = (source: string): string => {
     const pathname = new URL(source, "https://local.invalid").pathname;
     const extension = pathname.match(/\.(png|jpe?g|webp|avif)$/i)?.[1];
     if (extension) {
-      return extension.toLowerCase() === "jpeg"
-        ? "jpg"
-        : extension.toLowerCase();
+      return extension.toLowerCase() === "jpeg" ? "jpg" : extension.toLowerCase();
     }
   } catch {
     /* fall through to the interoperable photo default */
@@ -89,10 +87,8 @@ export const letterboxImageForVideo = async (
   if (typeof document === "undefined") return dataUrl;
 
   const targetRatio = aspect === "16:9" ? 16 / 9 : 9 / 16;
-  const outW =
-    aspect === "16:9" ? longEdge : Math.round(longEdge * (9 / 16));
-  const outH =
-    aspect === "16:9" ? Math.round(longEdge * (9 / 16)) : longEdge;
+  const outW = aspect === "16:9" ? longEdge : Math.round(longEdge * (9 / 16));
+  const outH = aspect === "16:9" ? Math.round(longEdge * (9 / 16)) : longEdge;
 
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const el = new Image();
@@ -244,10 +240,7 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
         imageOrientation: "from-image", // Respect EXIF orientation
       });
 
-      const scale = Math.min(
-        1,
-        maxDimension / Math.max(bitmap.width, bitmap.height),
-      );
+      const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
       const outputWidth = Math.max(1, Math.round(bitmap.width * scale));
       const outputHeight = Math.max(1, Math.round(bitmap.height * scale));
 

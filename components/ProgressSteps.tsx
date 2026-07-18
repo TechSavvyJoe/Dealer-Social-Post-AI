@@ -45,9 +45,7 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
                         "shadow-lg shadow-primary-950/20",
                       ),
                     isComplete &&
-                      cn(
-                        "border-success-500/50 bg-success-500/10 text-success-100",
-                      ),
+                      cn("border-success-500/50 bg-success-500/10 text-success-100"),
                     isUpcoming &&
                       "border-white/[0.08] bg-surface-800/45 text-surface-400",
                   )}

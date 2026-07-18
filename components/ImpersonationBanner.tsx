@@ -16,8 +16,7 @@ export const ImpersonationBanner: React.FC = () => {
 
   if (!isImpersonating) return null;
 
-  const roleLabel =
-    person?.role === "manager" ? "manager" : "salesperson";
+  const roleLabel = person?.role === "manager" ? "manager" : "salesperson";
 
   const handleExit = async () => {
     setBusy(true);
@@ -55,9 +54,7 @@ export const ImpersonationBanner: React.FC = () => {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {error ? (
-            <span className="text-xs text-rose-200">{error}</span>
-          ) : null}
+          {error ? <span className="text-xs text-rose-200">{error}</span> : null}
           <Button
             type="button"
             size="sm"

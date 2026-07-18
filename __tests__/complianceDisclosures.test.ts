@@ -11,9 +11,7 @@ describe("delivery compliance", () => {
     );
 
     expect(result.caption).toContain("4.9% APR");
-    expect(result.disclosures).toContain(
-      "Financing subject to credit approval",
-    );
+    expect(result.disclosures).toContain("Financing subject to credit approval");
     expect(result.disclosureCategories).toContain("financing_apr");
   });
 
@@ -22,9 +20,7 @@ describe("delivery compliance", () => {
       "Drive home with 4.9% APR.\n\n— Disclosures —",
     );
 
-    expect(result.disclosures).toContain(
-      "Financing subject to credit approval",
-    );
+    expect(result.disclosures).toContain("Financing subject to credit approval");
     expect(result.caption).toBe("Drive home with 4.9% APR.");
   });
 
@@ -58,8 +54,8 @@ describe("delivery compliance", () => {
 
   it("does not match a configured word inside an unrelated longer word", () => {
     expect(
-      prepareCaptionForDelivery("A refined carpeted interior.", "car")
-        .compliance.prohibited,
+      prepareCaptionForDelivery("A refined carpeted interior.", "car").compliance
+        .prohibited,
     ).toHaveLength(0);
   });
 });

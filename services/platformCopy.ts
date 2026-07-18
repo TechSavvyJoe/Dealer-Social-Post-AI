@@ -47,9 +47,7 @@ const toPlatformOption = (t: PublishTarget): PlatformOption => ({
   format: t.format,
   charBudget: t.charBudget,
   verticalPreferred:
-    t.format === "story_vertical" ||
-    t.id === "tiktok" ||
-    t.id === "instagram_story",
+    t.format === "story_vertical" || t.id === "tiktok" || t.id === "instagram_story",
 });
 
 export const getPlatformOptions = (): PlatformOption[] => {
@@ -66,9 +64,7 @@ export const resolvePlatformOption = (
   return target ? toPlatformOption(target) : undefined;
 };
 
-export const resolvePlatformOptions = (
-  platformIds: PlatformId[],
-): PlatformOption[] => {
+export const resolvePlatformOptions = (platformIds: PlatformId[]): PlatformOption[] => {
   return platformIds
     .map(resolvePlatformOption)
     .filter((p): p is PlatformOption => Boolean(p));
@@ -143,7 +139,8 @@ export const platformCopyGuidance = (platformId: PlatformId): string => {
       return `Marketplace listing tone: clear vehicle/value pitch, store name, contact CTA. Prefer keywords in body over hashtags (0–1). ${tagFmt}`;
     default: {
       const opt = resolvePlatformOption(platformId);
-      if (!opt) return `Platform ${platformId}: stay on-brand and under typical social length. ${tagFmt}`;
+      if (!opt)
+        return `Platform ${platformId}: stay on-brand and under typical social length. ${tagFmt}`;
       return `${opt.label}: respect ≤${Math.min(opt.charBudget, 400)} chars for the hook; name the store. ${tagFmt}`;
     }
   }

@@ -14,10 +14,7 @@
  */
 
 import { normalizeCaptionHashtags } from "./hashtags";
-import {
-  applyDealerBrandKit,
-  type DealerBrandKit,
-} from "./brandKit";
+import { applyDealerBrandKit, type DealerBrandKit } from "./brandKit";
 import { cleanSocialCaption } from "./captionQuality";
 
 export type DisclosureCategory =
@@ -126,9 +123,7 @@ export type DealerBannedPhrases = string | string[] | null | undefined;
 
 const parseDealerBannedPhrases = (value: DealerBannedPhrases): string[] => {
   const phrases = Array.isArray(value) ? value : (value ?? "").split(/[\n,]+/);
-  return Array.from(
-    new Set(phrases.map((phrase) => phrase.trim()).filter(Boolean)),
-  );
+  return Array.from(new Set(phrases.map((phrase) => phrase.trim()).filter(Boolean)));
 };
 
 const normalizePhrase = (value: string): string =>
@@ -147,8 +142,7 @@ const detectDealerBannedPhrases = (
     .filter((phrase) => {
       const normalizedPhrase = normalizePhrase(phrase);
       return (
-        normalizedPhrase.length > 0 &&
-        normalizedText.includes(` ${normalizedPhrase} `)
+        normalizedPhrase.length > 0 && normalizedText.includes(` ${normalizedPhrase} `)
       );
     })
     .map((phrase) => ({
@@ -213,18 +207,14 @@ export interface DeliveryCaption {
   compliance: ComplianceResult;
 }
 
-export const prohibitedClaimsMessage = (
-  prohibited: DisclosureMatch[],
-): string => {
+export const prohibitedClaimsMessage = (prohibited: DisclosureMatch[]): string => {
   const phrases = Array.from(
     new Set(prohibited.map((match) => match.triggerPhrase.trim())),
   );
   const dealerConfigured = prohibited.some(
     (match) => match.category === "dealer_banned_phrase",
   );
-  const legalClaim = prohibited.some(
-    (match) => match.category === "prohibited_phrase",
-  );
+  const legalClaim = prohibited.some((match) => match.category === "prohibited_phrase");
   const reason =
     dealerConfigured && legalClaim
       ? "These claims are prohibited or blocked by this dealership and cannot be published."
@@ -248,8 +238,7 @@ export const applyDisclosures = (
     return { text: "", matches: [], prohibited: [], changed: false };
   }
   const markerIndex = text.indexOf("— Disclosures —");
-  const caption =
-    markerIndex >= 0 ? text.slice(0, markerIndex).trimEnd() : text;
+  const caption = markerIndex >= 0 ? text.slice(0, markerIndex).trimEnd() : text;
   const matches = detectDisclosures(caption, bannedPhrases);
   const prohibited = matches.filter((m) => m.prohibited);
   const footer = formatDisclosureFooter(matches);
@@ -278,8 +267,7 @@ export const analyzeCaptionForDelivery = (
     markerIndex >= 0
       ? compliance.text.slice(0, markerIndex).trimEnd()
       : compliance.text.trimEnd();
-  const disclosures =
-    markerIndex >= 0 ? compliance.text.slice(markerIndex).trim() : "";
+  const disclosures = markerIndex >= 0 ? compliance.text.slice(markerIndex).trim() : "";
   return {
     caption,
     disclosures,

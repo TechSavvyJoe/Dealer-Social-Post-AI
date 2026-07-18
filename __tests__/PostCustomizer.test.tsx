@@ -41,9 +41,7 @@ describe("PostCustomizer", () => {
     fireEvent.click(screen.getByRole("button", { name: /Generate Post/i }));
 
     expect(baseProps.onGenerate).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "needs a signed photo release",
-    );
+    expect(screen.getByRole("alert")).toHaveTextContent("needs a signed photo release");
   });
 
   /*

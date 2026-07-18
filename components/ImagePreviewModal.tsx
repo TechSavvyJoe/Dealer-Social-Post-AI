@@ -14,14 +14,7 @@ interface ImagePreviewModalProps {
 }
 
 export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = memo(
-  ({
-    isOpen,
-    onClose,
-    imageSrc,
-    onConfirm,
-    onRetake,
-    confirmLabel = "Use photo",
-  }) => {
+  ({ isOpen, onClose, imageSrc, onConfirm, onRetake, confirmLabel = "Use photo" }) => {
     const handleClose = () => {
       triggerHapticFeedback();
       onClose();
@@ -72,5 +65,5 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = memo(
         </div>
       </Modal>
     );
-  }
+  },
 );

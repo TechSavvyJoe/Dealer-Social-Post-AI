@@ -63,9 +63,7 @@ describe("applyDealerBrandKit", () => {
     expect(tags.length).toBeGreaterThanOrEqual(4);
     expect(tags.length).toBeLessThanOrEqual(TARGET_HASHTAG_COUNT);
     expect(
-      tags.some((t) =>
-        (AGENCY_DISCOVERY_HASHTAGS as readonly string[]).includes(t),
-      ),
+      tags.some((t) => (AGENCY_DISCOVERY_HASHTAGS as readonly string[]).includes(t)),
     ).toBe(true);
   });
 

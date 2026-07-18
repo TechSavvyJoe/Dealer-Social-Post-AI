@@ -58,11 +58,7 @@ const PickerHarness: React.FC<{ dealerId: string }> = ({ dealerId }) => {
   });
   return (
     <>
-      <SalespersonPicker
-        dealerId={dealerId}
-        value={value}
-        onChange={setValue}
-      />
+      <SalespersonPicker dealerId={dealerId} value={value} onChange={setValue} />
       <output data-testid="picker-value">{JSON.stringify(value)}</output>
     </>
   );
@@ -130,9 +126,7 @@ describe("final frontend residuals", () => {
     });
     expect(trigger).toHaveTextContent("Pick yourself");
     await waitFor(() =>
-      expect(
-        localStorage.getItem(salespersonStorageKey("dealer-b")),
-      ).toBeNull(),
+      expect(localStorage.getItem(salespersonStorageKey("dealer-b"))).toBeNull(),
     );
     await user.click(trigger);
     const option = screen.getByRole("option", { name: /Bob B\./i });
@@ -162,9 +156,7 @@ describe("final frontend residuals", () => {
     await user.click(screen.getByRole("button", { name: "Keep working" }));
     expect(onLogout).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Log out" }));
-    await user.click(
-      await screen.findByRole("button", { name: "Log out anyway" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Log out anyway" }));
     expect(onLogout).toHaveBeenCalledTimes(1);
   });
 

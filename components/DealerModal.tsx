@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Dealer } from '../types';
-import { Icon } from './Icons';
-import { triggerHapticFeedback } from '../utils/haptics';
-import { fileToDataUrl } from '../utils/imageUtils';
-import { Button } from './ui/Button';
-import { Input } from './ui/Input';
-import { Modal } from './ui/Modal';
+import React, { useState, useEffect } from "react";
+import { Dealer } from "../types";
+import { Icon } from "./Icons";
+import { triggerHapticFeedback } from "../utils/haptics";
+import { fileToDataUrl } from "../utils/imageUtils";
+import { Button } from "./ui/Button";
+import { Input } from "./ui/Input";
+import { Modal } from "./ui/Modal";
 
 const DEALER_CODE_LENGTH = 6;
 const DEALER_CODE_PATTERN = /^\d{6}$/;
@@ -17,55 +17,61 @@ interface DealerModalProps {
   dealer: Dealer | null;
 }
 
-export const DealerModal: React.FC<DealerModalProps> = ({ isOpen, onClose, onSave, dealer }) => {
-  const [name, setName] = useState('');
-  const [code, setCode] = useState('');
+export const DealerModal: React.FC<DealerModalProps> = ({
+  isOpen,
+  onClose,
+  onSave,
+  dealer,
+}) => {
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
   const [logo, setLogo] = useState<string | undefined>(undefined);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (dealer) {
       setName(dealer.name);
-      setCode(dealer.code || (/^\d+$/.test(dealer.id) ? dealer.id : ''));
+      setCode(dealer.code || (/^\d+$/.test(dealer.id) ? dealer.id : ""));
       setLogo(dealer.logo);
     } else {
-      setName('');
-      setCode('');
+      setName("");
+      setCode("");
       setLogo(undefined);
     }
-    setError('');
+    setError("");
   }, [dealer, isOpen]);
 
   const handleSave = () => {
     triggerHapticFeedback();
     if (!name.trim()) {
-      setError('Dealer name is required.');
+      setError("Dealer name is required.");
       return;
     }
     if (!DEALER_CODE_PATTERN.test(code)) {
-      setError('Dealer code must be exactly 6 digits.');
+      setError("Dealer code must be exactly 6 digits.");
       return;
     }
     onSave(
       dealer
         ? { ...dealer, name: name.trim(), code, logo }
-        : { name: name.trim(), id: code, code, logo }
+        : { name: name.trim(), id: code, code, logo },
     );
   };
-  
+
   const handleLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 2 * 1024 * 1024) { // 2MB limit
-        setError('Logo file size should not exceed 2MB.');
+      if (file.size > 2 * 1024 * 1024) {
+        // 2MB limit
+        setError("Logo file size should not exceed 2MB.");
         return;
       }
       try {
         const dataUrl = await fileToDataUrl(file);
         setLogo(dataUrl);
-        setError('');
+        setError("");
       } catch (err) {
-        setError('Failed to read logo file.');
+        setError("Failed to read logo file.");
       }
     }
   };
@@ -74,7 +80,7 @@ export const DealerModal: React.FC<DealerModalProps> = ({ isOpen, onClose, onSav
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={dealer ? 'Edit dealer' : 'Add new dealer'}
+      title={dealer ? "Edit dealer" : "Add new dealer"}
       description="Dealer login codes must be exactly 6 digits."
       footer={
         <>
@@ -109,7 +115,7 @@ export const DealerModal: React.FC<DealerModalProps> = ({ isOpen, onClose, onSav
             type="text"
             value={code}
             onChange={(e) =>
-              setCode(e.target.value.replace(/\D/g, '').slice(0, DEALER_CODE_LENGTH))
+              setCode(e.target.value.replace(/\D/g, "").slice(0, DEALER_CODE_LENGTH))
             }
             disabled={!!dealer}
             maxLength={DEALER_CODE_LENGTH}
@@ -120,7 +126,9 @@ export const DealerModal: React.FC<DealerModalProps> = ({ isOpen, onClose, onSav
             fullWidth
           />
           <p className="mt-1.5 px-1 text-xs text-surface-400">
-            {dealer ? 'Dealer codes cannot be changed after creation.' : 'Used for dealer login, e.g. 123456.'}
+            {dealer
+              ? "Dealer codes cannot be changed after creation."
+              : "Used for dealer login, e.g. 123456."}
           </p>
         </div>
 

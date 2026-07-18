@@ -1,11 +1,17 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle2, XCircle, AlertCircle, Info, X } from 'lucide-react';
-import { cn } from '../../utils/classNames';
-import { fadeInUp, ANIMATION_DURATIONS } from '../../utils/animations';
-import { triggerHapticFeedback } from '../../utils/haptics';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  ReactNode,
+} from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { CheckCircle2, XCircle, AlertCircle, Info, X } from "lucide-react";
+import { cn } from "../../utils/classNames";
+import { fadeInUp, ANIMATION_DURATIONS } from "../../utils/animations";
+import { triggerHapticFeedback } from "../../utils/haptics";
 
-type ToastType = 'success' | 'error' | 'warning' | 'info';
+type ToastType = "success" | "error" | "warning" | "info";
 
 interface Toast {
   id: string;
@@ -27,7 +33,7 @@ const ToastContext = createContext<ToastContextValue | undefined>(undefined);
 export const useToast = () => {
   const context = useContext(ToastContext);
   if (!context) {
-    throw new Error('useToast must be used within ToastProvider');
+    throw new Error("useToast must be used within ToastProvider");
   }
   return context;
 };
@@ -40,9 +46,7 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
   const [toasts, setToasts] = useState<Toast[]>([]);
   // Track auto-dismiss timers so we can clear them on manual close and on
   // unmount — otherwise they fire setState after the provider is gone.
-  const timersRef = React.useRef<Map<string, ReturnType<typeof setTimeout>>>(
-    new Map()
-  );
+  const timersRef = React.useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const removeToast = useCallback((id: string) => {
     const handle = timersRef.current.get(id);
@@ -66,7 +70,7 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
         timersRef.current.set(id, handle);
       }
     },
-    [removeToast]
+    [removeToast],
   );
 
   // Clear any still-pending dismiss timers when the provider unmounts.
@@ -79,23 +83,23 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
   }, []);
 
   const success = useCallback(
-    (message: string, duration?: number) => showToast('success', message, duration),
-    [showToast]
+    (message: string, duration?: number) => showToast("success", message, duration),
+    [showToast],
   );
 
   const error = useCallback(
-    (message: string, duration?: number) => showToast('error', message, duration),
-    [showToast]
+    (message: string, duration?: number) => showToast("error", message, duration),
+    [showToast],
   );
 
   const warning = useCallback(
-    (message: string, duration?: number) => showToast('warning', message, duration),
-    [showToast]
+    (message: string, duration?: number) => showToast("warning", message, duration),
+    [showToast],
   );
 
   const info = useCallback(
-    (message: string, duration?: number) => showToast('info', message, duration),
-    [showToast]
+    (message: string, duration?: number) => showToast("info", message, duration),
+    [showToast],
   );
 
   return (
@@ -143,10 +147,10 @@ const ToastItem: React.FC<ToastItemProps> = ({ toast, onRemove }) => {
   };
 
   const typeStyles: Record<ToastType, string> = {
-    success: 'border-success-500/30 bg-success-500/10',
-    error: 'border-error-500/30 bg-error-500/10',
-    warning: 'border-warning-500/30 bg-warning-500/10',
-    info: 'border-info-500/30 bg-info-500/10',
+    success: "border-success-500/30 bg-success-500/10",
+    error: "border-error-500/30 bg-error-500/10",
+    warning: "border-warning-500/30 bg-warning-500/10",
+    info: "border-info-500/30 bg-info-500/10",
   };
 
   return (
@@ -156,10 +160,10 @@ const ToastItem: React.FC<ToastItemProps> = ({ toast, onRemove }) => {
       transition={{ duration: ANIMATION_DURATIONS.standard }}
       layout
       className={cn(
-        'flex items-center gap-3 px-4 py-3 rounded-xl',
-        'border backdrop-blur-lg glass pointer-events-auto',
-        'shadow-elevation-3 min-w-[280px] max-w-md',
-        typeStyles[toast.type]
+        "flex items-center gap-3 px-4 py-3 rounded-xl",
+        "border backdrop-blur-lg glass pointer-events-auto",
+        "shadow-elevation-3 min-w-[280px] max-w-md",
+        typeStyles[toast.type],
       )}
       role="alert"
     >

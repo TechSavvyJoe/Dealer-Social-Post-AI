@@ -6,10 +6,7 @@ import { EmptyState } from "./ui/EmptyState";
 import { ErrorBanner } from "./ui/ErrorBanner";
 import { Skeleton } from "./ui/Skeleton";
 import { cn } from "../utils/classNames";
-import {
-  getLeaderboard,
-  LeaderboardEntry,
-} from "../services/posts";
+import { getLeaderboard, LeaderboardEntry } from "../services/posts";
 import { useAppStore } from "../stores/appStore";
 
 type RangeKey = "week" | "month" | "30d" | "all";
@@ -42,14 +39,12 @@ const startOfRange = (range: RangeKey): Date => {
           0,
           0,
           0,
-          0
-        )
+          0,
+        ),
       );
     }
     case "month":
-      return new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0)
-      );
+      return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
     case "30d": {
       return new Date(
         Date.UTC(
@@ -59,8 +54,8 @@ const startOfRange = (range: RangeKey): Date => {
           0,
           0,
           0,
-          0
-        )
+          0,
+        ),
       );
     }
     case "all":
@@ -109,7 +104,7 @@ export const Leaderboard: React.FC = () => {
         if (reqIdRef.current === myId) setLoading(false);
       }
     },
-    [currentDealer, range]
+    [currentDealer, range],
   );
 
   useEffect(() => {
@@ -236,13 +231,13 @@ export const Leaderboard: React.FC = () => {
                   "flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors",
                   idx === 0
                     ? "border-amber-400/30 bg-amber-500/[0.06]"
-                    : "border-surface-800 bg-surface-900/40"
+                    : "border-surface-800 bg-surface-900/40",
                 )}
               >
                 <div
                   className={cn(
                     "flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center",
-                    idx === 0 ? "bg-amber-500/15" : "bg-white/5"
+                    idx === 0 ? "bg-amber-500/15" : "bg-white/5",
                   )}
                 >
                   {idx < 3 ? (
@@ -290,7 +285,7 @@ export const Leaderboard: React.FC = () => {
                   <div
                     className={cn(
                       "text-2xl font-extrabold tabular-nums",
-                      idx === 0 ? "text-amber-200" : "text-surface-50"
+                      idx === 0 ? "text-amber-200" : "text-surface-50",
                     )}
                   >
                     {entry.count}

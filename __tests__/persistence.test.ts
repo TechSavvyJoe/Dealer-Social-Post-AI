@@ -228,10 +228,7 @@ describe("Persistence Utils", () => {
 
   describe("clearSession", () => {
     it("removes session from localStorage", () => {
-      localStorageMock.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ dealerId: "test" }),
-      );
+      localStorageMock.setItem(STORAGE_KEY, JSON.stringify({ dealerId: "test" }));
 
       clearSession();
 

@@ -35,12 +35,10 @@ export const LoadingOverlay: React.FC<LoadingOverlayProps> = ({
   const shouldReduceMotion = useReducedMotion();
   const clampedProgress = Math.min(100, Math.max(0, progress));
   const activeStageIndex = GENERATION_STAGES.reduce(
-    (current, stage, index) =>
-      clampedProgress >= stage.startsAt ? index : current,
+    (current, stage, index) => (clampedProgress >= stage.startsAt ? index : current),
     0,
   );
-  const statusMessage =
-    message?.trim() || GENERATION_STAGES[activeStageIndex].detail;
+  const statusMessage = message?.trim() || GENERATION_STAGES[activeStageIndex].detail;
 
   return (
     <div
@@ -90,15 +88,10 @@ export const LoadingOverlay: React.FC<LoadingOverlayProps> = ({
           loadingLabel={statusMessage}
         />
 
-        <ol
-          className="mt-5 grid grid-cols-4 gap-2"
-          aria-label="Post generation stages"
-        >
+        <ol className="mt-5 grid grid-cols-4 gap-2" aria-label="Post generation stages">
           {GENERATION_STAGES.map((stage, index) => {
-            const isComplete =
-              index < activeStageIndex || clampedProgress === 100;
-            const isActive =
-              index === activeStageIndex && clampedProgress < 100;
+            const isComplete = index < activeStageIndex || clampedProgress === 100;
+            const isActive = index === activeStageIndex && clampedProgress < 100;
 
             return (
               <li
@@ -107,9 +100,7 @@ export const LoadingOverlay: React.FC<LoadingOverlayProps> = ({
                   "flex min-w-0 flex-col gap-1 border-t-2 pt-2 text-[10px] font-semibold uppercase tracking-wide",
                   isComplete && "border-success-400 text-success-300",
                   isActive && "border-primary-400 text-primary-200",
-                  !isComplete &&
-                    !isActive &&
-                    "border-white/10 text-surface-500",
+                  !isComplete && !isActive && "border-white/10 text-surface-500",
                 )}
                 aria-current={isActive ? "step" : undefined}
               >

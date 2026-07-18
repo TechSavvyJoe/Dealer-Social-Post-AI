@@ -79,7 +79,7 @@ class RequestCache {
   async deduplicatedRequest<T>(
     key: string,
     requestFn: () => Promise<T>,
-    ttlMs: number = 60000
+    ttlMs: number = 60000,
   ): Promise<T> {
     // Check cache first
     const cached = this.get<T>(key);

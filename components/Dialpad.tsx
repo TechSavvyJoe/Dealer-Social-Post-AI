@@ -3,18 +3,7 @@ import { Icon } from "./Icons";
 import { cn } from "../utils/classNames";
 
 export type DialpadKey =
-  | "1"
-  | "2"
-  | "3"
-  | "4"
-  | "5"
-  | "6"
-  | "7"
-  | "8"
-  | "9"
-  | "0"
-  | "backspace"
-  | "clear";
+  "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "0" | "backspace" | "clear";
 
 interface DialpadProps {
   onKeyPress: (key: DialpadKey) => void;

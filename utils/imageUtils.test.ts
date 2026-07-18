@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  imageFileExtension,
-  resolveVeoAspect,
-} from "./imageUtils";
+import { imageFileExtension, resolveVeoAspect } from "./imageUtils";
 
 describe("imageFileExtension", () => {
   it("matches data URL image formats", () => {
@@ -12,9 +9,7 @@ describe("imageFileExtension", () => {
   });
 
   it("matches supported URL suffixes without trusting query strings", () => {
-    expect(imageFileExtension("https://example.com/creative.avif?v=2")).toBe(
-      "avif",
-    );
+    expect(imageFileExtension("https://example.com/creative.avif?v=2")).toBe("avif");
     expect(imageFileExtension("https://example.com/creative.jpeg")).toBe("jpg");
   });
 

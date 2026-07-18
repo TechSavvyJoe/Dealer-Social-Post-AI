@@ -147,9 +147,7 @@ describe("Error Handler Utils", () => {
     });
 
     it("passes through already-normalized errors", () => {
-      const alreadyNormalized = new Error(
-        "Already normalized"
-      ) as NormalizedError;
+      const alreadyNormalized = new Error("Already normalized") as NormalizedError;
       alreadyNormalized.kind = "quota";
       alreadyNormalized.retryable = false;
 

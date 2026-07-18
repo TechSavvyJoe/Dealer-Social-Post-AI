@@ -42,10 +42,7 @@ export default defineConfig(() => {
             const stamp = `dsp-${Date.now()}`;
             const sw = fs
               .readFileSync(swOut, "utf8")
-              .replace(
-                /const VERSION = "[^"]+";/,
-                `const VERSION = "${stamp}";`,
-              );
+              .replace(/const VERSION = "[^"]+";/, `const VERSION = "${stamp}";`);
             fs.writeFileSync(swOut, sw);
             console.log(`[sw] stamped version ${stamp} → ${swOut}`);
           },
@@ -73,8 +70,7 @@ export default defineConfig(() => {
         output: {
           manualChunks(id) {
             if (id.includes("node_modules")) {
-              if (id.includes("react") || id.includes("zustand"))
-                return "vendor";
+              if (id.includes("react") || id.includes("zustand")) return "vendor";
               if (id.includes("framer-motion") || id.includes("lucide-react"))
                 return "ui";
             }

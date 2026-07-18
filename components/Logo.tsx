@@ -8,9 +8,7 @@ import React from "react";
  *
  * Color is pulled from --brand-primary so the mark white-labels per dealer.
  */
-export const Logo: React.FC<{ className?: string }> = ({
-  className = "w-32 h-32",
-}) => (
+export const Logo: React.FC<{ className?: string }> = ({ className = "w-32 h-32" }) => (
   <svg
     className={className}
     viewBox="0 0 200 40"

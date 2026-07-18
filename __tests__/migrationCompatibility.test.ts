@@ -26,10 +26,7 @@ type MigrationHandler = (dao: {
 describe("dealer code schema migration", () => {
   it("uses the PocketBase 0.22 Schema API for apply and rollback", () => {
     const source = readFileSync(
-      resolve(
-        process.cwd(),
-        "pb_migrations/1750100000_update_dealer_code_schema.js",
-      ),
+      resolve(process.cwd(), "pb_migrations/1750100000_update_dealer_code_schema.js"),
       "utf8",
     );
 

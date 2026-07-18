@@ -16,11 +16,7 @@ export const Shimmer: React.FC<ShimmerProps> = ({
 }) => {
   return (
     <div
-      className={cn(
-        "relative overflow-hidden bg-surface-800/50",
-        rounded,
-        className,
-      )}
+      className={cn("relative overflow-hidden bg-surface-800/50", rounded, className)}
       style={{
         width: width,
         height: height,

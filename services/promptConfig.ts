@@ -1,9 +1,4 @@
-import {
-  StyleOption,
-  ToneOption,
-  VideoStyle,
-  VideoRequestOptions,
-} from "../types";
+import { StyleOption, ToneOption, VideoStyle, VideoRequestOptions } from "../types";
 import { FLAGS } from "./modelConfig";
 import {
   generateTextPromptV2,
@@ -19,7 +14,7 @@ export const generateImagePrompt = (
   dealershipName: string,
   hasLogo: boolean,
   customMessage?: string,
-  creativeBrief?: string
+  creativeBrief?: string,
 ): string => {
   if (FLAGS.useV2Prompts) {
     return generateImagePromptV2(
@@ -27,7 +22,7 @@ export const generateImagePrompt = (
       dealershipName,
       hasLogo,
       customMessage,
-      creativeBrief
+      creativeBrief,
     );
   }
   const criticalRules = `
@@ -907,7 +902,7 @@ const addCategory = (
   ids: string[],
   category: string,
   popular = false,
-  tags?: string[]
+  tags?: string[],
 ) => {
   ids.forEach((id) => {
     funStyleMetaMap[id] = { category, popular, tags };
@@ -917,7 +912,7 @@ const addCategory = (
 addCategory(
   ["superhero", "anime", "pixar", "gta", "simpsons", "southpark", "timburton"],
   "Pop Culture",
-  true
+  true,
 );
 addCategory(
   [
@@ -930,7 +925,7 @@ addCategory(
     "solarized",
     "tintype",
   ],
-  "Retro & Nostalgia"
+  "Retro & Nostalgia",
 );
 addCategory(
   [
@@ -945,7 +940,7 @@ addCategory(
     "mayancodex",
     "victorianetching",
   ],
-  "Fine Art"
+  "Fine Art",
 );
 addCategory(
   [
@@ -960,24 +955,17 @@ addCategory(
     "anaglyph",
   ],
   "Graphic & Print",
-  false
+  false,
 );
 addCategory(
-  [
-    "cyberpunk",
-    "vaporwave",
-    "neonnoir",
-    "hologram",
-    "circuitboard",
-    "holographic",
-  ],
+  ["cyberpunk", "vaporwave", "neonnoir", "hologram", "circuitboard", "holographic"],
   "Futuristic & Tech",
-  true
+  true,
 );
 addCategory(
   ["claymation", "lego", "papercraft", "lowpoly", "storybook"],
   "Whimsy & Storybook",
-  true
+  true,
 );
 addCategory(
   [
@@ -990,29 +978,21 @@ addCategory(
     "carved",
     "cavepainting",
   ],
-  "Textures & Materials"
+  "Textures & Materials",
 );
 addCategory(
   ["fantasy", "nauticalchart", "constellation", "spygadget", "roadtrip"],
-  "World & Maps"
+  "World & Maps",
 );
 addCategory(
-  [
-    "steampunk",
-    "graffiti",
-    "tribal",
-    "heavymetal",
-    "shadowpuppet",
-    "rorschach",
-  ],
-  "Experimental & Bold"
+  ["steampunk", "graffiti", "tribal", "heavymetal", "shadowpuppet", "rorschach"],
+  "Experimental & Bold",
 );
 
 const deriveFallbackCategory = (id: string): string => {
   if (id.includes("punk") || id.includes("cyber") || id.includes("tech"))
     return "Futuristic & Tech";
-  if (id.includes("retro") || id.includes("vintage"))
-    return "Retro & Nostalgia";
+  if (id.includes("retro") || id.includes("vintage")) return "Retro & Nostalgia";
   if (id.includes("map") || id.includes("chart")) return "World & Maps";
   return "Artistic Remix";
 };
@@ -1066,17 +1046,17 @@ export const featuredFunStyleCatalog: FunStyleMeta[] = FEATURED_FUN_STYLE_IDS.ma
 ).filter((s): s is FunStyleMeta => Boolean(s));
 
 export const funStyleCategories = Array.from(
-  new Set(funStyleCatalog.map((style) => style.category))
+  new Set(funStyleCatalog.map((style) => style.category)),
 );
 
 export const generateFunPrompt = (
   dealershipName: string,
   logoBase64Url?: string,
-  requestedStyle?: string
+  requestedStyle?: string,
 ): string => {
   if (FLAGS.useV2Prompts) {
     const matched = funStyleCatalog.find(
-      (s) => s.id === requestedStyle || s.name === requestedStyle
+      (s) => s.id === requestedStyle || s.name === requestedStyle,
     );
     // Use the style's full Veo/Imagen prompt as the artistic-direction summary,
     // truncated so the V2 wrapper stays under model context budgets.
@@ -1087,7 +1067,7 @@ export const generateFunPrompt = (
       summary,
       dealershipName,
       !!logoBase64Url,
-      matched?.name || requestedStyle
+      matched?.name || requestedStyle,
     );
   }
   const criticalRules = `
@@ -1176,7 +1156,7 @@ The final output must be a single, high-resolution, fully-composed image in the 
 export const editImagePrompt = (
   editPrompt: string,
   dealershipName: string,
-  logoBase64Url?: string
+  logoBase64Url?: string,
 ): string => {
   if (FLAGS.useV2Prompts) {
     return editImagePromptV2(editPrompt, dealershipName, !!logoBase64Url);
@@ -1240,7 +1220,7 @@ export const editImagePrompt = (
 export const editTextPrompt = (
   originalText: string,
   editPrompt: string,
-  tone: ToneOption
+  tone: ToneOption,
 ): string => {
   if (FLAGS.useV2Prompts) {
     return editTextPromptV2(originalText, editPrompt, tone);
@@ -1272,7 +1252,7 @@ Write the edited post now:`;
 
 export const generateVideoPrompt = (
   style: VideoStyle,
-  options: VideoRequestOptions
+  options: VideoRequestOptions,
 ): string => {
   if (FLAGS.useV2Prompts) {
     return generateVideoPromptV2(style, options);
@@ -1292,12 +1272,12 @@ export const generateVideoPrompt = (
     options.soundtrack === "none"
       ? "Silent video only — no music, dialogue, or score."
       : options.soundtrack === "celebration"
-      ? "NATIVE AUDIO REQUIRED: generate upbeat celebratory original music + light ambient sound baked into the file (not silent)."
-      : options.soundtrack === "cinematic"
-      ? "NATIVE AUDIO REQUIRED: generate a smooth cinematic original score + subtle ambient audio baked into the file (not silent)."
-      : options.soundtrack === "anthemic"
-      ? "NATIVE AUDIO REQUIRED: generate an anthemic original score with energy lifts baked into the file (not silent)."
-      : "NATIVE AUDIO REQUIRED: generate a funky, bass-led original score baked into the file (not silent).";
+        ? "NATIVE AUDIO REQUIRED: generate upbeat celebratory original music + light ambient sound baked into the file (not silent)."
+        : options.soundtrack === "cinematic"
+          ? "NATIVE AUDIO REQUIRED: generate a smooth cinematic original score + subtle ambient audio baked into the file (not silent)."
+          : options.soundtrack === "anthemic"
+            ? "NATIVE AUDIO REQUIRED: generate an anthemic original score with energy lifts baked into the file (not silent)."
+            : "NATIVE AUDIO REQUIRED: generate a funky, bass-led original score baked into the file (not silent).";
 
   const pacingInstruction =
     options.pacing === "snappy"

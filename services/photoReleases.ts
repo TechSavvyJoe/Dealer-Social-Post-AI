@@ -44,7 +44,7 @@ export interface LinkedPhotoReleaseRecord {
 }
 
 export const saveRelease = async (
-  input: PhotoReleaseInput
+  input: PhotoReleaseInput,
 ): Promise<PhotoReleaseRecord> => {
   const sigBlob = await dataUrlToBlob(input.signaturePngDataUrl);
 

@@ -1,5 +1,5 @@
-import React from 'react';
-import { cn } from '../../utils/classNames';
+import React from "react";
+import { cn } from "../../utils/classNames";
 
 interface ProgressiveImageProps {
   src: string;
@@ -57,9 +57,9 @@ export const ProgressiveImage: React.FC<ProgressiveImageProps> = ({
       src={imageSrc}
       alt={alt}
       className={cn(
-        'transition-opacity duration-300',
-        isLoading ? 'opacity-50 blur-sm' : 'opacity-100',
-        className
+        "transition-opacity duration-300",
+        isLoading ? "opacity-50 blur-sm" : "opacity-100",
+        className,
       )}
       loading="lazy"
     />

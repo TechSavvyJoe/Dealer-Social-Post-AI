@@ -14,11 +14,7 @@ import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
 import { EmptyState } from "./ui/EmptyState";
 import { ErrorBanner } from "./ui/ErrorBanner";
-import {
-  listPendingPosts,
-  setApprovalStatus,
-  PostRecord,
-} from "../services/posts";
+import { listPendingPosts, setApprovalStatus, PostRecord } from "../services/posts";
 import { useAppStore } from "../stores/appStore";
 
 const formatTime = (iso: string) => {
@@ -67,10 +63,7 @@ export const ApprovalQueue: React.FC = () => {
     void load();
   }, [load]);
 
-  const handleAction = async (
-    post: PostRecord,
-    status: "approved" | "rejected",
-  ) => {
+  const handleAction = async (post: PostRecord, status: "approved" | "rejected") => {
     if (!approver.trim()) {
       setError("Enter your manager name first so the approval is logged.");
       return;
@@ -88,11 +81,7 @@ export const ApprovalQueue: React.FC = () => {
   };
 
   // Hide the entire queue if this dealer doesn't use the approval gate.
-  if (
-    currentDealer &&
-    !currentDealer.requires_approval &&
-    pending.length === 0
-  ) {
+  if (currentDealer && !currentDealer.requires_approval && pending.length === 0) {
     return null;
   }
 
@@ -118,8 +107,8 @@ export const ApprovalQueue: React.FC = () => {
               Pending Approvals
             </h3>
             <p className="text-xs text-surface-400">
-              {pending.length} post{pending.length === 1 ? "" : "s"} awaiting
-              manager review
+              {pending.length} post{pending.length === 1 ? "" : "s"} awaiting manager
+              review
             </p>
           </div>
         </div>
@@ -201,9 +190,7 @@ export const ApprovalQueue: React.FC = () => {
                       <span>{formatTime(post.generated_at)}</span>
                       {post.style && <span>· {post.style}</span>}
                       {post.tone && <span>· {post.tone}</span>}
-                      {post.vin && (
-                        <span className="font-mono">· {post.vin}</span>
-                      )}
+                      {post.vin && <span className="font-mono">· {post.vin}</span>}
                       {post.has_video && (
                         <span className="flex items-center gap-1 text-primary-200">
                           <Film className="h-3 w-3" /> video

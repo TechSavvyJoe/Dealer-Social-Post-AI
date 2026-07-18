@@ -57,15 +57,9 @@ class PerformanceMonitor {
   /**
    * Log slow operations (over threshold)
    */
-  logSlowOperation(
-    name: string,
-    duration: number,
-    threshold: number = 1000
-  ): void {
+  logSlowOperation(name: string, duration: number, threshold: number = 1000): void {
     if (duration > threshold) {
-      console.warn(
-        `[Performance] Slow operation detected: ${name} took ${duration}ms`
-      );
+      console.warn(`[Performance] Slow operation detected: ${name} took ${duration}ms`);
     }
   }
 
@@ -95,7 +89,7 @@ export const performanceMonitor = new PerformanceMonitor();
 // Helper functions for common patterns
 export const measureAsyncOperation = async <T>(
   name: string,
-  operation: () => Promise<T>
+  operation: () => Promise<T>,
 ): Promise<T> => {
   performanceMonitor.mark(`${name}-start`);
   try {

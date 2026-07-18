@@ -125,8 +125,7 @@ export const saveMediaToLibrary = async (options: {
 
     // Desktop / fallback: classic download (Files / Downloads)
     const objectUrl =
-      options.sourceUrl.startsWith("blob:") ||
-      options.sourceUrl.startsWith("data:")
+      options.sourceUrl.startsWith("blob:") || options.sourceUrl.startsWith("data:")
         ? options.sourceUrl.startsWith("blob:")
           ? options.sourceUrl
           : URL.createObjectURL(file)

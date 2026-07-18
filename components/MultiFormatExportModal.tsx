@@ -30,9 +30,7 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
   sourceImageUrl,
   priorityFormatIds,
 }) => {
-  const [rendered, setRendered] = useState<Record<ExportFormatId, string> | null>(
-    null,
-  );
+  const [rendered, setRendered] = useState<Record<ExportFormatId, string> | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [isDownloadingAll, setIsDownloadingAll] = useState(false);
   const [individuallyDownloaded, setIndividuallyDownloaded] = useState<
@@ -40,8 +38,7 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
   >(new Set());
 
   const orderedFormats = useMemo(
-    () =>
-      orderExportFormatsByPreference(EXPORT_FORMATS, priorityFormatIds ?? []),
+    () => orderExportFormatsByPreference(EXPORT_FORMATS, priorityFormatIds ?? []),
     [priorityFormatIds],
   );
 
@@ -258,8 +255,8 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
         </div>
 
         <p className="text-[11px] text-surface-500 leading-relaxed">
-          Tip: your browser may ask to allow multiple downloads — click "Allow"
-          once and files save to your Downloads folder.
+          Tip: your browser may ask to allow multiple downloads — click "Allow" once and
+          files save to your Downloads folder.
         </p>
       </div>
     </Modal>
