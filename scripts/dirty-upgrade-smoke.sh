@@ -86,7 +86,7 @@ base_container="$(docker run --detach \
   --volume "$volume_name:/pb/pb_data" \
   "$base_image")"
 if ! base_port="$(resolve_docker_published_port "$base_container")"; then
-  docker inspect "$base_container" >&2 || true
+  describe_docker_container_state "$base_container" >&2
   docker logs "$base_container" >&2 || true
   echo "Base image did not publish its PocketBase port." >&2
   exit 1
@@ -141,7 +141,7 @@ current_container="$(docker run --detach \
   --volume "$volume_name:/pb/pb_data" \
   "$current_image")"
 if ! current_port="$(resolve_docker_published_port "$current_container")"; then
-  docker inspect "$current_container" >&2 || true
+  describe_docker_container_state "$current_container" >&2
   docker logs "$current_container" >&2 || true
   echo "Candidate image did not publish its PocketBase port." >&2
   exit 1

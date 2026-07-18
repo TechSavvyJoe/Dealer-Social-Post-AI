@@ -35,3 +35,16 @@ resolve_docker_published_port() {
 
   return 1
 }
+
+# Report only operational state. A full `docker inspect` includes Env and can
+# leak credentials into CI logs when a release container fails to start.
+describe_docker_container_state() {
+  local container_id="${1:-}"
+  if [[ -z "$container_id" ]]; then
+    return 2
+  fi
+
+  docker inspect \
+    --format 'container={{.Id}} state={{.State.Status}} exitCode={{.State.ExitCode}} oomKilled={{.State.OOMKilled}} ports={{json .NetworkSettings.Ports}}' \
+    "$container_id" 2>/dev/null || true
+}

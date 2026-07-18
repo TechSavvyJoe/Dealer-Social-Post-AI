@@ -175,6 +175,13 @@ describe("Fly backup source identity", () => {
 
     expect(canary).toContain("logo=@public/icon-192.png;type=image/png");
     expect(canary).toContain("RESTORE_EXPECTED_FILE_SHA256");
+    expect(canary).toContain("migrate up");
+    expect(canary.indexOf("migrate up")).toBeLessThan(
+      canary.indexOf('admin create "$admin_email"'),
+    );
+    expect(canary.match(/--dir=\/pb\/pb_data/g)).toHaveLength(2);
+    expect(canary.match(/--migrationsDir=\/pb\/pb_migrations/g)).toHaveLength(2);
+    expect(canary.match(/--hooksDir=\/pb\/pb_hooks/g)).toHaveLength(2);
     expect(verifier).toContain("RESTORE_EXPECTED_FILE_COLLECTION");
     expect(verifier).toContain("RESTORE_EXPECTED_FILE_SHA256");
     expect(verifier).toContain("/api/files/${expected_file_collection}");
@@ -193,6 +200,10 @@ describe("Fly backup source identity", () => {
     expect(resolver).toContain('docker port "$container_id" "$container_port"');
     expect(resolver).toContain("attempt <= max_attempts");
     expect(resolver).toContain('state" = "dead"');
+    expect(resolver).toContain("describe_docker_container_state()");
+    expect(resolver).not.toContain(".Config");
+    expect(resolver).not.toContain(".Mounts");
+    expect(resolver).not.toContain(".State.Error");
 
     for (const path of [
       "scripts/backup-restore-canary.sh",
@@ -202,7 +213,9 @@ describe("Fly backup source identity", () => {
       const source = readFileSync(resolve(process.cwd(), path), "utf8");
       expect(source).toContain('source "$script_dir/lib/docker-port.sh"');
       expect(source).toContain("resolve_docker_published_port");
+      expect(source).toContain("describe_docker_container_state");
       expect(source).not.toContain('port="$(docker port');
+      expect(source).not.toContain('docker inspect "$');
     }
   });
 

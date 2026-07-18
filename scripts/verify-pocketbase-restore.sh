@@ -128,7 +128,7 @@ container_id="$(docker run --detach \
   "$image_tag")"
 
 if ! port="$(resolve_docker_published_port "$container_id")"; then
-  docker inspect "$container_id" >&2 || true
+  describe_docker_container_state "$container_id" >&2
   docker logs "$container_id" >&2 || true
   echo "Restore drill container did not publish its PocketBase port." >&2
   exit 1

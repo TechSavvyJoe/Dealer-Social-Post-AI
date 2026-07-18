@@ -47,6 +47,15 @@ docker run --rm \
   --entrypoint /pb/pocketbase \
   --volume "$volume_name:/pb/pb_data" \
   "$image_tag" \
+  migrate up \
+  --dir=/pb/pb_data \
+  --migrationsDir=/pb/pb_migrations \
+  --hooksDir=/pb/pb_hooks >/dev/null
+
+docker run --rm \
+  --entrypoint /pb/pocketbase \
+  --volume "$volume_name:/pb/pb_data" \
+  "$image_tag" \
   admin create "$admin_email" "$admin_password" \
   --dir=/pb/pb_data \
   --migrationsDir=/pb/pb_migrations \
@@ -63,7 +72,7 @@ container_id="$(docker run --detach \
   --volume "$volume_name:/pb/pb_data" \
   "$image_tag")"
 if ! port="$(resolve_docker_published_port "$container_id")"; then
-  docker inspect "$container_id" >&2 || true
+  describe_docker_container_state "$container_id" >&2
   docker logs "$container_id" >&2 || true
   echo "Backup canary source did not publish its PocketBase port." >&2
   exit 1
