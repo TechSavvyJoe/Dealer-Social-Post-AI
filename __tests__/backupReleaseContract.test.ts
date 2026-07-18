@@ -184,6 +184,28 @@ describe("Fly backup source identity", () => {
     expect(verifier).toContain('media_status="none-referenced"');
   });
 
+  it("bounds Docker port discovery across every disposable release drill", () => {
+    const resolver = readFileSync(
+      resolve(process.cwd(), "scripts/lib/docker-port.sh"),
+      "utf8",
+    );
+    expect(resolver).toContain("resolve_docker_published_port()");
+    expect(resolver).toContain('docker port "$container_id" "$container_port"');
+    expect(resolver).toContain("attempt <= max_attempts");
+    expect(resolver).toContain('state" = "dead"');
+
+    for (const path of [
+      "scripts/backup-restore-canary.sh",
+      "scripts/verify-pocketbase-restore.sh",
+      "scripts/dirty-upgrade-smoke.sh",
+    ]) {
+      const source = readFileSync(resolve(process.cwd(), path), "utf8");
+      expect(source).toContain('source "$script_dir/lib/docker-port.sh"');
+      expect(source).toContain("resolve_docker_published_port");
+      expect(source).not.toContain('port="$(docker port');
+    }
+  });
+
   it("bounds only tool-owned PocketBase emergency archives", () => {
     const current = "dspai_tool_20260717t123456789z_abcdef123456.zip";
     const older = "dspai_tool_20260716t123456789z_abcdef123455.zip";

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/lib/docker-port.sh"
+
 image_tag="${1:-dealer-social-post-ai:ci}"
 
 for command in docker node curl; do
@@ -59,7 +62,12 @@ container_id="$(docker run --detach \
   --publish 127.0.0.1::8090 \
   --volume "$volume_name:/pb/pb_data" \
   "$image_tag")"
-port="$(docker port "$container_id" 8090/tcp | awk -F: 'NR == 1 { print $NF }')"
+if ! port="$(resolve_docker_published_port "$container_id")"; then
+  docker inspect "$container_id" >&2 || true
+  docker logs "$container_id" >&2 || true
+  echo "Backup canary source did not publish its PocketBase port." >&2
+  exit 1
+fi
 
 healthy=false
 for _ in $(seq 1 45); do

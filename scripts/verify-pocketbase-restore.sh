@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/lib/docker-port.sh"
+
 backup_file="${1:-}"
 image_tag="${2:-dealer-social-post-ai:restore-drill}"
 release_sha="${RESTORE_RELEASE_SHA:-ci-restore-canary}"
@@ -124,9 +127,10 @@ container_id="$(docker run --detach \
   --volume "$volume_name:/pb/pb_data" \
   "$image_tag")"
 
-port="$(docker port "$container_id" 8090/tcp | awk -F: 'NR == 1 { print $NF }')"
-if [[ -z "$port" ]]; then
-  echo "Could not determine the restore drill container port." >&2
+if ! port="$(resolve_docker_published_port "$container_id")"; then
+  docker inspect "$container_id" >&2 || true
+  docker logs "$container_id" >&2 || true
+  echo "Restore drill container did not publish its PocketBase port." >&2
   exit 1
 fi
 

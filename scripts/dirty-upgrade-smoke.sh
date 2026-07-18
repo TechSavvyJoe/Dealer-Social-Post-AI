@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/lib/docker-port.sh"
+
 current_image="${1:-dealer-social-post-ai:ci}"
 base_sha="${2:-${BASE_SHA:-}}"
 
@@ -82,8 +85,13 @@ base_container="$(docker run --detach \
   --publish 127.0.0.1::8090 \
   --volume "$volume_name:/pb/pb_data" \
   "$base_image")"
-base_port="$(docker port "$base_container" 8090/tcp | awk -F: 'NR == 1 { print $NF }')"
-if [[ -z "$base_port" ]] || ! wait_for_url "http://127.0.0.1:${base_port}/api/health"; then
+if ! base_port="$(resolve_docker_published_port "$base_container")"; then
+  docker inspect "$base_container" >&2 || true
+  docker logs "$base_container" >&2 || true
+  echo "Base image did not publish its PocketBase port." >&2
+  exit 1
+fi
+if ! wait_for_url "http://127.0.0.1:${base_port}/api/health"; then
   docker logs "$base_container" >&2 || true
   echo "Base image did not initialize a healthy PocketBase database." >&2
   exit 1
@@ -132,8 +140,13 @@ current_container="$(docker run --detach \
   --publish 127.0.0.1::8090 \
   --volume "$volume_name:/pb/pb_data" \
   "$current_image")"
-current_port="$(docker port "$current_container" 8090/tcp | awk -F: 'NR == 1 { print $NF }')"
-if [[ -z "$current_port" ]] || ! wait_for_url "http://127.0.0.1:${current_port}/api/app/health"; then
+if ! current_port="$(resolve_docker_published_port "$current_container")"; then
+  docker inspect "$current_container" >&2 || true
+  docker logs "$current_container" >&2 || true
+  echo "Candidate image did not publish its PocketBase port." >&2
+  exit 1
+fi
+if ! wait_for_url "http://127.0.0.1:${current_port}/api/app/health"; then
   docker logs "$current_container" >&2 || true
   echo "Candidate image did not migrate the existing database successfully." >&2
   exit 1
