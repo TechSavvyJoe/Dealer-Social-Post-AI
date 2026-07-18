@@ -52,4 +52,26 @@ describe("release artifact binding", () => {
     expect(ci).toContain("--project=chromium-desktop-1440");
     expect(ci).toContain("--project=webkit-desktop-1440");
   });
+
+  it("pins current action runtimes without changing the Node 22 build contract", () => {
+    const checkout =
+      "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0";
+    const setupNode =
+      "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0";
+
+    for (const path of [
+      ".github/workflows/ci.yml",
+      ".github/workflows/fly-deploy.yml",
+      ".github/workflows/pocketbase-backup.yml",
+    ]) {
+      const workflow = read(path);
+      expect(workflow).toContain(checkout);
+      expect(workflow).toContain(setupNode);
+      expect(workflow).not.toContain("# v4.2.2");
+      expect(workflow).not.toContain("# v4.4.0");
+    }
+
+    expect(read(".node-version").trim()).toBe("22.23.1");
+    expect(read("Dockerfile")).toContain("FROM node:22.23.1-alpine");
+  });
 });
