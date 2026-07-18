@@ -182,6 +182,7 @@ describe("Fly backup source identity", () => {
     expect(canary.match(/--dir=\/pb\/pb_data/g)).toHaveLength(2);
     expect(canary.match(/--migrationsDir=\/pb\/pb_migrations/g)).toHaveLength(2);
     expect(canary.match(/--hooksDir=\/pb\/pb_hooks/g)).toHaveLength(2);
+    expect(canary).toContain('payload.logo || ""}\\n`);');
     expect(verifier).toContain("RESTORE_EXPECTED_FILE_COLLECTION");
     expect(verifier).toContain("RESTORE_EXPECTED_FILE_SHA256");
     expect(verifier).toContain("/api/files/${expected_file_collection}");

@@ -121,7 +121,7 @@ unset admin_token
 read -r file_collection file_record file_name < <(node -e '
   const fs = require("node:fs");
   const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-  process.stdout.write(`${payload.collectionId || ""} ${payload.id || ""} ${payload.logo || ""}`);
+  process.stdout.write(`${payload.collectionId || ""} ${payload.id || ""} ${payload.logo || ""}\n`);
 ' "$work_dir/file-record.json")
 if [[ ! "$file_collection" =~ ^[A-Za-z0-9_]+$ ||
       ! "$file_record" =~ ^[A-Za-z0-9]+$ ||
