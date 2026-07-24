@@ -1,4 +1,4 @@
-import React, { useId, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, Check, Sparkles } from "lucide-react";
 import {
@@ -36,7 +36,13 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
   className,
 }) => {
   const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
   const listboxId = useId();
+  const labelId = useId();
+  const selectedValueId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const currentDealer = useAppStore((s) => s.currentDealer);
 
   // Built-in catalog + dealer-defined custom scenarios from their record.
@@ -56,20 +62,107 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
   }, [allScenarios]);
 
   const current = value ? allScenarios.find((s) => s.id === value) : allScenarios[0]; // first scenario (Customer Delivery by convention)
+  const currentIndex = Math.max(
+    0,
+    allScenarios.findIndex((scenario) => scenario.id === current?.id),
+  );
+
+  const focusOption = useCallback(
+    (index: number) => {
+      if (!allScenarios.length) return;
+      const nextIndex = (index + allScenarios.length) % allScenarios.length;
+      setActiveIndex(nextIndex);
+      requestAnimationFrame(() => optionRefs.current[nextIndex]?.focus());
+    },
+    [allScenarios.length],
+  );
+
+  const closeAndRestoreFocus = useCallback(() => {
+    setOpen(false);
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  }, []);
+
+  const selectScenario = useCallback(
+    (scenario: PostScenario) => {
+      triggerHapticFeedback();
+      onChange(scenario);
+      closeAndRestoreFocus();
+    },
+    [closeAndRestoreFocus, onChange],
+  );
+
+  const openListbox = useCallback(() => {
+    setOpen(true);
+    focusOption(currentIndex);
+  }, [currentIndex, focusOption]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleOutsidePointer = (event: PointerEvent) => {
+      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", handleOutsidePointer);
+    return () => document.removeEventListener("pointerdown", handleOutsidePointer);
+  }, [open]);
+
+  const handleListboxKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        focusOption(activeIndex + 1);
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        focusOption(activeIndex - 1);
+        break;
+      case "Home":
+        event.preventDefault();
+        focusOption(0);
+        break;
+      case "End":
+        event.preventDefault();
+        focusOption(allScenarios.length - 1);
+        break;
+      case "Escape":
+        event.preventDefault();
+        closeAndRestoreFocus();
+        break;
+      case "Tab":
+        setOpen(false);
+        break;
+    }
+  };
 
   return (
-    <div className={cn("space-y-1.5", className)}>
-      <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+    <div ref={rootRef} className={cn("space-y-1.5", className)}>
+      <span
+        id={labelId}
+        className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+      >
         Post type
-      </label>
+      </span>
       <button
+        ref={triggerRef}
         type="button"
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-controls={listboxId}
+        aria-labelledby={`${labelId} ${selectedValueId}`}
         onClick={() => {
           triggerHapticFeedback();
-          setOpen((o) => !o);
+          if (open) {
+            setOpen(false);
+          } else {
+            openListbox();
+          }
+        }}
+        onKeyDown={(event) => {
+          if (!open && ["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) {
+            event.preventDefault();
+            openListbox();
+          }
         }}
         className={cn(
           "w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl",
@@ -88,7 +181,10 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
               );
             })()}
           <span className="min-w-0">
-            <span className="block text-surface-50 truncate font-semibold">
+            <span
+              id={selectedValueId}
+              className="block text-surface-50 truncate font-semibold"
+            >
               {current?.label}
             </span>
             <span className="block text-[10px] text-surface-400 truncate">
@@ -109,7 +205,8 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
           <motion.div
             id={listboxId}
             role="listbox"
-            aria-label="Post type"
+            aria-labelledby={labelId}
+            onKeyDown={handleListboxKeyDown}
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
@@ -117,62 +214,64 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
             className="rounded-xl border border-white/10 bg-surface-900/95 backdrop-blur-xl shadow-2xl p-2 max-h-96 overflow-y-auto"
           >
             {grouped.map(([category, list]) => (
-              <div key={category} className="mb-2 last:mb-0">
+              <div key={category} role="presentation" className="mb-2 last:mb-0">
                 <div className="text-[10px] uppercase tracking-wide text-surface-500 px-2 pb-1 pt-1.5">
                   {SCENARIO_CATEGORY_LABELS[category]}
                 </div>
-                <ul className="space-y-0.5">
+                <div role="presentation" className="space-y-0.5">
                   {list.map((s) => {
                     const active = (value || POST_SCENARIOS[0].id) === s.id;
+                    const scenarioIndex = allScenarios.findIndex(
+                      (candidate) => candidate.id === s.id,
+                    );
                     return (
-                      <li key={s.id}>
-                        <button
-                          type="button"
-                          role="option"
-                          aria-selected={active}
-                          onClick={() => {
-                            triggerHapticFeedback();
-                            onChange(s);
-                            setOpen(false);
-                          }}
-                          className={cn(
-                            "w-full flex items-start gap-2 px-2 py-2 rounded-lg text-left transition-colors",
-                            active
-                              ? "bg-primary-500/20 text-primary-100"
-                              : "hover:bg-white/5 text-surface-100",
-                          )}
-                        >
-                          {(() => {
-                            const Icon = SCENARIO_CATEGORY_ICON[s.category];
-                            return (
-                              <span
-                                className={cn(
-                                  "flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg mt-0.5 transition-colors",
-                                  active
-                                    ? "bg-primary-500/20 text-primary-200"
-                                    : "bg-white/[0.06] text-surface-300",
-                                )}
-                              >
-                                <Icon className="w-4 h-4" />
-                              </span>
-                            );
-                          })()}
-                          <span className="flex-1 min-w-0">
-                            <span className="block font-semibold text-sm">
-                              {s.label}
+                      <button
+                        key={s.id}
+                        ref={(element) => {
+                          optionRefs.current[scenarioIndex] = element;
+                        }}
+                        type="button"
+                        role="option"
+                        tabIndex={activeIndex === scenarioIndex ? 0 : -1}
+                        aria-selected={active}
+                        onFocus={() => setActiveIndex(scenarioIndex)}
+                        onClick={() => selectScenario(s)}
+                        className={cn(
+                          "w-full flex items-start gap-2 px-2 py-2 rounded-lg text-left transition-colors",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-900",
+                          active
+                            ? "bg-primary-500/20 text-primary-100"
+                            : "hover:bg-white/5 text-surface-100",
+                        )}
+                      >
+                        {(() => {
+                          const Icon = SCENARIO_CATEGORY_ICON[s.category];
+                          return (
+                            <span
+                              className={cn(
+                                "flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg mt-0.5 transition-colors",
+                                active
+                                  ? "bg-primary-500/20 text-primary-200"
+                                  : "bg-white/[0.06] text-surface-300",
+                              )}
+                            >
+                              <Icon className="w-4 h-4" />
                             </span>
-                            <span className="block text-[11px] text-surface-400">
-                              {s.blurb}
-                            </span>
+                          );
+                        })()}
+                        <span className="flex-1 min-w-0">
+                          <span className="block font-semibold text-sm">{s.label}</span>
+                          <span className="block text-[11px] text-surface-400">
+                            {s.blurb}
                           </span>
-                          {active && (
-                            <Check className="w-3.5 h-3.5 text-primary-300 flex-shrink-0 mt-1" />
-                          )}
-                        </button>
-                      </li>
+                        </span>
+                        {active && (
+                          <Check className="w-3.5 h-3.5 text-primary-300 flex-shrink-0 mt-1" />
+                        )}
+                      </button>
                     );
                   })}
-                </ul>
+                </div>
               </div>
             ))}
             <div className="border-t border-white/5 mt-1 pt-2 px-2 pb-1 text-[10px] text-surface-500 flex items-center gap-1">

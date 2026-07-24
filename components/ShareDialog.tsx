@@ -48,6 +48,7 @@ import { Button } from "./ui/Button";
 import {
   CORE_PUBLISH_IDS,
   copyPreparedCaption,
+  copyTextToClipboard,
   downloadPreparedMedia,
   isMobileShareDevice,
   openPreparedTarget,
@@ -219,8 +220,17 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       setSelectedTargetId(target.id);
       setStatus(null);
       setOperationError(null);
+
+      // Auto-copy caption to clipboard when platform is picked
+      const prep = preparation[target.id];
+      if (prep?.status === "ready") {
+        void copyPreparedCaption(prep.item);
+      } else {
+        const text = captionForTarget(target.id, target.charBudget);
+        void copyTextToClipboard(text);
+      }
     },
-    [busy],
+    [busy, preparation, captionForTarget],
   );
 
   const handleShareNow = useCallback(async () => {

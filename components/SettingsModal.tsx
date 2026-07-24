@@ -12,6 +12,8 @@ interface SettingsModalProps {
   onToggleCompactMode: (value: boolean) => void;
   imageQualityTier: ImageQualityTier;
   onImageQualityTierChange: (value: ImageQualityTier) => void;
+  theme: "dark" | "light" | "system";
+  onThemeChange: (value: "dark" | "light" | "system") => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -21,6 +23,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleCompactMode,
   imageQualityTier,
   onImageQualityTierChange,
+  theme,
+  onThemeChange,
 }) => {
   const handleClose = () => {
     triggerHapticFeedback();
@@ -66,6 +70,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <span className="relative ml-1 h-6 w-6 rounded-full bg-white shadow-md transition-transform peer-checked:translate-x-6" />
           </label>
         </div>
+
+        {/* Sunlight Mode (Theme) */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary-500/25 bg-primary-500/10">
+              <Icon type="sparkles" className="h-5 w-5 text-primary-300" />
+            </div>
+            <div>
+              <p className="font-semibold text-surface-50">Theme (Sunlight Mode)</p>
+              <p className="mt-1 text-sm leading-relaxed text-surface-400">
+                Light theme provides higher contrast for use outdoors in bright
+                sunlight.
+              </p>
+            </div>
+          </div>
+          <div
+            className="mt-4 grid grid-cols-3 gap-1 rounded-xl border border-white/10 bg-surface-950/70 p-1"
+            role="group"
+            aria-label="Theme"
+          >
+            {(["system", "dark", "light"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                aria-pressed={theme === t}
+                onClick={() => {
+                  triggerHapticFeedback();
+                  onThemeChange(t);
+                }}
+                className={`min-h-11 rounded-lg px-3 text-sm font-semibold capitalize transition-colors ${
+                  theme === t
+                    ? "bg-primary-600 text-white"
+                    : "text-surface-400 hover:text-surface-100"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
           <div className="flex items-start gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary-500/25 bg-primary-500/10">

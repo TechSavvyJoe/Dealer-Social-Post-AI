@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 # Required-action SHA pinning (post tj-actions/changed-files Mar 2025).
 # When you bump versions, paste the full 40-char SHA from the action's
 # release page — not the tag.

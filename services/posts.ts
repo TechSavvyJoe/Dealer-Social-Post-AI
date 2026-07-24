@@ -42,6 +42,8 @@ export interface LogPostInput {
   /** Opaque server-event correlations; not credentials and never user-visible. */
   captionAttemptId?: string;
   imageAttemptId?: string;
+  /** ISO timestamp for when this post should be published */
+  scheduledFor?: string;
 }
 
 export interface PostRecord {
@@ -64,6 +66,7 @@ export interface PostRecord {
   disclosures?: string;
   /** Session-authorized route; never a public PocketBase file URL. */
   creative_image_url?: string;
+  scheduled_for?: string;
 }
 
 export interface PostApprovalStatus {
@@ -135,6 +138,9 @@ export const logPost = async (input: LogPostInput): Promise<PostRecord | null> =
     if (input.imageAttemptId) {
       form.append("image_attempt_id", input.imageAttemptId);
     }
+    if (input.scheduledFor) {
+      form.append("scheduled_for", input.scheduledFor);
+    }
 
     // Persist caption + creative whenever available so History can reopen
     // for re-share/export without regenerating. Approval-gated posts still
@@ -178,8 +184,11 @@ export const logPost = async (input: LogPostInput): Promise<PostRecord | null> =
     }
     return (await res.json()) as PostRecord;
   } catch (err) {
-    // Logging a post should never break the user's flow.
-    console.warn("[posts.logPost] failed (non-fatal)", err);
+    // For approval-gated posts, a failed persist means the manager has nothing
+    // to review — the caller MUST know so it can lock share/save and alert.
+    if (input.requiresApproval) throw err;
+    // Non-approval posts: preserve the user's flow but log clearly.
+    console.warn("[posts.logPost] non-fatal persist failure", err);
     return null;
   }
 };
@@ -205,6 +214,20 @@ export const markPostVideoGenerated = async (
   jsonRequest<PostVideoStatus>(
     `/api/app/posts/${encodeURIComponent(postId)}/video-generated`,
     { method: "POST" },
+  );
+
+/** Set a scheduled publication timestamp on the owner-scoped post record. */
+export const schedulePost = async (
+  postId: string,
+  scheduledFor: string,
+): Promise<{ id: string; scheduled_for: string }> =>
+  jsonRequest<{ id: string; scheduled_for: string }>(
+    `/api/app/posts/${encodeURIComponent(postId)}/schedule`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scheduled_for: scheduledFor }),
+    },
   );
 
 /**

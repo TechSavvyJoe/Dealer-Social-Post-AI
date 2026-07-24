@@ -238,15 +238,15 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
         </div>
       )}
 
-      {/* Style Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-2">
+      {/* Style Grid / List */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pb-2">
         {filteredStyles.map((style) => {
           const promptPreview = style.prompt.split(". ")[0];
           const isFavorite = favorites.includes(style.id);
           return (
             <motion.div
               key={style.id}
-              className={`relative p-4 rounded-xl border-2 transition-all text-left group ${
+              className={`relative px-3 py-2.5 rounded-lg border transition-all text-left group ${
                 selectedStyle === style.id
                   ? "border-primary-400 bg-primary-500/20 shadow-glow-primary"
                   : "border-white/10 bg-white/5 hover:border-white/30 hover:bg-white/10"
@@ -261,16 +261,18 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
                 aria-label={`Use ${style.name} style`}
                 aria-pressed={selectedStyle === style.id}
               />
-              <div className="pointer-events-none relative flex items-start justify-between gap-2 mb-2">
-                <div>
-                  <h3 className="text-white font-semibold text-sm mb-1 group-hover:text-primary-300 transition-colors">
+              <div className="pointer-events-none relative flex items-center justify-between gap-2 mb-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-white font-medium text-sm group-hover:text-primary-300 transition-colors">
                     {style.name}
                   </h3>
-                  <p className="text-[11px] text-white/60">{style.category}</p>
+                  <p className="text-[10px] text-white/50 border border-white/10 rounded-full px-1.5 py-0.5">
+                    {style.category}
+                  </p>
                 </div>
                 <div className="flex items-center gap-1">
                   {style.popular && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-200 border border-amber-400/40">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-200 border border-amber-400/40 uppercase tracking-wide font-bold">
                       Hot
                     </span>
                   )}
@@ -293,7 +295,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
                   </button>
                 </div>
               </div>
-              <p className="pointer-events-none relative text-white/70 text-xs leading-relaxed line-clamp-2">
+              <p className="pointer-events-none relative text-white/60 text-[11px] leading-tight truncate">
                 {promptPreview}
               </p>
             </motion.div>

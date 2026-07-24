@@ -95,8 +95,23 @@ export const CaptionAlternativesModal: React.FC<CaptionAlternativesModalProps> =
       setPicked(null);
       return;
     }
-    void runAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    const initial: Variant[] = Array.from({ length: count }, (_, i) => ({
+      id: i,
+      text: "",
+      loading: true,
+    }));
+    setVariants(initial);
+    initial.forEach((v) => {
+      runOne(v.id).then((finished) => {
+        if (!cancelled) {
+          setVariants((prev) => prev.map((p) => (p.id === v.id ? finished : p)));
+        }
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen]);
 
   const handlePick = (v: Variant) => {

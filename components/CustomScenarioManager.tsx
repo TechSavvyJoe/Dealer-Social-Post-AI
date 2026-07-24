@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useId, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, Trash2, Save, X, Pencil, Loader2 } from "lucide-react";
 import { Input, Textarea } from "./ui/Input";
@@ -68,6 +68,9 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
   const [hashtagsInput, setHashtagsInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const categoryId = useId();
+  const defaultStyleId = useId();
+  const defaultToneId = useId();
 
   const startNew = () => {
     setEditing(blankScenario());
@@ -217,7 +220,10 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                 className="bg-white/5 border-white/10 focus:border-primary-400"
               />
               <div>
-                <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+                <label
+                  htmlFor={categoryId}
+                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+                >
                   Category
                 </label>
                 <div className="mt-1 flex items-center gap-2">
@@ -233,6 +239,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                     );
                   })()}
                   <select
+                    id={categoryId}
                     value={editing.category}
                     onChange={(e) =>
                       setEditing({
@@ -275,10 +282,14 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
-                <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+                <label
+                  htmlFor={defaultStyleId}
+                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+                >
                   Default style
                 </label>
                 <select
+                  id={defaultStyleId}
                   value={editing.defaultStyle}
                   onChange={(e) =>
                     setEditing({
@@ -296,10 +307,14 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                 </select>
               </div>
               <div>
-                <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+                <label
+                  htmlFor={defaultToneId}
+                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+                >
                   Default tone
                 </label>
                 <select
+                  id={defaultToneId}
                   value={editing.defaultTone}
                   onChange={(e) =>
                     setEditing({

@@ -187,6 +187,16 @@ describe("telemetry privacy", () => {
     expect(serverResult).not.toContain("provider-secret");
     expect(serverResult).toContain("[REDACTED_VIN]");
     expect(serverResult).toContain("[REDACTED_VIN][REDACTED_VIN]");
+    expect(
+      backendSanitizer.buildSafeTelemetryEnvelope(
+        null as unknown as Record<string, unknown>,
+      ),
+    ).toEqual({
+      name: "client.error",
+      payload: "{}",
+      releaseSha: "unknown",
+      apiContractVersion: "unknown",
+    });
   });
 
   it("routes render crashes through the shared redacted error envelope", () => {

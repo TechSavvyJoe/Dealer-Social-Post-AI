@@ -1,4 +1,4 @@
-type Task<T> = () => Promise<T>;
+type Task<T> = (signal?: AbortSignal) => Promise<T>;
 
 interface QueueOptions {
   maxRetries?: number;
@@ -33,12 +33,14 @@ const runNext = async () => {
   let attempt = 0;
   while (attempt <= options.maxRetries) {
     try {
+      const controller = new AbortController();
       const result = await new Promise((resolveTask, rejectTask) => {
-        const timer = setTimeout(
-          () => rejectTask(new Error("Task timed out")),
-          options.timeoutMs,
-        );
-        task()
+        const timer = setTimeout(() => {
+          controller.abort();
+          rejectTask(new Error("Task timed out"));
+        }, options.timeoutMs);
+
+        task(controller.signal)
           .then((value) => {
             clearTimeout(timer);
             resolveTask(value);

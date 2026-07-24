@@ -116,7 +116,7 @@ describe("durable provider resource ownership policy", () => {
     const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
     const helpers = readFileSync(resolve(process.cwd(), "pb_hooks/helpers.js"), "utf8");
     const ownershipCheck = hook.indexOf("helpers.dealerOwnsProviderResource(");
-    const upstreamSend = hook.indexOf("const res = $http.send({");
+    const upstreamSend = hook.indexOf("$http.send({", ownershipCheck);
     const durableClaim = hook.indexOf("helpers.claimProviderResources(");
 
     expect(ownershipCheck).toBeGreaterThan(-1);

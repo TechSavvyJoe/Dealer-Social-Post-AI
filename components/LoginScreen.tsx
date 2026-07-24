@@ -199,11 +199,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
       const isInteractiveTarget =
-        target instanceof HTMLElement &&
-        (target.matches(
+        target instanceof Element &&
+        (target.closest(
           'input, textarea, select, button, a[href], [role="button"], [role="tab"], [contenteditable="true"]',
         ) ||
-          target.isContentEditable);
+          (target instanceof HTMLElement && target.isContentEditable));
       if (isInteractiveTarget || isLoading || isSuccess) {
         return;
       }
@@ -334,12 +334,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         {/* Right pane: CSS grid — fixed chrome + fluid keypad (no page scroll) */}
         <div
           className={cn(
-            "grid h-full min-h-0 w-full grid-rows-[auto_minmax(0,1fr)]",
+            "login-access-pane grid h-full min-h-0 w-full grid-rows-[auto_minmax(0,1fr)]",
             "px-5 pt-4 pb-3 sm:px-8 sm:pt-7 sm:pb-6 lg:min-h-[38rem] lg:px-10 lg:py-8",
           )}
           aria-busy={isLoading}
         >
-          <Logo className="mb-3 h-auto w-[min(188px,50vw)] shrink-0 justify-self-start lg:hidden" />
+          <Logo className="login-mobile-logo mb-3 h-auto w-[min(188px,50vw)] shrink-0 justify-self-start lg:hidden" />
 
           <AnimatePresence mode="wait">
             {isSuccess ? (
@@ -392,7 +392,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             ) : (
               <motion.div
                 key="login-form"
-                className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 sm:gap-4"
+                className="login-form grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 sm:gap-4"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}

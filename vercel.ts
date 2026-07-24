@@ -12,6 +12,11 @@ const securityHeaders = [
     key: "Permissions-Policy",
     value: "camera=(self), microphone=(self), geolocation=(), payment=(), usb=()",
   },
+  {
+    key: "Content-Security-Policy",
+    value:
+      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https: wss:;",
+  },
 ];
 
 const securityHeaderRecord = Object.fromEntries(
@@ -31,18 +36,13 @@ const apiProxyRoute = routes.rewrite(
   },
 );
 
-const responseHeaderRoute = (
+const continuingHeaderRoute = (
   src: string,
   headers: ReadonlyArray<{ key: string; value: string }>,
 ) => ({
   src,
+  headers: Object.fromEntries(headers.map(({ key, value }) => [key, value])),
   continue: true,
-  transforms: headers.map(({ key, value }) => ({
-    type: "response.headers" as const,
-    op: "set" as const,
-    target: { key },
-    args: value,
-  })),
 });
 
 export const config: VercelConfig = {
@@ -51,22 +51,23 @@ export const config: VercelConfig = {
     // Production is promoted only after CI, Fly, canaries, and restore gates pass.
     deploymentEnabled: { main: false },
   },
-  // Request-header transforms use Vercel's lower-level routes format, so all
-  // response-header rules live in that same array (the formats cannot mix).
+  // The deployment-secret request transform requires Vercel's low-level
+  // routes collection. Native route `headers` are the supported response form;
+  // response-header transforms do not reliably apply to static Vite files.
   routes: [
     apiProxyRoute,
-    responseHeaderRoute("^/assets/(.*)$", [
+    continuingHeaderRoute("^/assets/(.*)$", [
       {
         key: "Cache-Control",
         value: "public, max-age=31536000, immutable",
       },
     ]),
-    responseHeaderRoute("^/sw\\.js$", [
+    continuingHeaderRoute("^/sw\\.js$", [
       {
         key: "Cache-Control",
         value: "no-cache, no-store, must-revalidate",
       },
     ]),
-    responseHeaderRoute("^/(.*)$", securityHeaders),
+    continuingHeaderRoute("^/(.*)$", securityHeaders),
   ],
 };

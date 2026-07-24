@@ -51,6 +51,7 @@ interface AppState {
   isRestoringSession: boolean;
 
   // Preferences
+  theme: "dark" | "light" | "system";
   preferredStyle: StyleOption;
   preferredTone: ToneOption;
   compactMode: boolean;
@@ -65,6 +66,7 @@ interface AppState {
   setError: (error: string | null) => void;
   setPreferences: (
     prefs: Partial<{
+      theme: "dark" | "light" | "system";
       preferredStyle: StyleOption;
       preferredTone: ToneOption;
       compactMode: boolean;
@@ -165,6 +167,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   generationParams: null,
   error: null,
   isRestoringSession: true,
+  theme: "system",
   preferredStyle: StyleOption.Modern,
   preferredTone: ToneOption.Excited,
   compactMode: false,
@@ -196,6 +199,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         generationParams: undefined,
         compactMode: preferences.compactMode,
         imageQualityTier: preferences.imageQualityTier,
+        theme: preferences.theme,
         preferredStyle: preferences.preferredStyle,
         preferredTone: preferences.preferredTone,
       });
@@ -292,6 +296,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => {
       const newState = { ...state, ...prefs };
       saveSession({
+        theme: newState.theme,
         compactMode: newState.compactMode,
         imageQualityTier: newState.imageQualityTier,
         preferredStyle: newState.preferredStyle,
@@ -505,6 +510,9 @@ export const useAppStore = create<AppState>((set, get) => ({
             step: restoredStep,
             compactMode: session?.compactMode ?? false,
             imageQualityTier: session?.imageQualityTier ?? "standard",
+            ...(session?.theme
+              ? { theme: session.theme as "dark" | "light" | "system" }
+              : {}),
             // Restore saved style/tone for authenticated users too. These were
             // previously only restored in the unauthenticated fall-through
             // (which returns early above), so a logged-in user's preferences
@@ -538,6 +546,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       if (session?.imageQualityTier) {
         set({ imageQualityTier: session.imageQualityTier });
+      }
+      if (session?.theme) {
+        set({ theme: session.theme as "dark" | "light" | "system" });
       }
       if (session?.preferredStyle) {
         set({ preferredStyle: session.preferredStyle as StyleOption });

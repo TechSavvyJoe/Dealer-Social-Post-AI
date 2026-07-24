@@ -98,7 +98,7 @@ export interface GenerationMeta {
 }
 
 export const useGeneration = () => {
-  const { error: toastError } = useToast();
+  const { error: toastError, warning: toastWarning } = useToast();
   const {
     currentDealer,
     selectedImage,
@@ -193,6 +193,7 @@ export const useGeneration = () => {
       );
     },
     onMutate: (variables) => {
+      cleanupTimers();
       setStep(AppStep.GENERATING);
       setError(null);
       setGenerationProgress(0);
@@ -427,6 +428,12 @@ export const useGeneration = () => {
           }
         } else {
           finalPost.approvalStatus = "n_a";
+        }
+
+        if (!post && !currentDealer.requires_approval) {
+          toastWarning(
+            "Your post was created, but it could not be saved to history. You can still share and save it now.",
+          );
         }
       }
       await new Promise((resolve) => setTimeout(resolve, 500));

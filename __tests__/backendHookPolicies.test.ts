@@ -67,7 +67,7 @@ const withServerSafety = <T extends Record<string, unknown>>(request: T) => ({
   safetySettings: canonicalModelPolicy.safetySettings,
 });
 
-const textPath = "v1beta/models/gemini-3.5-flash:generateContent";
+const textPath = "v1beta/models/gemini-3.6-flash:generateContent";
 const proImagePath = "v1beta/models/gemini-3-pro-image:generateContent";
 const flashImagePath = "v1beta/models/gemini-3.1-flash-image:generateContent";
 const liteImagePath = "v1beta/models/gemini-3.1-flash-lite-image:generateContent";
@@ -203,13 +203,13 @@ describe("PocketBase request policies", () => {
     ).toMatchObject({ bucket: "image-start", maxRequests: 10 });
     expect(policies.proxyCostPolicy("v1beta/operations/job-123")).toBeNull();
     expect(
-      policies.proxyCostPolicy("v1beta/models/gemini-3.5-flash:generateContent"),
+      policies.proxyCostPolicy("v1beta/models/gemini-3.6-flash:generateContent"),
     ).toBeNull();
   });
 
   it("allows only the configured Gemini model and method pairs", () => {
     expect(
-      policies.isAllowedProxyPath("v1beta/models/gemini-3.5-flash:generateContent"),
+      policies.isAllowedProxyPath("v1beta/models/gemini-3.6-flash:generateContent"),
     ).toBe(true);
     expect(
       policies.isAllowedProxyPath(
@@ -238,7 +238,7 @@ describe("PocketBase request policies", () => {
       policies.isAllowedProxyPath("v1beta/models/gemini-2.5-flash:generateContent"),
     ).toBe(false);
     expect(
-      policies.isAllowedProxyPath("v1beta/models/gemini-3.5-flash:predictLongRunning"),
+      policies.isAllowedProxyPath("v1beta/models/gemini-3.6-flash:predictLongRunning"),
     ).toBe(false);
     expect(
       policies.isAllowedProxyPath(

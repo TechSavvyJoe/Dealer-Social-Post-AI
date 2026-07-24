@@ -99,9 +99,9 @@ The active production routing is defined in `config/gemini-model-policy.json`:
 
 | Task                 | Tier     | Routing order                                                                   | Output contract            |
 | -------------------- | -------- | ------------------------------------------------------------------------------- | -------------------------- |
-| `caption`            | quality  | `gemini-3.5-flash` → `gemini-3.1-flash-lite`                                    | 2,048 tokens               |
-| `caption_regenerate` | quality  | `gemini-3.5-flash` → `gemini-3.1-flash-lite`                                    | 2,048 tokens               |
-| `caption_edit`       | fast     | `gemini-3.1-flash-lite` → `gemini-3.5-flash`                                    | 2,048 tokens               |
+| `caption`            | quality  | `gemini-3.6-flash` → `gemini-3.5-flash-lite`                                    | 2,048 tokens               |
+| `caption_regenerate` | quality  | `gemini-3.6-flash` → `gemini-3.5-flash-lite`                                    | 2,048 tokens               |
+| `caption_edit`       | fast     | `gemini-3.5-flash-lite` → `gemini-3.6-flash`                                    | 2,048 tokens               |
 | `image_standard`     | standard | `gemini-3.1-flash-image` → `gemini-3-pro-image` → `gemini-3.1-flash-lite-image` | 2K → 2K → 1K; 4,096 tokens |
 | `image_studio`       | studio   | `gemini-3-pro-image` → `gemini-3.1-flash-image` → `gemini-3.1-flash-lite-image` | 2K → 2K → 1K; 4,096 tokens |
 | `video_standard`     | standard | `veo-3.1-fast-generate-preview`                                                 | 720p                       |

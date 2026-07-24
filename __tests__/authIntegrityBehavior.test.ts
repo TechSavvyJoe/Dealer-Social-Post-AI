@@ -1318,12 +1318,11 @@ describe("Turnstile and route authority contracts", () => {
       createStart,
     );
     const createRoute = hook.slice(createStart, patchStart);
-    expect(createRoute).toContain('logAuthEvent("person_pin_issued"');
-    expect(createRoute).toContain("if (!audited)");
-    expect(createRoute.indexOf('logAuthEvent("person_pin_issued"')).toBeLessThan(
-      createRoute.indexOf("$app.dao().saveRecord(record)"),
+    expect(createRoute).toContain(
+      'runAuditedTransaction("person_pin_issued", createAudit',
     );
-    expect(createRoute.indexOf("if (!audited)")).toBeLessThan(
+    expect(createRoute).toContain("txDao.saveRecord(record)");
+    expect(createRoute.indexOf("txDao.saveRecord(record)")).toBeLessThan(
       createRoute.lastIndexOf("pin: pin"),
     );
     const rotateStart = hook.indexOf(
@@ -1331,11 +1330,11 @@ describe("Turnstile and route authority contracts", () => {
       patchStart,
     );
     const legacyPatchRoute = hook.slice(patchStart, rotateStart);
-    expect(legacyPatchRoute).toContain("credentialAudited = helpers.logAuthEvent(");
-    expect(legacyPatchRoute).toContain("if (!credentialAudited)");
-    expect(legacyPatchRoute.indexOf("if (!credentialAudited)")).toBeLessThan(
-      legacyPatchRoute.indexOf("pin: nextPin"),
-    );
+    expect(legacyPatchRoute).toContain("helpers.runAuditedTransaction(eventKind");
+    expect(legacyPatchRoute).toContain("helpers.revokePersonSessionsWithDao");
+    expect(
+      legacyPatchRoute.indexOf("helpers.runAuditedTransaction(eventKind"),
+    ).toBeLessThan(legacyPatchRoute.indexOf("pin: nextPin"));
 
     for (const path of ["rotate-pin", "reveal-pin"]) {
       const routeStart = hook.indexOf(
@@ -1345,10 +1344,17 @@ describe("Turnstile and route authority contracts", () => {
       const route = hook.slice(routeStart, routeEnd);
       expect(routeStart).toBeGreaterThan(-1);
       expect(route).toContain('set("Cache-Control", "private, no-store")');
-      expect(route).toContain("helpers.logAuthEvent(");
-      expect(route).toContain("if (!audited)");
-      expect(route).toContain('code: "UNAVAILABLE"');
-      expect(route.indexOf("if (!audited)")).toBeLessThan(route.indexOf("pin: pin"));
+      if (path === "rotate-pin") {
+        expect(route).toContain('helpers.runAuditedTransaction("person_pin_rotated"');
+        expect(route.indexOf("helpers.runAuditedTransaction")).toBeLessThan(
+          route.indexOf("pin: pin"),
+        );
+      } else {
+        expect(route).toContain("helpers.logAuthEvent(");
+        expect(route).toContain("if (!audited)");
+        expect(route).toContain('code: "UNAVAILABLE"');
+        expect(route.indexOf("if (!audited)")).toBeLessThan(route.indexOf("pin: pin"));
+      }
       expect(route).toContain("pin: pin");
     }
   });

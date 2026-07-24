@@ -414,13 +414,14 @@ export const Icon: React.FC<IconProps> = React.memo(
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.8"
           >
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
-              d="M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414 6.414a2 2 0 002.828 0L21 12M3 12l6.414-6.414a2 2 0 012.828 0L21 12"
+              d="M20 5H9l-7 7 7 7h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Z"
             />
+            <path strokeLinecap="round" strokeLinejoin="round" d="m12 9 6 6m0-6-6 6" />
           </svg>
         );
       case "trash":

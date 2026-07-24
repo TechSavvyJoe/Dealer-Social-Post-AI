@@ -184,7 +184,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
         aria-label="Take photo using device camera"
       />
 
-      <div className="mb-6 flex flex-col gap-4 lg:mb-8 lg:flex-row lg:items-end lg:justify-between">
+      <div className="capture-intro mb-6 flex flex-col gap-4 lg:mb-8 lg:flex-row lg:items-end lg:justify-between">
         <div className="max-w-2xl">
           <div className="mb-3 flex items-center gap-3 text-xs font-semibold tracking-[0.14em] text-primary-300">
             <span className="h-px w-10 bg-primary-400" aria-hidden="true" />
@@ -193,7 +193,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
           <h1 className="text-3xl font-semibold tracking-[-0.035em] text-surface-50 sm:text-5xl">
             Capture the handoff.
           </h1>
-          <p className="mt-3 max-w-xl text-sm leading-6 text-surface-300 sm:text-base">
+          <p className="capture-intro-copy mt-3 max-w-xl text-sm leading-6 text-surface-300 sm:text-base">
             Start with one clear customer or vehicle photo. We’ll prepare the framing,
             caption, and channel-ready creative next.
           </p>
@@ -213,9 +213,9 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
         </ol>
       </div>
 
-      <div className="grid min-h-[540px] overflow-hidden rounded-[1.75rem] border border-white/10 bg-surface-900 shadow-2xl shadow-black/25 lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.7fr)]">
+      <div className="capture-studio-grid grid min-h-0 overflow-hidden rounded-[1.5rem] border border-white/10 bg-surface-900 shadow-2xl shadow-black/25 sm:min-h-[480px] sm:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.65fr)] lg:min-h-[540px] lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.7fr)] lg:rounded-[1.75rem]">
         <section
-          className={`relative flex min-h-[360px] items-center justify-center overflow-hidden border-b border-white/10 bg-surface-950 p-6 transition-colors lg:min-h-[640px] lg:border-b-0 lg:border-r ${
+          className={`capture-studio-preview relative flex min-h-[300px] items-center justify-center overflow-hidden border-b border-white/10 bg-surface-950 p-4 transition-colors sm:min-h-[480px] sm:border-b-0 sm:border-r sm:p-5 lg:min-h-[640px] lg:p-6 ${
             isDraggingOver ? "border-primary-400 bg-primary-950/30" : ""
           }`}
           aria-label="Photo drop zone"
@@ -266,7 +266,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
           </div>
         </section>
 
-        <aside className="flex flex-col justify-between bg-surface-900 p-6 sm:p-8 lg:p-10">
+        <aside className="capture-studio-sidebar flex flex-col justify-between bg-surface-900 p-4 sm:p-6 lg:p-10">
           <div>
             <span className="text-xs font-semibold tracking-[0.14em] text-primary-300">
               PHOTO SOURCE
@@ -301,7 +301,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
             </div>
           </div>
 
-          <div className="mt-8 border-t border-white/10 pt-6">
+          <div className="capture-studio-tips mt-8 border-t border-white/10 pt-6">
             <p className="text-xs font-semibold text-surface-200">
               For the cleanest result
             </p>

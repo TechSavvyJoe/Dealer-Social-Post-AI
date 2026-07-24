@@ -42,33 +42,96 @@ interface ToastProviderProps {
   children: ReactNode;
 }
 
+interface ToastTimer {
+  handle: ReturnType<typeof setTimeout>;
+  remaining: number;
+  startedAt: number;
+  paused: boolean;
+}
+
+const DEFAULT_TOAST_DURATIONS: Record<ToastType, number> = {
+  success: 5000,
+  info: 6000,
+  warning: 8000,
+  // Errors stay until the user acknowledges them.
+  error: 0,
+};
+
 export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
   const [toasts, setToasts] = useState<Toast[]>([]);
   // Track auto-dismiss timers so we can clear them on manual close and on
   // unmount — otherwise they fire setState after the provider is gone.
-  const timersRef = React.useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const timersRef = React.useRef<Map<string, ToastTimer>>(new Map());
+  const pauseDepthRef = React.useRef<Map<string, number>>(new Map());
 
   const removeToast = useCallback((id: string) => {
-    const handle = timersRef.current.get(id);
-    if (handle) {
-      clearTimeout(handle);
+    const timer = timersRef.current.get(id);
+    if (timer) {
+      clearTimeout(timer.handle);
       timersRef.current.delete(id);
     }
+    pauseDepthRef.current.delete(id);
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   }, []);
 
   const showToast = useCallback(
-    (type: ToastType, message: string, duration: number = 3000) => {
+    (type: ToastType, message: string, duration?: number) => {
+      const resolvedDuration = duration ?? DEFAULT_TOAST_DURATIONS[type];
       const id = Math.random().toString(36).substring(2, 9);
-      const newToast: Toast = { id, type, message, duration };
+      const newToast: Toast = { id, type, message, duration: resolvedDuration };
 
       setToasts((prev) => [...prev, newToast]);
       triggerHapticFeedback();
 
-      if (duration > 0) {
-        const handle = setTimeout(() => removeToast(id), duration);
-        timersRef.current.set(id, handle);
+      if (resolvedDuration > 0) {
+        const handle = setTimeout(() => removeToast(id), resolvedDuration);
+        timersRef.current.set(id, {
+          handle,
+          remaining: resolvedDuration,
+          startedAt: Date.now(),
+          paused: false,
+        });
       }
+    },
+    [removeToast],
+  );
+
+  const pauseToast = useCallback((id: string) => {
+    const pauseDepth = (pauseDepthRef.current.get(id) || 0) + 1;
+    pauseDepthRef.current.set(id, pauseDepth);
+    if (pauseDepth > 1) return;
+    const timer = timersRef.current.get(id);
+    if (!timer || timer.paused) return;
+    clearTimeout(timer.handle);
+    timersRef.current.set(id, {
+      ...timer,
+      remaining: Math.max(0, timer.remaining - (Date.now() - timer.startedAt)),
+      paused: true,
+    });
+  }, []);
+
+  const resumeToast = useCallback(
+    (id: string) => {
+      const pauseDepth = Math.max(0, (pauseDepthRef.current.get(id) || 0) - 1);
+      if (pauseDepth > 0) {
+        pauseDepthRef.current.set(id, pauseDepth);
+        return;
+      }
+      pauseDepthRef.current.delete(id);
+      const timer = timersRef.current.get(id);
+      if (!timer || !timer.paused) return;
+      if (timer.remaining <= 0) {
+        removeToast(id);
+        return;
+      }
+      clearTimeout(timer.handle);
+      const handle = setTimeout(() => removeToast(id), timer.remaining);
+      timersRef.current.set(id, {
+        handle,
+        remaining: timer.remaining,
+        startedAt: Date.now(),
+        paused: false,
+      });
     },
     [removeToast],
   );
@@ -77,7 +140,7 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
   React.useEffect(() => {
     const timers = timersRef.current;
     return () => {
-      timers.forEach((handle) => clearTimeout(handle));
+      timers.forEach((timer) => clearTimeout(timer.handle));
       timers.clear();
     };
   }, []);
@@ -105,7 +168,12 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
   return (
     <ToastContext.Provider value={{ showToast, success, error, warning, info }}>
       {children}
-      <ToastContainer toasts={toasts} onRemove={removeToast} />
+      <ToastContainer
+        toasts={toasts}
+        onRemove={removeToast}
+        onPause={pauseToast}
+        onResume={resumeToast}
+      />
     </ToastContext.Provider>
   );
 };
@@ -113,19 +181,36 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
 interface ToastContainerProps {
   toasts: Toast[];
   onRemove: (id: string) => void;
+  onPause: (id: string) => void;
+  onResume: (id: string) => void;
 }
 
-const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, onRemove }) => {
+const ToastContainer: React.FC<ToastContainerProps> = ({
+  toasts,
+  onRemove,
+  onPause,
+  onResume,
+}) => {
   return (
     <div
-      className="fixed bottom-0 right-0 z-[100] p-4 pointer-events-none"
-      aria-live="polite"
-      aria-atomic="true"
+      className="pointer-events-none fixed z-[100]"
+      style={{
+        width:
+          "min(28rem, calc(100vw - max(1rem, var(--sal)) - max(1rem, var(--sar))))",
+        bottom: "max(1rem, var(--sab))",
+        right: "max(1rem, var(--sar))",
+      }}
     >
       <div className="flex flex-col gap-3 items-end">
         <AnimatePresence mode="popLayout">
           {toasts.map((toast) => (
-            <ToastItem key={toast.id} toast={toast} onRemove={onRemove} />
+            <ToastItem
+              key={toast.id}
+              toast={toast}
+              onRemove={onRemove}
+              onPause={onPause}
+              onResume={onResume}
+            />
           ))}
         </AnimatePresence>
       </div>
@@ -136,9 +221,16 @@ const ToastContainer: React.FC<ToastContainerProps> = ({ toasts, onRemove }) => 
 interface ToastItemProps {
   toast: Toast;
   onRemove: (id: string) => void;
+  onPause: (id: string) => void;
+  onResume: (id: string) => void;
 }
 
-const ToastItem: React.FC<ToastItemProps> = ({ toast, onRemove }) => {
+const ToastItem: React.FC<ToastItemProps> = ({
+  toast,
+  onRemove,
+  onPause,
+  onResume,
+}) => {
   const icons: Record<ToastType, ReactNode> = {
     success: <CheckCircle2 className="w-5 h-5 text-success-500" />,
     error: <XCircle className="w-5 h-5 text-error-500" />,
@@ -159,19 +251,28 @@ const ToastItem: React.FC<ToastItemProps> = ({ toast, onRemove }) => {
       exit={{ opacity: 0, scale: 0.95, y: -10 }}
       transition={{ duration: ANIMATION_DURATIONS.standard }}
       layout
+      onMouseEnter={() => onPause(toast.id)}
+      onMouseLeave={() => onResume(toast.id)}
+      onFocusCapture={() => onPause(toast.id)}
+      onBlurCapture={() => onResume(toast.id)}
       className={cn(
         "flex items-center gap-3 px-4 py-3 rounded-xl",
         "border backdrop-blur-lg glass pointer-events-auto",
-        "shadow-elevation-3 min-w-[280px] max-w-md",
+        "w-full max-w-md shadow-elevation-3",
         typeStyles[toast.type],
       )}
-      role="alert"
+      role={toast.type === "error" || toast.type === "warning" ? "alert" : "status"}
+      aria-live={
+        toast.type === "error" || toast.type === "warning" ? "assertive" : "polite"
+      }
+      aria-atomic="true"
     >
       <div className="flex-shrink-0">{icons[toast.type]}</div>
       <p className="flex-1 text-sm font-medium text-surface-50">{toast.message}</p>
       <button
+        type="button"
         onClick={() => onRemove(toast.id)}
-        className="flex-shrink-0 text-surface-400 hover:text-surface-200 transition-colors"
+        className="-my-2 -mr-2 inline-flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-lg text-surface-400 transition-colors hover:bg-white/10 hover:text-surface-200"
         aria-label="Close notification"
       >
         <X className="w-4 h-4" />

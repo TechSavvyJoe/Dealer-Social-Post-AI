@@ -77,7 +77,7 @@ export const computeContainRect = (
   dstW: number,
   dstH: number,
 ): { drawW: number; drawH: number; dx: number; dy: number; scale: number } => {
-  const scale = Math.min(dstW / srcW, dstH / srcH);
+  const scale = Math.min(dstW / Math.max(srcW, 1), dstH / Math.max(srcH, 1));
   const drawW = Math.round(srcW * scale);
   const drawH = Math.round(srcH * scale);
   const dx = Math.round((dstW - drawW) / 2);
@@ -92,7 +92,7 @@ export const computeCoverRect = (
   dstW: number,
   dstH: number,
 ): { drawW: number; drawH: number; dx: number; dy: number } => {
-  const scale = Math.max(dstW / srcW, dstH / srcH) * 1.12;
+  const scale = Math.max(dstW / Math.max(srcW, 1), dstH / Math.max(srcH, 1)) * 1.12;
   const drawW = Math.round(srcW * scale);
   const drawH = Math.round(srcH * scale);
   const dx = Math.round((dstW - drawW) / 2);

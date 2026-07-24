@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   setError: vi.fn(),
   setStep: vi.fn(),
   toastError: vi.fn(),
+  toastWarning: vi.fn(),
   generateSocialPost: vi.fn(),
   generateFunSocialPostImage: vi.fn(),
   editSocialPostImage: vi.fn(),
@@ -36,7 +37,7 @@ vi.mock("./useGemini", () => ({
 }));
 
 vi.mock("../components/ui/Toast", () => ({
-  useToast: () => ({ error: mocks.toastError }),
+  useToast: () => ({ error: mocks.toastError, warning: mocks.toastWarning }),
 }));
 
 vi.mock("../services/posts", () => ({
@@ -74,14 +75,14 @@ const existingPost: GeneratedPost = {
   aiMeta: {
     captionSource: "ai",
     selectedTier: "studio",
-    model: "gemini-3.5-flash",
+    model: "gemini-3.6-flash",
     fallbackCount: 2,
     lastSuccessfulGenerationAt: "2026-07-17T12:00:00.000Z",
     caption: {
       task: "caption",
       tier: "quality",
       provider: "gemini",
-      model: "gemini-3.5-flash",
+      model: "gemini-3.6-flash",
       fallbackCount: 0,
       lastSuccessAt: "2026-07-17T11:00:00.000Z",
     },
@@ -180,7 +181,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       label: "provider success",
       captionSource: "ai" as const,
       provider: "gemini",
-      model: "gemini-3.1-flash-lite",
+      model: "gemini-3.5-flash-lite",
       fallbackCount: 1,
       lastSuccessAt: "2026-07-17T13:00:00.000Z",
       expectedFallback: false,

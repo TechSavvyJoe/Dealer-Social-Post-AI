@@ -191,7 +191,7 @@ test.describe("real PocketBase release flow", () => {
     };
     const generationAttemptId = `e2e_${Date.now().toString(36)}_${"a".repeat(20)}`;
     const providerResponse = await page.request.post(
-      "/api/proxy/v1beta/models/gemini-3.5-flash:generateContent",
+      "/api/proxy/v1beta/models/gemini-3.6-flash:generateContent",
       {
         headers: {
           Cookie: adminCookie,
@@ -450,12 +450,25 @@ test.describe("real PocketBase release flow", () => {
     // hydrate the exact stored business hours from PocketBase.
     const expectedHours =
       "Mon 8:30 AM–7:30 PM, Tue–Fri 9:00 AM–8:00 PM, Sat 9:00 AM–6:00 PM, Sun closed";
-    await managerPage.getByRole("button", { name: "Settings", exact: true }).click();
+    await managerPage.getByRole("tab", { name: "Settings" }).click();
     let managerSettingsCard = managerPage
       .getByRole("heading", { name: "Dealership settings" })
       .locator("xpath=../../..");
     const managerMondayOpen = managerSettingsCard.getByLabel("Monday opens");
     const managerMondayClose = managerSettingsCard.getByLabel("Monday closes");
+    const noApprovalRequired = managerSettingsCard.getByRole("radio", {
+      name: "No approval required",
+    });
+    const approvalRequired = managerSettingsCard.getByRole("radio", {
+      name: "Require manager approval",
+    });
+    await noApprovalRequired.focus();
+    await managerPage.keyboard.press("ArrowRight");
+    await expect(approvalRequired).toBeFocused();
+    await expect(approvalRequired).toHaveAttribute("aria-checked", "true");
+    await managerPage.keyboard.press("ArrowLeft");
+    await expect(noApprovalRequired).toBeFocused();
+    await expect(noApprovalRequired).toHaveAttribute("aria-checked", "true");
     await managerMondayOpen.selectOption("8:30 AM");
     await managerMondayClose.selectOption("7:30 PM");
     await expect(managerMondayOpen).toHaveValue("8:30 AM");
@@ -492,7 +505,7 @@ test.describe("real PocketBase release flow", () => {
     await expect(managerPage.getByText("Manager dashboard")).toBeVisible({
       timeout: 15_000,
     });
-    await managerPage.getByRole("button", { name: "Settings", exact: true }).click();
+    await managerPage.getByRole("tab", { name: "Settings" }).click();
     managerSettingsCard = managerPage
       .getByRole("heading", { name: "Dealership settings" })
       .locator("xpath=../../..");

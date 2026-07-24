@@ -11,7 +11,7 @@ let requestCounter = 0;
  * A wrapper for the fetch API to communicate with our backend proxy for Gemini.
  * Now includes retry logic, performance monitoring, and enhanced error handling.
  * @param method 'GET' or 'POST'
- * @param path The path for the Google API (e.g., 'v1beta/models/gemini-3.5-flash:generateContent')
+ * @param path The path for the Google API (e.g., 'v1beta/models/gemini-3.6-flash:generateContent')
  * @param body The request body to be sent to the Gemini API.
  * @returns The JSON response from the API.
  */

@@ -241,9 +241,12 @@ const log = (
     name: redactVinLikeStrings(name),
     payload: {
       ...(safePayload || {}),
+      // The coordinated release selects VITE_RELEASE_SHA explicitly. Vercel's
+      // injected commit is only a preview/local fallback, never an override of
+      // the evidence-bound artifact identity.
       releaseSha:
-        import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA ||
         import.meta.env.VITE_RELEASE_SHA ||
+        import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA ||
         "development",
       apiContractVersion: API_CONTRACT_VERSION,
     },

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="title description">
+  <title id="title">Dealer Social Post AI showroom post concept</title>
+  <desc id="description">A dealership showroom and vehicle inside a social post frame, polished by AI.</desc>
+  <rect width="120" height="120" rx="28" fill="#07101f"/>
+  <rect x="8" y="8" width="104" height="104" rx="23" fill="#4f7cff"/>
+  <rect x="15" y="15" width="90" height="90" rx="17" fill="#07101f"/>
+  <path d="M20 58 60 35l40 23v12L60 48 20 70Z" fill="#f8fafc"/>
+  <rect x="24" y="66" width="8" height="29" rx="4" fill="#cbdcff"/>
+  <rect x="88" y="66" width="8" height="29" rx="4" fill="#cbdcff"/>
+  <rect x="20" y="89" width="80" height="8" rx="4" fill="#cbdcff"/>
+  <path d="M38 87 44 70q2-5 7-5h18q5 0 7 5l6 17v7H38Z" fill="#f8fafc"/>
+  <path d="m49 70-4 11h30l-4-11Z" fill="#07101f"/>
+  <circle cx="45" cy="87" r="3.5" fill="#4f7cff"/>
+  <circle cx="75" cy="87" r="3.5" fill="#4f7cff"/>
+  <path d="m91 21 2.8 6.2L100 30l-6.2 2.8L91 39l-2.8-6.2L82 30l6.2-2.8Z" fill="#67e8f9"/>
+</svg>

@@ -23,6 +23,7 @@ import {
   ChevronDown,
   CircleCheck,
   Camera,
+  Calendar,
   type LucideIcon,
 } from "lucide-react";
 import confetti from "canvas-confetti";
@@ -34,6 +35,7 @@ import { cn } from "../utils/classNames";
 import { ProgressBar } from "./ui/ProgressBar";
 import { normalizeError, recoveryHint } from "../utils/errorHandler";
 import { MultiFormatExportModal } from "./MultiFormatExportModal";
+import { ScheduleDialog } from "./ScheduleDialog";
 import { LayoutGrid } from "lucide-react";
 import { PlatformLimitMeter } from "./PlatformLimitMeter";
 import { CaptionStudio } from "./CaptionStudio";
@@ -43,7 +45,11 @@ import { ProgressiveImage } from "./ui/ProgressiveImage";
 import { useToast } from "./ui/Toast";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
-import { getPostApprovalStatus, markPostVideoGenerated } from "../services/posts";
+import {
+  getPostApprovalStatus,
+  markPostVideoGenerated,
+  schedulePost,
+} from "../services/posts";
 import {
   analyzeCaptionForDelivery,
   prohibitedClaimsMessage,
@@ -57,6 +63,7 @@ import {
   saveMediaToLibrary,
   saveResultToastMessage,
 } from "../utils/mediaSave";
+import { copyTextToClipboard } from "../services/publishTargets";
 import { useAppStore } from "../stores/appStore";
 
 // Lazy load modals for performance
@@ -100,6 +107,7 @@ const ActionTile: React.FC<{
   label: string;
   onClick: () => void;
   tooltip?: string;
+  ariaLabel?: string;
   disabled?: boolean;
   busy?: boolean;
   iconClassName?: string;
@@ -108,6 +116,7 @@ const ActionTile: React.FC<{
   label,
   onClick,
   tooltip,
+  ariaLabel,
   disabled = false,
   busy = false,
   iconClassName,
@@ -121,6 +130,7 @@ const ActionTile: React.FC<{
         onClick();
       }}
       disabled={disabled}
+      aria-label={ariaLabel}
       aria-busy={busy || undefined}
       className={cn(TILE_BASE, TILE_NEUTRAL)}
       whileHover={shouldReduceMotion ? undefined : { x: disabled ? 0 : 2 }}
@@ -275,8 +285,11 @@ export const PostResult: React.FC<PostResultProps> = ({
   >([]);
 
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const [isMultiFormatOpen, setIsMultiFormatOpen] = useState(false);
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const [isScheduleOpen, setIsScheduleOpen] = useState(false);
+  const [isScheduling, setIsScheduling] = useState(false);
+  const [captionAlts, setCaptionAlts] = useState<string[]>([]);
   const [isCaptionAltsOpen, setIsCaptionAltsOpen] = useState(false);
   const [isToolsOpen, setIsToolsOpen] = useState(isDesktopLayout);
   /** Guarded navigation away from this result: full reset or same-photo remix. */
@@ -1099,6 +1112,32 @@ export const PostResult: React.FC<PostResultProps> = ({
           onClose={() => setIsVideoDirectorOpen(false)}
           onSelectStyle={handleGenerateVideo}
         />
+        <ScheduleDialog
+          isOpen={isScheduleOpen}
+          onClose={() => setIsScheduleOpen(false)}
+          isLoading={isScheduling}
+          onSchedule={async (isoString) => {
+            if (post.postId) {
+              setIsScheduling(true);
+              try {
+                await schedulePost(post.postId, isoString);
+                toast.success(
+                  "Post scheduled for " + new Date(isoString).toLocaleString(),
+                );
+                setIsScheduleOpen(false);
+              } catch (err) {
+                toast.error(
+                  err instanceof Error ? err.message : "Failed to schedule post",
+                );
+              } finally {
+                setIsScheduling(false);
+              }
+            } else {
+              setIsScheduleOpen(false);
+              toast.success("Scheduled for " + new Date(isoString).toLocaleString());
+            }
+          }}
+        />
       </Suspense>
       <Suspense fallback={null}>
         <LazyFunModeDirectorModal
@@ -1516,66 +1555,117 @@ export const PostResult: React.FC<PostResultProps> = ({
               </div>
             ) : null}
 
-            <div className="w-full space-y-3">
-              <button
-                type="button"
-                onClick={() => setIsToolsOpen((open) => !open)}
-                aria-expanded={isToolsOpen}
-                aria-controls="creative-tools-panel"
-                className="flex min-h-[48px] w-full items-center gap-3 rounded-xl border border-white/10 bg-surface-950/35 px-3 text-left transition-colors hover:border-white/20 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-500/15 text-primary-300">
-                  <Sparkles className="h-4 w-4" aria-hidden="true" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold text-surface-100">
-                    Creative tools
-                  </span>
-                  <span className="block truncate text-xs text-surface-400">
-                    Optional image, caption, video, and export controls
-                  </span>
-                </span>
-                <ChevronDown
+            <div className="w-full space-y-2 mb-2">
+              <div className="flex flex-wrap gap-1.5 items-center justify-between bg-surface-950/35 border border-white/10 rounded-xl p-1.5">
+                <div className="flex gap-1.5 flex-1 min-w-0">
+                  <ActionTile
+                    icon={Film}
+                    iconClassName={TILE_ICON_ACCENT}
+                    tooltip="Turn your image into a video"
+                    disabled={imageBusy || isVideoLoading || creativeLockedForReview}
+                    busy={isVideoLoading}
+                    label={isVideoLoading ? "Render" : videoUrl ? "New video" : "Video"}
+                    onClick={() => setIsVideoDirectorOpen(true)}
+                  />
+                  <ActionTile
+                    icon={Sparkles}
+                    iconClassName="text-primary-300"
+                    tooltip="Artistic style (optional)"
+                    disabled={imageBusy || !!videoUrl || creativeLockedForReview}
+                    busy={imageBusy}
+                    label={imageBusy ? "Wait" : "Fun mode"}
+                    onClick={() => setIsFunModeDirectorOpen(true)}
+                  />
+                  <ActionTile
+                    icon={Calendar}
+                    iconClassName="text-emerald-300"
+                    tooltip="Schedule post for later"
+                    disabled={deliveryLocked}
+                    label="Schedule"
+                    onClick={() => {
+                      if (deliveryLocked) {
+                        toast.warning(deliveryGateMessage);
+                        return;
+                      }
+                      setIsScheduleOpen(true);
+                    }}
+                  />
+                  <ActionTile
+                    icon={Share2}
+                    iconClassName="text-blue-300"
+                    tooltip="Share post"
+                    ariaLabel={
+                      deliveryLocked
+                        ? `Share post (${deliveryLockLabel.toLowerCase()})`
+                        : "Share post"
+                    }
+                    disabled={deliveryLocked}
+                    label="Share"
+                    onClick={() => {
+                      if (deliveryLocked) {
+                        toast.warning(deliveryGateMessage);
+                        return;
+                      }
+                      void copyTextToClipboard(editedText);
+                      setIsShareDialogOpen(true);
+                    }}
+                  />
+                  <ActionTile
+                    icon={Download}
+                    iconClassName="text-success-300"
+                    tooltip="Save media"
+                    ariaLabel={
+                      deliveryLocked
+                        ? `Save image (${deliveryLockLabel.toLowerCase()})`
+                        : "Save image"
+                    }
+                    disabled={imageBusy || deliveryLocked}
+                    busy={imageBusy}
+                    label="Save"
+                    onClick={() => void handleSave()}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsToolsOpen((open) => !open)}
+                  aria-label={
+                    isToolsOpen ? "Hide creative tools" : "Show creative tools"
+                  }
+                  aria-expanded={isToolsOpen}
+                  aria-controls="creative-tools-panel"
                   className={cn(
-                    "h-4 w-4 shrink-0 text-surface-400 transition-transform",
-                    isToolsOpen && "rotate-180",
+                    "flex shrink-0 min-h-[44px] px-3 items-center justify-center gap-1.5 rounded-lg border border-transparent text-sm font-semibold text-surface-200 transition-colors",
+                    isToolsOpen ? "bg-white/[0.08]" : "hover:bg-white/[0.04]",
                   )}
-                  aria-hidden="true"
-                />
-              </button>
+                >
+                  More
+                  <ChevronDown
+                    className={cn(
+                      "h-4 w-4 shrink-0 text-surface-400 transition-transform",
+                      isToolsOpen && "rotate-180",
+                    )}
+                    aria-hidden="true"
+                  />
+                </button>
+              </div>
 
               <div
                 id="creative-tools-panel"
                 data-testid="creative-tools-panel"
                 hidden={!isToolsOpen}
                 className={cn(
-                  "grid grid-cols-2 gap-2 lg:grid-cols-3",
+                  "grid grid-cols-2 gap-2 sm:grid-cols-3 mt-1",
                   !isToolsOpen && "hidden",
                 )}
               >
-                <ActionTile
-                  icon={Film}
-                  iconClassName={TILE_ICON_ACCENT}
-                  tooltip="Turn your image into a video"
-                  disabled={imageBusy || isVideoLoading || creativeLockedForReview}
-                  busy={isVideoLoading}
-                  label={
-                    isVideoLoading
-                      ? "Rendering…"
-                      : videoUrl
-                        ? "New video"
-                        : "Animate with AI"
-                  }
-                  onClick={() => setIsVideoDirectorOpen(true)}
-                />
-
                 <ActionTile
                   icon={LayoutGrid}
                   iconClassName="text-amber-300"
                   tooltip={
                     deliveryLocked
                       ? deliveryGateMessage
-                      : "Export Story, Feed, Marketplace & Google sizes — full creative, no crop"
+                      : "Export Story, Feed, Marketplace & Google sizes"
                   }
                   disabled={imageBusy || deliveryLocked}
                   label="Export sizes"
@@ -1592,9 +1682,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                   icon={RefreshCw}
                   iconClassName="text-surface-300"
                   tooltip="Generate a new image version"
+                  ariaLabel="Regenerate image"
                   disabled={imageBusy || !!videoUrl || creativeLockedForReview}
                   busy={imageBusy}
-                  label={imageBusy ? "Updating image..." : "Regenerate image"}
+                  label={imageBusy ? "Wait..." : "Regen image"}
                   onClick={() => {
                     void handleImageAction(onRegenerateImage, [
                       "Refreshing with your chosen style...",
@@ -1611,11 +1702,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                   disabled={imageBusy || !!videoUrl || creativeLockedForReview}
                   busy={imageBusy}
                   label={
-                    imageBusy
-                      ? "Updating image..."
-                      : isImageEditing
-                        ? "Cancel"
-                        : "AI image edit"
+                    imageBusy ? "Wait..." : isImageEditing ? "Cancel" : "Edit image"
                   }
                   onClick={() => setIsImageEditing(!isImageEditing)}
                 />
@@ -1624,9 +1711,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                   icon={RefreshCw}
                   iconClassName="text-surface-300"
                   tooltip="Generate a new caption"
+                  ariaLabel="Regenerate caption"
                   disabled={textBusy || creativeLockedForReview}
                   busy={textBusy}
-                  label={textBusy ? "Updating caption..." : "Regenerate caption"}
+                  label={textBusy ? "Wait..." : "Regen text"}
                   onClick={() => {
                     void handleTextAction(onRegenerateText).catch(() => undefined);
                   }}
@@ -1638,7 +1726,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                   tooltip="Describe a caption change"
                   disabled={textBusy || creativeLockedForReview}
                   busy={textBusy}
-                  label={textBusy ? "Updating caption..." : "AI caption edit"}
+                  label={textBusy ? "Wait..." : "Edit text"}
                   onClick={() => setIsTextEditing(true)}
                 />
 
@@ -1648,20 +1736,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                     iconClassName={TILE_ICON_ACCENT}
                     tooltip="Generate three caption options"
                     disabled={textBusy || creativeLockedForReview}
-                    label="Three caption ideas"
+                    label="3 text ideas"
                     onClick={() => setIsCaptionAltsOpen(true)}
                   />
                 ) : null}
-
-                <ActionTile
-                  icon={Sparkles}
-                  iconClassName="text-primary-300"
-                  tooltip="Artistic style (optional — may change the look)"
-                  disabled={imageBusy || !!videoUrl || creativeLockedForReview}
-                  busy={imageBusy}
-                  label={imageBusy ? "Working..." : "Fun mode"}
-                  onClick={() => setIsFunModeDirectorOpen(true)}
-                />
               </div>
               <AnimatePresence>
                 {isToolsOpen && isImageEditing && (
@@ -1829,7 +1907,7 @@ export const PostResult: React.FC<PostResultProps> = ({
             aria-labelledby="caption-delivery-heading"
             aria-busy={textBusy}
           >
-            <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="mb-3 flex flex-col gap-3">
               <div className="min-w-0">
                 <h3
                   id="caption-delivery-heading"
@@ -1993,10 +2071,7 @@ export const PostResult: React.FC<PostResultProps> = ({
 
             {/* Desktop: delivery actions sit with the caption panel. */}
             {isDesktopLayout ? (
-              <div
-                className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3"
-                aria-label="Post delivery actions"
-              >
+              <div className="mb-4" aria-label="Post delivery actions">
                 <Button
                   variant="outline"
                   onClick={handleCopy}
@@ -2023,41 +2098,6 @@ export const PostResult: React.FC<PostResultProps> = ({
                         ? "Copied"
                         : "Copy caption"}
                   </span>
-                </Button>
-                <Button
-                  variant="filled"
-                  onClick={() => {
-                    if (deliveryLocked) {
-                      toast.warning(deliveryGateMessage);
-                      return;
-                    }
-                    setIsShareDialogOpen(true);
-                  }}
-                  disabled={deliveryLocked}
-                  aria-label={
-                    deliveryLocked
-                      ? `Share post (${deliveryLockLabel.toLowerCase()})`
-                      : "Share post"
-                  }
-                  leftIcon={<Share2 className="h-4 w-4" />}
-                  fullWidth
-                >
-                  {deliveryLocked ? deliveryLockLabel : "Share post"}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    void handleSave();
-                  }}
-                  disabled={imageBusy || deliveryLocked}
-                  loading={imageBusy}
-                  aria-label={saveAriaLabel(deliveryLocked)}
-                  leftIcon={<Download className="h-4 w-4" />}
-                  className="border-success-500/35 text-success-100 hover:border-success-400/60 hover:bg-success-500/10"
-                  fullWidth
-                  disableHaptics
-                >
-                  {deliveryLocked ? deliveryLockLabel : saveButtonLabel}
                 </Button>
               </div>
             ) : null}
@@ -2128,7 +2168,7 @@ export const PostResult: React.FC<PostResultProps> = ({
           }}
         >
           <div
-            className="mx-auto grid max-w-lg grid-cols-3 gap-2 px-3 pt-2"
+            className="mx-auto max-w-lg px-3 pt-2"
             aria-label="Post delivery actions"
           >
             <Button
@@ -2149,41 +2189,6 @@ export const PostResult: React.FC<PostResultProps> = ({
               <span aria-live="polite">
                 {deliveryLocked ? deliveryLockLabel : copied ? "Copied" : "Copy"}
               </span>
-            </Button>
-            <Button
-              variant="filled"
-              onClick={() => {
-                if (deliveryLocked) {
-                  toast.warning(deliveryGateMessage);
-                  return;
-                }
-                setIsShareDialogOpen(true);
-              }}
-              disabled={deliveryLocked}
-              aria-label={
-                deliveryLocked
-                  ? `Share post (${deliveryLockLabel.toLowerCase()})`
-                  : "Share post"
-              }
-              leftIcon={<Share2 className="h-4 w-4" />}
-              fullWidth
-            >
-              {deliveryLocked ? deliveryLockLabel : "Share"}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                void handleSave();
-              }}
-              disabled={imageBusy || deliveryLocked}
-              loading={imageBusy}
-              aria-label={saveAriaLabel(deliveryLocked)}
-              leftIcon={<Download className="h-4 w-4" />}
-              className="border-success-500/35 text-success-100 hover:border-success-400/60 hover:bg-success-500/10"
-              fullWidth
-              disableHaptics
-            >
-              {deliveryLocked ? deliveryLockLabel : saveToPhotos ? "Photos" : "Save"}
             </Button>
           </div>
         </div>

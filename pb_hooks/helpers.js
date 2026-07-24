@@ -457,6 +457,7 @@ function replaceImpersonationSession(
   sourceSessionId,
   ip,
   userAgent,
+  audit,
 ) {
   if (!impersonationSessionId || !sourceSessionId) {
     throw new Error("Impersonation session provenance is missing");
@@ -488,6 +489,9 @@ function replaceImpersonationSession(
     );
     txDao.deleteRecord(child);
     txDao.deleteRecord(source);
+    if (audit && audit.kind) {
+      saveAuthEvent(txDao, audit.kind, audit.options || {});
+    }
   });
   if (!minted) throw new Error("Failed to replace impersonation session");
   return minted;
@@ -508,6 +512,17 @@ function normalizePersonPin(value) {
  * both cases in PocketBase 0.22, so use a bounded list query whose empty array
  * is an authoritative not-found result.
  */
+function hashPersonPin(personId, pin) {
+  if (!personId || !isValidPersonPin(pin)) return "";
+  try {
+    return $security
+      .sha256("dealer-social-post-ai:person-pin:v1:" + personId + ":" + pin)
+      .toLowerCase();
+  } catch (_e) {
+    return "";
+  }
+}
+
 function findActivePersonByPin(pin) {
   const normalized = normalizePersonPin(pin);
   if (!isValidPersonPin(normalized)) {
@@ -527,9 +542,32 @@ function findActivePersonByPin(pin) {
     if (!records || typeof records.length !== "number") {
       return { status: "unavailable", person: null };
     }
-    return records.length > 0
-      ? { status: "found", person: records[0] }
-      : { status: "not_found", person: null };
+    if (records.length > 0) {
+      return { status: "found", person: records[0] };
+    }
+
+    // Fallback check for hashed PINs — paginate to cover all active records
+    var pageSize = 500;
+    var offset = 0;
+    var batch;
+    do {
+      batch = $app
+        .dao()
+        .findRecordsByFilter("salespeople", "active = true", "created", pageSize, offset, {});
+      for (var i = 0; i < batch.length; i++) {
+        var rec = batch[i];
+        var hashedPin = "";
+        try {
+          hashedPin = rec.getString("pin_hash");
+        } catch (_e) {}
+        if (hashedPin && hashedPin === hashPersonPin(rec.id, normalized)) {
+          return { status: "found", person: rec };
+        }
+      }
+      offset += pageSize;
+    } while (batch.length >= pageSize);
+
+    return { status: "not_found", person: null };
   } catch (_e) {
     return { status: "unavailable", person: null };
   }
@@ -649,8 +687,8 @@ function revokeSession(c) {
  * A single statement is atomic; per-record DAO loops can partially revoke,
  * cap out at an arbitrary page size, and accidentally preserve live bearers.
  */
-function deleteSessionsWhere(sql, params) {
-  const result = $app.dao().db().newQuery(sql).bind(params).execute();
+function deleteSessionsWhereWithDao(dao, sql, params) {
+  const result = dao.db().newQuery(sql).bind(params).execute();
   if (!result || typeof result.rowsAffected !== "function") {
     throw new Error("Session revocation did not return an affected-row count");
   }
@@ -659,6 +697,10 @@ function deleteSessionsWhere(sql, params) {
     throw new Error("Session revocation returned an invalid affected-row count");
   }
   return affected;
+}
+
+function deleteSessionsWhere(sql, params) {
+  return deleteSessionsWhereWithDao($app.dao(), sql, params);
 }
 
 /**
@@ -686,6 +728,15 @@ function revokePersonSessions(personId) {
   return deleteSessionsWhere("DELETE FROM sessions WHERE person = {:person}", {
     person: personId.toString(),
   });
+}
+
+function revokePersonSessionsWithDao(dao, personId) {
+  if (!personId) return 0;
+  return deleteSessionsWhereWithDao(
+    dao,
+    "DELETE FROM sessions WHERE person = {:person}",
+    { person: personId.toString() },
+  );
 }
 
 function buildSessionCookie(token, maxAgeSeconds) {
@@ -985,6 +1036,123 @@ function recordProxyGenerationEvent(
   }
 }
 
+function generationClaimResultCount(result) {
+  if (!result || typeof result.rowsAffected !== "function") {
+    throw new Error("Generation claim did not return an affected-row count");
+  }
+  const affected = Number(result.rowsAffected());
+  if (!Number.isFinite(affected) || affected < 0) {
+    throw new Error("Generation claim returned an invalid affected-row count");
+  }
+  return affected;
+}
+
+/**
+ * Claim a verified set of prompt-free generation events before creating a
+ * post. SQLite serializes each conditional update in this transaction, so two
+ * concurrent submissions cannot both consume the same attempt.
+ */
+function claimGenerationEvents(eventIds, ownerSessionHash, dealerId) {
+  if (!Array.isArray(eventIds) || eventIds.length === 0) return "";
+  if (!ownerSessionHash || !dealerId) {
+    throw new Error("Generation claim identity is required");
+  }
+  const seen = {};
+  const ids = eventIds.map(function (value) {
+    const id = (value || "").toString();
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id) || seen[id]) {
+      throw new Error("Generation claim event id is invalid");
+    }
+    seen[id] = true;
+    return id;
+  });
+  const claimToken = "claim_" + secureRandomString(32, "0123456789abcdef");
+  const updated = databaseTimestamp(new Date().toISOString());
+
+  $app.dao().runInTransaction(function (txDao) {
+    ids.forEach(function (id) {
+      const result = txDao
+        .db()
+        .newQuery(
+          "UPDATE generation_events SET consumed_post = {:claim}, updated = {:updated} " +
+            "WHERE id = {:id} AND owner_session_hash = {:owner} AND dealer = {:dealer} " +
+            "AND (consumed_post = '' OR consumed_post IS NULL)",
+        )
+        .bind({
+          claim: claimToken,
+          updated: updated,
+          id: id,
+          owner: ownerSessionHash,
+          dealer: dealerId,
+        })
+        .execute();
+      if (generationClaimResultCount(result) !== 1) {
+        throw new Error("Generation attempt was already consumed");
+      }
+    });
+  });
+  return claimToken;
+}
+
+function finalizeGenerationEventClaims(
+  claimToken,
+  postId,
+  ownerSessionHash,
+  dealerId,
+  expectedCount,
+) {
+  if (!claimToken) return 0;
+  if (
+    !/^claim_[a-f0-9]{32}$/.test(claimToken) ||
+    !/^[A-Za-z0-9_-]{1,64}$/.test((postId || "").toString())
+  ) {
+    throw new Error("Generation claim finalization is invalid");
+  }
+  let affected = 0;
+  $app.dao().runInTransaction(function (txDao) {
+    const result = txDao
+      .db()
+      .newQuery(
+        "UPDATE generation_events SET consumed_post = {:post}, updated = {:updated} " +
+          "WHERE consumed_post = {:claim} AND owner_session_hash = {:owner} " +
+          "AND dealer = {:dealer}",
+      )
+      .bind({
+        post: postId,
+        updated: databaseTimestamp(new Date().toISOString()),
+        claim: claimToken,
+        owner: ownerSessionHash,
+        dealer: dealerId,
+      })
+      .execute();
+    affected = generationClaimResultCount(result);
+    if (affected !== Number(expectedCount)) {
+      throw new Error("Generation claim finalization count mismatch");
+    }
+  });
+  return affected;
+}
+
+function releaseGenerationEventClaims(claimToken, ownerSessionHash, dealerId) {
+  if (!/^claim_[a-f0-9]{32}$/.test((claimToken || "").toString())) return 0;
+  const result = $app
+    .dao()
+    .db()
+    .newQuery(
+      "UPDATE generation_events SET consumed_post = '', updated = {:updated} " +
+        "WHERE consumed_post = {:claim} AND owner_session_hash = {:owner} " +
+        "AND dealer = {:dealer}",
+    )
+    .bind({
+      updated: databaseTimestamp(new Date().toISOString()),
+      claim: claimToken,
+      owner: ownerSessionHash,
+      dealer: dealerId,
+    })
+    .execute();
+  return generationClaimResultCount(result);
+}
+
 // ---------------------------------------------------------------------------
 // Client telemetry privacy envelope. Only this CommonJS helper is called by
 // the isolated telemetry handler; arbitrary browser text never reaches disk.
@@ -998,10 +1166,16 @@ function redactTelemetryVinStrings(value) {
 }
 
 function buildSafeTelemetryEnvelope(plainBody) {
-  const rawName = (plainBody.name || "client.error").toString().slice(0, 120);
+  const body =
+    plainBody && typeof plainBody === "object" && !Array.isArray(plainBody)
+      ? plainBody
+      : {};
+  const rawName = (body.name || "client.error").toString().slice(0, 120);
   const name = redactTelemetryVinStrings(rawName.replace(/[^A-Za-z0-9._:-]/g, "_"));
   const payloadObject =
-    plainBody.payload && typeof plainBody.payload === "object" ? plainBody.payload : {};
+    body.payload && typeof body.payload === "object" && !Array.isArray(body.payload)
+      ? body.payload
+      : {};
   const safePayload = {};
   [
     "errorCode",
@@ -1071,6 +1245,67 @@ function logAuthEvent(kind, opts) {
     console.error("[helpers.logAuthEvent] failed:", e);
     return false;
   }
+}
+
+/**
+ * Persist a noisy denial at most once per IP/kind/window, with a second global
+ * cap for distributed traffic. The durable lookup is the cross-process
+ * boundary; the bounded in-memory gates avoid querying SQLite for every repeat.
+ *
+ * A coalesced event is a successful logging outcome — callers must not turn a
+ * deliberately sampled diagnostic into an application failure.
+ */
+function logCoalescedAuthEvent(kind, opts, windowSeconds, globalMaxPerWindow) {
+  const options = opts || {};
+  const seconds = Math.max(60, Math.min(24 * 60 * 60, Number(windowSeconds) || 900));
+  const windowMs = seconds * 1000;
+  const ip = (options.ip || "").toString().slice(0, 64);
+  const localKey = "auth-sample:" + kind + ":" + (ip || "unknown");
+  const localGate = checkProxyRateLimit(localKey, 1, windowMs);
+  if (!localGate.ok) return true;
+
+  const globalLimit = Math.max(1, Math.min(1000, Number(globalMaxPerWindow) || 30));
+  const globalGate = checkProxyRateLimit(
+    "auth-sample-global:" + kind,
+    globalLimit,
+    windowMs,
+  );
+  if (!globalGate.ok) return true;
+
+  const since = databaseTimestamp(new Date(Date.now() - windowMs).toISOString());
+  try {
+    const existing = $app
+      .dao()
+      .findRecordsByFilter(
+        "auth_events",
+        "kind = {:kind} && ip = {:ip} && created >= {:since}",
+        "-created",
+        1,
+        0,
+        { kind: kind, ip: ip, since: since },
+      );
+    if (existing.length) return true;
+  } catch (e) {
+    console.error("[helpers.logCoalescedAuthEvent] lookup failed:", e);
+    return false;
+  }
+  return logAuthEvent(kind, options);
+}
+
+/**
+ * Run one privileged state transition and its audit row in the same SQLite
+ * transaction. A failed audit insert rolls the mutation back.
+ */
+function runAuditedTransaction(kind, opts, mutation) {
+  if (typeof mutation !== "function") {
+    throw new Error("Audited mutation callback is required");
+  }
+  let result;
+  $app.dao().runInTransaction(function (txDao) {
+    result = mutation(txDao);
+    saveAuthEvent(txDao, kind, opts || {});
+  });
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -1390,21 +1625,57 @@ function verifyTurnstileToken(token, remoteIp) {
   return { ok: true, unavailable: false };
 }
 
-// In-memory sliding window for proxy rate limiting. Per-process, resets on
-// restart — acceptable because Fly typically runs 1-2 machines and a brief
-// burst-over after a restart isn't a cost or security issue.
-var _proxyHits = {};
+// In-memory sliding windows remain a fast local guard in front of the durable
+// provider/account controls. Keep the map bounded: unauthenticated telemetry
+// keys include client IPs and must not become a process-memory exhaustion path.
+const MAX_PROXY_RATE_BUCKETS = 2048;
+const PROXY_RATE_EVICTION_BATCH = 128;
+const MAX_PROXY_CONCURRENCY_BUCKETS = 512;
+var _proxyHits = Object.create(null);
+var _proxyHitOperations = 0;
+var _proxyConcurrency = Object.create(null);
+
+function pruneProxyRateBuckets(now, reserveSlot) {
+  _proxyHitOperations += 1;
+  let keys = Object.keys(_proxyHits);
+  if (keys.length < MAX_PROXY_RATE_BUCKETS && _proxyHitOperations % 128 !== 0) {
+    return;
+  }
+  keys.forEach(function (key) {
+    const bucket = _proxyHits[key];
+    if (!bucket || now >= bucket.resetAt) delete _proxyHits[key];
+  });
+  keys = Object.keys(_proxyHits);
+  // When the map is full, evict a small batch rather than sorting the entire
+  // map again for every new attacker-controlled key.
+  const target = Math.max(
+    0,
+    MAX_PROXY_RATE_BUCKETS - (reserveSlot ? PROXY_RATE_EVICTION_BATCH : 0),
+  );
+  if (keys.length <= target) return;
+  keys.sort(function (left, right) {
+    return (_proxyHits[left].resetAt || 0) - (_proxyHits[right].resetAt || 0);
+  });
+  for (let index = 0; index < keys.length - target; index++) {
+    delete _proxyHits[keys[index]];
+  }
+}
 
 function checkProxyRateLimit(key, maxPerWindow, windowMs) {
   if (!key) return { ok: true };
   const now = Date.now();
-  const bucket = _proxyHits[key] || { count: 0, resetAt: now + windowMs };
+  const normalizedKey = key.toString().slice(0, 256);
+  pruneProxyRateBuckets(now, !_proxyHits[normalizedKey]);
+  const bucket = _proxyHits[normalizedKey] || {
+    count: 0,
+    resetAt: now + windowMs,
+  };
   if (now >= bucket.resetAt) {
     bucket.count = 0;
     bucket.resetAt = now + windowMs;
   }
   bucket.count += 1;
-  _proxyHits[key] = bucket;
+  _proxyHits[normalizedKey] = bucket;
   if (bucket.count > maxPerWindow) {
     return {
       ok: false,
@@ -1413,6 +1684,70 @@ function checkProxyRateLimit(key, maxPerWindow, windowMs) {
     };
   }
   return { ok: true, count: bucket.count, resetAt: bucket.resetAt };
+}
+
+function proxyRateLimitStateSize() {
+  pruneProxyRateBuckets(Date.now(), false);
+  return Object.keys(_proxyHits).length;
+}
+
+/**
+ * Acquire a bounded process-local provider slot. Every successful acquisition
+ * returns an idempotent release callback so handlers can use try/finally.
+ */
+function acquireProxyConcurrency(key, maxConcurrent) {
+  const normalizedKey = (key || "").toString().slice(0, 256);
+  const limit = Math.max(1, Math.min(100, Number(maxConcurrent) || 1));
+  if (!normalizedKey) return { ok: false, retryAfterMs: 1000 };
+  let keys = Object.keys(_proxyConcurrency);
+  if (
+    !_proxyConcurrency[normalizedKey] &&
+    keys.length >= MAX_PROXY_CONCURRENCY_BUCKETS
+  ) {
+    keys = keys.filter(function (candidate) {
+      return !_proxyConcurrency[candidate] || _proxyConcurrency[candidate].count <= 0;
+    });
+    keys.forEach(function (candidate) {
+      delete _proxyConcurrency[candidate];
+    });
+    if (Object.keys(_proxyConcurrency).length >= MAX_PROXY_CONCURRENCY_BUCKETS) {
+      return { ok: false, retryAfterMs: 1000 };
+    }
+  }
+
+  const bucket = _proxyConcurrency[normalizedKey] || { count: 0 };
+  if (bucket.count >= limit) {
+    return { ok: false, retryAfterMs: 1000, count: bucket.count };
+  }
+  bucket.count += 1;
+  _proxyConcurrency[normalizedKey] = bucket;
+  let released = false;
+  return {
+    ok: true,
+    count: bucket.count,
+    release: function () {
+      if (released) return;
+      released = true;
+      const current = _proxyConcurrency[normalizedKey];
+      if (!current) return;
+      current.count = Math.max(0, current.count - 1);
+      if (current.count === 0) delete _proxyConcurrency[normalizedKey];
+    },
+  };
+}
+
+function upstreamContentLength(response) {
+  if (!response || !response.headers) return null;
+  const headers = response.headers;
+  const keys = Object.keys(headers);
+  for (let index = 0; index < keys.length; index++) {
+    const key = keys[index];
+    if (key.toLowerCase() !== "content-length") continue;
+    const raw = Array.isArray(headers[key]) ? headers[key][0] : headers[key];
+    const parsed = parseInt((raw || "").toString(), 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1816,6 +2151,38 @@ function serializeDealer(record) {
   };
 }
 
+function purgeExpiredSessionsAndOldEvents() {
+  const nowStr = databaseTimestamp(new Date().toISOString());
+  try {
+    const expiredSessions = $app
+      .dao()
+      .findRecordsByFilter("sessions", "expires_at <= {:now}", "id", 500, 0, {
+        now: nowStr,
+      });
+    for (let i = 0; i < expiredSessions.length; i++) {
+      try {
+        $app.dao().deleteRecord(expiredSessions[i]);
+      } catch (_e) {}
+    }
+
+    const ninetyDaysAgo = databaseTimestamp(
+      new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
+    );
+    const oldEvents = $app
+      .dao()
+      .findRecordsByFilter("auth_events", "created < {:ago}", "id", 500, 0, {
+        ago: ninetyDaysAgo,
+      });
+    for (let i = 0; i < oldEvents.length; i++) {
+      try {
+        $app.dao().deleteRecord(oldEvents[i]);
+      } catch (_e) {}
+    }
+  } catch (err) {
+    console.error("[purgeExpiredSessionsAndOldEvents] error", err);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
@@ -1836,14 +2203,17 @@ module.exports = {
   mintSessionToken,
   hashSessionToken,
   createSession,
+  createSessionWithDao,
   replaceImpersonationSession,
   refreshSession,
   revokeSession,
   revokeDealerSessions,
   revokePersonSessions,
+  revokePersonSessionsWithDao,
   buildSessionCookie,
   buildClearCookie,
   databaseTimestamp,
+  purgeExpiredSessionsAndOldEvents,
   // Request metadata
   clientIP,
   trustedVercelProxyRequest,
@@ -1851,9 +2221,14 @@ module.exports = {
   legacyClientCompatibilityEnabled,
   recordProxyGenerationEvent,
   proxyGenerationResponseSucceeded,
+  claimGenerationEvents,
+  finalizeGenerationEventClaims,
+  releaseGenerationEventClaims,
   buildSafeTelemetryEnvelope,
   // Audit + rate limit
   logAuthEvent,
+  logCoalescedAuthEvent,
+  runAuditedTransaction,
   countRecentEvents,
   loginFailureState,
   reserveLoginAttempt,
@@ -1864,6 +2239,9 @@ module.exports = {
   isTurnstileTestSiteKey,
   isTurnstileTestSecret,
   checkProxyRateLimit,
+  proxyRateLimitStateSize,
+  acquireProxyConcurrency,
+  upstreamContentLength,
   // Constants
   SESSION_TTL_SECONDS,
   PROVIDER_RESOURCE_TTL_SECONDS,

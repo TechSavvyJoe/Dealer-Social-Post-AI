@@ -5,10 +5,11 @@ import {
   X,
   Clock,
   Loader2,
-  RefreshCw,
   Film,
   ShieldCheck,
   CheckCircle2,
+  Calendar,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
@@ -199,6 +200,11 @@ export const ApprovalQueue: React.FC = () => {
                       {post.has_release && (
                         <span className="flex items-center gap-1 text-success-200">
                           <ShieldCheck className="h-3 w-3" /> release
+                        </span>
+                      )}
+                      {post.scheduled_for && (
+                        <span className="flex items-center gap-1 text-emerald-300">
+                          <Calendar className="h-3 w-3" /> scheduled
                         </span>
                       )}
                     </div>

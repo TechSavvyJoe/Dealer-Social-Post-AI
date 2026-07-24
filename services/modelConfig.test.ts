@@ -13,12 +13,12 @@ const taskNames = Object.keys(MODEL_POLICY.tasks) as ModelTaskName[];
 describe("canonical Gemini model policy", () => {
   it("pins the approved balanced-premium routing", () => {
     expect(MODEL_POLICY.tasks.caption.models).toEqual([
-      "gemini-3.5-flash",
-      "gemini-3.1-flash-lite",
+      "gemini-3.6-flash",
+      "gemini-3.5-flash-lite",
     ]);
     expect(MODEL_POLICY.tasks.caption_edit.models).toEqual([
-      "gemini-3.1-flash-lite",
-      "gemini-3.5-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-3.6-flash",
     ]);
     expect(MODEL_POLICY.tasks.image_standard.models).toEqual([
       "gemini-3.1-flash-image",

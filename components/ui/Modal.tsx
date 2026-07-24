@@ -109,7 +109,7 @@ export const Modal: React.FC<ModalProps> = ({
   return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center sm:p-4">
+        <div className="modal-viewport fixed inset-0 z-[100] flex items-end justify-center sm:items-center">
           {/* Backdrop */}
           <motion.div
             initial={shouldReduceMotion ? false : { opacity: 0 }}
@@ -189,13 +189,18 @@ export const Modal: React.FC<ModalProps> = ({
             )}
 
             {/* Body */}
-            <div className="p-6 overflow-y-auto custom-scrollbar relative">
+            <div
+              className={cn(
+                "relative overflow-y-auto px-4 py-4 custom-scrollbar sm:p-6",
+                !footer && "pb-[max(1rem,var(--sab))]",
+              )}
+            >
               {children}
             </div>
 
             {/* Footer */}
             {footer && (
-              <div className="px-6 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-surface-950/30 border-t border-white/5 flex justify-end gap-3 rounded-b-2xl">
+              <div className="flex flex-wrap justify-end gap-2 rounded-b-2xl border-t border-white/5 bg-surface-950/30 px-4 pt-3 pb-[max(1rem,var(--sab))] sm:gap-3 sm:px-6 sm:pt-4">
                 {footer}
               </div>
             )}

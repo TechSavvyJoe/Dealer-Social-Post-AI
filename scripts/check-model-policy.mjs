@@ -7,6 +7,22 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const canonical = JSON.parse(
   readFileSync(resolve(root, "config/gemini-model-policy.json"), "utf8"),
 );
+const verifiedAt = Date.parse(`${canonical.verifiedAt}T00:00:00Z`);
+const policyAgeDays = (Date.now() - verifiedAt) / 86_400_000;
+assert.ok(
+  Number.isFinite(verifiedAt),
+  "Canonical Gemini policy verifiedAt must be an ISO calendar date",
+);
+assert.ok(
+  policyAgeDays >= -1,
+  "Canonical Gemini policy verifiedAt cannot be in the future",
+);
+assert.ok(
+  policyAgeDays <= 45,
+  `Canonical Gemini policy is ${Math.floor(
+    policyAgeDays,
+  )} days old; re-check Google's live model catalog and refresh verifiedAt`,
+);
 
 const policySource = readFileSync(resolve(root, "pb_hooks/requestPolicies.js"), "utf8");
 const policyModule = { exports: {} };

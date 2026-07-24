@@ -43,6 +43,19 @@
     --color-surface-overlay: 27 33 50; /* card overlay */
     --color-surface-raised: 38 44 63; /* modal / popover */
 
+    /* Tailwind Surface Palette (Dark Mode Default) */
+    --surface-50: 248 250 252;
+    --surface-100: 241 245 249;
+    --surface-200: 226 232 240;
+    --surface-300: 203 213 225;
+    --surface-400: 148 163 184;
+    --surface-500: 100 116 139;
+    --surface-600: 71 85 105;
+    --surface-700: 51 65 85;
+    --surface-800: 30 41 59;
+    --surface-900: 15 23 42;
+    --surface-950: 2 6 23;
+
     /* --- Text scale — high contrast, no muddy mids --- */
     --color-text-primary: 244 247 252; /* AA on every surface step */
     --color-text-secondary: 192 200 216; /* AA at 4.7:1 on surface-base */
@@ -87,8 +100,7 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.28);
     --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.36);
-    --shadow-focus: 0 0 0 3px
-      color-mix(in srgb, var(--brand-primary) 40%, transparent);
+    --shadow-focus: 0 0 0 3px color-mix(in srgb, var(--brand-primary) 40%, transparent);
 
     /* --- Motion — fast, eased, never showy --- */
     --duration-fast: 120ms;
@@ -111,6 +123,35 @@
     --gradient-end: transparent;
   }
 
+  /* Sunlight Mode (High-Contrast Light Theme) */
+  .theme-light {
+    --color-surface-base: 248 250 252;
+    --color-surface-elevated: 241 245 249;
+    --color-surface-overlay: 255 255 255;
+    --color-surface-raised: 255 255 255;
+    
+    --color-text-primary: 15 23 42;
+    --color-text-secondary: 51 65 85;
+    --color-text-tertiary: 100 116 139;
+
+    --color-border: 203 213 225;
+    --color-border-strong: 148 163 184;
+    --color-border-light: 226 232 240;
+
+    /* Invert surface palette so bg-surface-900 becomes light */
+    --surface-50: 2 6 23;
+    --surface-100: 15 23 42;
+    --surface-200: 30 41 59;
+    --surface-300: 51 65 85;
+    --surface-400: 71 85 105;
+    --surface-500: 100 116 139;
+    --surface-600: 148 163 184;
+    --surface-700: 203 213 225;
+    --surface-800: 226 232 240;
+    --surface-900: 241 245 249;
+    --surface-950: 248 250 252;
+  }
+
   /* Smooth scroll behavior with advanced typography */
   html {
     scroll-behavior: smooth;
@@ -119,6 +160,7 @@
     text-rendering: optimizeLegibility;
     /* Prevent horizontal rubber-band that shifts the whole app on phones */
     overflow-x: hidden;
+    overflow-x: clip;
     /* Enable advanced OpenType features */
     font-feature-settings:
       "liga" 1,
@@ -310,6 +352,87 @@
   @media (display-mode: standalone) {
     body {
       padding-top: 0;
+    }
+  }
+
+  /* Dialogs are portaled to body, outside the safe-area-padded app root. */
+  .modal-viewport {
+    padding-top: max(0.5rem, var(--sat));
+    padding-left: var(--sal);
+    padding-right: var(--sar);
+  }
+
+  @media (min-width: 640px) {
+    .modal-viewport {
+      padding-top: max(1rem, var(--sat));
+      padding-right: max(1rem, var(--sar));
+      padding-bottom: max(1rem, var(--sab));
+      padding-left: max(1rem, var(--sal));
+    }
+  }
+
+  /* A wide viewport is not necessarily a desktop: modern phones exceed the
+     tablet breakpoint in landscape. Keep short-landscape content compact and
+     preserve enough room for the primary task. */
+  @media (orientation: landscape) and (max-height: 500px) {
+    /* Keep the access keypad at full-size touch targets on short phones.
+       The brand is already present in the installed app chrome; use the wide
+       canvas for a two-column sign-in layout instead of compressing rows. */
+    .login-mobile-logo {
+      display: none;
+    }
+
+    .login-access-pane {
+      grid-template-rows: minmax(0, 1fr) !important;
+      padding: 0.5rem 1rem !important;
+    }
+
+    .login-form {
+      grid-row: 1 / -1;
+      height: 100%;
+      grid-template-columns: minmax(13rem, 0.8fr) minmax(20rem, 1.2fr);
+      grid-template-rows: auto minmax(0, 1fr) !important;
+      column-gap: 1rem;
+      row-gap: 0.75rem;
+    }
+
+    .login-form > :nth-child(1) {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .login-form > :nth-child(2) {
+      grid-column: 1;
+      grid-row: 2;
+      align-self: start;
+    }
+
+    .login-form > :nth-child(3) {
+      grid-column: 2;
+      grid-row: 1 / span 2;
+      min-height: 0;
+    }
+
+    .capture-intro {
+      margin-bottom: 0.75rem;
+    }
+
+    .capture-intro-copy,
+    .capture-studio-tips {
+      display: none;
+    }
+
+    .capture-studio-grid {
+      min-height: 0 !important;
+    }
+
+    .capture-studio-preview {
+      min-height: 16rem !important;
+      padding: 1rem !important;
+    }
+
+    .capture-studio-sidebar {
+      padding: 1rem !important;
     }
   }
 

@@ -74,8 +74,7 @@ describe("PostResult job-first flow", () => {
     });
   });
 
-  it("keeps delivery actions visible and mobile creative tools collapsed", async () => {
-    const user = userEvent.setup();
+  it("keeps delivery actions visible and mobile creative tools collapsed", () => {
     renderResult();
 
     expect(screen.getByRole("button", { name: "Copy caption" })).toBeInTheDocument();
@@ -91,7 +90,7 @@ describe("PostResult job-first flow", () => {
       screen.queryByRole("button", { name: "Regenerate image" }),
     ).not.toBeInTheDocument();
 
-    await user.click(disclosure);
+    fireEvent.click(disclosure);
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
     expect(panel).not.toHaveAttribute("hidden");
     expect(panel).not.toHaveClass("hidden");

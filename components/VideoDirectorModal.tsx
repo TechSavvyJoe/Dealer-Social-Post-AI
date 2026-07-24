@@ -80,23 +80,29 @@ const StyleButton = memo(
         triggerHapticFeedback();
         onSelect(style);
       }}
-      className="group relative flex flex-col items-center p-4 sm:p-5 bg-surface-900/60 hover:bg-primary-500/15
-               border border-surface-800 hover:border-primary-400 rounded-2xl transition-all duration-150
-               active:scale-95 touch-manipulation w-full h-full"
+      className="group relative flex items-center p-3 sm:p-3 bg-surface-900/60 hover:bg-primary-500/15
+               border border-surface-800 hover:border-primary-400 rounded-xl transition-all duration-150
+               active:scale-95 touch-manipulation w-full text-left gap-3"
     >
-      {isRecommended && (
-        <span className="absolute -top-2 -right-2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/30 text-emerald-300 border border-emerald-400/40">
-          ★
+      <div className="shrink-0">
+        <Icon
+          type={icon as any}
+          className="w-8 h-8 sm:w-9 sm:h-9 text-primary-300 group-hover:text-primary-200 transition-colors"
+        />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="font-semibold text-white text-sm truncate">{label}</span>
+          {isRecommended && (
+            <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/30 text-emerald-300 border border-emerald-400/40 uppercase tracking-wide font-bold">
+              ★ Pro
+            </span>
+          )}
+        </div>
+        <span className="block mt-0.5 text-[11px] text-white/60 truncate">
+          {description}
         </span>
-      )}
-      <Icon
-        type={icon as any}
-        className="w-10 h-10 sm:w-12 sm:h-12 text-primary-300 group-hover:text-primary-200 transition-colors"
-      />
-      <span className="mt-2 font-semibold text-white text-sm text-center">{label}</span>
-      <span className="mt-1 text-[11px] text-white/60 text-center line-clamp-2">
-        {description}
-      </span>
+      </div>
     </button>
   ),
 );
@@ -265,10 +271,10 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
         </div>
 
         <div className="mb-4">
-          <p className="text-xs font-semibold text-primary-300/80 uppercase tracking-wide mb-3">
+          <p className="text-xs font-semibold text-primary-300/80 uppercase tracking-wide mb-2">
             Marketing styles
           </p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {QUICK_STYLES.map(({ style, label, icon, description }) => (
               <StyleButton
                 key={style}

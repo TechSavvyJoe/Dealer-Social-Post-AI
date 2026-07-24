@@ -137,17 +137,12 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
                 </div>
               )}
 
-              <div>
-                <label className="text-xs font-medium text-surface-300 uppercase tracking-wide mb-2 block">
-                  Customer signature
-                </label>
-                <SignaturePad
-                  ref={padRef}
-                  width={600}
-                  height={220}
-                  onChange={(empty) => setSignatureEmpty(empty)}
-                />
-              </div>
+              <SignaturePad
+                ref={padRef}
+                width={600}
+                height={220}
+                onChange={(empty) => setSignatureEmpty(empty)}
+              />
 
               <AnimatePresence>
                 {error && (
@@ -155,6 +150,7 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
                     initial={{ opacity: 0, y: -8 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}
+                    role="alert"
                     className="flex items-start gap-2 rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs"
                   >
                     <AlertCircle className="h-4 w-4 text-error-400 flex-shrink-0 mt-0.5" />

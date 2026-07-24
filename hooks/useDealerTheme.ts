@@ -40,6 +40,15 @@ const expandShortHex = (hex: string): string => {
   return `#${m[0]}${m[0]}${m[1]}${m[1]}${m[2]}${m[2]}`;
 };
 
+const hexToRgbTriplet = (hex: string): string => {
+  const m = hex.replace("#", "");
+  if (m.length !== 6) return "30 64 175";
+  const r = parseInt(m.slice(0, 2), 16);
+  const g = parseInt(m.slice(2, 4), 16);
+  const b = parseInt(m.slice(4, 6), 16);
+  return `${r} ${g} ${b}`;
+};
+
 export const useDealerTheme = (): void => {
   const dealer = useAppStore((s) => s.currentDealer);
 
@@ -50,10 +59,16 @@ export const useDealerTheme = (): void => {
     const base = isValidHex(raw) ? expandShortHex(raw) : DEFAULT_BRAND;
 
     root.style.setProperty("--brand-primary", base);
+    root.style.setProperty("--brand-primary-700", base);
     root.style.setProperty("--brand-primary-600", lighten(base, 0.08));
     root.style.setProperty("--brand-primary-500", lighten(base, 0.2));
     root.style.setProperty("--brand-primary-400", lighten(base, 0.36));
     root.style.setProperty("--brand-primary-300", lighten(base, 0.55));
+    root.style.setProperty("--color-primary", hexToRgbTriplet(base));
+    root.style.setProperty(
+      "--color-primary-hover",
+      hexToRgbTriplet(lighten(base, -0.15)),
+    );
 
     return () => {
       // Don't reset to default on unmount — that would flash. Wait for the

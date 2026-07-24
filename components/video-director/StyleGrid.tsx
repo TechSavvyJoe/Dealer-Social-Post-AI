@@ -92,6 +92,8 @@ export const StyleGrid: React.FC<StyleGridProps> = ({ onSelect }) => {
         </div>
         <div className="w-full sm:w-64">
           <input
+            type="search"
+            aria-label="Search video styles"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search styles..."

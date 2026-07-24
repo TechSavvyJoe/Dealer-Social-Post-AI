@@ -59,7 +59,6 @@ const baseStyles = cn(
   "focus-visible:shadow-[0_0_0_4px_rgba(59,130,246,0.25)]",
   "disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none",
   "select-none touch-manipulation",
-  "will-change-transform",
 );
 
 // Variant styles with Apple-inspired colors

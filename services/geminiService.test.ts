@@ -207,8 +207,8 @@ describe("GeminiService model routing", () => {
   });
 
   it("uses production-stable Google model identifiers", () => {
-    expect(MODELS.text.primary).toBe("gemini-3.5-flash");
-    expect(MODELS.text.fallback).toBe("gemini-3.1-flash-lite");
+    expect(MODELS.text.primary).toBe("gemini-3.6-flash");
+    expect(MODELS.text.fallback).toBe("gemini-3.5-flash-lite");
     expect(MODELS.image.primary).toBe("gemini-3.1-flash-image");
     expect(MODELS.image.studio).toBe("gemini-3-pro-image");
     expect(MODELS.image.fallback).toBe("gemini-3-pro-image");

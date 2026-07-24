@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 export interface ShortcutHandlers {
   /** Cmd/Ctrl+Enter — primary action (generate, save, submit). */
@@ -20,6 +20,11 @@ export interface ShortcutHandlers {
  * can still hit "/" inside a caption without it stealing focus.
  */
 export const useKeyboardShortcuts = (handlers: ShortcutHandlers): void => {
+  const handlersRef = useRef(handlers);
+  useEffect(() => {
+    handlersRef.current = handlers;
+  });
+
   useEffect(() => {
     const isTypingTarget = (target: EventTarget | null): boolean => {
       if (!target || !(target instanceof HTMLElement)) return false;
@@ -30,6 +35,7 @@ export const useKeyboardShortcuts = (handlers: ShortcutHandlers): void => {
     };
 
     const onKey = (e: KeyboardEvent) => {
+      const current = handlersRef.current;
       const meta = e.metaKey || e.ctrlKey;
       const typing = isTypingTarget(e.target);
 
@@ -41,37 +47,37 @@ export const useKeyboardShortcuts = (handlers: ShortcutHandlers): void => {
       }
 
       // Cmd/Ctrl+Enter — primary
-      if (meta && e.key === "Enter" && handlers.onPrimary) {
+      if (meta && e.key === "Enter" && current.onPrimary) {
         e.preventDefault();
-        handlers.onPrimary();
+        current.onPrimary();
         return;
       }
 
       // Escape — cancel
-      if (e.key === "Escape" && handlers.onCancel) {
+      if (e.key === "Escape" && current.onCancel) {
         // Allow textarea/select to handle their own escape first
         if (typing && (e.target as HTMLElement).tagName === "SELECT") return;
         e.preventDefault();
-        handlers.onCancel();
+        current.onCancel();
         return;
       }
 
       // Cmd/Ctrl+K — palette
-      if (meta && e.key.toLowerCase() === "k" && handlers.onPalette) {
+      if (meta && e.key.toLowerCase() === "k" && current.onPalette) {
         e.preventDefault();
-        handlers.onPalette();
+        current.onPalette();
         return;
       }
 
       // "/" — focus search/first input. Skipped while typing.
-      if (!meta && e.key === "/" && handlers.onFocusSearch && !typing) {
+      if (!meta && e.key === "/" && current.onFocusSearch && !typing) {
         e.preventDefault();
-        handlers.onFocusSearch();
+        current.onFocusSearch();
         return;
       }
     };
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [handlers]);
+  }, []);
 };

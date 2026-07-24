@@ -13,6 +13,7 @@ import {
   Download,
   ExternalLink,
   Image as ImageIcon,
+  Calendar,
 } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
@@ -279,6 +280,8 @@ export const PostHistory: React.FC = () => {
           <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-surface-400 pointer-events-none" />
           <Input
             label=""
+            type="search"
+            aria-label="Search post history"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search by name, VIN, salesperson, style, caption…"
@@ -430,6 +433,11 @@ export const PostHistory: React.FC = () => {
                           {p.has_release && (
                             <span className="inline-flex items-center gap-1 text-success-200">
                               <ShieldCheck className="h-3 w-3" /> release
+                            </span>
+                          )}
+                          {p.scheduled_for && (
+                            <span className="inline-flex items-center gap-1 text-emerald-300">
+                              <Calendar className="h-3 w-3" /> scheduled
                             </span>
                           )}
                         </div>

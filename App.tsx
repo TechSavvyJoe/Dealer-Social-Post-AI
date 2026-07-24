@@ -1,4 +1,4 @@
-import React, { Suspense } from "react";
+import React, { Suspense, useEffect } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Header } from "./components/Header";
 import { ImpersonationBanner } from "./components/ImpersonationBanner";
@@ -6,6 +6,7 @@ import { MainContent } from "./components/MainContent";
 import { useAppController } from "./hooks/useAppController";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { AppStep } from "./types";
+import { useToast } from "./components/ui/Toast";
 import { useAppStore } from "./stores/appStore";
 
 // Lazy load heavyweight modals
@@ -63,6 +64,32 @@ const AppContent: React.FC = () => {
 
   // Must run before any conditional return — React requires a stable hook order.
   const isImpersonating = useAppStore((s) => s.isImpersonating);
+  const theme = useAppStore((s) => s.theme);
+
+  useEffect(() => {
+    const updateTheme = () => {
+      const isDark =
+        theme === "dark" ||
+        (theme === "system" &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches);
+      if (!isDark) {
+        document.documentElement.classList.add("theme-light");
+      } else {
+        document.documentElement.classList.remove("theme-light");
+      }
+    };
+
+    updateTheme();
+
+    if (theme === "system" && typeof window !== "undefined") {
+      const media = window.matchMedia("(prefers-color-scheme: dark)");
+      const handler = () => updateTheme();
+      media.addEventListener("change", handler);
+      return () => media.removeEventListener("change", handler);
+    }
+  }, [theme]);
+
+  const toast = useToast();
 
   // Power-user shortcuts. Step-aware so each key does the smart thing where you are.
   useKeyboardShortcuts({
@@ -88,6 +115,9 @@ const AppContent: React.FC = () => {
         // Result replacement is intentionally guarded by PostResult's
         // confirmation dialog. A global Escape must never bypass that guard
         // and discard an expensive unsaved creative.
+        toast.info(
+          "Unsaved creative in progress. Click 'Start Over' or 'Remix' to exit.",
+        );
         return;
       }
     },
@@ -189,10 +219,12 @@ const AppContent: React.FC = () => {
           onClose={() => setIsSettingsOpen(false)}
           compactMode={compactMode}
           imageQualityTier={imageQualityTier}
+          theme={theme}
           onToggleCompactMode={(value) => setPreferences({ compactMode: value })}
           onImageQualityTierChange={(value) =>
             setPreferences({ imageQualityTier: value })
           }
+          onThemeChange={(value) => setPreferences({ theme: value })}
         />
       </Suspense>
 

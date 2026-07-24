@@ -1,10 +1,14 @@
 import { defineConfig } from "@playwright/test";
 
 const viewports = [
-  { name: "phone-320", width: 320, height: 700 },
-  { name: "phone-390", width: 390, height: 844 },
-  { name: "tablet-768", width: 768, height: 1024 },
-  { name: "desktop-1440", width: 1440, height: 1000 },
+  { name: "phone-fold-280", width: 280, height: 653, mobile: true },
+  { name: "phone-320", width: 320, height: 568, mobile: true },
+  { name: "android-360", width: 360, height: 800, mobile: true },
+  { name: "phone-390", width: 390, height: 844, mobile: true },
+  { name: "phone-large-440", width: 440, height: 956, mobile: true },
+  { name: "phone-landscape-844", width: 844, height: 390, mobile: true },
+  { name: "tablet-768", width: 768, height: 1024, mobile: false },
+  { name: "desktop-1440", width: 1440, height: 1000, mobile: false },
 ] as const;
 
 const browsers = ["chromium", "webkit"] as const;
@@ -26,14 +30,14 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: browsers.flatMap((browserName) =>
-    viewports.map(({ name, width, height }) => ({
+    viewports.map(({ name, width, height, mobile }) => ({
       name: `${browserName}-${name}`,
       use: {
         browserName,
         viewport: { width, height },
-        hasTouch: width < 768,
-        isMobile: width < 768,
-        deviceScaleFactor: width < 768 ? 2 : 1,
+        hasTouch: mobile,
+        isMobile: mobile,
+        deviceScaleFactor: mobile ? 2 : 1,
       },
     })),
   ),

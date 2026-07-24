@@ -13,6 +13,7 @@ interface PersistedState {
   loginTimestamp?: number;
   compactMode?: boolean;
   imageQualityTier?: "standard" | "studio";
+  theme?: string;
   preferredStyle?: string;
   preferredTone?: string;
   generationParams?: {

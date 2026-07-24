@@ -2,6 +2,7 @@ import React, {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useId,
   useRef,
   forwardRef,
   useState,
@@ -42,28 +43,81 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
     ref,
   ) => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const canvasContainerRef = useRef<HTMLDivElement | null>(null);
     const drawingRef = useRef(false);
     const lastPointRef = useRef<{ x: number; y: number } | null>(null);
     const [hasStrokes, setHasStrokes] = useState(false);
+    const [signatureMethod, setSignatureMethod] = useState<"draw" | "type">("draw");
+    const [typedName, setTypedName] = useState("");
+    const [attested, setAttested] = useState(false);
+    const typedNameId = useId();
+    const statusId = useId();
+    const typedSignatureComplete = typedName.trim().length > 0 && attested;
+    const signatureComplete =
+      signatureMethod === "draw" ? hasStrokes : typedSignatureComplete;
 
-    // Size the canvas using devicePixelRatio so strokes are crisp.
-    useEffect(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.scale(dpr, dpr);
+    const configureContext = useCallback(
+      (canvas: HTMLCanvasElement, dpr: number) => {
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return null;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
         ctx.strokeStyle = strokeColor;
         ctx.lineWidth = strokeWidth;
-      }
-    }, [width, height, strokeColor, strokeWidth]);
+        return ctx;
+      },
+      [strokeColor, strokeWidth],
+    );
+
+    // Size the bitmap from the rendered container so signatures stay crisp
+    // without overflowing narrow phones. Preserve existing strokes on resize.
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      const container = canvasContainerRef.current;
+      if (!canvas || !container) return;
+
+      const resize = (nextWidth: number) => {
+        const cssWidth = Math.max(1, Math.min(width, Math.round(nextWidth || width)));
+        const cssHeight = Math.max(1, Math.round((cssWidth * height) / width));
+        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        const nextBitmapWidth = Math.round(cssWidth * dpr);
+        const nextBitmapHeight = Math.round(cssHeight * dpr);
+        if (canvas.width === nextBitmapWidth && canvas.height === nextBitmapHeight) {
+          configureContext(canvas, dpr);
+          return;
+        }
+
+        const snapshot = document.createElement("canvas");
+        snapshot.width = canvas.width;
+        snapshot.height = canvas.height;
+        if (canvas.width > 0 && canvas.height > 0) {
+          snapshot.getContext("2d")?.drawImage(canvas, 0, 0);
+        }
+
+        canvas.width = nextBitmapWidth;
+        canvas.height = nextBitmapHeight;
+        canvas.style.width = `${cssWidth}px`;
+        canvas.style.height = `${cssHeight}px`;
+        const ctx = configureContext(canvas, dpr);
+        if (ctx && snapshot.width > 0 && snapshot.height > 0) {
+          ctx.drawImage(snapshot, 0, 0, cssWidth, cssHeight);
+        }
+      };
+
+      resize(container.getBoundingClientRect().width || width);
+      if (typeof ResizeObserver === "undefined") return;
+      const observer = new ResizeObserver((entries) => {
+        const nextWidth = entries[0]?.contentRect.width;
+        if (nextWidth) resize(nextWidth);
+      });
+      observer.observe(container);
+      return () => observer.disconnect();
+    }, [width, height, configureContext]);
+
+    useEffect(() => {
+      onChange?.(!signatureComplete);
+    }, [onChange, signatureComplete]);
 
     const getRelativePoint = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
       const canvas = canvasRef.current;
@@ -107,7 +161,6 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
       lastPointRef.current = pt;
       if (!hasStrokes) {
         setHasStrokes(true);
-        onChange?.(false);
       }
     };
 
@@ -134,63 +187,168 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = strokeWidth;
       setHasStrokes(false);
-      onChange?.(true);
-    }, [strokeColor, strokeWidth, onChange]);
+      setTypedName("");
+      setAttested(false);
+    }, [strokeColor, strokeWidth]);
+
+    const typedSignatureDataUrl = useCallback(() => {
+      if (!typedSignatureComplete) return null;
+      const output = document.createElement("canvas");
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      output.width = width * dpr;
+      output.height = height * dpr;
+      const ctx = output.getContext("2d");
+      if (!ctx) return null;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = strokeColor;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = `italic ${Math.max(32, Math.round(height * 0.3))}px "Segoe Script", "Bradley Hand", cursive`;
+      ctx.fillText(typedName.trim(), width / 2, height / 2, width - 48);
+      return output.toDataURL("image/png");
+    }, [height, strokeColor, typedName, typedSignatureComplete, width]);
 
     useImperativeHandle(
       ref,
       () => ({
         clear,
-        isEmpty: () => !hasStrokes,
+        isEmpty: () => !signatureComplete,
         toDataURL: () => {
+          if (signatureMethod === "type") return typedSignatureDataUrl();
           const canvas = canvasRef.current;
           if (!canvas || !hasStrokes) return null;
           return canvas.toDataURL("image/png");
         },
       }),
-      [clear, hasStrokes],
+      [clear, hasStrokes, signatureComplete, signatureMethod, typedSignatureDataUrl],
     );
 
     return (
-      <div className={className}>
-        <div className="relative rounded-xl border border-white/20 bg-surface-950/60 overflow-hidden">
-          <canvas
-            ref={canvasRef}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerUp}
-            className="block w-full touch-none cursor-crosshair"
-            style={{ touchAction: "none" }}
-          />
-          {!hasStrokes && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="pointer-events-none absolute inset-0 flex items-center justify-center"
+      <fieldset className={className}>
+        <legend className="mb-2 text-xs font-medium uppercase tracking-wide text-surface-300">
+          Customer signature
+        </legend>
+        <div
+          className="mb-3 grid grid-cols-2 gap-1 rounded-xl border border-white/10 bg-surface-950/50 p-1"
+          role="group"
+          aria-label="Signature method"
+        >
+          {(["draw", "type"] as const).map((method) => (
+            <button
+              key={method}
+              type="button"
+              aria-pressed={signatureMethod === method}
+              onClick={() => setSignatureMethod(method)}
+              className={`min-h-11 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+                signatureMethod === method
+                  ? "bg-primary-500/25 text-primary-100"
+                  : "text-surface-400 hover:bg-white/5 hover:text-surface-200"
+              }`}
             >
-              <div className="flex items-center gap-2 text-surface-500 text-xs">
-                <PenLine className="h-3.5 w-3.5" />
-                Sign with finger or stylus
-              </div>
-            </motion.div>
-          )}
+              {method === "draw" ? "Draw signature" : "Type name"}
+            </button>
+          ))}
         </div>
-        <div className="mt-2 flex items-center justify-between text-[10px] text-surface-400">
-          <span className={hasStrokes ? "text-success-400" : "text-surface-500"}>
-            {hasStrokes ? "Signature captured" : "Awaiting signature…"}
-          </span>
-          <button
-            type="button"
-            onClick={clear}
-            disabled={!hasStrokes}
-            className="flex items-center gap-1 px-2 py-1 rounded hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-surface-300"
-          >
-            <Eraser className="h-3 w-3" />
-            Clear
-          </button>
-        </div>
-      </div>
+
+        {signatureMethod === "draw" ? (
+          <>
+            <div
+              ref={canvasContainerRef}
+              className="relative w-full overflow-hidden rounded-xl border border-white/20 bg-surface-950/60"
+              style={{ maxWidth: `${width}px`, aspectRatio: `${width} / ${height}` }}
+            >
+              <canvas
+                ref={canvasRef}
+                role="img"
+                aria-label="Draw the customer's signature with a pointer, finger, or stylus"
+                aria-describedby={statusId}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
+                className="absolute inset-0 block touch-none cursor-crosshair"
+                style={{ touchAction: "none" }}
+              />
+              {!hasStrokes && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="pointer-events-none absolute inset-0 flex items-center justify-center"
+                >
+                  <div className="flex items-center gap-2 text-xs text-surface-500">
+                    <PenLine className="h-3.5 w-3.5" />
+                    Sign with finger or stylus
+                  </div>
+                </motion.div>
+              )}
+            </div>
+            <div className="mt-2 flex items-center justify-between text-[10px] text-surface-400">
+              <span
+                id={statusId}
+                role="status"
+                aria-live="polite"
+                className={hasStrokes ? "text-success-400" : "text-surface-500"}
+              >
+                {hasStrokes ? "Signature captured" : "Awaiting signature…"}
+              </span>
+              <button
+                type="button"
+                onClick={clear}
+                disabled={!hasStrokes}
+                className="flex min-h-11 items-center gap-1 rounded px-3 py-2 text-surface-300 transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
+              >
+                <Eraser className="h-3 w-3" />
+                Clear
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="space-y-3 rounded-xl border border-white/15 bg-surface-950/40 p-3">
+            <div>
+              <label
+                htmlFor={typedNameId}
+                className="mb-1.5 block text-xs font-medium text-surface-300"
+              >
+                Type the customer’s full legal name
+              </label>
+              <input
+                id={typedNameId}
+                type="text"
+                autoComplete="name"
+                value={typedName}
+                onChange={(event) => setTypedName(event.target.value.slice(0, 160))}
+                className="min-h-11 w-full rounded-xl border-2 border-surface-700 bg-surface-900/60 px-3 py-2 text-base text-surface-50 focus:border-primary-500 focus:outline-none"
+              />
+            </div>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-white/10 p-3 text-sm text-surface-200">
+              <input
+                type="checkbox"
+                checked={attested}
+                onChange={(event) => setAttested(event.target.checked)}
+                className="mt-0.5 h-5 w-5 shrink-0 accent-primary-500"
+              />
+              <span>
+                I am the named customer and agree that typing my name is my electronic
+                signature for this photo release.
+              </span>
+            </label>
+            <p
+              id={statusId}
+              role="status"
+              aria-live="polite"
+              className={
+                typedSignatureComplete
+                  ? "text-xs text-success-400"
+                  : "text-xs text-surface-500"
+              }
+            >
+              {typedSignatureComplete
+                ? "Electronic signature ready"
+                : "Enter the customer’s name and confirm the attestation."}
+            </p>
+          </div>
+        )}
+      </fieldset>
     );
   },
 );

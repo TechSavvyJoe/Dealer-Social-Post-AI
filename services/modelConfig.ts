@@ -137,7 +137,7 @@ export interface TaskConfig {
  * Canonical model identifiers. Keep this list in sync with what Google has
  * actually released — picking nonexistent ids breaks generation silently.
  *
- * Current as of 2026-07-17. Update only after checking Google's live model
+ * Current as of 2026-07-23. Update only after checking Google's live model
  * catalog and deprecation notices. Stable ids are preferred where Google
  * offers them; Veo remains on the Gemini API's documented preview ids because
  * its stable `-001` ids are Vertex-only.

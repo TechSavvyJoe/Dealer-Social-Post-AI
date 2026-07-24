@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Settings,
@@ -19,6 +19,7 @@ import { PersonEditModal } from "./PersonEditModal";
 import type { CredentialResult, Person } from "../services/salespeople";
 import { Button } from "./ui/Button";
 import { Input, Textarea } from "./ui/Input";
+import { Modal } from "./ui/Modal";
 import { Leaderboard } from "./Leaderboard";
 import { ApprovalQueue } from "./ApprovalQueue";
 import { PostHistory } from "./PostHistory";
@@ -55,18 +56,47 @@ type Tab = "overview" | "settings" | "team";
 export const DealerAdminDashboard: React.FC = () => {
   const dealer = useAppStore((s) => s.currentDealer);
   const [tab, setTab] = useState<Tab>("overview");
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [pendingTab, setPendingTab] = useState<Tab | null>(null);
+  const tabRefs = React.useRef<Record<Tab, HTMLButtonElement | null>>({
+    overview: null,
+    settings: null,
+    team: null,
+  });
 
   // First-time setup wizard surfaces if brand voice + color aren't set yet.
   const [wizardDismissed, setWizardDismissed] = useState(() => {
     if (typeof window === "undefined") return false;
     try {
-      return localStorage.getItem("dsp.dealerSetupDismissed") === "1";
+      return dealer
+        ? localStorage.getItem(`dsp.dealerSetupDismissed.v1.${dealer.id}`) === "1"
+        : false;
     } catch {
       return false;
     }
   });
+  useEffect(() => {
+    if (!dealer || typeof window === "undefined") return;
+    try {
+      setWizardDismissed(
+        localStorage.getItem(`dsp.dealerSetupDismissed.v1.${dealer.id}`) === "1",
+      );
+    } catch {
+      setWizardDismissed(false);
+    }
+  }, [dealer?.id]);
   const showWizard =
     !wizardDismissed && dealer && (!dealer.brand_voice || !dealer.brand_color);
+
+  useEffect(() => {
+    if (!settingsDirty) return;
+    const preventAccidentalUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", preventAccidentalUnload);
+    return () => window.removeEventListener("beforeunload", preventAccidentalUnload);
+  }, [settingsDirty]);
 
   if (!dealer) {
     return (
@@ -88,6 +118,36 @@ export const DealerAdminDashboard: React.FC = () => {
         : s.currentDealer,
     }));
     return updated;
+  };
+
+  const requestTab = (nextTab: Tab) => {
+    if (nextTab === tab) return;
+    if (tab === "settings" && settingsDirty) {
+      setPendingTab(nextTab);
+      return;
+    }
+    setTab(nextTab);
+  };
+
+  const tabOrder: Tab[] = ["overview", "settings", "team"];
+  const handleTabKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    currentTab: Tab,
+  ) => {
+    let nextIndex: number | null = null;
+    const currentIndex = tabOrder.indexOf(currentTab);
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabOrder.length;
+    if (event.key === "ArrowLeft")
+      nextIndex = (currentIndex - 1 + tabOrder.length) % tabOrder.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = tabOrder.length - 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextTab = tabOrder[nextIndex];
+    requestTab(nextTab);
+    if (!(tab === "settings" && settingsDirty)) {
+      requestAnimationFrame(() => tabRefs.current[nextTab]?.focus());
+    }
   };
 
   return (
@@ -117,9 +177,9 @@ export const DealerAdminDashboard: React.FC = () => {
             </div>
           )}
           <div className="min-w-0">
-            <div className="truncate text-lg font-bold text-surface-50 sm:text-xl">
+            <h1 className="truncate text-lg font-bold text-surface-50 sm:text-xl">
               {dealer.name}
-            </div>
+            </h1>
             <div className="flex items-center gap-2 text-[11px] text-surface-400">
               <ShieldCheck className="h-3 w-3 text-success-300" />
               Manager dashboard
@@ -135,7 +195,7 @@ export const DealerAdminDashboard: React.FC = () => {
           onDismiss={() => {
             setWizardDismissed(true);
             try {
-              localStorage.setItem("dsp.dealerSetupDismissed", "1");
+              localStorage.setItem(`dsp.dealerSetupDismissed.v1.${dealer.id}`, "1");
             } catch {
               /* ignore */
             }
@@ -145,7 +205,11 @@ export const DealerAdminDashboard: React.FC = () => {
 
       {/* Tabs — sticky on mobile so managers can switch without scrolling up */}
       <div className="sticky top-0 z-20 -mx-0 bg-surface-950/90 py-1 backdrop-blur-md sm:static sm:bg-transparent sm:py-0 sm:backdrop-blur-none">
-        <div className="flex w-full gap-1 rounded-xl border border-surface-800 bg-surface-950/60 p-1 sm:inline-flex sm:w-auto">
+        <div
+          role="tablist"
+          aria-label="Manager dashboard"
+          className="flex w-full gap-1 rounded-xl border border-surface-800 bg-surface-950/60 p-1 sm:inline-flex sm:w-auto"
+        >
           {(
             [
               { key: "overview", label: "Overview", icon: Trophy },
@@ -156,11 +220,21 @@ export const DealerAdminDashboard: React.FC = () => {
             const Icon = t.icon;
             return (
               <button
+                ref={(element) => {
+                  tabRefs.current[t.key] = element;
+                }}
                 key={t.key}
+                id={`manager-tab-${t.key}`}
+                role="tab"
+                type="button"
+                aria-selected={tab === t.key}
+                aria-controls={`manager-panel-${t.key}`}
+                tabIndex={tab === t.key ? 0 : -1}
                 onClick={() => {
                   triggerHapticFeedback();
-                  setTab(t.key);
+                  requestTab(t.key);
                 }}
+                onKeyDown={(event) => handleTabKeyDown(event, t.key)}
                 className={cn(
                   "flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors sm:min-h-0 sm:flex-none sm:gap-2 sm:px-4",
                   tab === t.key
@@ -177,18 +251,70 @@ export const DealerAdminDashboard: React.FC = () => {
       </div>
 
       {tab === "overview" && (
-        <>
+        <div
+          id="manager-panel-overview"
+          role="tabpanel"
+          aria-labelledby="manager-tab-overview"
+          className="space-y-4 sm:space-y-6"
+        >
           <Leaderboard />
           <ApprovalQueue />
           <PostHistory />
-        </>
+        </div>
       )}
 
       {tab === "settings" && (
-        <DealerSettingsCard dealer={dealer} onSaved={handleWizardSave} />
+        <div
+          id="manager-panel-settings"
+          role="tabpanel"
+          aria-labelledby="manager-tab-settings"
+        >
+          <DealerSettingsCard
+            dealer={dealer}
+            onSaved={handleWizardSave}
+            onDirtyChange={setSettingsDirty}
+          />
+        </div>
       )}
 
-      {tab === "team" && <DealerTeamCard />}
+      {tab === "team" && (
+        <div id="manager-panel-team" role="tabpanel" aria-labelledby="manager-tab-team">
+          <DealerTeamCard />
+        </div>
+      )}
+
+      <Modal
+        isOpen={pendingTab !== null}
+        onClose={() => setPendingTab(null)}
+        size="sm"
+        title="Discard unsaved settings?"
+        footer={
+          <>
+            <Button variant="outline" fullWidth onClick={() => setPendingTab(null)}>
+              Keep editing
+            </Button>
+            <Button
+              variant="danger"
+              fullWidth
+              onClick={() => {
+                if (!pendingTab) return;
+                const nextTab = pendingTab;
+                setPendingTab(null);
+                setSettingsDirty(false);
+                setTab(nextTab);
+                requestAnimationFrame(() => tabRefs.current[nextTab]?.focus());
+              }}
+            >
+              Discard changes
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-surface-300">
+          You have dealership settings that have not been saved. Leaving this tab will
+          discard them.
+        </p>
+      </Modal>
     </div>
   );
 };
@@ -199,9 +325,14 @@ export const DealerAdminDashboard: React.FC = () => {
 interface DealerSettingsProps {
   dealer: NonNullable<ReturnType<typeof useAppStore.getState>["currentDealer"]>;
   onSaved: (fields: Record<string, string | boolean>) => Promise<unknown>;
+  onDirtyChange: (dirty: boolean) => void;
 }
 
-const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) => {
+const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
+  dealer,
+  onSaved,
+  onDirtyChange,
+}) => {
   // Voice / brand
   const [voice, setVoice] = useState(dealer.brand_voice || "");
   const [banned, setBanned] = useState(dealer.banned_phrases || "");
@@ -247,6 +378,8 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const noApprovalRef = useRef<HTMLButtonElement>(null);
+  const approvalRequiredRef = useRef<HTMLButtonElement>(null);
 
   const enabledStylesStr = Array.from(enabledStyles).join(",");
 
@@ -270,6 +403,10 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
     defaultFooter !== (dealer.default_footer || "") ||
     enabledStylesStr !== (dealer.enabled_styles || "") ||
     defaultStyle !== (dealer.default_style || "");
+
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
 
   const toggleStyle = (id: string) => {
     setEnabledStyles((prev) => {
@@ -611,9 +748,29 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
 
       <section className="space-y-2">
         <div className="text-sm font-semibold text-surface-50">Manager approval</div>
-        <div className="flex items-center gap-2">
+        <div
+          role="radiogroup"
+          aria-label="Manager approval requirement"
+          className="flex flex-col gap-2 sm:flex-row sm:items-center"
+          onKeyDown={(event) => {
+            if (
+              !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
+            )
+              return;
+            event.preventDefault();
+            const nextApproval = !approval;
+            setApproval(nextApproval);
+            requestAnimationFrame(() =>
+              (nextApproval ? approvalRequiredRef : noApprovalRef).current?.focus(),
+            );
+          }}
+        >
           <button
+            ref={noApprovalRef}
             type="button"
+            role="radio"
+            aria-checked={!approval}
+            tabIndex={!approval ? 0 : -1}
             onClick={() => setApproval(false)}
             className={cn(
               "px-3 py-2 rounded-lg text-sm transition-colors border",
@@ -622,10 +779,14 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
                 : "border-white/10 bg-white/5 text-surface-300",
             )}
           >
-            Auto-publish
+            No approval required
           </button>
           <button
+            ref={approvalRequiredRef}
             type="button"
+            role="radio"
+            aria-checked={approval}
+            tabIndex={approval ? 0 : -1}
             onClick={() => setApproval(true)}
             className={cn(
               "px-3 py-2 rounded-lg text-sm transition-colors border",
@@ -640,12 +801,15 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
       </section>
 
       {error && (
-        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs">
+        <div
+          role="alert"
+          className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs"
+        >
           {error}
         </div>
       )}
 
-      <div className="flex items-center justify-between pt-3 border-t border-white/10">
+      <div className="sticky bottom-2 z-10 flex items-center justify-between rounded-xl border border-white/10 bg-surface-950/95 px-3 py-3 shadow-elevation-3 backdrop-blur-xl">
         <div className="text-[11px] text-surface-500">
           {savedAt
             ? `Saved ${savedAt.toLocaleTimeString([], {
@@ -919,10 +1083,14 @@ export const DealerTeamCard: React.FC = () => {
 
       <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
         <div className="flex-1">
-          <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+          <label
+            htmlFor="manager-add-salesperson"
+            className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+          >
             Add salesperson
           </label>
           <input
+            id="manager-add-salesperson"
             type="text"
             value={newName}
             onChange={(e) => setNewName(e.target.value.slice(0, 120))}

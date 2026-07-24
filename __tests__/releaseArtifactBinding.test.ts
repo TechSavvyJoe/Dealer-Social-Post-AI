@@ -42,8 +42,17 @@ describe("release artifact binding", () => {
 
   it("keeps the stamped SHA in persisted client telemetry", () => {
     const telemetry = read("utils/telemetry.ts");
+    const vite = read("vite.config.ts");
     expect(telemetry).toContain("import.meta.env.VITE_RELEASE_SHA");
     expect(telemetry).toContain("releaseSha:");
+    expect(telemetry.indexOf("import.meta.env.VITE_RELEASE_SHA")).toBeLessThan(
+      telemetry.indexOf("import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA"),
+    );
+    expect(vite).toContain("process.env.VITE_RELEASE_SHA ||");
+    expect(vite).toContain("/^[0-9a-f]{40}$/i");
+    expect(vite).toContain("serviceWorkerVersion");
+    expect(vite).not.toContain("Date.now()");
+    expect(vite).not.toContain("__SW_VERSION__");
   });
 
   it("runs the real PocketBase release flow in Chromium and WebKit", () => {

@@ -52,7 +52,7 @@ function getViewportInfo(): ViewportInfo {
   const getSafeArea = (property: string): number => {
     if (!computedStyle) return 0;
     const value = computedStyle.getPropertyValue(property);
-    return parseInt(value) || 0;
+    return parseInt(value, 10) || 0;
   };
 
   return {

@@ -1,5 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from "react";
 import { logError } from "../utils/telemetry";
+import { clearAllCreatives } from "../utils/creativeStorage";
 
 interface Props {
   children: ReactNode;
@@ -43,8 +44,9 @@ export class ErrorBoundary extends Component<Props, State> {
     // customer or credential data and must never be sent to the persistence
     // endpoint.
     try {
-      const errorCode = /^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/.test(error.name)
-        ? error.name
+      const errorName = error?.name || "Error";
+      const errorCode = /^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/.test(errorName)
+        ? errorName
         : "RENDER_ERROR";
       logError("app.render.crash", {
         errorCode,
@@ -67,6 +69,18 @@ export class ErrorBoundary extends Component<Props, State> {
 
   private handleResetSession = async () => {
     try {
+      // Revoke the server-side cookie when the API is reachable. A client-only
+      // reset would immediately restore the same session on the next load.
+      try {
+        await fetch("/api/app/session", {
+          method: "DELETE",
+          credentials: "include",
+          cache: "no-store",
+        });
+      } catch {
+        /* backend unavailable — local recovery must still continue */
+      }
+      await clearAllCreatives();
       // Clear app state in localStorage
       try {
         Object.keys(localStorage).forEach((k) => {
