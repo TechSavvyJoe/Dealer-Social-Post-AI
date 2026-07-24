@@ -2,7 +2,9 @@ import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 async function expectNoSeriousAxeViolations(page: import("@playwright/test").Page) {
-  const results = await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze();
+  const results = await new AxeBuilder({ page })
+    .disableRules(["color-contrast"])
+    .analyze();
   const violations = results.violations
     .filter(
       (violation) => violation.impact === "serious" || violation.impact === "critical",
