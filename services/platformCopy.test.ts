@@ -8,6 +8,7 @@ import {
   platformsToCreativeBrief,
   platformCopyGuidance,
   preferredExportFormatIds,
+  resolvePrimaryImageProfile,
   shouldGenerateCaptionPack,
 } from "./platformCopy";
 import { EXPORT_FORMATS } from "../utils/multiFormatExport";
@@ -35,6 +36,30 @@ describe("platformCopy", () => {
     expect(formats[0]).toBe("story_vertical");
     expect(formats).toContain("feed_square");
   });
+
+  it.each([
+    {
+      platforms: ["instagram_story", "facebook_feed"],
+      format: "story_vertical",
+      aspect: "9:16",
+    },
+    {
+      platforms: ["facebook_feed", "gbp"],
+      format: "feed_square",
+      aspect: "1:1",
+    },
+    { platforms: ["gbp"], format: "gbp", aspect: "4:3" },
+    { platforms: ["marketplace"], format: "marketplace", aspect: "16:9" },
+    { platforms: [], format: "story_vertical", aspect: "9:16" },
+  ])(
+    "maps $platforms to the $format native generation profile",
+    ({ platforms, format, aspect }) => {
+      expect(resolvePrimaryImageProfile(platforms)).toMatchObject({
+        primaryFormatId: format,
+        imageAspectRatio: aspect,
+      });
+    },
+  );
 
   it("builds a caption pack brief with JSON keys for selected platforms", () => {
     const brief = platformsToCaptionPackBrief(

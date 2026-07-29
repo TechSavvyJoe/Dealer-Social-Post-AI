@@ -57,9 +57,11 @@ describe("ImageInput Drag and Drop", () => {
     // CameraCapture no longer opens its own review dialog. The app-level
     // ImageCropModal is the one authoritative review/crop surface.
     await waitFor(() => {
-      expect(mockOnImageSelected).toHaveBeenCalledWith(
-        "data:image/png;base64,dummydata",
-      );
+      expect(mockOnImageSelected).toHaveBeenCalledWith({
+        workingImage: "data:image/png;base64,dummydata",
+        originalSource: file,
+        originalFilename: "test.png",
+      });
     });
     expect(screen.queryByAltText("Captured preview")).not.toBeInTheDocument();
   });

@@ -48,7 +48,6 @@ import { Button } from "./ui/Button";
 import {
   CORE_PUBLISH_IDS,
   copyPreparedCaption,
-  copyTextToClipboard,
   downloadPreparedMedia,
   isMobileShareDevice,
   openPreparedTarget,
@@ -60,16 +59,21 @@ import {
   PublishContent,
   PublishTarget,
 } from "../services/publishTargets";
-import { fitCaptionToBudget } from "../utils/hashtags";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { logEvent } from "../utils/telemetry";
 import { cn } from "../utils/classNames";
+
+export interface PlatformShareCaption {
+  text: string;
+  disclosures?: string;
+  blockedReason?: string;
+}
 
 interface ShareDialogProps {
   isOpen: boolean;
   onClose: () => void;
   content: PublishContent;
-  platformCaptions?: Record<string, string>;
+  platformCaptions?: Record<string, string | PlatformShareCaption>;
   selectedPlatformIds?: string[];
 }
 
@@ -114,8 +118,12 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
   const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null);
   const [preparation, setPreparation] = useState<Record<string, PreparationState>>({});
   const [operationError, setOperationError] = useState<string | null>(null);
+  const [copyState, setCopyState] = useState<"idle" | "copying" | "copied" | "failed">(
+    "idle",
+  );
   const preparationGenerationRef = useRef(0);
   const targetRequestRef = useRef<Record<string, number>>({});
+  const copyRequestRef = useRef(0);
   const onPhone = React.useMemo(() => isMobileShareDevice(), []);
 
   const orderedTargets = React.useMemo(
@@ -131,12 +139,32 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     [orderedTargets],
   );
 
-  const captionForTarget = useCallback(
-    (targetId: string, budget: number): string => {
-      const packCaption = platformCaptions?.[targetId]?.trim();
-      return fitCaptionToBudget(packCaption || content.text, budget);
+  const contentForTarget = useCallback(
+    (targetId: string): PublishContent => {
+      const variant = platformCaptions?.[targetId];
+      if (!variant) return content;
+      if (typeof variant === "string") {
+        return {
+          ...content,
+          text: variant.trim(),
+          disclosures: undefined,
+        };
+      }
+      if (variant.blockedReason) throw new Error(variant.blockedReason);
+      return {
+        ...content,
+        text: variant.text.trim(),
+        disclosures: variant.disclosures,
+      };
     },
-    [content.text, platformCaptions],
+    [
+      content.disclosures,
+      content.hashtags,
+      content.imageDataUrl,
+      content.text,
+      content.videoUrl,
+      platformCaptions,
+    ],
   );
 
   const prepareTarget = useCallback(
@@ -150,8 +178,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
 
       try {
         const item = await preparePublishShare(target.id, {
-          ...content,
-          text: captionForTarget(target.id, target.charBudget),
+          ...contentForTarget(target.id),
         });
         if (
           preparationGenerationRef.current !== generation ||
@@ -183,7 +210,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         }));
       }
     },
-    [captionForTarget, content],
+    [contentForTarget],
   );
 
   useEffect(() => {
@@ -191,46 +218,69 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     const generation = preparationGenerationRef.current + 1;
     preparationGenerationRef.current = generation;
     targetRequestRef.current = {};
-    setPreparation(
-      Object.fromEntries(
-        orderedTargets.map((target) => [target.id, { status: "preparing" }]),
-      ) as Record<string, PreparationState>,
-    );
+    // Rendering nine full-size canvases at once can exhaust an iPhone tab.
+    // Prepare only the destination the salesperson actually selects.
+    setPreparation({});
     setOperationError(null);
     setStatus(null);
     setSelectedTargetId(null);
-
-    // Every destination settles independently: one failed canvas/fetch must
-    // not hide media that is already ready for another social app.
-    void Promise.allSettled(
-      orderedTargets.map((target) => prepareTarget(target, generation)),
-    );
+    setCopyState("idle");
+    copyRequestRef.current += 1;
 
     return () => {
       if (preparationGenerationRef.current === generation) {
         preparationGenerationRef.current += 1;
       }
     };
-  }, [isOpen, orderedTargets, prepareTarget]);
+  }, [isOpen]);
 
   const handlePick = useCallback(
     (target: PublishTarget) => {
       if (busy) return;
       triggerHapticFeedback();
+      // Keep at most one full-size prepared File resident. Switching targets
+      // invalidates older in-flight work and releases prior canvases/files for
+      // garbage collection instead of accumulating every export on mobile.
+      Object.keys(targetRequestRef.current).forEach((targetId) => {
+        if (targetId !== target.id) {
+          targetRequestRef.current[targetId] =
+            (targetRequestRef.current[targetId] || 0) + 1;
+        }
+      });
+      setPreparation((current) =>
+        current[target.id] ? { [target.id]: current[target.id] } : {},
+      );
       setSelectedTargetId(target.id);
       setStatus(null);
       setOperationError(null);
+      setCopyState("copying");
+      const copyRequest = copyRequestRef.current + 1;
+      copyRequestRef.current = copyRequest;
 
-      // Auto-copy caption to clipboard when platform is picked
+      // Clipboard writes can be rejected by Safari/browser policy. Track the
+      // actual result so the UI never claims the caption is ready when it is not.
       const prep = preparation[target.id];
-      if (prep?.status === "ready") {
-        void copyPreparedCaption(prep.item);
-      } else {
-        const text = captionForTarget(target.id, target.charBudget);
-        void copyTextToClipboard(text);
+      if (!prep || prep.status === "error") {
+        setCopyState("idle");
+        void prepareTarget(target, preparationGenerationRef.current);
+        return;
       }
+      if (prep?.status !== "ready") {
+        setCopyState("idle");
+        return;
+      }
+      const copyPromise = copyPreparedCaption(prep.item);
+      void copyPromise.then((copied) => {
+        if (copyRequestRef.current !== copyRequest) return;
+        setCopyState(copied ? "copied" : "failed");
+        if (!copied) {
+          setOperationError(
+            "Your browser did not allow clipboard access. Use Copy caption before opening the social app.",
+          );
+        }
+      });
     },
-    [busy, preparation, captionForTarget],
+    [busy, preparation, prepareTarget],
   );
 
   const handleShareNow = useCallback(async () => {
@@ -276,6 +326,24 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     (item) => item.status === "error",
   ).length;
 
+  const handleCopySelected = useCallback(() => {
+    if (!selectedPrepared || busy) return;
+    triggerHapticFeedback();
+    setOperationError(null);
+    setCopyState("copying");
+    const copyRequest = copyRequestRef.current + 1;
+    copyRequestRef.current = copyRequest;
+    void copyPreparedCaption(selectedPrepared).then((copied) => {
+      if (copyRequestRef.current !== copyRequest) return;
+      setCopyState(copied ? "copied" : "failed");
+      if (!copied) {
+        setOperationError(
+          "Your browser did not allow clipboard access. Select and copy the caption manually.",
+        );
+      }
+    });
+  }, [busy, selectedPrepared]);
+
   const msg = (() => {
     const s = status?.status;
     if (!s) return null;
@@ -314,7 +382,11 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         : target.id === "facebook_feed"
           ? onPhone
             ? "Use Facebook app · paste caption · add from Photos"
-            : "Caption copied · open Facebook · paste"
+            : isActive && copyState === "copied"
+              ? "Caption copied · open Facebook · paste"
+              : isActive && copyState === "failed"
+                ? "Copy caption below · open Facebook · paste"
+                : "Select to prepare caption and media"
           : target.id.startsWith("instagram")
             ? "Share photo · open Instagram · paste caption"
             : target.id === "tiktok"
@@ -435,25 +507,51 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                   {selectedPrepared.target.label} is ready
                 </p>
                 <p className="mt-1 text-xs text-surface-400">
-                  Share now opens the system sheet immediately.
+                  {copyState === "copied"
+                    ? "Caption copied. Share now opens the system sheet immediately."
+                    : copyState === "failed"
+                      ? "Media is ready. Copy the caption below before finishing."
+                      : "Share now opens the system sheet immediately."}
                 </p>
               </div>
-              <Button
-                variant="primary"
-                size="lg"
-                className="min-h-12 shrink-0"
-                disabled={!!busy}
-                leftIcon={
-                  busy ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Share2 className="h-4 w-4" />
-                  )
-                }
-                onClick={() => void handleShareNow()}
-              >
-                Share now
-              </Button>
+              <div className="grid shrink-0 grid-cols-2 gap-2">
+                <Button
+                  variant="outline"
+                  size="lg"
+                  className="min-h-12"
+                  disabled={!!busy || copyState === "copying"}
+                  leftIcon={
+                    copyState === "copied" ? (
+                      <Check className="h-4 w-4" />
+                    ) : (
+                      <ClipboardPaste className="h-4 w-4" />
+                    )
+                  }
+                  onClick={handleCopySelected}
+                >
+                  {copyState === "copying"
+                    ? "Copying…"
+                    : copyState === "copied"
+                      ? "Copied"
+                      : "Copy caption"}
+                </Button>
+                <Button
+                  variant="primary"
+                  size="lg"
+                  className="min-h-12"
+                  disabled={!!busy}
+                  leftIcon={
+                    busy ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Share2 className="h-4 w-4" />
+                    )
+                  }
+                  onClick={() => void handleShareNow()}
+                >
+                  Share now
+                </Button>
+              </div>
             </div>
           </div>
         ) : selectedPreparation?.status === "preparing" ? (
@@ -545,7 +643,11 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                     Finish in the Facebook app
                   </p>
                   <ol className="list-decimal space-y-1 pl-4 text-[11px] text-surface-300">
-                    <li>Caption is already on your clipboard</li>
+                    <li>
+                      {copyState === "copied"
+                        ? "Caption is confirmed on your clipboard"
+                        : "Tap Copy caption below, then paste it in Facebook"}
+                    </li>
                     <li>Save/share the photo into Photos if the sheet offered it</li>
                     <li>
                       Open the{" "}
@@ -562,20 +664,32 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                 <div className="flex flex-wrap gap-2 border-t border-white/10 pt-2">
                   <button
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      setCopyState("copying");
                       void copyPreparedCaption(selectedPrepared).then((ok) => {
-                        if (!ok) setOperationError("Could not copy the caption.");
-                      })
-                    }
+                        setCopyState(ok ? "copied" : "failed");
+                        setOperationError(ok ? null : "Could not copy the caption.");
+                      });
+                    }}
                     className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-surface-100"
                   >
                     <ClipboardPaste className="h-3.5 w-3.5" />
-                    Copy caption
+                    {copyState === "copying"
+                      ? "Copying…"
+                      : copyState === "copied"
+                        ? "Caption copied"
+                        : "Copy caption"}
                   </button>
                   {selectedPrepared.file ? (
                     <button
                       type="button"
-                      onClick={() => downloadPreparedMedia(selectedPrepared)}
+                      onClick={() => {
+                        if (!downloadPreparedMedia(selectedPrepared)) {
+                          setOperationError(
+                            "The browser could not start the media download. Try Share now again or use the main Save button.",
+                          );
+                        }
+                      }}
                       className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-surface-100"
                     >
                       Save media

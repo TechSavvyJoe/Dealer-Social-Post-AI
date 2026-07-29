@@ -3,7 +3,6 @@ import { clearAllCreatives } from "./creativeStorage";
 
 const STORAGE_KEY = "dealer-social-post-ai.session";
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const MAX_STORED_IMAGE_BYTES = 500_000; // ~0.5MB safety cap per image
 
 interface PersistedState {
   generatedPost?: Omit<GeneratedPost, "image"> & { image?: string };
@@ -26,13 +25,33 @@ interface PersistedState {
   };
 }
 
+const withoutImageBytes = (session: PersistedState): PersistedState => ({
+  ...session,
+  generatedPost: session.generatedPost
+    ? { ...session.generatedPost, image: undefined }
+    : undefined,
+  selectedImage: undefined,
+});
+
+const scrubLegacyImageBytes = (session: PersistedState): PersistedState => {
+  const scrubbed = withoutImageBytes(session);
+  if (session.selectedImage || session.generatedPost?.image) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(scrubbed));
+    } catch {
+      // Returning the scrubbed in-memory state still prevents reuse of legacy bytes.
+    }
+  }
+  return scrubbed;
+};
+
 export const loadSession = (): PersistedState | null => {
   if (typeof window === "undefined") return null;
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return null;
 
-    const session = JSON.parse(stored) as PersistedState;
+    const session = scrubLegacyImageBytes(JSON.parse(stored) as PersistedState);
 
     // Check if session has expired (7 days)
     if (session.loginTimestamp) {
@@ -56,23 +75,9 @@ export const loadSession = (): PersistedState | null => {
 export const saveSession = (state: PersistedState) => {
   if (typeof window === "undefined") return;
   try {
-    const pruneImages = (session: PersistedState): PersistedState => {
-      const next: PersistedState = { ...session };
-      if (
-        next.generatedPost?.image &&
-        next.generatedPost.image.length > MAX_STORED_IMAGE_BYTES
-      ) {
-        next.generatedPost = { ...next.generatedPost, image: undefined };
-      }
-      if (next.selectedImage && next.selectedImage.length > MAX_STORED_IMAGE_BYTES) {
-        next.selectedImage = undefined;
-      }
-      return next;
-    };
-
     // Preserve the login timestamp if it exists, or set it if this is a new login
     const existingSession = loadSessionRaw();
-    const sessionWithTimestamp: PersistedState = pruneImages({
+    const sessionWithTimestamp: PersistedState = withoutImageBytes({
       ...(existingSession ?? {}),
       ...state,
       loginTimestamp:
@@ -82,13 +87,9 @@ export const saveSession = (state: PersistedState) => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(sessionWithTimestamp));
     } catch (err) {
-      // On quota errors, retry without bulky images
-      const slimmed = pruneImages({
+      // Retry with workflow-heavy metadata removed, while images remain IndexedDB-only.
+      const slimmed = withoutImageBytes({
         ...sessionWithTimestamp,
-        generatedPost: sessionWithTimestamp.generatedPost
-          ? { ...sessionWithTimestamp.generatedPost, image: undefined }
-          : undefined,
-        selectedImage: undefined,
       });
       localStorage.setItem(STORAGE_KEY, JSON.stringify(slimmed));
     }
@@ -102,7 +103,7 @@ const loadSessionRaw = (): PersistedState | null => {
   if (typeof window === "undefined") return null;
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? (JSON.parse(stored) as PersistedState) : null;
+    return stored ? scrubLegacyImageBytes(JSON.parse(stored) as PersistedState) : null;
   } catch {
     return null;
   }

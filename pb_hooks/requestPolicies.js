@@ -179,16 +179,58 @@ function canonicalPostCompliance(caption, bannedPhrases) {
 }
 
 function validatePostCompliance(caption, disclosures, bannedPhrases) {
-  const text = (caption || "").toString();
-  const supplied = (disclosures || "").toString().replace(/\r\n?/g, "\n").trim();
-  const result = canonicalPostCompliance(text, bannedPhrases);
+  return validatePostComplianceSet([caption], disclosures, bannedPhrases);
+}
 
-  if (text.indexOf("— Disclosures —") !== -1) {
-    return {
-      ...result,
-      ok: false,
-      error: "Compliance disclosures must be submitted separately from the caption",
-    };
+function canonicalPostComplianceSet(captions, bannedPhrases) {
+  const values = Array.isArray(captions) ? captions : [captions];
+  const categories = {};
+  const blockedPhrases = [];
+  let legalProhibited = false;
+
+  for (let i = 0; i < values.length; i++) {
+    const result = canonicalPostCompliance((values[i] || "").toString(), bannedPhrases);
+    for (let j = 0; j < result.categories.length; j++) {
+      categories[result.categories[j]] = true;
+    }
+    legalProhibited = legalProhibited || result.legal_prohibited;
+    for (let j = 0; j < result.dealer_blocked_phrases.length; j++) {
+      const phrase = result.dealer_blocked_phrases[j];
+      if (blockedPhrases.indexOf(phrase) === -1) blockedPhrases.push(phrase);
+    }
+  }
+
+  const orderedCategories = [];
+  const disclosureTexts = [];
+  for (let i = 0; i < POST_COMPLIANCE_RULES.length; i++) {
+    const rule = POST_COMPLIANCE_RULES[i];
+    if (!categories[rule.category]) continue;
+    orderedCategories.push(rule.category);
+    disclosureTexts.push(rule.disclosure);
+  }
+  return {
+    categories: orderedCategories,
+    required_disclosures: disclosureTexts.length
+      ? "— Disclosures —\n" + disclosureTexts.join(" ")
+      : "",
+    legal_prohibited: legalProhibited,
+    dealer_blocked_phrases: blockedPhrases,
+  };
+}
+
+function validatePostComplianceSet(captions, disclosures, bannedPhrases) {
+  const values = Array.isArray(captions) ? captions : [captions];
+  const supplied = (disclosures || "").toString().replace(/\r\n?/g, "\n").trim();
+  const result = canonicalPostComplianceSet(values, bannedPhrases);
+
+  for (let i = 0; i < values.length; i++) {
+    if ((values[i] || "").toString().indexOf("— Disclosures —") !== -1) {
+      return {
+        ...result,
+        ok: false,
+        error: "Compliance disclosures must be submitted separately from the caption",
+      };
+    }
   }
   if (result.legal_prohibited || result.dealer_blocked_phrases.length > 0) {
     return {
@@ -236,7 +278,7 @@ const SERVER_SAFETY_SETTINGS = [
 // Language-neutral contract mirrored from config/gemini-model-policy.json.
 // `scripts/check-model-policy.mjs` and Vitest fail if this snapshot drifts.
 const GEMINI_MODEL_POLICY_SNAPSHOT = {
-  version: 2,
+  version: 3,
   verifiedAt: "2026-07-23",
   models: {
     textQuality: "gemini-3.6-flash",
@@ -309,6 +351,7 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
       resolution: "1080p",
     },
   },
+  allowedImageAspectRatios: ["1:1", "9:16", "16:9", "4:3"],
   allowedRequestFields: {
     generateContent: {
       topLevel: ["contents", "generationConfig"],
@@ -318,7 +361,7 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
       inlineData: ["mimeType", "data"],
       textGenerationConfig: ["maxOutputTokens"],
       imageGenerationConfig: ["responseModalities", "imageConfig", "maxOutputTokens"],
-      imageConfig: ["imageSize"],
+      imageConfig: ["imageSize", "aspectRatio"],
       legacyImageGenerationConfig: [
         "responseModalities",
         "responseFormat",
@@ -553,7 +596,7 @@ function providerFileFromUri(uri) {
     .toString()
     .trim()
     .match(
-      /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/(files\/[a-z0-9._~-]+):download(?:\?[^#\s\\]*)?$/i,
+      /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/(files\/[a-z0-9._~-]+)(?::download)?(?:\?[^#\s\\]*)?$/i,
     );
   if (!match) return null;
   return {
@@ -608,7 +651,9 @@ function providerResourcesFromResponse(path, responseBody) {
           normalizedKey === "fileuri" ||
           normalizedKey === "file_uri" ||
           normalizedKey === "videouri" ||
-          normalizedKey === "video_uri")
+          normalizedKey === "video_uri" ||
+          normalizedKey === "downloaduri" ||
+          normalizedKey === "download_uri")
       ) {
         add(providerFileFromUri(child));
       } else if (child && typeof child === "object") {
@@ -782,10 +827,11 @@ function buildGenerateContentRequest(model, input) {
     GEMINI_MODEL_POLICY_SNAPSHOT.tasks.image_studio.imageSizes[model];
   if (!requiredSize) return null;
   let requestedSize = "";
+  let requestedAspectRatio = "";
   const hasImageConfig =
     generationConfig.imageConfig &&
     typeof generationConfig.imageConfig === "object" &&
-    hasOnlyKeys(generationConfig.imageConfig, fields.imageConfig, fields.imageConfig);
+    hasOnlyKeys(generationConfig.imageConfig, fields.imageConfig, ["imageSize"]);
   const hasLegacyResponseFormat =
     generationConfig.responseFormat &&
     typeof generationConfig.responseFormat === "object" &&
@@ -813,6 +859,19 @@ function buildGenerateContentRequest(model, input) {
       return null;
     }
     requestedSize = generationConfig.imageConfig.imageSize;
+    if (
+      Object.prototype.hasOwnProperty.call(generationConfig.imageConfig, "aspectRatio")
+    ) {
+      requestedAspectRatio = generationConfig.imageConfig.aspectRatio;
+      if (
+        typeof requestedAspectRatio !== "string" ||
+        GEMINI_MODEL_POLICY_SNAPSHOT.allowedImageAspectRatios.indexOf(
+          requestedAspectRatio,
+        ) === -1
+      ) {
+        return null;
+      }
+    }
   } else if (hasLegacyResponseFormat) {
     if (
       !hasOnlyKeys(
@@ -838,11 +897,15 @@ function buildGenerateContentRequest(model, input) {
     GEMINI_REQUEST_LIMITS.maxImageTaskImages,
   );
   if (!contents) return null;
+  const sanitizedImageConfig = { imageSize: requiredSize };
+  if (requestedAspectRatio) {
+    sanitizedImageConfig.aspectRatio = requestedAspectRatio;
+  }
   return {
     contents: contents,
     generationConfig: {
       responseModalities: ["TEXT", "IMAGE"],
-      imageConfig: { imageSize: requiredSize },
+      imageConfig: sanitizedImageConfig,
       maxOutputTokens: requiredMaxOutputTokens,
     },
     safetySettings: SERVER_SAFETY_SETTINGS,
@@ -1141,7 +1204,9 @@ module.exports = {
   initialApprovalStatus,
   isValidAdminDealerCode,
   canonicalPostCompliance,
+  canonicalPostComplianceSet,
   validatePostCompliance,
+  validatePostComplianceSet,
   isAllowedProxyPath,
   isAllowedProxyRequest,
   providerOperationStartProvider,

@@ -1,20 +1,61 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PostResult } from "../components/PostResult";
 import { LoadingOverlay } from "../components/LoadingOverlay";
 import { ToastProvider } from "../components/ui/Toast";
 import { VideoStyle } from "../types";
+import { useAppStore } from "../stores/appStore";
 
 vi.mock("canvas-confetti", () => ({ default: vi.fn() }));
-const { mockGetPostApprovalStatus, mockMarkPostVideoGenerated } = vi.hoisted(() => ({
+const {
+  mockGetPostApprovalStatus,
+  mockMarkPostVideoGenerated,
+  mockRenderFormat,
+  mockPrepareMediaForSave,
+  mockSavePreparedMediaToLibrary,
+  mockUpdatePostDraft,
+} = vi.hoisted(() => ({
   mockGetPostApprovalStatus: vi.fn(),
   mockMarkPostVideoGenerated: vi.fn(),
+  mockRenderFormat: vi.fn(async (source: string) => source),
+  mockSavePreparedMediaToLibrary: vi.fn(
+    async (): Promise<{
+      method: "download" | "photos-share" | "cancelled" | "error";
+      kind: "image" | "video";
+    }> => ({
+      method: "download",
+      kind: "image",
+    }),
+  ),
+  mockUpdatePostDraft: vi.fn(async () => ({ id: "post-1", updated: true as const })),
+  mockPrepareMediaForSave: vi.fn(
+    async (options: { kind: "image" | "video"; basename?: string }) => {
+      const filename = `${options.basename || "dealer-social-post"}.${
+        options.kind === "video" ? "mp4" : "jpg"
+      }`;
+      const contents =
+        options.kind === "video"
+          ? new Uint8Array([
+              0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d,
+              0x00, 0x00, 0x00, 0x00, 0x69, 0x73, 0x6f, 0x6d, 0x6d, 0x70, 0x34, 0x31,
+            ])
+          : "prepared";
+      return {
+        kind: options.kind,
+        filename,
+        file: new File([contents], filename, {
+          type: options.kind === "video" ? "video/mp4" : "image/jpeg",
+        }),
+      };
+    },
+  ),
 }));
 vi.mock("../services/posts", () => ({
   getPostApprovalStatus: mockGetPostApprovalStatus,
   markPostVideoGenerated: mockMarkPostVideoGenerated,
+  updatePostDraft: mockUpdatePostDraft,
 }));
 vi.mock("../components/ui/ProgressiveImage", () => ({
   ProgressiveImage: ({
@@ -25,6 +66,22 @@ vi.mock("../components/ui/ProgressiveImage", () => ({
     <img src={src} alt={alt} className={className} />
   ),
 }));
+vi.mock("../utils/multiFormatExport", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../utils/multiFormatExport")>();
+  return {
+    ...actual,
+    renderFormat: mockRenderFormat,
+    renderFormatIfNeeded: mockRenderFormat,
+  };
+});
+vi.mock("../utils/mediaSave", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../utils/mediaSave")>();
+  return {
+    ...actual,
+    prepareMediaForSave: mockPrepareMediaForSave,
+    savePreparedMediaToLibrary: mockSavePreparedMediaToLibrary,
+  };
+});
 
 const callbacks = {
   onStartOver: vi.fn(),
@@ -32,7 +89,9 @@ const callbacks = {
   onRegenerateImage: vi.fn(async () => undefined),
   onEditImage: vi.fn(async () => undefined),
   onRegenerateText: vi.fn(async () => undefined),
-  onEditText: vi.fn(async () => undefined),
+  onEditText: vi.fn(
+    async (_prompt: string, originalText?: string) => originalText || "",
+  ),
   onFunMode: vi.fn(async () => undefined),
   onGenerateVideo: vi.fn(async (_style: VideoStyle) => "blob:video"),
   onGenerateCaptionVariant: vi.fn(async () => "Alternative caption"),
@@ -68,18 +127,33 @@ describe("PostResult job-first flow", () => {
       id: "post-review-1",
       has_video: true,
     });
+    mockUpdatePostDraft.mockResolvedValue({ id: "post-1", updated: true });
+    mockSavePreparedMediaToLibrary.mockResolvedValue({
+      method: "download",
+      kind: "image",
+    });
     Object.defineProperty(navigator, "vibrate", {
       configurable: true,
       value: vi.fn(),
+    });
+    useAppStore.setState({
+      selectedImage: "data:image/png;base64,b3JpZ2luYWw=",
     });
   });
 
   it("keeps delivery actions visible and mobile creative tools collapsed", () => {
     renderResult();
 
-    expect(screen.getByRole("button", { name: "Copy caption" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Share post" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save image" })).toBeInTheDocument();
+    const delivery = screen.getByLabelText("Post delivery actions");
+    expect(
+      within(delivery).getByRole("button", { name: "Copy caption" }),
+    ).toBeInTheDocument();
+    expect(
+      within(delivery).getByRole("button", { name: "Share post" }),
+    ).toBeInTheDocument();
+    expect(
+      within(delivery).getByRole("button", { name: "Save 1080×1920" }),
+    ).toBeInTheDocument();
 
     const disclosure = screen.getByRole("button", { name: /creative tools/i });
     const panel = screen.getByTestId("creative-tools-panel");
@@ -170,9 +244,15 @@ describe("PostResult job-first flow", () => {
 
     const delivery = screen.getByLabelText("Post delivery actions");
     expect(delivery).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy caption" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Share post" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save image" })).toBeInTheDocument();
+    expect(
+      within(delivery).getByRole("button", { name: "Copy caption" }),
+    ).toBeInTheDocument();
+    expect(
+      within(delivery).getByRole("button", { name: "Share post" }),
+    ).toBeInTheDocument();
+    expect(
+      within(delivery).getByRole("button", { name: "Save 1080×1920" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /creative tools/i })).toHaveAttribute(
       "aria-expanded",
       "false",
@@ -181,16 +261,55 @@ describe("PostResult job-first flow", () => {
 
   it("gates every delivery path while approval is pending", () => {
     renderResult({ requiresApproval: true });
+    const delivery = screen.getByLabelText("Post delivery actions");
 
     expect(
-      screen.getByRole("button", { name: "Copy caption (approval pending)" }),
+      within(delivery).getByRole("button", {
+        name: "Copy caption (approval pending)",
+      }),
     ).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Share post (approval pending)" }),
+      within(delivery).getByRole("button", {
+        name: "Share post (approval pending)",
+      }),
     ).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Save image (approval pending)" }),
+      within(delivery).getByRole("button", {
+        name: "Save image (approval pending)",
+      }),
     ).toBeDisabled();
+  });
+
+  it("keeps teammate History view-only while allowing its unchanged copy to be shared", () => {
+    useAppStore.setState({ selectedImage: null });
+    renderResult({
+      post: {
+        image: "data:image/png;base64,aGVsbG8=",
+        text: "A teammate's saved caption.",
+        postId: "teammate-post",
+        historyReadOnly: true,
+      },
+    });
+
+    expect(screen.getByText("View-only history")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Full caption text" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "New caption" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Three caption ideas" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Schedule" })).toBeDisabled();
+
+    const delivery = screen.getByLabelText("Post delivery actions");
+    expect(
+      within(delivery).getByRole("button", { name: "Copy caption" }),
+    ).toBeEnabled();
+    expect(within(delivery).getByRole("button", { name: "Share post" })).toBeEnabled();
+  });
+
+  it("disables AI caption actions when reopened History has no original capture", () => {
+    useAppStore.setState({ selectedImage: null });
+    renderResult();
+
+    expect(screen.getByRole("button", { name: "New caption" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Three caption ideas" })).toBeDisabled();
   });
 
   it("fails closed when a captured photo release was not stored", () => {
@@ -201,21 +320,29 @@ describe("PostResult job-first flow", () => {
         releaseStatus: "save_failed",
       },
     });
+    const delivery = screen.getByLabelText("Post delivery actions");
 
     expect(screen.getByRole("alert")).toHaveTextContent("Photo release not saved");
     expect(
-      screen.getByRole("button", { name: "Copy caption (release not saved)" }),
+      within(delivery).getByRole("button", {
+        name: "Copy caption (release not saved)",
+      }),
     ).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Share post (release not saved)" }),
+      within(delivery).getByRole("button", {
+        name: "Share post (release not saved)",
+      }),
     ).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Save image (release not saved)" }),
+      within(delivery).getByRole("button", {
+        name: "Save image (release not saved)",
+      }),
     ).toBeDisabled();
   });
 
   it("rescans direct caption edits and blocks prohibited delivery claims", () => {
     renderResult({ bannedPhrases: "lowest price guaranteed" });
+    const delivery = screen.getByLabelText("Post delivery actions");
 
     const caption = screen.getByRole("textbox", {
       name: "Full caption text",
@@ -227,13 +354,19 @@ describe("PostResult job-first flow", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Caption claim blocked");
     expect(caption).toHaveAttribute("aria-invalid", "true");
     expect(
-      screen.getByRole("button", { name: "Copy caption (claim blocked)" }),
+      within(delivery).getByRole("button", {
+        name: "Copy caption (claim blocked)",
+      }),
     ).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Share post (claim blocked)" }),
+      within(delivery).getByRole("button", {
+        name: "Share post (claim blocked)",
+      }),
     ).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Save image (claim blocked)" }),
+      within(delivery).getByRole("button", {
+        name: "Save image (claim blocked)",
+      }),
     ).toBeDisabled();
 
     fireEvent.change(caption, {
@@ -241,7 +374,308 @@ describe("PostResult job-first flow", () => {
     });
 
     expect(screen.queryByText("Caption claim blocked")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy caption" })).toBeEnabled();
+    expect(
+      within(delivery).getByRole("button", { name: "Copy caption" }),
+    ).toBeEnabled();
+  });
+
+  it("sends the visible caption to AI editing and replaces it with the result", async () => {
+    const user = userEvent.setup();
+    callbacks.onEditText.mockResolvedValueOnce(
+      "A warmer delivery-day caption with a personal thank-you.",
+    );
+    renderResult();
+
+    const caption = screen.getByRole("textbox", {
+      name: "Full caption text",
+    });
+    fireEvent.change(caption, {
+      target: { value: "The salesperson's current manual caption." },
+    });
+
+    await user.click(screen.getByRole("button", { name: /creative tools/i }));
+    await user.click(screen.getByRole("button", { name: "Edit text" }));
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Edit Post Text with AI",
+    });
+    expect(dialog).toHaveTextContent("The salesperson's current manual caption.");
+
+    await user.type(
+      screen.getByRole("textbox", {
+        name: "How would you like to change it?",
+      }),
+      "Make it warmer and add a thank-you.",
+    );
+    await user.click(screen.getByRole("button", { name: "Submit Edit" }));
+
+    await waitFor(() =>
+      expect(callbacks.onEditText).toHaveBeenCalledWith(
+        "Make it warmer and add a thank-you.",
+        "The salesperson's current manual caption.",
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "Full caption text" })).toHaveValue(
+        "A warmer delivery-day caption with a personal thank-you.",
+      ),
+    );
+  });
+
+  it("keeps a platform AI edit in that platform without replacing primary copy", async () => {
+    const user = userEvent.setup();
+    const ControlledResult = () => {
+      const [post, setPost] = React.useState({
+        image: "data:image/png;base64,aGVsbG8=",
+        text: "Primary caption stays unchanged.",
+        platformIds: ["facebook_feed"],
+        platformCaptions: { facebook_feed: "Original Facebook caption." },
+      });
+      return (
+        <ToastProvider>
+          <PostResult
+            post={post}
+            {...callbacks}
+            onEditText={async (_prompt, _original, platformId) => {
+              const replacement = "Updated Facebook caption from AI.";
+              if (platformId) {
+                setPost((current) => ({
+                  ...current,
+                  platformCaptions: {
+                    ...current.platformCaptions,
+                    [platformId]: replacement,
+                  },
+                }));
+              }
+              return replacement;
+            }}
+            isDesktopLayout={false}
+          />
+        </ToastProvider>
+      );
+    };
+    render(<ControlledResult />);
+
+    await user.click(screen.getByRole("tab", { name: /Facebook/i }));
+    await user.click(screen.getByRole("button", { name: /creative tools/i }));
+    await user.click(screen.getByRole("button", { name: "Edit text" }));
+    await user.type(
+      screen.getByRole("textbox", {
+        name: "How would you like to change it?",
+      }),
+      "Make this friendlier.",
+    );
+    await user.click(screen.getByRole("button", { name: "Submit Edit" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: /Facebook/i })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      ),
+    );
+    expect(screen.getByRole("textbox", { name: "Full caption text" })).toHaveValue(
+      "Updated Facebook caption from AI.",
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Primary" }));
+    expect(screen.getByRole("textbox", { name: "Full caption text" })).toHaveValue(
+      "Primary caption stays unchanged.",
+    );
+  });
+
+  it("preserves and saves a primary caption edit across platform tab changes", async () => {
+    const user = userEvent.setup();
+    renderResult({
+      post: {
+        image: "data:image/png;base64,aGVsbG8=",
+        text: "Original primary caption.",
+        postId: "post-primary-edit",
+        platformIds: ["facebook_feed"],
+        platformCaptions: {
+          facebook_feed: "Original Facebook caption.",
+        },
+      },
+    });
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Full caption text" }), {
+      target: { value: "Primary caption edited by the salesperson." },
+    });
+    await user.click(screen.getByRole("tab", { name: /Facebook/i }));
+    expect(screen.getByRole("textbox", { name: "Full caption text" })).toHaveValue(
+      "Original Facebook caption.",
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Primary" }));
+    expect(screen.getByRole("textbox", { name: "Full caption text" })).toHaveValue(
+      "Primary caption edited by the salesperson.",
+    );
+    await waitFor(() =>
+      expect(mockUpdatePostDraft).toHaveBeenCalledWith(
+        "post-primary-edit",
+        expect.objectContaining({
+          caption: expect.stringContaining(
+            "Primary caption edited by the salesperson.",
+          ),
+        }),
+      ),
+    );
+  });
+
+  it("starts prepared media sharing before awaiting a pending History save", async () => {
+    const order: string[] = [];
+    let releaseDraft: (() => void) | undefined;
+    mockSavePreparedMediaToLibrary.mockImplementationOnce(async () => {
+      order.push("media-share");
+      return { method: "photos-share", kind: "image" };
+    });
+    mockUpdatePostDraft.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          order.push("history-save");
+          releaseDraft = () => resolve({ id: "post-1", updated: true });
+        }),
+    );
+    renderResult({
+      post: {
+        image: "data:image/png;base64,aGVsbG8=",
+        text: "Original caption",
+        postId: "post-1",
+        approvalStatus: "n_a",
+      },
+    });
+    const saveButtons = await screen.findAllByRole("button", {
+      name: "Save 1080×1920",
+    });
+    await waitFor(() => expect(saveButtons[0]).toBeEnabled());
+    fireEvent.change(screen.getByRole("textbox", { name: "Full caption text" }), {
+      target: { value: "Edited caption that should be saved to History." },
+    });
+
+    fireEvent.click(saveButtons[0]);
+
+    await waitFor(() =>
+      expect(mockSavePreparedMediaToLibrary).toHaveBeenCalledTimes(1),
+    );
+    expect(mockUpdatePostDraft).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["media-share", "history-save"]);
+    releaseDraft?.();
+  });
+
+  it("reselects a completed video and sends that MP4 through Save and Share", async () => {
+    const user = userEvent.setup();
+    const syntheticVideoUrl = "blob:synthetic-generated-video";
+    const share = vi.fn((_data: ShareData) => Promise.resolve());
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: share,
+    });
+    Object.defineProperty(navigator, "canShare", {
+      configurable: true,
+      value: ({ files }: ShareData) =>
+        Boolean(files?.length && files[0]?.type === "video/mp4"),
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    callbacks.onGenerateVideo.mockResolvedValueOnce(syntheticVideoUrl);
+    mockSavePreparedMediaToLibrary.mockResolvedValueOnce({
+      method: "download",
+      kind: "video",
+    });
+
+    renderResult();
+
+    await user.click(screen.getByRole("button", { name: "Video" }));
+    await user.click(
+      await screen.findByRole("button", {
+        name: /Golden Delivery/i,
+      }),
+    );
+
+    expect(callbacks.onGenerateVideo).toHaveBeenCalledWith(
+      VideoStyle.GoldenRadiance,
+      expect.objectContaining({
+        aspectPreference: "16:9",
+        resolution: "720p",
+      }),
+    );
+    expect(
+      await screen.findByLabelText("Generated social media video preview"),
+    ).toHaveAttribute("src", syntheticVideoUrl);
+
+    await user.click(screen.getByRole("button", { name: "Back to photos" }));
+    expect(
+      screen.queryByLabelText("Generated social media video preview"),
+    ).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", {
+        name: `Show ${VideoStyle.GoldenRadiance} video`,
+      }),
+    );
+    expect(
+      await screen.findByLabelText("Generated social media video preview"),
+    ).toHaveAttribute("src", syntheticVideoUrl);
+
+    const delivery = screen.getByLabelText("Post delivery actions");
+    const saveVideo = within(delivery).getByRole("button", {
+      name: "Save video",
+    });
+    await waitFor(() => expect(saveVideo).toBeEnabled());
+    await user.click(saveVideo);
+
+    await waitFor(() =>
+      expect(mockSavePreparedMediaToLibrary).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "video",
+          filename: "dealer-social-video.mp4",
+          file: expect.objectContaining({
+            name: "dealer-social-video.mp4",
+            type: "video/mp4",
+          }),
+        }),
+      ),
+    );
+    expect(mockPrepareMediaForSave).toHaveBeenCalledWith({
+      sourceUrl: syntheticVideoUrl,
+      kind: "video",
+      basename: "dealer-social-video",
+    });
+
+    await user.click(
+      within(delivery).getByRole("button", {
+        name: "Share post",
+      }),
+    );
+    const shareDialog = await screen.findByRole("dialog", { name: "Share" });
+    await user.click(
+      within(shareDialog).getByRole("button", {
+        name: "Share to Instagram Feed",
+      }),
+    );
+    expect(
+      await within(shareDialog).findByText("Instagram Feed is ready"),
+    ).toBeInTheDocument();
+    await user.click(
+      within(shareDialog).getByRole("button", {
+        name: "Share now",
+      }),
+    );
+
+    expect(share).toHaveBeenCalledWith(
+      expect.objectContaining({
+        files: [
+          expect.objectContaining({
+            name: "dealer-social-post-instagram_feed.mp4",
+            type: "video/mp4",
+          }),
+        ],
+      }),
+    );
+    expect(writeText).toHaveBeenCalledWith(
+      expect.stringContaining("A polished delivery-day caption."),
+    );
   });
 
   it("polls owner status, unlocks delivery, and keeps approved creative frozen", async () => {
@@ -261,12 +695,19 @@ describe("PostResult job-first flow", () => {
         approvalStatus: "pending",
       },
     });
+    const delivery = screen.getByLabelText("Post delivery actions");
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Share post" })).toBeEnabled(),
+      expect(
+        within(delivery).getByRole("button", { name: "Share post" }),
+      ).toBeEnabled(),
     );
     expect(screen.getByText("Manager approved")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save image" })).toBeEnabled();
+    await waitFor(() =>
+      expect(
+        within(delivery).getByRole("button", { name: "Save 1080×1920" }),
+      ).toBeEnabled(),
+    );
     expect(screen.getByRole("textbox", { name: "Full caption text" })).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: /creative tools/i }));

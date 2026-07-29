@@ -24,11 +24,13 @@ import {
   PostRecord,
   ApprovalStatus,
   fetchPostCreativeDataUrl,
+  listPostsPage,
 } from "../services/posts";
 import { useAppStore } from "../stores/appStore";
 import { AppStep, GeneratedPost } from "../types";
 import { cn } from "../utils/classNames";
 import { useToast } from "./ui/Toast";
+import { LocalMediaArchive } from "./LocalMediaArchive";
 
 const STATUS_FILTERS: Array<{ key: ApprovalStatus | "all"; label: string }> = [
   { key: "all", label: "All" },
@@ -37,6 +39,7 @@ const STATUS_FILTERS: Array<{ key: ApprovalStatus | "all"; label: string }> = [
   { key: "rejected", label: "Rejected" },
   { key: "n_a", label: "No review" },
 ];
+const HISTORY_PAGE_SIZE = 50;
 
 const formatWhen = (iso: string): string => {
   try {
@@ -87,43 +90,70 @@ const statusBadge = (status?: ApprovalStatus): React.ReactElement | null => {
  * Searchable history of posts for the current dealership.
  * Posts with a stored creative can be reopened for share/export without regen.
  */
-export const PostHistory: React.FC = () => {
+interface PostHistoryProps {
+  onOpenCreative?: () => void;
+}
+
+export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
   const dealer = useAppStore((s) => s.currentDealer);
+  const role = useAppStore((s) => s.role);
+  const currentPersonId = useAppStore((s) => s.currentPerson?.id || "");
   const setGeneratedPost = useAppStore((s) => s.setGeneratedPost);
+  const setSelectedImage = useAppStore((s) => s.setSelectedImage);
   const setStep = useAppStore((s) => s.setStep);
   const { success: toastSuccess, error: toastError } = useToast();
   const [items, setItems] = useState<PostRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ApprovalStatus | "all">("all");
   const [openingId, setOpeningId] = useState<string | null>(null);
 
   const reqIdRef = useRef(0);
-  const load = useCallback(async () => {
-    if (!dealer) return;
-    const myId = ++reqIdRef.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const qs = new URLSearchParams({ limit: "200" });
-      if (statusFilter !== "all") qs.set("approval_status", statusFilter);
-      const res = await fetch(`/api/app/posts?${qs.toString()}`, {
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error(`/api/app/posts ${res.status}`);
-      const body = (await res.json()) as { items: PostRecord[] };
-      if (reqIdRef.current === myId) setItems(body.items || []);
-    } catch (err) {
-      if (reqIdRef.current === myId)
-        setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      if (reqIdRef.current === myId) setLoading(false);
-    }
-  }, [dealer, statusFilter]);
+  const load = useCallback(
+    async (cursor?: string) => {
+      if (!dealer) return;
+      const append = Boolean(cursor);
+      const myId = ++reqIdRef.current;
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+        setItems([]);
+        setNextCursor(null);
+      }
+      setError(null);
+      try {
+        const page = await listPostsPage({
+          limit: HISTORY_PAGE_SIZE,
+          approvalStatus: statusFilter,
+          cursor,
+        });
+        if (reqIdRef.current === myId) {
+          setItems((current) => {
+            if (!append) return page.items;
+            const seen = new Set(current.map((post) => post.id));
+            return [...current, ...page.items.filter((post) => !seen.has(post.id))];
+          });
+          setNextCursor(page.nextCursor || null);
+        }
+      } catch (err) {
+        if (reqIdRef.current === myId)
+          setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (reqIdRef.current === myId) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      }
+    },
+    [dealer, statusFilter],
+  );
 
   useEffect(() => {
-    void load();
+    void load(undefined);
   }, [load]);
 
   const filtered = useMemo(() => {
@@ -160,13 +190,34 @@ export const PostHistory: React.FC = () => {
         const generated: GeneratedPost = {
           image,
           text: (post.caption || "").trim() || "—",
+          captionSource: post.caption_source || undefined,
+          isBasicFallback: post.caption_source === "basic_fallback",
           disclosures: post.disclosures || undefined,
           postId: post.id,
           approvalStatus: approval,
-          releaseStatus: post.has_release ? "saved" : "not_required",
+          releaseStatus: post.has_release
+            ? "saved"
+            : post.release_required && post.release_status !== "saved"
+              ? "save_failed"
+              : "not_required",
+          historyReadOnly:
+            role !== "salesperson" &&
+            (!currentPersonId || post.salesperson_id !== currentPersonId),
+          platformIds:
+            post.platform_ids && post.platform_ids.length > 0
+              ? post.platform_ids
+              : undefined,
+          platformCaptions: post.platform_captions,
+          primaryFormatId: post.primary_format_id || undefined,
+          imageAspectRatio: post.image_aspect_ratio || undefined,
         };
+        // A stored creative may come from another device/session, so it does
+        // not have the original capture needed for a true same-photo remix.
+        // Clear any stale capture and expose only safe share/export actions.
+        setSelectedImage(null);
         setGeneratedPost(generated);
         setStep(AppStep.RESULT);
+        onOpenCreative?.();
         toastSuccess("Creative reopened — share or export without regenerating.");
       } catch (err) {
         toastError(
@@ -176,7 +227,16 @@ export const PostHistory: React.FC = () => {
         setOpeningId(null);
       }
     },
-    [setGeneratedPost, setStep, toastError, toastSuccess],
+    [
+      onOpenCreative,
+      currentPersonId,
+      role,
+      setGeneratedPost,
+      setSelectedImage,
+      setStep,
+      toastError,
+      toastSuccess,
+    ],
   );
 
   const exportCsv = useCallback(() => {
@@ -253,11 +313,12 @@ export const PostHistory: React.FC = () => {
           <div>
             <h3 className="text-xl font-bold text-surface-50 flex items-center gap-2">
               <History className="h-5 w-5 text-primary-300" />
-              Post History
+              {role === "salesperson" ? "My posts" : "Post history"}
             </h3>
             <p className="text-xs text-surface-400">
-              {filtered.length} of {items.length}{" "}
-              {items.length === 1 ? "post" : "posts"} · open creatives to re-share
+              {filtered.length} visible · {items.length}{" "}
+              {items.length === 1 ? "post" : "posts"} loaded
+              {nextCursor ? " · older posts available" : " · archive up to date"}
             </p>
           </div>
         </div>
@@ -268,12 +329,14 @@ export const PostHistory: React.FC = () => {
             leftIcon={<Download className="h-3.5 w-3.5" />}
             onClick={exportCsv}
             disabled={filtered.length === 0}
-            title="Download visible rows as CSV for compliance / reporting"
+            title="Download the filtered rows currently loaded"
           >
             Export CSV
           </Button>
         </div>
       </div>
+
+      {dealer ? <LocalMediaArchive dealerId={dealer.id} /> : null}
 
       <div className="flex flex-col sm:flex-row gap-2">
         <div className="relative flex-1">
@@ -284,7 +347,7 @@ export const PostHistory: React.FC = () => {
             aria-label="Search post history"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name, VIN, salesperson, style, caption…"
+            placeholder="Search loaded posts by name, VIN, salesperson…"
             fullWidth
             className="bg-white/5 border-white/10 focus:border-primary-400 pl-9"
           />
@@ -307,7 +370,12 @@ export const PostHistory: React.FC = () => {
         </div>
       </div>
 
-      {error && <ErrorBanner message={error} onRetry={() => void load()} />}
+      {error && (
+        <ErrorBanner
+          message={error}
+          onRetry={() => void load(nextCursor || undefined)}
+        />
+      )}
 
       <AnimatePresence mode="wait">
         {loading && items.length === 0 ? (
@@ -344,7 +412,11 @@ export const PostHistory: React.FC = () => {
               <EmptyState
                 icon={History}
                 title="No posts logged yet"
-                description="Posts your team generates will show up here. New posts store the creative so you can reopen and share later."
+                description={
+                  role === "salesperson"
+                    ? "Your generated posts will show up here. New posts store the creative so you can reopen and share later."
+                    : "Posts your team generates will show up here. New posts store the creative so you can reopen and share later."
+                }
               />
             ) : (
               <EmptyState
@@ -357,100 +429,81 @@ export const PostHistory: React.FC = () => {
         ) : (
           <motion.div
             key="rows"
-            className="overflow-x-auto -mx-2"
+            className="space-y-2"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <table className="w-full text-sm min-w-[720px]">
-              <thead>
-                <tr className="text-[10px] uppercase tracking-wider text-surface-400">
-                  <th className="text-left py-2 px-2">Creative</th>
-                  <th className="text-left py-2 px-2">When</th>
-                  <th className="text-left py-2 px-2">Salesperson</th>
-                  <th className="text-left py-2 px-2">Customer</th>
-                  <th className="text-left py-2 px-2">Style / Tone</th>
-                  <th className="text-left py-2 px-2">Status</th>
-                  <th className="text-right py-2 px-2">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((p) => {
-                  const canOpen = Boolean(p.creative_image_url);
-                  const isOpening = openingId === p.id;
-                  return (
-                    <tr
-                      key={p.id}
-                      className="border-t border-white/5 hover:bg-white/[0.02] transition-colors"
-                    >
-                      <td className="py-2 px-2">
-                        {p.creative_image_url ? (
-                          <button
-                            type="button"
-                            onClick={() => void openCreative(p)}
-                            disabled={isOpening}
-                            className="h-12 w-12 overflow-hidden rounded-lg border border-white/10 bg-surface-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
-                            aria-label="Open creative"
-                          >
-                            <img
-                              src={p.creative_image_url}
-                              alt=""
-                              className="h-full w-full object-cover"
-                              loading="lazy"
-                            />
-                          </button>
-                        ) : (
-                          <div
-                            className="flex h-12 w-12 items-center justify-center rounded-lg border border-white/5 bg-surface-950/80 text-surface-600"
-                            title="No image stored (older log)"
-                          >
-                            <ImageIcon className="h-4 w-4" />
-                          </div>
-                        )}
-                      </td>
-                      <td className="py-2 px-2 text-surface-300 whitespace-nowrap">
-                        {formatWhen(p.generated_at)}
-                      </td>
-                      <td className="py-2 px-2 text-surface-50 font-semibold">
-                        {p.salesperson_name || (
-                          <span className="text-surface-500 italic">unattributed</span>
-                        )}
-                      </td>
-                      <td className="py-2 px-2 text-surface-200">
-                        {p.customer_name || "—"}
-                      </td>
-                      <td className="py-2 px-2 text-surface-300">
-                        <span className="text-[11px]">
-                          {p.style || "—"}
-                          {p.tone ? ` · ${p.tone}` : ""}
-                        </span>
-                        <div className="flex items-center gap-2 text-[10px] mt-0.5">
-                          {p.has_video && (
-                            <span className="inline-flex items-center gap-1 text-primary-200">
+            <div className="space-y-2 md:hidden">
+              {filtered.map((post) => {
+                const canOpen = Boolean(post.creative_image_url);
+                const isOpening = openingId === post.id;
+                return (
+                  <article
+                    key={post.id}
+                    className="flex min-w-0 gap-3 rounded-xl border border-white/8 bg-surface-950/35 p-3"
+                  >
+                    {canOpen ? (
+                      <button
+                        type="button"
+                        onClick={() => void openCreative(post)}
+                        disabled={isOpening}
+                        className="h-20 w-16 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-surface-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                        aria-label={`Open post from ${formatWhen(post.generated_at)}`}
+                      >
+                        <img
+                          src={post.creative_image_url}
+                          alt=""
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                      </button>
+                    ) : (
+                      <div
+                        className="flex h-20 w-16 shrink-0 items-center justify-center rounded-lg border border-white/5 bg-surface-950/80 text-surface-600"
+                        aria-label="No stored image"
+                      >
+                        <ImageIcon className="h-5 w-5" />
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-surface-50">
+                            {post.customer_name ||
+                              post.salesperson_name ||
+                              "Social post"}
+                          </p>
+                          <p className="mt-0.5 text-[11px] text-surface-400">
+                            {formatWhen(post.generated_at)}
+                            {role !== "salesperson" && post.salesperson_name
+                              ? ` · ${post.salesperson_name}`
+                              : ""}
+                            {role !== "salesperson" &&
+                            post.salesperson_name &&
+                            !post.attribution_authoritative
+                              ? " · legacy attribution"
+                              : ""}
+                          </p>
+                        </div>
+                        {statusBadge(post.approval_status)}
+                      </div>
+                      <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-surface-300">
+                        {post.caption || `${post.style || "Post"} · ${post.tone || ""}`}
+                      </p>
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2 text-[10px] text-surface-400">
+                          {post.has_video && (
+                            <span className="inline-flex items-center gap-1">
                               <Film className="h-3 w-3" /> video
                             </span>
                           )}
-                          {p.has_release && (
+                          {post.has_release && (
                             <span className="inline-flex items-center gap-1 text-success-200">
                               <ShieldCheck className="h-3 w-3" /> release
                             </span>
                           )}
-                          {p.scheduled_for && (
-                            <span className="inline-flex items-center gap-1 text-emerald-300">
-                              <Calendar className="h-3 w-3" /> scheduled
-                            </span>
-                          )}
                         </div>
-                      </td>
-                      <td className="py-2 px-2">
-                        {statusBadge(p.approval_status)}
-                        {p.approved_by && (
-                          <div className="text-[10px] text-surface-500">
-                            by {p.approved_by}
-                          </div>
-                        )}
-                      </td>
-                      <td className="py-2 px-2 text-right">
                         <Button
                           type="button"
                           size="sm"
@@ -463,21 +516,161 @@ export const PostHistory: React.FC = () => {
                               <ExternalLink className="h-3.5 w-3.5" />
                             )
                           }
-                          onClick={() => void openCreative(p)}
-                          title={
-                            canOpen
-                              ? "Open for share / export"
-                              : "No creative image on this older log"
-                          }
+                          onClick={() => void openCreative(post)}
                         >
                           {isOpening ? "Opening…" : "Open"}
                         </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full min-w-[720px] text-sm">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wider text-surface-400">
+                    <th className="text-left py-2 px-2">Creative</th>
+                    <th className="text-left py-2 px-2">When</th>
+                    <th className="text-left py-2 px-2">Salesperson</th>
+                    <th className="text-left py-2 px-2">Customer</th>
+                    <th className="text-left py-2 px-2">Style / Tone</th>
+                    <th className="text-left py-2 px-2">Status</th>
+                    <th className="text-right py-2 px-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((p) => {
+                    const canOpen = Boolean(p.creative_image_url);
+                    const isOpening = openingId === p.id;
+                    return (
+                      <tr
+                        key={p.id}
+                        className="border-t border-white/5 hover:bg-white/[0.02] transition-colors"
+                      >
+                        <td className="py-2 px-2">
+                          {p.creative_image_url ? (
+                            <button
+                              type="button"
+                              onClick={() => void openCreative(p)}
+                              disabled={isOpening}
+                              className="h-12 w-12 overflow-hidden rounded-lg border border-white/10 bg-surface-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                              aria-label="Open creative"
+                            >
+                              <img
+                                src={p.creative_image_url}
+                                alt=""
+                                className="h-full w-full object-cover"
+                                loading="lazy"
+                              />
+                            </button>
+                          ) : (
+                            <div
+                              className="flex h-12 w-12 items-center justify-center rounded-lg border border-white/5 bg-surface-950/80 text-surface-600"
+                              title="No image stored (older log)"
+                            >
+                              <ImageIcon className="h-4 w-4" />
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-2 px-2 text-surface-300 whitespace-nowrap">
+                          {formatWhen(p.generated_at)}
+                        </td>
+                        <td className="py-2 px-2 text-surface-50 font-semibold">
+                          {p.salesperson_name || (
+                            <span className="text-surface-500 italic">
+                              unattributed
+                            </span>
+                          )}
+                          {p.salesperson_name && !p.attribution_authoritative ? (
+                            <div className="text-[10px] font-normal text-warning-200">
+                              legacy attribution
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="py-2 px-2 text-surface-200">
+                          {p.customer_name || "—"}
+                        </td>
+                        <td className="py-2 px-2 text-surface-300">
+                          <span className="text-[11px]">
+                            {p.style || "—"}
+                            {p.tone ? ` · ${p.tone}` : ""}
+                          </span>
+                          <div className="flex items-center gap-2 text-[10px] mt-0.5">
+                            {p.has_video && (
+                              <span className="inline-flex items-center gap-1 text-primary-200">
+                                <Film className="h-3 w-3" /> video
+                              </span>
+                            )}
+                            {p.has_release && (
+                              <span className="inline-flex items-center gap-1 text-success-200">
+                                <ShieldCheck className="h-3 w-3" /> release
+                              </span>
+                            )}
+                            {p.scheduled_for && (
+                              <span className="inline-flex items-center gap-1 text-emerald-300">
+                                <Calendar className="h-3 w-3" /> scheduled
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2 px-2">
+                          {statusBadge(p.approval_status)}
+                          {p.approved_by && (
+                            <div className="text-[10px] text-surface-500">
+                              by {p.approved_by}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-2 px-2 text-right">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={canOpen ? "outline" : "ghost"}
+                            disabled={!canOpen || isOpening}
+                            leftIcon={
+                              isOpening ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <ExternalLink className="h-3.5 w-3.5" />
+                              )
+                            }
+                            onClick={() => void openCreative(p)}
+                            title={
+                              canOpen
+                                ? "Open for share / export"
+                                : "No creative image on this older log"
+                            }
+                          >
+                            {isOpening ? "Opening…" : "Open"}
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {nextCursor ? (
+              <div className="flex justify-center pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void load(nextCursor)}
+                  disabled={loadingMore}
+                  leftIcon={
+                    loadingMore ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <History className="h-4 w-4" />
+                    )
+                  }
+                >
+                  {loadingMore ? "Loading older posts…" : "Load older posts"}
+                </Button>
+              </div>
+            ) : null}
           </motion.div>
         )}
       </AnimatePresence>

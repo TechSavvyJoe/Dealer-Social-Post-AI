@@ -47,6 +47,21 @@ type Helpers = {
     unavailable: boolean;
   };
   logAuthEvent: (kind: string, options: Record<string, unknown>) => boolean;
+  resolvePostScenarioPolicy: (
+    scenarioId: string,
+    customScenariosJson: string,
+    customerName?: string,
+  ) => { ok: boolean; releaseRequired: boolean };
+  parsePostPlatformCaptions: (
+    rawValue: string,
+    allowedPlatformIds: string[],
+    selectedPlatformIds: string[],
+  ) => {
+    ok: boolean;
+    error?: string;
+    value?: Record<string, string>;
+    serialized?: string;
+  };
 };
 
 function loadPocketBaseCommonJs<T>(relativePath: string): T {
@@ -76,7 +91,10 @@ const inlineImage = {
   inlineData: { mimeType: "image/jpeg", data: "aGVsbG8=" },
 };
 
-function imageRequest(imageSize: "1K" | "2K" | "4K" = "2K") {
+function imageRequest(
+  imageSize: "1K" | "2K" | "4K" = "2K",
+  aspectRatio?: "1:1" | "9:16" | "16:9" | "4:3",
+) {
   return {
     contents: [
       {
@@ -85,7 +103,10 @@ function imageRequest(imageSize: "1K" | "2K" | "4K" = "2K") {
     ],
     generationConfig: {
       responseModalities: ["TEXT", "IMAGE"],
-      imageConfig: { imageSize },
+      imageConfig: {
+        imageSize,
+        ...(aspectRatio ? { aspectRatio } : {}),
+      },
       maxOutputTokens: 4096,
     },
   };
@@ -112,6 +133,122 @@ function veoRequest(durationSeconds = 6, resolution = "720p") {
 }
 
 describe("PocketBase request policies", () => {
+  it("derives photo-release requirements from only known server scenarios", () => {
+    expect(helpers.resolvePostScenarioPolicy("customer_delivery", "[]", "")).toEqual({
+      ok: true,
+      releaseRequired: true,
+    });
+    expect(helpers.resolvePostScenarioPolicy("new_arrival", "[]", "")).toEqual({
+      ok: true,
+      releaseRequired: false,
+    });
+    expect(helpers.resolvePostScenarioPolicy("new_arrival", "[]", "Mia")).toEqual({
+      ok: true,
+      releaseRequired: true,
+    });
+    expect(
+      helpers.resolvePostScenarioPolicy(
+        "custom_customer",
+        JSON.stringify([
+          { id: "custom_customer", requiresCustomer: true },
+          { id: "custom_inventory", requiresCustomer: false },
+        ]),
+        "",
+      ),
+    ).toEqual({ ok: true, releaseRequired: true });
+    expect(
+      helpers.resolvePostScenarioPolicy(
+        "custom_inventory",
+        JSON.stringify([{ id: "custom_inventory", requiresCustomer: false }]),
+        "",
+      ),
+    ).toEqual({ ok: true, releaseRequired: false });
+    expect(
+      helpers.resolvePostScenarioPolicy(
+        "custom_inventory",
+        JSON.stringify([{ id: "custom_inventory", requiresCustomer: false }]),
+        "Mia",
+      ),
+    ).toEqual({ ok: true, releaseRequired: true });
+    expect(
+      helpers.resolvePostScenarioPolicy("invented_client_scenario", "[]", ""),
+    ).toEqual({ ok: false, releaseRequired: true });
+    expect(helpers.resolvePostScenarioPolicy("", "[]", "Mia")).toEqual({
+      ok: true,
+      releaseRequired: true,
+    });
+  });
+
+  it("bounds platform captions to the selected, server-allowlisted destinations", () => {
+    const allowed = ["instagram_feed", "instagram_story", "tiktok"];
+    expect(
+      helpers.parsePostPlatformCaptions(
+        JSON.stringify({
+          instagram_story: "  Story copy  ",
+          tiktok: "TikTok copy",
+        }),
+        allowed,
+        ["instagram_story", "tiktok"],
+      ),
+    ).toEqual({
+      ok: true,
+      value: {
+        instagram_story: "Story copy",
+        tiktok: "TikTok copy",
+      },
+      serialized: JSON.stringify({
+        instagram_story: "Story copy",
+        tiktok: "TikTok copy",
+      }),
+    });
+    expect(
+      helpers.parsePostPlatformCaptions(
+        JSON.stringify({ instagram_feed: "Not selected" }),
+        allowed,
+        ["instagram_story"],
+      ),
+    ).toMatchObject({ ok: false });
+    expect(
+      helpers.parsePostPlatformCaptions(
+        JSON.stringify({ attacker_target: "No" }),
+        allowed,
+        ["instagram_story"],
+      ),
+    ).toMatchObject({ ok: false });
+    expect(
+      helpers.parsePostPlatformCaptions(
+        JSON.stringify({ instagram_story: "x".repeat(12001) }),
+        allowed,
+        ["instagram_story"],
+      ),
+    ).toMatchObject({ ok: false });
+  });
+
+  it("binds temporary photo releases to one session and expires every legacy orphan", () => {
+    const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        "pb_migrations/1750800200_harden_photo_release_ownership.js",
+      ),
+      "utf8",
+    );
+
+    expect(hook).toContain("owner_session_hash: ownerSessionHash");
+    expect(hook).toContain("expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000)");
+    expect(hook).toContain(
+      'helpers.normalizeReleaseIdentity(release.getString("customer_name"))',
+    );
+    expect(hook).toContain('helpers.normalizeReleaseVin(release.getString("vin"))');
+    expect(hook).toContain(
+      "A verified customer photo release is required before approval",
+    );
+    expect(hook).toContain('cronAdd("prune-unlinked-photo-releases"');
+    expect(migration).toContain("UPDATE photo_releases");
+    expect(migration).toContain("WHERE post_id = '' OR post_id IS NULL");
+    expect(migration).not.toContain("10000");
+  });
+
   it("matches the canonical Gemini task, model, and safety contract", () => {
     expect(policies.geminiModelPolicySnapshot()).toEqual(canonicalModelPolicy);
   });
@@ -383,6 +520,38 @@ describe("PocketBase request policies", () => {
       policies.buildGeminiProxyRequest(proImagePath, {
         ...imageRequest("2K"),
         tools: [{ codeExecution: {} }],
+      }),
+    ).toBeNull();
+  });
+
+  it("allows only the app's canonical image aspect ratios", () => {
+    for (const aspectRatio of ["1:1", "9:16", "16:9", "4:3"] as const) {
+      const request = imageRequest("2K", aspectRatio);
+      expect(policies.buildGeminiProxyRequest(proImagePath, request)).toEqual(
+        withServerSafety(request),
+      );
+    }
+
+    expect(
+      policies.buildGeminiProxyRequest(proImagePath, {
+        ...imageRequest("2K"),
+        generationConfig: {
+          ...imageRequest("2K").generationConfig,
+          imageConfig: { imageSize: "2K", aspectRatio: "3:7" },
+        },
+      }),
+    ).toBeNull();
+    expect(
+      policies.buildGeminiProxyRequest(proImagePath, {
+        ...imageRequest("2K"),
+        generationConfig: {
+          ...imageRequest("2K").generationConfig,
+          imageConfig: {
+            imageSize: "2K",
+            aspectRatio: "9:16",
+            cropMode: "cover",
+          },
+        },
       }),
     ).toBeNull();
   });
@@ -831,8 +1000,23 @@ describe("PocketBase authentication and people migration wiring", () => {
     );
     expect(hook).not.toContain("body.salesperson_id");
     expect(hook).not.toContain("body.salesperson_name");
+    expect(hook).toContain("attribution_authoritative: !!context.person");
+    expect(hook).toContain("isAuthoritativePostPerson(context, record)");
+    expect(hook).toContain("filterParts.push(`attribution_authoritative = true`)");
     expect(hook).toContain("pin_needs_distribution = true");
     expect(hook).toContain("payload.nextCursor");
     expect(hook).toContain("dealerName");
+  });
+
+  it("keeps scheduling owner-scoped even for managers viewing teammate history", () => {
+    const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
+    const scheduleRoute = hook.slice(
+      hook.indexOf('routerAdd("POST", "/api/app/posts/:id/schedule"'),
+      hook.indexOf('routerAdd("GET", "/api/app/posts/:id/status"'),
+    );
+
+    expect(scheduleRoute).toContain("isAuthoritativePostPerson(context, record)");
+    expect(scheduleRoute).toContain("if (!isOwner && !isSamePerson)");
+    expect(scheduleRoute).not.toContain("isManager");
   });
 });

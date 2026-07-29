@@ -38,6 +38,8 @@ jobs:
           node-version-file: .node-version
 
       - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master 2026-07-15
+        with:
+          version: 0.4.71
 
       - name: Refuse a superseded main release
         env:
@@ -213,6 +215,8 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }}
 
       - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master 2026-07-15
+        with:
+          version: 0.4.71
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -328,10 +332,10 @@ jobs:
           for attempt in $(seq 1 30); do
             if curl --silent --show-error --fail --max-time 10 \
               https://dealer-social-post-ai-production.fly.dev/api/app/health \
-              --output /tmp/fly-health.json; then
-              grep --fixed-strings '"ok":true' /tmp/fly-health.json
-              grep --fixed-strings '"status":"verified"' /tmp/fly-health.json
-              grep --fixed-strings "\"releaseSha\":\"${EXPECTED_RELEASE_SHA}\"" /tmp/fly-health.json
+              --output /tmp/fly-health.json &&
+              grep --quiet --fixed-strings '"ok":true' /tmp/fly-health.json &&
+              grep --quiet --fixed-strings '"status":"verified"' /tmp/fly-health.json &&
+              grep --quiet --fixed-strings "\"releaseSha\":\"${EXPECTED_RELEASE_SHA}\"" /tmp/fly-health.json; then
               ready=true
               break
             fi

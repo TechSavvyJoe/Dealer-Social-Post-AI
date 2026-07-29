@@ -7,7 +7,7 @@ import {
   EXPORT_FORMATS,
   ExportFormatId,
   downloadAllFormats,
-  renderAllFormats,
+  renderFormat,
 } from "../utils/multiFormatExport";
 import { orderExportFormatsByPreference } from "../services/platformCopy";
 import { triggerHapticFeedback } from "../utils/haptics";
@@ -30,7 +30,9 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
   sourceImageUrl,
   priorityFormatIds,
 }) => {
-  const [rendered, setRendered] = useState<Record<ExportFormatId, string> | null>(null);
+  const [rendered, setRendered] = useState<Partial<
+    Record<ExportFormatId, string>
+  > | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [isDownloadingAll, setIsDownloadingAll] = useState(false);
   const [individuallyDownloaded, setIndividuallyDownloaded] = useState<
@@ -53,8 +55,18 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
     let cancelled = false;
     (async () => {
       try {
-        const all = await renderAllFormats(sourceImageUrl);
-        if (!cancelled) setRendered(all);
+        setRendered({});
+        // Render one preview at a time in destination-priority order. This
+        // avoids allocating four high-resolution canvases simultaneously on
+        // memory-constrained iPhones while still progressively filling the UI.
+        for (const format of orderedFormats) {
+          const preview = await renderFormat(sourceImageUrl, format);
+          if (cancelled) return;
+          setRendered((current) => ({
+            ...(current || {}),
+            [format.id]: preview,
+          }));
+        }
       } catch (err) {
         if (!cancelled) {
           setRenderError(err instanceof Error ? err.message : String(err));
@@ -64,15 +76,16 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, sourceImageUrl]);
+  }, [isOpen, orderedFormats, sourceImageUrl]);
 
   const handleDownloadOne = (id: ExportFormatId) => {
     if (!rendered) return;
     const fmt = EXPORT_FORMATS.find((f) => f.id === id);
-    if (!fmt) return;
+    const preview = rendered[id];
+    if (!fmt || !preview) return;
     triggerHapticFeedback();
     const link = document.createElement("a");
-    link.href = rendered[id];
+    link.href = preview;
     link.download = fmt.filename;
     document.body.appendChild(link);
     link.click();

@@ -20,6 +20,7 @@ import {
 } from "../utils/multiFormatExport";
 import { dataUrlToBlob } from "../utils/imageUtils";
 import { fitCaptionToBudget } from "../utils/hashtags";
+import { downloadPreparedMediaFile, prepareMediaForSave } from "../utils/mediaSave";
 
 export type PublishStatus =
   | {
@@ -39,8 +40,10 @@ export type PublishStatus =
   | { kind: "error"; message: string };
 
 export interface PublishContent {
-  /** Final caption text with disclosures already appended. */
+  /** Editable caption body. Legacy callers may still include a disclosure marker. */
   text: string;
+  /** Immutable compliance footer; target fitting never truncates this block. */
+  disclosures?: string;
   /** Hashtags as a single space-separated string (may already be in `text`). */
   hashtags?: string;
   /** Source generated image as data URL (or http URL). */
@@ -204,9 +207,7 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
     handoff: "share-or-intent",
     hint: "Optional · most dealerships skip X · 280-char limit",
     webIntentUrl: (c) =>
-      `https://twitter.com/intent/tweet?text=${encodeURIComponent(
-        fitCaptionToBudget(c.text, 280),
-      )}`,
+      `https://twitter.com/intent/tweet?text=${encodeURIComponent(c.text)}`,
   },
   {
     id: "native_share",
@@ -433,15 +434,16 @@ const buildShareFile = async (
   content: PublishContent,
 ): Promise<File | null> => {
   if (target.supportsVideo && content.videoUrl) {
-    try {
-      const res = await fetch(content.videoUrl);
-      const blob = await res.blob();
-      return new File([blob], `dealer-social-post-${target.id}.mp4`, {
-        type: blob.type || "video/mp4",
-      });
-    } catch {
-      /* fall back to image */
-    }
+    // Use the same authenticated-fetch, MP4-signature, MIME, and extension
+    // validation as direct Save. Never disguise a 401/JSON body as an .mp4 or
+    // silently share the still image when the user selected a video.
+    return (
+      await prepareMediaForSave({
+        sourceUrl: content.videoUrl,
+        kind: "video",
+        basename: `dealer-social-post-${target.id}`,
+      })
+    ).file;
   }
 
   if (content.imageDataUrl) {
@@ -466,6 +468,50 @@ export interface PreparedPublishShare {
 }
 
 /**
+ * Fit only the editable body while preserving the complete compliance footer.
+ * If a destination cannot hold both, fail closed instead of publishing a
+ * legally incomplete disclosure.
+ */
+export const fitPublishCaptionToBudget = (
+  content: Pick<PublishContent, "text" | "disclosures">,
+  maxChars: number,
+): string => {
+  const legacyMarkerIndex = content.text.indexOf("— Disclosures —");
+  const body = (
+    legacyMarkerIndex >= 0 ? content.text.slice(0, legacyMarkerIndex) : content.text
+  ).trim();
+  const disclosure = (
+    content.disclosures ||
+    (legacyMarkerIndex >= 0 ? content.text.slice(legacyMarkerIndex) : "")
+  ).trim();
+  if (!disclosure) return fitCaptionToBudget(body, maxChars);
+
+  const canonicalDisclosure = disclosure.startsWith("— Disclosures —")
+    ? disclosure
+    : `— Disclosures —\n${disclosure}`;
+  const separator = body ? "\n\n" : "";
+  const bodyBudget = maxChars - canonicalDisclosure.length - separator.length;
+  if (bodyBudget < 1) {
+    throw new Error(
+      `Required compliance disclosures exceed this destination's ${maxChars}-character limit. Choose another destination or revise the advertised terms.`,
+    );
+  }
+  const fittedBody = fitCaptionToBudget(body, bodyBudget);
+  if (!fittedBody) {
+    throw new Error(
+      "The caption cannot fit alongside its required compliance disclosures. Revise the advertised terms before sharing.",
+    );
+  }
+  const combined = `${fittedBody}\n\n${canonicalDisclosure}`;
+  if (combined.length > maxChars) {
+    throw new Error(
+      "The caption cannot fit without truncating required compliance disclosures.",
+    );
+  }
+  return combined;
+};
+
+/**
  * Expensive media work belongs before the user presses Share now. In
  * particular, canvas rendering and video fetches can outlive Safari's
  * transient user-activation window.
@@ -476,8 +522,8 @@ export const preparePublishShare = async (
 ): Promise<PreparedPublishShare> => {
   const target = findTarget(targetId);
   if (!target) throw new Error("Unknown publish target");
-  const caption = fitCaptionToBudget(content.text, target.charBudget);
-  const scopedContent = { ...content, text: caption };
+  const caption = fitPublishCaptionToBudget(content, target.charBudget);
+  const scopedContent = { ...content, text: caption, disclosures: undefined };
   const file = await buildShareFile(target, scopedContent);
   return {
     target,
@@ -511,9 +557,16 @@ export const sharePrepared = async (
   const shareData: ShareData = { title: prepared.target.label };
   if (includeText) shareData.text = prepared.caption;
   if (prepared.file) {
-    const canShareFile =
-      typeof navigator.canShare !== "function" ||
-      navigator.canShare({ files: [prepared.file] });
+    let canShareFile = false;
+    try {
+      canShareFile =
+        typeof navigator.canShare !== "function" ||
+        navigator.canShare({ files: [prepared.file] });
+    } catch {
+      // Safari may throw for an unsupported or oversized file. Keep the
+      // prepared File available to the explicit Save media fallback.
+      canShareFile = false;
+    }
     if (canShareFile) shareData.files = [prepared.file];
   }
   if (!shareData.files && !includeText) {
@@ -562,10 +615,7 @@ export const copyPreparedCaption = (prepared: PreparedPublishShare): Promise<boo
 
 export const downloadPreparedMedia = (prepared: PreparedPublishShare): boolean => {
   if (!prepared.file) return false;
-  const url = URL.createObjectURL(prepared.file);
-  triggerDownload(url, prepared.file.name);
-  window.setTimeout(() => URL.revokeObjectURL(url), 4000);
-  return true;
+  return downloadPreparedMediaFile(prepared.file);
 };
 
 /** App/web handoff is intentionally a separate, explicit click after sharing. */
@@ -589,15 +639,13 @@ export const publishTo = async (
   try {
     const file = await buildShareFile(target, content);
 
-    const captionForShare = fitCaptionToBudget(content.text, target.charBudget);
+    const captionForShare = fitPublishCaptionToBudget(content, target.charBudget);
     const copied = await copyTextToClipboard(captionForShare);
-    content = { ...content, text: captionForShare };
+    content = { ...content, text: captionForShare, disclosures: undefined };
 
     const downloadFile = () => {
       if (!file) return;
-      const dlUrl = URL.createObjectURL(file);
-      triggerDownload(dlUrl, file.name);
-      setTimeout(() => URL.revokeObjectURL(dlUrl), 4000);
+      downloadPreparedMediaFile(file);
     };
 
     const webUrl = target.webIntentUrl?.(content) ?? null;

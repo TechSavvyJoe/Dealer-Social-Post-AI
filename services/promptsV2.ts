@@ -430,9 +430,7 @@ export const generateVideoPromptV2 = (
   const aspect =
     options.aspectPreference === "auto"
       ? "match the source photo aspect"
-      : options.aspectPreference === "1:1"
-        ? "9:16 or 16:9 letterbox (never crop faces or the vehicle)"
-        : String(options.aspectPreference);
+      : String(options.aspectPreference);
 
   return [
     `You are directing a premium automotive dealership SOCIAL video (Reels/TikTok/Facebook).

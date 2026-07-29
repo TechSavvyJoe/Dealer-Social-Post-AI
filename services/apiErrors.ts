@@ -45,7 +45,10 @@ const normalizeCode = (
   return undefined;
 };
 
-export const readApiError = async (response: Response): Promise<ApiError> => {
+export const readApiError = async (
+  response: Response,
+  options: { notifyAuth?: boolean; requestAuthEpoch?: number } = {},
+): Promise<ApiError> => {
   let payload: ApiErrorPayload = {};
   try {
     payload = (await response.json()) as ApiErrorPayload;
@@ -66,6 +69,14 @@ export const readApiError = async (response: Response): Promise<ApiError> => {
     response.statusText ||
     "Request failed";
 
+  if (
+    response.status === 401 &&
+    options.notifyAuth !== false &&
+    typeof options.requestAuthEpoch === "number"
+  ) {
+    notifySessionRejected(options.requestAuthEpoch);
+  }
+
   return new ApiError(message, {
     code,
     status: response.status,
@@ -77,3 +88,4 @@ export const asSessionErrorCode = (value: string | undefined): SessionErrorCode 
   value && SESSION_CODES.has(value as SessionErrorCode)
     ? (value as SessionErrorCode)
     : "UNAVAILABLE";
+import { notifySessionRejected } from "../utils/authBoundary";

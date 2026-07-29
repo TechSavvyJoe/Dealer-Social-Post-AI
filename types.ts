@@ -12,6 +12,11 @@ export enum AppStep {
 
 export type UserRole = "salesperson" | "dealer_admin" | "super_admin";
 export type ImageQualityTier = "standard" | "studio";
+/** Gemini image ratios that map to the app's supported social canvases. */
+export type ImageAspectRatio = "1:1" | "9:16" | "16:9" | "4:3";
+/** Exact export canvas selected as the primary generation target. */
+export type PrimaryImageFormatId =
+  "feed_square" | "story_vertical" | "marketplace" | "gbp";
 
 export enum StyleOption {
   Luxury = "Luxury & Elegance",
@@ -53,6 +58,16 @@ export enum VideoStyle {
   Blueprint = "Blueprint",
 }
 
+/**
+ * The AI works from a normalized, mobile-safe image while the untouched File
+ * remains available for recovery and an explicit Save to Photos action.
+ */
+export interface ImageSelection {
+  workingImage: string;
+  originalSource: string | Blob;
+  originalFilename?: string;
+}
+
 export interface GeneratedPost {
   image: string; // base64 data URL
   text: string;
@@ -66,6 +81,8 @@ export interface GeneratedPost {
    * post can never claim consent that the backend does not hold.
    */
   releaseStatus?: "not_required" | "saved" | "save_failed";
+  /** Manager/super-admin History view of another salesperson's immutable work. */
+  historyReadOnly?: boolean;
   /**
    * Required compliance disclosure footer, stored separately from `text` so
    * a salesperson can't silently delete it while editing the caption.
@@ -81,6 +98,10 @@ export interface GeneratedPost {
    * multi-format export and to label the caption pack.
    */
   platformIds?: string[];
+  /** Native canvas targeted during AI image generation. */
+  primaryFormatId?: PrimaryImageFormatId;
+  /** Provider-validated aspect ratio used for the primary generated image. */
+  imageAspectRatio?: ImageAspectRatio;
   /**
    * Per-platform caption variants keyed by publish target id
    * (e.g. `instagram_feed`, `tiktok`). Absent when only the primary caption
@@ -193,7 +214,8 @@ export interface User {
 export interface VideoRequestOptions {
   durationSeconds: number;
   soundtrack: "none" | "celebration" | "cinematic" | "anthemic" | "funk";
-  aspectPreference: "auto" | "16:9" | "9:16" | "1:1";
+  /** Veo-supported output ratios only; never label a landscape file as square. */
+  aspectPreference: "auto" | "16:9" | "9:16";
   resolution: "720p" | "1080p";
   pacing: "cinematic" | "snappy";
 }
@@ -206,4 +228,8 @@ export interface GenerationParams {
   creativeBrief?: string;
   /** Platforms selected in PostCustomizer ("Share to") for caption packs + export priority. */
   platformIds?: string[];
+  /** Exact export canvas selected from the destination mix. */
+  primaryFormatId?: PrimaryImageFormatId;
+  /** Native Gemini image ratio corresponding to `primaryFormatId`. */
+  imageAspectRatio?: ImageAspectRatio;
 }

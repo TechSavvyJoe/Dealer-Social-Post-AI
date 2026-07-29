@@ -28,6 +28,8 @@ jobs:
           node-version-file: .node-version
 
       - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master 2026-07-15
+        with:
+          version: 0.4.71
 
       - name: Identify the exact running production source
         id: source-release

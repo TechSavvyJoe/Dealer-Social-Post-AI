@@ -38,14 +38,19 @@ const installLoopbackSessionCookie = async (
   cookie: string,
 ) => {
   const [name, value] = cookie.split("=", 2);
-  const origin = new URL(page.url()).origin;
+  const parsed = new URL(page.url());
+  // WebKit can retain the production Secure cookie as a distinct cookie with
+  // the same name/domain/path. Remove it, then use the more-specific /api path
+  // so later production Path=/ refreshes cannot displace this loopback shim.
+  await context.clearCookies({ name });
   await context.addCookies([
     {
       name,
       value,
-      url: origin,
+      domain: parsed.hostname,
+      path: "/api",
       httpOnly: true,
-      secure: origin.startsWith("https:"),
+      secure: parsed.protocol === "https:",
       sameSite: "Lax",
     },
   ]);
@@ -223,7 +228,7 @@ test.describe("real PocketBase release flow", () => {
         payload: {
           task: "caption",
           errorCode: "SYNTHETIC_PROVIDER_FAILURE",
-          releaseSha: "ci-runtime-canary",
+          releaseSha: `ci-runtime-canary-${browserName}`,
           apiContractVersion: "2026-07-17.v2",
           dealerCode: "MustNeverPersist1",
           token: "MustNeverPersist2",
@@ -260,6 +265,10 @@ test.describe("real PocketBase release flow", () => {
       ),
     ).toBe(true);
 
+    // Health responses refresh the production Secure cookie. WebKit discards
+    // that cookie on loopback HTTP, so restore the equivalent loopback-only
+    // shim before the reload that proves session restoration.
+    await installLoopbackSessionCookie(context, page, adminCookie);
     await page.reload({ waitUntil: "networkidle" });
 
     await expect(page.getByRole("heading", { name: "System Admin" })).toBeVisible({
@@ -439,11 +448,11 @@ test.describe("real PocketBase release flow", () => {
       name: managerName,
       role: "manager",
     });
+    const managerCookie = await responseSessionCookie(managerLoginResponse);
+    await installLoopbackSessionCookie(managerContext, managerPage, managerCookie);
     await expect(managerPage.getByText("Manager dashboard")).toBeVisible({
       timeout: 15_000,
     });
-    const managerCookie = await responseSessionCookie(managerLoginResponse);
-    await installLoopbackSessionCookie(managerContext, managerPage, managerCookie);
 
     // Persist a meaningful settings edit through the manager-owned UI, then
     // prove both the refreshed session payload and a full application reload
@@ -575,6 +584,9 @@ test.describe("real PocketBase release flow", () => {
         style: "Modern",
         tone: "Excited",
         caption: "Synthetic attribution canary. No provider call required.",
+        platform_ids: JSON.stringify(["instagram_story", "tiktok"]),
+        primary_format_id: "story_vertical",
+        image_aspect_ratio: "9:16",
       },
     });
     expect(createPostResponse.status()).toBe(200);
@@ -582,6 +594,36 @@ test.describe("real PocketBase release flow", () => {
     expect(createdPost.dealer).toBe(dealerId);
     const createdPostId = String(createdPost.id);
     expect(createdPostId).toMatch(/^[a-z0-9]{15}$/);
+    expect(createdPost).toMatchObject({
+      platform_ids: ["instagram_story", "tiktok"],
+      primary_format_id: "story_vertical",
+      image_aspect_ratio: "9:16",
+    });
+
+    const salespersonHistoryResponse = await salespersonPage.request.get(
+      "/api/app/posts?limit=1000",
+      { headers: { Cookie: salespersonCookie } },
+    );
+    expect(salespersonHistoryResponse.status()).toBe(200);
+    expect(
+      (await responseHeaders(salespersonHistoryResponse))["cache-control"],
+    ).toContain("no-store");
+    const salespersonHistory = (await salespersonHistoryResponse.json()) as {
+      items: JsonObject[];
+    };
+    expect(
+      salespersonHistory.items.find((item) => item.id === createdPostId),
+    ).toMatchObject({
+      dealer: dealerId,
+      salesperson_id: salespersonId,
+      salesperson_name: salespersonName,
+      platform_ids: ["instagram_story", "tiktok"],
+      primary_format_id: "story_vertical",
+      image_aspect_ratio: "9:16",
+    });
+    expect(
+      salespersonHistory.items.every((item) => item.salesperson_id === salespersonId),
+    ).toBe(true);
 
     const managerHistoryResponse = await managerPage.request.get(
       "/api/app/posts?limit=1000",
@@ -598,6 +640,9 @@ test.describe("real PocketBase release flow", () => {
       dealer: dealerId,
       salesperson_id: salespersonId,
       salesperson_name: salespersonName,
+      platform_ids: ["instagram_story", "tiktok"],
+      primary_format_id: "story_vertical",
+      image_aspect_ratio: "9:16",
     });
     expect(authoritativePost?.salesperson_id).not.toBe(managerId);
     expect(authoritativePost?.salesperson_name).not.toBe(spoofedSalespersonName);
@@ -656,6 +701,7 @@ test.describe("real PocketBase release flow", () => {
 
     // Start and exit a real salesperson impersonation. On loopback, install the
     // newly minted cookie before the exit action for the same Secure-cookie reason.
+    const preImpersonationAdminCookie = adminCookie;
     const salespersonRow = rosterRow(page, salespersonName);
     const impersonatePromise = page.waitForResponse(
       (response) =>
@@ -673,6 +719,31 @@ test.describe("real PocketBase release flow", () => {
       role: "salesperson",
     });
     const impersonationCookie = await responseSessionCookie(impersonateResponse);
+    await installLoopbackSessionCookie(context, page, impersonationCookie);
+
+    // The source bearer is parked while its child is active. Rejecting a copied
+    // source token prevents concurrent direct admin use, but must not invalidate
+    // the live child session needed to exit safely.
+    const parkedSourceResponse = await page.request.get("/api/app/session", {
+      headers: { Cookie: preImpersonationAdminCookie },
+    });
+    expect(parkedSourceResponse.status()).toBe(401);
+    const parkedClearCookie =
+      (await responseHeaders(parkedSourceResponse))["set-cookie"] || "";
+    expect(parkedClearCookie).toContain("dealer_session=");
+    expect(parkedClearCookie.toLowerCase()).toContain("max-age=0");
+
+    // APIRequestContext applies Set-Cookie responses to the browser context, so
+    // restore the child shim before proving the child remains authoritative.
+    await installLoopbackSessionCookie(context, page, impersonationCookie);
+    const activeChildResponse = await page.request.get("/api/app/session", {
+      headers: { Cookie: impersonationCookie },
+    });
+    expect(activeChildResponse.status()).toBe(200);
+    expect((await activeChildResponse.json()) as JsonObject).toMatchObject({
+      role: "salesperson",
+      is_impersonation: true,
+    });
     await installLoopbackSessionCookie(context, page, impersonationCookie);
 
     const impersonationBanner = page
@@ -694,7 +765,18 @@ test.describe("real PocketBase release flow", () => {
     expect(restored.role).toBe("super_admin");
     expect(restored.is_impersonation).toBe(false);
     adminCookie = await responseSessionCookie(exitResponse);
+    expect(adminCookie).not.toBe(preImpersonationAdminCookie);
+    expect(adminCookie).not.toBe(impersonationCookie);
     await installLoopbackSessionCookie(context, page, adminCookie);
+
+    // Exiting mints a new admin bearer; the copied pre-impersonation source
+    // token never becomes valid again.
+    const retiredSourceResponse = await page.request.get("/api/app/session", {
+      headers: { Cookie: preImpersonationAdminCookie },
+    });
+    expect(retiredSourceResponse.status()).toBe(401);
+    await installLoopbackSessionCookie(context, page, adminCookie);
+
     await expect(page.getByRole("heading", { name: "System Admin" })).toBeVisible({
       timeout: 15_000,
     });

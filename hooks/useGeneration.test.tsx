@@ -19,14 +19,18 @@ const mocks = vi.hoisted(() => ({
   generateSocialPostText: vi.fn(),
   generateSocialPostTextDetailed: vi.fn(),
   editSocialPostText: vi.fn(),
+  editSocialPostTextDetailed: vi.fn(),
   generatePostVideo: vi.fn(),
   loadGeminiService: vi.fn(),
   logPost: vi.fn(),
+  renderFormat: vi.fn(async (source: string) => source),
 }));
 
 vi.mock("../stores/appStore", () => ({
-  useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector(mocks.store),
+  useAppStore: Object.assign(
+    (selector: (state: Record<string, unknown>) => unknown) => selector(mocks.store),
+    { getState: () => mocks.store },
+  ),
 }));
 
 vi.mock("./useGemini", () => ({
@@ -56,6 +60,16 @@ vi.mock("../services/photoReleases", () => ({
 vi.mock("../utils/telemetry", () => ({
   logEvent: vi.fn(),
   logError: vi.fn(),
+}));
+
+vi.mock("../utils/multiFormatExport", () => ({
+  EXPORT_FORMATS: [
+    { id: "story_vertical", width: 1080, height: 1920 },
+    { id: "feed_square", width: 1080, height: 1080 },
+    { id: "marketplace", width: 1200, height: 628 },
+    { id: "gbp", width: 1200, height: 900 },
+  ],
+  renderFormat: mocks.renderFormat,
 }));
 
 const imageMeta = {
@@ -133,6 +147,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       },
       preferredTone: ToneOption.Professional,
       imageQualityTier: "studio",
+      authEpoch: 1,
       setGeneratedPost: mocks.setGeneratedPost,
       setGenerationParams: mocks.setGenerationParams,
       setError: mocks.setError,
@@ -149,6 +164,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       generateSocialPostText: mocks.generateSocialPostText,
       generateSocialPostTextDetailed: mocks.generateSocialPostTextDetailed,
       editSocialPostText: mocks.editSocialPostText,
+      editSocialPostTextDetailed: mocks.editSocialPostTextDetailed,
       generatePostVideo: mocks.generatePostVideo,
     });
   });
@@ -168,10 +184,83 @@ describe("useGeneration model-tier and provenance wiring", () => {
     });
 
     expect(mocks.generateSocialPost).toHaveBeenCalledTimes(2);
-    expect(mocks.generateSocialPost.mock.calls[0].at(-1)).toBe("studio");
-    expect(mocks.generateSocialPost.mock.calls[1].at(-1)).toBe("studio");
-    expect(mocks.generateFunSocialPostImage.mock.calls[0].at(-1)).toBe("studio");
-    expect(mocks.editSocialPostImage.mock.calls[0].at(-1)).toBe("studio");
+    expect(mocks.generateSocialPost.mock.calls[0].at(-2)).toBe("studio");
+    expect(mocks.generateSocialPost.mock.calls[1].at(-2)).toBe("studio");
+    expect(mocks.generateSocialPost.mock.calls[0].at(-1)).toBe("9:16");
+    expect(mocks.generateSocialPost.mock.calls[1].at(-1)).toBe("9:16");
+    expect(mocks.generateFunSocialPostImage.mock.calls[0].at(-2)).toBe("studio");
+    expect(mocks.generateFunSocialPostImage.mock.calls[0].at(-1)).toBe("9:16");
+    expect(mocks.editSocialPostImage.mock.calls[0].at(-2)).toBe("studio");
+    expect(mocks.editSocialPostImage.mock.calls[0].at(-1)).toBe("9:16");
+    expect(mocks.renderFormat).toHaveBeenCalledTimes(4);
+
+    cleanup();
+  });
+
+  it("derives and persists the native primary image profile from destinations", async () => {
+    const { result, cleanup } = renderGeneration();
+
+    await act(async () => {
+      await result.current.handleGenerate(
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Alex",
+        undefined,
+        undefined,
+        undefined,
+        ["gbp"],
+      );
+    });
+
+    expect(mocks.generateSocialPost.mock.calls[0].at(-1)).toBe("4:3");
+    expect(mocks.setGenerationParams).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platformIds: ["gbp"],
+        primaryFormatId: "gbp",
+        imageAspectRatio: "4:3",
+      }),
+    );
+    expect(mocks.setGeneratedPost.mock.calls.at(-1)?.[0]).toMatchObject({
+      primaryFormatId: "gbp",
+      imageAspectRatio: "4:3",
+    });
+
+    cleanup();
+  });
+
+  it("persists disclosures triggered only by a platform caption variant", async () => {
+    mocks.generateSocialPostText.mockResolvedValue(
+      JSON.stringify({
+        facebook_feed: "Lease for $299/mo with approved credit.",
+        instagram_feed: "A great delivery day at Example Motors.",
+      }),
+    );
+    const { result, cleanup } = renderGeneration();
+
+    await act(async () => {
+      await result.current.handleGenerate(
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Alex",
+        undefined,
+        undefined,
+        undefined,
+        ["facebook_feed", "instagram_feed"],
+      );
+    });
+
+    const finalPost = mocks.setGeneratedPost.mock.calls.at(-1)?.[0] as
+      GeneratedPost | undefined;
+    expect(finalPost?.text).toContain("Generated caption");
+    expect(finalPost?.text).not.toContain("— Disclosures —");
+    expect(finalPost?.platformCaptions?.facebook_feed).toContain("$299/mo");
+    expect(finalPost?.disclosures).toContain("Lease offer with approved credit");
+    expect(mocks.logPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        disclosures: expect.stringContaining("Lease offer with approved credit"),
+      }),
+      1,
+    );
 
     cleanup();
   });
@@ -262,4 +351,47 @@ describe("useGeneration model-tier and provenance wiring", () => {
       cleanup();
     },
   );
+
+  it("edits the visible caption source and persists the returned replacement", async () => {
+    mocks.editSocialPostTextDetailed.mockResolvedValue({
+      text: "A warmer thank-you for a wonderful delivery day.",
+      captionSource: "ai",
+      aiMeta: {
+        task: "caption_edit",
+        tier: "fast",
+        provider: "gemini",
+        model: "gemini-3.5-flash-lite",
+        fallbackCount: 0,
+        lastSuccessAt: "2026-07-28T16:00:00.000Z",
+      },
+    });
+    const { result, cleanup } = renderGeneration();
+
+    let replacement = "";
+    await act(async () => {
+      replacement = await result.current.handleEditText(
+        "Make it warmer and add a thank-you.",
+        "The salesperson's current manual caption.",
+      );
+    });
+
+    expect(mocks.editSocialPostTextDetailed).toHaveBeenCalledWith(
+      "The salesperson's current manual caption.",
+      "Make it warmer and add a thank-you.",
+      ToneOption.Professional,
+    );
+    expect(replacement).toContain("A warmer thank-you for a wonderful delivery day.");
+    expect(mocks.setGeneratedPost.mock.calls.at(-1)?.[0]).toMatchObject({
+      text: replacement,
+      captionSource: "ai",
+      aiMeta: {
+        caption: {
+          task: "caption_edit",
+          model: "gemini-3.5-flash-lite",
+        },
+      },
+    });
+
+    cleanup();
+  });
 });

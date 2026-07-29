@@ -1,4 +1,5 @@
 import modelPolicyJson from "../config/gemini-model-policy.json";
+import type { ImageAspectRatio } from "../types";
 
 export type ModelTaskName =
   | "caption"
@@ -33,6 +34,7 @@ interface ModelPolicyDocument {
     videoQuality: string;
   };
   tasks: Record<ModelTaskName, ModelPolicyTask>;
+  allowedImageAspectRatios: readonly string[];
   allowedRequestFields: Record<string, Record<string, readonly string[]>>;
   requestLimits: Record<string, number>;
   safetySettings: ReadonlyArray<{
@@ -47,6 +49,12 @@ interface ModelPolicyDocument {
  */
 export const MODEL_POLICY = modelPolicyJson as ModelPolicyDocument;
 export const MODEL_POLICY_VERSION = String(MODEL_POLICY.version);
+export const ALLOWED_IMAGE_ASPECT_RATIOS =
+  MODEL_POLICY.allowedImageAspectRatios as readonly ImageAspectRatio[];
+
+export const isAllowedImageAspectRatio = (value: unknown): value is ImageAspectRatio =>
+  typeof value === "string" &&
+  ALLOWED_IMAGE_ASPECT_RATIOS.includes(value as ImageAspectRatio);
 
 export type ImageGenerationTier = "standard" | "studio";
 export type ModelProvider =

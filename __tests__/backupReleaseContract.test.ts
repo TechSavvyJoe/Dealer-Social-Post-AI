@@ -7,7 +7,10 @@ import {
   bindHealthToFlyIdentity,
   resolveFlyMachineIdentity,
 } from "../scripts/resolve-fly-backup-source.mjs";
-import { planToolOwnedPocketBaseBackupCleanup } from "../scripts/pocketbase-r2-backup.mjs";
+import {
+  planToolOwnedPocketBaseBackupCleanup,
+  planToolOwnedR2BackupCleanup,
+} from "../scripts/pocketbase-r2-backup.mjs";
 
 const releaseSha = "7".repeat(40);
 const imageDigest = `sha256:${"a".repeat(64)}`;
@@ -261,6 +264,33 @@ describe("Fly backup source identity", () => {
       createFlow.indexOf("await pruneToolOwnedPocketBaseBackups(token);"),
     ).toBeLessThan(createFlow.indexOf('method: "POST"'));
     expect(source).toContain("await retainOnlyCurrentEmergencyBackup(token, name)");
+  });
+
+  it("retains only the newest tool-owned R2 archives without touching manual names", () => {
+    const prefix = "dealer-social-post-ai/pocketbase";
+    const toolOwned = Array.from({ length: 32 }, (_, index) => ({
+      key: `${prefix}/dspai_tool_20260717t${String(index).padStart(
+        9,
+        "0",
+      )}z_abcdef123456.zip`,
+    }));
+    const inventory = [
+      ...toolOwned,
+      { key: `${prefix}/manual-dashboard-backup.zip` },
+      { key: `${prefix}/dspai_20260713t123456789z_legacy.zip` },
+      { key: `another-prefix/dspai_tool_20260717t999999999z_abcdef123456.zip` },
+    ];
+
+    const orderedToolKeys = planToolOwnedR2BackupCleanup(inventory, prefix);
+    expect(orderedToolKeys).toHaveLength(32);
+    expect(orderedToolKeys.slice(30)).toEqual([
+      `${prefix}/dspai_tool_20260717t000000001z_abcdef123456.zip`,
+      `${prefix}/dspai_tool_20260717t000000000z_abcdef123456.zip`,
+    ]);
+    expect(orderedToolKeys).not.toContain(`${prefix}/manual-dashboard-backup.zip`);
+    expect(orderedToolKeys).not.toContain(
+      `${prefix}/dspai_20260713t123456789z_legacy.zip`,
+    );
   });
 
   it("keeps pre-v2 revocation schema-safe and rollback above the auth security floor", () => {

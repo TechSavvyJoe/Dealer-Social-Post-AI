@@ -4,9 +4,12 @@ import { fileToNormalizedDataUrl } from "../utils/imageUtils";
 import { WebcamCapture } from "./WebcamCapture";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Button } from "./ui/Button";
+import { useAppStore } from "../stores/appStore";
+import { RecentCaptureShelf } from "./RecentCaptureShelf";
+import type { ImageSelection } from "../types";
 
 interface ImageInputProps {
-  onImageSelected: (imageSrc: string) => void;
+  onImageSelected: (selection: ImageSelection) => void;
   /** @deprecated Capture is the workflow home; exit is owned by the header. */
   onClose?: () => void;
 }
@@ -18,6 +21,7 @@ const isMobileDevice = () => {
 };
 
 export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) => {
+  const dealerId = useAppStore((state) => state.currentDealer?.id || "");
   const [error, setError] = useState<string | null>(null);
   const [showWebcam, setShowWebcam] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
@@ -35,7 +39,8 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
 
   const processFile = useCallback(
     async (file: File) => {
-      if (!file.type.startsWith("image/")) {
+      const hasImageExtension = /\.(?:avif|heic|heif|jpe?g|png|webp)$/i.test(file.name);
+      if (!file.type.startsWith("image/") && !hasImageExtension) {
         setError("Invalid file type. Please use an image file.");
         return;
       }
@@ -56,10 +61,19 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
 
         // The global crop/review dialog is the single review surface for every
         // source. Calling it directly avoids two sequential confirmation steps.
-        onImageSelected(dataUrl);
+        onImageSelected({
+          workingImage: dataUrl,
+          originalSource: file,
+          originalFilename: file.name,
+        });
       } catch (err) {
         console.error("Error reading file:", err);
-        setError("Could not read the selected image file. Please try again.");
+        const message = err instanceof Error ? err.message : "";
+        setError(
+          /HEI[CF]/i.test(message)
+            ? message
+            : "Could not read the selected image file. Please try again.",
+        );
       } finally {
         setIsProcessing(false);
       }
@@ -157,7 +171,13 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
       <WebcamCapture
         onImageSelected={(imageSrc) => {
           setShowWebcam(false);
-          onImageSelected(imageSrc);
+          onImageSelected({
+            workingImage: imageSrc,
+            originalSource: imageSrc,
+            originalFilename: `dealer-photo-${new Date()
+              .toISOString()
+              .slice(0, 10)}.jpg`,
+          });
         }}
         onClose={() => setShowWebcam(false)}
       />
@@ -246,7 +266,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
 
           <div className="absolute left-6 right-6 top-6 flex items-center justify-between text-[11px] font-medium tracking-[0.12em] text-surface-500">
             <span>MEDIA BAY 01</span>
-            <span>JPG · PNG · HEIC</span>
+            <span>JPG · PNG · WEBP · HEIC*</span>
           </div>
 
           <div
@@ -309,10 +329,14 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
               <li>Keep faces and the vehicle fully in frame.</li>
               <li>Avoid harsh backlight and visible paperwork.</li>
               <li>You’ll review the photo before anything is generated.</li>
+              <li>* HEIC opens when the current device/browser supports it.</li>
             </ul>
           </div>
         </aside>
       </div>
+      {dealerId ? (
+        <RecentCaptureShelf dealerId={dealerId} onSelect={onImageSelected} />
+      ) : null}
     </div>
   );
 });

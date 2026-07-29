@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
+  createVideoBlobUrl,
+  editSocialPostTextDetailed,
+  fetchVideoThroughProxy,
   generateFunSocialPostImage,
   generateSocialPost,
   generatePostVideo,
@@ -39,6 +42,35 @@ vi.mock("../utils/imageUtils", () => ({
   resolveVeoAspect: () => "9:16" as const,
 }));
 
+const makeMp4Bytes = (size = 2048): Uint8Array => {
+  const bytes = new Uint8Array(size);
+  // ISO-BMFF file-type box: 4-byte box size followed by "ftyp" + major brand.
+  bytes.set([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+  return bytes;
+};
+
+const stubLoadedVideoImage = () => {
+  vi.stubGlobal(
+    "Image",
+    class {
+      onload: () => void = () => {};
+      onerror: () => void = () => {};
+      width = 100;
+      height = 100;
+      private value = "";
+
+      set src(value: string) {
+        this.value = value;
+        queueMicrotask(() => this.onload());
+      }
+
+      get src(): string {
+        return this.value;
+      }
+    },
+  );
+};
+
 /**
  * These tests pin the model-routing behaviour after the 2026-05-27 refactor
  * that moved hardcoded model IDs into `services/modelConfig.ts`. The asserts
@@ -77,6 +109,7 @@ describe("GeminiService model routing", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -119,6 +152,29 @@ describe("GeminiService model routing", () => {
       responseModalities: ["TEXT", "IMAGE"],
       imageConfig: { imageSize: "2K" },
       maxOutputTokens: 4096,
+    });
+  });
+
+  it("forwards the selected primary canvas as a Gemini image aspect ratio", async () => {
+    await generateSocialPost(
+      "data:image/jpeg;base64,fake",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Vertical Test Dealer",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "standard",
+      "9:16",
+    );
+
+    const imageCall = mockGenerateContent.mock.calls.find(
+      (call) => call[0].model === TASKS.image_standard.primary,
+    );
+    expect(imageCall?.[0].generationConfig.imageConfig).toEqual({
+      imageSize: "2K",
+      aspectRatio: "9:16",
     });
   });
 
@@ -317,6 +373,26 @@ describe("GeminiService model routing", () => {
     expect(result.text).toContain("Fallback Motors");
   });
 
+  it("rejects an AI edit that returns the original caption unchanged", async () => {
+    const original = "Congratulations on your new vehicle! #DeliveryDay";
+    mockGenerateContent.mockResolvedValue({
+      text: () => `  ${original.toLocaleUpperCase()}  `,
+    });
+
+    await expect(
+      editSocialPostTextDetailed(
+        original,
+        "Make it warmer and thank the customer.",
+        ToneOption.Family,
+      ),
+    ).rejects.toThrow("AI returned the caption without applying the requested edit");
+
+    expect(mockGenerateContent).toHaveBeenCalledTimes(TASKS.caption_edit.models.length);
+    expect(mockGenerateContent.mock.calls.map(([request]) => request.model)).toEqual(
+      TASKS.caption_edit.models,
+    );
+  });
+
   it("hits the Veo predictLongRunning endpoint for video generation", async () => {
     vi.stubGlobal(
       "fetch",
@@ -341,7 +417,8 @@ describe("GeminiService model routing", () => {
                   generatedSamples: [
                     {
                       video: {
-                        uri: "https://generativelanguage.googleapis.com/v1beta/files/test-video:download",
+                        downloadUri:
+                          "https://generativelanguage.googleapis.com/v1beta/files/test-video",
                       },
                     },
                   ],
@@ -352,7 +429,11 @@ describe("GeminiService model routing", () => {
         .mockResolvedValueOnce({
           ok: true,
           blob: () =>
-            Promise.resolve(new Blob(["fake-video-data"], { type: "video/mp4" })),
+            Promise.resolve(
+              new Blob([makeMp4Bytes().buffer as ArrayBuffer], {
+                type: "video/mp4",
+              }),
+            ),
         }),
     );
     vi.spyOn(global.URL, "createObjectURL").mockReturnValue("blob:fake-video-url");
@@ -413,4 +494,305 @@ describe("GeminiService model routing", () => {
     );
     expect(result).toBe("blob:fake-video-url");
   }, 30000);
+
+  it("does not issue a second billable start after an ambiguous network failure", async () => {
+    const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+    stubLoadedVideoImage();
+
+    await expect(
+      generatePostVideo("data:image/jpeg;base64,fake", VideoStyle.GoldenRadiance, {
+        durationSeconds: 8,
+        aspectPreference: "auto",
+        resolution: "720p",
+        soundtrack: "none",
+        pacing: "snappy",
+      }),
+    ).rejects.toThrow(
+      "The start request was not retried to prevent a duplicate paid video job.",
+    );
+
+    const startCalls = fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).includes(":predictLongRunning") && init?.method === "POST",
+    );
+    expect(startCalls).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [502, "Bad Gateway", "Could not secure provider resource"],
+    [503, "Service Unavailable", "provider overloaded"],
+  ])(
+    "does not retry a start when the proxy returns ambiguous %s",
+    async (status, statusText, responseText) => {
+      const fetchMock = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status,
+        statusText,
+        text: async () => responseText,
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      stubLoadedVideoImage();
+
+      await expect(
+        generatePostVideo("data:image/jpeg;base64,fake", VideoStyle.GoldenRadiance, {
+          durationSeconds: 8,
+          aspectPreference: "auto",
+          resolution: "720p",
+          soundtrack: "none",
+          pacing: "snappy",
+        }),
+      ).rejects.toThrow(`Video generation failed (${status})`);
+
+      const startCalls = fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          String(url).includes(":predictLongRunning") && init?.method === "POST",
+      );
+      expect(startCalls).toHaveLength(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("retries polling for the accepted operation without restarting Veo", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ name: "operations/poll-retry-123" }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        text: async () => "temporary poll failure",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          name: "operations/poll-retry-123",
+          done: true,
+          response: {
+            generateVideoResponse: {
+              generatedSamples: [
+                {
+                  video: {
+                    uri: "https://generativelanguage.googleapis.com/v1beta/files/poll-retry-video:download",
+                  },
+                },
+              ],
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        blob: async () =>
+          new Blob([makeMp4Bytes().buffer as ArrayBuffer], {
+            type: "video/mp4",
+          }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(global.URL, "createObjectURL").mockReturnValue("blob:poll-retry-video");
+    stubLoadedVideoImage();
+
+    const generation = generatePostVideo(
+      "data:image/jpeg;base64,fake",
+      VideoStyle.GoldenRadiance,
+      {
+        durationSeconds: 8,
+        aspectPreference: "auto",
+        resolution: "720p",
+        soundtrack: "none",
+        pacing: "snappy",
+      },
+    );
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await vi.advanceTimersByTimeAsync(5000);
+    await expect(generation).resolves.toBe("blob:poll-retry-video");
+
+    const startCalls = fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).includes(":predictLongRunning") && init?.method === "POST",
+    );
+    const pollCalls = fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).includes("/operations/") && init?.method === "GET",
+    );
+    expect(startCalls).toHaveLength(1);
+    expect(pollCalls).toHaveLength(2);
+  });
+
+  it("accepts inline base64 only when it contains an MP4 ftyp header", () => {
+    const createObjectUrl = vi
+      .spyOn(global.URL, "createObjectURL")
+      .mockReturnValue("blob:valid-inline-video");
+    const encoded = Buffer.from(makeMp4Bytes()).toString("base64");
+
+    expect(createVideoBlobUrl(encoded)).toBe("blob:valid-inline-video");
+    expect(createObjectUrl).toHaveBeenCalledTimes(1);
+    expect(createObjectUrl.mock.calls[0]?.[0]).toBeInstanceOf(Blob);
+    expect((createObjectUrl.mock.calls[0]?.[0] as Blob).type).toBe("video/mp4");
+  });
+
+  it("normalizes a valid MP4 data URI to a CSP-safe blob URL", async () => {
+    const createObjectUrl = vi
+      .spyOn(global.URL, "createObjectURL")
+      .mockReturnValue("blob:validated-data-uri");
+    const encoded = Buffer.from(makeMp4Bytes()).toString("base64");
+
+    await expect(
+      fetchVideoThroughProxy(`data:video/mp4;base64,${encoded}`, 0),
+    ).resolves.toBe("blob:validated-data-uri");
+    expect(createObjectUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "video/mp4" }),
+    );
+  });
+
+  it("rejects a non-video data URI instead of returning a CSP-blocked URL", async () => {
+    const encoded = Buffer.from(
+      JSON.stringify({ error: "no video" }).repeat(80),
+    ).toString("base64");
+
+    await expect(
+      fetchVideoThroughProxy(`data:application/json;base64,${encoded}`, 0),
+    ).rejects.toThrow("Generated video data is not valid MP4 media.");
+  });
+
+  it.each([
+    ["JSON", JSON.stringify({ error: "provider unavailable" }).repeat(80)],
+    ["plain text", "upstream gateway failure ".repeat(100)],
+  ])("rejects %s disguised as inline base64 video", (_label, payload) => {
+    const encoded = Buffer.from(payload).toString("base64");
+
+    expect(() => createVideoBlobUrl(encoded)).toThrow(
+      "Generated video data is not valid MP4 media.",
+    );
+  });
+
+  it("validates only a 16-byte slice and never reads the full video Blob", async () => {
+    const header = makeMp4Bytes().slice(0, 16);
+    const fullArrayBuffer = vi.fn(async () => {
+      throw new Error("full video must not be read");
+    });
+    const headerArrayBuffer = vi.fn(async () => header.buffer);
+    const retypedBlob = {
+      size: 5_000_000,
+      type: "video/mp4",
+    } as Blob;
+    const slice = vi.fn((start?: number, end?: number, type?: string) => {
+      if (start === 0 && end === 16) {
+        return {
+          size: 16,
+          type: "",
+          arrayBuffer: headerArrayBuffer,
+        } as unknown as Blob;
+      }
+      if (start === 0 && end === 5_000_000 && type === "video/mp4") {
+        return retypedBlob;
+      }
+      throw new Error("unexpected Blob slice");
+    });
+    const rawBlob = {
+      size: 5_000_000,
+      type: "application/octet-stream",
+      arrayBuffer: fullArrayBuffer,
+      slice,
+    } as unknown as Blob;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        blob: async () => rawBlob,
+      })),
+    );
+    const createObjectUrl = vi
+      .spyOn(global.URL, "createObjectURL")
+      .mockReturnValue("blob:validated-proxy-video");
+
+    await expect(
+      fetchVideoThroughProxy(
+        "https://generativelanguage.googleapis.com/v1beta/files/test-video:download",
+        0,
+      ),
+    ).resolves.toBe("blob:validated-proxy-video");
+
+    expect(fullArrayBuffer).not.toHaveBeenCalled();
+    expect(headerArrayBuffer).toHaveBeenCalledTimes(1);
+    expect(slice).toHaveBeenNthCalledWith(1, 0, 16);
+    expect(slice).toHaveBeenNthCalledWith(2, 0, rawBlob.size, "video/mp4");
+    expect(createObjectUrl).toHaveBeenCalledWith(retypedBlob);
+  });
+
+  it("canonicalizes a trusted suffixless Veo file URI before proxy download", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        blob: async () =>
+          new Blob([makeMp4Bytes().buffer as ArrayBuffer], {
+            type: "video/mp4",
+          }),
+      })),
+    );
+    vi.spyOn(global.URL, "createObjectURL").mockReturnValue(
+      "blob:suffixless-provider-video",
+    );
+
+    await expect(
+      fetchVideoThroughProxy(
+        "https://generativelanguage.googleapis.com/v1beta/files/suffixless-video",
+        0,
+      ),
+    ).resolves.toBe("blob:suffixless-provider-video");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/proxy/v1beta/files/suffixless-video:download?alt=media",
+      expect.objectContaining({
+        method: "GET",
+        credentials: "include",
+      }),
+    );
+  });
+
+  it.each([
+    "https://generativelanguage.googleapis.com.attacker.example/v1beta/files/video",
+    "https://generativelanguage.googleapis.com/v1beta/files/video/extra",
+    "https://generativelanguage.googleapis.com/v1beta/models/video",
+  ])("rejects an untrusted provider video URI shape: %s", async (uri) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchVideoThroughProxy(uri, 0)).rejects.toThrow(/not trusted/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["JSON", new Blob([JSON.stringify({ error: "unavailable" }).repeat(8)])],
+    ["plain text", new Blob(["upstream gateway failure ".repeat(10)])],
+  ])(
+    "rejects a proxy %s payload even when the response is 200",
+    async (_label, blob) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({
+          ok: true,
+          status: 200,
+          blob: async () => blob,
+        })),
+      );
+
+      await expect(
+        fetchVideoThroughProxy(
+          "https://generativelanguage.googleapis.com/v1beta/files/test-video:download",
+          0,
+        ),
+      ).rejects.toThrow("Video proxy returned invalid MP4 media.");
+    },
+  );
 });

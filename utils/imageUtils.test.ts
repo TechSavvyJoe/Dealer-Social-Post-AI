@@ -1,5 +1,13 @@
-import { describe, expect, it } from "vitest";
-import { imageFileExtension, resolveVeoAspect } from "./imageUtils";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  fileToNormalizedDataUrl,
+  imageFileExtension,
+  resolveVeoAspect,
+} from "./imageUtils";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("imageFileExtension", () => {
   it("matches data URL image formats", () => {
@@ -31,6 +39,33 @@ describe("resolveVeoAspect", () => {
   it("honors explicit preference", () => {
     expect(resolveVeoAspect(1080, 1080, "16:9")).toBe("16:9");
     expect(resolveVeoAspect(1920, 1080, "9:16")).toBe("9:16");
+    // Legacy square requests resolve truthfully to a real Veo landscape file.
     expect(resolveVeoAspect(1080, 1080, "1:1")).toBe("16:9");
+  });
+});
+
+describe("fileToNormalizedDataUrl", () => {
+  it("fails clearly when the browser cannot decode a HEIC original", async () => {
+    class UndecodableImage {
+      width = 0;
+      height = 0;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      set src(_value: string) {
+        queueMicrotask(() => this.onerror?.());
+      }
+    }
+
+    vi.stubGlobal("createImageBitmap", undefined);
+    vi.stubGlobal("Image", UndecodableImage);
+
+    const file = new File([new Uint8Array([1, 2, 3, 4])], "delivery.heic", {
+      type: "image/heic",
+    });
+
+    await expect(fileToNormalizedDataUrl(file)).rejects.toThrow(
+      "cannot preview this HEIC photo",
+    );
   });
 });

@@ -137,7 +137,7 @@ describe("Persistence Utils", () => {
       expect(savedData.dealerId).toBe("new123");
     });
 
-    it("prunes large images to prevent localStorage quota errors", () => {
+    it("keeps all image bytes out of localStorage", () => {
       const largeImage = "x".repeat(600_000); // 600KB, over the 500KB limit
       const sessionData = {
         dealerId: "dealer123",
@@ -162,7 +162,7 @@ describe("Persistence Utils", () => {
       expect(savedData.generatedPost.releaseStatus).toBe("saved");
     });
 
-    it("keeps small images that are under the size limit", () => {
+    it("keeps even small images in the private IndexedDB archive only", () => {
       const smallImage = "x".repeat(100_000); // 100KB, under the 500KB limit
       const sessionData = {
         dealerId: "dealer123",
@@ -172,7 +172,30 @@ describe("Persistence Utils", () => {
       saveSession(sessionData);
 
       const savedData = JSON.parse(localStorageMock.store[STORAGE_KEY]);
-      expect(savedData.selectedImage).toBe(smallImage);
+      expect(savedData.selectedImage).toBeUndefined();
+    });
+
+    it("scrubs legacy image bytes while loading session metadata", () => {
+      localStorageMock.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          dealerId: "dealer123",
+          selectedImage: "data:image/jpeg;base64,legacy-original",
+          generatedPost: {
+            image: "data:image/jpeg;base64,legacy-result",
+            text: "Retained caption",
+          },
+        }),
+      );
+
+      const loaded = loadSession();
+      const stored = JSON.parse(localStorageMock.store[STORAGE_KEY]);
+
+      expect(loaded?.selectedImage).toBeUndefined();
+      expect(loaded?.generatedPost?.image).toBeUndefined();
+      expect(loaded?.generatedPost?.text).toBe("Retained caption");
+      expect(stored.selectedImage).toBeUndefined();
+      expect(stored.generatedPost.image).toBeUndefined();
     });
 
     it("merges with existing session data", () => {

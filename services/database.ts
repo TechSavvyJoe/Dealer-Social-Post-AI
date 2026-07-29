@@ -3,6 +3,8 @@ import { Dealer } from "../types";
 import { retryWithBackoff, isRetryableError } from "../utils/retry";
 import { getErrorMessage } from "../utils/errorMessages";
 import { DealerRecordSchema } from "../utils/schemas";
+import { readApiError } from "./apiErrors";
+import { assertAuthEpoch, captureAuthEpoch } from "../utils/authBoundary";
 
 // Initialize PocketBase
 // In production (served by PB), this is relative. In dev, it might need to be localhost:8090
@@ -33,13 +35,16 @@ export const checkHealth = async (): Promise<boolean> => {
  * Returns [] if the caller isn't an admin or the session is missing.
  */
 export const getAllDealers = async (): Promise<Dealer[]> => {
+  const requestAuthEpoch = captureAuthEpoch();
   try {
+    assertAuthEpoch(requestAuthEpoch);
     const res = await fetch("/api/app/dealers", { credentials: "include" });
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) return [];
-      throw new Error(`/api/app/dealers ${res.status}`);
+      if (res.status === 403) return [];
+      throw await readApiError(res, { requestAuthEpoch });
     }
     const body = (await res.json()) as { items?: Dealer[] };
+    assertAuthEpoch(requestAuthEpoch);
     return (body.items || []).map((d) => ({
       ...d,
       logo: d.logo || undefined,
@@ -147,22 +152,19 @@ const mutateDealer = async (
   method: "POST" | "PATCH" | "DELETE",
   formData?: FormData,
 ): Promise<Dealer> => {
+  const requestAuthEpoch = captureAuthEpoch();
+  assertAuthEpoch(requestAuthEpoch);
   const res = await fetch(url, {
     method,
     credentials: "include",
     body: formData,
   });
   if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const body = await res.json();
-      detail = body?.error || detail;
-    } catch {
-      /* not json */
-    }
-    throw new Error(`${url}: ${detail}`);
+    throw await readApiError(res, { requestAuthEpoch });
   }
-  return (await res.json()) as Dealer;
+  const dealer = (await res.json()) as Dealer;
+  assertAuthEpoch(requestAuthEpoch);
+  return dealer;
 };
 
 export const addDealer = async (dealer: Omit<Dealer, "id">): Promise<Dealer> => {
@@ -196,18 +198,14 @@ export const addDealerWithFile = async (formData: FormData): Promise<Dealer> => 
 };
 
 export const deleteDealer = async (dealerId: string): Promise<void> => {
+  const requestAuthEpoch = captureAuthEpoch();
+  assertAuthEpoch(requestAuthEpoch);
   const res = await fetch(`/api/app/dealers/${encodeURIComponent(dealerId)}`, {
     method: "DELETE",
     credentials: "include",
   });
   if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const body = await res.json();
-      detail = body?.error || detail;
-    } catch {
-      /* not json */
-    }
-    throw new Error(`Failed to delete dealer: ${detail}`);
+    throw await readApiError(res, { requestAuthEpoch });
   }
+  assertAuthEpoch(requestAuthEpoch);
 };

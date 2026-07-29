@@ -39,7 +39,7 @@ import { ScheduleDialog } from "./ScheduleDialog";
 import { LayoutGrid } from "lucide-react";
 import { PlatformLimitMeter } from "./PlatformLimitMeter";
 import { CaptionStudio } from "./CaptionStudio";
-import { ShareDialog } from "./ShareDialog";
+import { ShareDialog, type PlatformShareCaption } from "./ShareDialog";
 import { CaptionAlternativesModal } from "./CaptionAlternativesModal";
 import { ProgressiveImage } from "./ui/ProgressiveImage";
 import { useToast } from "./ui/Toast";
@@ -49,22 +49,29 @@ import {
   getPostApprovalStatus,
   markPostVideoGenerated,
   schedulePost,
+  updatePostDraft,
 } from "../services/posts";
 import {
   analyzeCaptionForDelivery,
+  analyzeCaptionSetForDelivery,
   prohibitedClaimsMessage,
 } from "../utils/complianceDisclosures";
 import {
   preferredExportFormatIds,
+  resolvePrimaryImageProfile,
   resolvePlatformOption,
 } from "../services/platformCopy";
 import {
   isMobilePhotoDevice,
-  saveMediaToLibrary,
+  prepareMediaForSave,
+  savePreparedMediaToLibrary,
   saveResultToastMessage,
+  type PreparedMediaSave,
 } from "../utils/mediaSave";
-import { copyTextToClipboard } from "../services/publishTargets";
 import { useAppStore } from "../stores/appStore";
+import { archiveDealerMedia } from "../utils/creativeStorage";
+import { EXPORT_FORMATS, renderFormatIfNeeded } from "../utils/multiFormatExport";
+import { logError } from "../utils/telemetry";
 
 // Lazy load modals for performance
 const LazyImagePreviewModal = React.lazy(() =>
@@ -167,7 +174,11 @@ interface PostResultProps {
   onRegenerateImage: () => Promise<void>;
   onEditImage: (prompt: string) => Promise<void>;
   onRegenerateText: () => Promise<void>;
-  onEditText: (prompt: string) => Promise<void>;
+  onEditText: (
+    prompt: string,
+    originalText?: string,
+    platformId?: string,
+  ) => Promise<string>;
   onFunMode: (styleName?: string) => Promise<void>;
   onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
   /** One-shot caption generator for the 3-variant alternatives modal. */
@@ -235,6 +246,8 @@ export const PostResult: React.FC<PostResultProps> = ({
   const toast = useToast();
   const shouldReduceMotion = useReducedMotion();
   const enabledFunStyles = useAppStore((s) => s.currentDealer?.enabled_fun_styles);
+  const dealerId = useAppStore((s) => s.currentDealer?.id || "");
+  const hasOriginalCapture = useAppStore((s) => Boolean(s.selectedImage));
 
   const [isImageEditing, setIsImageEditing] = useState(false);
   const [imageEditPrompt, setImageEditPrompt] = useState("");
@@ -243,6 +256,8 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [imageLoadingProgress, setImageLoadingProgress] = useState(0);
 
   const [editedText, setEditedText] = useState(post.text);
+  /** Primary caption survives visits to destination-specific caption tabs. */
+  const [primaryCaption, setPrimaryCaption] = useState(post.text);
   const [isTextEditing, setIsTextEditing] = useState(false);
   const [isTextLoading, setIsTextLoading] = useState(false);
   /** Active caption-pack platform tab; null = primary post.text. */
@@ -268,6 +283,7 @@ export const PostResult: React.FC<PostResultProps> = ({
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   /** Own blob URLs so we only revoke the previous one when replacing/unmounting. */
   const activeVideoBlobRef = useRef<string | null>(null);
+  const ownedVideoBlobUrlsRef = useRef<Set<string>>(new Set());
   const [videoJobs, setVideoJobs] = useState<
     Array<{
       id: string;
@@ -303,26 +319,55 @@ export const PostResult: React.FC<PostResultProps> = ({
       (requiresApproval ? (post.postId ? "pending" : "submission_failed") : "n_a"),
   );
   const [approvalCheckError, setApprovalCheckError] = useState<string | null>(null);
-  // Local override for the disclosure footer + categories — set when the
-  // user picks an alternative caption from the modal so the displayed
-  // compliance block matches the chosen variant.
-  const [disclosureOverride, setDisclosureOverride] = useState<{
-    text: string;
-    categories: string[];
-  } | null>(null);
   /** Local edits to per-platform pack captions (share + tab switch must honor these). */
   const [packOverrides, setPackOverrides] = useState<Record<string, string>>({});
   /** Prior image versions after regen/fun/edit (local compare stack, max 5). */
   const [imageVersions, setImageVersions] = useState<string[]>([]);
+  const [preparedSave, setPreparedSave] = useState<PreparedMediaSave | null>(null);
+  const [formattedPreviewUrl, setFormattedPreviewUrl] = useState<string | null>(null);
+  const [isPreparingSave, setIsPreparingSave] = useState(false);
+  const [draftSyncStatus, setDraftSyncStatus] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const draftSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingDraftSyncRef = useRef<{
+    caption: string;
+    disclosures: string;
+    imageDataUrl?: string;
+    platformCaptions?: Record<string, string>;
+  } | null>(null);
+  const draftSyncChainRef = useRef<Promise<void>>(Promise.resolve());
+  const draftSyncMountedRef = useRef(true);
+  const lastSyncedDraftRef = useRef({
+    caption: post.text,
+    disclosures: post.disclosures || "",
+    image: post.image,
+    platformCaptions: JSON.stringify(post.platformCaptions || {}),
+  });
   const prevImageRef = useRef(post.image);
-  // Reset override whenever the source post changes (regenerate, new post).
+  const resultIdentity =
+    post.postId ||
+    post.aiMeta?.image.attemptId ||
+    post.aiMeta?.lastSuccessfulGenerationAt ||
+    "local-result";
+  const previousResultIdentityRef = useRef(resultIdentity);
+  const previousPostTextRef = useRef(post.text);
+  // Caption state follows a new result/caption pack, but image-only
+  // regeneration/editing must not erase salesperson edits already saved into
+  // destination captions.
   useEffect(() => {
-    setDisclosureOverride(null);
+    if (previousResultIdentityRef.current === resultIdentity) return;
+    previousResultIdentityRef.current = resultIdentity;
     setPackOverrides({});
     setHasSavedMedia(false);
     setHasCopiedCaption(false);
     setActiveCaptionPlatform(null);
-  }, [post.image, post.text, post.platformCaptions]);
+    previousPostTextRef.current = post.text;
+    setPrimaryCaption(post.text);
+    setEditedText(post.text);
+    setTextHistory([post.text]);
+    setHistoryIndex(0);
+  }, [post.text, resultIdentity]);
 
   // Push previous creative onto a small version stack when image is replaced.
   useEffect(() => {
@@ -362,6 +407,12 @@ export const PostResult: React.FC<PostResultProps> = ({
     () => preferredExportFormatIds(post.platformIds ?? []),
     [post.platformIds],
   );
+  const primarySaveFormat = useMemo(() => {
+    const formatId =
+      post.primaryFormatId ??
+      resolvePrimaryImageProfile(post.platformIds).primaryFormatId;
+    return EXPORT_FORMATS.find((format) => format.id === formatId);
+  }, [post.platformIds, post.primaryFormatId]);
 
   useEffect(() => {
     setIsToolsOpen(isDesktopLayout);
@@ -370,16 +421,137 @@ export const PostResult: React.FC<PostResultProps> = ({
     () => analyzeCaptionForDelivery(editedText, bannedPhrases),
     [bannedPhrases, editedText],
   );
+  const captionSetAnalysis = useMemo(() => {
+    const currentPrimaryCaption = activeCaptionPlatform ? primaryCaption : editedText;
+    const variants = { ...(effectivePack || {}) };
+    if (activeCaptionPlatform) variants[activeCaptionPlatform] = editedText;
+    return analyzeCaptionSetForDelivery(
+      [currentPrimaryCaption, ...Object.values(variants)],
+      bannedPhrases,
+    );
+  }, [activeCaptionPlatform, bannedPhrases, editedText, effectivePack, primaryCaption]);
   const imageBusy = isImageLoading || isVideoLoading;
   const textBusy = isTextLoading;
-  const approvalLocked = requiresApproval && approvalStatus !== "approved";
+  const reviewRequired =
+    post.approvalStatus !== undefined
+      ? post.approvalStatus !== "n_a"
+      : requiresApproval;
+  const approvalLocked = reviewRequired && approvalStatus !== "approved";
   const releaseLocked = post.releaseStatus === "save_failed";
-  const claimLocked = captionAnalysis.compliance.prohibited.length > 0;
+  const claimLocked = captionSetAnalysis.prohibited.length > 0;
   const deliveryLocked = approvalLocked || releaseLocked || claimLocked;
   // Once a creative has entered the review workflow it must remain byte-for-
   // byte equivalent to what the manager saw. Delivery unlocks on approval,
   // while edits require starting a new review submission.
-  const creativeLockedForReview = requiresApproval;
+  const creativeLockedForReview = reviewRequired;
+  const historyReadOnly = Boolean(post.historyReadOnly);
+  const editableDraft = !reviewRequired && !historyReadOnly;
+  const originalRequiredMessage =
+    "This tool needs the original captured photo. Reopened History keeps the finished creative, so use Edit image or start a new photo instead.";
+
+  const flushPendingDraft = useCallback((): Promise<boolean> => {
+    const draft = pendingDraftSyncRef.current;
+    if (draftSyncTimeoutRef.current) {
+      clearTimeout(draftSyncTimeoutRef.current);
+      draftSyncTimeoutRef.current = null;
+    }
+    if (!draft || !post.postId || !editableDraft) return Promise.resolve(true);
+
+    const operation = draftSyncChainRef.current.then(async () => {
+      try {
+        await updatePostDraft(post.postId as string, draft);
+        lastSyncedDraftRef.current = {
+          caption: draft.caption,
+          disclosures: draft.disclosures,
+          image: draft.imageDataUrl || lastSyncedDraftRef.current.image,
+          platformCaptions: JSON.stringify(draft.platformCaptions || {}),
+        };
+        if (pendingDraftSyncRef.current === draft) {
+          pendingDraftSyncRef.current = null;
+        }
+        if (draftSyncMountedRef.current) {
+          setDraftSyncStatus(pendingDraftSyncRef.current ? "saving" : "saved");
+        }
+        return true;
+      } catch (err) {
+        logError("post.draft_sync_failed", {
+          postId: post.postId,
+          message: err instanceof Error ? err.message : String(err),
+        });
+        if (draftSyncMountedRef.current) setDraftSyncStatus("error");
+        return false;
+      }
+    });
+    draftSyncChainRef.current = operation.then(() => undefined);
+    return operation;
+  }, [editableDraft, post.postId]);
+
+  useEffect(() => {
+    if (!post.postId || !editableDraft) return;
+    const historyCaption = activeCaptionPlatform ? primaryCaption : editedText;
+    const historyAnalysis = activeCaptionPlatform
+      ? analyzeCaptionForDelivery(primaryCaption, bannedPhrases)
+      : captionAnalysis;
+    if (
+      !historyCaption.trim() ||
+      historyAnalysis.compliance.prohibited.length > 0 ||
+      captionSetAnalysis.prohibited.length > 0
+    ) {
+      return;
+    }
+    const last = lastSyncedDraftRef.current;
+    const caption = historyAnalysis.caption;
+    const disclosures = captionSetAnalysis.disclosures;
+    const imageChanged = post.image !== last.image;
+    const platformCaptionsJson = JSON.stringify(effectivePack || {});
+    const platformCaptionsChanged = platformCaptionsJson !== last.platformCaptions;
+    if (
+      caption === last.caption &&
+      disclosures === last.disclosures &&
+      !imageChanged &&
+      !platformCaptionsChanged
+    ) {
+      return;
+    }
+    pendingDraftSyncRef.current = {
+      caption,
+      disclosures,
+      ...(imageChanged ? { imageDataUrl: post.image } : {}),
+      platformCaptions: effectivePack,
+    };
+    setDraftSyncStatus("saving");
+    if (draftSyncTimeoutRef.current) clearTimeout(draftSyncTimeoutRef.current);
+    draftSyncTimeoutRef.current = setTimeout(() => {
+      void flushPendingDraft();
+    }, 600);
+  }, [
+    activeCaptionPlatform,
+    bannedPhrases,
+    captionAnalysis,
+    captionSetAnalysis,
+    editedText,
+    effectivePack,
+    flushPendingDraft,
+    post.image,
+    post.postId,
+    primaryCaption,
+    editableDraft,
+  ]);
+
+  useEffect(() => {
+    draftSyncMountedRef.current = true;
+    return () => {
+      draftSyncMountedRef.current = false;
+      if (draftSyncTimeoutRef.current) {
+        clearTimeout(draftSyncTimeoutRef.current);
+        draftSyncTimeoutRef.current = null;
+      }
+      // Queue the last edit behind any in-flight save so an older response can
+      // never overwrite a newer draft during navigation.
+      void flushPendingDraft();
+    };
+  }, [flushPendingDraft]);
+
   const approvalGateMessage =
     approvalStatus === "approved"
       ? "Manager approved this exact creative. Save, share, and export are unlocked; start a new post to make changes."
@@ -391,7 +563,7 @@ export const PostResult: React.FC<PostResultProps> = ({
   const releaseGateMessage =
     "The signed photo release was not stored, so consent cannot be verified. Copy, share, save, and export remain locked; check your connection and create another post to retry.";
   const claimGateMessage = claimLocked
-    ? prohibitedClaimsMessage(captionAnalysis.compliance.prohibited)
+    ? prohibitedClaimsMessage(captionSetAnalysis.prohibited)
     : "";
   const deliveryGateMessage = claimLocked
     ? claimGateMessage
@@ -413,7 +585,7 @@ export const PostResult: React.FC<PostResultProps> = ({
   }, [post.postId, post.approvalStatus, requiresApproval]);
 
   useEffect(() => {
-    if (!requiresApproval || approvalStatus !== "pending" || !post.postId) {
+    if (!reviewRequired || approvalStatus !== "pending" || !post.postId) {
       return;
     }
 
@@ -464,13 +636,17 @@ export const PostResult: React.FC<PostResultProps> = ({
       controller.abort();
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [approvalStatus, post.postId, requiresApproval, toast]);
+  }, [approvalStatus, post.postId, reviewRequired, toast]);
 
   useEffect(() => {
+    if (previousPostTextRef.current === post.text) return;
+    previousPostTextRef.current = post.text;
+    setPrimaryCaption(post.text);
+    if (activeCaptionPlatform !== null) return;
     setEditedText(post.text);
     setTextHistory([post.text]);
     setHistoryIndex(0);
-  }, [post.text]);
+  }, [activeCaptionPlatform, post.text]);
 
   // Keyboard shortcuts for undo/redo
   useEffect(() => {
@@ -501,6 +677,7 @@ export const PostResult: React.FC<PostResultProps> = ({
   const handleTextChange = useCallback(
     (newText: string) => {
       setEditedText(newText);
+      if (activeCaptionPlatform === null) setPrimaryCaption(newText);
       setHasCopiedCaption(false);
       // Add to history, removing any future history if we're not at the end
       const newHistory = textHistory.slice(0, historyIndex + 1);
@@ -508,7 +685,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       setTextHistory(newHistory);
       setHistoryIndex(newHistory.length - 1);
     },
-    [historyIndex, textHistory],
+    [activeCaptionPlatform, historyIndex, textHistory],
   );
 
   const handleUndo = useCallback(() => {
@@ -516,31 +693,32 @@ export const PostResult: React.FC<PostResultProps> = ({
       const newIndex = historyIndex - 1;
       setHistoryIndex(newIndex);
       setEditedText(textHistory[newIndex]);
+      if (activeCaptionPlatform === null) {
+        setPrimaryCaption(textHistory[newIndex]);
+      }
       setHasCopiedCaption(false);
       triggerHapticFeedback();
     }
-  }, [historyIndex, textHistory]);
+  }, [activeCaptionPlatform, historyIndex, textHistory]);
 
   const handleRedo = useCallback(() => {
     if (historyIndex < textHistory.length - 1) {
       const newIndex = historyIndex + 1;
       setHistoryIndex(newIndex);
       setEditedText(textHistory[newIndex]);
+      if (activeCaptionPlatform === null) {
+        setPrimaryCaption(textHistory[newIndex]);
+      }
       setHasCopiedCaption(false);
       triggerHapticFeedback();
     }
-  }, [historyIndex, textHistory]);
+  }, [activeCaptionPlatform, historyIndex, textHistory]);
 
   const adoptVideoUrl = useCallback((url: string | null) => {
-    // Revoke only the previous blob we own — never revoke the URL still shown.
-    const prev = activeVideoBlobRef.current;
-    if (prev && prev !== url && prev.startsWith("blob:")) {
-      try {
-        URL.revokeObjectURL(prev);
-      } catch {
-        /* ignore */
-      }
-    }
+    // Preview selection must not revoke a completed queue asset. The user can
+    // switch video → photo → video without turning the retained URL into a
+    // dead pointer. URLs are revoked only on explicit removal or unmount.
+    if (url?.startsWith("blob:")) ownedVideoBlobUrlsRef.current.add(url);
     activeVideoBlobRef.current = url;
     setVideoUrl(url);
     setVideoPlayError(null);
@@ -549,38 +727,98 @@ export const PostResult: React.FC<PostResultProps> = ({
     setVideoMuted(true);
   }, []);
 
-  // Unmount-only revoke (avoid React Strict Mode / effect re-runs killing the
-  // blob while <video> still points at it — that causes endless play spinners).
+  // Unmount-only bulk cleanup. Selecting a different asset never destroys it.
   useEffect(() => {
     return () => {
-      const owned = activeVideoBlobRef.current;
-      if (owned && owned.startsWith("blob:")) {
+      ownedVideoBlobUrlsRef.current.forEach((owned) => {
         try {
           URL.revokeObjectURL(owned);
         } catch {
           /* ignore */
         }
-        activeVideoBlobRef.current = null;
-      }
+      });
+      ownedVideoBlobUrlsRef.current.clear();
+      activeVideoBlobRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    setVideoJobs([]);
-    adoptVideoUrl(null);
-  }, [post.image, adoptVideoUrl]);
+    const retained = new Set(
+      videoJobs.map((job) => job.url).filter((url): url is string => Boolean(url)),
+    );
+    ownedVideoBlobUrlsRef.current.forEach((owned) => {
+      if (retained.has(owned) || activeVideoBlobRef.current === owned) return;
+      URL.revokeObjectURL(owned);
+      ownedVideoBlobUrlsRef.current.delete(owned);
+    });
+  }, [videoJobs, videoUrl]);
 
   useEffect(() => {
     setHasSavedMedia(false);
   }, [videoUrl]);
 
+  useEffect(() => {
+    let active = true;
+    setPreparedSave(null);
+    setIsPreparingSave(true);
+    void (async () => {
+      const isVideo = Boolean(videoUrl);
+      const sourceUrl =
+        !isVideo && primarySaveFormat
+          ? await renderFormatIfNeeded(post.image, primarySaveFormat)
+          : videoUrl || post.image;
+      return prepareMediaForSave({
+        sourceUrl,
+        kind: isVideo ? "video" : "image",
+        basename: isVideo
+          ? "dealer-social-video"
+          : primarySaveFormat
+            ? primarySaveFormat.filename.replace(/\.[^.]+$/, "")
+            : "dealer-social-post",
+      });
+    })()
+      .then((prepared) => {
+        if (active) setPreparedSave(prepared);
+      })
+      .catch(() => {
+        if (active) setPreparedSave(null);
+      })
+      .finally(() => {
+        if (active) setIsPreparingSave(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [post.image, primarySaveFormat, videoUrl]);
+
+  useEffect(() => {
+    if (
+      !preparedSave ||
+      preparedSave.kind !== "image" ||
+      videoUrl ||
+      typeof URL.createObjectURL !== "function"
+    ) {
+      setFormattedPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(preparedSave.file);
+    setFormattedPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [preparedSave, videoUrl]);
+
+  const displayImageUrl = formattedPreviewUrl || post.image;
+
   const saveKind = videoUrl ? "video" : "image";
   const saveToPhotos = isMobilePhotoDevice();
   const saveButtonLabel = saveToPhotos
-    ? "Save to Photos"
+    ? primarySaveFormat && saveKind === "image"
+      ? `Save ${primarySaveFormat.width}×${primarySaveFormat.height}`
+      : "Save to Photos"
     : saveKind === "video"
       ? "Save video"
-      : "Save image";
+      : primarySaveFormat
+        ? `Save ${primarySaveFormat.width}×${primarySaveFormat.height}`
+        : "Save image";
   const saveAriaLabel = (locked: boolean) =>
     locked ? `Save ${saveKind} (${deliveryLockLabel.toLowerCase()})` : saveButtonLabel;
 
@@ -590,12 +828,27 @@ export const PostResult: React.FC<PostResultProps> = ({
       toast.warning(deliveryGateMessage);
       return;
     }
+    if (!preparedSave) {
+      toast.warning(
+        isPreparingSave
+          ? "Media is still preparing. Try Save again in a moment."
+          : "Media could not be prepared. Switch to another version or retry.",
+      );
+      return;
+    }
 
-    const result = await saveMediaToLibrary({
-      sourceUrl: videoUrl || post.image,
-      kind: videoUrl ? "video" : "image",
-      basename: videoUrl ? "social-media-video" : "social-media-post",
-    });
+    // WebKit consumes transient activation at the first asynchronous boundary.
+    // The prepared File is ready already, so invoke navigator.share (inside this
+    // helper) immediately from the click before a History PATCH can await.
+    const mediaSavePromise = savePreparedMediaToLibrary(preparedSave);
+    const draftSavePromise = flushPendingDraft();
+    const result = await mediaSavePromise;
+    const draftSaved = await draftSavePromise;
+    if (!draftSaved) {
+      toast.warning(
+        "The media is ready, but the latest History update did not save. You can continue or use Retry history save.",
+      );
+    }
 
     if (result.method === "cancelled") {
       toast.warning(saveResultToastMessage(result));
@@ -644,22 +897,15 @@ export const PostResult: React.FC<PostResultProps> = ({
   // copy + share + download we always paste the caption + disclosure block
   // together so the dealer's actual social post is compliant.
   //
-  // disclosureOverride takes precedence over post.disclosures when the user
-  // picked an alternative from the CaptionAlternativesModal (each variant
-  // may trigger a different compliance language set).
   const sourceCaptionForActive =
     activeCaptionPlatform && effectivePack?.[activeCaptionPlatform]
       ? effectivePack[activeCaptionPlatform]
       : post.text;
   const captionWasEdited = editedText !== sourceCaptionForActive;
-  const activeDisclosures = (
-    captionWasEdited
-      ? captionAnalysis.disclosures
-      : (disclosureOverride?.text ?? post.disclosures ?? "")
-  ).trim();
-  const activeDisclosureCategories = captionWasEdited
-    ? captionAnalysis.disclosureCategories
-    : (disclosureOverride?.categories ?? post.disclosureCategories ?? []);
+  // Always derive the footer from the actual visible caption. Platform
+  // variants and salesperson edits may advertise different terms.
+  const activeDisclosures = captionAnalysis.disclosures.trim();
+  const activeDisclosureCategories = captionAnalysis.disclosureCategories;
   const appendDisclosures = (caption: string): string => {
     const cap = caption.trim();
     if (!activeDisclosures) return cap;
@@ -682,27 +928,26 @@ export const PostResult: React.FC<PostResultProps> = ({
     });
   }, [editedText, activeCaptionPlatform]);
 
-  /** Pack captions (with local overrides) + disclosures for ShareDialog. */
+  /** Re-scan every outgoing variant; one platform can trigger a different disclosure. */
   const sharePlatformCaptions = useMemo(() => {
     if (!effectivePack) return undefined;
-    const baseDisc = (post.disclosures ?? "").trim();
-    const out: Record<string, string> = {};
+    const out: Record<string, PlatformShareCaption> = {};
     for (const [id, cap] of Object.entries(effectivePack)) {
       // Active platform: use live editor text (includes in-progress edits)
       const base = id === activeCaptionPlatform ? editedText.trim() : cap?.trim();
       if (!base) continue;
-      if (!baseDisc) {
-        out[id] = base;
-      } else {
-        out[id] = `${base}\n\n${
-          baseDisc.startsWith("— Disclosures —")
-            ? baseDisc
-            : `— Disclosures —\n${baseDisc}`
-        }`;
-      }
+      const prepared = analyzeCaptionForDelivery(base, bannedPhrases);
+      out[id] = {
+        text: prepared.caption,
+        disclosures: prepared.disclosures || undefined,
+        blockedReason:
+          prepared.compliance.prohibited.length > 0
+            ? prohibitedClaimsMessage(prepared.compliance.prohibited)
+            : undefined,
+      };
     }
     return Object.keys(out).length > 0 ? out : undefined;
-  }, [effectivePack, post.disclosures, activeCaptionPlatform, editedText]);
+  }, [activeCaptionPlatform, bannedPhrases, editedText, effectivePack]);
 
   const selectCaptionPlatform = useCallback(
     (platformId: string | null) => {
@@ -712,9 +957,12 @@ export const PostResult: React.FC<PostResultProps> = ({
           ...prev,
           [activeCaptionPlatform]: editedText.trim(),
         }));
+      } else if (activeCaptionPlatform === null) {
+        setPrimaryCaption(editedText);
       }
       const pack = { ...(post.platformCaptions || {}), ...packOverrides };
-      const nextText = platformId && pack[platformId] ? pack[platformId] : post.text;
+      const nextText =
+        platformId && pack[platformId] ? pack[platformId] : primaryCaption;
       setActiveCaptionPlatform(platformId);
       setEditedText(nextText);
       setTextHistory([nextText]);
@@ -726,8 +974,8 @@ export const PostResult: React.FC<PostResultProps> = ({
       activeCaptionPlatform,
       editedText,
       packOverrides,
+      primaryCaption,
       post.platformCaptions,
-      post.text,
     ],
   );
 
@@ -767,6 +1015,12 @@ export const PostResult: React.FC<PostResultProps> = ({
       toast.warning(deliveryGateMessage);
       return;
     }
+    const draftSaved = await flushPendingDraft();
+    if (!draftSaved) {
+      toast.warning(
+        "The caption can still be copied, but its latest History update did not save.",
+      );
+    }
     let success = false;
     const textToCopy = captionWithDisclosures;
     if (navigator.clipboard) {
@@ -792,6 +1046,23 @@ export const PostResult: React.FC<PostResultProps> = ({
         "The caption could not be copied. Select the text and copy it manually.",
       );
     }
+  };
+
+  const handleOpenShare = async () => {
+    triggerHapticFeedback();
+    if (deliveryLocked) {
+      toast.warning(deliveryGateMessage);
+      return;
+    }
+    const draftSaved = await flushPendingDraft();
+    if (!draftSaved) {
+      toast.warning(
+        "Sharing is available, but the latest History update did not save. Retry when you are back online.",
+      );
+    }
+    // The dialog copies the exact per-platform caption (including required
+    // disclosures) and tracks whether the browser actually allowed it.
+    setIsShareDialogOpen(true);
   };
 
   const handleImageAction = async (
@@ -837,8 +1108,17 @@ export const PostResult: React.FC<PostResultProps> = ({
   };
 
   const handleTextEditSubmit = async (prompt: string) => {
-    await handleTextAction(() => onEditText(prompt));
-    setIsTextEditing(false); // Close modal after action completes
+    const sourceText = editedText;
+    let updatedText = "";
+    await handleTextAction(async () => {
+      updatedText = activeCaptionPlatform
+        ? await onEditText(prompt, sourceText, activeCaptionPlatform)
+        : await onEditText(prompt, sourceText);
+    });
+    if (updatedText) {
+      handleTextChange(updatedText);
+    }
+    setIsTextEditing(false);
   };
 
   const startVideoJob = async (
@@ -876,20 +1156,22 @@ export const PostResult: React.FC<PostResultProps> = ({
 
     const jobId = existingJobId || `video-${Date.now()}`;
     if (!existingJobId) {
-      setVideoJobs((prev) => [
-        ...prev,
-        {
-          id: jobId,
-          style,
-          status: "queued",
-          duration: options.durationSeconds,
-          soundtrack: options.soundtrack,
-          aspectPreference: options.aspectPreference,
-          resolution: options.resolution,
-          pacing: options.pacing,
-          createdAt: new Date().toISOString(),
-        },
-      ]);
+      setVideoJobs((prev) =>
+        [
+          ...prev,
+          {
+            id: jobId,
+            style,
+            status: "queued" as const,
+            duration: options.durationSeconds,
+            soundtrack: options.soundtrack,
+            aspectPreference: options.aspectPreference,
+            resolution: options.resolution,
+            pacing: options.pacing,
+            createdAt: new Date().toISOString(),
+          },
+        ].slice(-5),
+      );
     }
 
     // Mark job as processing
@@ -899,13 +1181,22 @@ export const PostResult: React.FC<PostResultProps> = ({
       ),
     );
 
-    const maxAttempts = 3;
+    // The provider service owns bounded model/poll retries. Retrying the whole
+    // request here could create multiple paid Veo jobs after a lost response.
+    const maxAttempts = 1;
     const runAttempt = async (attempt: number): Promise<void> => {
       try {
         const url = await onGenerateVideo(style, options);
         // Always show the latest successful render (previous logic kept a
         // stale/null URL if something odd was already set).
         adoptVideoUrl(url);
+        if (dealerId) {
+          void archiveDealerMedia(dealerId, {
+            kind: "video",
+            source: url,
+            label: `${style} video`,
+          });
+        }
         setVideoJobs((prev) =>
           prev.map((job) =>
             job.id === jobId ? { ...job, status: "completed", url } : job,
@@ -993,6 +1284,14 @@ export const PostResult: React.FC<PostResultProps> = ({
   };
 
   const handleRemoveVideoJob = (jobId: string) => {
+    const removed = videoJobs.find((job) => job.id === jobId);
+    if (removed?.url && activeVideoBlobRef.current === removed.url) {
+      adoptVideoUrl(null);
+    }
+    if (removed?.url?.startsWith("blob:")) {
+      ownedVideoBlobUrlsRef.current.delete(removed.url);
+      URL.revokeObjectURL(removed.url);
+    }
     setVideoJobs((prev) => prev.filter((job) => job.id !== jobId));
   };
 
@@ -1037,7 +1336,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         <LazyImagePreviewModal
           isOpen={isPreviewOpen && !videoUrl}
           onClose={() => setIsPreviewOpen(false)}
-          imageSrc={post.image}
+          imageSrc={displayImageUrl}
         />
       </Suspense>
 
@@ -1051,7 +1350,8 @@ export const PostResult: React.FC<PostResultProps> = ({
         isOpen={isShareDialogOpen && !deliveryLocked}
         onClose={() => setIsShareDialogOpen(false)}
         content={{
-          text: captionWithDisclosures,
+          text: editedText,
+          disclosures: activeDisclosures || undefined,
           imageDataUrl: post.image,
           videoUrl: videoUrl || undefined,
         }}
@@ -1083,26 +1383,27 @@ export const PostResult: React.FC<PostResultProps> = ({
       </Modal>
       {onGenerateCaptionVariant && (
         <CaptionAlternativesModal
-          isOpen={isCaptionAltsOpen && !creativeLockedForReview}
+          isOpen={
+            isCaptionAltsOpen &&
+            !creativeLockedForReview &&
+            !historyReadOnly &&
+            hasOriginalCapture
+          }
           onClose={() => setIsCaptionAltsOpen(false)}
           generateOne={onGenerateCaptionVariant}
           bannedPhrases={bannedPhrases}
-          onSelect={({ text, disclosures, disclosureCategories }) => {
+          onSelect={({ text }) => {
             handleTextChange(text);
-            setDisclosureOverride({
-              text: disclosures,
-              categories: disclosureCategories,
-            });
           }}
         />
       )}
 
       <Suspense fallback={null}>
         <LazyEditTextModal
-          isOpen={isTextEditing && !creativeLockedForReview}
+          isOpen={isTextEditing && !creativeLockedForReview && !historyReadOnly}
           onClose={() => setIsTextEditing(false)}
           onSubmit={handleTextEditSubmit}
-          originalText={post.text}
+          originalText={editedText}
           isLoading={isTextLoading}
         />
       </Suspense>
@@ -1111,9 +1412,10 @@ export const PostResult: React.FC<PostResultProps> = ({
           isOpen={isVideoDirectorOpen && !creativeLockedForReview}
           onClose={() => setIsVideoDirectorOpen(false)}
           onSelectStyle={handleGenerateVideo}
+          defaultAspect={post.imageAspectRatio === "9:16" ? "9:16" : "16:9"}
         />
         <ScheduleDialog
-          isOpen={isScheduleOpen}
+          isOpen={isScheduleOpen && !historyReadOnly}
           onClose={() => setIsScheduleOpen(false)}
           isLoading={isScheduling}
           onSchedule={async (isoString) => {
@@ -1141,7 +1443,9 @@ export const PostResult: React.FC<PostResultProps> = ({
       </Suspense>
       <Suspense fallback={null}>
         <LazyFunModeDirectorModal
-          isOpen={isFunModeDirectorOpen && !creativeLockedForReview}
+          isOpen={
+            isFunModeDirectorOpen && !creativeLockedForReview && hasOriginalCapture
+          }
           onClose={() => setIsFunModeDirectorOpen(false)}
           enabledFunStyles={enabledFunStyles}
           onSelectStyle={(styleName) => {
@@ -1179,7 +1483,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 ? "Caption claim needs attention"
                 : releaseLocked
                   ? "Photo release needs attention"
-                  : requiresApproval
+                  : reviewRequired
                     ? approvalStatus === "approved"
                       ? "Approved and ready to publish"
                       : approvalStatus === "rejected"
@@ -1192,14 +1496,16 @@ export const PostResult: React.FC<PostResultProps> = ({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto">
-            <button
-              type="button"
-              onClick={handleRemixRequest}
-              className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-primary-400/35 bg-primary-500/10 px-4 text-sm font-semibold text-primary-100 transition-colors hover:border-primary-400/55 hover:bg-primary-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 sm:min-h-[44px] sm:flex-none"
-            >
-              <Sparkles className="h-4 w-4" aria-hidden="true" />
-              Remix this photo
-            </button>
+            {hasOriginalCapture && (
+              <button
+                type="button"
+                onClick={handleRemixRequest}
+                className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-primary-400/35 bg-primary-500/10 px-4 text-sm font-semibold text-primary-100 transition-colors hover:border-primary-400/55 hover:bg-primary-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 sm:min-h-[44px] sm:flex-none"
+              >
+                <Sparkles className="h-4 w-4" aria-hidden="true" />
+                Remix this photo
+              </button>
+            )}
             <button
               type="button"
               onClick={handleCreateAnotherRequest}
@@ -1234,7 +1540,8 @@ export const PostResult: React.FC<PostResultProps> = ({
               variant="outline"
               size="sm"
               className="min-h-11 shrink-0 border-warning-300/30 text-warning-50"
-              disabled={textBusy || creativeLockedForReview}
+              disabled={textBusy || creativeLockedForReview || !hasOriginalCapture}
+              title={!hasOriginalCapture ? originalRequiredMessage : undefined}
               leftIcon={
                 textBusy ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -1299,7 +1606,7 @@ export const PostResult: React.FC<PostResultProps> = ({
             </div>
           </motion.div>
         )}
-        {requiresApproval && (
+        {reviewRequired && (
           <motion.div
             className={cn(
               "mx-auto flex max-w-3xl flex-col gap-3 rounded-2xl px-4 py-4 shadow-lg shadow-black/10 sm:flex-row sm:items-start",
@@ -1389,9 +1696,53 @@ export const PostResult: React.FC<PostResultProps> = ({
               >
                 Media preview
               </h3>
-              <Badge variant={videoUrl ? "info" : "neutral"} uppercase={false}>
-                {videoUrl ? "Video" : "Image"}
-              </Badge>
+              <div className="flex flex-wrap justify-end gap-2">
+                {historyReadOnly ? (
+                  <Badge variant="neutral" uppercase={false}>
+                    View-only history
+                  </Badge>
+                ) : editableDraft && draftSyncStatus !== "idle" ? (
+                  <div className="flex items-center gap-1.5">
+                    <Badge
+                      variant={
+                        draftSyncStatus === "error"
+                          ? "error"
+                          : draftSyncStatus === "saved"
+                            ? "success"
+                            : "info"
+                      }
+                      uppercase={false}
+                    >
+                      {draftSyncStatus === "error"
+                        ? "History save failed"
+                        : draftSyncStatus === "saved"
+                          ? "Saved to My work"
+                          : "Saving to My work…"}
+                    </Badge>
+                    {draftSyncStatus === "error" ? (
+                      <button
+                        type="button"
+                        className="min-h-8 rounded-lg border border-error-400/30 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100"
+                        onClick={() => void flushPendingDraft()}
+                      >
+                        Retry
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                <Badge variant={videoUrl ? "info" : "neutral"} uppercase={false}>
+                  {videoUrl
+                    ? "Video"
+                    : primarySaveFormat
+                      ? `Saves as ${primarySaveFormat.width}×${primarySaveFormat.height}`
+                      : "Image"}
+                </Badge>
+                {!videoUrl && preparedSave ? (
+                  <Badge variant="neutral" uppercase={false}>
+                    {preparedSave.filename.split(".").pop()?.toUpperCase() || "JPG"}
+                  </Badge>
+                ) : null}
+              </div>
             </div>
             <div className="relative w-full overflow-hidden rounded-xl bg-surface-950/60">
               {(isImageLoading || isVideoLoading) && (
@@ -1468,6 +1819,19 @@ export const PostResult: React.FC<PostResultProps> = ({
                       Turn on sound
                     </button>
                   ) : null}
+                  {!videoPlayError ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        triggerHapticFeedback();
+                        adoptVideoUrl(null);
+                      }}
+                      className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/[0.05] px-3 py-2 text-sm font-semibold text-surface-100 transition-colors hover:bg-white/[0.09]"
+                    >
+                      <Camera className="h-4 w-4" aria-hidden="true" />
+                      Back to photos
+                    </button>
+                  ) : null}
                   {videoPlayError ? (
                     <div
                       className="space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 px-3 py-2 text-xs text-error-100"
@@ -1509,24 +1873,70 @@ export const PostResult: React.FC<PostResultProps> = ({
                     triggerHapticFeedback();
                     setIsPreviewOpen(true);
                   }}
-                  className="w-full block rounded-xl overflow-hidden focus:outline-none focus:ring-4 focus:ring-primary-500/50 transition-all hover:ring-2 hover:ring-primary-400/30"
+                  className="mx-auto block w-full overflow-hidden rounded-xl bg-black focus:outline-none focus:ring-4 focus:ring-primary-500/50 transition-all hover:ring-2 hover:ring-primary-400/30"
+                  style={
+                    primarySaveFormat
+                      ? {
+                          aspectRatio: `${primarySaveFormat.width} / ${primarySaveFormat.height}`,
+                          maxWidth: `min(100%, calc(70dvh * ${primarySaveFormat.width} / ${primarySaveFormat.height}))`,
+                        }
+                      : undefined
+                  }
                   aria-label="Enlarge image"
                 >
                   <ProgressiveImage
-                    src={post.image}
+                    src={displayImageUrl}
                     alt="Generated social media post"
-                    className="max-h-[70dvh] w-full rounded-xl object-contain shadow-2xl"
+                    className="h-full w-full rounded-xl object-contain shadow-2xl"
                   />
                 </button>
               )}
             </div>
 
-            {imageVersions.length > 0 && !videoUrl && !creativeLockedForReview ? (
-              <div className="w-full">
-                <p className="mb-1.5 text-[10px] uppercase tracking-wide text-surface-500">
-                  Previous versions — tap to restore
-                </p>
-                <div className="flex gap-2 overflow-x-auto pb-1">
+            {!creativeLockedForReview ? (
+              <div className="w-full rounded-xl border border-white/10 bg-surface-950/35 p-2.5">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-semibold text-surface-100">Media tray</p>
+                    <p className="text-[10px] text-surface-500">
+                      Photos and completed videos stay available while you work.
+                    </p>
+                  </div>
+                  <Badge variant="neutral" uppercase={false}>
+                    {1 +
+                      imageVersions.length +
+                      videoJobs.filter((job) => job.url).length}{" "}
+                    items
+                  </Badge>
+                </div>
+                <div
+                  className="flex gap-2 overflow-x-auto pb-1"
+                  aria-label="Generated media tray"
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      adoptVideoUrl(null);
+                    }}
+                    className={cn(
+                      "relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border bg-surface-950 ring-offset-2 ring-offset-surface-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400",
+                      !videoUrl
+                        ? "border-primary-300 ring-2 ring-primary-400/45"
+                        : "border-white/15 hover:border-primary-400/60",
+                    )}
+                    aria-label="Show current generated photo"
+                    aria-current={!videoUrl ? "true" : undefined}
+                  >
+                    <img
+                      src={post.image}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                    <span className="absolute inset-x-0 bottom-0 bg-black/75 px-1 py-0.5 text-center text-[9px] font-semibold text-white">
+                      Current
+                    </span>
+                  </button>
                   {imageVersions.map((url, i) => (
                     <button
                       key={`${i}-${url.slice(0, 24)}`}
@@ -1545,12 +1955,43 @@ export const PostResult: React.FC<PostResultProps> = ({
                             : rest.slice(0, 5);
                         });
                       }}
-                      className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-white/15 bg-surface-950 ring-offset-2 ring-offset-surface-900 hover:ring-2 hover:ring-primary-400/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                      className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-white/15 bg-surface-950 ring-offset-2 ring-offset-surface-900 hover:border-primary-400/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
                       aria-label={`Restore previous image version ${i + 1}`}
                     >
                       <img src={url} alt="" className="h-full w-full object-cover" />
+                      <span className="absolute inset-x-0 bottom-0 bg-black/75 px-1 py-0.5 text-center text-[9px] font-semibold text-white">
+                        Version {i + 1}
+                      </span>
                     </button>
                   ))}
+                  {videoJobs
+                    .filter((job) => Boolean(job.url))
+                    .map((job) => (
+                      <button
+                        key={`tray-${job.id}`}
+                        type="button"
+                        onClick={() => {
+                          triggerHapticFeedback();
+                          adoptVideoUrl(job.url || null);
+                        }}
+                        className={cn(
+                          "relative flex h-20 w-24 shrink-0 flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border bg-surface-900 px-2 text-center ring-offset-2 ring-offset-surface-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400",
+                          videoUrl === job.url
+                            ? "border-primary-300 ring-2 ring-primary-400/45"
+                            : "border-white/15 hover:border-primary-400/60",
+                        )}
+                        aria-label={`Show ${job.style} video`}
+                        aria-current={videoUrl === job.url ? "true" : undefined}
+                      >
+                        <Film className="h-5 w-5 text-primary-300" aria-hidden="true" />
+                        <span className="line-clamp-2 text-[9px] font-semibold leading-tight text-surface-100">
+                          {job.style}
+                        </span>
+                        <span className="text-[8px] uppercase tracking-wide text-surface-500">
+                          Video
+                        </span>
+                      </button>
+                    ))}
                 </div>
               </div>
             ) : null}
@@ -1561,8 +2002,17 @@ export const PostResult: React.FC<PostResultProps> = ({
                   <ActionTile
                     icon={Film}
                     iconClassName={TILE_ICON_ACCENT}
-                    tooltip="Turn your image into a video"
-                    disabled={imageBusy || isVideoLoading || creativeLockedForReview}
+                    tooltip={
+                      historyReadOnly
+                        ? "This teammate's saved post is view-only"
+                        : "Turn your image into a video"
+                    }
+                    disabled={
+                      imageBusy ||
+                      isVideoLoading ||
+                      creativeLockedForReview ||
+                      historyReadOnly
+                    }
                     busy={isVideoLoading}
                     label={isVideoLoading ? "Render" : videoUrl ? "New video" : "Video"}
                     onClick={() => setIsVideoDirectorOpen(true)}
@@ -1570,8 +2020,18 @@ export const PostResult: React.FC<PostResultProps> = ({
                   <ActionTile
                     icon={Sparkles}
                     iconClassName="text-primary-300"
-                    tooltip="Artistic style (optional)"
-                    disabled={imageBusy || !!videoUrl || creativeLockedForReview}
+                    tooltip={
+                      hasOriginalCapture
+                        ? "Artistic style (optional)"
+                        : originalRequiredMessage
+                    }
+                    disabled={
+                      imageBusy ||
+                      !!videoUrl ||
+                      creativeLockedForReview ||
+                      historyReadOnly ||
+                      !hasOriginalCapture
+                    }
                     busy={imageBusy}
                     label={imageBusy ? "Wait" : "Fun mode"}
                     onClick={() => setIsFunModeDirectorOpen(true)}
@@ -1580,11 +2040,15 @@ export const PostResult: React.FC<PostResultProps> = ({
                     icon={Calendar}
                     iconClassName="text-emerald-300"
                     tooltip="Schedule post for later"
-                    disabled={deliveryLocked}
+                    disabled={deliveryLocked || historyReadOnly}
                     label="Schedule"
                     onClick={() => {
-                      if (deliveryLocked) {
-                        toast.warning(deliveryGateMessage);
+                      if (deliveryLocked || historyReadOnly) {
+                        toast.warning(
+                          historyReadOnly
+                            ? "This teammate's saved post is view-only."
+                            : deliveryGateMessage,
+                        );
                         return;
                       }
                       setIsScheduleOpen(true);
@@ -1601,27 +2065,16 @@ export const PostResult: React.FC<PostResultProps> = ({
                     }
                     disabled={deliveryLocked}
                     label="Share"
-                    onClick={() => {
-                      if (deliveryLocked) {
-                        toast.warning(deliveryGateMessage);
-                        return;
-                      }
-                      void copyTextToClipboard(editedText);
-                      setIsShareDialogOpen(true);
-                    }}
+                    onClick={handleOpenShare}
                   />
                   <ActionTile
                     icon={Download}
                     iconClassName="text-success-300"
                     tooltip="Save media"
-                    ariaLabel={
-                      deliveryLocked
-                        ? `Save image (${deliveryLockLabel.toLowerCase()})`
-                        : "Save image"
-                    }
-                    disabled={imageBusy || deliveryLocked}
-                    busy={imageBusy}
-                    label="Save"
+                    ariaLabel={saveAriaLabel(deliveryLocked)}
+                    disabled={imageBusy || deliveryLocked || isPreparingSave}
+                    busy={imageBusy || isPreparingSave}
+                    label={isPreparingSave ? "Preparing" : "Save"}
                     onClick={() => void handleSave()}
                   />
                 </div>
@@ -1681,9 +2134,19 @@ export const PostResult: React.FC<PostResultProps> = ({
                 <ActionTile
                   icon={RefreshCw}
                   iconClassName="text-surface-300"
-                  tooltip="Generate a new image version"
+                  tooltip={
+                    hasOriginalCapture
+                      ? "Generate a new image version"
+                      : originalRequiredMessage
+                  }
                   ariaLabel="Regenerate image"
-                  disabled={imageBusy || !!videoUrl || creativeLockedForReview}
+                  disabled={
+                    imageBusy ||
+                    !!videoUrl ||
+                    creativeLockedForReview ||
+                    historyReadOnly ||
+                    !hasOriginalCapture
+                  }
                   busy={imageBusy}
                   label={imageBusy ? "Wait..." : "Regen image"}
                   onClick={() => {
@@ -1698,8 +2161,17 @@ export const PostResult: React.FC<PostResultProps> = ({
                 <ActionTile
                   icon={Edit3}
                   iconClassName={TILE_ICON_ACCENT}
-                  tooltip="Change specific details"
-                  disabled={imageBusy || !!videoUrl || creativeLockedForReview}
+                  tooltip={
+                    historyReadOnly
+                      ? "This teammate's saved post is view-only"
+                      : "Change specific details"
+                  }
+                  disabled={
+                    imageBusy ||
+                    !!videoUrl ||
+                    creativeLockedForReview ||
+                    historyReadOnly
+                  }
                   busy={imageBusy}
                   label={
                     imageBusy ? "Wait..." : isImageEditing ? "Cancel" : "Edit image"
@@ -1710,9 +2182,18 @@ export const PostResult: React.FC<PostResultProps> = ({
                 <ActionTile
                   icon={RefreshCw}
                   iconClassName="text-surface-300"
-                  tooltip="Generate a new caption"
+                  tooltip={
+                    hasOriginalCapture
+                      ? "Generate a new caption"
+                      : originalRequiredMessage
+                  }
                   ariaLabel="Regenerate caption"
-                  disabled={textBusy || creativeLockedForReview}
+                  disabled={
+                    textBusy ||
+                    creativeLockedForReview ||
+                    historyReadOnly ||
+                    !hasOriginalCapture
+                  }
                   busy={textBusy}
                   label={textBusy ? "Wait..." : "Regen text"}
                   onClick={() => {
@@ -1723,8 +2204,12 @@ export const PostResult: React.FC<PostResultProps> = ({
                 <ActionTile
                   icon={Edit3}
                   iconClassName={TILE_ICON_ACCENT}
-                  tooltip="Describe a caption change"
-                  disabled={textBusy || creativeLockedForReview}
+                  tooltip={
+                    historyReadOnly
+                      ? "This teammate's saved post is view-only"
+                      : "Describe a caption change"
+                  }
+                  disabled={textBusy || creativeLockedForReview || historyReadOnly}
                   busy={textBusy}
                   label={textBusy ? "Wait..." : "Edit text"}
                   onClick={() => setIsTextEditing(true)}
@@ -1734,8 +2219,17 @@ export const PostResult: React.FC<PostResultProps> = ({
                   <ActionTile
                     icon={Sparkles}
                     iconClassName={TILE_ICON_ACCENT}
-                    tooltip="Generate three caption options"
-                    disabled={textBusy || creativeLockedForReview}
+                    tooltip={
+                      hasOriginalCapture
+                        ? "Generate three caption options"
+                        : originalRequiredMessage
+                    }
+                    disabled={
+                      textBusy ||
+                      creativeLockedForReview ||
+                      historyReadOnly ||
+                      !hasOriginalCapture
+                    }
                     label="3 text ideas"
                     onClick={() => setIsCaptionAltsOpen(true)}
                   />
@@ -1916,9 +2410,11 @@ export const PostResult: React.FC<PostResultProps> = ({
                   Caption studio
                 </h3>
                 <p className="mt-0.5 text-xs text-surface-400">
-                  {creativeLockedForReview
-                    ? "Review copy is locked to the exact creative submitted to the manager."
-                    : "Ready to copy and post. Tap New caption if you want a different version."}
+                  {historyReadOnly
+                    ? "This teammate's saved copy is view-only. You can still copy, share, or export it."
+                    : creativeLockedForReview
+                      ? "Review copy is locked to the exact creative submitted to the manager."
+                      : "Ready to copy and post. Tap New caption if you want a different version."}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -1927,7 +2423,12 @@ export const PostResult: React.FC<PostResultProps> = ({
                   onClick={() => {
                     void handleTextAction(onRegenerateText).catch(() => undefined);
                   }}
-                  disabled={textBusy || creativeLockedForReview}
+                  disabled={
+                    textBusy ||
+                    creativeLockedForReview ||
+                    historyReadOnly ||
+                    !hasOriginalCapture
+                  }
                   className={cn(
                     "inline-flex min-h-11 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors",
                     "border-primary-400/45 bg-primary-500/15 text-primary-50",
@@ -1935,7 +2436,13 @@ export const PostResult: React.FC<PostResultProps> = ({
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
                     "disabled:cursor-not-allowed disabled:opacity-40",
                   )}
-                  title="Generate a full new marketing caption and hashtags"
+                  title={
+                    historyReadOnly
+                      ? "This teammate's saved post is view-only"
+                      : !hasOriginalCapture
+                        ? originalRequiredMessage
+                        : "Generate a full new marketing caption and hashtags"
+                  }
                   aria-label="New caption"
                 >
                   {textBusy ? (
@@ -1949,7 +2456,12 @@ export const PostResult: React.FC<PostResultProps> = ({
                   <button
                     type="button"
                     onClick={() => setIsCaptionAltsOpen(true)}
-                    disabled={textBusy || creativeLockedForReview}
+                    disabled={
+                      textBusy ||
+                      creativeLockedForReview ||
+                      historyReadOnly ||
+                      !hasOriginalCapture
+                    }
                     className={cn(
                       "inline-flex min-h-11 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors",
                       "border-white/10 bg-white/[0.04] text-surface-200",
@@ -1957,7 +2469,13 @@ export const PostResult: React.FC<PostResultProps> = ({
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
                       "disabled:cursor-not-allowed disabled:opacity-40",
                     )}
-                    title="Generate three full caption options"
+                    title={
+                      historyReadOnly
+                        ? "This teammate's saved post is view-only"
+                        : !hasOriginalCapture
+                          ? originalRequiredMessage
+                          : "Generate three full caption options"
+                    }
                     aria-label="Three caption ideas"
                   >
                     <Sparkles className="h-4 w-4 text-primary-300" />3 options
@@ -1966,7 +2484,9 @@ export const PostResult: React.FC<PostResultProps> = ({
                 <button
                   type="button"
                   onClick={handleUndo}
-                  disabled={historyIndex === 0 || creativeLockedForReview}
+                  disabled={
+                    historyIndex === 0 || creativeLockedForReview || historyReadOnly
+                  }
                   className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-surface-200 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 disabled:cursor-not-allowed disabled:opacity-30"
                   title="Undo (Ctrl+Z)"
                   aria-label="Undo caption change"
@@ -1977,7 +2497,9 @@ export const PostResult: React.FC<PostResultProps> = ({
                   type="button"
                   onClick={handleRedo}
                   disabled={
-                    historyIndex === textHistory.length - 1 || creativeLockedForReview
+                    historyIndex === textHistory.length - 1 ||
+                    creativeLockedForReview ||
+                    historyReadOnly
                   }
                   className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-surface-200 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 disabled:cursor-not-allowed disabled:opacity-30"
                   title="Redo (Ctrl+Y)"
@@ -2063,7 +2585,7 @@ export const PostResult: React.FC<PostResultProps> = ({
               <CaptionStudio
                 value={editedText}
                 onChange={handleTextChange}
-                disabled={isTextLoading || creativeLockedForReview}
+                disabled={isTextLoading || creativeLockedForReview || historyReadOnly}
                 platformId={activeCaptionPlatform}
                 claimLocked={claimLocked}
               />
@@ -2102,7 +2624,7 @@ export const PostResult: React.FC<PostResultProps> = ({
               </div>
             ) : null}
 
-            {requiresApproval ? (
+            {reviewRequired ? (
               <p
                 className={cn(
                   "mb-4 text-xs",
@@ -2168,7 +2690,7 @@ export const PostResult: React.FC<PostResultProps> = ({
           }}
         >
           <div
-            className="mx-auto max-w-lg px-3 pt-2"
+            className="mx-auto grid max-w-lg grid-cols-3 gap-2 px-3 pt-2"
             aria-label="Post delivery actions"
           >
             <Button
@@ -2184,11 +2706,46 @@ export const PostResult: React.FC<PostResultProps> = ({
                 copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />
               }
               fullWidth
+              className="min-w-0 px-2"
               disableHaptics
             >
               <span aria-live="polite">
                 {deliveryLocked ? deliveryLockLabel : copied ? "Copied" : "Copy"}
               </span>
+            </Button>
+            <Button
+              variant="tinted"
+              onClick={handleOpenShare}
+              disabled={deliveryLocked}
+              aria-label={
+                deliveryLocked
+                  ? `Share post (${deliveryLockLabel.toLowerCase()})`
+                  : "Share post"
+              }
+              leftIcon={<Share2 className="h-4 w-4" />}
+              fullWidth
+              className="min-w-0 px-2"
+              disableHaptics
+            >
+              Share
+            </Button>
+            <Button
+              variant="tinted"
+              onClick={() => void handleSave()}
+              disabled={deliveryLocked || imageBusy || isPreparingSave}
+              aria-label={saveAriaLabel(deliveryLocked)}
+              leftIcon={
+                isPreparingSave ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )
+              }
+              fullWidth
+              className="min-w-0 px-2 text-success-200"
+              disableHaptics
+            >
+              {isPreparingSave ? "Ready…" : "Save"}
             </Button>
           </div>
         </div>

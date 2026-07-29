@@ -75,7 +75,9 @@ describe("durable provider resource ownership policy", () => {
             generatedSamples: [
               {
                 video: {
-                  uri: "https://generativelanguage.googleapis.com/v1beta/files/generated-video_789:download?alt=media",
+                  uri: "https://generativelanguage.googleapis.com/v1beta/files/generated-video_789",
+                  downloadUri:
+                    "https://generativelanguage.googleapis.com/v1beta/files/generated-video_789:download?alt=media",
                 },
               },
             ],
@@ -97,6 +99,39 @@ describe("durable provider resource ownership policy", () => {
         provider: "gemini",
         resource_type: "file",
         resource_id: "files/generated-video_789",
+      },
+    ]);
+  });
+
+  it("claims suffixless and downloadUri file variants only on Google's exact origin", () => {
+    expect(
+      policies.providerResourcesFromResponse(startPath, {
+        name: "operations/job_123",
+        response: {
+          generatedVideos: [
+            {
+              video: {
+                download_uri:
+                  "https://generativelanguage.googleapis.com/v1beta/files/download-field_1",
+              },
+            },
+          ],
+          attacker: {
+            downloadUri:
+              "https://generativelanguage.googleapis.com.attacker.example/v1beta/files/stolen",
+          },
+        },
+      }),
+    ).toEqual([
+      {
+        provider: "gemini",
+        resource_type: "operation",
+        resource_id: "operations/job_123",
+      },
+      {
+        provider: "gemini",
+        resource_type: "file",
+        resource_id: "files/download-field_1",
       },
     ]);
   });

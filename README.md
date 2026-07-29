@@ -25,6 +25,10 @@ Set these values in `.env.local` before starting:
 # Server-side secret used by the PocketBase proxy. Never VITE_-prefix it.
 GEMINI_API_KEY=your-gemini-api-key
 
+# Local-only bootstrap credential: exactly 12 case-sensitive alphanumeric
+# characters. Replace this example before using any shared environment.
+ADMIN_DEALER_CODE=your-12-character-code
+
 # Browser-visible backend origin; this is configuration, not a secret.
 VITE_POCKETBASE_URL=http://127.0.0.1:8090
 ```

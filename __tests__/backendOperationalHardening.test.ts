@@ -20,17 +20,28 @@ type HelperModule = {
     windowSeconds: number,
     globalMaxPerWindow: number,
   ) => boolean;
+  persistBoundedTelemetryEvent: (
+    safeEnvelope: {
+      name: string;
+      payload: string;
+      releaseSha: string;
+      apiContractVersion: string;
+    },
+    occurredAt: Date,
+  ) => { stored: boolean; reason: string };
 };
 
 const runtime = globalThis as unknown as Record<string, any>;
 const savedRuntime = {
   $app: runtime.$app,
   Record: runtime.Record,
+  DynamicModel: runtime.DynamicModel,
 };
 
 afterEach(() => {
   runtime.$app = savedRuntime.$app;
   runtime.Record = savedRuntime.Record;
+  runtime.DynamicModel = savedRuntime.DynamicModel;
 });
 
 function loadHelpers(): HelperModule {
@@ -127,6 +138,136 @@ describe("backend operational hardening", () => {
     expect(events).toHaveLength(3);
   });
 
+  it("durably caps telemetry writes from distributed sources", () => {
+    const helpers = loadHelpers();
+    const events: Array<Record<string, unknown>> = [];
+    runtime.DynamicModel = class {
+      constructor(values: Record<string, unknown>) {
+        Object.assign(this, values);
+      }
+    };
+    runtime.Record = class {
+      values: Record<string, unknown>;
+
+      constructor(_collection: unknown, values: Record<string, unknown>) {
+        this.values = { ...values };
+      }
+    };
+    const txDao = {
+      db: () => ({
+        newQuery: () => ({
+          bind: () => ({
+            one: (summary: Record<string, unknown>) => {
+              summary.recentTotal = events.length;
+              summary.overallTotal = events.length;
+              summary.duplicateTotal = 0;
+            },
+          }),
+        }),
+      }),
+      findCollectionByNameOrId: () => ({ id: "client_error_events" }),
+      saveRecord: (record: { values: Record<string, unknown> }) => {
+        events.push(record.values);
+      },
+    };
+    runtime.$app = {
+      dao: () => ({
+        runInTransaction: (callback: (dao: typeof txDao) => void) => callback(txDao),
+      }),
+    };
+
+    for (let index = 0; index < 200; index += 1) {
+      helpers.persistBoundedTelemetryEvent(
+        {
+          name: `client.error.${index}`,
+          payload: JSON.stringify({ errorCode: `E${index}` }),
+          releaseSha: "release-a",
+          apiContractVersion: "contract-a",
+        },
+        new Date("2026-07-28T20:00:00.000Z"),
+      );
+    }
+
+    expect(events).toHaveLength(120);
+    expect(
+      helpers.persistBoundedTelemetryEvent(
+        {
+          name: "client.error.overflow",
+          payload: "{}",
+          releaseSha: "release-a",
+          apiContractVersion: "contract-a",
+        },
+        new Date("2026-07-28T20:00:00.000Z"),
+      ),
+    ).toEqual({ stored: false, reason: "global_rate" });
+  });
+
+  it("enforces the durable telemetry row cap and duplicate coalescing", () => {
+    runtime.DynamicModel = class {
+      constructor(values: Record<string, unknown>) {
+        Object.assign(this, values);
+      }
+    };
+    runtime.Record = class {
+      values: Record<string, unknown>;
+
+      constructor(_collection: unknown, values: Record<string, unknown>) {
+        this.values = { ...values };
+      }
+    };
+    let summaryValues = {
+      recentTotal: 0,
+      overallTotal: 10_000,
+      duplicateTotal: 0,
+    };
+    let saves = 0;
+    const txDao = {
+      db: () => ({
+        newQuery: () => ({
+          bind: () => ({
+            one: (summary: Record<string, unknown>) =>
+              Object.assign(summary, summaryValues),
+          }),
+        }),
+      }),
+      findCollectionByNameOrId: () => ({ id: "client_error_events" }),
+      saveRecord: () => {
+        saves += 1;
+      },
+    };
+    runtime.$app = {
+      dao: () => ({
+        runInTransaction: (callback: (dao: typeof txDao) => void) => callback(txDao),
+      }),
+    };
+
+    const envelope = {
+      name: "client.error",
+      payload: "{}",
+      releaseSha: "release-a",
+      apiContractVersion: "contract-a",
+    };
+    expect(
+      loadHelpers().persistBoundedTelemetryEvent(
+        envelope,
+        new Date("2026-07-28T20:00:00.000Z"),
+      ),
+    ).toEqual({ stored: false, reason: "row_cap" });
+
+    summaryValues = {
+      recentTotal: 1,
+      overallTotal: 1,
+      duplicateTotal: 1,
+    };
+    expect(
+      loadHelpers().persistBoundedTelemetryEvent(
+        envelope,
+        new Date("2026-07-28T20:00:01.000Z"),
+      ),
+    ).toEqual({ stored: false, reason: "coalesced" });
+    expect(saves).toBe(0);
+  });
+
   it("wires retention, transactional audits, atomic provenance, aggregates, and dealer pagination", () => {
     const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
     const helpers = readFileSync(resolve(process.cwd(), "pb_hooks/helpers.js"), "utf8");
@@ -189,5 +330,47 @@ describe("backend operational hardening", () => {
     expect(dealerList).toContain('c.queryParam("limit")');
     expect(dealerList).toContain("payload.nextCursor");
     expect(dealerList).toContain("total: records.length");
+
+    expect(helpers).toContain("function safeProviderTransportDiagnostic(err)");
+    expect(hook).toContain("helpers.safeProviderTransportDiagnostic(err)");
+    expect(hook).not.toContain('console.error("[Proxy OpenAI] error", err)');
+    expect(hook).not.toContain('console.error("[Proxy Anthropic] error", err)');
+    expect(hook).not.toContain('console.error("[proxy-image] fetch failed", err)');
+
+    expect(hook).toContain('"app-write:post:hour:"');
+    expect(hook).toContain('"app-write:post:day:"');
+    expect(hook).toContain('"app-write:post:dealer:day:"');
+    expect(hook).toContain("The dealership reached its daily archive limit");
+    expect(hook).toContain('"app-write:photo-release:hour:"');
+    expect(hook).toContain('"app-write:photo-release:day:"');
+    expect(hook).toContain('"app-attempt:post:hour:"');
+    expect(hook).toContain('"app-attempt:photo-release:hour:"');
+    expect(hook.indexOf('"app-attempt:post:hour:"')).toBeLessThan(
+      hook.indexOf(
+        "const body = $apis.requestInfo(c).data || {};",
+        hook.indexOf('routerAdd("POST", "/api/app/posts"'),
+      ),
+    );
+    expect(hook.indexOf('"app-write:post:hour:"')).toBeGreaterThan(
+      hook.indexOf(
+        'if (approvalStatus === "pending" && !creativeFile)',
+        hook.indexOf('routerAdd("POST", "/api/app/posts"'),
+      ),
+    );
+    expect(hook.indexOf('"app-write:photo-release:hour:"')).toBeGreaterThan(
+      hook.indexOf(
+        "if (!signatureFile)",
+        hook.indexOf('routerAdd("POST", "/api/app/photo_releases"'),
+      ),
+    );
+    expect(hook).toContain('error: "WRITE_RATE_LIMITED"');
+    expect(hook).toContain('c.response().header().set("Retry-After"');
+    expect(hook).not.toContain('c.response().header("Retry-After"');
+    expect(hook).not.toMatch(/c\.response\(\)\.header\("[^"]+"/);
+    const creativeLimit = readFileSync(
+      resolve(process.cwd(), "pb_migrations/1750800400_bound_post_creative_size.js"),
+      "utf8",
+    );
+    expect(creativeLimit).toContain("8 * 1024 * 1024");
   });
 });

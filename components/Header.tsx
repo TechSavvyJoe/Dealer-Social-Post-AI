@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Settings, LogOut } from "lucide-react";
+import { History, Settings, LogOut } from "lucide-react";
 import { Dealer } from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Button } from "./ui/Button";
@@ -12,6 +12,7 @@ interface HeaderProps {
   dealer?: Dealer | null;
   onLogout: () => void;
   onShowSettings: () => void;
+  onShowHistory?: () => void;
   /** Guard against discarding a generated result that may not survive reload. */
   confirmBeforeLogout?: boolean;
 }
@@ -20,6 +21,7 @@ export const Header: React.FC<HeaderProps> = ({
   dealer,
   onLogout,
   onShowSettings,
+  onShowHistory,
   confirmBeforeLogout = false,
 }) => {
   const [isScrolled, setIsScrolled] = useState(false);
@@ -56,6 +58,11 @@ export const Header: React.FC<HeaderProps> = ({
   const handleOpenSettings = () => {
     triggerHapticFeedback();
     onShowSettings();
+  };
+
+  const handleOpenHistory = () => {
+    triggerHapticFeedback();
+    onShowHistory?.();
   };
 
   // Defensive check - should not render if dealer is undefined
@@ -146,6 +153,37 @@ export const Header: React.FC<HeaderProps> = ({
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.2, duration: 0.4 }}
           >
+            {onShowHistory && (
+              <div
+                className="relative"
+                onMouseEnter={() => setShowTooltip("history")}
+                onMouseLeave={() => setShowTooltip(null)}
+              >
+                <Button
+                  variant="tinted"
+                  size="sm"
+                  leftIcon={<History className="h-4 w-4" />}
+                  onClick={handleOpenHistory}
+                  aria-label="Open my work"
+                >
+                  <span className="hidden sm:inline">My work</span>
+                </Button>
+
+                <AnimatePresence>
+                  {showTooltip === "history" && (
+                    <motion.div
+                      className="absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-lg border border-white/10 bg-surface-950/95 px-2 py-1 text-xs text-surface-200 shadow-lg sm:hidden"
+                      initial={{ opacity: 0, y: -5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -5 }}
+                    >
+                      My work
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+
             {/* Settings Button with tooltip */}
             <div
               className="relative"

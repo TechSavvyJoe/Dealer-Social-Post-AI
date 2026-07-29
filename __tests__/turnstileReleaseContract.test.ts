@@ -5,18 +5,18 @@ import { describe, expect, it } from "vitest";
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
 
 describe("Turnstile production release contract", () => {
-  it("allows only the official challenge origin in the required CSP directives", () => {
+  it("uses one production response CSP that allows only the official challenge origin", () => {
     const html = read("index.html");
-    const csp = html.match(
-      /http-equiv="Content-Security-Policy"[\s\S]*?content="([^"]+)"/,
+    const vercel = read("vercel.ts");
+    const csp = vercel.match(
+      /export const contentSecurityPolicy = \[([\s\S]*?)\]\.join/,
     )?.[1];
     expect(csp).toBeDefined();
+    expect(html).not.toContain('http-equiv="Content-Security-Policy"');
 
     const directives = Object.fromEntries(
-      String(csp)
-        .split(";")
-        .map((directive) => directive.trim().split(/\s+/))
-        .filter(([name]) => Boolean(name))
+      Array.from(String(csp).matchAll(/"([^"]+)"/g))
+        .map((match) => match[1].trim().split(/\s+/))
         .map(([name, ...values]) => [name, values]),
     );
     for (const directive of ["script-src", "frame-src", "connect-src"]) {
@@ -61,6 +61,8 @@ describe("Turnstile production release contract", () => {
     expect(fly).toContain('--build-arg VITE_TURNSTILE_SITE_KEY="$TURNSTILE_SITE_KEY"');
     expect(backend).toContain("helpers.isTurnstileTestSecret(turnstileSecret)");
     expect(backend).toContain("helpers.isTurnstileTestSiteKey(turnstileSiteKey)");
+    expect(backend).toContain('routerAdd("GET", "/api/app/proxy-readiness"');
+    expect(backend).toContain("helpers.trustedVercelProxyRequest(c)");
     expect(runbook).toContain("turnstile-spin-v2");
     expect(runbook).toContain("Vercel production as `VITE_TURNSTILE_SITE_KEY`");
     expect(runbook).toContain("Every official Cloudflare test sitekey and secret");

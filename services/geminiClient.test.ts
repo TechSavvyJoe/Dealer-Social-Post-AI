@@ -42,6 +42,7 @@ describe("proxied Gemini client", () => {
       },
       "caption",
       undefined,
+      undefined,
     );
     expect(response.text()).toBe("First second");
   });
@@ -64,6 +65,7 @@ describe("proxied Gemini client", () => {
       "v1beta/models/gemini-3.6-flash:generateContent",
       { contents },
       "caption_regenerate",
+      undefined,
       undefined,
     );
   });

@@ -54,8 +54,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [lockoutUntil, setLockoutUntil] = useState(0);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const adminInputRef = useRef<HTMLInputElement>(null);
+  const isMountedRef = useRef(true);
   const shouldReduceMotion = useReducedMotion();
   const toast = useToast();
+
+  useEffect(() => {
+    // A successful login updates the global store and can immediately unmount
+    // this screen while the short success transition is still resolving.
+    // Keep late async continuations from scheduling work on a retired tree.
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const submitCode = useCallback(
     async (codeToSubmit: string, mode: EntryMode, turnstileToken?: string) => {
@@ -82,6 +93,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       setIsLoading(true);
       try {
         const result = await onLogin(normalizedCode, turnstileToken);
+        if (!isMountedRef.current) return;
         if (result.ok) {
           setPendingAttempt(null);
           setIsSuccess(true);
@@ -131,7 +143,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           "We could not verify this code. Check your connection and try again.",
         );
       } finally {
-        setIsLoading(false);
+        if (isMountedRef.current) {
+          setIsLoading(false);
+        }
       }
     },
     [isLoading, isSuccess, lockoutUntil, onLogin, shouldReduceMotion, toast],

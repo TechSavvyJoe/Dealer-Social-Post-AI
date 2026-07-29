@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { Button } from "./ui/Button";
 import { cn } from "../utils/classNames";
+import { assertAuthEpoch, captureAuthEpoch } from "../utils/authBoundary";
+import { readApiError } from "../services/apiErrors";
 
 interface HealthPayload {
   ok: boolean;
@@ -240,10 +242,12 @@ export const SystemHealthPanel: React.FC = () => {
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
 
   const load = useCallback(async () => {
+    const requestAuthEpoch = captureAuthEpoch();
     setLoading(true);
     setError(null);
     let res: Response;
     try {
+      assertAuthEpoch(requestAuthEpoch);
       res = await fetch("/api/app/health", { credentials: "include" });
     } catch (err) {
       // A transport failure means the old snapshot can no longer describe the
@@ -255,9 +259,19 @@ export const SystemHealthPanel: React.FC = () => {
       return;
     }
 
+    if (res.status === 401) {
+      const authError = await readApiError(res, { requestAuthEpoch });
+      setData(null);
+      setLastChecked(null);
+      setError(authError.message);
+      setLoading(false);
+      return;
+    }
+
     let body: unknown;
     try {
       body = await res.json();
+      assertAuthEpoch(requestAuthEpoch);
     } catch {
       // HTML proxy errors and truncated responses are not health snapshots.
       setData(null);

@@ -309,17 +309,30 @@ async function createAndDownloadPocketBaseBackup(outputPath) {
   }
 }
 
+export function planToolOwnedR2BackupCleanup(objects, prefix) {
+  const prefixPath = `${String(prefix || "").replace(/\/+$/g, "")}/`;
+  return (Array.isArray(objects) ? objects : [])
+    .map((object) => String(object?.key || ""))
+    .filter((key) => {
+      if (!key.startsWith(prefixPath)) return false;
+      const filename = key.slice(prefixPath.length);
+      return (
+        !filename.includes("/") && TOOL_OWNED_POCKETBASE_BACKUP_PATTERN.test(filename)
+      );
+    })
+    .sort((left, right) => right.localeCompare(left));
+}
+
 async function pruneOldBackups(client, prefix) {
-  const backupObjects = (await client.list(`${prefix}/`))
-    .filter((object) => object.key.endsWith(".zip"))
-    .sort((left, right) => right.key.localeCompare(left.key));
-  const expired = backupObjects.slice(BACKUP_RETENTION);
-  for (const object of expired) {
-    await client.delete(object.key);
-    await client.delete(`${object.key}.manifest.json`);
+  const backupObjects = await client.list(`${prefix}/`);
+  const toolOwnedKeys = planToolOwnedR2BackupCleanup(backupObjects, prefix);
+  const expired = toolOwnedKeys.slice(BACKUP_RETENTION);
+  for (const key of expired) {
+    await client.delete(key);
+    await client.delete(`${key}.manifest.json`);
   }
   return {
-    retained: Math.min(backupObjects.length, BACKUP_RETENTION),
+    retained: Math.min(toolOwnedKeys.length, BACKUP_RETENTION),
     pruned: expired.length,
   };
 }

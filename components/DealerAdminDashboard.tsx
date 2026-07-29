@@ -37,6 +37,7 @@ import {
   serializeHours,
   type WeekHours,
 } from "../utils/hoursFormat";
+import { getLeaderboard } from "../services/posts";
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
@@ -876,29 +877,28 @@ export const DealerTeamCard: React.FC = () => {
   const dealer = useAppStore((s) => s.currentDealer);
 
   const load = React.useCallback(async () => {
+    if (!dealer) return;
     setLoading(true);
     setError(null);
     try {
       const [sp, postsRes] = await Promise.all([
         import("../services/salespeople").then((m) => m.listSalespeople(true)),
-        fetch("/api/app/posts?limit=1000", { credentials: "include" }).then((r) =>
-          r.ok ? r.json() : { items: [] },
-        ),
+        getLeaderboard(dealer.id, new Date(Date.UTC(2000, 0, 1))),
       ]);
       const counts = new Map<string, { count: number; lastAt: string }>();
       const looseNames = new Map<string, { count: number; lastAt: string }>();
-      for (const p of (postsRes.items as any[]) || []) {
-        const stamp = p.generated_at as string;
-        if (p.salesperson_id) {
-          const cur = counts.get(p.salesperson_id) || { count: 0, lastAt: stamp };
-          cur.count += 1;
+      for (const p of postsRes) {
+        const stamp = p.lastPostedAt;
+        if (p.salespersonId) {
+          const cur = counts.get(p.salespersonId) || { count: 0, lastAt: stamp };
+          cur.count += p.count;
           if (stamp > cur.lastAt) cur.lastAt = stamp;
-          counts.set(p.salesperson_id, cur);
-        } else if (p.salesperson_name) {
-          const key = (p.salesperson_name as string).trim();
+          counts.set(p.salespersonId, cur);
+        } else if (p.salesperson) {
+          const key = p.salesperson.trim();
           if (!key) continue;
           const cur = looseNames.get(key) || { count: 0, lastAt: stamp };
-          cur.count += 1;
+          cur.count += p.count;
           if (stamp > cur.lastAt) cur.lastAt = stamp;
           looseNames.set(key, cur);
         }
@@ -931,7 +931,7 @@ export const DealerTeamCard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [dealer]);
 
   React.useEffect(() => {
     void load();

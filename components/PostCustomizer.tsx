@@ -22,6 +22,9 @@ import {
   Megaphone,
   Command,
   CornerDownLeft,
+  RefreshCw,
+  ShieldCheck,
+  Trash2,
   type LucideIcon,
 } from "lucide-react";
 import { StyleOption, ToneOption } from "../types";
@@ -36,7 +39,6 @@ import { VinScanner } from "./VinScanner";
 import { DecodedVehicle, vehicleToCreativeBrief } from "../services/vinDecoder";
 import { PhotoReleaseModal } from "./PhotoReleaseModal";
 import { useAppStore } from "../stores/appStore";
-import { ShieldCheck } from "lucide-react";
 import { CapturedRelease } from "../services/photoReleases";
 import { ScenarioPicker } from "./ScenarioPicker";
 import {
@@ -50,10 +52,14 @@ import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { ProgressiveImage } from "./ui/ProgressiveImage";
 import {
   DEFAULT_PLATFORM_IDS,
+  getPrimaryImageProfile,
   getPlatformOptions,
   platformsToCreativeBrief,
+  resolvePrimaryImageProfile,
+  type PrimaryImageProfile,
   type PlatformId,
 } from "../services/platformCopy";
+import type { PrimaryImageFormatId } from "../types";
 import { brandHashtagFromName, formatHashtag } from "../utils/hashtags";
 
 interface PostCustomizerProps {
@@ -68,10 +74,12 @@ interface PostCustomizerProps {
       salespersonName?: string;
       salespersonId?: string;
       vin?: string;
+      scenarioId?: string;
       hasRelease?: boolean;
       capturedRelease?: CapturedRelease;
     },
     platformIds?: PlatformId[],
+    outputProfile?: PrimaryImageProfile,
   ) => Promise<void> | void;
   onBack: () => void;
   dealershipName: string;
@@ -81,6 +89,12 @@ interface PostCustomizerProps {
   isDesktopLayout: boolean;
   isGenerating?: boolean;
 }
+
+const normalizeReleaseCustomer = (value: string | undefined): string =>
+  (value || "").normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " ").trim();
+
+const normalizeReleaseVin = (value: string | undefined): string =>
+  (value || "").trim().toUpperCase();
 
 // Style descriptions. Icons are lucide components (not emoji) so they render
 // identically across OS/browser, sit on the baseline, and share one stroke weight.
@@ -158,6 +172,17 @@ const TypewriterText: React.FC<{ text: string }> = ({ text }) => {
 
 type CaptionSource = "ai" | "custom";
 
+const OUTPUT_FORMAT_CHOICES: Array<{
+  id: PrimaryImageFormatId;
+  label: string;
+  size: string;
+}> = [
+  { id: "story_vertical", label: "Story / Reel", size: "1080×1920" },
+  { id: "feed_square", label: "Feed", size: "1080×1080" },
+  { id: "marketplace", label: "Marketplace", size: "1200×628" },
+  { id: "gbp", label: "Google", size: "1200×900" },
+];
+
 export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   imageSrc,
   onGenerate,
@@ -174,7 +199,20 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   const [selectedPlatforms, setSelectedPlatforms] = useState<PlatformId[]>(() => [
     ...DEFAULT_PLATFORM_IDS,
   ]);
+  const [primaryFormatOverride, setPrimaryFormatOverride] =
+    useState<PrimaryImageFormatId | null>(null);
   const platformOptions = useMemo(() => getPlatformOptions(), []);
+  const suggestedImageProfile = useMemo(
+    () => resolvePrimaryImageProfile(selectedPlatforms),
+    [selectedPlatforms],
+  );
+  const primaryImageProfile = useMemo(
+    () =>
+      primaryFormatOverride
+        ? getPrimaryImageProfile(primaryFormatOverride)
+        : suggestedImageProfile,
+    [primaryFormatOverride, suggestedImageProfile],
+  );
   const [tone, setTone] = useState<ToneOption>(defaultTone);
   const [customMessage, setCustomMessage] = useState("");
   const [captionSource, setCaptionSource] = useState<CaptionSource>("ai");
@@ -277,6 +315,21 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   const handleGenerate = useCallback(async () => {
     triggerHapticFeedback();
     if (activeScenario.requiresCustomer && !capturedRelease) {
+      setReleaseValidationError(true);
+      setReleaseModalOpen(true);
+      return;
+    }
+    if (
+      capturedRelease &&
+      (normalizeReleaseCustomer(capturedRelease.customerName) !==
+        normalizeReleaseCustomer(customerName) ||
+        normalizeReleaseVin(capturedRelease.vin) !==
+          normalizeReleaseVin(decodedVehicle?.vin))
+    ) {
+      // A signature is authority for one exact customer/vehicle pair. If
+      // restored or stale UI state ever diverges, discard it before any
+      // provider request and require a fresh acknowledgement.
+      setCapturedRelease(null);
       setReleaseValidationError(true);
       setReleaseModalOpen(true);
       return;
@@ -407,10 +460,12 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         creativeBrief,
         {
           vin: decodedVehicle?.vin,
+          scenarioId,
           hasRelease: !!capturedRelease,
           capturedRelease: capturedRelease || undefined,
         },
         selectedPlatforms,
+        primaryImageProfile,
       );
     } finally {
       setIsSubmitting(false);
@@ -427,6 +482,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     scenarioId,
     activeScenario.requiresCustomer,
     selectedPlatforms,
+    primaryImageProfile,
     dealershipName,
     onGenerate,
   ]);
@@ -545,6 +601,12 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
               placeholder="First name"
+              disabled={Boolean(capturedRelease)}
+              helperText={
+                capturedRelease
+                  ? "Remove or replace the signed release to change this identity."
+                  : undefined
+              }
               fullWidth
               className="bg-white/5 border-white/10 focus:border-primary-400 focus:bg-white/10 transition-colors"
             />
@@ -572,11 +634,17 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   <button
                     type="button"
                     aria-label="Clear vehicle"
+                    disabled={Boolean(capturedRelease)}
+                    title={
+                      capturedRelease
+                        ? "Remove or replace the signed release before changing the vehicle."
+                        : "Clear vehicle"
+                    }
                     onClick={() => {
                       triggerHapticFeedback();
                       setDecodedVehicle(null);
                     }}
-                    className="p-1 -mr-1 text-success-300/80 hover:text-success-100 rounded-full transition-colors"
+                    className="p-1 -mr-1 text-success-300/80 hover:text-success-100 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -592,6 +660,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   }}
                   fullWidth
                   className="border-dashed border-white/20 bg-white/5 hover:bg-white/10"
+                  disabled={Boolean(capturedRelease)}
                 >
                   Scan VIN (optional — boosts accuracy)
                 </Button>
@@ -616,8 +685,29 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       Release captured for {capturedRelease.customerName}
                     </div>
                     <div className="text-[10px] text-success-300/80">
-                      Will be saved when you generate the post.
+                      Identity and vehicle are locked to this signature.
                     </div>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCapturedRelease(null);
+                        setReleaseModalOpen(true);
+                      }}
+                      className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[11px] font-semibold text-success-100 transition-colors hover:bg-success-500/20"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                      Replace
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Remove captured release"
+                      onClick={() => setCapturedRelease(null)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-error-400/25 bg-error-500/10 text-error-100 transition-colors hover:bg-error-500/20"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
                   </div>
                 </motion.div>
               ) : (
@@ -783,10 +873,71 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   );
                 })}
               </div>
-              <p className="text-[11px] leading-snug text-surface-500">
-                Captions are tailored to these platforms. Stories and TikTok prefer
-                vertical (9:16) exports.
-              </p>
+              <fieldset className="space-y-2 rounded-xl border border-primary-400/20 bg-primary-500/10 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <legend className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-300">
+                      Main image size
+                    </legend>
+                    <p className="mt-0.5 text-xs text-surface-300">
+                      This exact canvas is used for preview, save, and history.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setPrimaryFormatOverride(null);
+                    }}
+                    aria-pressed={primaryFormatOverride === null}
+                    className={cn(
+                      "min-h-9 shrink-0 rounded-lg border px-2.5 text-[10px] font-semibold uppercase tracking-wide transition-colors",
+                      primaryFormatOverride === null
+                        ? "border-primary-300 bg-primary-500/30 text-primary-50"
+                        : "border-white/10 bg-white/5 text-surface-300 hover:border-primary-400/40",
+                    )}
+                  >
+                    Auto
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {OUTPUT_FORMAT_CHOICES.map((format) => {
+                    const selected = primaryImageProfile.primaryFormatId === format.id;
+                    return (
+                      <button
+                        key={format.id}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => {
+                          triggerHapticFeedback();
+                          setPrimaryFormatOverride(format.id);
+                        }}
+                        className={cn(
+                          "min-h-12 rounded-lg border px-2 py-1.5 text-left transition-colors",
+                          selected
+                            ? "border-primary-300 bg-primary-500/30 text-primary-50 shadow-sm"
+                            : "border-white/10 bg-surface-950/25 text-surface-300 hover:border-primary-400/40",
+                        )}
+                      >
+                        <span className="block text-[11px] font-semibold leading-tight">
+                          {format.label}
+                        </span>
+                        <span className="mt-0.5 block text-[10px] tabular-nums opacity-75">
+                          {format.size}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p
+                  className="text-[10px] leading-relaxed text-surface-400"
+                  aria-live="polite"
+                >
+                  {primaryFormatOverride
+                    ? `${primaryImageProfile.label} selected. Other destination sizes remain available in Export sizes.`
+                    : `${suggestedImageProfile.label} recommended from your selected destinations. Choose a size above to override it.`}
+                </p>
+              </fieldset>
             </div>
 
             {/* Tone Selection - Horizontal Scroll on Mobile with Snap */}
@@ -1056,6 +1207,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           defaultCustomerName={customerName}
           onCaptured={(release) => {
             setCapturedRelease(release);
+            setCustomerName(release.customerName);
             setReleaseValidationError(false);
           }}
         />

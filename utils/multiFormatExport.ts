@@ -70,6 +70,20 @@ const loadImage = (src: string): Promise<HTMLImageElement> =>
     img.src = src;
   });
 
+const decodedPixelDimensions = (
+  img: HTMLImageElement,
+): { width: number; height: number } => ({
+  width: img.naturalWidth || img.width,
+  height: img.naturalHeight || img.height,
+});
+
+/** Whether a decoded image already has the exact pixels required by a profile. */
+export const imageMatchesExportFormat = (
+  width: number,
+  height: number,
+  format: Pick<ExportFormat, "width" | "height">,
+): boolean => width === format.width && height === format.height;
+
 /** Pure layout helper — contain (letterbox), never cover-crop. */
 export const computeContainRect = (
   srcW: number,
@@ -151,7 +165,8 @@ const drawBlurredCoverBackground = (
   const tctx = tiny.getContext("2d");
   if (!tctx) return;
 
-  const cover = computeCoverRect(img.width, img.height, tinyW, tinyH);
+  const source = decodedPixelDimensions(img);
+  const cover = computeCoverRect(source.width, source.height, tinyW, tinyH);
   tctx.imageSmoothingEnabled = true;
   tctx.imageSmoothingQuality = "low";
   tctx.drawImage(img, cover.dx, cover.dy, cover.drawW, cover.drawH);
@@ -171,12 +186,7 @@ const drawBlurredCoverBackground = (
  * Draw the full creative into the target canvas using contain + soft blur pad.
  * Never crops store text, faces, or vehicle out of the designed post.
  */
-export const renderFormat = async (
-  sourceDataUrl: string,
-  format: ExportFormat,
-): Promise<string> => {
-  const img = await loadImage(sourceDataUrl);
-
+const renderLoadedFormat = (img: HTMLImageElement, format: ExportFormat): string => {
   const canvas = document.createElement("canvas");
   canvas.width = format.width;
   canvas.height = format.height;
@@ -184,9 +194,10 @@ export const renderFormat = async (
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas 2D context unavailable");
 
+  const source = decodedPixelDimensions(img);
   const { drawW, drawH, dx, dy } = computeContainRect(
-    img.width,
-    img.height,
+    source.width,
+    source.height,
     format.width,
     format.height,
   );
@@ -229,6 +240,27 @@ export const renderFormat = async (
   return canvas.toDataURL("image/jpeg", 0.94);
 };
 
+export const renderFormat = async (
+  sourceDataUrl: string,
+  format: ExportFormat,
+): Promise<string> => renderLoadedFormat(await loadImage(sourceDataUrl), format);
+
+/**
+ * Preserve a source that is already at the selected profile's exact pixel size.
+ * Legacy and mismatched media still use the normal premium contain render.
+ */
+export const renderFormatIfNeeded = async (
+  sourceDataUrl: string,
+  format: ExportFormat,
+): Promise<string> => {
+  const img = await loadImage(sourceDataUrl);
+  const source = decodedPixelDimensions(img);
+  if (imageMatchesExportFormat(source.width, source.height, format)) {
+    return sourceDataUrl;
+  }
+  return renderLoadedFormat(img, format);
+};
+
 /**
  * Renders all four formats in parallel and returns them keyed by id.
  */
@@ -241,6 +273,19 @@ export const renderAllFormats = async (
     ),
   );
   return Object.fromEntries(entries) as Record<ExportFormatId, string>;
+};
+
+/** Resolve a de-duplicated, validated export-format selection. */
+export const resolveExportFormats = (formatIds?: ExportFormatId[]): ExportFormat[] => {
+  if (!formatIds?.length) return [...EXPORT_FORMATS];
+  const seen = new Set<ExportFormatId>();
+  return formatIds
+    .map((id) => EXPORT_FORMATS.find((format) => format.id === id))
+    .filter((format): format is ExportFormat => {
+      if (!format || seen.has(format.id)) return false;
+      seen.add(format.id);
+      return true;
+    });
 };
 
 const triggerDownload = (dataUrl: string, filename: string): void => {
@@ -261,16 +306,14 @@ export const downloadAllFormats = async (
   sourceDataUrl: string,
   formatIds?: ExportFormatId[],
 ): Promise<void> => {
-  const rendered = await renderAllFormats(sourceDataUrl);
-  const formats =
-    formatIds && formatIds.length > 0
-      ? formatIds
-          .map((id) => EXPORT_FORMATS.find((f) => f.id === id))
-          .filter((f): f is ExportFormat => Boolean(f))
-      : EXPORT_FORMATS;
+  const formats = resolveExportFormats(formatIds);
   for (let i = 0; i < formats.length; i++) {
     const fmt = formats[i];
-    triggerDownload(rendered[fmt.id], fmt.filename);
+    // Render only the requested variants and release each large canvas result
+    // before moving on. Four parallel 1080p data URLs can otherwise exhaust a
+    // mobile Safari tab.
+    const rendered = await renderFormat(sourceDataUrl, fmt);
+    triggerDownload(rendered, fmt.filename);
     if (i < formats.length - 1) {
       await new Promise((r) => setTimeout(r, 250));
     }

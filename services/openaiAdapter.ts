@@ -11,6 +11,11 @@
  * adds the auth header so the key never reaches the browser.
  */
 import { FLAGS, MODEL_POLICY_VERSION, OPENAI_MODELS } from "./modelConfig";
+import {
+  assertAuthEpoch,
+  captureAuthEpoch,
+  notifySessionRejected,
+} from "../utils/authBoundary";
 
 const PROXY_PATH = "/api/proxy/openai/v1/images/generations";
 
@@ -22,6 +27,8 @@ interface OpenAIImageOptions {
   size?: "1024x1024" | "1024x1536" | "1536x1024";
   /** GPT Image quality tier. */
   quality?: "low" | "medium" | "high";
+  /** Originating authenticated workspace for cross-provider failover. */
+  requestAuthEpoch?: number;
 }
 
 interface OpenAIImageResponse {
@@ -56,6 +63,7 @@ const proxyHeaders = (
 export const generateImageViaOpenAI = async (
   options: OpenAIImageOptions,
 ): Promise<string> => {
+  const requestAuthEpoch = options.requestAuthEpoch ?? captureAuthEpoch();
   if (!FLAGS.enableOpenAIFallback) {
     throw new Error(
       "OpenAI fallback is disabled (set VITE_ENABLE_OPENAI_FALLBACK=true)",
@@ -71,6 +79,7 @@ export const generateImageViaOpenAI = async (
     output_format: "png",
   };
 
+  assertAuthEpoch(requestAuthEpoch);
   const res = await fetch(PROXY_PATH, {
     method: "POST",
     credentials: "include",
@@ -79,6 +88,7 @@ export const generateImageViaOpenAI = async (
   });
 
   if (!res.ok) {
+    if (res.status === 401) notifySessionRejected(requestAuthEpoch);
     let detail = `${res.status} ${res.statusText}`;
     try {
       const errBody = await res.json();
@@ -90,6 +100,7 @@ export const generateImageViaOpenAI = async (
   }
 
   const payload: OpenAIImageResponse = await res.json();
+  assertAuthEpoch(requestAuthEpoch);
   if (payload.error) {
     throw new Error(`OpenAI image error: ${payload.error.message}`);
   }
@@ -97,6 +108,7 @@ export const generateImageViaOpenAI = async (
   if (!b64) {
     throw new Error("OpenAI returned no image data");
   }
+  assertAuthEpoch(requestAuthEpoch);
   return `data:image/png;base64,${b64}`;
 };
 

@@ -11,14 +11,26 @@ describe("PocketBase 0.22 multipart routes", () => {
     expect(hook + helpers).toContain("$filesystem.fileFromMultipart(header)");
   });
 
-  it("creates a durable unlinked release with tenant and audit data forced server-side", () => {
+  it("creates a durable unlinked release with minimized server-owned audit data", () => {
     expect(hook).toContain('c.formFile("signature_png")');
     expect(hook).toContain('form.addFiles("signature_png", signatureFile)');
     expect(hook).toContain("dealer: dealer.id");
     expect(hook).toContain("signed_at: new Date().toISOString()");
     expect(hook).toContain('post_id: ""');
-    expect(hook).toContain('data.ip_hash = ip ? $security.sha256(ip) : ""');
+    expect(hook).toContain('ip_hash: ""');
+    expect(hook).toContain('user_agent: ""');
+    expect(hook).not.toContain("$security.sha256(ip)");
     expect(hook).toContain("has_release: false");
+    const minimizationMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        "pb_migrations/1750800500_minimize_photo_release_metadata.js",
+      ),
+      "utf8",
+    );
+    expect(minimizationMigration).toContain(
+      "UPDATE photo_releases SET ip_hash = '', user_agent = ''",
+    );
   });
 
   it("links consent one way only after validating release, post, tenant, and owner", () => {

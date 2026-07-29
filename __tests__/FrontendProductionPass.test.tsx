@@ -134,6 +134,14 @@ describe("frontend production pass", () => {
     await waitFor(() =>
       expect(onLogin).toHaveBeenCalledWith("Admin9xQ2Z7p", undefined),
     );
+    expect(
+      await screen.findByRole("heading", { name: "Access confirmed" }),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText("Dealer access").querySelector("[aria-busy]"),
+      ).toHaveAttribute("aria-busy", "false"),
+    );
   });
 
   it("does not let global code shortcuts override a focused login control", async () => {
@@ -174,12 +182,14 @@ describe("frontend production pass", () => {
 
   it("exposes the photo review as a described modal dialog", () => {
     render(
-      <ImageCropModal
-        isOpen
-        imageSrc="data:image/png;base64,preview"
-        onConfirm={vi.fn()}
-        onClose={vi.fn()}
-      />,
+      <ToastProvider>
+        <ImageCropModal
+          isOpen
+          imageSrc="data:image/png;base64,preview"
+          onConfirm={vi.fn()}
+          onClose={vi.fn()}
+        />
+      </ToastProvider>,
     );
 
     const dialog = screen.getByRole("dialog", { name: "Review photo" });

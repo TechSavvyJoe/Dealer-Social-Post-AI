@@ -93,6 +93,7 @@ const savedRuntime = {
   $os: runtime.$os,
   $security: runtime.$security,
   Record: runtime.Record,
+  ApiError: runtime.ApiError,
 };
 
 afterEach(() => {
@@ -101,6 +102,7 @@ afterEach(() => {
   runtime.$os = savedRuntime.$os;
   runtime.$security = savedRuntime.$security;
   runtime.Record = savedRuntime.Record;
+  runtime.ApiError = savedRuntime.ApiError;
   vi.restoreAllMocks();
 });
 
@@ -426,6 +428,8 @@ describe("authoritative session revalidation", () => {
     dealer?: PocketBaseRecord;
     systemDealer?: PocketBaseRecord;
     sourceSession?: PocketBaseRecord;
+    impersonationChildren?: PocketBaseRecord[];
+    impersonationLookupError?: Error;
   }) {
     let adminSecret = options?.adminSecret ?? "MixedCaseA7Z";
     const deleted: string[] = [];
@@ -454,6 +458,7 @@ describe("authoritative session revalidation", () => {
         pin: "1234",
       });
     const sourceSession = options?.sourceSession;
+    const impersonationChildren = options?.impersonationChildren ?? [];
 
     const dao = {
       findFirstRecordByFilter: (collection: string) => {
@@ -471,7 +476,29 @@ describe("authoritative session revalidation", () => {
       deleteRecord: (record: PocketBaseRecord) => {
         deleted.push(record.id);
       },
-      findRecordsByFilter: () => [] as PocketBaseRecord[],
+      findRecordsByFilter: (
+        collection: string,
+        _filter: string,
+        _sort: string,
+        limit: number,
+        _offset: number,
+        params: StringMap,
+      ) => {
+        if (collection !== "sessions") {
+          throw new Error(`Unexpected records lookup: ${collection}`);
+        }
+        if (options?.impersonationLookupError) {
+          throw options.impersonationLookupError;
+        }
+        return impersonationChildren
+          .filter(
+            (child) =>
+              child.getBool("is_impersonation") &&
+              child.getString("impersonator_session") === String(params.source || "") &&
+              new Date(child.getString("expires_at")).getTime() > Date.now(),
+          )
+          .slice(0, limit);
+      },
     };
     runtime.$os = {
       getenv: (name: string) => (name === "ADMIN_DEALER_CODE" ? adminSecret : ""),
@@ -507,6 +534,116 @@ describe("authoritative session revalidation", () => {
       "Set-Cookie",
       expect.stringContaining("Max-Age=0"),
     ]);
+  });
+
+  it("parks a source bearer while its live impersonation child remains valid", () => {
+    const source = makeRecord("source-admin-session", {
+      role: "super_admin",
+      dealer: "system-dealer",
+      person: "",
+      is_impersonation: false,
+      impersonator_session: "",
+      expires_at: "2999-01-01T00:00:00.000Z",
+      admin_secret_fingerprint: sha256(
+        "dealer-social-post-ai:admin-session:v1:MixedCaseA7Z",
+      ),
+    });
+    const child = makeRecord("impersonated-session", {
+      role: "salesperson",
+      dealer: "dealer-1",
+      person: "person-1",
+      is_impersonation: true,
+      impersonator_session: source.id,
+      expires_at: "2999-01-01T00:00:00.000Z",
+    });
+    const state = installRuntime({
+      session: source,
+      impersonationChildren: [child],
+    });
+    const request = makeRequestContext(token);
+
+    expect(helpers.sessionContext(request.context)).toBeNull();
+    expect(state.deleted).toEqual([]);
+    expect(request.responseHeaders).toContainEqual([
+      "Set-Cookie",
+      expect.stringContaining("Max-Age=0"),
+    ]);
+  });
+
+  it("unparks the source bearer after its child is gone or expired", () => {
+    const source = makeRecord("source-admin-session", {
+      role: "super_admin",
+      dealer: "system-dealer",
+      person: "",
+      is_impersonation: false,
+      impersonator_session: "",
+      expires_at: "2999-01-01T00:00:00.000Z",
+      admin_secret_fingerprint: sha256(
+        "dealer-social-post-ai:admin-session:v1:MixedCaseA7Z",
+      ),
+    });
+    const child = makeRecord("expired-impersonated-session", {
+      role: "salesperson",
+      dealer: "dealer-1",
+      person: "person-1",
+      is_impersonation: true,
+      impersonator_session: source.id,
+      expires_at: "2000-01-01T00:00:00.000Z",
+    });
+    const state = installRuntime({
+      session: source,
+      impersonationChildren: [child],
+    });
+    const request = makeRequestContext(token);
+
+    expect(helpers.sessionContext(request.context)).toMatchObject({
+      role: "super_admin",
+      isImpersonating: false,
+    });
+    expect(state.deleted).toEqual([]);
+    expect(request.responseHeaders).toEqual([]);
+  });
+
+  it("preserves the parked source when its child lookup is unavailable", () => {
+    const source = makeRecord("source-admin-session", {
+      role: "super_admin",
+      dealer: "system-dealer",
+      person: "",
+      is_impersonation: false,
+      impersonator_session: "",
+      expires_at: "2999-01-01T00:00:00.000Z",
+      admin_secret_fingerprint: sha256(
+        "dealer-social-post-ai:admin-session:v1:MixedCaseA7Z",
+      ),
+    });
+    const state = installRuntime({
+      session: source,
+      impersonationLookupError: new Error("database unavailable"),
+    });
+    const request = makeRequestContext(token);
+    runtime.ApiError = class extends Error {
+      status: number;
+      data: StringMap;
+
+      constructor(status: number, message: string, data: StringMap) {
+        super(message);
+        this.status = status;
+        this.data = data;
+      }
+    };
+
+    let failure: unknown;
+    try {
+      helpers.sessionContext(request.context);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toMatchObject({
+      status: 503,
+      data: { code: "UNAVAILABLE" },
+    });
+    expect(state.deleted).toEqual([]);
+    expect(request.responseHeaders).toEqual([]);
   });
 
   it("invalidates a person session immediately when the current role changes", () => {
@@ -678,6 +815,74 @@ describe("authoritative session revalidation", () => {
         ),
       }),
     ).toThrow("Session person credential changed during sign-in");
+    expect(saveRecord).not.toHaveBeenCalled();
+  });
+
+  it("prevents a second live impersonation child from the same source", () => {
+    const systemDealer = makeRecord("system-dealer", { is_system: true });
+    const dealer = makeRecord("dealer-1", { is_system: false });
+    const person = makeRecord("person-1", {
+      dealer: dealer.id,
+      role: "salesperson",
+      active: true,
+      pin: "1234",
+    });
+    const source = makeRecord("source-session", {
+      role: "super_admin",
+      dealer: systemDealer.id,
+      person: "",
+      is_impersonation: false,
+      impersonator_session: "",
+      expires_at: "2999-01-01T00:00:00.000Z",
+      admin_secret_fingerprint: sha256(
+        "dealer-social-post-ai:admin-session:v1:MixedCaseA7Z",
+      ),
+    });
+    const existingChild = makeRecord("existing-child", {
+      is_impersonation: true,
+      impersonator_session: source.id,
+      expires_at: "2999-01-01T00:00:00.000Z",
+    });
+    const saveRecord = vi.fn();
+    const findRecordsByFilter = vi.fn(() => [existingChild]);
+    runtime.$os = {
+      getenv: (name: string) => (name === "ADMIN_DEALER_CODE" ? "MixedCaseA7Z" : ""),
+    };
+    runtime.$security = {
+      sha256,
+      randomStringWithAlphabet: () => "a".repeat(64),
+    };
+    runtime.Record = class {};
+    runtime.$app = {
+      dao: () => ({
+        findCollectionByNameOrId: () => ({ id: "sessions" }),
+        findRecordById: (collection: string, id: string) => {
+          if (collection === "dealers" && id === dealer.id) return dealer;
+          if (collection === "dealers" && id === systemDealer.id) return systemDealer;
+          if (collection === "salespeople" && id === person.id) return person;
+          if (collection === "sessions" && id === source.id) return source;
+          throw new Error(`Missing ${collection}/${id}`);
+        },
+        findRecordsByFilter,
+        saveRecord,
+      }),
+    };
+
+    expect(() =>
+      helpers.createSession(dealer.id, "salesperson", "203.0.113.20", "vitest", {
+        personId: person.id,
+        isImpersonation: true,
+        impersonatorSessionId: source.id,
+      }),
+    ).toThrow("Impersonation source already has an active child");
+    expect(findRecordsByFilter).toHaveBeenCalledWith(
+      "sessions",
+      expect.stringContaining("impersonator_session = {:source}"),
+      "id",
+      1,
+      0,
+      expect.objectContaining({ source: source.id }),
+    );
     expect(saveRecord).not.toHaveBeenCalled();
   });
 

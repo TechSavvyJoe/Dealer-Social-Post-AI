@@ -165,12 +165,12 @@ test.describe("Dealer Social Post AI Flow", () => {
 
     await page.emulateMedia({ reducedMotion: "reduce" });
 
-    const csp = await page
-      .locator('meta[http-equiv="Content-Security-Policy"]')
-      .getAttribute("content");
-    expect(csp).toContain("script-src 'self' https://challenges.cloudflare.com");
-    expect(csp).toContain("frame-src https://challenges.cloudflare.com");
-    expect(csp).toContain("connect-src 'self' https://challenges.cloudflare.com");
+    // Production owns one canonical CSP in Vercel's response headers. A
+    // second HTML meta policy would intersect with it and can silently block
+    // Turnstile even when the response header is correct.
+    await expect(
+      page.locator('meta[http-equiv="Content-Security-Policy"]'),
+    ).toHaveCount(0);
 
     // Login was simplified for mobile: primary heading is "Sign in".
     await expect(page.getByRole("heading", { name: /^sign in$/i })).toBeVisible();
@@ -255,6 +255,14 @@ test.describe("Dealer Social Post AI Flow", () => {
       });
     });
 
+    await page.route("**/api/app/posts/qa-post-1/draft", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ id: "qa-post-1", updated: true }),
+      });
+    });
+
     await page.addInitScript(() => {
       (window as unknown as { __shareCalls: ShareData[] }).__shareCalls = [];
       Object.defineProperty(navigator, "canShare", {
@@ -274,13 +282,48 @@ test.describe("Dealer Social Post AI Flow", () => {
         configurable: true,
         value: { writeText: () => Promise.resolve() },
       });
+    });
 
+    await page.goto("/");
+    await expect(
+      page.getByRole("heading", { name: "Capture the handoff." }),
+    ).toBeVisible();
+    await page.evaluate(async () => {
       const image =
         "data:image/svg+xml;charset=utf-8," +
         encodeURIComponent(
           '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#07111f"/><stop offset="1" stop-color="#2563eb"/></linearGradient></defs><rect width="1080" height="1080" fill="url(#g)"/><path d="M140 640h800l-92-210H310z" fill="#e8eef8" opacity=".92"/><circle cx="350" cy="680" r="88" fill="#07111f"/><circle cx="760" cy="680" r="88" fill="#07111f"/><text x="540" y="860" text-anchor="middle" font-family="Arial" font-size="54" fill="white">NORTHLINE MOTORS</text></svg>',
         );
-
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("dealer-social-post-ai", 2);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains("creative-assets")) {
+            db.createObjectStore("creative-assets", { keyPath: "key" });
+          }
+          if (!db.objectStoreNames.contains("media-archive")) {
+            const archive = db.createObjectStore("media-archive", {
+              keyPath: "id",
+            });
+            archive.createIndex("dealerId", "dealerId", { unique: false });
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction("creative-assets", "readwrite");
+        transaction.objectStore("creative-assets").put({
+          key: "qa-dealer:generated",
+          value: image,
+          updatedAt: Date.now(),
+          mediaEpoch: 0,
+        });
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+      database.close();
       localStorage.setItem(
         "dealer-social-post-ai.session",
         JSON.stringify({
@@ -288,7 +331,6 @@ test.describe("Dealer Social Post AI Flow", () => {
           step: 4,
           loginTimestamp: Date.now(),
           generatedPost: {
-            image,
             text: "A standout delivery deserves a standout moment. Congratulations on the new ride!",
             postId: "qa-post-1",
             releaseStatus: "saved",
@@ -301,20 +343,31 @@ test.describe("Dealer Social Post AI Flow", () => {
         }),
       );
     });
-
-    await page.goto("/");
+    await page.reload();
 
     await expect(page.getByRole("heading", { name: "Ready to publish" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Copy caption" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Share post" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Save image" })).toBeVisible();
+    const mediaPreview = page.getByRole("region", { name: "Media preview" });
+    const isDesktop = testInfo.project.name.endsWith("desktop-1440");
+    const deliveryBar = page.getByLabel("Post delivery actions");
+    const shareAndSaveActions = isDesktop ? mediaPreview : deliveryBar;
+    await expect(
+      deliveryBar.getByRole("button", { name: "Copy caption" }),
+    ).toBeVisible();
+    const shareTrigger = shareAndSaveActions.getByRole("button", {
+      name: "Share post",
+    });
+    await expect(shareTrigger).toBeVisible();
+    await expect(
+      shareAndSaveActions.getByRole("button", {
+        name: /^Save (?:image|video|to Photos|\d+×\d+)$/,
+      }),
+    ).toBeVisible();
 
     await expectNoCriticalAccessibilityIssues(page);
     await expectNoSeriousAxeViolations(page);
     await expectNoHorizontalOverflow(page);
 
     const creativeTools = page.getByRole("button", { name: /creative tools/i });
-    const isDesktop = testInfo.project.name.endsWith("desktop-1440");
     await expect(creativeTools).toHaveAttribute(
       "aria-expanded",
       isDesktop ? "true" : "false",
@@ -326,7 +379,6 @@ test.describe("Dealer Social Post AI Flow", () => {
       await expect(page.getByRole("button", { name: "Regenerate image" })).toBeHidden();
     }
 
-    const shareTrigger = page.getByRole("button", { name: "Share post" });
     await shareTrigger.focus();
     await page.keyboard.press("Enter");
     const shareDialog = page.getByRole("dialog", { name: "Share" });

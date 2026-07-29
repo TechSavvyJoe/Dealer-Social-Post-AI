@@ -8,12 +8,14 @@ import {
   VideoStyle,
   VideoRequestOptions,
   Dealer,
+  ImageSelection,
 } from "../types";
 import { LoadingOverlay } from "./LoadingOverlay";
 import { PageTransition } from "./ui/PageTransition";
 import { Button } from "./ui/Button";
 import { Shimmer } from "./ui/Shimmer";
 import type { LoginResult } from "../stores/appStore";
+import type { PrimaryImageProfile, PlatformId } from "../services/platformCopy";
 
 // Lazy load components
 const LazyLoginScreen = React.lazy(() =>
@@ -52,7 +54,7 @@ interface MainContentProps {
 
   // Handlers
   onLogin: (dealerCode: string, turnstileToken?: string) => Promise<LoginResult>;
-  onImageSelected: (image: string) => void;
+  onImageSelected: (selection: ImageSelection) => void;
   onReset: () => void;
   /** Same-photo remix — keep capture, re-open CUSTOMIZE. */
   onRemix: () => void;
@@ -67,6 +69,7 @@ interface MainContentProps {
       salespersonName?: string;
       salespersonId?: string;
       vin?: string;
+      scenarioId?: string;
       hasRelease?: boolean;
       capturedRelease?: {
         customerName: string;
@@ -74,14 +77,19 @@ interface MainContentProps {
         vin?: string;
       };
     },
-    platformIds?: string[],
+    platformIds?: PlatformId[],
+    outputProfile?: PrimaryImageProfile,
   ) => Promise<void>;
   onBackToCapture: () => void;
   onStyleToneChange: (style: StyleOption, tone: ToneOption) => void;
   onRegenerateImage: () => Promise<void>;
   onEditImage: (prompt: string) => Promise<void>;
   onRegenerateText: () => Promise<void>;
-  onEditText: (prompt: string) => Promise<void>;
+  onEditText: (
+    prompt: string,
+    originalText?: string,
+    platformId?: string,
+  ) => Promise<string>;
   onFunMode: (styleName?: string) => Promise<void>;
   onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
   /** One-shot caption generator for the alternatives modal. */
@@ -221,6 +229,11 @@ export const MainContent: React.FC<MainContentProps> = ({
         return generatedPost ? (
           <Suspense fallback={suspenseFallback("Loading results")}>
             <LazyPostResult
+              key={
+                generatedPost.postId ||
+                generatedPost.aiMeta?.image.attemptId ||
+                generatedPost.image
+              }
               post={generatedPost}
               onStartOver={onReset}
               onRemix={onRemix}

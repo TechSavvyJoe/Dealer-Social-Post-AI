@@ -8,6 +8,7 @@ type Policies = {
 
 type Helpers = {
   findSessionByToken(token: string): unknown;
+  findSystemDealer(): unknown;
   createSession(
     dealerId: string,
     role: string,
@@ -169,6 +170,54 @@ describe("PocketBase sensitive-storage hardening", () => {
     expect(clearCookie).toHaveBeenCalled();
   });
 
+  it("preserves the bearer when session lookup infrastructure is unavailable", () => {
+    const lookupError = Object.assign(new Error("database unavailable"), {
+      code: 500,
+    });
+    const deleteRecord = vi.fn();
+    runtime.$security = { sha256: () => "a".repeat(64) };
+    runtime.$app = {
+      dao: () => ({
+        findFirstRecordByFilter: () => {
+          throw lookupError;
+        },
+        deleteRecord,
+      }),
+    };
+    const clearCookie = vi.fn();
+    const context = {
+      request: () => ({
+        header: {
+          get: () => `dealer_session=${"d".repeat(64)}`,
+        },
+      }),
+      response: () => ({
+        header: () => ({ add: clearCookie }),
+      }),
+    };
+
+    expect(() => helpers.sessionContext(context)).toThrow("database unavailable");
+    expect(deleteRecord).not.toHaveBeenCalled();
+    expect(clearCookie).not.toHaveBeenCalled();
+  });
+
+  it("treats PocketBase 0.22's exact no-row sentinel as an ordinary auth miss", () => {
+    const noRows = Object.assign(new Error("sql: no rows in result set"), {
+      name: "GoError",
+    });
+    runtime.$security = { sha256: () => "a".repeat(64) };
+    runtime.$app = {
+      dao: () => ({
+        findFirstRecordByFilter: () => {
+          throw noRows;
+        },
+      }),
+    };
+
+    expect(helpers.findSessionByToken("d".repeat(64))).toBeNull();
+    expect(helpers.findSystemDealer()).toBeNull();
+  });
+
   it("slides the authoritative database expiry together with the cookie", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-15T12:00:00.000Z"));
@@ -281,7 +330,10 @@ describe("Generated video transport", () => {
     );
 
     expect(clientSource).toContain(
-      'parsed.hostname !== "generativelanguage.googleapis.com"',
+      'parsed.origin !== "https://generativelanguage.googleapis.com"',
+    );
+    expect(clientSource).toContain(
+      String.raw`/^\/v1beta\/files\/([a-z0-9._~-]+)(?::download)?$/i`,
     );
     expect(clientSource).toContain("fetch(`/api/proxy/${proxyPath}`");
     expect(clientSource).not.toContain("await fetch(videoUri)");

@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "verifiedAt": "2026-07-23",
   "models": {
     "textQuality": "gemini-3.6-flash",
@@ -72,6 +72,7 @@
       "resolution": "1080p"
     }
   },
+  "allowedImageAspectRatios": ["1:1", "9:16", "16:9", "4:3"],
   "allowedRequestFields": {
     "generateContent": {
       "topLevel": ["contents", "generationConfig"],
@@ -81,7 +82,7 @@
       "inlineData": ["mimeType", "data"],
       "textGenerationConfig": ["maxOutputTokens"],
       "imageGenerationConfig": ["responseModalities", "imageConfig", "maxOutputTokens"],
-      "imageConfig": ["imageSize"],
+      "imageConfig": ["imageSize", "aspectRatio"],
       "legacyImageGenerationConfig": [
         "responseModalities",
         "responseFormat",

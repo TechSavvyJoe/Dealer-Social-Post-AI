@@ -4,7 +4,13 @@ import {
   letterboxImageForVideo,
   resolveVeoAspect,
 } from "../utils/imageUtils";
-import { StyleOption, ToneOption, VideoStyle, VideoRequestOptions } from "../types";
+import {
+  StyleOption,
+  ToneOption,
+  VideoStyle,
+  VideoRequestOptions,
+  type ImageAspectRatio,
+} from "../types";
 import {
   generateImagePrompt,
   generateTextPrompt,
@@ -22,6 +28,7 @@ import {
   FLAGS,
   getFallbackChain,
   type ImageGenerationTier,
+  isAllowedImageAspectRatio,
   type ModelExecutionMetadata,
   type ModelProvider,
   type ModelTaskName,
@@ -31,6 +38,11 @@ import {
   TASKS,
   type GenerationParams,
 } from "./modelConfig";
+import {
+  assertAuthEpoch,
+  captureAuthEpoch,
+  notifySessionRejected,
+} from "../utils/authBoundary";
 import { generateTextViaClaude, shouldFallbackToClaude } from "./claudeAdapter";
 import { generateImageViaOpenAI, shouldFallbackToOpenAI } from "./openaiAdapter";
 import { requestCache } from "../utils/requestCache";
@@ -284,11 +296,15 @@ const generateImageWithFallback = async (
   task: "image_standard" | "image_studio",
   imageParts: unknown[],
   imagePromptForOpenAI?: string,
+  imageAspectRatio?: ImageAspectRatio,
+  requestAuthEpoch: number = captureAuthEpoch(),
 ): Promise<ModelRun<string>> => {
+  assertAuthEpoch(requestAuthEpoch);
   const client = getGeminiClient();
   const attemptId = createGenerationAttemptId();
   try {
     const response = await withFallbackChain(task, attemptId, async (modelId) => {
+      assertAuthEpoch(requestAuthEpoch);
       const res = await client.models.generateContent({
         model: modelId,
         task,
@@ -298,8 +314,11 @@ const generateImageWithFallback = async (
           modelId,
           TASKS[task].params,
           TASKS[task].imageSizes,
+          imageAspectRatio,
         ),
+        requestAuthEpoch,
       } as any);
+      assertAuthEpoch(requestAuthEpoch);
       const dataUrl = extractGeneratedImageDataUrl(res);
       if (!dataUrl) {
         throw new Error(`No image from ${modelId} (${imageFailureReason(res)})`);
@@ -321,13 +340,21 @@ const generateImageWithFallback = async (
         task,
       });
       try {
+        const openAIImageSize =
+          imageAspectRatio === "9:16"
+            ? "1024x1536"
+            : imageAspectRatio === "4:3" || imageAspectRatio === "16:9"
+              ? "1536x1024"
+              : "1024x1024";
         const value = await generateImageViaOpenAI({
           prompt: imagePromptForOpenAI,
           task,
           attemptId,
-          size: "1024x1024",
+          size: openAIImageSize,
           quality: "high",
+          requestAuthEpoch,
         });
+        assertAuthEpoch(requestAuthEpoch);
         return {
           value,
           aiMeta: recordExecution(
@@ -370,14 +397,21 @@ const imageGenerationConfig = (
   modelId: string,
   params: GenerationParams,
   imageSizes?: Readonly<Record<string, "1K" | "2K" | "4K">>,
-) => ({
-  responseModalities: ["TEXT" as any, "IMAGE" as any],
-  imageConfig: {
-    imageSize:
-      imageSizes?.[modelId] ?? (modelId === MODELS.image.emergency ? "1K" : "2K"),
-  },
-  ...params,
-});
+  imageAspectRatio?: ImageAspectRatio,
+) => {
+  if (imageAspectRatio && !isAllowedImageAspectRatio(imageAspectRatio)) {
+    throw new Error(`Unsupported image aspect ratio: ${imageAspectRatio}`);
+  }
+  return {
+    responseModalities: ["TEXT" as any, "IMAGE" as any],
+    imageConfig: {
+      imageSize:
+        imageSizes?.[modelId] ?? (modelId === MODELS.image.emergency ? "1K" : "2K"),
+      ...(imageAspectRatio ? { aspectRatio: imageAspectRatio } : {}),
+    },
+    ...params,
+  };
+};
 
 const imageTaskForTier = (
   tier: ImageGenerationTier,
@@ -390,12 +424,16 @@ export const generateFunSocialPostImage = async (
   logoBase64Url?: string,
   requestedStyle?: string, // Optional: specific style  name or 'random'
   imageTier: ImageGenerationTier = "standard",
+  imageAspectRatio?: ImageAspectRatio,
 ): Promise<string> => {
+  const requestAuthEpoch = captureAuthEpoch();
   const normalisedOriginal = await normaliseDataUrl(originalImageBase64Url);
+  assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedOriginal);
   const originalImagePart = { inlineData: { mimeType, data: base64Data } };
 
   const logoImagePart = await optionalLogoImagePart(logoBase64Url);
+  assertAuthEpoch(requestAuthEpoch);
 
   const funPrompt = generateFunPrompt(dealershipName, logoBase64Url, requestedStyle);
 
@@ -405,7 +443,13 @@ export const generateFunSocialPostImage = async (
   }
 
   return (
-    await generateImageWithFallback(imageTaskForTier(imageTier), imageParts, funPrompt)
+    await generateImageWithFallback(
+      imageTaskForTier(imageTier),
+      imageParts,
+      funPrompt,
+      imageAspectRatio,
+      requestAuthEpoch,
+    )
   ).value;
 };
 
@@ -415,12 +459,16 @@ export const editSocialPostImage = async (
   dealershipName: string,
   logoBase64Url?: string,
   imageTier: ImageGenerationTier = "standard",
+  imageAspectRatio?: ImageAspectRatio,
 ): Promise<string> => {
+  const requestAuthEpoch = captureAuthEpoch();
   const normalisedPrevious = await normaliseDataUrl(previousImageBase64Url);
+  assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedPrevious);
   const previousImagePart = { inlineData: { mimeType, data: base64Data } };
 
   const logoImagePart = await optionalLogoImagePart(logoBase64Url);
+  assertAuthEpoch(requestAuthEpoch);
 
   const editInstruction = editImagePrompt(
     editPromptString,
@@ -438,6 +486,8 @@ export const editSocialPostImage = async (
       imageTaskForTier(imageTier),
       imageParts,
       editInstruction,
+      imageAspectRatio,
+      requestAuthEpoch,
     )
   ).value;
 };
@@ -451,7 +501,9 @@ export const generateSocialPostTextDetailed = async (
   creativeBrief?: string,
   style?: StyleOption,
 ): Promise<CaptionGenerationResult> => {
+  const requestAuthEpoch = captureAuthEpoch();
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
+  assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
   const imagePart = { inlineData: { mimeType, data: base64Data } };
   const textPrompt = generateTextPrompt(
@@ -477,6 +529,7 @@ export const generateSocialPostTextDetailed = async (
     !isRegeneration && FLAGS.enableResponseCache
       ? `caption:v2:${await hashString(textPrompt + ":" + base64Data)}`
       : null;
+  assertAuthEpoch(requestAuthEpoch);
   if (cacheKey) {
     const cached = requestCache.get<CaptionGenerationResult>(cacheKey);
     if (cached) {
@@ -493,6 +546,7 @@ export const generateSocialPostTextDetailed = async (
 
   const runOnGemini = () =>
     withFallbackChain(task, attemptId, async (modelId) => {
+      assertAuthEpoch(requestAuthEpoch);
       const client = getGeminiClient();
       const response = await client.models.generateContent({
         model: modelId,
@@ -500,7 +554,9 @@ export const generateSocialPostTextDetailed = async (
         attemptId,
         contents: { parts: [imagePart, { text: textPrompt }] },
         generationConfig: taskConfig.params,
+        requestAuthEpoch,
       } as any);
+      assertAuthEpoch(requestAuthEpoch);
       let rawText = "";
       try {
         rawText = typeof response.text === "function" ? response.text() : "";
@@ -549,8 +605,10 @@ export const generateSocialPostTextDetailed = async (
             model: taskConfig.claudeFallback,
             temperature: taskConfig.claudeTemperature,
             maxTokens: taskConfig.params.maxOutputTokens,
+            requestAuthEpoch,
           }),
         );
+        assertAuthEpoch(requestAuthEpoch);
         aiMeta = recordExecution(
           task,
           "anthropic",
@@ -644,12 +702,15 @@ export const editSocialPostTextDetailed = async (
   editPromptString: string,
   tone: ToneOption,
 ): Promise<CaptionGenerationResult> => {
+  const requestAuthEpoch = captureAuthEpoch();
+  assertAuthEpoch(requestAuthEpoch);
   const prompt = editTextPrompt(originalText, editPromptString, tone);
   const taskConfig = TASKS["caption_edit"];
   const attemptId = createGenerationAttemptId();
 
   const runOnGemini = () =>
     withFallbackChain("caption_edit", attemptId, async (modelId) => {
+      assertAuthEpoch(requestAuthEpoch);
       const client = getGeminiClient();
       const response = await client.models.generateContent({
         model: modelId,
@@ -657,7 +718,9 @@ export const editSocialPostTextDetailed = async (
         attemptId,
         contents: { parts: [{ text: prompt }] },
         generationConfig: taskConfig.params,
+        requestAuthEpoch,
       } as any);
+      assertAuthEpoch(requestAuthEpoch);
       let rawText = "";
       try {
         rawText = typeof response.text === "function" ? response.text() : "";
@@ -667,6 +730,11 @@ export const editSocialPostTextDetailed = async (
       const cleaned = cleanGeneratedText(rawText);
       if (!cleaned) {
         throw new Error("AI caption edit blocked by quality gate");
+      }
+      const comparable = (value: string) =>
+        cleanGeneratedText(value).replace(/\s+/g, " ").trim().toLocaleLowerCase();
+      if (comparable(cleaned) === comparable(originalText)) {
+        throw new Error("AI returned the caption without applying the requested edit");
       }
       return cleaned;
     });
@@ -690,8 +758,16 @@ export const editSocialPostTextDetailed = async (
           model: taskConfig.claudeFallback,
           temperature: taskConfig.claudeTemperature,
           maxTokens: taskConfig.params.maxOutputTokens,
+          requestAuthEpoch,
         }),
       );
+      assertAuthEpoch(requestAuthEpoch);
+      if (
+        text.replace(/\s+/g, " ").trim().toLocaleLowerCase() ===
+        cleanGeneratedText(originalText).replace(/\s+/g, " ").trim().toLocaleLowerCase()
+      ) {
+        throw new Error("AI returned the caption without applying the requested edit");
+      }
       aiMeta = recordExecution(
         "caption_edit",
         "anthropic",
@@ -731,8 +807,11 @@ export const generateSocialPost = async (
   initialText?: string,
   creativeBrief?: string,
   imageTier: ImageGenerationTier = "standard",
+  imageAspectRatio?: ImageAspectRatio,
 ): Promise<SocialPostGenerationResult> => {
+  const requestAuthEpoch = captureAuthEpoch();
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
+  assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
 
   const imagePart = {
@@ -743,6 +822,7 @@ export const generateSocialPost = async (
   };
 
   const logoImagePart = await optionalLogoImagePart(logoBase64Url);
+  assertAuthEpoch(requestAuthEpoch);
 
   // Generate text (or use provided template/custom text) and the final image in parallel.
   const textPromise: Promise<CaptionGenerationResult> = (
@@ -792,6 +872,8 @@ export const generateSocialPost = async (
         imageTaskForTier(imageTier),
         imageParts,
         imagePrompt,
+        imageAspectRatio,
+        requestAuthEpoch,
       );
     } catch (err) {
       console.warn(
@@ -817,6 +899,7 @@ export const generateSocialPost = async (
   })();
 
   const [textResult, imageResult] = await Promise.all([textPromise, imagePromise]);
+  assertAuthEpoch(requestAuthEpoch);
 
   if (!textResult.text) {
     throw new Error("Failed to generate social post caption.");
@@ -870,41 +953,71 @@ const looksLikeMp4 = (bytes: Uint8Array): boolean => {
   );
 };
 
+/** Read a small Blob slice across modern browsers and jsdom's legacy Blob. */
+const readBlobSlice = async (blob: Blob): Promise<Uint8Array> => {
+  if (typeof blob.arrayBuffer === "function") {
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+  if (typeof FileReader !== "undefined") {
+    const result = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (reader.result instanceof ArrayBuffer) {
+          resolve(reader.result);
+        } else {
+          reject(new Error("Video header could not be read."));
+        }
+      };
+      reader.onerror = () =>
+        reject(reader.error || new Error("Video header could not be read."));
+      reader.readAsArrayBuffer(blob);
+    });
+    return new Uint8Array(result);
+  }
+  throw new Error("Video header could not be read.");
+};
+
 /**
  * Fetches video content from a Google API URL through our proxy
  * This is needed because the video URI requires API key authentication
  */
-const fetchVideoThroughProxy = async (videoUri: string): Promise<string> => {
-  if (videoUri.startsWith("blob:")) {
-    return videoUri;
+export const fetchVideoThroughProxy = async (
+  videoUri: string,
+  requestAuthEpoch: number,
+): Promise<string> => {
+  const normalizedUri = videoUri.trim();
+  if (normalizedUri.startsWith("blob:")) {
+    return normalizedUri;
   }
-  if (videoUri.startsWith("data:")) {
-    return videoUri;
+  if (normalizedUri.startsWith("data:")) {
+    assertAuthEpoch(requestAuthEpoch);
+    return createVideoBlobUrl(normalizedUri);
   }
 
   try {
-    const parsed = new URL(videoUri);
-    if (
-      parsed.protocol !== "https:" ||
-      parsed.hostname !== "generativelanguage.googleapis.com" ||
-      !parsed.pathname.startsWith("/v1beta/files/")
-    ) {
+    const parsed = new URL(normalizedUri);
+    if (parsed.origin !== "https://generativelanguage.googleapis.com") {
       throw new Error("Video download origin is not trusted.");
     }
-    // Path only for allowlist; always request alt=media for binary bytes.
-    let pathname = parsed.pathname.replace(/^\/+/, "");
-    if (!pathname.endsWith(":download") && !pathname.includes(":download")) {
-      // Some responses omit the :download suffix
-      pathname = `${pathname}:download`;
+    // Veo has returned both the canonical :download URI and the base File URI.
+    // Convert either trusted shape to the single internal path authorized by
+    // the provider-resource ledger. Do not forward provider query credentials.
+    const fileMatch = parsed.pathname.match(
+      /^\/v1beta\/files\/([a-z0-9._~-]+)(?::download)?$/i,
+    );
+    if (!fileMatch) {
+      throw new Error("Video download path is not trusted.");
     }
-    const proxyPath = `${pathname}?alt=media`;
+    const proxyPath = `v1beta/files/${fileMatch[1]}:download?alt=media`;
 
+    assertAuthEpoch(requestAuthEpoch);
     const response = await fetch(`/api/proxy/${proxyPath}`, {
       method: "GET",
       credentials: "include",
     });
 
     if (!response.ok) {
+      if (response.status === 401) notifySessionRejected(requestAuthEpoch);
       const errText = await response.text().catch(() => "");
       throw new Error(
         `Video proxy returned ${response.status}${errText ? `: ${errText.slice(0, 160)}` : ""}.`,
@@ -912,44 +1025,33 @@ const fetchVideoThroughProxy = async (videoUri: string): Promise<string> => {
     }
 
     const rawBlob = await response.blob();
+    assertAuthEpoch(requestAuthEpoch);
     if (rawBlob.size === 0) {
       throw new Error("Video proxy returned empty media.");
     }
 
-    // Force a playable MIME type — Google often sends application/octet-stream,
-    // and some browsers refuse to decode that in <video>.
-    const typed = rawBlob.type.startsWith("video/")
-      ? rawBlob
-      : new Blob([rawBlob], { type: "video/mp4" });
-
-    // Soft validate container when arrayBuffer is available (jsdom tests may not).
-    try {
-      if (typeof typed.arrayBuffer === "function") {
-        const buf = new Uint8Array(await typed.arrayBuffer());
-        const head = buf.subarray(0, 16);
-        if (buf.byteLength > 32 && !looksLikeMp4(head)) {
-          // JSON error bodies sometimes sneak through as 200 + octet-stream
-          const asText = new TextDecoder().decode(buf.subarray(0, 80));
-          if (asText.trimStart().startsWith("{") || asText.includes("error")) {
-            throw new Error("Video proxy returned an error payload, not media.");
-          }
-          console.warn(
-            "[VideoGen] Downloaded media missing ftyp magic; shipping as video/mp4.",
-          );
-        }
-        // Rebuild from the same bytes so MIME is definitely video/mp4
-        return URL.createObjectURL(new Blob([buf], { type: "video/mp4" }));
-      }
-    } catch (validateErr) {
-      if (
-        validateErr instanceof Error &&
-        validateErr.message.includes("error payload")
-      ) {
-        throw validateErr;
-      }
-      console.warn("[VideoGen] Video byte validation skipped:", validateErr);
+    if (rawBlob.size < 32 || typeof rawBlob.slice !== "function") {
+      throw new Error("Video proxy returned invalid MP4 media.");
     }
 
+    // Inspect only the ISO-BMFF header. Reading the full 720p/1080p Blob into a
+    // Uint8Array doubles peak memory and can terminate a mobile Safari PWA.
+    const headBlob = rawBlob.slice(0, 16);
+    const head = await readBlobSlice(headBlob);
+    assertAuthEpoch(requestAuthEpoch);
+    if (!looksLikeMp4(head)) {
+      // Never relabel arbitrary 200 responses as MP4. Provider gateways can
+      // return HTML/JSON/plain-text failures with an octet-stream MIME.
+      throw new Error("Video proxy returned invalid MP4 media.");
+    }
+
+    // Blob.slice can safely apply the playable MIME without copying video
+    // bytes into JavaScript memory. Preserve a correct MP4 Blob unchanged.
+    const typed =
+      rawBlob.type.toLowerCase() === "video/mp4"
+        ? rawBlob
+        : rawBlob.slice(0, rawBlob.size, "video/mp4");
+    assertAuthEpoch(requestAuthEpoch);
     return URL.createObjectURL(typed);
   } catch (error) {
     console.error("[VideoGen] Secure video download failed.", error);
@@ -961,22 +1063,38 @@ const fetchVideoThroughProxy = async (videoUri: string): Promise<string> => {
   }
 };
 
+const providerVideoUri = (value: any): string | null => {
+  if (!value || typeof value !== "object") return null;
+  const candidate =
+    value.downloadUri ||
+    value.download_uri ||
+    value.fileUri ||
+    value.file_uri ||
+    value.videoUri ||
+    value.video_uri ||
+    value.uri;
+  return typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
+};
+
 export const generatePostVideo = async (
   imageBase64Url: string,
   style: VideoStyle,
   options: VideoRequestOptions,
   signal?: AbortSignal,
 ): Promise<string> => {
+  const requestAuthEpoch = captureAuthEpoch();
   const videoTask: "video_standard" | "video_quality" =
     options.resolution === "1080p" ? "video_quality" : "video_standard";
   const videoModels = getFallbackChain(videoTask);
   const resolvedResolution = TASKS[videoTask].resolution ?? "720p";
 
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
+  assertAuthEpoch(requestAuthEpoch);
 
   // Resolve final Veo params FIRST so the prompt matches the wire body.
   // Veo 3.1 accepts only 16:9 | 9:16 and duration 4 | 6 | 8 (1080p → 8s).
   const { width, height } = await getImageDimensions(normalisedImage);
+  assertAuthEpoch(requestAuthEpoch);
   const aspectRatio = resolveVeoAspect(
     width,
     height,
@@ -989,6 +1107,7 @@ export const generatePostVideo = async (
   // Letterbox so Veo never has to invent crop margins (root cause of morph/
   // second-car frames when a square branded post is forced into 9:16).
   const letterboxed = await letterboxImageForVideo(normalisedImage, aspectRatio);
+  assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data: base64Data } = parseDataUrl(letterboxed);
 
   const prompt = generateVideoPrompt(style, {
@@ -1027,7 +1146,7 @@ export const generatePostVideo = async (
     `[VideoGen] Options: aspect=${aspectRatio} duration=${durationSeconds}s soundtrack=${options.soundtrack || "cinematic"}`,
   );
 
-  let lastError: any = null;
+  let lastError: unknown = null;
   const generationAttemptId = createGenerationAttemptId();
 
   for (let modelIndex = 0; modelIndex < videoModels.length; modelIndex += 1) {
@@ -1043,145 +1162,156 @@ export const generatePostVideo = async (
       );
       return videoUrl;
     };
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      if (signal?.aborted) {
-        throw new DOMException("Video generation aborted", "AbortError");
+    if (signal?.aborted) {
+      throw new DOMException("Video generation aborted", "AbortError");
+    }
+
+    console.log(`[VideoGen] Starting video generation with ${veoModel}.`);
+    console.log(`[VideoGen] Config: ${durationSeconds}s, ${aspectRatio}`);
+
+    // A Veo start is billable and non-idempotent. The generation-attempt
+    // header is audit metadata; the proxy does not persist a mapping that can
+    // recover and return the original operation. Consequently, there must be
+    // no automatic retry after a transport/5xx/ambiguous success failure.
+    const apiPath = `v1beta/models/${veoModel}:predictLongRunning`;
+    let response: Response;
+    try {
+      assertAuthEpoch(requestAuthEpoch);
+      response = await fetch(`/api/proxy/${apiPath}`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Generation-Task": videoTask,
+          "X-Model-Policy-Version": MODEL_POLICY_VERSION,
+          "X-Generation-Attempt-ID": generationAttemptId,
+        },
+        body: JSON.stringify(body),
+        signal,
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw error;
       }
+      lastError = error;
+      console.error(
+        `[VideoGen] ${veoModel} start failed; not retrying an ambiguous request.`,
+        normalizeError(error).message,
+      );
+      break;
+    }
 
+    if (!response.ok) {
+      if (response.status === 401) notifySessionRejected(requestAuthEpoch);
+      let text = "";
       try {
-        console.log(
-          `[VideoGen] Starting video generation with ${veoModel}, attempt ${attempt}`,
+        text = await response.text();
+      } catch (_error) {
+        // The status is still useful even if its response body cannot be read.
+      }
+      lastError = new Error(
+        `Video generation failed (${response.status}): ${
+          text || response.statusText || "request rejected"
+        }`,
+      );
+      console.error("[VideoGen] Request failed:", text || response.statusText);
+
+      // A 404 proves the selected model endpoint did not start a job, so a
+      // configured model fallback is safe. All other failures stop here:
+      // notably, proxy 5xx responses can occur after an upstream acceptance
+      // whose operation response was lost or could not be secured.
+      if (response.status === 404 && modelIndex < videoModels.length - 1) {
+        console.warn(
+          `[VideoGen] ${veoModel} was not found; trying the next configured model.`,
         );
-        console.log(`[VideoGen] Config: ${durationSeconds}s, ${aspectRatio}`);
+        continue;
+      }
+      break;
+    }
 
-        // Use the predictLongRunning endpoint for Veo 3.x
-        const apiPath = `v1beta/models/${veoModel}:predictLongRunning`;
+    let json: any;
+    try {
+      json = await response.json();
+      assertAuthEpoch(requestAuthEpoch);
+    } catch (error) {
+      lastError = error;
+      console.error(
+        "[VideoGen] Accepted start returned an unreadable response; not retrying.",
+      );
+      break;
+    }
+    console.log("[VideoGen] Generation request accepted.");
 
-        const response = await fetch(`/api/proxy/${apiPath}`, {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Generation-Task": videoTask,
-            "X-Model-Policy-Version": MODEL_POLICY_VERSION,
-            "X-Generation-Attempt-ID": generationAttemptId,
-          },
-          body: JSON.stringify(body),
-        });
+    // Once an operation name exists, never start a fallback job. The poller
+    // owns transient retries for this one durable provider operation.
+    const operationName = json?.name;
+    if (operationName) {
+      console.log("[VideoGen] Async operation started; polling.");
+      return finishVideo(
+        await pollGeminiVideoOperation(operationName, 360000, signal, requestAuthEpoch),
+      ); // 6 minute timeout for Veo 3.1
+    }
 
-        if (!response.ok) {
-          const text = await response.text();
-          console.error(`[VideoGen] Request failed:`, text);
+    // Check for immediate response (unlikely but handle it)
+    if (json?.generatedVideos?.[0]) {
+      return finishVideo(await extractVideoFromResponse(json, requestAuthEpoch));
+    }
 
-          // Check for specific error types
-          if (response.status === 503 || text.includes("overloaded")) {
-            console.log(`[VideoGen] Service overloaded, will retry...`);
-            if (attempt < 3) {
-              await sleep(attempt * 5000);
-              continue;
-            }
-            throw new Error(
-              `Video generation failed (${response.status}): ${
-                text || "service overloaded"
-              }`,
+    // Try to extract video from response
+    const candidates = json?.candidates;
+    if (candidates && candidates.length > 0) {
+      const parts = candidates[0]?.content?.parts;
+      if (parts && parts.length > 0) {
+        for (const part of parts) {
+          // Check for inline video data
+          if (part.inlineData?.mimeType?.startsWith("video/")) {
+            console.log(`[VideoGen] Got inline video data`);
+            return finishVideo(createVideoBlobUrl(part.inlineData.data));
+          }
+          // Check for a provider file/download URI
+          const partFileUri = providerVideoUri(part.fileData);
+          if (partFileUri) {
+            return finishVideo(
+              await fetchVideoThroughProxy(partFileUri, requestAuthEpoch),
             );
           }
-
-          throw new Error(
-            `Video generation failed (${response.status}): ${
-              text || response.statusText
-            }`,
-          );
-        }
-
-        const json = await response.json();
-        console.log("[VideoGen] Generation request accepted.");
-
-        // Veo 3.1 returns an async operation that needs polling
-        const operationName = json?.name;
-        if (operationName) {
-          console.log("[VideoGen] Async operation started; polling.");
-          return finishVideo(
-            await pollGeminiVideoOperation(operationName, 360000, signal),
-          ); // 6 minute timeout for Veo 3.1
-        }
-
-        // Check for immediate response (unlikely but handle it)
-        if (json?.generatedVideos?.[0]) {
-          return finishVideo(await extractVideoFromResponse(json));
-        }
-
-        // Try to extract video from response
-        const candidates = json?.candidates;
-        if (candidates && candidates.length > 0) {
-          const parts = candidates[0]?.content?.parts;
-          if (parts && parts.length > 0) {
-            for (const part of parts) {
-              // Check for inline video data
-              if (part.inlineData?.mimeType?.startsWith("video/")) {
-                console.log(`[VideoGen] Got inline video data`);
-                return finishVideo(createVideoBlobUrl(part.inlineData.data));
-              }
-              // Check for file URI
-              if (part.fileData?.fileUri) {
-                return finishVideo(await fetchVideoThroughProxy(part.fileData.fileUri));
-              }
-              // Check for video URI directly
-              if (part.videoMetadata?.uri || part.uri) {
-                const uri = part.videoMetadata?.uri || part.uri;
-                return finishVideo(await fetchVideoThroughProxy(uri));
-              }
-            }
+          // Check for video URI directly
+          const partVideoUri =
+            providerVideoUri(part.videoMetadata) || providerVideoUri(part);
+          if (partVideoUri) {
+            return finishVideo(
+              await fetchVideoThroughProxy(partVideoUri, requestAuthEpoch),
+            );
           }
         }
-
-        // Check for generatedVideos format
-        if (json?.generatedVideos || json?.videos) {
-          return finishVideo(await extractVideoFromResponse(json));
-        }
-
-        // Check predictions format (fallback)
-        if (json?.predictions?.[0]) {
-          return finishVideo(await extractVideoFromPrediction(json.predictions[0]));
-        }
-
-        throw new Error(
-          "No video content found in response. The model may not support video generation with the current configuration.",
-        );
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          throw error;
-        }
-
-        lastError = error;
-        const normalized = normalizeError(error);
-        console.error(
-          `[VideoGen] ${veoModel} attempt ${attempt} failed:`,
-          normalized.message,
-        );
-
-        if (normalized.kind === "model_unavailable" && attempt < 3) {
-          await sleep(attempt * 5000);
-          continue;
-        }
-        if (normalized.kind === "network" && attempt < 3) {
-          await sleep(attempt * 3000);
-          continue;
-        }
-
-        console.warn(
-          `[VideoGen] ${veoModel} exhausted; trying the next configured model.`,
-        );
-        break;
       }
     }
+
+    // Check for generatedVideos format
+    if (json?.generatedVideos || json?.videos) {
+      return finishVideo(await extractVideoFromResponse(json, requestAuthEpoch));
+    }
+
+    // Check predictions format (fallback)
+    if (json?.predictions?.[0]) {
+      return finishVideo(
+        await extractVideoFromPrediction(json.predictions[0], requestAuthEpoch),
+      );
+    }
+
+    lastError = new Error(
+      "No video content found in response. The model may not support video generation with the current configuration.",
+    );
+    // A successful-but-unrecognized start response is ambiguous. Do not send
+    // another billable start request.
+    break;
   }
 
   const normalized = normalizeError(lastError);
   throw new Error(
-    `Video generation failed after all configured models: ${normalized.message} ${recoveryHint(
+    `Video generation did not start safely: ${normalized.message} ${recoveryHint(
       normalized,
-    )}`,
+    )} The start request was not retried to prevent a duplicate paid video job.`,
   );
 };
 
@@ -1196,6 +1326,7 @@ const pollGeminiVideoOperation = async (
   operationName: string,
   timeoutMs: number = 300000,
   signal?: AbortSignal,
+  requestAuthEpoch: number = captureAuthEpoch(),
 ): Promise<string> => {
   const startTime = Date.now();
   let pollInterval = 5000;
@@ -1226,6 +1357,7 @@ const pollGeminiVideoOperation = async (
 
       console.log("[VideoGen] Polling video operation.");
 
+      assertAuthEpoch(requestAuthEpoch);
       const response = await fetch(`/api/proxy/${pollPath}`, {
         method: "GET",
         credentials: "include",
@@ -1235,6 +1367,7 @@ const pollGeminiVideoOperation = async (
       });
 
       if (!response.ok) {
+        if (response.status === 401) notifySessionRejected(requestAuthEpoch);
         const text = await response.text();
         console.error(`[VideoGen] Poll failed:`, text);
         await sleep(pollInterval);
@@ -1243,6 +1376,7 @@ const pollGeminiVideoOperation = async (
       }
 
       const rawOperation = await response.json();
+      assertAuthEpoch(requestAuthEpoch);
       const operation = GeminiVideoOperationSchema.parse(rawOperation);
 
       console.log(`[VideoGen] Operation done: ${operation.done === true}`);
@@ -1260,16 +1394,20 @@ const pollGeminiVideoOperation = async (
           // Try to extract video from the response
           const resp = operation.response;
           // Check generateVideoResponse format (from predictLongRunning) - OFFICIAL FORMAT
-          if (resp.generateVideoResponse?.generatedSamples?.[0]?.video?.uri) {
-            const videoUri = resp.generateVideoResponse.generatedSamples[0].video.uri;
+          const officialVideoUri = providerVideoUri(
+            resp.generateVideoResponse?.generatedSamples?.[0]?.video,
+          );
+          if (officialVideoUri) {
             // Download video through proxy to handle auth
-            return await fetchVideoThroughProxy(videoUri);
+            return await fetchVideoThroughProxy(officialVideoUri, requestAuthEpoch);
           }
 
           // Alternative format: direct generatedSamples
-          if (resp.generatedSamples?.[0]?.video?.uri) {
-            const videoUri = resp.generatedSamples[0].video.uri;
-            return await fetchVideoThroughProxy(videoUri);
+          const generatedSampleUri = providerVideoUri(
+            resp.generatedSamples?.[0]?.video,
+          );
+          if (generatedSampleUri) {
+            return await fetchVideoThroughProxy(generatedSampleUri, requestAuthEpoch);
           }
 
           // Check candidates
@@ -1278,15 +1416,16 @@ const pollGeminiVideoOperation = async (
               if (part.inlineData?.data) {
                 return createVideoBlobUrl(part.inlineData.data);
               }
-              if (part.fileData?.fileUri) {
-                return await fetchVideoThroughProxy(part.fileData.fileUri);
+              const partFileUri = providerVideoUri(part.fileData);
+              if (partFileUri) {
+                return await fetchVideoThroughProxy(partFileUri, requestAuthEpoch);
               }
             }
           }
 
           // Check generatedVideos
           if (resp.generatedVideos) {
-            return extractVideoFromResponse(resp);
+            return extractVideoFromResponse(resp, requestAuthEpoch);
           }
         }
 
@@ -1335,16 +1474,19 @@ const pollGeminiVideoOperation = async (
 /**
  * Extracts video URL or blob from a Veo response
  */
-const extractVideoFromResponse = async (response: any): Promise<string> => {
+const extractVideoFromResponse = async (
+  response: any,
+  requestAuthEpoch: number,
+): Promise<string> => {
   // Check for generated videos array (common Veo response format)
   const generatedVideos = response?.generatedVideos || response?.videos;
   if (generatedVideos && generatedVideos.length > 0) {
     const video = generatedVideos[0];
 
     // Check for video URI
-    const uri = video?.video?.uri || video?.uri || video?.videoUri;
+    const uri = providerVideoUri(video?.video) || providerVideoUri(video);
     if (uri) {
-      return await fetchVideoThroughProxy(uri);
+      return await fetchVideoThroughProxy(uri, requestAuthEpoch);
     }
 
     // Check for base64 video data
@@ -1356,7 +1498,7 @@ const extractVideoFromResponse = async (response: any): Promise<string> => {
 
   // Check for predictions format
   if (response?.predictions) {
-    return await extractVideoFromPrediction(response.predictions[0]);
+    return await extractVideoFromPrediction(response.predictions[0], requestAuthEpoch);
   }
 
   throw new Error("Could not extract video from response.");
@@ -1365,7 +1507,10 @@ const extractVideoFromResponse = async (response: any): Promise<string> => {
 /**
  * Extracts video from a prediction object
  */
-const extractVideoFromPrediction = async (prediction: any): Promise<string> => {
+const extractVideoFromPrediction = async (
+  prediction: any,
+  requestAuthEpoch: number,
+): Promise<string> => {
   if (!prediction) {
     throw new Error("No prediction data available.");
   }
@@ -1382,14 +1527,13 @@ const extractVideoFromPrediction = async (prediction: any): Promise<string> => {
   }
 
   const uri =
-    prediction.videoUri ||
-    prediction.outputUri ||
-    prediction.uri ||
-    prediction.mediaUri ||
-    prediction.video?.uri;
+    providerVideoUri(prediction.video) ||
+    providerVideoUri(prediction) ||
+    (typeof prediction.outputUri === "string" ? prediction.outputUri : null) ||
+    (typeof prediction.mediaUri === "string" ? prediction.mediaUri : null);
 
   if (uri) {
-    return await fetchVideoThroughProxy(uri);
+    return await fetchVideoThroughProxy(uri, requestAuthEpoch);
   }
 
   throw new Error("No video content found in prediction.");
@@ -1398,7 +1542,7 @@ const extractVideoFromPrediction = async (prediction: any): Promise<string> => {
 /**
  * Creates a blob URL from base64 video data
  */
-const createVideoBlobUrl = (base64Data: string): string => {
+export const createVideoBlobUrl = (base64Data: string): string => {
   // Strip data-URL prefix if the model returned a full data URI
   const pure = base64Data.includes(",")
     ? base64Data.slice(base64Data.indexOf(",") + 1)
@@ -1407,6 +1551,9 @@ const createVideoBlobUrl = (base64Data: string): string => {
   const bytes = atob(pure);
   const arr = new Uint8Array(bytes.length);
   for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  if (arr.byteLength < 32 || !looksLikeMp4(arr.subarray(0, 16))) {
+    throw new Error("Generated video data is not valid MP4 media.");
+  }
   const blob = new Blob([arr], { type: "video/mp4" });
   if (blob.size < 1000) {
     throw new Error("Generated video data was too small to be valid.");

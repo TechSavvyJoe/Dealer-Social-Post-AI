@@ -4,6 +4,7 @@
  */
 import { PUBLISH_TARGETS, type PublishTarget } from "./publishTargets";
 import type { ExportFormatId } from "../utils/multiFormatExport";
+import type { ImageAspectRatio, PrimaryImageFormatId } from "../types";
 
 export type PlatformId = string;
 
@@ -17,6 +18,72 @@ export interface PlatformOption {
   charBudget: number;
   verticalPreferred: boolean;
 }
+
+export interface PrimaryImageProfile {
+  primaryFormatId: PrimaryImageFormatId;
+  imageAspectRatio: ImageAspectRatio;
+  label: string;
+}
+
+const PRIMARY_IMAGE_PROFILES: Record<
+  PrimaryImageFormatId,
+  Omit<PrimaryImageProfile, "primaryFormatId">
+> = {
+  story_vertical: {
+    imageAspectRatio: "9:16",
+    label: "Story / Reel · 9:16",
+  },
+  feed_square: {
+    imageAspectRatio: "1:1",
+    label: "Social Feed · 1:1",
+  },
+  marketplace: {
+    // Gemini does not offer the exact 1.91:1 Marketplace ratio. Generate the
+    // closest native landscape canvas, then use the lossless export adapter.
+    imageAspectRatio: "16:9",
+    label: "Marketplace · 16:9 master",
+  },
+  gbp: {
+    imageAspectRatio: "4:3",
+    label: "Google Business · 4:3",
+  },
+};
+
+export const getPrimaryImageProfile = (
+  primaryFormatId: PrimaryImageFormatId,
+): PrimaryImageProfile => ({
+  primaryFormatId,
+  ...PRIMARY_IMAGE_PROFILES[primaryFormatId],
+});
+
+/**
+ * Resolve one deterministic native generation canvas from a destination mix.
+ *
+ * Vertical destinations lead because Stories/Reels/TikTok cannot recover
+ * useful portrait composition from a square or landscape master. When no
+ * vertical destination is selected, a social-feed square leads mixed sets;
+ * GBP and Marketplace retain their native profile when selected alone.
+ */
+export const resolvePrimaryImageProfile = (
+  platformIds: PlatformId[] | undefined | null,
+): PrimaryImageProfile => {
+  const formats = resolvePlatformOptions(platformIds ?? []).map(
+    (option) => option.format,
+  );
+  if (formats.includes("story_vertical")) {
+    return getPrimaryImageProfile("story_vertical");
+  }
+  if (formats.includes("feed_square")) {
+    return getPrimaryImageProfile("feed_square");
+  }
+  if (formats.includes("gbp")) {
+    return getPrimaryImageProfile("gbp");
+  }
+  if (formats.includes("marketplace")) {
+    return getPrimaryImageProfile("marketplace");
+  }
+  return getPrimaryImageProfile("story_vertical");
+};
 
 const SHORT: Record<string, string> = {
   facebook_feed: "Facebook",

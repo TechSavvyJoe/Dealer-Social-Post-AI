@@ -135,6 +135,8 @@ export const letterboxImageForVideo = async (
 export const resolveVeoAspect = (
   width: number,
   height: number,
+  // "1:1" remains accepted only for one-release compatibility with a stale
+  // persisted request; the current UI and public type expose real Veo ratios.
   preference: "auto" | "16:9" | "9:16" | "1:1",
 ): "16:9" | "9:16" => {
   if (preference === "16:9" || preference === "1:1") return "16:9";
@@ -243,6 +245,8 @@ export const getJpegExifOrientation = (file: File): Promise<number> => {
  */
 export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
   const maxDimension = 2048;
+  const fileType = file.type.toLowerCase();
+  const isHeic = /image\/hei[cf]/.test(fileType) || /\.(?:heic|heif)$/i.test(file.name);
 
   // Modern browsers (Chrome 81+, Safari 15+, Firefox 98+) support createImageBitmap
   // with automatic orientation handling via imageOrientation option
@@ -252,6 +256,10 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
       const bitmap = await createImageBitmap(file, {
         imageOrientation: "from-image", // Respect EXIF orientation
       });
+      if (!bitmap.width || !bitmap.height) {
+        bitmap.close();
+        throw new Error("The selected image has no readable dimensions.");
+      }
 
       const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
       const outputWidth = Math.max(1, Math.round(bitmap.width * scale));
@@ -271,6 +279,7 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
         return canvas.toDataURL(mimeType, 0.92);
       }
       bitmap.close();
+      throw new Error("This browser could not create an image preview.");
     } catch (e) {
       console.warn(
         "createImageBitmap failed, falling back to manual EXIF handling:",
@@ -288,35 +297,42 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
     orientation = 1;
   }
 
-  // If orientation is 1 and not JPEG, just return original
-  if (orientation === 1 && file.type !== "image/jpeg") {
-    return originalDataUrl;
-  }
-
-  // Load image into canvas and apply transforms
+  // Always prove that the browser can decode the fallback before returning a
+  // preview. Returning a raw HEIC data URL here made the next screen appear
+  // blank on browsers that cannot decode HEIC.
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const i = new Image();
     i.onload = () => resolve(i);
-    i.onerror = reject;
+    i.onerror = () =>
+      reject(
+        new Error(
+          isHeic
+            ? "This browser cannot preview this HEIC photo. Convert it to JPG or PNG and try again."
+            : "This browser could not decode the selected image.",
+        ),
+      );
     i.src = originalDataUrl;
   });
+  if (!img.width || !img.height) {
+    throw new Error("The selected image has no readable dimensions.");
+  }
 
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
   if (!ctx) {
-    return originalDataUrl;
+    throw new Error("This browser could not create an image preview.");
   }
 
   const { width, height } = img;
+  const swapsAxes = orientation > 4 && orientation < 9;
+  const orientedWidth = swapsAxes ? height : width;
+  const orientedHeight = swapsAxes ? width : height;
+  const scale = Math.min(1, maxDimension / Math.max(orientedWidth, orientedHeight));
 
   // Set canvas size depending on rotation
-  if (orientation > 4 && orientation < 9) {
-    canvas.width = height;
-    canvas.height = width;
-  } else {
-    canvas.width = width;
-    canvas.height = height;
-  }
+  canvas.width = Math.max(1, Math.round(orientedWidth * scale));
+  canvas.height = Math.max(1, Math.round(orientedHeight * scale));
+  ctx.scale(scale, scale);
 
   // Apply orientation transforms
   switch (orientation) {
@@ -355,7 +371,7 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
   }
 
   ctx.drawImage(img, 0, 0);
-  const mimeType = file.type === "image/jpeg" ? "image/jpeg" : file.type;
+  const mimeType = fileType === "image/png" ? "image/png" : "image/jpeg";
   return canvas.toDataURL(mimeType, 0.92);
 };
 

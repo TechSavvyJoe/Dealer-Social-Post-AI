@@ -11,6 +11,11 @@
  * api.anthropic.com so the key never reaches the browser.
  */
 import { CLAUDE_MODELS, FLAGS, MODEL_POLICY_VERSION } from "./modelConfig";
+import {
+  assertAuthEpoch,
+  captureAuthEpoch,
+  notifySessionRejected,
+} from "../utils/authBoundary";
 
 const PROXY_PATH = "/api/proxy/anthropic/v1/messages";
 
@@ -22,6 +27,8 @@ interface ClaudeMessageOptions {
   system?: string;
   task?: "caption" | "caption_regenerate" | "caption_edit";
   attemptId?: string;
+  /** Originating authenticated workspace for cross-provider failover. */
+  requestAuthEpoch?: number;
 }
 
 interface ClaudeMessageResponse {
@@ -59,6 +66,7 @@ export const generateTextViaClaude = async (
   prompt: string,
   options: ClaudeMessageOptions = {},
 ): Promise<string> => {
+  const requestAuthEpoch = options.requestAuthEpoch ?? captureAuthEpoch();
   if (!FLAGS.enableClaudeFallback) {
     throw new Error(
       "Claude fallback is disabled (set VITE_ENABLE_CLAUDE_FALLBACK=true)",
@@ -78,6 +86,7 @@ export const generateTextViaClaude = async (
     ],
   };
 
+  assertAuthEpoch(requestAuthEpoch);
   const res = await fetch(PROXY_PATH, {
     method: "POST",
     credentials: "include",
@@ -86,6 +95,7 @@ export const generateTextViaClaude = async (
   });
 
   if (!res.ok) {
+    if (res.status === 401) notifySessionRejected(requestAuthEpoch);
     let detail = `${res.status} ${res.statusText}`;
     try {
       const errBody = await res.json();
@@ -97,6 +107,7 @@ export const generateTextViaClaude = async (
   }
 
   const payload: ClaudeMessageResponse = await res.json();
+  assertAuthEpoch(requestAuthEpoch);
   if (payload.error) {
     throw new Error(`Claude API error: ${payload.error.message}`);
   }
@@ -111,6 +122,7 @@ export const generateTextViaClaude = async (
     throw new Error("Claude returned an empty response");
   }
 
+  assertAuthEpoch(requestAuthEpoch);
   return text;
 };
 

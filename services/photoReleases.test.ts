@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
@@ -6,6 +6,11 @@ import {
   runWithPersistedPhotoRelease,
   type CapturedRelease,
 } from "./photoReleases";
+import { captureAuthEpoch, setActiveAuthEpoch } from "../utils/authBoundary";
+
+beforeEach(() => {
+  setActiveAuthEpoch(1);
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -96,6 +101,53 @@ describe("photo release consent gate", () => {
         providerTask,
       ),
     ).rejects.toThrow("Photo release failed: storage unavailable");
+    expect(providerTask).not.toHaveBeenCalled();
+  });
+
+  it("does not send the customer photo after identity changes while consent saves", async () => {
+    setActiveAuthEpoch(20);
+    const originatingEpoch = captureAuthEpoch();
+    let finishRelease: ((response: Response) => void) | undefined;
+    const releaseResponse = new Promise<Response>((resolve) => {
+      finishRelease = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).startsWith("data:image/")) {
+          return new Response(new Uint8Array([1, 2, 3]), {
+            status: 200,
+            headers: { "Content-Type": "image/png" },
+          });
+        }
+        return releaseResponse;
+      }),
+    );
+    const providerTask = vi.fn(async () => "must-not-run");
+    const operation = runWithPersistedPhotoRelease(
+      {
+        customerName: "Alex",
+        signaturePngDataUrl: signatureDataUrl,
+      },
+      "Example Motors",
+      providerTask,
+      originatingEpoch,
+    );
+
+    await vi.waitFor(() => expect(finishRelease).toBeDefined());
+    setActiveAuthEpoch(21);
+    finishRelease?.(
+      new Response(
+        JSON.stringify({
+          id: "release-old-workspace",
+          customer_name: "Alex",
+          signed_at: "2026-07-28T12:00:00.000Z",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(operation).rejects.toMatchObject({ name: "AbortError" });
     expect(providerTask).not.toHaveBeenCalled();
   });
 

@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const publishMocks = vi.hoisted(() => ({
   preparePublishShare: vi.fn(),
   sharePrepared: vi.fn(),
+  copyPreparedCaption: vi.fn(),
+  copyTextToClipboard: vi.fn(),
 }));
 
 vi.mock("../services/publishTargets", async (importOriginal) => {
@@ -17,6 +19,8 @@ vi.mock("../services/publishTargets", async (importOriginal) => {
       actual.PUBLISH_TARGETS.filter((target) => visibleIds.has(target.id)),
     preparePublishShare: publishMocks.preparePublishShare,
     sharePrepared: publishMocks.sharePrepared,
+    copyPreparedCaption: publishMocks.copyPreparedCaption,
+    copyTextToClipboard: publishMocks.copyTextToClipboard,
   };
 });
 
@@ -43,6 +47,8 @@ describe("ShareDialog media preparation", () => {
       via: "web-share",
       pasteRequired: true,
     });
+    publishMocks.copyPreparedCaption.mockResolvedValue(true);
+    publishMocks.copyTextToClipboard.mockResolvedValue(true);
   });
 
   it("settles destinations independently and offers a per-target retry", async () => {
@@ -56,12 +62,11 @@ describe("ShareDialog media preparation", () => {
 
     render(<ShareDialog isOpen onClose={vi.fn()} content={{ text: "Delivery day" }} />);
 
-    await screen.findByText(/One destination needs attention/i);
-
     const instagramTile = screen.getByRole("button", {
-      name: /Share to Instagram Feed, media ready/,
+      name: "Share to Instagram Feed",
     });
     expect(instagramTile).toHaveAttribute("aria-pressed", "false");
+    expect(publishMocks.preparePublishShare).not.toHaveBeenCalled();
     fireEvent.click(instagramTile);
     expect(instagramTile).toHaveAttribute("aria-pressed", "true");
     expect(await screen.findByText("Instagram Feed is ready")).toBeInTheDocument();
@@ -69,7 +74,7 @@ describe("ShareDialog media preparation", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: /Share to Facebook, media preparation failed/,
+        name: "Share to Facebook",
       }),
     );
     expect(
@@ -79,8 +84,39 @@ describe("ShareDialog media preparation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Retry media preparation" }));
     expect(await screen.findByText("Facebook is ready")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Share to Instagram Feed" }),
+    ).not.toHaveAccessibleName(/media ready/i);
     await waitFor(() =>
       expect(publishMocks.preparePublishShare).toHaveBeenCalledTimes(3),
     );
+  });
+
+  it("never claims a failed clipboard write succeeded", async () => {
+    publishMocks.preparePublishShare.mockImplementation(async (targetId: string) =>
+      preparedFor(targetId),
+    );
+    publishMocks.copyPreparedCaption.mockResolvedValue(false);
+
+    render(<ShareDialog isOpen onClose={vi.fn()} content={{ text: "Delivery day" }} />);
+
+    const facebookTile = screen.getByRole("button", {
+      name: "Share to Facebook",
+    });
+    fireEvent.click(facebookTile);
+
+    expect(await screen.findByText("Facebook is ready")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Copy caption" }));
+    expect(
+      await screen.findByText(/browser did not allow clipboard access/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/caption copied/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Share now" }));
+
+    expect(
+      await screen.findByText(/Tap Copy caption below, then paste it in Facebook/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/confirmed on your clipboard/i)).not.toBeInTheDocument();
   });
 });

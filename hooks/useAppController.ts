@@ -1,18 +1,22 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAppStore } from "../stores/appStore";
 import { useShallow } from "zustand/react/shallow";
 import { useLayoutMode } from "./useLayoutMode";
 import { useGemini } from "./useGemini";
 import { useGeneration } from "./useGeneration";
 import { useDealerTheme } from "./useDealerTheme";
-import { AppStep, StyleOption, ToneOption } from "../types";
+import { AppStep, StyleOption, ToneOption, type ImageSelection } from "../types";
 import { logEvent } from "../utils/telemetry";
+import { archiveDealerMedia } from "../utils/creativeStorage";
 
 export const useAppController = () => {
   // Global State
   const {
     step,
     currentDealer,
+    currentPerson,
+    role,
+    isImpersonating,
     selectedImage,
     generatedPost,
     error,
@@ -35,6 +39,9 @@ export const useAppController = () => {
     useShallow((state) => ({
       step: state.step,
       currentDealer: state.currentDealer,
+      currentPerson: state.currentPerson,
+      role: state.role,
+      isImpersonating: state.isImpersonating,
       selectedImage: state.selectedImage,
       generatedPost: state.generatedPost,
       error: state.error,
@@ -63,6 +70,17 @@ export const useAppController = () => {
   // Crop Modal State
   const [cropModalOpen, setCropModalOpen] = useState(false);
   const [tempImageForCrop, setTempImageForCrop] = useState<string | null>(null);
+  const [tempOriginalForBackup, setTempOriginalForBackup] = useState<
+    string | Blob | null
+  >(null);
+  const [tempOriginalFilename, setTempOriginalFilename] = useState<string | undefined>(
+    undefined,
+  );
+  const [originalBackupStatus, setOriginalBackupStatus] = useState<
+    "idle" | "saving" | "saved" | "unavailable"
+  >("idle");
+  const originalBackupRequestRef = useRef(0);
+  const previousAuthIdentityRef = useRef("");
 
   // Custom Hooks
   const isDesktopLayout = useLayoutMode();
@@ -75,6 +93,33 @@ export const useAppController = () => {
     logEvent("app.boot");
     restoreSession();
   }, [restoreSession]);
+
+  useEffect(() => {
+    const authIdentity = currentDealer
+      ? `${currentDealer.id}:${currentPerson?.id || ""}:${role}:${isImpersonating ? "impersonating" : "direct"}`
+      : "";
+    const identityChanged =
+      previousAuthIdentityRef.current &&
+      previousAuthIdentityRef.current !== authIdentity;
+    if (!authIdentity || identityChanged) {
+      setIsSettingsOpen(false);
+      setIsVideoDirectorOpen(false);
+      setCropModalOpen(false);
+      setTempImageForCrop(null);
+      setTempOriginalForBackup(null);
+      setTempOriginalFilename(undefined);
+      setOriginalBackupStatus("idle");
+      originalBackupRequestRef.current += 1;
+    }
+    previousAuthIdentityRef.current = authIdentity;
+  }, [
+    currentDealer,
+    currentPerson?.id,
+    isImpersonating,
+    role,
+    setIsSettingsOpen,
+    setIsVideoDirectorOpen,
+  ]);
 
   // Handlers
   const handleLogin = async (dealerCode: string, turnstileToken?: string) => {
@@ -90,10 +135,36 @@ export const useAppController = () => {
     [setPreferences],
   );
 
-  const handleImageSelected = useCallback((image: string) => {
-    setTempImageForCrop(image);
-    setCropModalOpen(true);
-  }, []);
+  const handleImageSelected = useCallback(
+    (selection: ImageSelection) => {
+      const requestId = originalBackupRequestRef.current + 1;
+      originalBackupRequestRef.current = requestId;
+      setTempImageForCrop(selection.workingImage);
+      setTempOriginalForBackup(selection.originalSource);
+      setTempOriginalFilename(selection.originalFilename);
+      setCropModalOpen(true);
+      setOriginalBackupStatus("saving");
+      const dealerId = currentDealer?.id;
+      if (!dealerId) {
+        setOriginalBackupStatus("unavailable");
+        return;
+      }
+      void archiveDealerMedia(dealerId, {
+        kind: "capture",
+        source: selection.originalSource,
+        previewSource: selection.workingImage,
+        originalFilename: selection.originalFilename,
+        label: "Original photo",
+      }).then((record) => {
+        if (originalBackupRequestRef.current !== requestId) return;
+        setOriginalBackupStatus(record ? "saved" : "unavailable");
+        logEvent("media.capture.backup", {
+          outcome: record ? "saved" : "unavailable",
+        });
+      });
+    },
+    [currentDealer?.id],
+  );
 
   const handleCropConfirm = useCallback(
     (croppedImage: string) => {
@@ -103,9 +174,22 @@ export const useAppController = () => {
       setError(null);
       setCropModalOpen(false);
       setTempImageForCrop(null);
+      setTempOriginalForBackup(null);
+      setTempOriginalFilename(undefined);
+      originalBackupRequestRef.current += 1;
+      setOriginalBackupStatus("idle");
     },
     [setSelectedImage, setGeneratedPost, setStep, setError],
   );
+
+  const handleCropClose = useCallback(() => {
+    originalBackupRequestRef.current += 1;
+    setCropModalOpen(false);
+    setTempImageForCrop(null);
+    setTempOriginalForBackup(null);
+    setTempOriginalFilename(undefined);
+    setOriginalBackupStatus("idle");
+  }, []);
 
   return {
     step,
@@ -131,11 +215,15 @@ export const useAppController = () => {
     cropModalOpen,
     setCropModalOpen,
     tempImageForCrop,
+    tempOriginalForBackup,
+    tempOriginalFilename,
+    originalBackupStatus,
     isDesktopLayout,
     ...generationProps,
     handleLogin,
     handleStyleToneChange,
     handleImageSelected,
     handleCropConfirm,
+    handleCropClose,
   };
 };

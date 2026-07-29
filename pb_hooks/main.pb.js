@@ -138,7 +138,7 @@ const proxyHandler = (c) => {
         60,
       );
       const retryAfter = Math.max(1, Math.ceil((limit.retryAfterMs || 60000) / 1000));
-      c.response().header("Retry-After", String(retryAfter));
+      c.response().header().set("Retry-After", String(retryAfter));
       return c.json(429, {
         error: "Rate limit exceeded",
         retry_after_seconds: retryAfter,
@@ -223,7 +223,7 @@ const proxyHandler = (c) => {
           1,
           Math.ceil((costLimit.retryAfterMs || costPolicy.windowMs) / 1000),
         );
-        c.response().header("Retry-After", String(retryAfter));
+        c.response().header().set("Retry-After", String(retryAfter));
         return c.json(429, {
           error: "Generation rate limit exceeded",
           retry_after_seconds: retryAfter,
@@ -477,10 +477,10 @@ const proxyHandler = (c) => {
             tokenExpiry = now + (tokenData.expires_in || 3600);
             return cachedAccessToken;
           } catch (err) {
-            console.log("[Auth] Signing failed:", err);
-            // Try to read stderr from the command if possible?
-            // Unfortunately err object might not have it directly if it's a Go error.
-            // But we can try to log more context.
+            console.log(
+              "[Auth] Signing failed:",
+              helpers.safeProviderTransportDiagnostic(err),
+            );
             throw err;
           } finally {
             // Safely clean up temp files (ignore errors if files don't exist)
@@ -493,7 +493,10 @@ const proxyHandler = (c) => {
         const accessToken = getVertexAccessToken();
         authHeader = { Authorization: `Bearer ${accessToken}` };
       } catch (e) {
-        console.error("Failed to get Vertex Access Token:", e);
+        console.error(
+          "Failed to get Vertex Access Token:",
+          helpers.safeProviderTransportDiagnostic(e),
+        );
         return c.json(500, {
           error: "Vertex AI authentication is temporarily unavailable",
         });
@@ -592,7 +595,7 @@ const proxyHandler = (c) => {
 
     const globalProviderSlot = helpers.acquireProxyConcurrency("provider:global", 12);
     if (!globalProviderSlot.ok) {
-      c.response().header("Retry-After", "1");
+      c.response().header().set("Retry-After", "1");
       return c.json(503, { error: "Provider capacity is temporarily busy" });
     }
     const dealerProviderSlot = helpers.acquireProxyConcurrency(
@@ -601,7 +604,7 @@ const proxyHandler = (c) => {
     );
     if (!dealerProviderSlot.ok) {
       globalProviderSlot.release();
-      c.response().header("Retry-After", "1");
+      c.response().header().set("Retry-After", "1");
       return c.json(429, { error: "Too many concurrent provider requests" });
     }
 
@@ -647,15 +650,28 @@ const proxyHandler = (c) => {
           String(key).toLowerCase() === "content-type"
         ) {
           upstreamContentType = String(value).split(";", 1)[0].trim();
-          c.response().header("Content-Type", String(value));
+          c.response().header().set("Content-Type", String(value));
         }
       });
     }
 
-    const isVideoDownload =
-      cleanPath.startsWith("v1beta/files/") &&
-      (upstreamContentType.indexOf("video/") === 0 ||
-        upstreamContentType === "application/octet-stream");
+    const normalizedUpstreamContentType = upstreamContentType.toLowerCase();
+    const isSuccessfulFileDownload =
+      isFileDownloadPath && res.statusCode >= 200 && res.statusCode < 300;
+    if (
+      isSuccessfulFileDownload &&
+      (normalizedUpstreamContentType.indexOf("application/json") === 0 ||
+        normalizedUpstreamContentType.indexOf("text/") === 0)
+    ) {
+      return c.json(502, {
+        error: "Video provider returned metadata instead of playable media",
+      });
+    }
+    // Google has returned video bytes as video/mp4, application/octet-stream,
+    // and occasionally without Content-Type. The allowlisted :download route
+    // plus a successful status is the authoritative binary boundary; requiring
+    // one exact upstream header corrupts otherwise valid MP4s in the JSON path.
+    const isVideoDownload = isSuccessfulFileDownload;
     if (isVideoDownload) {
       const binaryBody = res.raw || res.body;
       const maxVideoBytes = 100 * 1024 * 1024;
@@ -665,9 +681,9 @@ const proxyHandler = (c) => {
       if (binaryBody.length > maxVideoBytes) {
         return c.json(413, { error: "Generated video exceeds 100 MB" });
       }
-      c.response().header("Cache-Control", "private, no-store");
-      c.response().header("X-Content-Type-Options", "nosniff");
-      return c.blob(res.statusCode, upstreamContentType, binaryBody);
+      c.response().header().set("Cache-Control", "private, no-store");
+      c.response().header().set("X-Content-Type-Options", "nosniff");
+      return c.blob(res.statusCode, "video/mp4", binaryBody);
     }
 
     const body = res.body ?? res.raw ?? (res.json ? JSON.stringify(res.json) : "");
@@ -779,7 +795,10 @@ const proxyHandler = (c) => {
       );
     }
     const apiType = path && path.startsWith("vertex/") ? "Vertex AI" : "Gemini API";
-    console.error(`[Proxy ${apiType}] Error:`, err);
+    console.error(
+      `[Proxy ${apiType}] Error:`,
+      helpers.safeProviderTransportDiagnostic(err),
+    );
     return c.json(500, {
       error: `${apiType} request failed`,
     });
@@ -821,7 +840,7 @@ routerAdd("POST", "/api/proxy/openai/v1/images/generations", (c) => {
   }
   const limit = helpers.checkProxyRateLimit("openai:" + dealer.id, 5, 60 * 1000);
   if (!limit.ok) {
-    c.response().header("Retry-After", "60");
+    c.response().header().set("Retry-After", "60");
     return c.json(429, { error: "Rate limit exceeded" });
   }
   const requestInfo = $apis.requestInfo(c);
@@ -831,7 +850,7 @@ routerAdd("POST", "/api/proxy/openai/v1/images/generations", (c) => {
   }
   const globalProviderSlot = helpers.acquireProxyConcurrency("openai:global", 8);
   if (!globalProviderSlot.ok) {
-    c.response().header("Retry-After", "1");
+    c.response().header().set("Retry-After", "1");
     return c.json(503, { error: "Provider capacity is temporarily busy" });
   }
   const dealerProviderSlot = helpers.acquireProxyConcurrency(
@@ -840,7 +859,7 @@ routerAdd("POST", "/api/proxy/openai/v1/images/generations", (c) => {
   );
   if (!dealerProviderSlot.ok) {
     globalProviderSlot.release();
-    c.response().header("Retry-After", "1");
+    c.response().header().set("Retry-After", "1");
     return c.json(429, { error: "Too many concurrent image requests" });
   }
   try {
@@ -906,7 +925,7 @@ routerAdd("POST", "/api/proxy/openai/v1/images/generations", (c) => {
       upstreamRequest.model,
       null,
     );
-    console.error("[Proxy OpenAI] error", err);
+    console.error("[Proxy OpenAI] error", helpers.safeProviderTransportDiagnostic(err));
     return c.json(500, {
       error: "Failed to proxy request to OpenAI",
     });
@@ -938,7 +957,7 @@ routerAdd("POST", "/api/proxy/anthropic/v1/messages", (c) => {
   }
   const limit = helpers.checkProxyRateLimit("anthropic:" + dealer.id, 15, 60 * 1000);
   if (!limit.ok) {
-    c.response().header("Retry-After", "60");
+    c.response().header().set("Retry-After", "60");
     return c.json(429, { error: "Rate limit exceeded" });
   }
   const requestInfo = $apis.requestInfo(c);
@@ -948,7 +967,7 @@ routerAdd("POST", "/api/proxy/anthropic/v1/messages", (c) => {
   }
   const globalProviderSlot = helpers.acquireProxyConcurrency("anthropic:global", 16);
   if (!globalProviderSlot.ok) {
-    c.response().header("Retry-After", "1");
+    c.response().header().set("Retry-After", "1");
     return c.json(503, { error: "Provider capacity is temporarily busy" });
   }
   const dealerProviderSlot = helpers.acquireProxyConcurrency(
@@ -957,7 +976,7 @@ routerAdd("POST", "/api/proxy/anthropic/v1/messages", (c) => {
   );
   if (!dealerProviderSlot.ok) {
     globalProviderSlot.release();
-    c.response().header("Retry-After", "1");
+    c.response().header().set("Retry-After", "1");
     return c.json(429, { error: "Too many concurrent caption requests" });
   }
   try {
@@ -1024,7 +1043,10 @@ routerAdd("POST", "/api/proxy/anthropic/v1/messages", (c) => {
       upstreamRequest.model,
       null,
     );
-    console.error("[Proxy Anthropic] error", err);
+    console.error(
+      "[Proxy Anthropic] error",
+      helpers.safeProviderTransportDiagnostic(err),
+    );
     return c.json(500, {
       error: "Failed to proxy request to Anthropic",
     });
@@ -1045,7 +1067,7 @@ routerAdd("GET", "/api/proxy-image", (c) => {
   }
   const limit = helpers.checkProxyRateLimit("img:" + dealer.id, 120, 60 * 1000);
   if (!limit.ok) {
-    c.response().header("Retry-After", "60");
+    c.response().header().set("Retry-After", "60");
     return c.json(429, { error: "Rate limit exceeded" });
   }
 
@@ -1060,7 +1082,7 @@ routerAdd("GET", "/api/proxy-image", (c) => {
 
   const globalProviderSlot = helpers.acquireProxyConcurrency("image-proxy:global", 12);
   if (!globalProviderSlot.ok) {
-    c.response().header("Retry-After", "1");
+    c.response().header().set("Retry-After", "1");
     return c.json(503, { error: "Image proxy capacity is temporarily busy" });
   }
   const dealerProviderSlot = helpers.acquireProxyConcurrency(
@@ -1069,7 +1091,7 @@ routerAdd("GET", "/api/proxy-image", (c) => {
   );
   if (!dealerProviderSlot.ok) {
     globalProviderSlot.release();
-    c.response().header("Retry-After", "1");
+    c.response().header().set("Retry-After", "1");
     return c.json(429, { error: "Too many concurrent image requests" });
   }
 
@@ -1129,20 +1151,33 @@ routerAdd("GET", "/api/proxy-image", (c) => {
       return c.json(413, { error: "Upstream image exceeds 10 MB" });
     }
 
-    c.response().header("Cache-Control", "private, no-store");
-    c.response().header("X-Content-Type-Options", "nosniff");
+    c.response().header().set("Cache-Control", "private, no-store");
+    c.response().header().set("X-Content-Type-Options", "nosniff");
 
     return c.blob(res.statusCode, contentType, res.raw);
   } catch (err) {
     dealerProviderSlot.release();
     globalProviderSlot.release();
-    console.error("[proxy-image] fetch failed", err);
+    console.error(
+      "[proxy-image] fetch failed",
+      helpers.safeProviderTransportDiagnostic(err),
+    );
     return c.json(500, { error: "Image proxy request failed" });
   }
 });
 
 // (Anthropic Claude fallback proxy moved above the wildcard /api/proxy/:path
 // registration so route precedence works correctly.)
+
+// Public release probe used only to prove that the staged Vercel /api route
+// injected the configured server-side credential. It reveals one boolean and
+// never echoes the supplied or configured secret.
+routerAdd("GET", "/api/app/proxy-readiness", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  c.response().header().set("Cache-Control", "no-store");
+  const trusted = helpers.trustedVercelProxyRequest(c);
+  return c.json(trusted ? 200 : 503, { ok: trusted });
+});
 
 // ----------------------------------------------------------------------------
 // Health + diagnostics endpoint. Public (no session required) so uptime
@@ -1321,8 +1356,7 @@ routerAdd("GET", "/api/app/health", (c) => {
       result.counts.posts_24h = Number(postSummary.total) || 0;
       result.generation.aiSuccesses24h = Number(postSummary.aiSuccesses) || 0;
       result.generation.basicFallbacks24h = Number(postSummary.basicFallbacks) || 0;
-      result.generation.fallbackAttempts24h =
-        Number(postSummary.fallbackAttempts) || 0;
+      result.generation.fallbackAttempts24h = Number(postSummary.fallbackAttempts) || 0;
       result.generation.standardTier24h = Number(postSummary.standardTier) || 0;
       result.generation.studioTier24h = Number(postSummary.studioTier) || 0;
       result.generation.lastSuccessfulAt = postSummary.lastSuccessfulAt
@@ -1361,7 +1395,7 @@ routerAdd("GET", "/api/app/health", (c) => {
         .dao()
         .db()
         .newQuery(
-            "SELECT COUNT(*) AS total, " +
+          "SELECT COUNT(*) AS total, " +
             "COALESCE(SUM(CASE WHEN succeeded = 0 THEN 1 ELSE 0 END), 0) AS failures, " +
             "COALESCE(MAX(occurred_at), '') AS lastAttemptAt " +
             "FROM generation_events WHERE occurred_at >= {:cutoff}",
@@ -1462,7 +1496,7 @@ routerAdd("GET", "/api/app/health", (c) => {
         !checks.turnstile_site_key_set)) ||
     (checks.turnstile_enforcement_enabled &&
       (!checks.turnstile_secret_set || !checks.turnstile_site_key_set)) ||
-    !checks.off_box_restore_ready
+    (flyRuntime && !checks.off_box_restore_ready)
   ) {
     result.ok = false;
   }
@@ -1484,6 +1518,8 @@ routerAdd("POST", "/api/telemetry", (c) => {
       60 * 1000,
     );
     if (!rl.ok) return c.json(429, { success: false });
+    const globalRl = helpers.checkProxyRateLimit("telemetry:ingress", 240, 60 * 1000);
+    if (!globalRl.ok) return c.json(202, { success: true, stored: false });
 
     telemetryStage = "request_info";
     const rawBody = $apis.requestInfo(c).data || {};
@@ -1507,16 +1543,9 @@ routerAdd("POST", "/api/telemetry", (c) => {
     const safeEnvelope = helpers.buildSafeTelemetryEnvelope(plainBody);
     telemetryStage = "validated";
 
-    const collection = $app.dao().findCollectionByNameOrId("client_error_events");
-    const record = new Record(collection);
-    record.set("name", safeEnvelope.name);
-    record.set("payload", safeEnvelope.payload);
-    record.set("release_sha", safeEnvelope.releaseSha);
-    record.set("api_contract_version", safeEnvelope.apiContractVersion);
-    record.set("occurred_at", new Date().toISOString());
     telemetryStage = "record_ready";
-    $app.dao().saveRecord(record);
-    return c.json(200, { success: true });
+    const persistence = helpers.persistBoundedTelemetryEvent(safeEnvelope, new Date());
+    return c.json(persistence.stored ? 200 : 202, { success: true });
   } catch (_err) {
     console.error("Telemetry persistence error at stage", telemetryStage);
     // Return 200 even on error to prevent client noise; do not echo details.
@@ -2040,8 +2069,44 @@ routerAdd("DELETE", "/api/app/session", (c) => {
 // ---- Photo releases -----------------------------------------------------
 routerAdd("POST", "/api/app/photo_releases", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  const dealer = helpers.dealerFromSession(c);
-  if (!dealer) return c.json(401, { error: "No active session" });
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  const dealer = context.dealer;
+  const token = helpers.readSessionToken(c);
+  const ownerSessionHash = token ? helpers.hashSessionToken(token) : "";
+  if (!ownerSessionHash) return c.json(401, { error: "No active session" });
+  const releaseWriter = context.person ? context.person.id : context.session.id;
+  // A higher attempt throttle protects validation work without letting a
+  // malformed client consume the lower successful-save allowance below.
+  const releaseAttemptHourly = helpers.checkProxyRateLimit(
+    "app-attempt:photo-release:hour:" + dealer.id + ":" + releaseWriter,
+    120,
+    60 * 60 * 1000,
+  );
+  const releaseAttemptDaily = helpers.checkProxyRateLimit(
+    "app-attempt:photo-release:day:" + dealer.id + ":" + releaseWriter,
+    300,
+    24 * 60 * 60 * 1000,
+  );
+  if (!releaseAttemptHourly.ok || !releaseAttemptDaily.ok) {
+    const retryAfter = Math.max(
+      1,
+      Math.ceil(
+        Math.max(
+          releaseAttemptHourly.retryAfterMs || 0,
+          releaseAttemptDaily.retryAfterMs || 0,
+        ) / 1000,
+      ),
+    );
+    c.response().header().set("Retry-After", String(retryAfter));
+    return c.json(429, {
+      error: "WRITE_RATE_LIMITED",
+      code: "WRITE_RATE_LIMITED",
+      message:
+        "Too many photo-release save attempts. Check the app and try again later.",
+      retry_after_seconds: retryAfter,
+    });
+  }
 
   try {
     const releases = $app.dao().findCollectionByNameOrId("photo_releases");
@@ -2065,6 +2130,34 @@ routerAdd("POST", "/api/app/photo_releases", (c) => {
       return c.json(400, { error: "Signature image is required" });
     }
 
+    // Count only a validated write against the normal salesperson allowance.
+    const releaseHourly = helpers.checkProxyRateLimit(
+      "app-write:photo-release:hour:" + dealer.id + ":" + releaseWriter,
+      20,
+      60 * 60 * 1000,
+    );
+    const releaseDaily = helpers.checkProxyRateLimit(
+      "app-write:photo-release:day:" + dealer.id + ":" + releaseWriter,
+      50,
+      24 * 60 * 60 * 1000,
+    );
+    if (!releaseHourly.ok || !releaseDaily.ok) {
+      const retryAfter = Math.max(
+        1,
+        Math.ceil(
+          Math.max(releaseHourly.retryAfterMs || 0, releaseDaily.retryAfterMs || 0) /
+            1000,
+        ),
+      );
+      c.response().header().set("Retry-After", String(retryAfter));
+      return c.json(429, {
+        error: "WRITE_RATE_LIMITED",
+        code: "WRITE_RATE_LIMITED",
+        message: "The photo-release save limit was reached. Try again later.",
+        retry_after_seconds: retryAfter,
+      });
+    }
+
     // Only allowlist the customer-controlled release fields. Dealer,
     // timestamp, IP hash, and user agent always come from the active request.
     // A newly captured release is deliberately unlinked: it must be durable
@@ -2076,21 +2169,14 @@ routerAdd("POST", "/api/app/photo_releases", (c) => {
       dealer: dealer.id,
       customer_name: customerName,
       signed_at: new Date().toISOString(),
-      vin: helpers.assertString((body.vin || "").toString().trim(), 17),
+      vin: helpers.assertString(helpers.normalizeReleaseVin(body.vin), 17),
       notes: helpers.assertString((body.notes || "").toString(), 1000),
       post_id: "",
+      owner_session_hash: ownerSessionHash,
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       ip_hash: "",
       user_agent: "",
     };
-    try {
-      const ip = helpers.clientIP(c) || "";
-      // Store a hash, not the raw IP (field is named ip_hash).
-      data.ip_hash = ip ? $security.sha256(ip) : "";
-    } catch (_e) {}
-    try {
-      data.user_agent = (helpers.userAgent(c) || "").toString().slice(0, 300);
-    } catch (_e) {}
-
     form.loadData(data);
     form.addFiles("signature_png", signatureFile);
     form.submit();
@@ -2112,8 +2198,9 @@ routerAdd("POST", "/api/app/photo_releases", (c) => {
 // never accepted or re-saved here, and an existing link cannot be redirected.
 routerAdd("POST", "/api/app/photo_releases/:id/link-post", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  const dealer = helpers.dealerFromSession(c);
-  if (!dealer) return c.json(401, { error: "No active session" });
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  const dealer = context.dealer;
 
   let release = null;
   try {
@@ -2149,6 +2236,34 @@ routerAdd("POST", "/api/app/photo_releases/:id/link-post", (c) => {
   if (!currentOwnerHash || currentOwnerHash !== post.getString("owner_session_hash")) {
     return c.json(403, { error: "Post belongs to another session" });
   }
+  if (currentOwnerHash !== release.getString("owner_session_hash")) {
+    return c.json(403, { error: "Photo release belongs to another session" });
+  }
+  const releaseExpiry = release.getString("expires_at");
+  if (
+    !release.getString("post_id") &&
+    (!releaseExpiry ||
+      releaseExpiry.replace("T", " ") <=
+        helpers.databaseTimestamp(new Date().toISOString()))
+  ) {
+    return c.json(410, { error: "Photo release expired; capture it again" });
+  }
+  if (
+    helpers.normalizeReleaseIdentity(release.getString("customer_name")) !==
+    helpers.normalizeReleaseIdentity(post.getString("customer_name"))
+  ) {
+    return c.json(409, {
+      error: "Photo release customer does not match this post",
+    });
+  }
+  if (
+    helpers.normalizeReleaseVin(release.getString("vin")) !==
+    helpers.normalizeReleaseVin(post.getString("vin"))
+  ) {
+    return c.json(409, {
+      error: "Photo release vehicle does not match this post",
+    });
+  }
 
   try {
     const existingPostId = release.getString("post_id");
@@ -2169,6 +2284,7 @@ routerAdd("POST", "/api/app/photo_releases/:id/link-post", (c) => {
           "UPDATE photo_releases " +
             "SET post_id = {:postId}, updated = {:updated} " +
             "WHERE id = {:releaseId} AND dealer = {:dealer} " +
+            "AND owner_session_hash = {:owner} " +
             "AND (post_id = '' OR post_id IS NULL)",
         )
         .bind({
@@ -2176,6 +2292,7 @@ routerAdd("POST", "/api/app/photo_releases/:id/link-post", (c) => {
           updated: linkedAt,
           releaseId: release.id,
           dealer: dealer.id,
+          owner: currentOwnerHash,
         })
         .execute();
 
@@ -2195,8 +2312,14 @@ routerAdd("POST", "/api/app/photo_releases/:id/link-post", (c) => {
     const hasRelease = post.getBool
       ? post.getBool("has_release")
       : !!post.get("has_release");
-    if (!hasRelease) {
+    if (
+      !hasRelease ||
+      !post.getBool("release_required") ||
+      post.getString("release_status") !== "saved"
+    ) {
       post.set("has_release", true);
+      post.set("release_required", true);
+      post.set("release_status", "saved");
       $app.dao().saveRecord(post);
     }
 
@@ -2211,6 +2334,32 @@ routerAdd("POST", "/api/app/photo_releases/:id/link-post", (c) => {
   }
 });
 
+// Abandoned signatures are sensitive temporary records, not legal audit
+// artifacts. Delete them record-by-record so PocketBase also removes the
+// protected file. Linked releases are never selected by this cleanup.
+cronAdd("prune-unlinked-photo-releases", "13 * * * *", function () {
+  try {
+    const helpers = require(__hooks + "/helpers.js");
+    const expired = $app
+      .dao()
+      .findRecordsByFilter(
+        "photo_releases",
+        "post_id = '' && expires_at != '' && expires_at <= {:now}",
+        "expires_at",
+        500,
+        0,
+        { now: helpers.databaseTimestamp(new Date().toISOString()) },
+      );
+    for (let i = 0; i < expired.length; i++) {
+      try {
+        $app.dao().deleteRecord(expired[i]);
+      } catch (_e) {}
+    }
+  } catch (_e) {
+    // Collection/fields may not exist before the forward migration.
+  }
+});
+
 // ---- Posts (log + leaderboard + approval) ------------------------------
 routerAdd("POST", "/api/app/posts", (c) => {
   const helpers = require(__hooks + "/helpers.js");
@@ -2218,6 +2367,36 @@ routerAdd("POST", "/api/app/posts", (c) => {
   const context = helpers.sessionContext(c);
   if (!context) return c.json(401, { error: "No active session" });
   const dealer = context.dealer;
+  const postWriter = context.person ? context.person.id : context.session.id;
+  // Protect parsing/validation independently from the successful-save quota.
+  const postAttemptHourly = helpers.checkProxyRateLimit(
+    "app-attempt:post:hour:" + dealer.id + ":" + postWriter,
+    120,
+    60 * 60 * 1000,
+  );
+  const postAttemptDaily = helpers.checkProxyRateLimit(
+    "app-attempt:post:day:" + dealer.id + ":" + postWriter,
+    300,
+    24 * 60 * 60 * 1000,
+  );
+  if (!postAttemptHourly.ok || !postAttemptDaily.ok) {
+    const retryAfter = Math.max(
+      1,
+      Math.ceil(
+        Math.max(
+          postAttemptHourly.retryAfterMs || 0,
+          postAttemptDaily.retryAfterMs || 0,
+        ) / 1000,
+      ),
+    );
+    c.response().header().set("Retry-After", String(retryAfter));
+    return c.json(429, {
+      error: "WRITE_RATE_LIMITED",
+      code: "WRITE_RATE_LIMITED",
+      message: "Too many post-save attempts. Check the app and try again later.",
+      retry_after_seconds: retryAfter,
+    });
+  }
   let generationClaimToken = "";
   let generationClaimOwner = "";
   let generationClaimCount = 0;
@@ -2231,6 +2410,107 @@ routerAdd("POST", "/api/app/posts", (c) => {
     const form = new RecordUpsertForm($app, record);
     form.setFullManageAccess(true);
     const body = $apis.requestInfo(c).data || {};
+    const scenarioId = helpers.assertString(
+      (body.scenario_id || "").toString().trim(),
+      80,
+    );
+    const scenarioPolicy = helpers.resolvePostScenarioPolicy(
+      scenarioId,
+      dealer.getString("custom_scenarios"),
+      body.customer_name,
+    );
+    if (!scenarioPolicy.ok) {
+      return c.json(400, { error: "Invalid post scenario" });
+    }
+    const releaseRequired = scenarioPolicy.releaseRequired;
+    const allowedPlatformIds = [
+      "instagram_feed",
+      "instagram_story",
+      "facebook_feed",
+      "tiktok",
+      "gbp",
+      "marketplace",
+      "linkedin",
+      "x_twitter",
+      "native_share",
+    ];
+    const allowedPrimaryFormatIds = [
+      "feed_square",
+      "story_vertical",
+      "marketplace",
+      "gbp",
+    ];
+    const allowedImageAspectRatios = ["1:1", "9:16", "16:9", "4:3"];
+
+    // Preserve the exact destination mix and generated master canvas so a
+    // History reopen uses the same sizing workflow. Multipart values arrive
+    // as strings; reject malformed/unknown values rather than storing
+    // arbitrary client metadata alongside customer creatives.
+    const rawPlatformIds = helpers.assertString(
+      (body.platform_ids || "").toString(),
+      400,
+    );
+    let parsedPlatformIds = [];
+    if (rawPlatformIds) {
+      try {
+        parsedPlatformIds = JSON.parse(rawPlatformIds);
+      } catch (_e) {
+        return c.json(400, { error: "Invalid platform selection" });
+      }
+      if (!Array.isArray(parsedPlatformIds)) {
+        return c.json(400, { error: "Invalid platform selection" });
+      }
+    }
+    if (parsedPlatformIds.length > allowedPlatformIds.length) {
+      return c.json(400, { error: "Too many platform selections" });
+    }
+    const platformIds = [];
+    for (let i = 0; i < parsedPlatformIds.length; i++) {
+      const platformId = parsedPlatformIds[i];
+      if (
+        typeof platformId !== "string" ||
+        allowedPlatformIds.indexOf(platformId) === -1
+      ) {
+        return c.json(400, { error: "Invalid platform selection" });
+      }
+      if (platformIds.indexOf(platformId) === -1) {
+        platformIds.push(platformId);
+      }
+    }
+    const primaryFormatId = helpers.assertString(
+      (body.primary_format_id || "").toString(),
+      40,
+    );
+    if (primaryFormatId && allowedPrimaryFormatIds.indexOf(primaryFormatId) === -1) {
+      return c.json(400, { error: "Invalid primary image format" });
+    }
+    const imageAspectRatio = helpers.assertString(
+      (body.image_aspect_ratio || "").toString(),
+      10,
+    );
+    if (imageAspectRatio && allowedImageAspectRatios.indexOf(imageAspectRatio) === -1) {
+      return c.json(400, { error: "Invalid image aspect ratio" });
+    }
+    const expectedAspectByFormat = {
+      feed_square: "1:1",
+      story_vertical: "9:16",
+      marketplace: "16:9",
+      gbp: "4:3",
+    };
+    if (
+      !!primaryFormatId !== !!imageAspectRatio ||
+      (primaryFormatId && expectedAspectByFormat[primaryFormatId] !== imageAspectRatio)
+    ) {
+      return c.json(400, { error: "Output format and aspect ratio do not match" });
+    }
+    const parsedPlatformCaptions = helpers.parsePostPlatformCaptions(
+      body.platform_captions,
+      allowedPlatformIds,
+      platformIds,
+    );
+    if (!parsedPlatformCaptions.ok) {
+      return c.json(400, { error: parsedPlatformCaptions.error });
+    }
 
     // Attribution comes exclusively from the centrally validated session.
     // Legacy client fields are ignored so a browser cannot credit another
@@ -2249,9 +2529,9 @@ routerAdd("POST", "/api/app/posts", (c) => {
     if (approvalStatus === "pending" && !caption) {
       return c.json(400, { error: "Review caption is required" });
     }
-    if (approvalStatus === "pending") {
-      const compliance = policies.validatePostCompliance(
-        caption,
+    {
+      const compliance = policies.validatePostComplianceSet(
+        [caption].concat(Object.values(parsedPlatformCaptions.value)),
         disclosures,
         dealer.getString("banned_phrases"),
       );
@@ -2269,6 +2549,46 @@ routerAdd("POST", "/api/app/posts", (c) => {
     } catch (_e) {}
     if (approvalStatus === "pending" && !creativeFile) {
       return c.json(400, { error: "Review image is required" });
+    }
+
+    // Invalid requests above do not consume this normal storage allowance.
+    const postHourly = helpers.checkProxyRateLimit(
+      "app-write:post:hour:" + dealer.id + ":" + postWriter,
+      20,
+      60 * 60 * 1000,
+    );
+    const postDaily = helpers.checkProxyRateLimit(
+      "app-write:post:day:" + dealer.id + ":" + postWriter,
+      50,
+      24 * 60 * 60 * 1000,
+    );
+    // Bound the dealership's aggregate private-media growth as well as each
+    // person's usage. This intentionally does not delete History records.
+    const postDealerDaily = helpers.checkProxyRateLimit(
+      "app-write:post:dealer:day:" + dealer.id,
+      100,
+      24 * 60 * 60 * 1000,
+    );
+    if (!postHourly.ok || !postDaily.ok || !postDealerDaily.ok) {
+      const retryAfter = Math.max(
+        1,
+        Math.ceil(
+          Math.max(
+            postHourly.retryAfterMs || 0,
+            postDaily.retryAfterMs || 0,
+            postDealerDaily.retryAfterMs || 0,
+          ) / 1000,
+        ),
+      );
+      c.response().header().set("Retry-After", String(retryAfter));
+      return c.json(429, {
+        error: "WRITE_RATE_LIMITED",
+        code: "WRITE_RATE_LIMITED",
+        message: postDealerDaily.ok
+          ? "The post save limit was reached. Try again later."
+          : "The dealership reached its daily archive limit. Ask a manager to check storage.",
+        retry_after_seconds: retryAfter,
+      });
     }
 
     // Load only the server-approved text fields, then attach the parsed upload
@@ -2418,11 +2738,14 @@ routerAdd("POST", "/api/app/posts", (c) => {
       style: helpers.assertString((body.style || "").toString(), 60),
       tone: helpers.assertString((body.tone || "").toString(), 60),
       customer_name: helpers.assertString((body.customer_name || "").toString(), 120),
+      scenario_id: scenarioId,
       vin: helpers.assertString((body.vin || "").toString(), 17),
       scheduled_for: helpers.assertString((body.scheduled_for || "").toString(), 40),
       // Release status is derived from a durably stored, same-dealer signature
       // by the photo-releases endpoint. Never trust a client assertion here.
       has_release: false,
+      release_required: releaseRequired,
+      release_status: releaseRequired ? "pending" : "not_required",
       // Video metrics are recorded only by the owner-scoped completion route
       // after rendering succeeds; a client cannot pre-claim success here.
       has_video: false,
@@ -2431,6 +2754,10 @@ routerAdd("POST", "/api/app/posts", (c) => {
       approved_at: "",
       caption: storeCaption,
       disclosures: storeDisclosures,
+      platform_ids: JSON.stringify(platformIds),
+      platform_captions: parsedPlatformCaptions.serialized,
+      primary_format_id: primaryFormatId,
+      image_aspect_ratio: imageAspectRatio,
       caption_source: captionSource,
       generation_tier: generationTier,
       generation_model: generationModel,
@@ -2440,6 +2767,8 @@ routerAdd("POST", "/api/app/posts", (c) => {
       // Every derived artifact (approval polling, protected creative, video
       // completion) is bound to the opaque browser session that logged it.
       owner_session_hash: ownerSessionHash,
+      owner_person_id: salespersonId,
+      attribution_authoritative: !!context.person,
     });
     if (creativeFile) form.addFiles("creative_image", creativeFile);
     form.submit();
@@ -2477,11 +2806,20 @@ routerAdd("POST", "/api/app/posts", (c) => {
       generationClaimToken = "";
     }
 
+    c.response().header().set("Cache-Control", "private, no-store");
     return c.json(200, {
       id: record.id,
       dealer: dealer.id,
       generated_at: record.getString("generated_at"),
       approval_status: record.getString("approval_status"),
+      release_required: record.getBool
+        ? record.getBool("release_required")
+        : !!record.get("release_required"),
+      release_status: record.getString("release_status"),
+      platform_ids: platformIds,
+      platform_captions: parsedPlatformCaptions.value,
+      primary_format_id: primaryFormatId,
+      image_aspect_ratio: imageAspectRatio,
     });
   } catch (err) {
     if (generationClaimToken) {
@@ -2511,13 +2849,125 @@ routerAdd("POST", "/api/app/posts", (c) => {
   }
 });
 
+// Persist the latest editable draft for History recovery. Approval submissions
+// remain immutable: the manager must always review the exact original copy.
+routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const policies = require(__hooks + "/requestPolicies.js");
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+
+  try {
+    const record = $app.dao().findRecordById("posts", c.pathParam("id"));
+    if (record.getString("dealer") !== context.dealer.id) {
+      return c.json(403, { error: "Cross-dealer draft update blocked" });
+    }
+    const token = helpers.readSessionToken(c);
+    const ownerHash = token ? helpers.hashSessionToken(token) : "";
+    const isOwner = !!ownerHash && ownerHash === record.getString("owner_session_hash");
+    const isSamePerson = helpers.isAuthoritativePostPerson(context, record);
+    if (!isOwner && !isSamePerson) {
+      return c.json(403, { error: "Post belongs to another person" });
+    }
+    if (record.getString("approval_status") !== "n_a") {
+      return c.json(409, {
+        error: "Approval review copies are immutable; create another post to revise it",
+      });
+    }
+
+    const body = $apis.requestInfo(c).data || {};
+    const caption = helpers.assertString((body.caption || "").toString().trim(), 12000);
+    const disclosures = helpers.assertString(
+      (body.disclosures || "").toString().trim(),
+      12000,
+    );
+    if (!caption) return c.json(400, { error: "Draft caption is required" });
+    const allowedPlatformIds = [
+      "instagram_feed",
+      "instagram_story",
+      "facebook_feed",
+      "tiktok",
+      "gbp",
+      "marketplace",
+      "linkedin",
+      "x_twitter",
+      "native_share",
+    ];
+    let selectedPlatformIds = [];
+    try {
+      const storedPlatformIds = JSON.parse(record.getString("platform_ids") || "[]");
+      if (Array.isArray(storedPlatformIds)) {
+        selectedPlatformIds = storedPlatformIds.filter(function (platformId, index) {
+          return (
+            typeof platformId === "string" &&
+            allowedPlatformIds.indexOf(platformId) !== -1 &&
+            storedPlatformIds.indexOf(platformId) === index
+          );
+        });
+      }
+    } catch (_e) {}
+    let parsedPlatformCaptions = null;
+    if (body.platform_captions !== undefined && body.platform_captions !== null) {
+      parsedPlatformCaptions = helpers.parsePostPlatformCaptions(
+        body.platform_captions,
+        allowedPlatformIds,
+        selectedPlatformIds,
+      );
+      if (!parsedPlatformCaptions.ok) {
+        return c.json(400, { error: parsedPlatformCaptions.error });
+      }
+    } else {
+      parsedPlatformCaptions = helpers.parsePostPlatformCaptions(
+        record.getString("platform_captions"),
+        allowedPlatformIds,
+        selectedPlatformIds,
+      );
+      if (!parsedPlatformCaptions.ok) {
+        return c.json(400, { error: parsedPlatformCaptions.error });
+      }
+    }
+    const compliance = policies.validatePostComplianceSet(
+      [caption].concat(Object.values(parsedPlatformCaptions.value)),
+      disclosures,
+      context.dealer.getString("banned_phrases"),
+    );
+    if (!compliance.ok) return c.json(400, { error: compliance.error });
+
+    let creativeFile = null;
+    try {
+      const header = c.formFile("creative_image");
+      if (header) creativeFile = $filesystem.fileFromMultipart(header);
+    } catch (_e) {}
+
+    const form = new RecordUpsertForm($app, record);
+    form.setFullManageAccess(true);
+    const draftData = {
+      caption: caption,
+      disclosures: disclosures,
+    };
+    if (parsedPlatformCaptions) {
+      draftData.platform_captions = parsedPlatformCaptions.serialized;
+    }
+    form.loadData(draftData);
+    if (creativeFile) form.addFiles("creative_image", creativeFile);
+    form.submit();
+
+    c.response().header().set("Cache-Control", "private, no-store");
+    return c.json(200, { id: record.id, updated: true });
+  } catch (err) {
+    console.error("[/api/app/posts/:id/draft] update error", err);
+    return c.json(400, { error: "Failed to update saved draft" });
+  }
+});
+
 // Record successful video rendering only from the browser session that logged
 // the source post. The transition is intentionally idempotent so client retry
 // after a lost response cannot inflate or corrupt metrics.
 routerAdd("POST", "/api/app/posts/:id/video-generated", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  const dealer = helpers.dealerFromSession(c);
-  if (!dealer) return c.json(401, { error: "No active session" });
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  const dealer = context.dealer;
 
   let record = null;
   try {
@@ -2532,10 +2982,10 @@ routerAdd("POST", "/api/app/posts/:id/video-generated", (c) => {
 
   const token = helpers.readSessionToken(c);
   const currentOwnerHash = token ? helpers.hashSessionToken(token) : "";
-  if (
-    !currentOwnerHash ||
-    currentOwnerHash !== record.getString("owner_session_hash")
-  ) {
+  const isOwner =
+    !!currentOwnerHash && currentOwnerHash === record.getString("owner_session_hash");
+  const isSamePerson = helpers.isAuthoritativePostPerson(context, record);
+  if (!isOwner && !isSamePerson) {
     return c.json(403, { error: "Post belongs to another session" });
   }
 
@@ -2556,8 +3006,9 @@ routerAdd("POST", "/api/app/posts/:id/video-generated", (c) => {
 
 routerAdd("POST", "/api/app/posts/:id/schedule", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  const dealer = helpers.dealerFromSession(c);
-  if (!dealer) return c.json(401, { error: "No active session" });
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  const dealer = context.dealer;
 
   let record = null;
   try {
@@ -2570,19 +3021,21 @@ routerAdd("POST", "/api/app/posts/:id/schedule", (c) => {
     return c.json(403, { error: "Cross-dealer post update blocked" });
   }
 
-  const role = helpers.sessionRoleFromCookie(c);
-  const isManager = role === "dealer_admin" || role === "super_admin";
   const token = helpers.readSessionToken(c);
   const currentOwnerHash = token ? helpers.hashSessionToken(token) : "";
   const isOwner =
     !!currentOwnerHash && currentOwnerHash === record.getString("owner_session_hash");
-  if (!isOwner && !isManager) {
+  const isSamePerson = helpers.isAuthoritativePostPerson(context, record);
+  if (!isOwner && !isSamePerson) {
     return c.json(403, { error: "Post belongs to another session" });
   }
 
   try {
     const body = $apis.requestInfo(c).data || {};
-    const scheduledFor = helpers.assertString((body.scheduled_for || "").toString(), 40);
+    const scheduledFor = helpers.assertString(
+      (body.scheduled_for || "").toString(),
+      40,
+    );
     record.set("scheduled_for", scheduledFor);
     $app.dao().saveRecord(record);
     return c.json(200, { id: record.id, scheduled_for: scheduledFor });
@@ -2597,8 +3050,9 @@ routerAdd("POST", "/api/app/posts/:id/schedule", (c) => {
 // opaque session token, and the dealer relationship is checked independently.
 routerAdd("GET", "/api/app/posts/:id/status", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  const dealer = helpers.dealerFromSession(c);
-  if (!dealer) return c.json(401, { error: "No active session" });
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  const dealer = context.dealer;
 
   try {
     const record = $app.dao().findRecordById("posts", c.pathParam("id"));
@@ -2606,13 +3060,14 @@ routerAdd("GET", "/api/app/posts/:id/status", (c) => {
       return c.json(403, { error: "Cross-dealer status read blocked" });
     }
 
-    const role = helpers.sessionRoleFromCookie(c);
+    const role = context.role;
     const isManager = role === "dealer_admin" || role === "super_admin";
     const token = helpers.readSessionToken(c);
     const currentOwnerHash = token ? helpers.hashSessionToken(token) : "";
     const isOwner =
       !!currentOwnerHash && currentOwnerHash === record.getString("owner_session_hash");
-    if (!isOwner && !isManager) {
+    const isSamePerson = helpers.isAuthoritativePostPerson(context, record);
+    if (!isOwner && !isManager && !isSamePerson) {
       return c.json(403, { error: "Post status belongs to another session" });
     }
 
@@ -2633,8 +3088,9 @@ routerAdd("GET", "/api/app/posts/:id/status", (c) => {
 // first and then streams the stored file from the configured local/S3 backend.
 routerAdd("GET", "/api/app/posts/:id/creative-image", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  const dealer = helpers.dealerFromSession(c);
-  if (!dealer) return c.json(401, { error: "No active session" });
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  const dealer = context.dealer;
 
   try {
     const record = $app.dao().findRecordById("posts", c.pathParam("id"));
@@ -2642,13 +3098,14 @@ routerAdd("GET", "/api/app/posts/:id/creative-image", (c) => {
       return c.json(403, { error: "Cross-dealer creative read blocked" });
     }
 
-    const role = helpers.sessionRoleFromCookie(c);
+    const role = context.role;
     const isManager = role === "dealer_admin" || role === "super_admin";
     const token = helpers.readSessionToken(c);
     const currentOwnerHash = token ? helpers.hashSessionToken(token) : "";
     const isOwner =
       !!currentOwnerHash && currentOwnerHash === record.getString("owner_session_hash");
-    if (!isOwner && !isManager) {
+    const isSamePerson = helpers.isAuthoritativePostPerson(context, record);
+    if (!isOwner && !isManager && !isSamePerson) {
       return c.json(403, { error: "Creative belongs to another session" });
     }
 
@@ -2675,11 +3132,13 @@ routerAdd("GET", "/api/app/posts/:id/creative-image", (c) => {
 
 routerAdd("GET", "/api/app/posts", (c) => {
   const helpers = require(__hooks + "/helpers.js");
-  const dealer = helpers.dealerFromSession(c);
-  if (!dealer) return c.json(401, { error: "No active session" });
-  const role = helpers.sessionRoleFromCookie(c);
-  if (role !== "dealer_admin" && role !== "super_admin") {
-    return c.json(403, { error: "Manager role required" });
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  const dealer = context.dealer;
+  const role = context.role;
+  const isManager = role === "dealer_admin" || role === "super_admin";
+  if (!isManager && !context.person) {
+    return c.json(403, { error: "Personal session required" });
   }
 
   try {
@@ -2687,11 +3146,113 @@ routerAdd("GET", "/api/app/posts", (c) => {
     const since = helpers.databaseTimestamp((query.since || "").toString());
     const until = helpers.databaseTimestamp((query.until || "").toString());
     const status = (query.approval_status || "").toString();
+    const aggregate = (query.aggregate || "").toString().trim();
+    const cursor = (query.cursor || "").toString().trim();
     const limitRaw = parseInt((query.limit || "200").toString(), 10);
     const limit = Math.min(Math.max(limitRaw || 200, 1), 1000);
+    let cursorTime = "";
+    let cursorId = "";
+    if (aggregate && aggregate !== "leaderboard") {
+      return c.json(400, {
+        error: "INVALID_POST_AGGREGATE",
+        code: "INVALID_POST_AGGREGATE",
+        message: "The requested post aggregate is invalid.",
+      });
+    }
+    if (cursor) {
+      const cursorMatch = cursor.match(
+        /^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z?)\|([A-Za-z0-9_-]{1,64})$/,
+      );
+      if (!cursorMatch) {
+        return c.json(400, {
+          error: "INVALID_POST_CURSOR",
+          code: "INVALID_POST_CURSOR",
+          message: "The post-history cursor is invalid.",
+        });
+      }
+      cursorTime = helpers.databaseTimestamp(cursorMatch[1]);
+      cursorId = cursorMatch[2];
+    }
+
+    if (aggregate === "leaderboard") {
+      const summaryFilters = ["p.dealer = {:dealer}"];
+      const summaryParams = { dealer: dealer.id };
+      if (!isManager) {
+        summaryFilters.push("p.attribution_authoritative = 1");
+        summaryFilters.push("p.owner_person_id = {:person}");
+        summaryParams.person = context.person.id;
+      }
+      if (since) {
+        summaryFilters.push("p.generated_at >= {:since}");
+        summaryParams.since = since;
+      }
+      if (until) {
+        summaryFilters.push("p.generated_at <= {:until}");
+        summaryParams.until = until;
+      }
+      if (status) {
+        summaryFilters.push("p.approval_status = {:status}");
+        summaryParams.status = status;
+      }
+      const summaryRows = arrayOf(
+        new DynamicModel({
+          salesperson: "",
+          salespersonId: "",
+          count: 0,
+          videoCount: 0,
+          releaseCount: 0,
+          lastPostedAt: "",
+        }),
+      );
+      $app
+        .dao()
+        .db()
+        .newQuery(
+          "SELECT " +
+            "CASE WHEN p.attribution_authoritative = 1 " +
+            "THEN COALESCE(NULLIF(s.name, ''), 'Former teammate') " +
+            "ELSE 'Legacy unattributed' END AS salesperson, " +
+            "CASE WHEN p.attribution_authoritative = 1 " +
+            "THEN COALESCE(p.owner_person_id, '') ELSE '' END AS salespersonId, " +
+            "COUNT(*) AS count, " +
+            "COALESCE(SUM(CASE WHEN p.has_video = 1 THEN 1 ELSE 0 END), 0) AS videoCount, " +
+            "COALESCE(SUM(CASE WHEN p.has_release = 1 THEN 1 ELSE 0 END), 0) AS releaseCount, " +
+            "COALESCE(MAX(p.generated_at), '') AS lastPostedAt " +
+            "FROM posts p LEFT JOIN salespeople s ON s.id = p.owner_person_id " +
+            "WHERE " +
+            summaryFilters.join(" AND ") +
+            " GROUP BY p.attribution_authoritative, COALESCE(p.owner_person_id, ''), " +
+            "CASE WHEN p.attribution_authoritative = 1 " +
+            "THEN COALESCE(NULLIF(s.name, ''), 'Former teammate') " +
+            "ELSE 'Legacy unattributed' END " +
+            "ORDER BY count DESC, salesperson ASC",
+        )
+        .bind(summaryParams)
+        .all(summaryRows);
+      c.response().header().set("Cache-Control", "private, no-store");
+      return c.json(200, {
+        items: summaryRows.map((row) => ({
+          salesperson: (row.salesperson || "Unattributed").toString(),
+          salespersonId: (row.salespersonId || "").toString(),
+          count: Number(row.count) || 0,
+          videoCount: Number(row.videoCount) || 0,
+          releaseCount: Number(row.releaseCount) || 0,
+          lastPostedAt: (row.lastPostedAt || "").toString(),
+        })),
+      });
+    }
 
     const filterParts = [`dealer = {:dealer}`];
     const params = { dealer: dealer.id };
+    if (!isManager) {
+      // Salespeople can recover their own work across browser sessions, but
+      // never enumerate a teammate's customer posts. Legacy display
+      // attribution was client-selectable, so only the server-owned marker/id
+      // can grant cross-session recovery.
+      filterParts.push(`attribution_authoritative = true`);
+      filterParts.push(`owner_person_id = {:person}`);
+      params.person = context.person.id;
+    }
     if (since) {
       filterParts.push(`generated_at >= {:since}`);
       params.since = since;
@@ -2704,42 +3265,106 @@ routerAdd("GET", "/api/app/posts", (c) => {
       filterParts.push(`approval_status = {:status}`);
       params.status = status;
     }
+    if (cursorTime && cursorId) {
+      filterParts.push(
+        `(generated_at < {:cursorTime} || (generated_at = {:cursorTime} && id < {:cursorId}))`,
+      );
+      params.cursorTime = cursorTime;
+      params.cursorId = cursorId;
+    }
 
     const records = $app
       .dao()
       .findRecordsByFilter(
         "posts",
         filterParts.join(" && "),
-        "-generated_at",
-        limit,
+        "-generated_at,-id",
+        limit + 1,
         0,
         params,
       );
+    const hasMore = records.length > limit;
+    const page = hasMore ? records.slice(0, limit) : records;
 
-    const items = records.map((r) => ({
-      id: r.id,
-      dealer: r.getString("dealer"),
-      salesperson_name: r.getString("salesperson_name"),
-      salesperson_id: r.getString("salesperson_id"),
-      generated_at: r.getString("generated_at"),
-      style: r.getString("style"),
-      tone: r.getString("tone"),
-      customer_name: r.getString("customer_name"),
-      vin: r.getString("vin"),
-      has_release: r.getBool ? r.getBool("has_release") : !!r.get("has_release"),
-      has_video: r.getBool ? r.getBool("has_video") : !!r.get("has_video"),
-      approval_status: r.getString("approval_status"),
-      approved_by: r.getString("approved_by"),
-      approved_at: r.getString("approved_at"),
-      caption: r.getString("caption"),
-      disclosures: r.getString("disclosures"),
-      scheduled_for: r.getString("scheduled_for"),
-      creative_image_url: r.getString("creative_image")
-        ? `/api/app/posts/${r.id}/creative-image`
-        : "",
-    }));
+    const allowedPlatformIds = [
+      "instagram_feed",
+      "instagram_story",
+      "facebook_feed",
+      "tiktok",
+      "gbp",
+      "marketplace",
+      "linkedin",
+      "x_twitter",
+      "native_share",
+    ];
+    const items = page.map((r) => {
+      let platformIds = [];
+      try {
+        const parsed = JSON.parse(r.getString("platform_ids") || "[]");
+        if (Array.isArray(parsed)) {
+          platformIds = parsed.filter(
+            (id, index) =>
+              typeof id === "string" &&
+              allowedPlatformIds.indexOf(id) !== -1 &&
+              parsed.indexOf(id) === index,
+          );
+        }
+      } catch (_e) {}
+      const parsedPlatformCaptions = helpers.parsePostPlatformCaptions(
+        r.getString("platform_captions"),
+        allowedPlatformIds,
+        platformIds,
+      );
+      return {
+        id: r.id,
+        dealer: r.getString("dealer"),
+        salesperson_name: r.getString("salesperson_name"),
+        salesperson_id: r.getString("salesperson_id"),
+        attribution_authoritative: r.getBool
+          ? r.getBool("attribution_authoritative")
+          : !!r.get("attribution_authoritative"),
+        generated_at: r.getString("generated_at"),
+        style: r.getString("style"),
+        tone: r.getString("tone"),
+        customer_name: r.getString("customer_name"),
+        scenario_id: r.getString("scenario_id"),
+        vin: r.getString("vin"),
+        has_release: r.getBool ? r.getBool("has_release") : !!r.get("has_release"),
+        release_required: r.getBool
+          ? r.getBool("release_required")
+          : !!r.get("release_required"),
+        release_status: r.getString("release_status"),
+        has_video: r.getBool ? r.getBool("has_video") : !!r.get("has_video"),
+        approval_status: r.getString("approval_status"),
+        approved_by: r.getString("approved_by"),
+        approved_at: r.getString("approved_at"),
+        caption: r.getString("caption"),
+        caption_source:
+          ["ai", "custom", "basic_fallback"].indexOf(r.getString("caption_source")) !==
+          -1
+            ? r.getString("caption_source")
+            : null,
+        disclosures: r.getString("disclosures"),
+        platform_ids: platformIds,
+        platform_captions: parsedPlatformCaptions.ok
+          ? parsedPlatformCaptions.value
+          : {},
+        primary_format_id: r.getString("primary_format_id"),
+        image_aspect_ratio: r.getString("image_aspect_ratio"),
+        scheduled_for: r.getString("scheduled_for"),
+        creative_image_url: r.getString("creative_image")
+          ? `/api/app/posts/${r.id}/creative-image`
+          : "",
+      };
+    });
 
-    return c.json(200, { items });
+    c.response().header().set("Cache-Control", "private, no-store");
+    const payload = { items: items };
+    if (hasMore && page.length) {
+      const last = page[page.length - 1];
+      payload.nextCursor = last.getString("generated_at") + "|" + last.id;
+    }
+    return c.json(200, payload);
   } catch (err) {
     console.error("[/api/app/posts] list error", err);
     return c.json(500, { error: "Failed to list posts" });
@@ -2790,12 +3415,55 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
         error: "Cannot approve a post without reviewable creative",
       });
     }
+    if (
+      decision === "approved" &&
+      record.getBool("release_required") &&
+      (!record.getBool("has_release") || record.getString("release_status") !== "saved")
+    ) {
+      return c.json(409, {
+        error: "A verified customer photo release is required before approval",
+      });
+    }
     if (decision === "approved") {
       // Re-evaluate the stored, immutable review copy against the current
       // dealer policy. This protects legacy queue entries and catches phrases
       // blocked after submission; rejection remains available to clear them.
-      const compliance = policies.validatePostCompliance(
-        record.getString("caption"),
+      const allowedPlatformIds = [
+        "instagram_feed",
+        "instagram_story",
+        "facebook_feed",
+        "tiktok",
+        "gbp",
+        "marketplace",
+        "linkedin",
+        "x_twitter",
+        "native_share",
+      ];
+      let selectedPlatformIds = [];
+      try {
+        const parsed = JSON.parse(record.getString("platform_ids") || "[]");
+        if (Array.isArray(parsed)) {
+          selectedPlatformIds = parsed.filter(function (platformId, index) {
+            return (
+              typeof platformId === "string" &&
+              allowedPlatformIds.indexOf(platformId) !== -1 &&
+              parsed.indexOf(platformId) === index
+            );
+          });
+        }
+      } catch (_e) {}
+      const platformCaptions = helpers.parsePostPlatformCaptions(
+        record.getString("platform_captions"),
+        allowedPlatformIds,
+        selectedPlatformIds,
+      );
+      if (!platformCaptions.ok) {
+        return c.json(409, {
+          error: "Stored platform captions are invalid; reject and resubmit",
+        });
+      }
+      const compliance = policies.validatePostComplianceSet(
+        [record.getString("caption")].concat(Object.values(platformCaptions.value)),
         record.getString("disclosures"),
         dealer.getString("banned_phrases"),
       );

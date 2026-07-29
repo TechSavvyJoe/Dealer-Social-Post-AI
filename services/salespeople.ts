@@ -4,6 +4,7 @@
  */
 
 import { readApiError } from "./apiErrors";
+import { assertAuthEpoch, captureAuthEpoch } from "../utils/authBoundary";
 
 export type PersonRole = "manager" | "salesperson";
 
@@ -65,6 +66,8 @@ const normalizePerson = (person: Record<string, unknown>): RosterPerson => ({
 });
 
 const json = async <T>(url: string, init: RequestInit = {}): Promise<T> => {
+  const requestAuthEpoch = captureAuthEpoch();
+  assertAuthEpoch(requestAuthEpoch);
   const res = await fetch(url, {
     credentials: "include",
     headers: {
@@ -76,8 +79,10 @@ const json = async <T>(url: string, init: RequestInit = {}): Promise<T> => {
     cache: "no-store",
     ...init,
   });
-  if (!res.ok) throw await readApiError(res);
-  return (await res.json()) as T;
+  if (!res.ok) throw await readApiError(res, { requestAuthEpoch });
+  const body = (await res.json()) as T;
+  assertAuthEpoch(requestAuthEpoch);
+  return body;
 };
 
 export interface ListPeopleOptions {
@@ -116,9 +121,36 @@ export const listPeoplePage = async (
   };
 };
 
+export const listAllPeople = async (
+  options: Omit<ListPeopleOptions, "cursor" | "limit"> = {},
+): Promise<RosterPerson[]> => {
+  const operationAuthEpoch = captureAuthEpoch();
+  const items: RosterPerson[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+
+  // The backend's four-digit credential namespace caps the complete roster at
+  // 10,000 records (50 pages of 200). Fail explicitly if that invariant ever
+  // changes instead of showing a silently truncated team.
+  for (let pageNumber = 0; pageNumber < 50; pageNumber += 1) {
+    assertAuthEpoch(operationAuthEpoch);
+    const page = await listPeoplePage({ ...options, limit: 200, cursor });
+    assertAuthEpoch(operationAuthEpoch);
+    items.push(...page.items);
+    if (!page.nextCursor) return items;
+    if (seenCursors.has(page.nextCursor)) {
+      throw new Error("The people roster returned a repeated continuation cursor.");
+    }
+    seenCursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
+
+  throw new Error("The people roster exceeds the supported 10,000-person limit.");
+};
+
 export const listSalespeople = async (
   includeInactive = false,
-): Promise<RosterPerson[]> => (await listPeoplePage({ includeInactive })).items;
+): Promise<RosterPerson[]> => listAllPeople({ includeInactive, role: "salesperson" });
 
 export const listPeople = async (
   options: ListPeopleOptions = {},

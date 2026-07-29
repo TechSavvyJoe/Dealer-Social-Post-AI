@@ -52,9 +52,80 @@ function findSessionByToken(token) {
       return null;
     }
     return record;
-  } catch (_e) {
-    return null;
+  } catch (err) {
+    if (isNotFoundError(err)) return null;
+    throwSessionValidationUnavailable(err);
   }
+}
+
+function isNotFoundError(err) {
+  if (!err) return false;
+  const code = Number(err.code || err.status || err.statusCode || 0);
+  if (code === 404 || err.name === "NotFoundError") return true;
+  const message = (err.message || err.toString() || "")
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/^goerror:\s*/, "");
+  // PocketBase 0.22 surfaces an empty findFirstRecordByFilter query as this
+  // exact Go/SQLite sentinel rather than an HTTP-shaped 404.
+  return message === "sql: no rows in result set";
+}
+
+/**
+ * Route-safe ownership check for posts created after authoritative attribution
+ * was introduced. Legacy salesperson_id/name fields were client-selectable, so
+ * they must never grant access to a saved post.
+ */
+function isAuthoritativePostPerson(context, record) {
+  if (!context || !context.person || !record) return false;
+  let authoritative = false;
+  try {
+    authoritative = record.getBool
+      ? !!record.getBool("attribution_authoritative")
+      : !!record.get("attribution_authoritative");
+  } catch (_e) {
+    return false;
+  }
+  return authoritative && context.person.id === record.getString("owner_person_id");
+}
+
+/**
+ * Provider transport errors can carry request URLs, response bodies, or header
+ * values. Return only a short allowlisted diagnostic for server logs.
+ */
+function safeProviderTransportDiagnostic(err) {
+  const clean = function (value) {
+    return (value || "")
+      .toString()
+      .replace(/[^A-Za-z0-9_.:-]/g, "")
+      .slice(0, 80);
+  };
+  const name = clean(err && err.name);
+  const code = clean(err && err.code);
+  const status = clean(err && (err.statusCode || err.status));
+  const details = [];
+  if (name) details.push("name=" + name);
+  if (code) details.push("code=" + code);
+  if (status) details.push("status=" + status);
+  return details.length ? details.join(" ") : "unclassified_transport_error";
+}
+
+/**
+ * An unavailable database/hash dependency is not proof that a bearer is
+ * invalid. Surface a 503 and preserve both the cookie and session row so a
+ * transient outage cannot sign the user out or erase their private workspace.
+ */
+function throwSessionValidationUnavailable(err) {
+  console.error("[session validation] authority could not be revalidated", err);
+  if (typeof ApiError === "function") {
+    throw new ApiError(503, "Session validation is temporarily unavailable", {
+      code: "UNAVAILABLE",
+    });
+  }
+  throw err instanceof Error
+    ? err
+    : new Error("Session validation is temporarily unavailable");
 }
 
 function deleteSessionRecord(record) {
@@ -137,8 +208,9 @@ function personPinFingerprint(person) {
 function findSystemDealer() {
   try {
     return $app.dao().findFirstRecordByFilter("dealers", "is_system = true", {});
-  } catch (_e) {
-    return null;
+  } catch (err) {
+    if (isNotFoundError(err)) return null;
+    throwSessionValidationUnavailable(err);
   }
 }
 
@@ -151,12 +223,7 @@ function validateSuperAdminSession(session, daoOverride) {
 
   const secret = configuredAdminSecret();
   if (!secret) return null;
-  let fingerprint = "";
-  try {
-    fingerprint = adminSecretFingerprint(secret);
-  } catch (_e) {
-    return null;
-  }
+  const fingerprint = adminSecretFingerprint(secret);
   if (session.getString("admin_secret_fingerprint") !== fingerprint) {
     return null;
   }
@@ -165,10 +232,47 @@ function validateSuperAdminSession(session, daoOverride) {
   try {
     const dao = daoOverride || $app.dao();
     dealer = dao.findRecordById("dealers", session.getString("dealer"));
-  } catch (_e) {
-    return null;
+  } catch (err) {
+    if (isNotFoundError(err)) return null;
+    throwSessionValidationUnavailable(err);
   }
   return recordBool(dealer, "is_system") ? dealer : null;
+}
+
+/**
+ * A source super-admin bearer is parked while an active impersonation child
+ * references it. The source row remains authoritative for validating and
+ * exiting the child, but the copied source cookie cannot be used in parallel.
+ *
+ * This query must run on the caller's DAO. During impersonation creation that
+ * DAO is the audited transaction DAO, so concurrent attempts serialize around
+ * the check and insert instead of minting two live children.
+ */
+function sourceHasActiveImpersonationChild(dao, sourceSessionId) {
+  if (!dao || !sourceSessionId) return false;
+  let children = null;
+  try {
+    children = dao.findRecordsByFilter(
+      "sessions",
+      "is_impersonation = true && impersonator_session = {:source} && expires_at > {:now}",
+      "id",
+      1,
+      0,
+      {
+        source: sourceSessionId.toString(),
+        now: databaseTimestamp(new Date().toISOString()),
+      },
+    );
+  } catch (err) {
+    if (isNotFoundError(err)) return false;
+    throwSessionValidationUnavailable(err);
+  }
+  if (!children || typeof children.length !== "number") {
+    throwSessionValidationUnavailable(
+      new Error("Impersonation source lookup returned an invalid result"),
+    );
+  }
+  return children.length > 0;
 }
 
 /**
@@ -200,6 +304,14 @@ function sessionContext(c) {
   if (role === "super_admin") {
     const systemDealer = validateSuperAdminSession(session);
     if (!systemDealer) return reject();
+    if (sourceHasActiveImpersonationChild($app.dao(), session.id)) {
+      // Do not delete the parked source: the child still needs it for
+      // continuous authority checks and the atomic exit replacement.
+      try {
+        c.response().header().add("Set-Cookie", buildClearCookie());
+      } catch (_e) {}
+      return null;
+    }
     return {
       token: token,
       session: session,
@@ -220,8 +332,9 @@ function sessionContext(c) {
   try {
     person = $app.dao().findRecordById("salespeople", personId);
     dealer = $app.dao().findRecordById("dealers", session.getString("dealer"));
-  } catch (_e) {
-    return reject();
+  } catch (err) {
+    if (isNotFoundError(err)) return reject();
+    throwSessionValidationUnavailable(err);
   }
   if (!recordBool(person, "active")) return reject();
   if (person.getString("dealer") !== dealer.id) return reject();
@@ -229,12 +342,7 @@ function sessionContext(c) {
   if (personRoleToSessionRole(person.getString("role")) !== role) {
     return reject();
   }
-  let currentPinFingerprint = "";
-  try {
-    currentPinFingerprint = personPinFingerprint(person);
-  } catch (_e) {
-    return reject();
-  }
+  const currentPinFingerprint = personPinFingerprint(person);
   if (
     !currentPinFingerprint ||
     session.getString("person_pin_fingerprint") !== currentPinFingerprint
@@ -249,8 +357,12 @@ function sessionContext(c) {
     if (!sourceId || sourceId === session.id) return reject();
     try {
       source = $app.dao().findRecordById("sessions", sourceId);
-    } catch (_e) {
-      source = null;
+    } catch (err) {
+      if (isNotFoundError(err)) {
+        source = null;
+      } else {
+        throwSessionValidationUnavailable(err);
+      }
     }
     if (!validateSuperAdminSession(source)) {
       if (source && sessionIsExpired(source)) deleteSessionRecord(source);
@@ -390,6 +502,9 @@ function createSessionWithDao(dao, dealerId, role, ip, userAgent, opts) {
       } catch (_e) {}
       if (!validateSuperAdminSession(source, dao)) {
         throw new Error("Impersonation source is invalid");
+      }
+      if (sourceHasActiveImpersonationChild(dao, source.id)) {
+        throw new Error("Impersonation source already has an active child");
       }
     } else if (options.impersonatorSessionId) {
       throw new Error("Unexpected impersonation source");
@@ -553,7 +668,14 @@ function findActivePersonByPin(pin) {
     do {
       batch = $app
         .dao()
-        .findRecordsByFilter("salespeople", "active = true", "created", pageSize, offset, {});
+        .findRecordsByFilter(
+          "salespeople",
+          "active = true",
+          "created",
+          pageSize,
+          offset,
+          {},
+        );
       for (var i = 0; i < batch.length; i++) {
         var rec = batch[i];
         var hashedPin = "";
@@ -1211,6 +1333,88 @@ function buildSafeTelemetryEnvelope(plainBody) {
     releaseSha: safeIdentifier(payloadObject.releaseSha),
     apiContractVersion: safeIdentifier(payloadObject.apiContractVersion),
   };
+}
+
+const TELEMETRY_GLOBAL_PER_MINUTE = 120;
+const TELEMETRY_TOTAL_ROW_CAP = 10000;
+const TELEMETRY_COALESCE_SECONDS = 60;
+
+/**
+ * Persist one pre-login client error behind process-local and durable global
+ * ceilings. The SQLite transaction makes distributed-IP requests compete for
+ * the same quota, while duplicate safe envelopes coalesce for one minute.
+ */
+function persistBoundedTelemetryEvent(safeEnvelope, occurredAt) {
+  const localGate = checkProxyRateLimit(
+    "telemetry:global",
+    TELEMETRY_GLOBAL_PER_MINUTE,
+    60 * 1000,
+  );
+  if (!localGate.ok) return { stored: false, reason: "global_rate" };
+
+  const now = occurredAt instanceof Date ? occurredAt : new Date();
+  const nowIso = now.toISOString();
+  const minuteCutoff = databaseTimestamp(
+    new Date(now.getTime() - 60 * 1000).toISOString(),
+  );
+  const duplicateCutoff = databaseTimestamp(
+    new Date(now.getTime() - TELEMETRY_COALESCE_SECONDS * 1000).toISOString(),
+  );
+  let result = { stored: false, reason: "unavailable" };
+
+  $app.dao().runInTransaction(function (txDao) {
+    const counts = new DynamicModel({
+      recentTotal: 0,
+      overallTotal: 0,
+      duplicateTotal: 0,
+    });
+    txDao
+      .db()
+      .newQuery(
+        "SELECT " +
+          "(SELECT COUNT(*) FROM client_error_events " +
+          "WHERE occurred_at >= {:minuteCutoff}) AS recentTotal, " +
+          "(SELECT COUNT(*) FROM client_error_events) AS overallTotal, " +
+          "(SELECT COUNT(*) FROM client_error_events " +
+          "WHERE occurred_at >= {:duplicateCutoff} " +
+          "AND name = {:name} AND payload = {:payload} " +
+          "AND release_sha = {:releaseSha}) AS duplicateTotal",
+      )
+      .bind({
+        minuteCutoff: minuteCutoff,
+        duplicateCutoff: duplicateCutoff,
+        name: safeEnvelope.name,
+        payload: safeEnvelope.payload,
+        releaseSha: safeEnvelope.releaseSha,
+      })
+      .one(counts);
+
+    if (Number(counts.recentTotal) >= TELEMETRY_GLOBAL_PER_MINUTE) {
+      result = { stored: false, reason: "global_rate" };
+      return;
+    }
+    if (Number(counts.overallTotal) >= TELEMETRY_TOTAL_ROW_CAP) {
+      result = { stored: false, reason: "row_cap" };
+      return;
+    }
+    if (Number(counts.duplicateTotal) > 0) {
+      result = { stored: false, reason: "coalesced" };
+      return;
+    }
+
+    const collection = txDao.findCollectionByNameOrId("client_error_events");
+    const record = new Record(collection, {
+      name: safeEnvelope.name,
+      payload: safeEnvelope.payload,
+      release_sha: safeEnvelope.releaseSha,
+      api_contract_version: safeEnvelope.apiContractVersion,
+      occurred_at: nowIso,
+    });
+    txDao.saveRecord(record);
+    result = { stored: true, reason: "stored" };
+  });
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -2151,6 +2355,119 @@ function serializeDealer(record) {
   };
 }
 
+const BUILT_IN_POST_SCENARIOS = {
+  customer_delivery: true,
+  preowned_spotlight: false,
+  new_arrival: false,
+  trade_in_spotlight: false,
+  service_promotion: false,
+  recall_complete: true,
+  customer_testimonial: true,
+  sold_by_salesperson: true,
+  model_year_end: false,
+  community_event: false,
+  team_anniversary: false,
+  test_drive_invite: false,
+};
+
+/**
+ * Resolve a scenario only from the server-owned catalog or the dealer's
+ * validated custom-scenario record. Unknown ids fail closed instead of
+ * allowing a modified client to bypass customer-release enforcement.
+ */
+function resolvePostScenarioPolicy(scenarioId, customScenariosJson, customerName) {
+  const id = (scenarioId || "").toString();
+  const hasCustomer = normalizeReleaseIdentity(customerName).length > 0;
+  if (!id) {
+    // The product's canonical/default scenario is customer delivery. Legacy
+    // or tampered clients that omit both fields therefore fail closed instead
+    // of bypassing consent for an unidentified customer photo.
+    return { ok: true, releaseRequired: true };
+  }
+  if (Object.prototype.hasOwnProperty.call(BUILT_IN_POST_SCENARIOS, id)) {
+    return {
+      ok: true,
+      releaseRequired: hasCustomer || BUILT_IN_POST_SCENARIOS[id] === true,
+    };
+  }
+
+  try {
+    const customScenarios = JSON.parse((customScenariosJson || "[]").toString());
+    if (Array.isArray(customScenarios)) {
+      for (let i = 0; i < customScenarios.length; i++) {
+        const scenario = customScenarios[i];
+        if (scenario && scenario.id === id) {
+          return {
+            ok: true,
+            releaseRequired: hasCustomer || scenario.requiresCustomer === true,
+          };
+        }
+      }
+    }
+  } catch (_e) {}
+  return { ok: false, releaseRequired: true };
+}
+
+function normalizeReleaseIdentity(value) {
+  return (value || "").toString().trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalizeReleaseVin(value) {
+  return (value || "").toString().trim().toUpperCase();
+}
+
+/**
+ * Parse a platform-caption map under the same destination allowlist used for
+ * post sizing. Captions may only exist for selected destinations and remain
+ * within the persisted field's aggregate and per-caption bounds.
+ */
+function parsePostPlatformCaptions(rawValue, allowedPlatformIds, selectedPlatformIds) {
+  const raw = (rawValue || "").toString();
+  if (!raw) return { ok: true, value: {}, serialized: "{}" };
+  if (raw.length > 60000) {
+    return { ok: false, error: "Platform captions are too large" };
+  }
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (_e) {
+    return { ok: false, error: "Invalid platform captions" };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, error: "Invalid platform captions" };
+  }
+
+  const result = {};
+  const keys = Object.keys(parsed);
+  if (keys.length > allowedPlatformIds.length) {
+    return { ok: false, error: "Too many platform captions" };
+  }
+  for (let i = 0; i < keys.length; i++) {
+    const platformId = keys[i];
+    if (
+      allowedPlatformIds.indexOf(platformId) === -1 ||
+      selectedPlatformIds.indexOf(platformId) === -1
+    ) {
+      return { ok: false, error: "Invalid platform caption destination" };
+    }
+    if (typeof parsed[platformId] !== "string") {
+      return { ok: false, error: "Invalid platform caption" };
+    }
+    const caption = parsed[platformId].trim();
+    if (caption.length > 12000) {
+      return { ok: false, error: "Platform caption is too long" };
+    }
+    if (caption) result[platformId] = caption;
+  }
+
+  const serialized = JSON.stringify(result);
+  if (serialized.length > 60000) {
+    return { ok: false, error: "Platform captions are too large" };
+  }
+  return { ok: true, value: result, serialized: serialized };
+}
+
 function purgeExpiredSessionsAndOldEvents() {
   const nowStr = databaseTimestamp(new Date().toISOString());
   try {
@@ -2225,6 +2542,7 @@ module.exports = {
   finalizeGenerationEventClaims,
   releaseGenerationEventClaims,
   buildSafeTelemetryEnvelope,
+  persistBoundedTelemetryEvent,
   // Audit + rate limit
   logAuthEvent,
   logCoalescedAuthEvent,
@@ -2263,7 +2581,13 @@ module.exports = {
   personRoleToSessionRole,
   serializePerson,
   serializePersonSummary,
+  isAuthoritativePostPerson,
   generateUniquePersonPin,
+  resolvePostScenarioPolicy,
+  normalizeReleaseIdentity,
+  normalizeReleaseVin,
+  parsePostPlatformCaptions,
+  safeProviderTransportDiagnostic,
   // Provider resource ownership
   claimProviderResource,
   claimProviderResources,

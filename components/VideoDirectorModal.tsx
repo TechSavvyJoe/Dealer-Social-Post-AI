@@ -1,4 +1,4 @@
-import React, { useState, useCallback, memo } from "react";
+import React, { useState, useCallback, useEffect, memo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { VideoStyle, VideoRequestOptions } from "../types";
 import { Icon } from "./Icons";
@@ -16,6 +16,23 @@ import {
 // Recommended = top automotive marketing motion recipes
 const QUICK_STYLES = videoStyles.filter((s) => s.recommended);
 const EXPERIMENTAL_STYLES = videoStyles.filter((s) => !s.recommended);
+
+const VIDEO_QUALITIES: Array<{
+  value: VideoRequestOptions["resolution"];
+  label: string;
+  detail: string;
+}> = [
+  {
+    value: "720p",
+    label: "Fast 720p",
+    detail: "Quicker everyday render",
+  },
+  {
+    value: "1080p",
+    label: "Quality 1080p",
+    detail: "Best detail · fixed at 8s",
+  },
+];
 
 /** One-tap formats for the channels dealerships actually post to. */
 const FORMAT_PRESETS: Array<{
@@ -42,20 +59,14 @@ const FORMAT_PRESETS: Array<{
     soundtrack: "cinematic",
     duration: 6,
   },
-  {
-    id: "square",
-    label: "Square-friendly",
-    sub: "Feed posts (letterboxed)",
-    aspect: "1:1",
-    soundtrack: "cinematic",
-    duration: 6,
-  },
 ];
 
 interface VideoDirectorModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectStyle: (style: VideoStyle, options: VideoRequestOptions) => void;
+  /** Inherit the safest supported video ratio from selected destinations. */
+  defaultAspect?: "9:16" | "16:9";
 }
 
 const StyleButton = memo(
@@ -108,7 +119,7 @@ const StyleButton = memo(
 );
 
 export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
-  ({ isOpen, onClose, onSelectStyle }) => {
+  ({ isOpen, onClose, onSelectStyle, defaultAspect = "9:16" }) => {
     const [showMore, setShowMore] = useState(false);
     // Default vertical + music for dealership Reels/TikTok (not silent landscape).
     const [aspectPreference, setAspectPreference] =
@@ -116,17 +127,25 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
     const [soundtrack, setSoundtrack] =
       useState<VideoRequestOptions["soundtrack"]>("cinematic");
     const [duration, setDuration] = useState(6);
+    const [resolution, setResolution] =
+      useState<VideoRequestOptions["resolution"]>(defaultResolution);
     const [activePreset, setActivePreset] = useState("vertical");
+
+    useEffect(() => {
+      if (!isOpen) return;
+      setAspectPreference(defaultAspect);
+      setActivePreset(defaultAspect === "9:16" ? "vertical" : "horizontal");
+    }, [defaultAspect, isOpen]);
 
     const buildOptions = useCallback((): VideoRequestOptions => {
       return {
-        durationSeconds: duration,
+        durationSeconds: resolution === "1080p" ? 8 : duration,
         soundtrack,
         aspectPreference,
-        resolution: defaultResolution,
+        resolution,
         pacing: "cinematic",
       };
-    }, [aspectPreference, duration, soundtrack]);
+    }, [aspectPreference, duration, resolution, soundtrack]);
 
     const handleStyleSelect = useCallback(
       (style: VideoStyle) => {
@@ -142,7 +161,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
       setActivePreset(preset.id);
       setAspectPreference(preset.aspect);
       setSoundtrack(preset.soundtrack);
-      setDuration(preset.duration);
+      setDuration(resolution === "1080p" ? 8 : preset.duration);
     };
 
     return (
@@ -151,7 +170,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
         onClose={onClose}
         size="lg"
         title="Creator video"
-        description="Automotive marketing motion for real delivery photos. Format → sound → style."
+        description="Automotive marketing motion for real delivery photos. Format → quality → sound → style."
         className="bg-surface-900 border-surface-800"
       >
         <div className="mb-4 space-y-4">
@@ -167,11 +186,12 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
             <h3 className="text-xs font-semibold uppercase tracking-wide text-primary-300/80">
               Format for
             </h3>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {FORMAT_PRESETS.map((p) => (
                 <button
                   key={p.id}
                   type="button"
+                  aria-pressed={activePreset === p.id}
                   onClick={() => applyPreset(p.id)}
                   className={cn(
                     "rounded-xl border px-3 py-2.5 text-left transition-colors",
@@ -189,6 +209,46 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
 
           {/* Aspect + sound + duration */}
           <div className="space-y-3 rounded-xl border border-white/10 bg-surface-950/40 p-3">
+            <fieldset className="space-y-2">
+              <legend className="text-xs font-semibold text-white/80">
+                Video quality
+              </legend>
+              <div className="grid grid-cols-2 gap-2">
+                {VIDEO_QUALITIES.map(({ value, label, detail }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-label={`${label}. ${detail}`}
+                    aria-pressed={resolution === value}
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setResolution(value);
+                      if (value === "1080p") setDuration(8);
+                    }}
+                    className={cn(
+                      "min-h-14 rounded-lg border px-2.5 py-2 text-left transition-all",
+                      resolution === value
+                        ? "border-primary-400 bg-primary-500/20 text-white"
+                        : "border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50",
+                    )}
+                  >
+                    <span className="block text-sm font-semibold">{label}</span>
+                    <span className="mt-0.5 block text-[10px] leading-tight opacity-75">
+                      {detail}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <p
+                aria-live="polite"
+                className="text-[10px] leading-relaxed text-surface-500"
+              >
+                {resolution === "1080p"
+                  ? "Quality mode uses the premium 1080p model and requires an 8-second video."
+                  : "Fast mode uses the 720p model and usually finishes sooner."}
+              </p>
+            </fieldset>
+
             <div className="space-y-2">
               <h3 className="text-xs font-semibold text-white/80">Aspect ratio</h3>
               <div className="flex flex-wrap gap-2">
@@ -197,6 +257,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
                     key={value}
                     type="button"
                     title={description}
+                    aria-pressed={aspectPreference === value}
                     onClick={() => {
                       triggerHapticFeedback();
                       setAspectPreference(value);
@@ -216,7 +277,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
               <p className="text-[10px] text-surface-500">
                 Veo renders <strong className="text-surface-300">9:16</strong>{" "}
                 (vertical) or <strong className="text-surface-300">16:9</strong> (wide).
-                Square uses letterboxing into a supported ratio.
+                The file and label always use the same ratio.
               </p>
             </div>
 
@@ -227,6 +288,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
                   <button
                     key={value}
                     type="button"
+                    aria-pressed={soundtrack === value}
                     onClick={() => {
                       triggerHapticFeedback();
                       setSoundtrack(value);
@@ -246,26 +308,40 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
 
             <div className="space-y-2">
               <h3 className="text-xs font-semibold text-white/80">Length</h3>
-              <div className="flex gap-2">
-                {durations.map(({ value, label }) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => {
-                      triggerHapticFeedback();
-                      setDuration(value);
-                    }}
-                    className={cn(
-                      "min-h-10 flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all",
-                      duration === value
-                        ? "border-primary-400 bg-primary-500/20 text-white"
-                        : "border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50",
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              {resolution === "1080p" ? (
+                <div
+                  role="status"
+                  className="flex min-h-10 items-center justify-between rounded-lg border border-primary-400 bg-primary-500/20 px-3 py-2 text-sm text-white"
+                >
+                  <span className="font-semibold">8 seconds</span>
+                  <span className="text-[10px] text-primary-100/80">
+                    Required for 1080p
+                  </span>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  {durations.map(({ value, label, description }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      title={description}
+                      aria-pressed={duration === value}
+                      onClick={() => {
+                        triggerHapticFeedback();
+                        setDuration(value);
+                      }}
+                      className={cn(
+                        "min-h-10 flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all",
+                        duration === value
+                          ? "border-primary-400 bg-primary-500/20 text-white"
+                          : "border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

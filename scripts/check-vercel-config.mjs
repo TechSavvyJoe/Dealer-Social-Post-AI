@@ -23,7 +23,9 @@ if (/x-dealer-proxy-secret['"]?\s*:\s*['"][^$]/i.test(source)) {
   throw new Error("The Vercel-to-Fly proxy secret must never be hard-coded.");
 }
 
-const { config } = await import(new URL("../vercel.ts", import.meta.url));
+const { config, contentSecurityPolicy } = await import(
+  new URL("../vercel.ts", import.meta.url)
+);
 if (!Array.isArray(config.routes) || config.routes.length !== 4) {
   throw new Error("Vercel config must compile the proxy and three header routes.");
 }
@@ -86,11 +88,37 @@ const requiredSecurityHeaders = new Map([
     "permissions-policy",
     "camera=(self), microphone=(self), geolocation=(), payment=(), usb=()",
   ],
+  ["content-security-policy", contentSecurityPolicy],
 ]);
 for (const [key, value] of requiredSecurityHeaders) {
   if (globalHeaders.get(key) !== value) {
     throw new Error(`Global security header is missing or invalid: ${key}`);
   }
+}
+
+const cspDirectives = new Map(
+  String(globalHeaders.get("content-security-policy"))
+    .split(";")
+    .map((directive) => directive.trim().split(/\s+/))
+    .filter(([name]) => Boolean(name))
+    .map(([name, ...values]) => [name, values]),
+);
+for (const directive of ["script-src", "frame-src", "connect-src"]) {
+  if (!cspDirectives.get(directive)?.includes("https://challenges.cloudflare.com")) {
+    throw new Error(`Production CSP blocks Turnstile in ${directive}.`);
+  }
+}
+if (cspDirectives.get("script-src")?.includes("https:")) {
+  throw new Error("Production CSP must not allow arbitrary HTTPS scripts.");
+}
+if (cspDirectives.get("frame-src")?.includes("https:")) {
+  throw new Error("Production CSP must not allow arbitrary HTTPS frames.");
+}
+if (
+  cspDirectives.get("object-src")?.join(" ") !== "'none'" ||
+  cspDirectives.get("frame-ancestors")?.join(" ") !== "'none'"
+) {
+  throw new Error("Production CSP must deny plugins and framing.");
 }
 for (const route of [assetRoute, workerRoute, securityRoute]) {
   if (route?.continue !== true || Array.isArray(route?.transforms)) {

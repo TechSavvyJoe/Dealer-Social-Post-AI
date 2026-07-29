@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly VERCEL_CLI_VERSION="56.3.1"
+readonly VERCEL_CLI_VERSION="58.1.0"
 readonly FLY_ORIGIN="https://dealer-social-post-ai-production.fly.dev"
+readonly EXPECTED_VERCEL_ORG_ID="team_Tc8DG6XMPUCefkTa3u71mmlN"
+readonly EXPECTED_VERCEL_PROJECT_ID="prj_h5phWNMNtK4D9dqwbOHrrrRMqrRi"
 readonly DEFAULT_EVIDENCE_PATH="test-results/vercel-staged-release.json"
 
 command_name="${1:-}"
@@ -57,6 +59,115 @@ if (
 NODE
 }
 
+assert_expected_vercel_link() {
+  node - \
+    ".vercel/project.json" \
+    "$EXPECTED_VERCEL_ORG_ID" \
+    "$EXPECTED_VERCEL_PROJECT_ID" <<'NODE'
+const fs = require("node:fs");
+const [file, expectedOrgId, expectedProjectId] = process.argv.slice(2);
+if (!fs.existsSync(file)) {
+  console.error("The repository is not explicitly linked to its production Vercel project.");
+  process.exit(1);
+}
+const link = JSON.parse(fs.readFileSync(file, "utf8"));
+if (link.orgId !== expectedOrgId || link.projectId !== expectedProjectId) {
+  console.error("The repository is linked to a different Vercel project or team.");
+  process.exit(1);
+}
+NODE
+}
+
+validate_vercel_environment() {
+  local env_file="$1"
+  local env_inventory_file="$2"
+  local static_directory="${3:-}"
+
+  node - "$env_file" "$env_inventory_file" "$static_directory" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const [envFile, envInventoryFile, staticDirectory] = process.argv.slice(2);
+if (!fs.existsSync(envFile) || !fs.existsSync(envInventoryFile)) {
+  console.error("Vercel production environment file was not downloaded.");
+  process.exit(1);
+}
+const inventoryPayload = JSON.parse(fs.readFileSync(envInventoryFile, "utf8"));
+const inventory = Array.isArray(inventoryPayload)
+  ? inventoryPayload
+  : Array.isArray(inventoryPayload?.envs)
+    ? inventoryPayload.envs
+    : [];
+const proxyEntry = inventory.find(
+  (entry) => entry?.key === "VERCEL_TO_FLY_PROXY_SECRET",
+);
+if (
+  !proxyEntry ||
+  !(
+    String(proxyEntry.type || "").toLowerCase() === "sensitive" ||
+    proxyEntry.sensitive === true
+  )
+) {
+  console.error("Vercel production is missing the sensitive trusted proxy credential.");
+  process.exit(1);
+}
+const siteKeyEntry = inventory.find(
+  (entry) => entry?.key === "VITE_TURNSTILE_SITE_KEY",
+);
+if (
+  !siteKeyEntry ||
+  String(siteKeyEntry.type || "").toLowerCase() === "sensitive"
+) {
+  console.error("Vercel production is missing its readable Turnstile site key.");
+  process.exit(1);
+}
+const values = {};
+for (const line of fs.readFileSync(envFile, "utf8").split(/\r?\n/)) {
+  const normalized = line.trim();
+  if (!normalized || normalized.startsWith("#")) continue;
+  const separator = normalized.indexOf("=");
+  if (separator <= 0) continue;
+  const key = normalized.slice(0, separator).trim().replace(/^export\s+/, "");
+  let value = normalized.slice(separator + 1).trim();
+  if (value.startsWith('"') && value.endsWith('"')) {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      process.exit(1);
+    }
+  } else if (value.startsWith("'") && value.endsWith("'")) {
+    value = value.slice(1, -1);
+  }
+  values[key] = value;
+}
+const siteKey = String(values.VITE_TURNSTILE_SITE_KEY || "");
+const testSiteKeys = new Set([
+  "1x00000000000000000000AA",
+  "2x00000000000000000000AB",
+  "1x00000000000000000000BB",
+  "2x00000000000000000000BB",
+  "3x00000000000000000000FF",
+]);
+if (!/^[A-Za-z0-9_-]{20,}$/.test(siteKey) || testSiteKeys.has(siteKey)) {
+  console.error("Vercel production is missing a real Turnstile site key.");
+  process.exit(1);
+}
+if (!staticDirectory) process.exit(0);
+const files = [];
+const visit = (directory) => {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) visit(target);
+    else if (/\.(?:html|js)$/.test(entry.name)) files.push(target);
+  }
+};
+visit(staticDirectory);
+if (!files.some((file) => fs.readFileSync(file, "utf8").includes(siteKey))) {
+  console.error("The prebuilt frontend does not contain its production Turnstile site key.");
+  process.exit(1);
+}
+NODE
+}
+
 assert_clean_current_release() {
   local release_sha="$1"
   local head_sha remote_main
@@ -91,6 +202,20 @@ if (
   console.error(`${label} does not report the exact healthy, restore-verified release.`);
   process.exit(1);
 }
+NODE
+}
+
+assert_trusted_proxy_route() {
+  local origin="$1"
+  local label="$2"
+  local output_file="$work_dir/${label}-proxy.json"
+
+  curl --silent --show-error --fail --max-time 20 \
+    "${origin%/}/api/app/proxy-readiness" --output "$output_file"
+  node - "$output_file" <<'NODE'
+const fs = require("node:fs");
+const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (payload.ok !== true) process.exit(1);
 NODE
 }
 
@@ -149,14 +274,25 @@ NODE
 stage_release() {
   local release_sha="${2:-${RELEASE_SHA:-}}"
   local deployment_url
+  local env_inventory_file="$work_dir/vercel-production-env.json"
 
   validate_sha "$release_sha"
   assert_clean_current_release "$release_sha"
   assert_release_health "$FLY_ORIGIN" "$release_sha" "fly-before-stage"
+  assert_expected_vercel_link
 
   export VITE_RELEASE_SHA="$release_sha"
+  # Vercel preserves local-only keys during pull. Remove this one generated
+  # file first so a deleted remote site key can never survive as stale input.
+  node -e 'require("node:fs").rmSync(".vercel/.env.production.local", { force: true })'
   npx --yes "vercel@${VERCEL_CLI_VERSION}" pull --yes --environment=production
+  npx --yes "vercel@${VERCEL_CLI_VERSION}" env list production --json \
+    > "$env_inventory_file"
+  validate_vercel_environment \
+    ".vercel/.env.production.local" "$env_inventory_file"
   npx --yes "vercel@${VERCEL_CLI_VERSION}" build --prod
+  validate_vercel_environment \
+    ".vercel/.env.production.local" "$env_inventory_file" ".vercel/output/static"
   grep -Rqs --include='*.js' --fixed-strings "$release_sha" .vercel/output/static ||
     fail "the prebuilt frontend does not contain its selected release SHA."
 
@@ -167,6 +303,7 @@ stage_release() {
   validate_deployment_url "$deployment_url" ||
     fail "Vercel did not return a canonical staged deployment URL."
   assert_release_health "$deployment_url" "$release_sha" "vercel-staged"
+  assert_trusted_proxy_route "$deployment_url" "vercel-staged"
   write_stage_evidence "$release_sha" "$deployment_url"
 
   echo "Staged release verified: $deployment_url"
@@ -184,8 +321,10 @@ promote_release() {
   validate_sha "$release_sha"
   validate_deployment_url "$deployment_url" || fail "staged deployment URL is invalid."
   assert_clean_current_release "$release_sha"
+  assert_expected_vercel_link
   assert_release_health "$FLY_ORIGIN" "$release_sha" "fly-before-promotion"
   assert_release_health "$deployment_url" "$release_sha" "vercel-before-promotion"
+  assert_trusted_proxy_route "$deployment_url" "vercel-before-promotion"
 
   npx --yes "vercel@${VERCEL_CLI_VERSION}" promote "$deployment_url" --yes
   mark_promoted

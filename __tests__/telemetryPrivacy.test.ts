@@ -176,9 +176,12 @@ describe("telemetry privacy", () => {
     expect(photoRelease).toContain("{ vinPresent: Boolean(vin) }");
     expect(photoRelease).not.toContain('logEvent("photo_release.captured", { vin })');
     expect(helperSource).toContain("function buildSafeTelemetryEnvelope");
+    expect(helperSource).toContain("function persistBoundedTelemetryEvent");
+    expect(helperSource).toContain("TELEMETRY_GLOBAL_PER_MINUTE");
+    expect(helperSource).toContain("TELEMETRY_TOTAL_ROW_CAP");
     expect(telemetryRoute).toContain("Persist an allowlisted diagnostic envelope");
     expect(helperSource).toContain('"fallbackCount"');
-    expect(telemetryRoute).toContain('record.set("payload", safeEnvelope.payload)');
+    expect(telemetryRoute).toContain("helpers.persistBoundedTelemetryEvent(");
     expect(telemetryRoute).not.toContain(
       "JSON.stringify(payloadObject).slice(0, 2000)",
     );
@@ -253,7 +256,7 @@ describe("telemetry privacy", () => {
     expect(backend).toContain('backupStatus = "release_mismatch"');
     expect(backend).toContain('backupStatus = "stale"');
     expect(backend).toContain("backupVerificationMaxAgeHours = 7 * 24");
-    expect(backend).toContain("!checks.off_box_restore_ready");
+    expect(backend).toContain("flyRuntime && !checks.off_box_restore_ready");
     expect(helpers).toContain("databaseTimestamp,");
     expect(backend).toContain("const since = helpers.databaseTimestamp(");
     expect(backend).toContain("const cutoff = helpers.databaseTimestamp(");

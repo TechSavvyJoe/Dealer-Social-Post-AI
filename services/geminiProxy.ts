@@ -3,6 +3,11 @@ import { retryWithBackoff } from "../utils/retry";
 import { performanceMonitor } from "../utils/performanceMonitor";
 import { withCircuitBreaker } from "../utils/circuitBreaker";
 import { MODEL_POLICY_VERSION, type ModelTaskName } from "./modelConfig";
+import {
+  assertAuthEpoch,
+  captureAuthEpoch,
+  notifySessionRejected,
+} from "../utils/authBoundary";
 
 // Request tracking for debugging
 let requestCounter = 0;
@@ -21,7 +26,9 @@ export async function fetchFromProxy(
   body: unknown,
   task?: ModelTaskName,
   attemptId?: string,
+  requestAuthEpoch: number = captureAuthEpoch(),
 ) {
+  assertAuthEpoch(requestAuthEpoch);
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
     throw normalizeError(new Error("Offline: please reconnect to the internet."));
   }
@@ -48,6 +55,7 @@ export async function fetchFromProxy(
     const response = await withCircuitBreaker(serviceKey, async () => {
       return await retryWithBackoff(
         async () => {
+          assertAuthEpoch(requestAuthEpoch);
           const res = await fetch(`/api/proxy/${path}`, {
             method,
             credentials: "include",
@@ -87,8 +95,10 @@ export async function fetchFromProxy(
     console.log(`[GeminiProxy] [${requestId}] Response ${response.status} for ${path}`);
 
     const responseText = await response.text();
+    assertAuthEpoch(requestAuthEpoch);
 
     if (!response.ok) {
+      if (response.status === 401) notifySessionRejected(requestAuthEpoch);
       // Prefer Google's structured error message when the body is JSON; fall
       // back to the raw text. (Parsing is isolated so the parse-failure catch
       // doesn't swallow the message we want to surface.)
@@ -116,15 +126,22 @@ export async function fetchFromProxy(
     }
 
     try {
-      return JSON.parse(responseText);
+      const parsed = JSON.parse(responseText);
+      assertAuthEpoch(requestAuthEpoch);
+      return parsed;
     } catch {
       // If the successful response is not JSON, return the raw text
+      assertAuthEpoch(requestAuthEpoch);
       return responseText;
     }
   } catch (error) {
     performanceMonitor.measure(`${markName}-error`, `${markName}-start`);
 
-    if (error instanceof Error && error.name === "AbortError") {
+    if (
+      error instanceof Error &&
+      error.name === "AbortError" &&
+      controller.signal.aborted
+    ) {
       throw new Error(`Request to ${path} timed out after 300 seconds.`);
     }
     throw normalizeError(error);

@@ -23,7 +23,10 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // WebKit + service-worker + IndexedDB cases can starve one another on a
+  // developer laptop when Playwright expands to every core. Two local workers
+  // retain useful parallelism while keeping the full device matrix repeatable.
+  workers: process.env.CI ? 1 : 2,
   reporter: "html",
   use: {
     baseURL: externalBaseUrl || "http://localhost:5173",

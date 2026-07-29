@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Header } from "./components/Header";
 import { ImpersonationBanner } from "./components/ImpersonationBanner";
@@ -8,6 +8,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { AppStep } from "./types";
 import { useToast } from "./components/ui/Toast";
 import { useAppStore } from "./stores/appStore";
+import { Modal } from "./components/ui/Modal";
 
 // Lazy load heavyweight modals
 const LazySettingsModal = React.lazy(() =>
@@ -20,7 +21,13 @@ const LazyImageCropModal = React.lazy(() =>
     default: mod.ImageCropModal,
   })),
 );
+const LazyPostHistory = React.lazy(() =>
+  import("./components/PostHistory").then((mod) => ({
+    default: mod.PostHistory,
+  })),
+);
 const AppContent: React.FC = () => {
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const {
     step,
     currentDealer,
@@ -43,8 +50,10 @@ const AppContent: React.FC = () => {
     isVideoDirectorOpen,
     setIsVideoDirectorOpen,
     cropModalOpen,
-    setCropModalOpen,
     tempImageForCrop,
+    tempOriginalForBackup,
+    tempOriginalFilename,
+    originalBackupStatus,
     isDesktopLayout,
     generationProgress,
     progressMessage,
@@ -52,6 +61,7 @@ const AppContent: React.FC = () => {
     handleStyleToneChange,
     handleImageSelected,
     handleCropConfirm,
+    handleCropClose,
     handleGenerate,
     handleRegenerateImage,
     handleFunMode,
@@ -64,7 +74,11 @@ const AppContent: React.FC = () => {
 
   // Must run before any conditional return — React requires a stable hook order.
   const isImpersonating = useAppStore((s) => s.isImpersonating);
+  const currentPersonId = useAppStore((s) => s.currentPerson?.id || "");
   const theme = useAppStore((s) => s.theme);
+  useEffect(() => {
+    setIsHistoryOpen(false);
+  }, [currentDealer?.id, currentPersonId, isImpersonating]);
 
   useEffect(() => {
     const updateTheme = () => {
@@ -94,6 +108,10 @@ const AppContent: React.FC = () => {
   // Power-user shortcuts. Step-aware so each key does the smart thing where you are.
   useKeyboardShortcuts({
     onCancel: () => {
+      if (isHistoryOpen) {
+        setIsHistoryOpen(false);
+        return;
+      }
       if (isSettingsOpen) {
         setIsSettingsOpen(false);
         return;
@@ -103,7 +121,7 @@ const AppContent: React.FC = () => {
         return;
       }
       if (cropModalOpen) {
-        setCropModalOpen(false);
+        handleCropClose();
         return;
       }
       // Step-specific back actions
@@ -166,6 +184,7 @@ const AppContent: React.FC = () => {
           dealer={currentDealer}
           onLogout={() => logout()}
           onShowSettings={() => setIsSettingsOpen(true)}
+          onShowHistory={() => setIsHistoryOpen(true)}
           confirmBeforeLogout={step === AppStep.RESULT && Boolean(generatedPost)}
         />
       )}
@@ -231,11 +250,36 @@ const AppContent: React.FC = () => {
       <Suspense fallback={null}>
         <LazyImageCropModal
           isOpen={cropModalOpen}
-          onClose={() => setCropModalOpen(false)}
+          onClose={handleCropClose}
           imageSrc={tempImageForCrop}
+          originalSource={tempOriginalForBackup}
+          originalFilename={tempOriginalFilename}
           onConfirm={handleCropConfirm}
+          originalBackupStatus={originalBackupStatus}
         />
       </Suspense>
+
+      <Modal
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        size="full"
+        title="My work"
+        description="Reopen prior creatives, captions, and customer posts without regenerating."
+        className="mx-2 w-[calc(100%-1rem)] sm:mx-4 sm:w-[min(72rem,calc(100%-2rem))]"
+      >
+        <Suspense
+          fallback={
+            <div
+              className="flex min-h-48 items-center justify-center text-sm text-surface-300"
+              role="status"
+            >
+              Loading your work…
+            </div>
+          }
+        >
+          <LazyPostHistory onOpenCreative={() => setIsHistoryOpen(false)} />
+        </Suspense>
+      </Modal>
 
       {/* Video director lives on PostResult — global no-op modal removed */}
     </div>

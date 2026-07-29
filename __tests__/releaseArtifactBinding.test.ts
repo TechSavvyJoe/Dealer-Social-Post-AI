@@ -27,7 +27,20 @@ describe("release artifact binding", () => {
     execFileSync("bash", ["-n", scriptPath]);
     expect(script).toContain("git status --porcelain --untracked-files=normal");
     expect(script).toContain("git ls-remote --exit-code origin refs/heads/main");
+    expect(script).toContain("assert_expected_vercel_link");
+    expect(script).toContain("team_Tc8DG6XMPUCefkTa3u71mmlN");
+    expect(script).toContain("prj_h5phWNMNtK4D9dqwbOHrrrRMqrRi");
     expect(script).toContain('export VITE_RELEASE_SHA="$release_sha"');
+    expect(script).toContain("validate_vercel_environment");
+    expect(script).toContain(".vercel/.env.production.local");
+    expect(script).toContain(
+      'rmSync(".vercel/.env.production.local", { force: true })',
+    );
+    expect(script).toContain("env list production --json");
+    expect(script).toContain('proxyEntry.type || "").toLowerCase() === "sensitive"');
+    expect(script).toContain('entry?.key === "VITE_TURNSTILE_SITE_KEY"');
+    expect(script).toContain("assert_trusted_proxy_route");
+    expect(script).toContain("/api/app/proxy-readiness");
     expect(script).toContain("grep -Rqs --include='*.js'");
     expect(script).toContain("deploy \\");
     expect(script).toContain("--prebuilt --prod --skip-domain --yes");
@@ -78,6 +91,13 @@ describe("release artifact binding", () => {
       expect(workflow).toContain(setupNode);
       expect(workflow).not.toContain("# v4.2.2");
       expect(workflow).not.toContain("# v4.4.0");
+    }
+    for (const path of [
+      ".github/workflows/fly-deploy.yml",
+      ".github/workflows/pocketbase-backup.yml",
+      ".github/workflows/fetch-fly-logs.yml",
+    ]) {
+      expect(read(path)).toContain("version: 0.4.71");
     }
 
     expect(read(".node-version").trim()).toBe("22.23.1");
