@@ -20,6 +20,8 @@ Create a protected GitHub environment named `production-backup` with:
 
 Each backup manifest is bound to the exact production origin, source release, restore-target release, source identity, running Fly image digest, tooling commit, archive checksum, and size. Health SHA and authenticated Fly image labels must agree. The workflow downloads the immutable object key returned by that backup operation; it never authorizes a release from a movable `latest.json` pointer. Thirty R2 archives are retained. Before creating a PocketBase archive, the tool removes only older files in its exact `dspai_tool_…` namespace; after a download or upload failure it preserves at most the current tool-owned archive for emergency recovery and never deletes manual, legacy, or otherwise unrecognized backup names.
 
+Fly mounts an ext filesystem root at `/pb/pb_data`; a new volume can therefore contain a root-only `lost+found` directory that PocketBase's unprivileged backup walk cannot read. Both protected workflows run `scripts/prepare-fly-backup-volume.sh` before creating an archive. The preflight refuses links, changes only that filesystem metadata directory to `root:pbuser` mode `0750`, and proves `pbuser` can traverse it. It never recursively changes application-data ownership or permissions.
+
 Nightly drills refresh the release-bound backup timestamp/SHA through Fly secrets. The deploy workflow stages the candidate release SHA, sitekey, allowed hostnames, timestamp/SHA evidence, and mutable Turnstile/legacy flags through that same secret mechanism before deploying; it does not rely on lower-precedence `--env` values that an older Fly secret could override.
 
 ### First v2 source-identity bootstrap

@@ -409,6 +409,30 @@ describe("post output-profile persistence", () => {
     expect(source).toContain("dealers_social_attribution_field_count");
     expect(source).toContain("facebook_page_tag,linkedin_company_tag");
     expect(source).toContain("output-profile=enforced");
+    expect(source).toContain(
+      'people_repair_migration="pb_migrations/1750500000_auth_people_integrity.js"',
+    );
+    expect(source).toContain(
+      'people_repair_baseline="173b48e77b61bd3b84fa0bfb0b0ce6091f25c66d"',
+    );
+    expect(source).toContain(
+      'people_repair_baseline_parent="723b3c87bbaa7fc3f51a3508378c60d70c31e69c"',
+    );
+    expect(source).toContain(
+      'people_roles_baseline_blob="1b9e2e566d614b72c12a49716b6660a34d268fa7"',
+    );
+    expect(source).toContain(
+      'git cat-file -e "${base_sha}:${people_repair_migration}"',
+    );
+    expect(source).toContain('git cat-file -e "${base_sha}:${people_roles_migration}"');
+    expect(source).toContain(
+      "git cat-file commit \"$people_repair_baseline\" | sed -n 's/^parent //p'",
+    );
+    expect(source).toContain(
+      'git rev-parse "${people_repair_baseline}:${people_roles_migration}"',
+    );
+    expect(source).not.toContain("git merge-base --is-ancestor");
+    expect(source).toContain('base_sha="$people_repair_baseline"');
   });
 
   it("adds the forward release and platform-caption fields without editing the applied profile migration", () => {

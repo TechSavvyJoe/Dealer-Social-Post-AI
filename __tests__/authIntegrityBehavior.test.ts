@@ -77,6 +77,7 @@ type AuthHelpers = {
     token: string,
     remoteIp: string,
   ) => { ok: boolean; unavailable: boolean };
+  configuredTurnstileHostnames: () => string[];
   isTurnstileTestSiteKey: (value: string) => boolean;
   isTurnstileTestSecret: (value: string) => boolean;
   clientIP: (context: unknown) => string;
@@ -1327,6 +1328,89 @@ describe("trusted request metadata", () => {
 describe("Turnstile and route authority contracts", () => {
   const helpers = loadCommonJs<AuthHelpers>("pb_hooks/helpers.js");
 
+  it("uses local hostname defaults only outside Fly and fails closed without Fly config", () => {
+    runtime.$os = { getenv: () => "" };
+    expect(helpers.configuredTurnstileHostnames()).toEqual(["localhost", "127.0.0.1"]);
+
+    runtime.$os = {
+      getenv: (name: string) => {
+        if (name === "FLY_APP_NAME") return "dealer-social-post-ai-production";
+        if (name === "TURNSTILE_SECRET") return "production-secret";
+        return "";
+      },
+    };
+    expect(helpers.configuredTurnstileHostnames()).toEqual([]);
+    const sendWithoutFlyHostnames = vi.fn(() => ({
+      statusCode: 200,
+      json: {
+        success: true,
+        hostname: "localhost",
+        action: "turnstile-spin-v2",
+      },
+    }));
+    runtime.$http = {
+      send: sendWithoutFlyHostnames,
+    };
+    expect(helpers.verifyTurnstileToken("local-token", "127.0.0.1")).toEqual({
+      ok: false,
+      unavailable: true,
+    });
+    expect(sendWithoutFlyHostnames).not.toHaveBeenCalled();
+
+    runtime.$os = {
+      getenv: (name: string) => {
+        if (name === "FLY_APP_NAME") return "dealer-social-post-ai-production";
+        if (name === "TURNSTILE_SECRET") return "production-secret";
+        if (name === "TURNSTILE_ALLOWED_HOSTNAMES") {
+          return [
+            "localhost",
+            "127.0.0.1",
+            "::1",
+            "[::1]",
+            "dealer-social-post-ai.vercel.app",
+            "dealer-social-post-ai-production.fly.dev",
+          ].join(",");
+        }
+        return "";
+      },
+    };
+    const successfulFlyVerification = vi.fn(() => ({
+      statusCode: 200,
+      json: {
+        success: true,
+        hostname: "dealer-social-post-ai.vercel.app",
+        action: "turnstile-spin-v2",
+      },
+    }));
+    runtime.$http = {
+      send: successfulFlyVerification,
+    };
+    expect(helpers.configuredTurnstileHostnames()).toEqual([
+      "dealer-social-post-ai.vercel.app",
+      "dealer-social-post-ai-production.fly.dev",
+    ]);
+    expect(helpers.verifyTurnstileToken("production-token", "203.0.113.20")).toEqual({
+      ok: true,
+      unavailable: false,
+    });
+    expect(successfulFlyVerification).toHaveBeenCalledTimes(1);
+
+    runtime.$http = {
+      send: vi.fn(() => ({
+        statusCode: 200,
+        json: {
+          success: true,
+          hostname: "localhost",
+          action: "turnstile-spin-v2",
+        },
+      })),
+    };
+    expect(helpers.verifyTurnstileToken("local-token", "127.0.0.1")).toEqual({
+      ok: false,
+      unavailable: false,
+    });
+  });
+
   it("requires Cloudflare success, an allowed hostname, and the canonical action", () => {
     let verification = {
       success: true,
@@ -1334,8 +1418,13 @@ describe("Turnstile and route authority contracts", () => {
       action: "turnstile-spin-v2",
     };
     runtime.$os = {
-      getenv: (name: string) =>
-        name === "TURNSTILE_SECRET" ? "production-secret" : "",
+      getenv: (name: string) => {
+        if (name === "TURNSTILE_SECRET") return "production-secret";
+        if (name === "TURNSTILE_ALLOWED_HOSTNAMES") {
+          return "dealer-social-post-ai.vercel.app";
+        }
+        return "";
+      },
     };
     runtime.$http = {
       send: vi.fn(() => ({ statusCode: 200, json: verification })),

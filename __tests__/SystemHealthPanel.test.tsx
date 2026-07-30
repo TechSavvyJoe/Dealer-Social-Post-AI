@@ -22,6 +22,7 @@ const healthyPayload = {
     turnstile_enforcement_enabled: true,
     turnstile_secret_set: true,
     turnstile_site_key_set: true,
+    turnstile_hostnames_configured: true,
     trusted_proxy_configured: true,
     legacy_client_compatibility_enabled: false,
     off_box_backup_configured: true,

@@ -88,6 +88,8 @@ describe("Fly backup source identity", () => {
       expect(workflow).toContain("POCKETBASE_TARGET_RELEASE_SHA:");
       expect(workflow).toContain("POCKETBASE_SOURCE_IDENTITY:");
       expect(workflow).toContain('--key "${{ steps.backup.outputs.key }}"');
+      expect(workflow).toContain("bash scripts/prepare-fly-backup-volume.sh");
+      expect(workflow).toContain("set -o pipefail");
     }
 
     const tooling = readFileSync(
@@ -131,6 +133,25 @@ describe("Fly backup source identity", () => {
     expect(flyDeploy).toContain(
       "machine?.image_ref?.digest !== process.env.EXPECTED_IMAGE_DIGEST",
     );
+  });
+
+  it("repairs only Fly volume metadata before PocketBase walks a full backup", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "scripts/prepare-fly-backup-volume.sh"),
+      "utf8",
+    );
+
+    expect(source).toContain("--user root");
+    expect(source).toContain("--user pbuser");
+    expect(source.match(/\[ -L \/pb\/pb_data\/lost\+found \]/g)).toHaveLength(2);
+    expect(source).toContain("[ ! -L /pb/pb_data/lost+found ]");
+    expect(source).toContain('stat -c %u /pb/pb_data/lost+found)\\" = 0');
+    expect(source).toContain("chgrp pbuser /pb/pb_data/lost+found");
+    expect(source).toContain("chmod 0750 /pb/pb_data/lost+found");
+    expect(source).toContain("[ -r /pb/pb_data/lost+found ]");
+    expect(source).toContain("[ -x /pb/pb_data/lost+found ]");
+    expect(source).not.toContain("chown -R");
+    expect(source).not.toContain("chmod -R");
   });
 
   it("lets the protected environment load before checking nightly enablement", () => {

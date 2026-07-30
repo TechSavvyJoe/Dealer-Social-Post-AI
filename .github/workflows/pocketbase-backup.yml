@@ -41,6 +41,7 @@ jobs:
           ALLOW_FLY_IMAGE_IDENTITY_BOOTSTRAP: ${{ vars.ALLOW_FLY_IMAGE_IDENTITY_BOOTSTRAP }}
           FLY_IMAGE_IDENTITY_BOOTSTRAP_EXPIRES_AT: ${{ vars.FLY_IMAGE_IDENTITY_BOOTSTRAP_EXPIRES_AT }}
         run: |
+          set -o pipefail
           node scripts/resolve-fly-backup-source.mjs | tee /tmp/source-identity.json
           node -e '
             const fs = require("node:fs");
@@ -82,6 +83,12 @@ jobs:
             exit 1
           fi
 
+      - name: Prepare the Fly volume for an unprivileged full backup
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_BACKUP_APP: dealer-social-post-ai-production
+        run: bash scripts/prepare-fly-backup-volume.sh
+
       - name: Create a source-bound full backup and retain 30 copies in private R2
         id: backup
         env:
@@ -100,6 +107,7 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BACKUP_PREFIX: ${{ vars.R2_BACKUP_PREFIX }}
         run: |
+          set -o pipefail
           node scripts/pocketbase-r2-backup.mjs backup | tee /tmp/backup-result.json
           backup_key="$(node -e '
             const fs = require("node:fs");
