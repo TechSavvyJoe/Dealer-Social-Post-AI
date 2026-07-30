@@ -59,6 +59,9 @@ describe("release artifact binding", () => {
     expect(script).toContain("grep -Rqs --include='*.js'");
     expect(script).toContain("deploy \\");
     expect(script).toContain("--prebuilt --prod --skip-domain --yes");
+    expect(script).toContain("--yes --json");
+    expect(script).toContain("deployment_url_from_json");
+    expect(script).not.toContain("tail -n 1");
     expect(script).toContain('promote "$deployment_url" --yes');
     expect(script.match(/assert_release_health/g)?.length).toBeGreaterThanOrEqual(6);
     expect(script).toContain(".release-evidence/vercel-staged-release.json");
