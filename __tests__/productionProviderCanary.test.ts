@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   AuthenticatedClient,
+  finalInlineImage,
   probeImageEvidence,
   probeVideoEvidence,
   validateVideoProbeMetadata,
@@ -136,9 +137,49 @@ describe("production provider canary", () => {
       width: 800,
       height: 1000,
     });
+    expect(
+      probeImageEvidence(syntheticPng(1856, 2304), "image/png", "4:5", {
+        width: 1856,
+        height: 2304,
+      }),
+    ).toEqual({
+      width: 1856,
+      height: 2304,
+    });
     expect(() =>
       probeImageEvidence(syntheticPng(1000, 1000), "image/png", "4:5"),
     ).toThrow(/requested 4:5 aspect ratio/);
+    expect(() =>
+      probeImageEvidence(syntheticPng(1856, 2240), "image/png", "4:5"),
+    ).toThrow(/dimensions 1856x2240/);
+    expect(() =>
+      probeImageEvidence(syntheticPng(928, 1152), "image/png", "4:5", {
+        width: 1856,
+        height: 2304,
+      }),
+    ).toThrow(/exact 1856x2304 delivery contract/);
+  });
+
+  it("selects the final provider image instead of an interim thought image", () => {
+    expect(
+      finalInlineImage([
+        {
+          thought: true,
+          inlineData: { mimeType: "image/png", data: "interim-image" },
+        },
+        {
+          inlineData: { mimeType: "image/jpeg", data: "final-image" },
+        },
+      ]),
+    ).toEqual({ mimeType: "image/jpeg", data: "final-image" });
+    expect(
+      finalInlineImage([
+        {
+          thought: true,
+          inlineData: { mimeType: "image/png", data: "interim-only" },
+        },
+      ]),
+    ).toBeNull();
   });
 
   it("blocks with an explicit prerequisite when ffprobe is unavailable", async () => {
