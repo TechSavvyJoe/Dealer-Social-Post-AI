@@ -409,6 +409,13 @@ describe("post output-profile persistence", () => {
     expect(source).toContain("dealers_social_attribution_field_count");
     expect(source).toContain("facebook_page_tag,linkedin_company_tag");
     expect(source).toContain("output-profile=enforced");
+    expect(source).toContain(
+      'people_repair_migration="pb_migrations/1750500000_auth_people_integrity.js"',
+    );
+    expect(source).toContain(
+      'git merge-base --is-ancestor "$people_repair_commit" "$base_sha"',
+    );
+    expect(source).toContain('base_sha="$(git rev-parse "${people_repair_commit}^")"');
   });
 
   it("adds the forward release and platform-caption fields without editing the applied profile migration", () => {

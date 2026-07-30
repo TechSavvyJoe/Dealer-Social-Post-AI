@@ -27,6 +27,23 @@ if [[ -z "$base_sha" ]] || ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null;
   exit 2
 fi
 
+# The dirty fixture must be inserted before the one-time people-integrity
+# migration is marked as applied. On a later hotfix PR, the immediate base
+# already contains that migration; seeding invalid rows into that database
+# would manufacture a state that no real forward upgrade can repair. Derive
+# the pre-migration base from Git history so this release gate remains useful
+# after the original hardening PR is merged.
+people_repair_migration="pb_migrations/1750500000_auth_people_integrity.js"
+people_repair_commit="$(git log -n 1 --format=%H --diff-filter=A -- "$people_repair_migration")"
+if [[ -z "$people_repair_commit" ]] ||
+  ! git cat-file -e "${people_repair_commit}^{commit}" 2>/dev/null; then
+  echo "The people-integrity migration introduction commit could not be resolved." >&2
+  exit 2
+fi
+if git merge-base --is-ancestor "$people_repair_commit" "$base_sha"; then
+  base_sha="$(git rev-parse "${people_repair_commit}^")"
+fi
+
 work_dir="$(mktemp -d)"
 base_dir="$work_dir/base"
 volume_name="dspai-upgrade-${RANDOM}-$$"
