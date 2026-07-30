@@ -1728,16 +1728,18 @@ function formEncode(value) {
 }
 
 function configuredTurnstileHostnames() {
-  const defaults = [
-    "localhost",
-    "127.0.0.1",
-    "dealer-social-post-ai.vercel.app",
-    "dealer-social-post-ai-production.fly.dev",
-  ];
   let configured = "";
+  let flyRuntime = false;
   try {
     configured = ($os.getenv("TURNSTILE_ALLOWED_HOSTNAMES") || "").toString();
   } catch (_e) {}
+  try {
+    flyRuntime = !!($os.getenv("FLY_APP_NAME") || "").toString().trim();
+  } catch (_e) {}
+
+  // Local development stays convenient, but a Fly deployment must fail closed
+  // and accept only the deployment-specific hostnames supplied at runtime.
+  const defaults = flyRuntime ? [] : ["localhost", "127.0.0.1"];
   const values = defaults.concat(configured.split(","));
   const seen = {};
   const result = [];
