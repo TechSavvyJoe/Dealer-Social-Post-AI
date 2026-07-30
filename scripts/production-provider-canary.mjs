@@ -34,6 +34,13 @@ const DEFAULT_EVIDENCE_PATH = resolve(
 const CONFIRMATION = "caption-image-video-synthetic-only";
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 const PRODUCTION_FLY_ORIGIN = "https://dealer-social-post-ai-production.fly.dev";
+const EXACT_STANDARD_IMAGE = Object.freeze({
+  model: "gemini-3.1-flash-image",
+  aspectRatio: "4:5",
+  imageSize: "2K",
+  width: 1856,
+  height: 2304,
+});
 const EXACT_STANDARD_VIDEO = Object.freeze({
   aspectRatio: "9:16",
   width: 720,
@@ -193,7 +200,12 @@ function webpDimensions(buffer) {
   return null;
 }
 
-export function probeImageEvidence(data, mimeType, expectedAspectRatio) {
+export function probeImageEvidence(
+  data,
+  mimeType,
+  expectedAspectRatio,
+  expectedDimensions,
+) {
   const normalizedMimeType = String(mimeType || "").toLowerCase();
   if (!isRecognizedImage(data, normalizedMimeType)) {
     throw new CanaryError(
@@ -238,13 +250,41 @@ export function probeImageEvidence(data, mimeType, expectedAspectRatio) {
       dimensions.width * expectedHeightRatio,
       dimensions.height * expectedWidthRatio,
     );
-  if (ratioError > 0.005) {
+  // Gemini's documented image canvases are aligned to encoder-friendly pixel
+  // blocks rather than mathematically exact fractions. For example, its
+  // canonical 2K "4:5" output is 1856x2304 (about 0.69% from exactly 4:5).
+  // Keep the gate tight enough to reject the wrong canvas while accepting the
+  // provider's own advertised dimensions; final platform exports are rendered
+  // separately to exact destination pixels.
+  if (ratioError > 0.01) {
     throw new CanaryError(
       "IMAGE_OUTPUT_INVALID",
-      `Generated image did not satisfy the requested ${expectedAspectRatio} aspect ratio.`,
+      `Generated image dimensions ${dimensions.width}x${dimensions.height} did not satisfy the requested ${expectedAspectRatio} aspect ratio.`,
+    );
+  }
+  if (
+    expectedDimensions &&
+    (dimensions.width !== expectedDimensions.width ||
+      dimensions.height !== expectedDimensions.height)
+  ) {
+    throw new CanaryError(
+      "IMAGE_OUTPUT_INVALID",
+      `Generated image dimensions ${dimensions.width}x${dimensions.height} did not satisfy the exact ${expectedDimensions.width}x${expectedDimensions.height} delivery contract.`,
     );
   }
   return dimensions;
+}
+
+export function finalInlineImage(parts) {
+  if (!Array.isArray(parts)) return null;
+  for (const part of parts) {
+    if (!part || part.thought === true) continue;
+    const inline = part.inlineData;
+    if (typeof inline?.data === "string" && typeof inline?.mimeType === "string") {
+      return inline;
+    }
+  }
+  return null;
 }
 
 function providerVideoUri(value, depth = 0) {
@@ -336,6 +376,17 @@ async function contractCheck() {
     throw new CanaryError(
       "POLICY_INVALID",
       "Image canary must use the canonical 4096-token contract.",
+    );
+  }
+  if (
+    policy.tasks.image_standard.models[0] !== EXACT_STANDARD_IMAGE.model ||
+    policy.tasks.image_standard.imageSizes?.[EXACT_STANDARD_IMAGE.model] !==
+      EXACT_STANDARD_IMAGE.imageSize ||
+    !policy.allowedImageAspectRatios?.includes(EXACT_STANDARD_IMAGE.aspectRatio)
+  ) {
+    throw new CanaryError(
+      "POLICY_INVALID",
+      "Image canary must use the reviewed exact standard-image pixel contract.",
     );
   }
   if (policy.tasks.video_standard.resolution !== "720p") {
@@ -529,18 +580,17 @@ async function runImage(client, policy, imageBase64) {
         ],
         generationConfig: {
           responseModalities: ["TEXT", "IMAGE"],
-          imageConfig: { imageSize, aspectRatio: "4:5" },
+          imageConfig: {
+            imageSize,
+            aspectRatio: EXACT_STANDARD_IMAGE.aspectRatio,
+          },
           maxOutputTokens: task.maxOutputTokens,
         },
       }),
     },
   );
   const payload = await jsonOrFail(response, "IMAGE_HTTP_FAILED", "Image canary");
-  const image = (payload.candidates?.[0]?.content?.parts || [])
-    .map((part) => part?.inlineData)
-    .find(
-      (part) => typeof part?.data === "string" && typeof part?.mimeType === "string",
-    );
+  const image = finalInlineImage(payload.candidates?.[0]?.content?.parts);
   const byteCount = image?.data ? decodedBase64Bytes(image.data) : 0;
   if (byteCount < 1024) {
     throw new CanaryError(
@@ -548,13 +598,18 @@ async function runImage(client, policy, imageBase64) {
       "Image provider output was not a meaningful supported image.",
     );
   }
-  const dimensions = probeImageEvidence(image.data, image.mimeType, "4:5");
+  const dimensions = probeImageEvidence(
+    image.data,
+    image.mimeType,
+    EXACT_STANDARD_IMAGE.aspectRatio,
+    EXACT_STANDARD_IMAGE,
+  );
   return {
     model,
     mimeType: image.mimeType.toLowerCase(),
     byteCount,
     imageSize,
-    aspectRatio: "4:5",
+    aspectRatio: EXACT_STANDARD_IMAGE.aspectRatio,
     ...dimensions,
   };
 }

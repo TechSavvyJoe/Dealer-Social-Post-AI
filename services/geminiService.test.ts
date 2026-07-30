@@ -155,6 +155,36 @@ describe("GeminiService model routing", () => {
     });
   });
 
+  it("uses the final generated image instead of an interim thought image", async () => {
+    mockGenerateContent.mockResolvedValue({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                thought: true,
+                inlineData: {
+                  mimeType: "image/png",
+                  data: "interim-thought-image",
+                },
+              },
+              {
+                inlineData: {
+                  mimeType: "image/jpeg",
+                  data: "final-publishable-image",
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    await expect(
+      generateFunSocialPostImage("data:image/jpeg;base64,fake", "Final Image Dealer"),
+    ).resolves.toBe("data:image/jpeg;base64,final-publishable-image");
+  });
+
   it("forwards the selected primary canvas as a Gemini image aspect ratio", async () => {
     await generateSocialPost(
       "data:image/jpeg;base64,fake",

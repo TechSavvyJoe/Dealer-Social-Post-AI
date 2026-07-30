@@ -264,8 +264,15 @@ const extractGeneratedImageDataUrl = (response: unknown): string | null => {
     (response as { candidates?: Array<{ content?: { parts?: unknown[] } }> })
       ?.candidates?.[0]?.content?.parts ?? [];
   for (const part of parts) {
-    const inline = (part as { inlineData?: { mimeType?: string; data?: string } })
-      ?.inlineData;
+    const typedPart = part as {
+      thought?: boolean;
+      inlineData?: { mimeType?: string; data?: string };
+    };
+    // Gemini can return interim thought images before the final composition.
+    // Those parts are not publishable output and must never win first-match
+    // response selection.
+    if (typedPart?.thought === true) continue;
+    const inline = typedPart?.inlineData;
     if (inline?.data) {
       return `data:${inline.mimeType || "image/png"};base64,${inline.data}`;
     }
