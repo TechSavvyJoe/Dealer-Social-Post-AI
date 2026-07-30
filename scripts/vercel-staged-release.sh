@@ -190,6 +190,49 @@ process.stdout.write(deployment.id);
 NODE
 }
 
+inspect_alias_deployment_id() {
+  local alias_url="$1"
+  local alias_hostname next_cursor="" inventory_file page_result deployment_id
+  local seen_cursors="|"
+  local -a alias_args
+  local page_count=0
+
+  alias_hostname="$(
+    node -e 'process.stdout.write(new URL(process.argv[1]).hostname)' "$alias_url"
+  )" || return 1
+
+  while ((page_count < 100)); do
+    page_count=$((page_count + 1))
+    inventory_file="$(mktemp "$work_dir/vercel-aliases.XXXXXX")"
+    alias_args=(alias list --json --limit 100)
+    if [[ -n "$next_cursor" ]]; then
+      alias_args+=(--next "$next_cursor")
+    fi
+    npx --yes "vercel@${VERCEL_CLI_VERSION}" "${alias_args[@]}" \
+      > "$inventory_file" ||
+      return 1
+    page_result="$(
+      node scripts/vercel-staged-qa.mjs \
+        --resolve-alias-page "$inventory_file" "$alias_hostname"
+    )" || return 1
+    deployment_id="$(printf '%s\n' "$page_result" | sed -n '1p')"
+    next_cursor="$(printf '%s\n' "$page_result" | sed -n '2p')"
+
+    if [[ "$deployment_id" != "-" ]]; then
+      validate_deployment_id "$deployment_id" || return 1
+      printf '%s' "$deployment_id"
+      return 0
+    fi
+    if [[ "$next_cursor" = "-" ]]; then
+      return 1
+    fi
+    [[ "$next_cursor" =~ ^[0-9]+$ ]] || return 1
+    [[ "$seen_cursors" != *"|${next_cursor}|"* ]] || return 1
+    seen_cursors+="${next_cursor}|"
+  done
+  return 1
+}
+
 validate_vercel_environment() {
   local env_file="$1"
   local env_inventory_file="$2"
@@ -655,7 +698,9 @@ assert_promoted_deployment() {
     if ((delay > 0)); then
       sleep "$delay"
     fi
-    current_id="$(inspect_deployment_id "$PRODUCTION_VERCEL_ORIGIN" 2>/dev/null || true)"
+    current_id="$(
+      inspect_alias_deployment_id "$PRODUCTION_VERCEL_ORIGIN" 2>/dev/null || true
+    )"
     if [[ "$current_id" = "$expected_deployment_id" ]]; then
       return 0
     fi
@@ -667,7 +712,7 @@ assert_current_promoted_deployment() {
   local expected_deployment_id="$1"
   local current_id=""
 
-  current_id="$(inspect_deployment_id "$PRODUCTION_VERCEL_ORIGIN")" ||
+  current_id="$(inspect_alias_deployment_id "$PRODUCTION_VERCEL_ORIGIN")" ||
     fail "the production domain could not be inspected after verification."
   [[ "$current_id" = "$expected_deployment_id" ]] ||
     fail "the production domain changed during final verification."
