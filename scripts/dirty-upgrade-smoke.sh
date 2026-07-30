@@ -31,17 +31,24 @@ fi
 # migration is marked as applied. On a later hotfix PR, the immediate base
 # already contains that migration; seeding invalid rows into that database
 # would manufacture a state that no real forward upgrade can repair. Derive
-# the pre-migration base from Git history so this release gate remains useful
-# after the original hardening PR is merged.
+# an audited pre-migration base so this release gate remains useful after the
+# original hardening PR is merged. The exact SHA is validated against both the
+# old and new migration paths before it can replace the caller-supplied base.
 people_repair_migration="pb_migrations/1750500000_auth_people_integrity.js"
-people_repair_commit="$(git log -n 1 --format=%H --diff-filter=A -- "$people_repair_migration")"
-if [[ -z "$people_repair_commit" ]] ||
-  ! git cat-file -e "${people_repair_commit}^{commit}" 2>/dev/null; then
-  echo "The people-integrity migration introduction commit could not be resolved." >&2
+people_roles_migration="pb_migrations/1750400000_people_roles_impersonation.js"
+people_repair_baseline="173b48e77b61bd3b84fa0bfb0b0ce6091f25c66d"
+if ! git cat-file -e "${people_repair_baseline}^{commit}" 2>/dev/null ||
+  ! git cat-file -e "${people_repair_baseline}:${people_roles_migration}" 2>/dev/null ||
+  git cat-file -e "${people_repair_baseline}:${people_repair_migration}" 2>/dev/null; then
+  echo "The audited pre-repair people migration baseline is unavailable or invalid." >&2
   exit 2
 fi
-if git merge-base --is-ancestor "$people_repair_commit" "$base_sha"; then
-  base_sha="$(git rev-parse "${people_repair_commit}^")"
+if git cat-file -e "${base_sha}:${people_repair_migration}" 2>/dev/null; then
+  if ! git merge-base --is-ancestor "$people_repair_baseline" "$base_sha"; then
+    echo "The supplied base does not descend from the audited people migration baseline." >&2
+    exit 2
+  fi
+  base_sha="$people_repair_baseline"
 fi
 
 work_dir="$(mktemp -d)"

@@ -413,9 +413,15 @@ describe("post output-profile persistence", () => {
       'people_repair_migration="pb_migrations/1750500000_auth_people_integrity.js"',
     );
     expect(source).toContain(
-      'git merge-base --is-ancestor "$people_repair_commit" "$base_sha"',
+      'people_repair_baseline="173b48e77b61bd3b84fa0bfb0b0ce6091f25c66d"',
     );
-    expect(source).toContain('base_sha="$(git rev-parse "${people_repair_commit}^")"');
+    expect(source).toContain(
+      'git cat-file -e "${base_sha}:${people_repair_migration}"',
+    );
+    expect(source).toContain(
+      'git merge-base --is-ancestor "$people_repair_baseline" "$base_sha"',
+    );
+    expect(source).toContain('base_sha="$people_repair_baseline"');
   });
 
   it("adds the forward release and platform-caption fields without editing the applied profile migration", () => {
