@@ -5,11 +5,13 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   AuthenticatedClient,
+  canonicalOrigin,
   finalInlineImage,
   probeImageEvidence,
   probeVideoEvidence,
   validateVideoProbeMetadata,
 } from "../scripts/production-provider-canary.mjs";
+import { acquireReleaseLock } from "../scripts/vercel-staged-qa.mjs";
 
 const scriptPath = resolve(process.cwd(), "scripts/production-provider-canary.mjs");
 
@@ -30,7 +32,7 @@ describe("production provider canary", () => {
     expect(source).not.toContain("RELEASE_CANARY_ADMIN_CODE");
 
     const evidenceStart = source.indexOf("const evidence = {");
-    const evidenceEnd = source.indexOf("let primaryError", evidenceStart);
+    const evidenceEnd = source.indexOf("\n  };", evidenceStart) + "\n  };".length;
     const evidenceShape = source.slice(evidenceStart, evidenceEnd);
     for (const sensitiveField of [
       "adminCode",
@@ -204,16 +206,28 @@ describe("production provider canary", () => {
   });
 
   it("refuses to send the canary credential to an arbitrary HTTPS origin", () => {
-    const result = spawnSync(process.execPath, [scriptPath], {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        RELEASE_CANARY_BASE_URL: "https://untrusted.example",
-      },
-    });
+    expect(() => canonicalOrigin("https://untrusted.example")).toThrow(
+      expect.objectContaining({ code: "CONFIG_UNTRUSTED_ORIGIN" }),
+    );
+  });
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("CONFIG_UNTRUSTED_ORIGIN");
+  it("refuses a canary while another release command owns the shared lock", () => {
+    const releaseLockCleanup = acquireReleaseLock();
+    try {
+      const result = spawnSync(process.execPath, [scriptPath], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          RELEASE_CANARY_CONFIRM: "caption-image-video-synthetic-only",
+        },
+      });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "another staged release command owns the release lock",
+      );
+    } finally {
+      releaseLockCleanup();
+    }
   });
 
   it("proves logout by replaying the revoked cookie and requiring it to be cleared", async () => {

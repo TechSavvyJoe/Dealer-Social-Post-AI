@@ -11,6 +11,7 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   open,
@@ -20,16 +21,17 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { acquireReleaseLock } from "./vercel-staged-qa.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const policyPath = resolve(root, "config/gemini-model-policy.json");
 const syntheticImagePath = resolve(root, "public/icon-512.png");
 const DEFAULT_EVIDENCE_PATH = resolve(
   root,
-  "test-results/production-provider-canary.json",
+  ".release-evidence/production-provider-canary.json",
 );
 const CONFIRMATION = "caption-image-video-synthetic-only";
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
@@ -74,7 +76,7 @@ function requireEnv(name) {
   return value;
 }
 
-function canonicalOrigin(value) {
+export function canonicalOrigin(value) {
   let url;
   try {
     url = new URL(value);
@@ -338,6 +340,12 @@ function failureEvidence(error) {
       ...(Number.isInteger(error.details.status)
         ? { httpStatus: error.details.status }
         : {}),
+    };
+  }
+  if (error instanceof Error && error.code === "RELEASE_LOCKED") {
+    return {
+      code: "RELEASE_LOCKED",
+      message: error.message,
     };
   }
   return {
@@ -880,7 +888,11 @@ async function runVideo(client, policy, imageBase64, taskName, expected) {
 
 async function writeEvidence(path, evidence) {
   const absolute = resolve(path);
-  await mkdir(dirname(absolute), { recursive: true });
+  const directory = dirname(absolute);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  if (basename(directory) === ".release-evidence") {
+    await chmod(directory, 0o700);
+  }
   const temporary = `${absolute}.tmp-${process.pid}`;
   await writeFile(temporary, `${JSON.stringify(evidence, null, 2)}\n`, {
     mode: 0o600,
@@ -894,6 +906,48 @@ async function run() {
     await contractCheck();
     return;
   }
+
+  const releaseLockCleanup = acquireReleaseLock();
+  try {
+    await runLockedCanary();
+  } finally {
+    releaseLockCleanup();
+  }
+}
+
+async function runLockedCanary() {
+  const evidencePath = resolve(
+    process.env.RELEASE_CANARY_EVIDENCE_PATH || DEFAULT_EVIDENCE_PATH,
+  );
+  if (evidencePath !== DEFAULT_EVIDENCE_PATH) {
+    throw new CanaryError(
+      "CONFIG_INVALID_EVIDENCE_PATH",
+      "RELEASE_CANARY_EVIDENCE_PATH must be the canonical private release-evidence path.",
+    );
+  }
+  if (requireEnv("RELEASE_CANARY_CONFIRM") !== CONFIRMATION) {
+    throw new CanaryError(
+      "CONFIG_CONFIRMATION_REQUIRED",
+      `RELEASE_CANARY_CONFIRM must equal ${CONFIRMATION}.`,
+    );
+  }
+  const startedAt = new Date().toISOString();
+  const evidence = {
+    schemaVersion: 3,
+    canary: "production-provider-proxy",
+    syntheticAsset: "public/icon-512.png",
+    targetOrigin: null,
+    expectedReleaseSha: null,
+    startedAt,
+    completedAt: null,
+    outcome: "running",
+    apiContractVersion: null,
+    modelPolicyVersion: null,
+    checks: {},
+  };
+  // Atomically invalidate any older pass before checking prerequisites. If
+  // this process is interrupted, a non-authorizing running receipt remains.
+  await writeEvidence(evidencePath, evidence);
 
   const origin = canonicalOrigin(requireEnv("RELEASE_CANARY_BASE_URL"));
   const expectedReleaseSha = requireEnv("RELEASE_CANARY_EXPECTED_SHA");
@@ -910,34 +964,15 @@ async function run() {
       "RELEASE_CANARY_PERSON_PIN must be exactly four digits.",
     );
   }
-  if (requireEnv("RELEASE_CANARY_CONFIRM") !== CONFIRMATION) {
-    throw new CanaryError(
-      "CONFIG_CONFIRMATION_REQUIRED",
-      `RELEASE_CANARY_CONFIRM must equal ${CONFIRMATION}.`,
-    );
-  }
-
-  const evidencePath =
-    process.env.RELEASE_CANARY_EVIDENCE_PATH || DEFAULT_EVIDENCE_PATH;
   const policy = await loadPolicy();
   await contractCheck();
   const syntheticImage = await readFile(syntheticImagePath);
   const imageBase64 = syntheticImage.toString("base64");
-  const startedAt = new Date().toISOString();
   const client = new AuthenticatedClient(origin);
-  const evidence = {
-    schemaVersion: 3,
-    canary: "production-provider-proxy",
-    syntheticAsset: "public/icon-512.png",
-    targetOrigin: origin,
-    expectedReleaseSha,
-    startedAt,
-    completedAt: null,
-    outcome: "running",
-    apiContractVersion: null,
-    modelPolicyVersion: String(policy.version),
-    checks: {},
-  };
+  evidence.targetOrigin = origin;
+  evidence.expectedReleaseSha = expectedReleaseSha;
+  evidence.modelPolicyVersion = String(policy.version);
+  await writeEvidence(evidencePath, evidence);
   let primaryError = null;
 
   try {
@@ -1074,9 +1109,7 @@ const isMain =
 if (isMain) {
   run().catch(async (error) => {
     // A stale temp evidence file is not useful and could confuse automation.
-    const evidencePath =
-      process.env.RELEASE_CANARY_EVIDENCE_PATH || DEFAULT_EVIDENCE_PATH;
-    await rm(`${resolve(evidencePath)}.tmp-${process.pid}`, { force: true }).catch(
+    await rm(`${DEFAULT_EVIDENCE_PATH}.tmp-${process.pid}`, { force: true }).catch(
       () => {},
     );
     const safe = failureEvidence(error);

@@ -21,7 +21,7 @@ const DialpadButton: React.FC<{
     aria-label={ariaLabel}
     className={cn(
       // Fill the grid cell — height comes from parent remaining space
-      "flex h-full min-h-0 w-full touch-manipulation select-none items-center justify-center rounded-2xl",
+      "flex h-full min-h-0 w-full touch-manipulation select-none items-center justify-center rounded-2xl lg:min-h-11",
       "text-[clamp(1.1rem,2.8dvh,1.5rem)] font-semibold tabular-nums text-surface-50",
       "border border-white/[0.09] bg-[#171d29]",
       "shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-[background-color,border-color,transform] duration-150",

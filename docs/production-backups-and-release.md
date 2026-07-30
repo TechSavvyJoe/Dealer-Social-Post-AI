@@ -98,17 +98,17 @@ flyctl ssh console --app dealer-social-post-ai-production --command \
    export RELEASE_CANARY_BASE_URL=https://dealer-social-post-ai-production.fly.dev
    export RELEASE_CANARY_EXPECTED_SHA="$(git rev-parse HEAD)"
    export RELEASE_CANARY_CONFIRM=caption-image-video-synthetic-only
-   export RELEASE_CANARY_EVIDENCE_PATH="$PWD/test-results/production-provider-canary.json"
+   export RELEASE_CANARY_EVIDENCE_PATH="$PWD/.release-evidence/production-provider-canary.json"
    npm run release:provider-canary
    unset RELEASE_CANARY_PERSON_PIN RELEASE_CANARY_BASE_URL \
      RELEASE_CANARY_EXPECTED_SHA RELEASE_CANARY_CONFIRM \
      RELEASE_CANARY_EVIDENCE_PATH
    ```
 
-   Review and archive the redacted JSON evidence with the release record. A failed canary exits nonzero and records only a stable failure code, safe message, and HTTP status when applicable. Never run it with customer media or place the PIN on the command line. Rotate the dedicated PIN after any suspected exposure; never substitute the system-admin secret.
+   Review and archive the redacted JSON evidence with the release record. Starting a canary atomically replaces any older pass with a non-authorizing `running` receipt. Both staging and promotion refuse a missing, failed, mismatched, or more-than-six-hours-old receipt, and require every authentication, health, caption, standard-image, standard-video, quality-video, and session-revocation check to pass for the exact Fly SHA. A failed canary exits nonzero and records only a stable failure code, safe message, and HTTP status when applicable. Never run it with customer media or place the PIN on the command line. Rotate the dedicated PIN after any suspected exposure; never substitute the system-admin secret.
 
 4. Build the same SHA for Vercel. Main-branch production-domain auto-assignment is disabled in `vercel.ts`; branch previews remain available. The staging command refuses a dirty worktree, a stale `main`, a local `HEAD` that differs from Fly health, or any frontend output that does not contain the exact release SHA used by client telemetry.
-5. Stage the production-configured artifact without assigning the production domain. The script captures the canonical deployment URL in a permission-restricted, gitignored evidence file and rechecks same-origin health through that URL:
+5. Stage the production-configured artifact without assigning the production domain. The script captures the canonical deployment URL and immutable Vercel deployment ID in a permission-restricted, gitignored `.release-evidence/vercel-staged-release.json` receipt. This directory is separate from Playwright's disposable `test-results` output. Staging invalidates any earlier browser-QA receipt and rechecks same-origin health, proxy readiness, security headers, PWA assets, service-worker release binding, and the frontend bundle's exact SHA:
 
    ```bash
    RELEASE_SHA="$(git rev-parse HEAD)"
@@ -116,7 +116,15 @@ flyctl ssh console --app dealer-social-post-ai-production --command \
    unset RELEASE_SHA
    ```
 
-6. Run the complete browser, responsive, accessibility, service-worker, sharing, login-recovery, and same-origin API checks against the exact staged URL recorded in `test-results/vercel-staged-release.json`. Promote only that evidence-bound deployment, without rebuilding. The promotion command repeats the clean/current-main, direct-Fly, staged-URL, release-SHA, and backup-readiness checks:
+   The provider canary, staging, hosted QA, and promotion share one atomic owner-bearing lock so they cannot overlap. An interrupted process deliberately leaves that lock in place instead of guessing that it is stale; remove `.release-evidence/vercel-release.lock` only after directly confirming that no release command is still running.
+
+6. Run the hosted-artifact browser gate against the exact staged URL. The gate is deliberately non-mutating: it never submits an invalid code, creates production data, or depends on source-only TypeScript modules that are absent from a production Vite build. It verifies the exact frontend SHA, same-origin health and proxy readiness, security headers, PWA metadata/icons/service worker, case-preserving masked admin entry, serious accessibility issues, horizontal overflow, Dynamic Island safe areas, and the complete Chromium/WebKit viewport matrix. The full stubbed UI, sharing, login-recovery, and real-PocketBase workflows already ran in CI before Fly deployment.
+
+   ```bash
+   npm run release:vercel:qa
+   ```
+
+   A pass writes `.release-evidence/vercel-staged-qa.json`, bound to the exact SHA, deployment URL, immutable deployment ID, spec, and project matrix. Once browser QA is ready to start, a failed or interrupted run cannot leave an older pass receipt behind. Promote only that evidence-bound deployment, without rebuilding. The promotion command requires both the QA receipt and the explicit operator confirmation, then repeats clean/current-main, direct-Fly, staged-URL, frontend/PWA, release-SHA, proxy, and backup-readiness checks. It marks the receipt promoted only after the stable domain resolves to the same immutable deployment ID and passes those checks:
 
    ```bash
    export VERCEL_RELEASE_QA_CONFIRM=staged-browser-qa-passed
@@ -151,6 +159,8 @@ Prove all of the following before declaring the release complete:
 - The saved pre-rotation admin cookie and every impersonation cookie return HTTP 401 and are cleared.
 - Three known-invalid synthetic codes remain frictionless; the fourth returns `CHALLENGE_REQUIRED`, renders the managed widget, and succeeds only with hostname/action/token validation. Invalid token, wrong hostname/action, and verifier outage are not mislabeled as a bad PIN.
 - An authenticated health response shows Turnstile enforcement enabled, the secret/site key set, trusted proxy configured, legacy compatibility disabled, current contract/policy versions, verified backup state, and no unexpected provider fallback spike.
+
+Failed sign-ins share a 15-minute IP risk bucket. Do not combine the previous-secret/exact-case proof and the three-frictionless-attempt Turnstile proof from the same fresh IP window: use separate clean egress IPs or wait the full window between groups. Wrong-hostname, wrong-action, verifier-outage, and ten-failure lockout negative tests belong in the isolated PocketBase environment; never deliberately break the production verifier secret.
 
 Unset both admin variables after proof and securely delete the temporary cookie jar. Remove the first-release Fly image bootstrap variables as soon as v2 reports its SHA.
 

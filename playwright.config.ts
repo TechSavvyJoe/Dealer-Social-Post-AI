@@ -1,4 +1,4 @@
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 
 const viewports = [
   { name: "phone-fold-280", width: 280, height: 653, mobile: true },
@@ -33,16 +33,25 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: browsers.flatMap((browserName) =>
-    viewports.map(({ name, width, height, mobile }) => ({
-      name: `${browserName}-${name}`,
-      use: {
-        browserName,
-        viewport: { width, height },
-        hasTouch: mobile,
-        isMobile: mobile,
-        deviceScaleFactor: mobile ? 2 : 1,
-      },
-    })),
+    viewports.map(({ name, width, height, mobile }) => {
+      const mobileProfile = mobile
+        ? browserName === "webkit"
+          ? devices["iPhone 15"]
+          : devices["Pixel 7"]
+        : null;
+      return {
+        name: `${browserName}-${name}`,
+        use: {
+          browserName,
+          viewport: { width, height },
+          screen: mobile ? { width, height } : undefined,
+          userAgent: mobileProfile?.userAgent,
+          hasTouch: mobile,
+          isMobile: mobile,
+          deviceScaleFactor: mobileProfile?.deviceScaleFactor || 1,
+        },
+      };
+    }),
   ),
   webServer: externalBaseUrl
     ? undefined
