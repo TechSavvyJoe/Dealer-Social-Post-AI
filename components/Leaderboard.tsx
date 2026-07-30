@@ -1,15 +1,12 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Trophy, Film, ShieldCheck, Loader2, RefreshCw } from "lucide-react";
+import { Trophy, Film, ShieldCheck, Loader2, RefreshCw, Download } from "lucide-react";
 import { Button } from "./ui/Button";
 import { EmptyState } from "./ui/EmptyState";
 import { ErrorBanner } from "./ui/ErrorBanner";
 import { Skeleton } from "./ui/Skeleton";
 import { cn } from "../utils/classNames";
-import {
-  getLeaderboard,
-  LeaderboardEntry,
-} from "../services/posts";
+import { getLeaderboard, LeaderboardEntry } from "../services/posts";
 import { useAppStore } from "../stores/appStore";
 
 type RangeKey = "week" | "month" | "30d" | "all";
@@ -42,14 +39,12 @@ const startOfRange = (range: RangeKey): Date => {
           0,
           0,
           0,
-          0
-        )
+          0,
+        ),
       );
     }
     case "month":
-      return new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0)
-      );
+      return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
     case "30d": {
       return new Date(
         Date.UTC(
@@ -59,8 +54,8 @@ const startOfRange = (range: RangeKey): Date => {
           0,
           0,
           0,
-          0
-        )
+          0,
+        ),
       );
     }
     case "all":
@@ -92,31 +87,72 @@ export const Leaderboard: React.FC = () => {
   // Monotonic request id: when `range`/dealer changes quickly, an older fetch
   // can resolve after a newer one — only the latest request may write state.
   const reqIdRef = useRef(0);
-  const load = useMemo(
-    () => async () => {
-      if (!currentDealer) return;
-      const myId = ++reqIdRef.current;
-      setLoading(true);
-      setError(null);
-      try {
-        const since = startOfRange(range);
-        const data = await getLeaderboard(currentDealer.id, since);
-        if (reqIdRef.current === myId) setEntries(data);
-      } catch (err) {
-        if (reqIdRef.current === myId)
-          setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (reqIdRef.current === myId) setLoading(false);
-      }
-    },
-    [currentDealer, range]
-  );
+  const load = useCallback(async () => {
+    if (!currentDealer) return;
+    const myId = ++reqIdRef.current;
+    setLoading(true);
+    setError(null);
+    try {
+      const since = startOfRange(range);
+      const data = await getLeaderboard(currentDealer.id, since);
+      if (reqIdRef.current === myId) setEntries(data);
+    } catch (err) {
+      if (reqIdRef.current === myId)
+        setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (reqIdRef.current === myId) setLoading(false);
+    }
+  }, [currentDealer, range]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   const total = entries.reduce((acc, e) => acc + e.count, 0);
+
+  const exportCsv = React.useCallback(() => {
+    const rows = [
+      [
+        "rank",
+        "salesperson",
+        "posts_count",
+        "video_count",
+        "release_count",
+        "last_posted_at",
+      ],
+      ...entries.map((e, idx) => [
+        idx + 1,
+        e.salesperson || "",
+        e.count,
+        e.videoCount,
+        e.releaseCount,
+        e.lastPostedAt || "",
+      ]),
+    ];
+    const csv = rows
+      .map((r) =>
+        r
+          .map((cell) => {
+            let s = String(cell);
+            if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+            return `"${s.replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
+          })
+          .join(","),
+      )
+      .join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `leaderboard-${currentDealer?.name || "dealer"}-${range}-${new Date()
+      .toISOString()
+      .slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [entries, currentDealer?.name, range]);
 
   return (
     <motion.div
@@ -145,7 +181,7 @@ export const Leaderboard: React.FC = () => {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="flex bg-surface-950/60 p-1 rounded-xl border border-surface-800">
             {RANGES.map((r) => (
               <button
@@ -161,6 +197,16 @@ export const Leaderboard: React.FC = () => {
               </button>
             ))}
           </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={<Download className="h-3.5 w-3.5" />}
+            onClick={exportCsv}
+            disabled={entries.length === 0}
+            title="Export leaderboard as CSV"
+          >
+            Export CSV
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -236,13 +282,13 @@ export const Leaderboard: React.FC = () => {
                   "flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors",
                   idx === 0
                     ? "border-amber-400/30 bg-amber-500/[0.06]"
-                    : "border-surface-800 bg-surface-900/40"
+                    : "border-surface-800 bg-surface-900/40",
                 )}
               >
                 <div
                   className={cn(
                     "flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center",
-                    idx === 0 ? "bg-amber-500/15" : "bg-white/5"
+                    idx === 0 ? "bg-amber-500/15" : "bg-white/5",
                   )}
                 >
                   {idx < 3 ? (
@@ -290,7 +336,7 @@ export const Leaderboard: React.FC = () => {
                   <div
                     className={cn(
                       "text-2xl font-extrabold tabular-nums",
-                      idx === 0 ? "text-amber-200" : "text-surface-50"
+                      idx === 0 ? "text-amber-200" : "text-surface-50",
                     )}
                   >
                     {entry.count}

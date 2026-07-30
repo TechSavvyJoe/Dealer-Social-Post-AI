@@ -7,8 +7,7 @@ type ConnectionListener = (online: boolean) => void;
 
 class ConnectionManager {
   private listeners = new Set<ConnectionListener>();
-  private _isOnline =
-    typeof navigator !== "undefined" ? navigator.onLine : true;
+  private _isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
 
   constructor() {
     if (typeof window !== "undefined") {
@@ -24,9 +23,7 @@ class ConnectionManager {
   private setOnline(status: boolean): void {
     if (this._isOnline !== status) {
       this._isOnline = status;
-      console.log(
-        `[Connection] Status changed: ${status ? "ONLINE" : "OFFLINE"}`
-      );
+      console.log(`[Connection] Status changed: ${status ? "ONLINE" : "OFFLINE"}`);
       this.notifyListeners();
     }
   }

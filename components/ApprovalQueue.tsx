@@ -5,21 +5,23 @@ import {
   X,
   Clock,
   Loader2,
-  RefreshCw,
   Film,
   ShieldCheck,
   CheckCircle2,
+  Calendar,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
 import { EmptyState } from "./ui/EmptyState";
 import { ErrorBanner } from "./ui/ErrorBanner";
-import {
-  listPendingPosts,
-  setApprovalStatus,
-  PostRecord,
-} from "../services/posts";
+import { listPendingPosts, setApprovalStatus, PostRecord } from "../services/posts";
 import { useAppStore } from "../stores/appStore";
+import { PUBLISH_TARGETS } from "../services/publishTargets";
+
+const PLATFORM_LABELS = new Map(
+  PUBLISH_TARGETS.map((target) => [target.id, target.label]),
+);
 
 const formatTime = (iso: string) => {
   try {
@@ -67,10 +69,7 @@ export const ApprovalQueue: React.FC = () => {
     void load();
   }, [load]);
 
-  const handleAction = async (
-    post: PostRecord,
-    status: "approved" | "rejected",
-  ) => {
+  const handleAction = async (post: PostRecord, status: "approved" | "rejected") => {
     if (!approver.trim()) {
       setError("Enter your manager name first so the approval is logged.");
       return;
@@ -88,11 +87,7 @@ export const ApprovalQueue: React.FC = () => {
   };
 
   // Hide the entire queue if this dealer doesn't use the approval gate.
-  if (
-    currentDealer &&
-    !currentDealer.requires_approval &&
-    pending.length === 0
-  ) {
+  if (currentDealer && !currentDealer.requires_approval && pending.length === 0) {
     return null;
   }
 
@@ -118,8 +113,8 @@ export const ApprovalQueue: React.FC = () => {
               Pending Approvals
             </h3>
             <p className="text-xs text-surface-400">
-              {pending.length} post{pending.length === 1 ? "" : "s"} awaiting
-              manager review
+              {pending.length} post{pending.length === 1 ? "" : "s"} awaiting manager
+              review
             </p>
           </div>
         </div>
@@ -178,6 +173,10 @@ export const ApprovalQueue: React.FC = () => {
               const hasReviewCreative = Boolean(
                 post.creative_image_url && post.caption,
               );
+              const releaseReady =
+                !post.release_required ||
+                (post.has_release && post.release_status === "saved");
+              const canApprove = hasReviewCreative && releaseReady;
               return (
                 <motion.li
                   key={post.id}
@@ -201,9 +200,7 @@ export const ApprovalQueue: React.FC = () => {
                       <span>{formatTime(post.generated_at)}</span>
                       {post.style && <span>· {post.style}</span>}
                       {post.tone && <span>· {post.tone}</span>}
-                      {post.vin && (
-                        <span className="font-mono">· {post.vin}</span>
-                      )}
+                      {post.vin && <span className="font-mono">· {post.vin}</span>}
                       {post.has_video && (
                         <span className="flex items-center gap-1 text-primary-200">
                           <Film className="h-3 w-3" /> video
@@ -212,6 +209,11 @@ export const ApprovalQueue: React.FC = () => {
                       {post.has_release && (
                         <span className="flex items-center gap-1 text-success-200">
                           <ShieldCheck className="h-3 w-3" /> release
+                        </span>
+                      )}
+                      {post.scheduled_for && (
+                        <span className="flex items-center gap-1 text-emerald-300">
+                          <Calendar className="h-3 w-3" /> scheduled
                         </span>
                       )}
                     </div>
@@ -238,6 +240,29 @@ export const ApprovalQueue: React.FC = () => {
                           {post.caption || "Review caption unavailable"}
                         </p>
                       </div>
+                      {post.platform_captions &&
+                      Object.keys(post.platform_captions).length > 0 ? (
+                        <div className="space-y-2 rounded-lg border border-primary-400/20 bg-primary-500/[0.07] p-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-primary-200">
+                            Destination captions included in this approval
+                          </p>
+                          {Object.entries(post.platform_captions).map(
+                            ([platformId, caption]) => (
+                              <div
+                                key={platformId}
+                                className="rounded-md border border-white/10 bg-black/15 px-3 py-2"
+                              >
+                                <p className="mb-1 text-[10px] font-semibold text-surface-300">
+                                  {PLATFORM_LABELS.get(platformId) || platformId}
+                                </p>
+                                <p className="max-h-32 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-surface-100">
+                                  {caption}
+                                </p>
+                              </div>
+                            ),
+                          )}
+                        </div>
+                      ) : null}
                       {post.disclosures ? (
                         <div className="rounded-lg border border-warning-500/20 bg-warning-500/10 px-3 py-2">
                           <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-warning-300">
@@ -252,6 +277,16 @@ export const ApprovalQueue: React.FC = () => {
                         <p className="text-xs font-medium text-error-200">
                           This legacy item cannot be approved without reviewable
                           creative. Reject it and have the salesperson resubmit.
+                        </p>
+                      ) : null}
+                      {!releaseReady ? (
+                        <p
+                          className="rounded-lg border border-warning-500/25 bg-warning-500/10 px-3 py-2 text-xs font-medium text-warning-100"
+                          role="alert"
+                        >
+                          Approval is locked until the customer photo release is
+                          securely linked and verified. Reject this item and have the
+                          salesperson recapture consent if it does not recover.
                         </p>
                       ) : null}
                     </div>
@@ -283,11 +318,13 @@ export const ApprovalQueue: React.FC = () => {
                         )
                       }
                       onClick={() => handleAction(post, "approved")}
-                      disabled={busy[post.id] || !hasReviewCreative}
+                      disabled={busy[post.id] || !canApprove}
                       title={
-                        hasReviewCreative
+                        canApprove
                           ? "Approve this exact creative"
-                          : "Creative is unavailable; reject and resubmit"
+                          : !hasReviewCreative
+                            ? "Creative is unavailable; reject and resubmit"
+                            : "Verified customer consent is required before approval"
                       }
                     >
                       Approve

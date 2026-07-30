@@ -9,12 +9,9 @@ import { z } from "zod";
 export const validationSchemas = {
   required: z.string().min(1, "This field is required"),
   email: z.string().email("Please enter a valid email address"),
-  phone: z
-    .string()
-    .regex(/^\+?[\d\s-()]{10,}$/, "Please enter a valid phone number"),
+  phone: z.string().regex(/^\+?[\d\s-()]{10,}$/, "Please enter a valid phone number"),
   url: z.string().url("Please enter a valid URL"),
-  minLength: (min: number) =>
-    z.string().min(min, `Must be at least ${min} characters`),
+  minLength: (min: number) => z.string().min(min, `Must be at least ${min} characters`),
   maxLength: (max: number) =>
     z.string().max(max, `Must be no more than ${max} characters`),
 };
@@ -29,10 +26,7 @@ export interface ValidationState {
 /**
  * Validate a value against a schema
  */
-export function validateField<T>(
-  value: T,
-  schema: z.ZodSchema<T>
-): ValidationState {
+export function validateField<T>(value: T, schema: z.ZodSchema<T>): ValidationState {
   const result = schema.safeParse(value);
   return {
     isValid: result.success,
@@ -53,9 +47,7 @@ export function formatValidationError(error: string | undefined): string {
 /**
  * Combine multiple validation states
  */
-export function combineValidationStates(
-  states: ValidationState[]
-): ValidationState {
+export function combineValidationStates(states: ValidationState[]): ValidationState {
   const hasError = states.some((s) => !s.isValid && s.touched);
   const firstError = states.find((s) => !s.isValid && s.touched);
 

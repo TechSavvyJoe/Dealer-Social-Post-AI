@@ -1,0 +1,178 @@
+name: PocketBase backup and restore drill
+
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-release-and-backup
+  cancel-in-progress: false
+
+jobs:
+  backup-and-restore:
+    name: full backup to R2 + disposable restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production-backup
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master 2026-07-15
+        with:
+          version: 0.4.71
+
+      - name: Identify the exact running production source
+        id: source-release
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_BACKUP_APP: dealer-social-post-ai-production
+          POCKETBASE_EXPECTED_ORIGIN: https://dealer-social-post-ai-production.fly.dev
+          EXPECTED_GITHUB_REPOSITORY: ${{ github.repository }}
+          ALLOW_FLY_IMAGE_IDENTITY_BOOTSTRAP: ${{ vars.ALLOW_FLY_IMAGE_IDENTITY_BOOTSTRAP }}
+          FLY_IMAGE_IDENTITY_BOOTSTRAP_EXPIRES_AT: ${{ vars.FLY_IMAGE_IDENTITY_BOOTSTRAP_EXPIRES_AT }}
+        run: |
+          node scripts/resolve-fly-backup-source.mjs | tee /tmp/source-identity.json
+          node -e '
+            const fs = require("node:fs");
+            const payload = JSON.parse(fs.readFileSync("/tmp/source-identity.json", "utf8"));
+            const output = process.env.GITHUB_OUTPUT;
+            fs.appendFileSync(output, `sha=${payload.releaseSha}\n`);
+            fs.appendFileSync(output, `identity=${payload.sourceIdentity}\n`);
+            fs.appendFileSync(output, `digest=${payload.sourceImageDigest}\n`);
+            fs.appendFileSync(output, `bootstrap_verified=${payload.bootstrapIdentityVerified}\n`);
+          '
+
+      - name: Pin the exact restore target
+        id: target-release
+        env:
+          SOURCE_SHA: ${{ steps.source-release.outputs.sha }}
+          SOURCE_IDENTITY: ${{ steps.source-release.outputs.identity }}
+        run: |
+          target_sha="$(git rev-parse HEAD)"
+          target_path="."
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$SOURCE_IDENTITY" = "health" ]; then
+            target_sha="$SOURCE_SHA"
+            git cat-file -e "${target_sha}^{commit}"
+            target_path="/tmp/running-release"
+            git worktree add --detach "$target_path" "$target_sha"
+          fi
+          if ! printf '%s' "$target_sha" | grep --quiet --extended-regexp '^[0-9a-f]{40}$'; then
+            echo "The recovery target is not pinned to an exact Git release SHA." >&2
+            exit 1
+          fi
+          echo "sha=$target_sha" >> "$GITHUB_OUTPUT"
+          echo "path=$target_path" >> "$GITHUB_OUTPUT"
+
+      - name: Require the explicit backup enablement flag
+        env:
+          BACKUPS_ENABLED: ${{ vars.POCKETBASE_R2_BACKUPS_ENABLED }}
+        run: |
+          if [ "$BACKUPS_ENABLED" != "true" ]; then
+            echo "Set the production-backup environment variable POCKETBASE_R2_BACKUPS_ENABLED=true after R2 credentials are configured." >&2
+            exit 1
+          fi
+
+      - name: Create a source-bound full backup and retain 30 copies in private R2
+        id: backup
+        env:
+          POCKETBASE_BACKUP_URL: ${{ vars.POCKETBASE_BACKUP_URL }}
+          POCKETBASE_EXPECTED_ORIGIN: https://dealer-social-post-ai-production.fly.dev
+          POCKETBASE_EXPECTED_RELEASE_SHA: ${{ steps.source-release.outputs.sha }}
+          POCKETBASE_TARGET_RELEASE_SHA: ${{ steps.target-release.outputs.sha }}
+          POCKETBASE_SOURCE_IDENTITY: ${{ steps.source-release.outputs.identity }}
+          POCKETBASE_SOURCE_IMAGE_DIGEST: ${{ steps.source-release.outputs.digest }}
+          POCKETBASE_BOOTSTRAP_IDENTITY_VERIFIED: ${{ steps.source-release.outputs.bootstrap_verified }}
+          POCKETBASE_ADMIN_EMAIL: ${{ secrets.POCKETBASE_ADMIN_EMAIL }}
+          POCKETBASE_ADMIN_PASSWORD: ${{ secrets.POCKETBASE_ADMIN_PASSWORD }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BACKUP_PREFIX: ${{ vars.R2_BACKUP_PREFIX }}
+        run: |
+          node scripts/pocketbase-r2-backup.mjs backup | tee /tmp/backup-result.json
+          backup_key="$(node -e '
+            const fs = require("node:fs");
+            const payload = JSON.parse(fs.readFileSync("/tmp/backup-result.json", "utf8"));
+            process.stdout.write(String(payload.key || ""));
+          ')"
+          if [ -z "$backup_key" ]; then
+            echo "Backup tooling did not return an immutable R2 object key." >&2
+            exit 1
+          fi
+          echo "key=$backup_key" >> "$GITHUB_OUTPUT"
+
+      - name: Download and verify the exact off-box archive
+        env:
+          POCKETBASE_EXPECTED_ORIGIN: https://dealer-social-post-ai-production.fly.dev
+          POCKETBASE_EXPECTED_RELEASE_SHA: ${{ steps.source-release.outputs.sha }}
+          POCKETBASE_TARGET_RELEASE_SHA: ${{ steps.target-release.outputs.sha }}
+          POCKETBASE_SOURCE_IDENTITY: ${{ steps.source-release.outputs.identity }}
+          POCKETBASE_SOURCE_IMAGE_DIGEST: ${{ steps.source-release.outputs.digest }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BACKUP_PREFIX: ${{ vars.R2_BACKUP_PREFIX }}
+        run: >-
+          node scripts/pocketbase-r2-backup.mjs download
+          --key "${{ steps.backup.outputs.key }}"
+          --output /tmp/pocketbase-production.zip
+
+      # The workflow's checked-out code is the restore target. This deliberately
+      # avoids a first-release deadlock where the running release predates the
+      # backup tooling. After promotion, source and target normally match.
+      - name: Build the exact disposable restore target
+        run: >-
+          docker build --tag dealer-social-post-ai:restore-drill
+          "${{ steps.target-release.outputs.path }}"
+
+      - name: Restore the archive and verify SQLite, collections, migrations, and startup
+        id: restore-evidence
+        env:
+          RELEASE_SHA: ${{ steps.target-release.outputs.sha }}
+        run: |
+          verified_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          RESTORE_RELEASE_SHA="$RELEASE_SHA" RESTORE_VERIFIED_AT="$verified_at" \
+            bash scripts/verify-pocketbase-restore.sh /tmp/pocketbase-production.zip dealer-social-post-ai:restore-drill
+          echo "verified_at=$verified_at" >> "$GITHUB_OUTPUT"
+
+      - name: Refresh runtime restore evidence for the same release
+        if: steps.source-release.outputs.sha == steps.target-release.outputs.sha
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          RELEASE_SHA: ${{ steps.target-release.outputs.sha }}
+          RESTORE_VERIFIED_AT: ${{ steps.restore-evidence.outputs.verified_at }}
+        run: >-
+          flyctl secrets set --app dealer-social-post-ai-production
+          POCKETBASE_R2_BACKUPS_ENABLED=true
+          POCKETBASE_BACKUP_LAST_VERIFIED_AT="$RESTORE_VERIFIED_AT"
+          POCKETBASE_BACKUP_VERIFIED_RELEASE_SHA="$RELEASE_SHA"
+
+      - name: Publish a non-sensitive restore summary
+        run: |
+          echo "### PocketBase recovery gate" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Full backup uploaded to private R2" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Exact archive integrity and source manifest verified" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Disposable PocketBase restore passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source release: ${{ steps.source-release.outputs.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Restore target: ${{ steps.target-release.outputs.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.source-release.outputs.sha }}" = "${{ steps.target-release.outputs.sha }}" ]; then
+            echo "- Runtime evidence refreshed for the running release" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Bootstrap drill only; runtime evidence was not rebound to a different release" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Remove the temporary running-release worktree
+        if: always() && steps.target-release.outputs.path != '.'
+        run: git worktree remove --force "${{ steps.target-release.outputs.path }}"

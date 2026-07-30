@@ -2,15 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PLATFORM_IDS,
   getPlatformOptions,
+  getSecondaryPlatformOptions,
   orderExportFormatsByPreference,
   parsePlatformCaptionPack,
   platformsToCaptionPackBrief,
   platformsToCreativeBrief,
   platformCopyGuidance,
   preferredExportFormatIds,
+  resolvePrimaryImageProfile,
   shouldGenerateCaptionPack,
 } from "./platformCopy";
 import { EXPORT_FORMATS } from "../utils/multiFormatExport";
+import { PUBLISH_TARGETS } from "./publishTargets";
 
 describe("platformCopy", () => {
   it("exposes primary platforms with story bias", () => {
@@ -18,6 +21,23 @@ describe("platformCopy", () => {
     expect(options.length).toBeGreaterThanOrEqual(4);
     expect(DEFAULT_PLATFORM_IDS).toContain("instagram_story");
     expect(DEFAULT_PLATFORM_IDS).toContain("instagram_feed");
+  });
+
+  it("derives secondary editor destinations from the canonical publish registry", () => {
+    const primaryIds = new Set(getPlatformOptions().map((option) => option.id));
+    const secondaryIds = getSecondaryPlatformOptions().map((option) => option.id);
+    const registrySecondaryIds = PUBLISH_TARGETS.filter(
+      (target) => !primaryIds.has(target.id),
+    ).map((target) => target.id);
+
+    expect(secondaryIds).toEqual(registrySecondaryIds);
+    expect(secondaryIds).toEqual([
+      "instagram_reel",
+      "marketplace",
+      "linkedin",
+      "x_twitter",
+      "native_share",
+    ]);
   });
 
   it("builds a store-specific multi-platform brief", () => {
@@ -33,8 +53,32 @@ describe("platformCopy", () => {
   it("prefers story_vertical when any vertical platform is selected", () => {
     const formats = preferredExportFormatIds(["tiktok", "facebook_feed"]);
     expect(formats[0]).toBe("story_vertical");
-    expect(formats).toContain("feed_square");
+    expect(formats).toContain("feed_portrait");
   });
+
+  it.each([
+    {
+      platforms: ["instagram_story", "facebook_feed"],
+      format: "story_vertical",
+      aspect: "9:16",
+    },
+    {
+      platforms: ["facebook_feed", "gbp"],
+      format: "feed_portrait",
+      aspect: "4:5",
+    },
+    { platforms: ["gbp"], format: "gbp", aspect: "4:3" },
+    { platforms: ["marketplace"], format: "marketplace", aspect: "16:9" },
+    { platforms: [], format: "story_vertical", aspect: "9:16" },
+  ])(
+    "maps $platforms to the $format native generation profile",
+    ({ platforms, format, aspect }) => {
+      expect(resolvePrimaryImageProfile(platforms)).toMatchObject({
+        primaryFormatId: format,
+        imageAspectRatio: aspect,
+      });
+    },
+  );
 
   it("builds a caption pack brief with JSON keys for selected platforms", () => {
     const brief = platformsToCaptionPackBrief(
@@ -70,9 +114,9 @@ describe("platformCopy", () => {
 
   it("parses fenced JSON and delimited caption packs", () => {
     const fenced = '```json\n{"instagram_story":"Story line"}\n```';
-    expect(
-      parsePlatformCaptionPack(fenced, ["instagram_story"]).instagram_story,
-    ).toBe("Story line");
+    expect(parsePlatformCaptionPack(fenced, ["instagram_story"]).instagram_story).toBe(
+      "Story line",
+    );
 
     const delimited = `
 === instagram_feed ===
@@ -81,10 +125,7 @@ Feed body here
 === tiktok ===
 TikTok body
 `;
-    const pack = parsePlatformCaptionPack(delimited, [
-      "instagram_feed",
-      "tiktok",
-    ]);
+    const pack = parsePlatformCaptionPack(delimited, ["instagram_feed", "tiktok"]);
     expect(pack.instagram_feed).toBe("Feed body here");
     expect(pack.tiktok).toBe("TikTok body");
   });
@@ -92,9 +133,7 @@ TikTok body
   it("only recommends a pack when 2+ platforms are selected", () => {
     expect(shouldGenerateCaptionPack([])).toBe(false);
     expect(shouldGenerateCaptionPack(["instagram_feed"])).toBe(false);
-    expect(
-      shouldGenerateCaptionPack(["instagram_feed", "facebook_feed"]),
-    ).toBe(true);
+    expect(shouldGenerateCaptionPack(["instagram_feed", "facebook_feed"])).toBe(true);
   });
 
   it("orders export formats by preferred ids", () => {

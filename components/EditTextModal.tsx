@@ -1,5 +1,4 @@
-import React, { useState } from "react";
-import { Icon } from "./Icons";
+import React, { useEffect, useState } from "react";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
@@ -7,7 +6,7 @@ import { Button } from "./ui/Button";
 interface EditTextModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (prompt: string) => void;
+  onSubmit: (prompt: string) => Promise<void>;
   originalText: string;
   isLoading: boolean;
 }
@@ -20,11 +19,28 @@ export const EditTextModal: React.FC<EditTextModalProps> = ({
   isLoading,
 }) => {
   const [prompt, setPrompt] = useState("");
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const handleSubmit = () => {
+  useEffect(() => {
+    if (!isOpen) {
+      setPrompt("");
+      setSubmitError(null);
+    }
+  }, [isOpen]);
+
+  const handleSubmit = async () => {
     triggerHapticFeedback();
     if (prompt.trim() && !isLoading) {
-      onSubmit(prompt);
+      setSubmitError(null);
+      try {
+        await onSubmit(prompt.trim());
+      } catch (error) {
+        setSubmitError(
+          error instanceof Error
+            ? error.message
+            : "The caption could not be changed. Try again.",
+        );
+      }
     }
   };
 
@@ -47,7 +63,7 @@ export const EditTextModal: React.FC<EditTextModalProps> = ({
           </Button>
           <Button
             variant="filled"
-            onClick={handleSubmit}
+            onClick={() => void handleSubmit()}
             disabled={!prompt.trim() || isLoading}
             loading={isLoading}
             className="w-40"
@@ -86,6 +102,14 @@ export const EditTextModal: React.FC<EditTextModalProps> = ({
             placeholder="e.g., Make it funnier, or add a question at the end..."
             className="w-full bg-surface-800/50 text-surface-50 border-2 border-white/20 rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary-400 focus:border-primary-400 outline-none transition h-32 resize-none placeholder:text-surface-500"
           />
+          {submitError ? (
+            <p
+              className="mt-3 rounded-xl border border-error-500/30 bg-error-500/10 px-3 py-2 text-sm text-error-100"
+              role="alert"
+            >
+              {submitError}
+            </p>
+          ) : null}
         </div>
       </div>
     </Modal>

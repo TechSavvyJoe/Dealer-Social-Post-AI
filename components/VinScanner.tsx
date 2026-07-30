@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Loader2, ScanLine, AlertCircle, Check, X, Camera } from "lucide-react";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
@@ -71,7 +71,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const detectionIntervalRef = useRef<number | null>(null);
+  const detectionTimerRef = useRef<number | null>(null);
   // Flips true on close/unmount so async decode + setTimeout chains can bail
   // before they call setState on an unmounted component.
   const cancelledRef = useRef(false);
@@ -96,15 +96,14 @@ export const VinScanner: React.FC<VinScannerProps> = ({
   // down and re-acquired every time a decode starts/finishes.
   const isDecodingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
-  const [scanStatus, setScanStatus] = useState<string>(
-    "Point at the VIN barcode",
-  );
+  const [scanStatus, setScanStatus] = useState<string>("Point at the VIN barcode");
   const [lastDecoded, setLastDecoded] = useState<DecodedVehicle | null>(null);
+  const reduceMotion = useReducedMotion();
 
   const stopCamera = useCallback(() => {
-    if (detectionIntervalRef.current) {
-      window.clearInterval(detectionIntervalRef.current);
-      detectionIntervalRef.current = null;
+    if (detectionTimerRef.current !== null) {
+      window.clearTimeout(detectionTimerRef.current);
+      detectionTimerRef.current = null;
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
@@ -138,12 +137,12 @@ export const VinScanner: React.FC<VinScannerProps> = ({
             model: vehicle.model,
           });
           triggerHapticFeedback();
-          // Brief success display, then close.
+          // Leave enough time for assistive technology to announce the result.
           window.setTimeout(() => {
             if (cancelledRef.current) return;
             onVehicleDecoded(vehicle);
             onClose();
-          }, 900);
+          }, 1600);
         }
       } catch (err) {
         if (cancelledRef.current) return;
@@ -209,31 +208,53 @@ export const VinScanner: React.FC<VinScannerProps> = ({
           detector = new Detector();
         }
 
-        detectionIntervalRef.current = window.setInterval(async () => {
-          if (!videoRef.current || isDecodingRef.current) return;
-          try {
-            const results = await detector.detect(videoRef.current);
-            if (results.length > 0) {
-              const raw = results[0].rawValue;
-              // VIN barcodes sometimes have a leading "I" framing char — strip non-alnum
-              const candidate = raw.replace(/[^A-Z0-9]/gi, "").toUpperCase();
-              // Look for any 17-char substring that's a valid VIN.
-              for (let i = 0; i + 17 <= candidate.length; i++) {
-                const slice = candidate.slice(i, i + 17);
-                if (isValidVin(slice)) {
-                  stopCamera();
-                  void handleDecodeRef.current(slice);
-                  return;
-                }
-              }
-              setScanStatus(
-                `Detected "${candidate.slice(0, 24)}…" — keep aiming`,
-              );
+        const scheduleDetection = (delay = 400) => {
+          if (cancelled || cancelledRef.current || !streamRef.current) return;
+          detectionTimerRef.current = window.setTimeout(async () => {
+            detectionTimerRef.current = null;
+            if (
+              cancelled ||
+              cancelledRef.current ||
+              !videoRef.current ||
+              !streamRef.current
+            ) {
+              return;
             }
-          } catch {
-            // detection errors are non-fatal; loop continues
-          }
-        }, 400);
+            if (isDecodingRef.current) {
+              scheduleDetection();
+              return;
+            }
+
+            try {
+              // Schedule the next scan only after this promise settles. Some
+              // mobile detectors take longer than 400ms and must not overlap.
+              const results = await detector.detect(videoRef.current);
+              if (cancelled || cancelledRef.current || !streamRef.current) return;
+              if (results.length > 0) {
+                const raw = results[0].rawValue;
+                // VIN barcodes sometimes have a leading framing char.
+                const candidate = raw.replace(/[^A-Z0-9]/gi, "").toUpperCase();
+                // Look for any 17-char substring that's a valid VIN.
+                for (let i = 0; i + 17 <= candidate.length; i++) {
+                  const slice = candidate.slice(i, i + 17);
+                  if (isValidVin(slice)) {
+                    stopCamera();
+                    void handleDecodeRef.current(slice);
+                    return;
+                  }
+                }
+                setScanStatus(`Detected "${candidate.slice(0, 24)}…" — keep aiming`);
+              }
+            } catch {
+              // Detection errors are non-fatal; the serialized loop continues.
+            } finally {
+              if (!cancelled && !cancelledRef.current && streamRef.current) {
+                scheduleDetection();
+              }
+            }
+          }, delay);
+        };
+        scheduleDetection(0);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         setError(
@@ -278,12 +299,17 @@ export const VinScanner: React.FC<VinScannerProps> = ({
     <Modal isOpen={isOpen} onClose={handleClose} title="Scan VIN" size="md">
       <div className="space-y-4">
         {/* Mode toggle */}
-        <div className="flex gap-2 bg-surface-950/30 p-1 rounded-xl border border-white/5">
+        <div
+          className="flex gap-2 bg-surface-950/30 p-1 rounded-xl border border-white/5"
+          role="group"
+          aria-label="VIN entry method"
+        >
           <Button
             variant={mode === "scanner" ? "filled" : "ghost"}
             size="sm"
             leftIcon={<ScanLine className="h-3.5 w-3.5" />}
             onClick={() => setMode("scanner")}
+            aria-pressed={mode === "scanner"}
             disabled={!hasNativeDetector}
             className="flex-1 rounded-lg"
             title={
@@ -299,6 +325,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
             size="sm"
             leftIcon={<Camera className="h-3.5 w-3.5" />}
             onClick={() => setMode("manual")}
+            aria-pressed={mode === "manual"}
             className="flex-1 rounded-lg"
           >
             Type VIN
@@ -321,6 +348,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
                   className="w-full h-full object-cover"
                   playsInline
                   muted
+                  aria-label="Live camera view for VIN barcode scanning"
                 />
                 {/* Targeting overlay */}
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
@@ -329,21 +357,30 @@ export const VinScanner: React.FC<VinScannerProps> = ({
                 {/* Scan line */}
                 <motion.div
                   className="absolute left-[10%] right-[10%] h-[2px] bg-primary-400 shadow-[0_0_12px_rgba(56,189,248,0.8)]"
-                  animate={{ top: ["38%", "62%", "38%"] }}
-                  transition={{
-                    duration: 2.5,
-                    repeat: Infinity,
-                    ease: "easeInOut",
-                  }}
+                  animate={
+                    reduceMotion ? { top: "50%" } : { top: ["38%", "62%", "38%"] }
+                  }
+                  transition={
+                    reduceMotion
+                      ? { duration: 0 }
+                      : {
+                          duration: 2.5,
+                          repeat: Infinity,
+                          ease: "easeInOut",
+                        }
+                  }
                 />
               </div>
-              <p className="text-xs text-surface-300 text-center">
+              <p
+                role="status"
+                aria-live="polite"
+                className="text-xs text-surface-300 text-center"
+              >
                 {scanStatus}
               </p>
               <p className="text-[10px] text-surface-500 text-center leading-relaxed">
                 Tip: the VIN barcode is usually on the driver-side door jamb or
-                lower-left corner of the windshield. Hold steady, fill the
-                frame.
+                lower-left corner of the windshield. Hold steady, fill the frame.
               </p>
             </motion.div>
           )}
@@ -391,6 +428,9 @@ export const VinScanner: React.FC<VinScannerProps> = ({
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
               className="flex items-start gap-3 bg-success-900/40 border border-success-700/50 rounded-xl p-3 text-success-100"
             >
               <Check className="h-5 w-5 text-success-400 flex-shrink-0 mt-0.5" />
@@ -411,6 +451,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
+              role="alert"
               className="flex items-start gap-3 bg-error-900/40 border border-error-700/50 rounded-xl p-3 text-error-100 text-sm"
             >
               <AlertCircle className="h-5 w-5 text-error-400 flex-shrink-0 mt-0.5" />

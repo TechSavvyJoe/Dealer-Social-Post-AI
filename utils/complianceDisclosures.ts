@@ -14,10 +14,7 @@
  */
 
 import { normalizeCaptionHashtags } from "./hashtags";
-import {
-  applyDealerBrandKit,
-  type DealerBrandKit,
-} from "./brandKit";
+import { applyDealerBrandKit, type DealerBrandKit } from "./brandKit";
 import { cleanSocialCaption } from "./captionQuality";
 
 export type DisclosureCategory =
@@ -46,8 +43,9 @@ interface Rule {
   prohibited?: boolean;
 }
 
-// Order matters only for which trigger phrase shows up first in audit output;
-// disclosures themselves are deduplicated by category.
+// This order is the canonical client/server disclosure order. Caption packs can
+// surface the same rules in any destination order, so delivery metadata and the
+// locked footer must always be rebuilt in this fixed sequence.
 const RULES: Rule[] = [
   {
     category: "financing_apr",
@@ -126,9 +124,7 @@ export type DealerBannedPhrases = string | string[] | null | undefined;
 
 const parseDealerBannedPhrases = (value: DealerBannedPhrases): string[] => {
   const phrases = Array.isArray(value) ? value : (value ?? "").split(/[\n,]+/);
-  return Array.from(
-    new Set(phrases.map((phrase) => phrase.trim()).filter(Boolean)),
-  );
+  return Array.from(new Set(phrases.map((phrase) => phrase.trim()).filter(Boolean)));
 };
 
 const normalizePhrase = (value: string): string =>
@@ -147,8 +143,7 @@ const detectDealerBannedPhrases = (
     .filter((phrase) => {
       const normalizedPhrase = normalizePhrase(phrase);
       return (
-        normalizedPhrase.length > 0 &&
-        normalizedText.includes(` ${normalizedPhrase} `)
+        normalizedPhrase.length > 0 && normalizedText.includes(` ${normalizedPhrase} `)
       );
     })
     .map((phrase) => ({
@@ -184,15 +179,20 @@ export const detectDisclosures = (
 const formatDisclosureFooter = (matches: DisclosureMatch[]): string => {
   const usable = matches.filter((m) => !m.prohibited && m.disclosure);
   if (usable.length === 0) return "";
-  // Deduplicate by category in order of appearance
-  const seen = new Set<DisclosureCategory>();
-  const ordered: string[] = [];
-  for (const m of usable) {
-    if (seen.has(m.category)) continue;
-    seen.add(m.category);
-    ordered.push(m.disclosure);
-  }
+  const byCategory = new Map(usable.map((match) => [match.category, match]));
+  const ordered = RULES.map((rule) => byCategory.get(rule.category)?.disclosure).filter(
+    (disclosure): disclosure is string => Boolean(disclosure),
+  );
   return `\n\n— Disclosures —\n${ordered.join(" ")}`;
+};
+
+const canonicalDisclosureCategories = (
+  matches: DisclosureMatch[],
+): DisclosureCategory[] => {
+  const present = new Set(
+    matches.filter((match) => !match.prohibited).map((match) => match.category),
+  );
+  return RULES.map((rule) => rule.category).filter((category) => present.has(category));
 };
 
 export interface ComplianceResult {
@@ -213,18 +213,21 @@ export interface DeliveryCaption {
   compliance: ComplianceResult;
 }
 
-export const prohibitedClaimsMessage = (
-  prohibited: DisclosureMatch[],
-): string => {
+export interface CaptionSetDeliveryAnalysis {
+  disclosures: string;
+  disclosureCategories: DisclosureCategory[];
+  matches: DisclosureMatch[];
+  prohibited: DisclosureMatch[];
+}
+
+export const prohibitedClaimsMessage = (prohibited: DisclosureMatch[]): string => {
   const phrases = Array.from(
     new Set(prohibited.map((match) => match.triggerPhrase.trim())),
   );
   const dealerConfigured = prohibited.some(
     (match) => match.category === "dealer_banned_phrase",
   );
-  const legalClaim = prohibited.some(
-    (match) => match.category === "prohibited_phrase",
-  );
+  const legalClaim = prohibited.some((match) => match.category === "prohibited_phrase");
   const reason =
     dealerConfigured && legalClaim
       ? "These claims are prohibited or blocked by this dealership and cannot be published."
@@ -248,8 +251,7 @@ export const applyDisclosures = (
     return { text: "", matches: [], prohibited: [], changed: false };
   }
   const markerIndex = text.indexOf("— Disclosures —");
-  const caption =
-    markerIndex >= 0 ? text.slice(0, markerIndex).trimEnd() : text;
+  const caption = markerIndex >= 0 ? text.slice(0, markerIndex).trimEnd() : text;
   const matches = detectDisclosures(caption, bannedPhrases);
   const prohibited = matches.filter((m) => m.prohibited);
   const footer = formatDisclosureFooter(matches);
@@ -278,19 +280,35 @@ export const analyzeCaptionForDelivery = (
     markerIndex >= 0
       ? compliance.text.slice(0, markerIndex).trimEnd()
       : compliance.text.trimEnd();
-  const disclosures =
-    markerIndex >= 0 ? compliance.text.slice(markerIndex).trim() : "";
+  const disclosures = markerIndex >= 0 ? compliance.text.slice(markerIndex).trim() : "";
   return {
     caption,
     disclosures,
-    disclosureCategories: Array.from(
-      new Set(
-        compliance.matches
-          .filter((match) => !match.prohibited)
-          .map((match) => match.category),
-      ),
-    ),
+    disclosureCategories: canonicalDisclosureCategories(compliance.matches),
     compliance,
+  };
+};
+
+/**
+ * Rebuild the authoritative disclosure footer across a primary caption and
+ * every destination variant. A platform-specific offer must never disappear
+ * merely because the primary caption did not contain the same trigger.
+ */
+export const analyzeCaptionSetForDelivery = (
+  captions: Array<string | null | undefined>,
+  bannedPhrases?: DealerBannedPhrases,
+): CaptionSetDeliveryAnalysis => {
+  const matches = captions
+    .filter((caption): caption is string => Boolean(caption?.trim()))
+    .flatMap(
+      (caption) => analyzeCaptionForDelivery(caption, bannedPhrases).compliance.matches,
+    );
+  const prohibited = matches.filter((match) => match.prohibited);
+  return {
+    disclosures: formatDisclosureFooter(matches).trim(),
+    disclosureCategories: canonicalDisclosureCategories(matches),
+    matches,
+    prohibited,
   };
 };
 

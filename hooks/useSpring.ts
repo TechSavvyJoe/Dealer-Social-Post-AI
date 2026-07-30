@@ -15,17 +15,8 @@ interface SpringOptions extends SpringConfig {
  * Custom hook for spring-based animations using velocity and physics
  * Provides smoother, more natural animations than CSS transitions
  */
-export const useSpring = (
-  target: number,
-  options: SpringOptions = {}
-): number => {
-  const {
-    stiffness = 170,
-    damping = 26,
-    mass = 1,
-    onUpdate,
-    onComplete,
-  } = options;
+export const useSpring = (target: number, options: SpringOptions = {}): number => {
+  const { stiffness = 170, damping = 26, mass = 1, onUpdate, onComplete } = options;
 
   const currentValue = useRef(target);
   const velocity = useRef(0);

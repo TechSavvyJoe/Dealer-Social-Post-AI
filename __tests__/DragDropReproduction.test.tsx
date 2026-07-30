@@ -1,11 +1,5 @@
 import React from "react";
-import {
-  render,
-  screen,
-  fireEvent,
-  waitFor,
-  act,
-} from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { ImageInput } from "../components/CameraCapture";
 import * as imageUtils from "../utils/imageUtils";
@@ -29,16 +23,9 @@ describe("ImageInput Drag and Drop", () => {
   });
 
   it("should send a dropped photo to the single global review flow", async () => {
-    render(
-      <ImageInput
-        onImageSelected={mockOnImageSelected}
-        onClose={mockOnClose}
-      />,
-    );
+    render(<ImageInput onImageSelected={mockOnImageSelected} onClose={mockOnClose} />);
 
-    const dropZone = screen
-      .getByText("Add a photo")
-      .closest("div")?.parentElement;
+    const dropZone = screen.getByText("Add a photo").closest("div")?.parentElement;
     expect(dropZone).toBeInTheDocument();
 
     const file = new File(["dummy content"], "test.png", { type: "image/png" });
@@ -70,20 +57,17 @@ describe("ImageInput Drag and Drop", () => {
     // CameraCapture no longer opens its own review dialog. The app-level
     // ImageCropModal is the one authoritative review/crop surface.
     await waitFor(() => {
-      expect(mockOnImageSelected).toHaveBeenCalledWith(
-        "data:image/png;base64,dummydata",
-      );
+      expect(mockOnImageSelected).toHaveBeenCalledWith({
+        workingImage: "data:image/png;base64,dummydata",
+        originalSource: file,
+        originalFilename: "test.png",
+      });
     });
     expect(screen.queryByAltText("Captured preview")).not.toBeInTheDocument();
   });
 
   it("should handle invalid file type drop", async () => {
-    render(
-      <ImageInput
-        onImageSelected={mockOnImageSelected}
-        onClose={mockOnClose}
-      />,
-    );
+    render(<ImageInput onImageSelected={mockOnImageSelected} onClose={mockOnClose} />);
 
     const file = new File(["dummy content"], "test.txt", {
       type: "text/plain",

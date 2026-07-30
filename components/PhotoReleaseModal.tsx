@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ShieldCheck, AlertCircle, Check } from "lucide-react";
 import { Modal } from "./ui/Modal";
@@ -19,10 +19,9 @@ interface PhotoReleaseModalProps {
   vin?: string;
   defaultCustomerName?: string;
   /**
-   * Called with the captured (NOT yet saved) release. The host stores this in
-   * state and saves it linked to the post when generation succeeds. If the
-   * salesperson never generates, no PB record is created — solves the orphan-
-   * release bug.
+   * Called with the captured (not yet uploaded) release. Generation first
+   * stores it as a short-lived, session-owned record, then links that same
+   * record to the post. An abandoned unlinked record expires automatically.
    */
   onCaptured?: (release: CapturedRelease) => void;
 }
@@ -36,19 +35,50 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
   onCaptured,
 }) => {
   const padRef = useRef<SignaturePadHandle | null>(null);
+  const autoCloseTimerRef = useRef<number | null>(null);
+  const wasOpenRef = useRef(false);
+  const backConsequenceId = useId();
   const [customerName, setCustomerName] = useState(defaultCustomerName || "");
   const [signatureEmpty, setSignatureEmpty] = useState(true);
   const [captured, setCaptured] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const clearAutoCloseTimer = useCallback(() => {
+    if (autoCloseTimerRef.current === null) return;
+    window.clearTimeout(autoCloseTimerRef.current);
+    autoCloseTimerRef.current = null;
+  }, []);
+
   const handleClose = useCallback(() => {
+    clearAutoCloseTimer();
     setCustomerName(defaultCustomerName || "");
     setSignatureEmpty(true);
     setCaptured(false);
     setError(null);
     padRef.current?.clear();
     onClose();
-  }, [defaultCustomerName, onClose]);
+  }, [clearAutoCloseTimer, defaultCustomerName, onClose]);
+
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) {
+      setCustomerName(defaultCustomerName || "");
+    } else if (!isOpen && wasOpenRef.current) {
+      clearAutoCloseTimer();
+      setCustomerName(defaultCustomerName || "");
+      setSignatureEmpty(true);
+      setCaptured(false);
+      setError(null);
+      padRef.current?.clear();
+    }
+    wasOpenRef.current = isOpen;
+  }, [clearAutoCloseTimer, defaultCustomerName, isOpen]);
+
+  useEffect(
+    () => () => {
+      clearAutoCloseTimer();
+    },
+    [clearAutoCloseTimer],
+  );
 
   const handleSubmit = useCallback(() => {
     setError(null);
@@ -70,15 +100,19 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
       signaturePngDataUrl: sigDataUrl,
       vin,
     });
-    window.setTimeout(() => handleClose(), 1200);
-  }, [customerName, vin, onCaptured, handleClose]);
+    clearAutoCloseTimer();
+    autoCloseTimerRef.current = window.setTimeout(() => {
+      autoCloseTimerRef.current = null;
+      handleClose();
+    }, 1200);
+  }, [customerName, vin, onCaptured, clearAutoCloseTimer, handleClose]);
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
       title="Customer photo release"
-      description="Optional but recommended when the customer appears in the photo. Saved with the post when you generate."
+      description="Required for customer-focused posts. It is stored securely before AI processing, linked only to this post, and an abandoned unlinked capture expires within 24 hours."
       size="lg"
     >
       <div className="space-y-4">
@@ -97,7 +131,8 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
                 Release captured
               </div>
               <div className="text-xs text-surface-400">
-                It will be saved automatically when you generate the post.
+                Generate will securely store it before AI processing and link it to this
+                exact customer and vehicle.
               </div>
             </motion.div>
           ) : (
@@ -113,13 +148,11 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
                   <ShieldCheck className="h-4 w-4 text-primary-300 mt-0.5 flex-shrink-0" />
                   <p>
                     By signing below, the customer grants{" "}
-                    <strong className="text-surface-50">
-                      {dealershipName}
-                    </strong>{" "}
-                    permission to use the photo taken today on social media,
-                    websites, advertising, and other marketing materials. The
-                    customer may withdraw consent in writing at any time by
-                    contacting the dealership.
+                    <strong className="text-surface-50">{dealershipName}</strong>{" "}
+                    permission to use the photo taken today on social media, websites,
+                    advertising, and other marketing materials. The customer may
+                    withdraw consent in writing at any time by contacting the
+                    dealership.
                   </p>
                 </div>
               </div>
@@ -139,17 +172,12 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
                 </div>
               )}
 
-              <div>
-                <label className="text-xs font-medium text-surface-300 uppercase tracking-wide mb-2 block">
-                  Customer signature
-                </label>
-                <SignaturePad
-                  ref={padRef}
-                  width={600}
-                  height={220}
-                  onChange={(empty) => setSignatureEmpty(empty)}
-                />
-              </div>
+              <SignaturePad
+                ref={padRef}
+                width={600}
+                height={220}
+                onChange={(empty) => setSignatureEmpty(empty)}
+              />
 
               <AnimatePresence>
                 {error && (
@@ -157,6 +185,7 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
                     initial={{ opacity: 0, y: -8 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}
+                    role="alert"
                     className="flex items-start gap-2 rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs"
                   >
                     <AlertCircle className="h-4 w-4 text-error-400 flex-shrink-0 mt-0.5" />
@@ -166,19 +195,36 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
               </AnimatePresence>
 
               <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-white/10">
-                <Button
-                  variant="filled"
-                  size="md"
-                  fullWidth
-                  disabled={signatureEmpty || !customerName.trim()}
-                  leftIcon={<ShieldCheck className="h-4 w-4" />}
-                  onClick={handleSubmit}
-                >
-                  Capture release
-                </Button>
-                <Button variant="ghost" size="md" onClick={handleClose}>
-                  Skip
-                </Button>
+                <div className="flex-1">
+                  <Button
+                    variant="filled"
+                    size="md"
+                    fullWidth
+                    disabled={signatureEmpty || !customerName.trim()}
+                    leftIcon={<ShieldCheck className="h-4 w-4" />}
+                    onClick={handleSubmit}
+                  >
+                    Capture release
+                  </Button>
+                </div>
+                <div className="flex flex-1 flex-col gap-1.5">
+                  <Button
+                    variant="ghost"
+                    size="md"
+                    fullWidth
+                    aria-describedby={backConsequenceId}
+                    onClick={handleClose}
+                  >
+                    Back to post
+                  </Button>
+                  <p
+                    id={backConsequenceId}
+                    className="text-center text-[11px] leading-relaxed text-surface-400"
+                  >
+                    No release will be saved. Customer-photo AI generation stays blocked
+                    until a signed release is captured.
+                  </p>
+                </div>
               </div>
             </motion.div>
           )}

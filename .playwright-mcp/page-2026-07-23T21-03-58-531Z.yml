@@ -1,0 +1,14 @@
+- generic [active] [ref=f1e1]:
+  - link "Skip to main content" [ref=f1e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - main [ref=f1e6]:
+    - status [ref=f1e10]:
+      - generic [ref=f1e11]:
+        - status "Loading..." [ref=f1e12]
+        - generic [ref=f1e14]:
+          - status "Loading..." [ref=f1e15]
+          - status "Loading..." [ref=f1e17]
+        - generic [ref=f1e19]:
+          - status "Loading..." [ref=f1e20]
+          - status "Loading..." [ref=f1e22]
+      - generic [ref=f1e24]: Loading login

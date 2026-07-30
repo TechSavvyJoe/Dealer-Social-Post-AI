@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { computeContainRect, EXPORT_FORMATS } from "./multiFormatExport";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  computeContainRect,
+  EXPORT_FORMATS,
+  imageMatchesExportFormat,
+  renderFormatIfNeeded,
+} from "./multiFormatExport";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("computeContainRect", () => {
   it("letterboxes a landscape creative into 9:16 without cropping", () => {
@@ -43,6 +53,104 @@ describe("computeCoverRect", () => {
 describe("EXPORT_FORMATS", () => {
   it("lists story before feed for mobile-first dealership traffic", () => {
     expect(EXPORT_FORMATS[0].id).toBe("story_vertical");
-    expect(EXPORT_FORMATS[1].id).toBe("feed_square");
+    expect(EXPORT_FORMATS[1].id).toBe("feed_portrait");
+    expect(EXPORT_FORMATS.map(({ id }) => id)).toContain("social_landscape");
+  });
+});
+
+describe("renderFormatIfNeeded", () => {
+  const installDecodedImage = (width: number, height: number) => {
+    class DecodedImage {
+      crossOrigin = "";
+      width = 0;
+      height = 0;
+      naturalWidth = width;
+      naturalHeight = height;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      set src(_value: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+
+    vi.stubGlobal("Image", DecodedImage);
+  };
+
+  const installCanvasRenderer = () => {
+    const gradient = { addColorStop: vi.fn() };
+    const context = {
+      createRadialGradient: vi.fn(() => gradient),
+      drawImage: vi.fn(),
+      fillRect: vi.fn(),
+      getImageData: vi.fn(() => ({
+        data: new Uint8ClampedArray(8 * 8 * 4).fill(64),
+      })),
+      restore: vi.fn(),
+      save: vi.fn(),
+      strokeRect: vi.fn(),
+      fillStyle: "",
+      globalAlpha: 1,
+      imageSmoothingEnabled: true,
+      imageSmoothingQuality: "high",
+      lineWidth: 1,
+      shadowBlur: 0,
+      shadowColor: "",
+      shadowOffsetY: 0,
+      strokeStyle: "",
+    };
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+      context as unknown as CanvasRenderingContext2D,
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue(
+      "data:image/jpeg;base64,rendered-exact",
+    );
+    return context;
+  };
+
+  it("returns an already exact JPEG without allocating an export canvas", async () => {
+    const format = EXPORT_FORMATS.find(({ id }) => id === "story_vertical")!;
+    installDecodedImage(format.width, format.height);
+    const canvasSpy = vi.spyOn(document, "createElement");
+    const source = "data:image/jpeg;base64,already-exact";
+
+    await expect(renderFormatIfNeeded(source, format)).resolves.toBe(source);
+    expect(canvasSpy).not.toHaveBeenCalledWith("canvas");
+  });
+
+  it("renders legacy media whose decoded pixels do not match the profile", async () => {
+    const format = EXPORT_FORMATS.find(({ id }) => id === "story_vertical")!;
+    installDecodedImage(1080, 1080);
+    const context = installCanvasRenderer();
+
+    await expect(
+      renderFormatIfNeeded("data:image/jpeg;base64,legacy-square", format),
+    ).resolves.toBe("data:image/jpeg;base64,rendered-exact");
+    expect(context.drawImage).toHaveBeenCalled();
+    expect(HTMLCanvasElement.prototype.toDataURL).toHaveBeenCalledWith(
+      "image/jpeg",
+      0.94,
+    );
+  });
+
+  it("re-encodes an exact-size PNG to the promised JPEG contract", async () => {
+    const format = EXPORT_FORMATS.find(({ id }) => id === "story_vertical")!;
+    installDecodedImage(format.width, format.height);
+    installCanvasRenderer();
+
+    await expect(
+      renderFormatIfNeeded("data:image/png;base64,already-exact", format),
+    ).resolves.toBe("data:image/jpeg;base64,rendered-exact");
+    expect(HTMLCanvasElement.prototype.toDataURL).toHaveBeenCalledWith(
+      "image/jpeg",
+      0.94,
+    );
+  });
+
+  it("compares exact width and height rather than aspect ratio alone", () => {
+    const story = EXPORT_FORMATS.find(({ id }) => id === "story_vertical")!;
+    expect(imageMatchesExportFormat(1080, 1920, story)).toBe(true);
+    expect(imageMatchesExportFormat(540, 960, story)).toBe(false);
+    expect(imageMatchesExportFormat(1920, 1080, story)).toBe(false);
   });
 });

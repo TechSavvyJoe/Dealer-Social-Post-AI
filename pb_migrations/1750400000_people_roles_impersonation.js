@@ -22,7 +22,7 @@ migrate(
         new SchemaField({
           name: "role",
           type: "select",
-          required: true,
+          required: false,
           options: {
             maxSelect: 1,
             values: ["salesperson", "manager"],
@@ -30,81 +30,54 @@ migrate(
         }),
       );
     }
-
-    const pinField = salespeople.schema.getFieldByName("pin");
-    if (pinField) {
-      pinField.options = pinField.options || {};
-      pinField.options.min = 4;
-      pinField.options.max = 4;
-      pinField.options.pattern = "^[0-9]{4}$";
-    }
-
-    const indexes = Array.from(salespeople.indexes || []);
-    if (!indexes.some((i) => String(i).indexOf("idx_salespeople_pin") !== -1)) {
-      indexes.push(
-        "CREATE UNIQUE INDEX `idx_salespeople_pin` ON `salespeople` (`pin`) WHERE `pin` != '' AND `active` = true",
-      );
-    }
-    salespeople.indexes = indexes;
+    // Do not tighten or index PINs yet. Existing installations can contain
+    // blank, malformed, or duplicate legacy values; the forward integrity
+    // migration repairs every row before installing the four-digit contract.
     dao.saveCollection(salespeople);
 
     // Backfill role for existing rows (SQLite default for new column via PB may be empty).
-    try {
-      db.newQuery(
-        "UPDATE salespeople SET role = 'salesperson' WHERE role IS NULL OR role = ''",
-      ).execute();
-    } catch (_e) {
-      /* ignore if already set */
-    }
+    db.newQuery(
+      "UPDATE salespeople SET role = 'salesperson' WHERE role IS NULL OR role = ''",
+    ).execute();
+    salespeople = dao.findCollectionByNameOrId("salespeople");
+    const roleField = salespeople.schema.getFieldByName("role");
+    if (!roleField) throw new Error("salespeople.role field not found");
+    roleField.required = true;
+    dao.saveCollection(salespeople);
 
-    // Migrate dealer admin_code → manager person when pin free.
-    try {
-      const rows = db
-        .newQuery(
-          "SELECT id, name, admin_code FROM dealers WHERE admin_code IS NOT NULL AND admin_code != ''",
-        )
-        .all();
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        const adminCode = String(row.admin_code || "").trim();
-        if (!/^[0-9]{4}$/.test(adminCode)) continue;
-        let exists = null;
-        try {
-          exists = db
-            .newQuery(
-              "SELECT id FROM salespeople WHERE pin = {:pin} LIMIT 1",
-            )
-            .bind({ pin: adminCode })
-            .one();
-        } catch (_e) {
-          exists = null;
-        }
-        if (exists && exists.id) continue;
+    // Migrate each legacy dealer admin credential to a manager person. Keep
+    // the raw value temporarily (when schema-compatible); the next migration
+    // preserves valid unique values and securely replaces every other one.
+    const rows = dao.findRecordsByFilter(
+      "dealers",
+      "admin_code != ''",
+      "created",
+      10000,
+      0,
+    );
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      let existingManager = null;
+      try {
+        existingManager = dao.findFirstRecordByFilter(
+          "salespeople",
+          "dealer = {:dealer} && role = 'manager'",
+          { dealer: row.id },
+        );
+      } catch (_e) {}
+      if (existingManager && existingManager.id) continue;
 
-        const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-        let id = "";
-        for (let k = 0; k < 15; k++) {
-          id += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        const now = new Date().toISOString();
-        try {
-          db.newQuery(
-            "INSERT INTO salespeople (id, dealer, name, pin, role, active, created_at, created, updated) VALUES ({:id}, {:dealer}, {:name}, {:pin}, 'manager', true, {:now}, {:now}, {:now})",
-          )
-            .bind({
-              id: id,
-              dealer: row.id,
-              name: String(row.name || "Manager") + " Manager",
-              pin: adminCode,
-              now: now,
-            })
-            .execute();
-        } catch (_e) {
-          /* skip duplicate / schema drift */
-        }
-      }
-    } catch (_e) {
-      /* non-fatal */
+      const adminCode = row.getString("admin_code").trim();
+      const temporaryPin = adminCode.length <= 12 ? adminCode : "";
+      const now = new Date().toISOString();
+      const manager = new Record(salespeople);
+      manager.set("dealer", row.id);
+      manager.set("name", (row.getString("name") || "Manager") + " Manager");
+      manager.set("pin", temporaryPin);
+      manager.set("role", "manager");
+      manager.set("active", true);
+      manager.set("created_at", now);
+      dao.saveRecord(manager);
     }
 
     // ---- sessions impersonation fields ----

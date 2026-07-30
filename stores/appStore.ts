@@ -7,39 +7,59 @@ import {
   ToneOption,
   GenerationParams,
   UserRole,
+  ImageQualityTier,
 } from "../types";
 import { loadSession, saveSession, clearSession } from "../utils/persistence";
 // Removed duplicate import
 import { logEvent, logError } from "../utils/telemetry";
 import {
+  archiveDealerMedia,
   clearAllCreatives,
   clearDealerCreatives,
   loadDealerCreative,
   saveDealerCreative,
 } from "../utils/creativeStorage";
-import type { Person } from "../services/salespeople";
+import type { PersonSummary } from "../services/salespeople";
 import {
   exitImpersonation as exitImpersonationApi,
   impersonatePerson as impersonatePersonApi,
 } from "../services/salespeople";
+import {
+  ApiError,
+  asSessionErrorCode,
+  readApiError,
+  type SessionErrorCode,
+} from "../services/apiErrors";
+import { AUTH_SESSION_REJECTED_EVENT, setActiveAuthEpoch } from "../utils/authBoundary";
+
+export interface LoginResult {
+  ok: boolean;
+  code?: SessionErrorCode;
+  message?: string;
+  retryAfterSeconds?: number;
+}
 
 interface AppState {
   // Core State
   step: AppStep;
   currentDealer: Dealer | null;
   role: UserRole;
-  currentPerson: Person | null;
+  currentPerson: PersonSummary | null;
   isImpersonating: boolean;
   selectedImage: string | null;
   generatedPost: GeneratedPost | null;
   generationParams: GenerationParams | null;
   error: string | null;
   isRestoringSession: boolean;
+  /** Monotonic identity boundary used to discard stale async provider results. */
+  authEpoch: number;
 
   // Preferences
+  theme: "dark" | "light" | "system";
   preferredStyle: StyleOption;
   preferredTone: ToneOption;
   compactMode: boolean;
+  imageQualityTier: ImageQualityTier;
 
   // Actions
   setStep: (step: AppStep) => void;
@@ -50,14 +70,16 @@ interface AppState {
   setError: (error: string | null) => void;
   setPreferences: (
     prefs: Partial<{
+      theme: "dark" | "light" | "system";
       preferredStyle: StyleOption;
       preferredTone: ToneOption;
       compactMode: boolean;
+      imageQualityTier: ImageQualityTier;
     }>,
   ) => void;
 
   // Complex Actions
-  login: (dealerId: string) => Promise<boolean>;
+  login: (dealerCode: string, turnstileToken?: string) => Promise<LoginResult>;
   logout: () => Promise<void>;
   reset: () => void;
   /**
@@ -70,7 +92,7 @@ interface AppState {
   applyAuthPayload: (body: {
     role?: string;
     dealer?: Dealer;
-    person?: Person | null;
+    person?: PersonSummary | null;
     is_impersonation?: boolean;
   }) => void;
   impersonatePerson: (personId: string) => Promise<void>;
@@ -84,6 +106,22 @@ const stepForRole = (role: UserRole): AppStep => {
 };
 
 const SESSION_REQUEST_TIMEOUT_MS = 8_000;
+const AUTH_BOUNDARY_STORAGE_KEY = "__dsp_auth_boundary_v1";
+const AUTH_BOUNDARY_CHANNEL = "dealer-social-auth-boundary";
+const authBoundaryChannel =
+  typeof window !== "undefined" && typeof window.BroadcastChannel !== "undefined"
+    ? new window.BroadcastChannel(AUTH_BOUNDARY_CHANNEL)
+    : null;
+
+const publishAuthBoundary = (): void => {
+  const value = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  try {
+    localStorage.setItem(AUTH_BOUNDARY_STORAGE_KEY, value);
+  } catch {
+    // BroadcastChannel still covers modern private-browsing contexts.
+  }
+  authBoundaryChannel?.postMessage({ value });
+};
 
 /** Keep an unavailable backend from trapping the entire app in startup UI. */
 export const fetchSession = async (
@@ -149,9 +187,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   generationParams: null,
   error: null,
   isRestoringSession: true,
+  authEpoch: 0,
+  // New installs open in the dealership-studio theme shown throughout the
+  // product. Explicitly saved light/system preferences still restore below.
+  theme: "dark",
   preferredStyle: StyleOption.Modern,
   preferredTone: ToneOption.Excited,
   compactMode: false,
+  imageQualityTier: "standard",
 
   applyAuthPayload: (body) => {
     const dealer = body.dealer || null;
@@ -167,6 +210,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       generatedPost: null,
       generationParams: null,
       error: null,
+      authEpoch: get().authEpoch + 1,
     });
     if (dealer) {
       const preferences = get();
@@ -178,10 +222,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         generatedPost: undefined,
         generationParams: undefined,
         compactMode: preferences.compactMode,
+        imageQualityTier: preferences.imageQualityTier,
+        theme: preferences.theme,
         preferredStyle: preferences.preferredStyle,
         preferredTone: preferences.preferredTone,
       });
     }
+    publishAuthBoundary();
   },
 
   impersonatePerson: async (personId: string) => {
@@ -209,7 +256,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setStep: (step) => {
-    set({ step });
+    const startsNewCapture = step === AppStep.CAPTURE;
+    set(
+      startsNewCapture
+        ? {
+            step,
+            generationParams: null,
+          }
+        : { step },
+    );
     const { currentDealer, generatedPost, selectedImage } = get();
     if (currentDealer) {
       saveSession({
@@ -217,7 +272,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         dealerId: currentDealer.id,
         generatedPost: generatedPost || undefined,
         selectedImage: selectedImage || undefined,
-        generationParams: get().generationParams || undefined,
+        generationParams: startsNewCapture
+          ? undefined
+          : get().generationParams || undefined,
       });
     }
   },
@@ -240,14 +297,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setGeneratedPost: (post) => {
+    const previousImage = get().generatedPost?.image;
     set({ generatedPost: post });
     const { currentDealer, step, selectedImage } = get();
     if (currentDealer) {
-      void saveDealerCreative(
-        currentDealer.id,
-        "generated",
-        post?.image || null,
-      );
+      void saveDealerCreative(currentDealer.id, "generated", post?.image || null);
+      if (post?.image && post.image !== previousImage) {
+        void archiveDealerMedia(currentDealer.id, {
+          kind: "generated-image",
+          source: post.image,
+          label: "Generated image",
+        });
+      }
       saveSession({
         generatedPost: post || undefined,
         dealerId: currentDealer.id,
@@ -278,7 +339,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => {
       const newState = { ...state, ...prefs };
       saveSession({
+        theme: newState.theme,
         compactMode: newState.compactMode,
+        imageQualityTier: newState.imageQualityTier,
         preferredStyle: newState.preferredStyle,
         preferredTone: newState.preferredTone,
       });
@@ -286,29 +349,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
-  login: async (dealerCode: string) => {
+  login: async (dealerCode: string, turnstileToken?: string) => {
     try {
       const res = await fetchSession({
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dealerCode }),
+        body: JSON.stringify({
+          dealerCode,
+          ...(turnstileToken ? { turnstileToken } : {}),
+        }),
       });
 
       if (!res.ok) {
-        let serverMessage = "";
-        try {
-          const body = await res.json();
-          serverMessage = (body?.error || "").toString();
-        } catch {
-          /* not json */
-        }
-        if (res.status === 400 || res.status === 401) {
-          throw new Error("INVALID_DEALER_CODE");
-        }
-        if (res.status === 429 && serverMessage) {
-          throw new Error(serverMessage);
-        }
-        throw new Error("SIGN_IN_UNAVAILABLE");
+        throw await readApiError(res, { notifyAuth: false });
       }
 
       const body = await res.json();
@@ -327,38 +380,76 @@ export const useAppStore = create<AppState>((set, get) => ({
           person: body.person || null,
           is_impersonation: !!body.is_impersonation,
         });
-        return true;
+        return { ok: true };
       }
-      return false;
+      throw new ApiError("Sign-in response did not include a dealership.", {
+        code: "UNAVAILABLE",
+        status: 503,
+      });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
+      const isTimeout = err instanceof DOMException && err.name === "AbortError";
+      const code = isTimeout
+        ? "UNAVAILABLE"
+        : err instanceof ApiError
+          ? asSessionErrorCode(err.code)
+          : "UNAVAILABLE";
+      const retryAfterSeconds =
+        err instanceof ApiError ? err.retryAfterSeconds : undefined;
       logError("app.login.failed", {
-        message: errorMessage,
+        errorCode: code,
         codeLength: dealerCode.length,
       });
-      const isTimeout =
-        err instanceof DOMException && err.name === "AbortError";
       const userMessage =
-        errorMessage === "INVALID_DEALER_CODE"
+        code === "INVALID_CODE"
           ? "That access code was not recognized. Check it and try again."
-          : isTimeout ||
-              errorMessage === "SIGN_IN_UNAVAILABLE" ||
-              err instanceof TypeError
-            ? "The secure sign-in service is unavailable right now. Check your connection and try again."
-            : errorMessage;
+          : code === "CHALLENGE_REQUIRED"
+            ? "Complete the security check to continue."
+            : code === "LOCKED"
+              ? "Too many attempts. Sign-in is temporarily locked."
+              : "The secure sign-in service is unavailable right now. Check your connection and try again.";
       set({
         error: userMessage,
       });
-      return false;
+      return {
+        ok: false,
+        code,
+        message:
+          code === "UNAVAILABLE" && errorMessage && !isTimeout
+            ? userMessage
+            : userMessage,
+        retryAfterSeconds,
+      };
     }
   },
 
   logout: async () => {
-    const dealerId = get().currentDealer?.id;
     try {
-      await fetchSession({ method: "DELETE" });
+      const response = await fetchSession({ method: "DELETE" });
+      if (response.status === 401) {
+        // The server is already authoritative: there is no active session.
+        // Treat this as a completed sign-out and clear the stale local shell.
+      } else if (!response.ok) {
+        const detail = await readApiError(response, { notifyAuth: false });
+        logError("app.logout.failed", {
+          status: response.status,
+          code: detail.code || "UNKNOWN",
+        });
+        set({
+          error:
+            "Secure sign-out did not complete. Your session is still active; check your connection and try again.",
+        });
+        return;
+      }
     } catch (err) {
-      console.error("Logout error", err);
+      logError("app.logout.failed", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      set({
+        error:
+          "Secure sign-out did not complete. Your session is still active; check your connection and try again.",
+      });
+      return;
     }
     set({
       currentDealer: null,
@@ -369,9 +460,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       error: null,
       step: AppStep.LOGIN,
       role: "salesperson",
+      authEpoch: get().authEpoch + 1,
     });
     clearSession();
-    if (dealerId) void clearDealerCreatives(dealerId);
+    // Includes short-lived original-photo recovery copies. The storage helper
+    // coordinates upgrades and falls back to deleting the private database.
+    const mediaCleared = await clearAllCreatives();
+    if (!mediaCleared) {
+      logError("media.storage.clear_failed", {
+        boundary: "logout",
+      });
+    }
+    publishAuthBoundary();
   },
 
   reset: () => {
@@ -387,6 +487,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       generatedPost: null,
       selectedImage: null,
+      generationParams: null,
       error: null,
       step: nextStep,
     });
@@ -473,7 +574,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           set({
             currentDealer: dealer,
             role: serverRole,
-            currentPerson: (body.person as Person | undefined) || null,
+            currentPerson: (body.person as PersonSummary | undefined) || null,
             isImpersonating: !!body.is_impersonation,
             selectedImage: restoredSelectedImage,
             generatedPost: restoredGeneratedPost,
@@ -482,6 +583,10 @@ export const useAppStore = create<AppState>((set, get) => ({
               : null) as GenerationParams | null,
             step: restoredStep,
             compactMode: session?.compactMode ?? false,
+            imageQualityTier: session?.imageQualityTier ?? "standard",
+            ...(session?.theme
+              ? { theme: session.theme as "dark" | "light" | "system" }
+              : {}),
             // Restore saved style/tone for authenticated users too. These were
             // previously only restored in the unauthenticated fall-through
             // (which returns early above), so a logged-in user's preferences
@@ -493,6 +598,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               ? { preferredTone: session.preferredTone as ToneOption }
               : {}),
             isRestoringSession: false,
+            authEpoch: get().authEpoch + 1,
           });
           logEvent("app.session.restored", {
             step: restoredStep,
@@ -513,6 +619,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (session?.compactMode !== undefined) {
         set({ compactMode: session.compactMode });
       }
+      if (session?.imageQualityTier) {
+        set({ imageQualityTier: session.imageQualityTier });
+      }
+      if (session?.theme) {
+        set({ theme: session.theme as "dark" | "light" | "system" });
+      }
       if (session?.preferredStyle) {
         set({ preferredStyle: session.preferredStyle as StyleOption });
       }
@@ -523,3 +635,51 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 }));
+
+setActiveAuthEpoch(useAppStore.getState().authEpoch);
+useAppStore.subscribe((state, previousState) => {
+  if (state.authEpoch !== previousState.authEpoch) {
+    setActiveAuthEpoch(state.authEpoch);
+  }
+});
+
+if (typeof window !== "undefined") {
+  let externalBoundaryPending = false;
+  const handleExternalBoundary = (event?: Event) => {
+    if (
+      event?.type === AUTH_SESSION_REJECTED_EVENT &&
+      event instanceof CustomEvent &&
+      event.detail?.authEpoch !== useAppStore.getState().authEpoch
+    ) {
+      return;
+    }
+    if (externalBoundaryPending) return;
+    externalBoundaryPending = true;
+    const state = useAppStore.getState();
+    useAppStore.setState({
+      currentDealer: null,
+      currentPerson: null,
+      isImpersonating: false,
+      selectedImage: null,
+      generatedPost: null,
+      generationParams: null,
+      error: null,
+      role: "salesperson",
+      step: AppStep.LOGIN,
+      isRestoringSession: true,
+      authEpoch: state.authEpoch + 1,
+    });
+    void clearAllCreatives()
+      .then(() => useAppStore.getState().restoreSession())
+      .finally(() => {
+        externalBoundaryPending = false;
+      });
+  };
+  window.addEventListener("storage", (event) => {
+    if (event.key === AUTH_BOUNDARY_STORAGE_KEY) handleExternalBoundary();
+  });
+  window.addEventListener(AUTH_SESSION_REJECTED_EVENT, handleExternalBoundary);
+  if (authBoundaryChannel) {
+    authBoundaryChannel.onmessage = handleExternalBoundary;
+  }
+}

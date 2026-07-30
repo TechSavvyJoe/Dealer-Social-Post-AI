@@ -4,10 +4,10 @@
 
 // Standard animation durations (in seconds)
 export const ANIMATION_DURATIONS = {
-  quick: 0.2,      // Micro-interactions (hover, focus)
-  standard: 0.3,   // Form feedback, simple state changes
-  smooth: 0.4,     // Page transitions, modal open/close
-  extended: 0.6,   // Complex animations, emphasis
+  quick: 0.2, // Micro-interactions (hover, focus)
+  standard: 0.3, // Form feedback, simple state changes
+  smooth: 0.4, // Page transitions, modal open/close
+  extended: 0.6, // Complex animations, emphasis
 } as const;
 
 // Spring animation configurations
@@ -59,7 +59,7 @@ export const slideInRight = {
 export const hoverScale = {
   whileHover: { scale: 1.02 },
   whileTap: { scale: 0.98 },
-  transition: { type: 'spring', ...SPRING_CONFIGS.snappy },
+  transition: { type: "spring", ...SPRING_CONFIGS.snappy },
 };
 
 export const hoverLift = {
@@ -69,9 +69,9 @@ export const hoverLift = {
 
 // Check if user prefers reduced motion
 export const shouldReduceMotion = (): boolean => {
-  if (typeof window === 'undefined') return false;
+  if (typeof window === "undefined") return false;
   if (!window.matchMedia) return false; // Handle test environments
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 };
 
 // Helper to create motion props that respect reduced motion preference

@@ -38,7 +38,7 @@ pass "Health endpoint reachable ($HEALTH_CODE)"
 # 2. Proxy with NO auth → 401.
 # -----------------------------------------------------------------------------
 CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
-  -X POST "$BASE/api/proxy/v1beta/models/gemini-3.5-flash:generateContent" \
+  -X POST "$BASE/api/proxy/v1beta/models/gemini-3.6-flash:generateContent" \
   -H "Content-Type: application/json" -d '{}')
 [ "$CODE" = "401" ] || fail "Proxy without auth returned $CODE (expected 401)"
 pass "Proxy rejects unauthenticated requests"

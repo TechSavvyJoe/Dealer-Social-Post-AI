@@ -1,4 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from "react";
+import { logError } from "../utils/telemetry";
+import { clearAllCreatives } from "../utils/creativeStorage";
 
 interface Props {
   children: ReactNode;
@@ -37,24 +39,19 @@ export class ErrorBoundary extends Component<Props, State> {
     this.setState({ errorInfo });
     console.error("[ErrorBoundary]", error, errorInfo);
 
-    // Best-effort telemetry — never block render on this.
+    // Keep crash telemetry inside the same redacted envelope as every other
+    // client error. Raw messages, stacks, URLs, and user agents can contain
+    // customer or credential data and must never be sent to the persistence
+    // endpoint.
     try {
-      const payload = {
-        message: error.message,
-        stack: error.stack,
-        componentStack: errorInfo.componentStack,
-        url: typeof window !== "undefined" ? window.location.href : "",
-        userAgent:
-          typeof navigator !== "undefined" ? navigator.userAgent : "",
-        ts: new Date().toISOString(),
-      };
-      fetch("/api/telemetry", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: "render_error", payload }),
-        credentials: "include",
-      }).catch(() => {
-        /* swallow — telemetry is best-effort */
+      const errorName = error?.name || "Error";
+      const errorCode = /^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/.test(errorName)
+        ? errorName
+        : "RENDER_ERROR";
+      logError("app.render.crash", {
+        errorCode,
+        kind: "render_error",
+        target: "react_boundary",
       });
     } catch {
       /* swallow */
@@ -72,6 +69,18 @@ export class ErrorBoundary extends Component<Props, State> {
 
   private handleResetSession = async () => {
     try {
+      // Revoke the server-side cookie when the API is reachable. A client-only
+      // reset would immediately restore the same session on the next load.
+      try {
+        await fetch("/api/app/session", {
+          method: "DELETE",
+          credentials: "include",
+          cache: "no-store",
+        });
+      } catch {
+        /* backend unavailable — local recovery must still continue */
+      }
+      await clearAllCreatives();
       // Clear app state in localStorage
       try {
         Object.keys(localStorage).forEach((k) => {
@@ -164,12 +173,10 @@ export class ErrorBoundary extends Component<Props, State> {
                 />
               </svg>
             </div>
-            <h1 className="text-2xl font-bold text-white mb-2">
-              Something went wrong
-            </h1>
+            <h1 className="text-2xl font-bold text-white mb-2">Something went wrong</h1>
             <p className="text-surface-300 mb-6 text-sm">
-              The app hit an unexpected error. Try one of these — they go from
-              least to most destructive.
+              The app hit an unexpected error. Try one of these — they go from least to
+              most destructive.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

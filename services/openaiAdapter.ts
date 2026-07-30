@@ -10,16 +10,25 @@
  * route `/api/proxy/openai/v1/images/generations` in pb_hooks/main.pb.js
  * adds the auth header so the key never reaches the browser.
  */
-import { FLAGS, OPENAI_MODELS } from "./modelConfig";
+import { FLAGS, MODEL_POLICY_VERSION, OPENAI_MODELS } from "./modelConfig";
+import {
+  assertAuthEpoch,
+  captureAuthEpoch,
+  notifySessionRejected,
+} from "../utils/authBoundary";
 
 const PROXY_PATH = "/api/proxy/openai/v1/images/generations";
 
 interface OpenAIImageOptions {
   prompt: string;
+  task?: "image_standard" | "image_studio";
+  attemptId?: string;
   /** Standard GPT Image sizes; GPT Image 2 also supports bounded custom sizes. */
   size?: "1024x1024" | "1024x1536" | "1536x1024";
   /** GPT Image quality tier. */
   quality?: "low" | "medium" | "high";
+  /** Originating authenticated workspace for cross-provider failover. */
+  requestAuthEpoch?: number;
 }
 
 interface OpenAIImageResponse {
@@ -29,8 +38,18 @@ interface OpenAIImageResponse {
 
 // Auth: HttpOnly session cookie attached via credentials:"include" at the
 // fetch call site. VITE_PROXY_ACCESS_TOKEN removed 2026-05-28.
-const proxyHeaders = (): Record<string, string> => ({
+const proxyHeaders = (
+  task?: OpenAIImageOptions["task"],
+  attemptId?: string,
+): Record<string, string> => ({
   "Content-Type": "application/json",
+  ...(task
+    ? {
+        "X-Generation-Task": task,
+        "X-Model-Policy-Version": MODEL_POLICY_VERSION,
+        ...(attemptId ? { "X-Generation-Attempt-ID": attemptId } : {}),
+      }
+    : {}),
 });
 
 /**
@@ -44,6 +63,7 @@ const proxyHeaders = (): Record<string, string> => ({
 export const generateImageViaOpenAI = async (
   options: OpenAIImageOptions,
 ): Promise<string> => {
+  const requestAuthEpoch = options.requestAuthEpoch ?? captureAuthEpoch();
   if (!FLAGS.enableOpenAIFallback) {
     throw new Error(
       "OpenAI fallback is disabled (set VITE_ENABLE_OPENAI_FALLBACK=true)",
@@ -59,14 +79,16 @@ export const generateImageViaOpenAI = async (
     output_format: "png",
   };
 
+  assertAuthEpoch(requestAuthEpoch);
   const res = await fetch(PROXY_PATH, {
     method: "POST",
     credentials: "include",
-    headers: proxyHeaders(),
+    headers: proxyHeaders(options.task, options.attemptId),
     body: JSON.stringify(body),
   });
 
   if (!res.ok) {
+    if (res.status === 401) notifySessionRejected(requestAuthEpoch);
     let detail = `${res.status} ${res.statusText}`;
     try {
       const errBody = await res.json();
@@ -78,6 +100,7 @@ export const generateImageViaOpenAI = async (
   }
 
   const payload: OpenAIImageResponse = await res.json();
+  assertAuthEpoch(requestAuthEpoch);
   if (payload.error) {
     throw new Error(`OpenAI image error: ${payload.error.message}`);
   }
@@ -85,6 +108,7 @@ export const generateImageViaOpenAI = async (
   if (!b64) {
     throw new Error("OpenAI returned no image data");
   }
+  assertAuthEpoch(requestAuthEpoch);
   return `data:image/png;base64,${b64}`;
 };
 

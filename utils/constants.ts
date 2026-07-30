@@ -6,7 +6,8 @@ export const LOADING_MESSAGES = [
   "Warming up the engine...",
   "Consulting with our design AI...",
   "Applying your edits...",
-  "Finalizing the details..."
+  "Finalizing the details...",
 ];
 
-export const API_KEY_REQUIRED_MESSAGE = "Please add your Gemini API key in Settings to use AI features.";
+export const API_KEY_REQUIRED_MESSAGE =
+  "Please add your Gemini API key in Settings to use AI features.";

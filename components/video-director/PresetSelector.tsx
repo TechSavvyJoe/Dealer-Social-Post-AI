@@ -1,21 +1,24 @@
-import React from 'react';
-import { cn } from '../../utils/classNames';
-import { triggerHapticFeedback } from '../../utils/haptics';
-import { presets } from './constants';
-import { VideoRequestOptions } from '../../types';
+import React from "react";
+import { cn } from "../../utils/classNames";
+import { triggerHapticFeedback } from "../../utils/haptics";
+import { presets } from "./constants";
+import { VideoRequestOptions } from "../../types";
 
 interface PresetSelectorProps {
   currentValues: {
     duration: number;
-    soundtrack: VideoRequestOptions['soundtrack'];
-    aspectPreference: VideoRequestOptions['aspectPreference'];
-    resolution: VideoRequestOptions['resolution'];
-    pacing: VideoRequestOptions['pacing'];
+    soundtrack: VideoRequestOptions["soundtrack"];
+    aspectPreference: VideoRequestOptions["aspectPreference"];
+    resolution: VideoRequestOptions["resolution"];
+    pacing: VideoRequestOptions["pacing"];
   };
-  onSelect: (values: typeof presets[number]['values']) => void;
+  onSelect: (values: (typeof presets)[number]["values"]) => void;
 }
 
-export const PresetSelector: React.FC<PresetSelectorProps> = ({ currentValues, onSelect }) => {
+export const PresetSelector: React.FC<PresetSelectorProps> = ({
+  currentValues,
+  onSelect,
+}) => {
   const matchesPreset = (preset: (typeof presets)[number]) => {
     const { values } = preset;
     return (
@@ -40,7 +43,8 @@ export const PresetSelector: React.FC<PresetSelectorProps> = ({ currentValues, o
             }}
             className={cn(
               "rounded-xl border border-surface-800 bg-surface-900/70 hover:border-primary-400/60 hover:bg-primary-500/10 transition-all text-left px-3 py-3",
-              matchesPreset(preset) && "border-primary-400 bg-primary-500/10 shadow-[0_0_0_1px_rgba(59,130,246,0.35)]"
+              matchesPreset(preset) &&
+                "border-primary-400 bg-primary-500/10 shadow-[0_0_0_1px_rgba(59,130,246,0.35)]",
             )}
           >
             <div className="flex items-center justify-between gap-2 mb-1">

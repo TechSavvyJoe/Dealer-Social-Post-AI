@@ -27,12 +27,7 @@ import {
 } from "lucide-react";
 
 export type ScenarioCategory =
-  | "delivery"
-  | "inventory"
-  | "service"
-  | "promo"
-  | "community"
-  | "team";
+  "delivery" | "inventory" | "service" | "promo" | "community" | "team";
 
 export interface PostScenario {
   id: string;
@@ -295,12 +290,12 @@ export const parseCustomScenarios = (raw?: string): PostScenario[] => {
           // empty/undefined, letting an arbitrary string ("neon") through as a
           // bogus enum that later breaks style switches downstream.
           defaultStyle: Object.values(StyleOption).includes(
-            entry.defaultStyle as StyleOption
+            entry.defaultStyle as StyleOption,
           )
             ? (entry.defaultStyle as StyleOption)
             : StyleOption.Modern,
           defaultTone: Object.values(ToneOption).includes(
-            entry.defaultTone as ToneOption
+            entry.defaultTone as ToneOption,
           )
             ? (entry.defaultTone as ToneOption)
             : ToneOption.Promotional,
@@ -309,13 +304,11 @@ export const parseCustomScenarios = (raw?: string): PostScenario[] => {
           promptAdditions: entry.promptAdditions,
           suggestedHashtags: Array.isArray(entry.suggestedHashtags)
             ? entry.suggestedHashtags.filter(
-                (h: unknown): h is string => typeof h === "string"
+                (h: unknown): h is string => typeof h === "string",
               )
             : [],
           starterCaption:
-            typeof entry.starterCaption === "string"
-              ? entry.starterCaption
-              : undefined,
+            typeof entry.starterCaption === "string" ? entry.starterCaption : undefined,
         });
       }
     }
@@ -331,17 +324,13 @@ export const parseCustomScenarios = (raw?: string): PostScenario[] => {
  * Custom scenarios are appended after built-ins in their category so the GSM
  * can see their templates alongside the defaults.
  */
-export const getScenariosForDealer = (
-  customScenariosJson?: string
-): PostScenario[] => {
+export const getScenariosForDealer = (customScenariosJson?: string): PostScenario[] => {
   const custom = parseCustomScenarios(customScenariosJson);
   return [...POST_SCENARIOS, ...custom];
 };
 
 /** Helper to encode a custom-scenarios array back to JSON for persistence. */
-export const serializeCustomScenarios = (
-  scenarios: PostScenario[]
-): string => {
+export const serializeCustomScenarios = (scenarios: PostScenario[]): string => {
   return JSON.stringify(scenarios);
 };
 
@@ -380,7 +369,7 @@ export const SCENARIO_CATEGORY_ICON: Record<ScenarioCategory, LucideIcon> = {
  */
 export const scenarioToCreativeBrief = (
   id?: string,
-  customScenariosJson?: string
+  customScenariosJson?: string,
 ): string => {
   if (!id) return "";
   const scenario =
@@ -392,11 +381,7 @@ export const scenarioToCreativeBrief = (
         " ",
       )}.`
     : "";
-  return [
-    `Post scenario: ${scenario.label}.`,
-    scenario.promptAdditions,
-    hashtagLine,
-  ]
+  return [`Post scenario: ${scenario.label}.`, scenario.promptAdditions, hashtagLine]
     .filter(Boolean)
     .join("\n");
 };

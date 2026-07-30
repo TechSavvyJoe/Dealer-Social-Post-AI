@@ -22,18 +22,23 @@ import {
   Megaphone,
   Command,
   CornerDownLeft,
+  RefreshCw,
+  ShieldCheck,
+  Trash2,
+  Image as ImageIcon,
+  Film,
   type LucideIcon,
 } from "lucide-react";
-import { StyleOption, ToneOption } from "../types";
+import {
+  StyleOption,
+  ToneOption,
+  type GenerationParams,
+  type MediaOutputMode,
+  type PrimaryImageFormatId,
+} from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Button } from "./ui/Button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "./ui/Card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { Input, Textarea, Select } from "./ui/Input";
 import { POST_TEMPLATES } from "./templates";
@@ -42,23 +47,24 @@ import { VinScanner } from "./VinScanner";
 import { DecodedVehicle, vehicleToCreativeBrief } from "../services/vinDecoder";
 import { PhotoReleaseModal } from "./PhotoReleaseModal";
 import { useAppStore } from "../stores/appStore";
-import { ShieldCheck } from "lucide-react";
 import { CapturedRelease } from "../services/photoReleases";
-import { SalespersonPicker } from "./SalespersonPicker";
 import { ScenarioPicker } from "./ScenarioPicker";
 import {
   PostScenario,
   POST_SCENARIOS,
   scenarioToCreativeBrief,
-  findScenario,
   getScenariosForDealer,
 } from "../services/postScenarios";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { ProgressiveImage } from "./ui/ProgressiveImage";
 import {
   DEFAULT_PLATFORM_IDS,
+  getPrimaryImageProfile,
   getPlatformOptions,
+  getSecondaryPlatformOptions,
   platformsToCreativeBrief,
+  resolvePrimaryImageProfile,
+  type PrimaryImageProfile,
   type PlatformId,
 } from "../services/platformCopy";
 import { brandHashtagFromName, formatHashtag } from "../utils/hashtags";
@@ -75,10 +81,13 @@ interface PostCustomizerProps {
       salespersonName?: string;
       salespersonId?: string;
       vin?: string;
+      scenarioId?: string;
       hasRelease?: boolean;
       capturedRelease?: CapturedRelease;
     },
     platformIds?: PlatformId[],
+    outputProfile?: PrimaryImageProfile,
+    mediaOutputMode?: MediaOutputMode,
   ) => Promise<void> | void;
   onBack: () => void;
   dealershipName: string;
@@ -87,7 +96,18 @@ interface PostCustomizerProps {
   onStyleToneChange: (style: StyleOption, tone: ToneOption) => void;
   isDesktopLayout: boolean;
   isGenerating?: boolean;
+  /**
+   * Previous exact delivery choices, supplied only when retrying or remixing
+   * the current capture. A brand-new capture intentionally omits this value.
+   */
+  initialGenerationParams?: GenerationParams | null;
 }
+
+const normalizeReleaseCustomer = (value: string | undefined): string =>
+  (value || "").normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " ").trim();
+
+const normalizeReleaseVin = (value: string | undefined): string =>
+  (value || "").trim().toUpperCase();
 
 // Style descriptions. Icons are lucide components (not emoji) so they render
 // identically across OS/browser, sit on the baseline, and share one stroke weight.
@@ -165,6 +185,30 @@ const TypewriterText: React.FC<{ text: string }> = ({ text }) => {
 
 type CaptionSource = "ai" | "custom";
 
+const OUTPUT_FORMAT_CHOICES: Array<{
+  id: PrimaryImageFormatId;
+  label: string;
+  size: string;
+}> = [
+  { id: "story_vertical", label: "Story / Reel", size: "1080×1920" },
+  { id: "feed_portrait", label: "Feed portrait", size: "1080×1350" },
+  { id: "feed_square", label: "Feed", size: "1080×1080" },
+  { id: "marketplace", label: "Marketplace", size: "1200×628" },
+  { id: "gbp", label: "Google", size: "1200×900" },
+];
+
+const isMediaOutputMode = (value: unknown): value is MediaOutputMode =>
+  value === "photo" || value === "video" || value === "both";
+
+const isStyleOption = (value: unknown): value is StyleOption =>
+  Object.values(StyleOption).includes(value as StyleOption);
+
+const isToneOption = (value: unknown): value is ToneOption =>
+  Object.values(ToneOption).includes(value as ToneOption);
+
+const isPrimaryImageFormatId = (value: unknown): value is PrimaryImageFormatId =>
+  OUTPUT_FORMAT_CHOICES.some((format) => format.id === value);
+
 export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   imageSrc,
   onGenerate,
@@ -175,35 +219,110 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   onStyleToneChange,
   isDesktopLayout,
   isGenerating = false,
+  initialGenerationParams,
 }) => {
-  const [customerName, setCustomerName] = useState("");
-  const [style, setStyle] = useState<StyleOption>(defaultStyle);
-  const [selectedPlatforms, setSelectedPlatforms] = useState<PlatformId[]>(
-    () => [...DEFAULT_PLATFORM_IDS],
+  const currentDealer = useAppStore((s) => s.currentDealer);
+  const currentPerson = useAppStore((s) => s.currentPerson);
+  const restoredCustomerName =
+    typeof initialGenerationParams?.customerName === "string"
+      ? initialGenerationParams.customerName
+      : "";
+  const restoredCustomText =
+    typeof initialGenerationParams?.customText === "string"
+      ? initialGenerationParams.customText
+      : "";
+  const [customerName, setCustomerName] = useState(restoredCustomerName);
+  const [style, setStyle] = useState<StyleOption>(() =>
+    isStyleOption(initialGenerationParams?.style)
+      ? initialGenerationParams.style
+      : defaultStyle,
   );
-  const platformOptions = useMemo(() => getPlatformOptions(), []);
-  const [tone, setTone] = useState<ToneOption>(defaultTone);
-  const [customMessage, setCustomMessage] = useState("");
-  const [captionSource, setCaptionSource] = useState<CaptionSource>("ai");
+  const primaryPlatformOptions = useMemo(() => getPlatformOptions(), []);
+  const secondaryPlatformOptions = useMemo(() => getSecondaryPlatformOptions(), []);
+  const platformOptions = useMemo(
+    () => [...primaryPlatformOptions, ...secondaryPlatformOptions],
+    [primaryPlatformOptions, secondaryPlatformOptions],
+  );
+  const supportedPlatformIds = useMemo(
+    () => new Set(platformOptions.map((platform) => platform.id)),
+    [platformOptions],
+  );
+  const initialPlatforms = useMemo(() => {
+    const restored = Array.from(
+      new Set(
+        (initialGenerationParams?.platformIds || []).filter((platformId) =>
+          supportedPlatformIds.has(platformId),
+        ),
+      ),
+    );
+    return restored.length > 0 ? restored : [...DEFAULT_PLATFORM_IDS];
+  }, [initialGenerationParams?.platformIds, supportedPlatformIds]);
+  const [selectedPlatforms, setSelectedPlatforms] =
+    useState<PlatformId[]>(initialPlatforms);
+  const [showMorePlatforms, setShowMorePlatforms] = useState(() => {
+    const restored = new Set(initialGenerationParams?.platformIds || []);
+    return secondaryPlatformOptions.some((platform) => restored.has(platform.id));
+  });
+  const selectedSecondaryCount = useMemo(
+    () =>
+      secondaryPlatformOptions.filter((platform) =>
+        selectedPlatforms.includes(platform.id),
+      ).length,
+    [secondaryPlatformOptions, selectedPlatforms],
+  );
+  const [mediaOutputMode, setMediaOutputMode] = useState<MediaOutputMode>(() =>
+    isMediaOutputMode(initialGenerationParams?.mediaOutputMode)
+      ? initialGenerationParams.mediaOutputMode
+      : "photo",
+  );
+  const [primaryFormatOverride, setPrimaryFormatOverride] =
+    useState<PrimaryImageFormatId | null>(() => {
+      const restoredFormat = initialGenerationParams?.primaryFormatId;
+      return isPrimaryImageFormatId(restoredFormat) ? restoredFormat : null;
+    });
+  const suggestedImageProfile = useMemo(
+    () => resolvePrimaryImageProfile(selectedPlatforms),
+    [selectedPlatforms],
+  );
+  const primaryImageProfile = useMemo(
+    () =>
+      primaryFormatOverride
+        ? getPrimaryImageProfile(primaryFormatOverride)
+        : suggestedImageProfile,
+    [primaryFormatOverride, suggestedImageProfile],
+  );
+  const [tone, setTone] = useState<ToneOption>(() =>
+    isToneOption(initialGenerationParams?.tone)
+      ? initialGenerationParams.tone
+      : defaultTone,
+  );
+  const [customMessage, setCustomMessage] = useState(restoredCustomText);
+  const [captionSource, setCaptionSource] = useState<CaptionSource>(() =>
+    restoredCustomText.trim() ? "custom" : "ai",
+  );
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [vinScannerOpen, setVinScannerOpen] = useState(false);
-  const [decodedVehicle, setDecodedVehicle] = useState<DecodedVehicle | null>(
-    null,
-  );
+  const [decodedVehicle, setDecodedVehicle] = useState<DecodedVehicle | null>(null);
   const [releaseModalOpen, setReleaseModalOpen] = useState(false);
   const [releaseValidationError, setReleaseValidationError] = useState(false);
   // Captured signature stays local until Generate. useGeneration durably saves
   // it before the customer photo is sent to an AI provider, then links that
   // same protected record to the created post.
-  const [capturedRelease, setCapturedRelease] =
-    useState<CapturedRelease | null>(null);
-  const currentDealer = useAppStore((s) => s.currentDealer);
+  const [capturedRelease, setCapturedRelease] = useState<CapturedRelease | null>(null);
 
   // Post scenario — drives prompt context + default style/tone. "customer_delivery"
   // is the implicit default; an undefined value also resolves to that.
-  const [scenarioId, setScenarioId] = useState<string>(POST_SCENARIOS[0].id);
+  const [scenarioId, setScenarioId] = useState<string>(() => {
+    const restoredScenarioId = initialGenerationParams?.scenarioId;
+    return restoredScenarioId &&
+      getScenariosForDealer(currentDealer?.custom_scenarios).some(
+        (scenario) => scenario.id === restoredScenarioId,
+      )
+      ? restoredScenarioId
+      : POST_SCENARIOS[0].id;
+  });
   // Scenario lookup now considers the dealer's custom_scenarios JSON too.
   const activeScenario = useMemo(() => {
     const all = getScenariosForDealer(currentDealer?.custom_scenarios);
@@ -222,38 +341,43 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         .map((s) => s.trim())
         .filter(Boolean),
     );
-    const filtered = Object.values(StyleOption).filter((s) =>
-      allowedSet.has(s),
-    );
+    const filtered = Object.values(StyleOption).filter((s) => allowedSet.has(s));
     return filtered.length > 0 ? filtered : Object.values(StyleOption);
   }, [currentDealer?.enabled_styles]);
 
-  const dealerDefaultStyle = currentDealer?.default_style as
-    StyleOption | undefined;
+  const dealerDefaultStyle = currentDealer?.default_style as StyleOption | undefined;
 
-  // Salesperson identity — picker pulls from the dealer's roster (if any),
-  // falls back to a free-text input when the roster is empty. Persists last
-  // selection in localStorage so the same iPad keeps the same identity.
-  const [salesperson, setSalesperson] = useState<{
-    id?: string;
-    name: string;
-  }>({ name: "" });
-  const salespersonName = salesperson.name;
-
-  // Sync with defaults. Order of precedence:
-  //   1. Dealer-set default_style (if it's in the enabled set)
-  //   2. User-level preferred style (if it's in the enabled set)
-  //   3. First enabled style
+  // Sync with defaults. A safe retry/remix seed wins when it is still allowed;
+  // otherwise use the dealer default, user preference, then first enabled style.
   useEffect(() => {
-    let nextStyle: StyleOption = defaultStyle;
-    if (dealerDefaultStyle && allowedStyles.includes(dealerDefaultStyle)) {
+    const restoredStyle = initialGenerationParams?.style;
+    let nextStyle: StyleOption =
+      isStyleOption(restoredStyle) && allowedStyles.includes(restoredStyle)
+        ? restoredStyle
+        : defaultStyle;
+    if (
+      !(isStyleOption(restoredStyle) && allowedStyles.includes(restoredStyle)) &&
+      dealerDefaultStyle &&
+      allowedStyles.includes(dealerDefaultStyle)
+    ) {
       nextStyle = dealerDefaultStyle;
     } else if (!allowedStyles.includes(nextStyle)) {
       nextStyle = allowedStyles[0];
     }
     setStyle(nextStyle);
-    setTone(defaultTone);
-  }, [defaultStyle, defaultTone, dealerDefaultStyle, allowedStyles]);
+    setTone(
+      isToneOption(initialGenerationParams?.tone)
+        ? initialGenerationParams.tone
+        : defaultTone,
+    );
+  }, [
+    defaultStyle,
+    defaultTone,
+    dealerDefaultStyle,
+    allowedStyles,
+    initialGenerationParams?.style,
+    initialGenerationParams?.tone,
+  ]);
 
   // When the salesperson picks a new scenario, retune style + tone to the
   // scenario's smart defaults — but respect the dealer's enabled_styles list
@@ -302,6 +426,21 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
       setReleaseModalOpen(true);
       return;
     }
+    if (
+      capturedRelease &&
+      (normalizeReleaseCustomer(capturedRelease.customerName) !==
+        normalizeReleaseCustomer(customerName) ||
+        normalizeReleaseVin(capturedRelease.vin) !==
+          normalizeReleaseVin(decodedVehicle?.vin))
+    ) {
+      // A signature is authority for one exact customer/vehicle pair. If
+      // restored or stale UI state ever diverges, discard it before any
+      // provider request and require a fresh acknowledgement.
+      setCapturedRelease(null);
+      setReleaseValidationError(true);
+      setReleaseModalOpen(true);
+      return;
+    }
     setReleaseValidationError(false);
     let preparedText: string | undefined;
 
@@ -320,10 +459,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
       briefParts.push(scenarioBlock);
     }
 
-    const platformBrief = platformsToCreativeBrief(
-      selectedPlatforms,
-      dealershipName,
-    );
+    const platformBrief = platformsToCreativeBrief(selectedPlatforms, dealershipName);
     if (platformBrief) {
       briefParts.push(platformBrief);
     }
@@ -430,13 +566,14 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         preparedText,
         creativeBrief,
         {
-          salespersonName: salesperson.name.trim() || undefined,
-          salespersonId: salesperson.id,
           vin: decodedVehicle?.vin,
+          scenarioId,
           hasRelease: !!capturedRelease,
           capturedRelease: capturedRelease || undefined,
         },
         selectedPlatforms,
+        primaryImageProfile,
+        mediaOutputMode,
       );
     } finally {
       setIsSubmitting(false);
@@ -448,12 +585,13 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     customerName,
     customMessage,
     decodedVehicle,
-    salesperson,
     capturedRelease,
     currentDealer,
     scenarioId,
     activeScenario.requiresCustomer,
     selectedPlatforms,
+    primaryImageProfile,
+    mediaOutputMode,
     dealershipName,
     onGenerate,
   ]);
@@ -533,9 +671,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 />
               </motion.div>
               <div className="min-w-0 flex-1">
-                <CardTitle className="text-lg sm:text-xl">
-                  Create your post
-                </CardTitle>
+                <CardTitle className="text-lg sm:text-xl">Create your post</CardTitle>
                 <CardDescription className="text-xs sm:text-sm">
                   Pick a style — AI handles the rest
                 </CardDescription>
@@ -546,17 +682,27 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           <CardContent className="relative space-y-5 pt-0">
             {/* Post scenario — selects which kind of post this is (delivery,
                 pre-owned spotlight, service promo, etc). Tunes prompt + defaults. */}
-            <ScenarioPicker
-              value={scenarioId}
-              onChange={handleScenarioChange}
-            />
+            <ScenarioPicker value={scenarioId} onChange={handleScenarioChange} />
 
-            {/* Salesperson — searchable roster picker w/ unrostered fallback */}
-            <SalespersonPicker
-              dealerId={currentDealer?.id ?? ""}
-              value={salesperson}
-              onChange={setSalesperson}
-            />
+            <div
+              className="flex items-center gap-3 rounded-xl border border-primary-400/20 bg-primary-500/[0.07] px-3 py-2.5"
+              aria-label={`Posting as ${currentPerson?.name || "signed-in team member"}`}
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-primary-400/20 bg-primary-500/10 text-primary-300">
+                <Users className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-primary-300">
+                  Posting as
+                </p>
+                <p className="truncate text-sm font-semibold text-surface-100">
+                  {currentPerson?.name || "Signed-in team member"}
+                </p>
+              </div>
+              <Badge variant="success" size="sm" className="shrink-0">
+                Verified
+              </Badge>
+            </div>
 
             {/* Customer Name - Compact */}
             <Input
@@ -564,6 +710,12 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
               placeholder="First name"
+              disabled={Boolean(capturedRelease)}
+              helperText={
+                capturedRelease
+                  ? "Remove or replace the signed release to change this identity."
+                  : undefined
+              }
               fullWidth
               className="bg-white/5 border-white/10 focus:border-primary-400 focus:bg-white/10 transition-colors"
             />
@@ -591,11 +743,17 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   <button
                     type="button"
                     aria-label="Clear vehicle"
+                    disabled={Boolean(capturedRelease)}
+                    title={
+                      capturedRelease
+                        ? "Remove or replace the signed release before changing the vehicle."
+                        : "Clear vehicle"
+                    }
                     onClick={() => {
                       triggerHapticFeedback();
                       setDecodedVehicle(null);
                     }}
-                    className="p-1 -mr-1 text-success-300/80 hover:text-success-100 rounded-full transition-colors"
+                    className="p-1 -mr-1 text-success-300/80 hover:text-success-100 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -611,6 +769,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   }}
                   fullWidth
                   className="border-dashed border-white/20 bg-white/5 hover:bg-white/10"
+                  disabled={Boolean(capturedRelease)}
                 >
                   Scan VIN (optional — boosts accuracy)
                 </Button>
@@ -635,8 +794,29 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       Release captured for {capturedRelease.customerName}
                     </div>
                     <div className="text-[10px] text-success-300/80">
-                      Will be saved when you generate the post.
+                      Identity and vehicle are locked to this signature.
                     </div>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCapturedRelease(null);
+                        setReleaseModalOpen(true);
+                      }}
+                      className="inline-flex min-h-11 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[11px] font-semibold text-success-100 transition-colors hover:bg-success-500/20 [.theme-light_&]:text-success-900"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                      Replace
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Remove captured release"
+                      onClick={() => setCapturedRelease(null)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-error-400/25 bg-error-500/10 text-error-100 transition-colors hover:bg-error-500/20"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
                   </div>
                 </motion.div>
               ) : (
@@ -660,8 +840,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   className="rounded-lg border border-error-500/30 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100"
                   role="alert"
                 >
-                  This customer-focused post needs a signed photo release before
-                  the photo can be sent for AI processing.
+                  This customer-focused post needs a signed photo release before the
+                  photo can be sent for AI processing.
                 </p>
               ) : null}
             </div>
@@ -738,10 +918,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                             {option.split(" ")[0]}
                           </span>
                           {isActive && (
-                            <motion.div
-                              initial={{ scale: 0 }}
-                              animate={{ scale: 1 }}
-                            >
+                            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}>
                               <Check className="h-3.5 w-3.5 text-primary-400 flex-shrink-0" />
                             </motion.div>
                           )}
@@ -749,9 +926,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         <span
                           className={cn(
                             "text-[11px] block leading-snug transition-colors",
-                            isActive
-                              ? "text-primary-200/80"
-                              : "text-surface-400",
+                            isActive ? "text-primary-200/80" : "text-surface-400",
                           )}
                         >
                           {info.desc}
@@ -782,7 +957,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 </span>
               </div>
               <div className="mobile-h-scroll -mx-1 px-1 pb-1 sm:flex-wrap sm:overflow-visible">
-                {platformOptions.map((p) => {
+                {primaryPlatformOptions.map((p) => {
                   const on = selectedPlatforms.includes(p.id);
                   return (
                     <button
@@ -793,11 +968,19 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       className={cn(
                         "min-h-11 shrink-0 snap-start rounded-full border px-3.5 py-2 text-left transition-colors",
                         on
-                          ? "border-primary-400 bg-primary-500/25 text-primary-50"
+                          ? "border-primary-400 bg-primary-500/25 text-primary-50 [.theme-light_&]:text-primary-950"
                           : "border-white/10 bg-white/5 text-surface-300 hover:border-primary-400/40",
                       )}
                     >
-                      <span className="block text-sm font-semibold">
+                      <span className="flex items-center gap-1.5 text-sm font-semibold">
+                        {on ? (
+                          <span
+                            className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-primary-300 text-primary-950"
+                            aria-hidden="true"
+                          >
+                            <Check className="h-3 w-3" strokeWidth={3} />
+                          </span>
+                        ) : null}
                         {p.shortLabel}
                       </span>
                       <span className="block text-[10px] leading-tight opacity-80">
@@ -807,10 +990,218 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   );
                 })}
               </div>
-              <p className="text-[11px] leading-snug text-surface-500">
-                Captions are tailored to these platforms. Stories and TikTok
-                prefer vertical (9:16) exports.
-              </p>
+              <div className="overflow-hidden rounded-xl border border-white/10 bg-surface-950/25">
+                <button
+                  type="button"
+                  aria-expanded={showMorePlatforms}
+                  aria-controls="secondary-platform-options"
+                  aria-label={`More platforms, ${selectedSecondaryCount} selected`}
+                  onClick={() => {
+                    triggerHapticFeedback();
+                    setShowMorePlatforms((current) => !current);
+                  }}
+                  className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-white/5"
+                >
+                  <span>
+                    <span className="block text-xs font-semibold text-surface-200">
+                      More platforms
+                    </span>
+                    <span className="block text-[10px] text-surface-400">
+                      Reels, Marketplace, LinkedIn, X, and device share
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    {selectedSecondaryCount > 0 ? (
+                      <span className="rounded-full border border-primary-400/25 bg-primary-500/15 px-2 py-0.5 text-[10px] font-semibold text-primary-200 [.theme-light_&]:text-primary-900">
+                        {selectedSecondaryCount} selected
+                      </span>
+                    ) : null}
+                    <ChevronDown
+                      className={cn(
+                        "h-4 w-4 text-surface-400 transition-transform",
+                        showMorePlatforms && "rotate-180",
+                      )}
+                      aria-hidden="true"
+                    />
+                  </span>
+                </button>
+                <AnimatePresence initial={false}>
+                  {showMorePlatforms ? (
+                    <motion.div
+                      id="secondary-platform-options"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.18 }}
+                      className="overflow-hidden border-t border-white/10"
+                    >
+                      <div className="grid grid-cols-2 gap-2 p-2.5 sm:grid-cols-3 xl:grid-cols-5">
+                        {secondaryPlatformOptions.map((platform) => {
+                          const selected = selectedPlatforms.includes(platform.id);
+                          return (
+                            <button
+                              key={platform.id}
+                              type="button"
+                              aria-pressed={selected}
+                              onClick={() => togglePlatform(platform.id)}
+                              className={cn(
+                                "min-h-16 rounded-xl border px-2.5 py-2 text-left transition-colors",
+                                selected
+                                  ? "border-primary-400 bg-primary-500/20 text-primary-50 [.theme-light_&]:text-primary-950"
+                                  : "border-white/10 bg-white/[0.035] text-surface-300 hover:border-primary-400/35 hover:bg-white/[0.06]",
+                              )}
+                            >
+                              <span className="flex items-center gap-1.5 text-xs font-semibold">
+                                {selected ? (
+                                  <span
+                                    className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-primary-300 text-primary-950"
+                                    aria-hidden="true"
+                                  >
+                                    <Check className="h-3 w-3" strokeWidth={3} />
+                                  </span>
+                                ) : null}
+                                {platform.shortLabel}
+                              </span>
+                              <span className="mt-1 line-clamp-2 block text-[9px] leading-snug opacity-75">
+                                {platform.hint}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              </div>
+              <fieldset className="rounded-xl border border-white/10 bg-surface-950/30 p-1.5">
+                <legend className="sr-only">
+                  Media to create for each destination
+                </legend>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(
+                    [
+                      {
+                        value: "photo",
+                        label: "Photo",
+                        Icon: ImageIcon,
+                        hint: "Exact images",
+                      },
+                      {
+                        value: "video",
+                        label: "Video",
+                        Icon: Film,
+                        hint: "Motion posts",
+                      },
+                      {
+                        value: "both",
+                        label: "Both",
+                        Icon: Sparkles,
+                        hint: "Full campaign",
+                      },
+                    ] as const
+                  ).map(({ value, label, Icon, hint }) => {
+                    const selected = mediaOutputMode === value;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => {
+                          triggerHapticFeedback();
+                          setMediaOutputMode(value);
+                        }}
+                        className={cn(
+                          "min-h-12 rounded-lg border px-2 py-2 text-left transition-colors",
+                          selected
+                            ? "border-primary-300 bg-primary-500/30 text-primary-50 [.theme-light_&]:text-primary-950"
+                            : "border-transparent bg-white/[0.035] text-surface-300 hover:border-primary-400/35",
+                        )}
+                      >
+                        <span className="flex items-center gap-1.5 text-xs font-semibold">
+                          <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                          {label}
+                        </span>
+                        <span className="mt-0.5 block text-[9px] leading-tight opacity-70">
+                          {hint}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="px-1 pt-1.5 text-[10px] leading-relaxed text-surface-400">
+                  {mediaOutputMode === "photo"
+                    ? "Creates one exact, unstretched image file for every selected destination."
+                    : mediaOutputMode === "video"
+                      ? "Creates the protected photo master first, then guides you through the supported video ratios."
+                      : "Creates the exact photo set and a video-ready delivery plan without hiding extra paid renders."}
+                </p>
+              </fieldset>
+              <fieldset className="space-y-2 rounded-xl border border-primary-400/20 bg-primary-500/10 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <legend className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-300">
+                      Main image size
+                    </legend>
+                    <p className="mt-0.5 text-xs text-surface-300">
+                      This is the first composition. Every destination still gets its
+                      own exact file in the delivery board.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setPrimaryFormatOverride(null);
+                    }}
+                    aria-pressed={primaryFormatOverride === null}
+                    className={cn(
+                      "min-h-9 shrink-0 rounded-lg border px-2.5 text-[10px] font-semibold uppercase tracking-wide transition-colors",
+                      primaryFormatOverride === null
+                        ? "border-primary-300 bg-primary-500/30 text-primary-50 [.theme-light_&]:text-primary-950"
+                        : "border-white/10 bg-white/5 text-surface-300 hover:border-primary-400/40",
+                    )}
+                  >
+                    Auto
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                  {OUTPUT_FORMAT_CHOICES.map((format) => {
+                    const selected = primaryImageProfile.primaryFormatId === format.id;
+                    return (
+                      <button
+                        key={format.id}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => {
+                          triggerHapticFeedback();
+                          setPrimaryFormatOverride(format.id);
+                        }}
+                        className={cn(
+                          "min-h-12 rounded-lg border px-2 py-1.5 text-left transition-colors",
+                          selected
+                            ? "border-primary-300 bg-primary-500/30 text-primary-50 shadow-sm [.theme-light_&]:text-primary-950"
+                            : "border-white/10 bg-surface-950/25 text-surface-300 hover:border-primary-400/40",
+                        )}
+                      >
+                        <span className="block text-[11px] font-semibold leading-tight">
+                          {format.label}
+                        </span>
+                        <span className="mt-0.5 block text-[10px] tabular-nums opacity-75">
+                          {format.size}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p
+                  className="text-[10px] leading-relaxed text-surface-400"
+                  aria-live="polite"
+                >
+                  {primaryFormatOverride
+                    ? `${primaryImageProfile.label} selected as the starting composition. Destination files remain independent.`
+                    : `${suggestedImageProfile.label} recommended from your destinations. Choose a starting composition above only when needed.`}
+                </p>
+              </fieldset>
             </div>
 
             {/* Tone Selection - Horizontal Scroll on Mobile with Snap */}
@@ -876,8 +1267,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   }}
                   className={cn(
                     "flex-1 rounded-lg",
-                    captionSource !== "ai" &&
-                      "text-surface-400 hover:text-surface-200",
+                    captionSource !== "ai" && "text-surface-400 hover:text-surface-200",
                   )}
                 >
                   AI Caption
@@ -975,10 +1365,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                                   /\[Customer Name\]/g,
                                   customerName.trim() || "our amazing customer",
                                 )
-                                .replace(
-                                  /\[Dealership Name\]/g,
-                                  dealershipName,
-                                ),
+                                .replace(/\[Dealership Name\]/g, dealershipName),
                             );
                             setCaptionSource("custom");
                           }
@@ -1015,12 +1402,17 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               <Button
                 variant="filled"
                 size="lg"
-                leftIcon={
-                  <Sparkles className={cn(isBusy && "animate-pulse")} />
-                }
+                leftIcon={<Sparkles className={cn(isBusy && "animate-pulse")} />}
                 rightIcon={!isBusy && <ChevronRight />}
                 onClick={handleGenerate}
                 disabled={isBusy}
+                aria-label={`Generate Post — ${
+                  mediaOutputMode === "photo"
+                    ? "create photo outputs"
+                    : mediaOutputMode === "video"
+                      ? "create video plan"
+                      : "create photo and video set"
+                }`}
                 fullWidth
                 className="relative overflow-hidden h-14 text-base"
                 style={{
@@ -1042,7 +1434,13 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   />
                 )}
                 <span className="relative z-10 flex items-center gap-2">
-                  {isBusy ? "Creating your post..." : "Generate Post"}
+                  {isBusy
+                    ? "Creating platform outputs..."
+                    : mediaOutputMode === "photo"
+                      ? "Create photo outputs"
+                      : mediaOutputMode === "video"
+                        ? "Create video plan"
+                        : "Create photo + video set"}
                   {!isBusy && (
                     <kbd className="hidden sm:inline-flex items-center gap-1 px-1.5 py-1 rounded bg-white/15 border border-white/20 text-white/80">
                       <Command className="w-3 h-3" />
@@ -1086,6 +1484,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           defaultCustomerName={customerName}
           onCaptured={(release) => {
             setCapturedRelease(release);
+            setCustomerName(release.customerName);
             setReleaseValidationError(false);
           }}
         />

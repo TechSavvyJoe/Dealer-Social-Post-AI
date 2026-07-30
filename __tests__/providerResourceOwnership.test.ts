@@ -11,14 +11,8 @@ type ProviderResource = {
 type Policies = {
   isAllowedProxyPath(path: string): boolean;
   providerOperationStartProvider(path: string, method: string): string | null;
-  providerResourceRequest(
-    path: string,
-    method: string,
-  ): ProviderResource | null;
-  providerResourcesFromResponse(
-    path: string,
-    response: unknown,
-  ): ProviderResource[];
+  providerResourceRequest(path: string, method: string): ProviderResource | null;
+  providerResourcesFromResponse(path: string, response: unknown): ProviderResource[];
 };
 
 function loadPolicies(): Policies {
@@ -36,9 +30,7 @@ const startPath = "v1beta/models/veo-3.1-generate-preview:predictLongRunning";
 
 describe("durable provider resource ownership policy", () => {
   it("canonicalizes Veo operation polls and Gemini file downloads", () => {
-    expect(policies.providerOperationStartProvider(startPath, "POST")).toBe(
-      "gemini",
-    );
+    expect(policies.providerOperationStartProvider(startPath, "POST")).toBe("gemini");
     expect(
       policies.providerResourceRequest("v1beta/operations/job_123", "GET"),
     ).toEqual({
@@ -83,7 +75,9 @@ describe("durable provider resource ownership policy", () => {
             generatedSamples: [
               {
                 video: {
-                  uri: "https://generativelanguage.googleapis.com/v1beta/files/generated-video_789:download?alt=media",
+                  uri: "https://generativelanguage.googleapis.com/v1beta/files/generated-video_789",
+                  downloadUri:
+                    "https://generativelanguage.googleapis.com/v1beta/files/generated-video_789:download?alt=media",
                 },
               },
             ],
@@ -109,6 +103,39 @@ describe("durable provider resource ownership policy", () => {
     ]);
   });
 
+  it("claims suffixless and downloadUri file variants only on Google's exact origin", () => {
+    expect(
+      policies.providerResourcesFromResponse(startPath, {
+        name: "operations/job_123",
+        response: {
+          generatedVideos: [
+            {
+              video: {
+                download_uri:
+                  "https://generativelanguage.googleapis.com/v1beta/files/download-field_1",
+              },
+            },
+          ],
+          attacker: {
+            downloadUri:
+              "https://generativelanguage.googleapis.com.attacker.example/v1beta/files/stolen",
+          },
+        },
+      }),
+    ).toEqual([
+      {
+        provider: "gemini",
+        resource_type: "operation",
+        resource_id: "operations/job_123",
+      },
+      {
+        provider: "gemini",
+        resource_type: "file",
+        resource_id: "files/download-field_1",
+      },
+    ]);
+  });
+
   it("keeps disabled Vertex paths denied while defining a future-safe key", () => {
     const vertexPoll =
       "vertex/v1/projects/project-a/locations/us-central1/operations/job_1";
@@ -121,24 +148,16 @@ describe("durable provider resource ownership policy", () => {
   });
 
   it("checks ownership before upstream I/O and persists discovered IDs", () => {
-    const hook = readFileSync(
-      resolve(process.cwd(), "pb_hooks/main.pb.js"),
-      "utf8",
-    );
-    const helpers = readFileSync(
-      resolve(process.cwd(), "pb_hooks/helpers.js"),
-      "utf8",
-    );
+    const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
+    const helpers = readFileSync(resolve(process.cwd(), "pb_hooks/helpers.js"), "utf8");
     const ownershipCheck = hook.indexOf("helpers.dealerOwnsProviderResource(");
-    const upstreamSend = hook.indexOf("const res = $http.send({");
+    const upstreamSend = hook.indexOf("$http.send({", ownershipCheck);
     const durableClaim = hook.indexOf("helpers.claimProviderResources(");
 
     expect(ownershipCheck).toBeGreaterThan(-1);
     expect(ownershipCheck).toBeLessThan(upstreamSend);
     expect(durableClaim).toBeGreaterThan(upstreamSend);
-    expect(hook).toContain(
-      'error: "Dealer session required for provider resource access"',
-    );
+    expect(hook).toContain('error: "Unauthorized proxy request"');
     expect(hook).toContain('error: "Provider resource access denied"');
     expect(helpers).toContain('"provider_resources"');
     expect(helpers).toContain("PROVIDER_RESOURCE_TTL_SECONDS");
@@ -146,10 +165,7 @@ describe("durable provider resource ownership policy", () => {
 
   it("locks the ledger and uniquely binds each provider identifier", () => {
     const migration = readFileSync(
-      resolve(
-        process.cwd(),
-        "pb_migrations/1750300300_create_provider_resources.js",
-      ),
+      resolve(process.cwd(), "pb_migrations/1750300300_create_provider_resources.js"),
       "utf8",
     );
     expect(migration).toContain('name: "provider_resources"');

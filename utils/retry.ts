@@ -42,10 +42,10 @@ export class RetryError extends Error {
   constructor(
     message: string,
     public readonly lastError: Error,
-    public readonly attempts: number
+    public readonly attempts: number,
   ) {
     super(message);
-    this.name = 'RetryError';
+    this.name = "RetryError";
   }
 }
 
@@ -54,7 +54,7 @@ export class RetryError extends Error {
  */
 export async function retryWithBackoff<T>(
   operation: () => Promise<T>,
-  options: RetryOptions = {}
+  options: RetryOptions = {},
 ): Promise<T> {
   const {
     maxAttempts = 3,
@@ -65,7 +65,7 @@ export async function retryWithBackoff<T>(
     shouldRetry = (e: Error) => !isPermanentError(e),
   } = options;
 
-  let lastError: Error = new Error('Unknown error');
+  let lastError: Error = new Error("Unknown error");
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -83,20 +83,20 @@ export async function retryWithBackoff<T>(
         throw new RetryError(
           `Operation failed after ${maxAttempts} attempts`,
           lastError,
-          maxAttempts
+          maxAttempts,
         );
       }
 
       // Calculate delay with exponential backoff
       const delay = Math.min(
         initialDelay * Math.pow(backoffMultiplier, attempt - 1),
-        maxDelay
+        maxDelay,
       );
 
       onRetry?.(attempt, lastError);
 
       // Wait before retrying
-      await new Promise(resolve => setTimeout(resolve, delay));
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
 
@@ -110,11 +110,11 @@ export function isRetryableError(error: unknown): boolean {
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
     return (
-      message.includes('network') ||
-      message.includes('timeout') ||
-      message.includes('503') ||
-      message.includes('502') ||
-      message.includes('500')
+      message.includes("network") ||
+      message.includes("timeout") ||
+      message.includes("503") ||
+      message.includes("502") ||
+      message.includes("500")
     );
   }
   return false;

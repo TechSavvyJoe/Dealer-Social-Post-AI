@@ -8,11 +8,17 @@ import {
   VideoStyle,
   VideoRequestOptions,
   Dealer,
+  GenerationParams,
+  ImageSelection,
+  MediaOutputMode,
 } from "../types";
 import { LoadingOverlay } from "./LoadingOverlay";
 import { PageTransition } from "./ui/PageTransition";
 import { Button } from "./ui/Button";
 import { Shimmer } from "./ui/Shimmer";
+import type { LoginResult } from "../stores/appStore";
+import { useAppStore } from "../stores/appStore";
+import type { PrimaryImageProfile, PlatformId } from "../services/platformCopy";
 
 // Lazy load components
 const LazyLoginScreen = React.lazy(() =>
@@ -50,8 +56,8 @@ interface MainContentProps {
   progressMessage: string;
 
   // Handlers
-  onLogin: (dealerId: string) => Promise<boolean>;
-  onImageSelected: (image: string) => void;
+  onLogin: (dealerCode: string, turnstileToken?: string) => Promise<LoginResult>;
+  onImageSelected: (selection: ImageSelection) => void;
   onReset: () => void;
   /** Same-photo remix — keep capture, re-open CUSTOMIZE. */
   onRemix: () => void;
@@ -66,6 +72,7 @@ interface MainContentProps {
       salespersonName?: string;
       salespersonId?: string;
       vin?: string;
+      scenarioId?: string;
       hasRelease?: boolean;
       capturedRelease?: {
         customerName: string;
@@ -73,21 +80,27 @@ interface MainContentProps {
         vin?: string;
       };
     },
-    platformIds?: string[],
+    platformIds?: PlatformId[],
+    outputProfile?: PrimaryImageProfile,
+    mediaOutputMode?: MediaOutputMode,
   ) => Promise<void>;
   onBackToCapture: () => void;
   onStyleToneChange: (style: StyleOption, tone: ToneOption) => void;
   onRegenerateImage: () => Promise<void>;
   onEditImage: (prompt: string) => Promise<void>;
   onRegenerateText: () => Promise<void>;
-  onEditText: (prompt: string) => Promise<void>;
-  onFunMode: (styleName?: string) => Promise<void>;
-  onGenerateVideo: (
-    style: VideoStyle,
-    options: VideoRequestOptions,
+  onEditText: (
+    prompt: string,
+    originalText?: string,
+    platformId?: string,
   ) => Promise<string>;
+  onFunMode: (styleName?: string) => Promise<void>;
+  onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
   /** One-shot caption generator for the alternatives modal. */
   onGenerateCaptionVariant?: () => Promise<string>;
+  onShowSettings?: () => void;
+  onShowHistory?: () => void;
+  onRequestLogout?: () => void;
 }
 
 export const MainContent: React.FC<MainContentProps> = ({
@@ -117,7 +130,111 @@ export const MainContent: React.FC<MainContentProps> = ({
   onFunMode,
   onGenerateVideo,
   onGenerateCaptionVariant,
+  onShowSettings,
+  onShowHistory,
+  onRequestLogout,
 }) => {
+  const persistedGenerationParams = useAppStore((state) => state.generationParams);
+  const [customizerSeed, setCustomizerSeed] = React.useState<GenerationParams | null>(
+    () => (displayedStep === AppStep.CUSTOMIZE ? persistedGenerationParams : null),
+  );
+
+  // Returning to Capture starts a genuinely new post. Keep the persisted
+  // values available for reload/remix recovery, but do not leak them into the
+  // next photo's editor defaults.
+  React.useEffect(() => {
+    if (displayedStep === AppStep.CAPTURE) {
+      setCustomizerSeed(null);
+    }
+  }, [displayedStep]);
+
+  const handleCustomizerGenerate = React.useCallback(
+    async (
+      style: StyleOption,
+      tone: ToneOption,
+      customerName: string,
+      customText?: string,
+      creativeBrief?: string,
+      meta?: {
+        salespersonName?: string;
+        salespersonId?: string;
+        vin?: string;
+        scenarioId?: string;
+        hasRelease?: boolean;
+        capturedRelease?: {
+          customerName: string;
+          signaturePngDataUrl: string;
+          vin?: string;
+        };
+      },
+      platformIds?: PlatformId[],
+      outputProfile?: PrimaryImageProfile,
+      mediaOutputMode: MediaOutputMode = "photo",
+    ) => {
+      // Capture the exact editor choices before GENERATING unmounts the
+      // customizer. If generation fails, or the result is remixed, the same
+      // destination plan is available on the next CUSTOMIZE mount.
+      setCustomizerSeed({
+        style,
+        tone,
+        customerName,
+        customText,
+        creativeBrief,
+        platformIds: platformIds ? [...platformIds] : undefined,
+        scenarioId: meta?.scenarioId,
+        mediaOutputMode,
+        primaryFormatId: outputProfile?.primaryFormatId,
+        imageAspectRatio: outputProfile?.imageAspectRatio,
+      });
+      await onGenerate(
+        style,
+        tone,
+        customerName,
+        customText,
+        creativeBrief,
+        meta,
+        platformIds,
+        outputProfile,
+        mediaOutputMode,
+      );
+    },
+    [onGenerate],
+  );
+
+  const handleRemixWithSelections = React.useCallback(() => {
+    const base = persistedGenerationParams || customizerSeed;
+    const postDeliveryParams = generatedPost
+      ? {
+          platformIds: generatedPost.platformIds,
+          mediaOutputMode: generatedPost.mediaOutputMode,
+          primaryFormatId: generatedPost.primaryFormatId,
+          imageAspectRatio: generatedPost.imageAspectRatio,
+        }
+      : {};
+
+    setCustomizerSeed({
+      style: base?.style ?? preferredStyle,
+      tone: base?.tone ?? preferredTone,
+      customerName: base?.customerName ?? "",
+      customText: base?.customText,
+      creativeBrief: base?.creativeBrief,
+      platformIds: postDeliveryParams.platformIds ?? base?.platformIds,
+      scenarioId: base?.scenarioId,
+      mediaOutputMode:
+        postDeliveryParams.mediaOutputMode ?? base?.mediaOutputMode ?? "photo",
+      primaryFormatId: postDeliveryParams.primaryFormatId ?? base?.primaryFormatId,
+      imageAspectRatio: postDeliveryParams.imageAspectRatio ?? base?.imageAspectRatio,
+    });
+    onRemix();
+  }, [
+    customizerSeed,
+    generatedPost,
+    onRemix,
+    persistedGenerationParams,
+    preferredStyle,
+    preferredTone,
+  ]);
+
   const suspenseFallback = (label: string) => (
     <div
       className="w-full max-w-2xl mx-auto p-4 flex flex-col items-center justify-center min-h-[50vh] space-y-6"
@@ -171,16 +288,13 @@ export const MainContent: React.FC<MainContentProps> = ({
       case AppStep.CAPTURE:
         return (
           <Suspense fallback={suspenseFallback("Preparing camera")}>
-            <LazyImageInput
-              onImageSelected={onImageSelected}
-              onClose={onReset}
-            />
+            <LazyImageInput onImageSelected={onImageSelected} onClose={onReset} />
           </Suspense>
         );
       case AppStep.CUSTOMIZE:
         const customizerProps = {
           imageSrc: selectedImage!,
-          onGenerate: onGenerate,
+          onGenerate: handleCustomizerGenerate,
           onBack: onBackToCapture,
           dealershipName: currentDealer!.name,
           defaultStyle: preferredStyle,
@@ -188,6 +302,7 @@ export const MainContent: React.FC<MainContentProps> = ({
           onStyleToneChange: onStyleToneChange,
           isDesktopLayout,
           isGenerating: step === AppStep.GENERATING,
+          initialGenerationParams: customizerSeed,
         };
 
         return selectedImage ? (
@@ -220,18 +335,20 @@ export const MainContent: React.FC<MainContentProps> = ({
         ) : null;
       case AppStep.GENERATING:
         return (
-          <LoadingOverlay
-            progress={generationProgress}
-            message={progressMessage}
-          />
+          <LoadingOverlay progress={generationProgress} message={progressMessage} />
         );
       case AppStep.RESULT:
         return generatedPost ? (
           <Suspense fallback={suspenseFallback("Loading results")}>
             <LazyPostResult
+              key={
+                generatedPost.postId ||
+                generatedPost.aiMeta?.image.attemptId ||
+                generatedPost.image
+              }
               post={generatedPost}
               onStartOver={onReset}
-              onRemix={onRemix}
+              onRemix={handleRemixWithSelections}
               onRegenerateImage={onRegenerateImage}
               onEditImage={onEditImage}
               onRegenerateText={onRegenerateText}
@@ -239,6 +356,9 @@ export const MainContent: React.FC<MainContentProps> = ({
               onFunMode={onFunMode}
               onGenerateVideo={onGenerateVideo}
               onGenerateCaptionVariant={onGenerateCaptionVariant}
+              onShowSettings={onShowSettings}
+              onShowHistory={onShowHistory}
+              onRequestLogout={onRequestLogout}
               error={error}
               isDesktopLayout={isDesktopLayout}
               requiresApproval={Boolean(currentDealer?.requires_approval)}
@@ -253,9 +373,7 @@ export const MainContent: React.FC<MainContentProps> = ({
 
   return (
     <PageTransition pageKey={String(displayedStep)}>
-      <div className="flex h-full min-h-0 w-full flex-1 flex-col">
-        {stepContent()}
-      </div>
+      <div className="flex h-full min-h-0 w-full flex-1 flex-col">{stepContent()}</div>
     </PageTransition>
   );
 };

@@ -28,7 +28,7 @@ export const ErrorBanner: React.FC<ErrorBannerProps> = ({
     className={cn(
       "flex items-start gap-2.5 rounded-xl border border-error-500/30 bg-error-500/10",
       "px-3.5 py-2.5 text-xs text-error-200",
-      className
+      className,
     )}
   >
     <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-error-400" />
@@ -40,7 +40,7 @@ export const ErrorBanner: React.FC<ErrorBannerProps> = ({
         className={cn(
           "flex-shrink-0 inline-flex items-center gap-1 font-semibold text-error-100",
           "hover:text-white transition-colors",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-400/70 rounded"
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-400/70 rounded",
         )}
       >
         <RefreshCw className="h-3 w-3" />

@@ -1,0 +1,127 @@
+{
+  "version": 4,
+  "verifiedAt": "2026-07-29",
+  "models": {
+    "textQuality": "gemini-3.6-flash",
+    "textFast": "gemini-3.5-flash-lite",
+    "imageStandard": "gemini-3.1-flash-image",
+    "imageStudio": "gemini-3-pro-image",
+    "imageLite": "gemini-3.1-flash-lite-image",
+    "videoStandard": "veo-3.1-fast-generate-preview",
+    "videoQuality": "veo-3.1-generate-preview"
+  },
+  "tasks": {
+    "caption": {
+      "kind": "text",
+      "tier": "quality",
+      "models": ["gemini-3.6-flash", "gemini-3.5-flash-lite"],
+      "maxOutputTokens": 2048
+    },
+    "caption_regenerate": {
+      "kind": "text",
+      "tier": "quality",
+      "models": ["gemini-3.6-flash", "gemini-3.5-flash-lite"],
+      "maxOutputTokens": 2048
+    },
+    "caption_edit": {
+      "kind": "text",
+      "tier": "fast",
+      "models": ["gemini-3.5-flash-lite", "gemini-3.6-flash"],
+      "maxOutputTokens": 2048
+    },
+    "image_standard": {
+      "kind": "image",
+      "tier": "standard",
+      "models": [
+        "gemini-3.1-flash-image",
+        "gemini-3-pro-image",
+        "gemini-3.1-flash-lite-image"
+      ],
+      "maxOutputTokens": 4096,
+      "imageSizes": {
+        "gemini-3.1-flash-image": "2K",
+        "gemini-3-pro-image": "2K",
+        "gemini-3.1-flash-lite-image": "1K"
+      }
+    },
+    "image_studio": {
+      "kind": "image",
+      "tier": "studio",
+      "models": [
+        "gemini-3-pro-image",
+        "gemini-3.1-flash-image",
+        "gemini-3.1-flash-lite-image"
+      ],
+      "maxOutputTokens": 4096,
+      "imageSizes": {
+        "gemini-3-pro-image": "2K",
+        "gemini-3.1-flash-image": "2K",
+        "gemini-3.1-flash-lite-image": "1K"
+      }
+    },
+    "video_standard": {
+      "kind": "video",
+      "tier": "standard",
+      "models": ["veo-3.1-fast-generate-preview"],
+      "resolution": "720p"
+    },
+    "video_quality": {
+      "kind": "video",
+      "tier": "quality",
+      "models": ["veo-3.1-generate-preview"],
+      "resolution": "1080p"
+    }
+  },
+  "allowedImageAspectRatios": ["1:1", "4:5", "9:16", "16:9", "4:3"],
+  "allowedRequestFields": {
+    "generateContent": {
+      "topLevel": ["contents", "generationConfig"],
+      "content": ["parts"],
+      "textPart": ["text"],
+      "imagePart": ["inlineData"],
+      "inlineData": ["mimeType", "data"],
+      "textGenerationConfig": ["maxOutputTokens"],
+      "imageGenerationConfig": ["responseModalities", "imageConfig", "maxOutputTokens"],
+      "imageConfig": ["imageSize", "aspectRatio"],
+      "legacyImageGenerationConfig": [
+        "responseModalities",
+        "responseFormat",
+        "maxOutputTokens"
+      ],
+      "legacyResponseFormat": ["image"],
+      "legacyResponseFormatImage": ["imageSize"]
+    },
+    "veo": {
+      "topLevel": ["instances", "parameters"],
+      "instance": ["prompt", "image"],
+      "image": ["bytesBase64Encoded", "mimeType"],
+      "legacyImage": ["inlineData"],
+      "parameters": ["aspectRatio", "personGeneration", "durationSeconds", "resolution"]
+    }
+  },
+  "requestLimits": {
+    "maxPromptChars": 20000,
+    "maxInlineImageChars": 16777216,
+    "maxTotalInlineImageChars": 20971520,
+    "maxTextImages": 1,
+    "maxImageTaskImages": 2
+  },
+  "safetySettings": [
+    {
+      "category": "HARM_CATEGORY_HATE_SPEECH",
+      "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+    },
+    {
+      "category": "HARM_CATEGORY_HARASSMENT",
+      "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+    },
+    {
+      "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+      "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+    },
+    {
+      "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+      "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+    }
+  ]
+}

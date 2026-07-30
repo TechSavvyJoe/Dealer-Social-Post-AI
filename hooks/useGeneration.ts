@@ -10,11 +10,16 @@ import {
   VideoRequestOptions,
   AppStep,
   GeneratedPost,
+  ImageQualityTier,
+  MediaOutputMode,
 } from "../types";
 import { useToast } from "../components/ui/Toast";
 import { normalizeError, recoveryHint } from "../utils/errorHandler";
 import { logPost } from "../services/posts";
-import { prepareCaptionForDelivery } from "../utils/complianceDisclosures";
+import {
+  analyzeCaptionSetForDelivery,
+  prepareCaptionForDelivery,
+} from "../utils/complianceDisclosures";
 import type { DealerBrandKit } from "../utils/brandKit";
 import { logEvent, logError } from "../utils/telemetry";
 import {
@@ -25,10 +30,15 @@ import {
 import {
   parsePlatformCaptionPack,
   platformsToCaptionPackBrief,
+  resolvePrimaryImageProfile,
   shouldGenerateCaptionPack,
+  type PrimaryImageProfile,
   type PlatformId,
 } from "../services/platformCopy";
 import type { Dealer } from "../types";
+import type { CaptionGenerationResult } from "../services/modelConfig";
+import { MODEL_POLICY_VERSION } from "../services/modelConfig";
+import { EXPORT_FORMATS, renderFormat } from "../utils/multiFormatExport";
 
 const brandKitFromDealer = (dealer?: Dealer | null): DealerBrandKit | null => {
   if (!dealer) return null;
@@ -39,24 +49,96 @@ const brandKitFromDealer = (dealer?: Dealer | null): DealerBrandKit | null => {
   };
 };
 
+const latestSuccessfulAt = (
+  ...values: Array<string | null | undefined>
+): string | undefined => {
+  const valid = values.filter((value): value is string => {
+    return typeof value === "string" && Number.isFinite(Date.parse(value));
+  });
+  return valid.sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+};
+
+const workspaceKeyForPost = (post: GeneratedPost | null | undefined): string | null =>
+  post?.postId || post?.aiMeta?.image.attemptId || post?.image || null;
+
+const workspaceIsCurrent = (workspaceKey: string | null): boolean =>
+  workspaceKeyForPost(useAppStore.getState().generatedPost) === workspaceKey;
+
+const assertOperationAuthEpoch = (operationAuthEpoch: number): void => {
+  if (operationAuthEpoch !== useAppStore.getState().authEpoch) {
+    throw new DOMException(
+      "The signed-in workspace changed during this operation.",
+      "AbortError",
+    );
+  }
+};
+
+const renderExactPrimaryImage = async (
+  image: string,
+  formatId: PrimaryImageProfile["primaryFormatId"],
+): Promise<string> => {
+  const format = EXPORT_FORMATS.find((candidate) => candidate.id === formatId);
+  if (!format) throw new Error("Selected output format is unavailable.");
+  return renderFormat(image, format);
+};
+
+/**
+ * Replace caption provenance after a regeneration while retaining the image
+ * provenance for the creative that is still on screen. Older saved posts may
+ * predate modality metadata; their existing image is represented as unknown
+ * instead of falsely attributing it to a provider or model.
+ */
+export const mergeCaptionProvenance = (
+  current: GeneratedPost["aiMeta"] | undefined,
+  captionResult: CaptionGenerationResult,
+  selectedTier: ImageQualityTier,
+): NonNullable<GeneratedPost["aiMeta"]> => {
+  const image = current?.image ?? {
+    task: selectedTier === "studio" ? "image_studio" : "image_standard",
+    tier: selectedTier,
+    provider: "unknown",
+    model: null,
+    fallbackCount: 0,
+    lastSuccessAt: null,
+  };
+  const lastSuccessfulGenerationAt = latestSuccessfulAt(
+    captionResult.aiMeta.lastSuccessAt,
+    image.lastSuccessAt,
+  );
+
+  return {
+    captionSource: captionResult.captionSource,
+    selectedTier: current?.selectedTier ?? selectedTier,
+    ...(captionResult.aiMeta.model ? { model: captionResult.aiMeta.model } : {}),
+    fallbackCount: captionResult.aiMeta.fallbackCount + image.fallbackCount,
+    ...(lastSuccessfulGenerationAt ? { lastSuccessfulGenerationAt } : {}),
+    caption: captionResult.aiMeta,
+    image,
+    modelPolicyVersion: current?.modelPolicyVersion ?? MODEL_POLICY_VERSION,
+  };
+};
+
 export interface GenerationMeta {
   salespersonName?: string;
   /** When the salesperson was picked from the dealer's roster, this is the salespeople record id. */
   salespersonId?: string;
   vin?: string;
+  scenarioId?: string;
   hasRelease?: boolean;
   /** Signed-but-unsaved release captured before generation. Saved linked to the post on success so we never create orphan release records. */
   capturedRelease?: CapturedRelease;
 }
 
 export const useGeneration = () => {
-  const { error: toastError } = useToast();
+  const { error: toastError, warning: toastWarning } = useToast();
   const {
     currentDealer,
     selectedImage,
     generatedPost,
     generationParams,
     preferredTone,
+    imageQualityTier,
+    authEpoch,
     setGeneratedPost,
     setGenerationParams,
     setError,
@@ -68,6 +150,8 @@ export const useGeneration = () => {
       generatedPost: state.generatedPost,
       generationParams: state.generationParams,
       preferredTone: state.preferredTone,
+      imageQualityTier: state.imageQualityTier,
+      authEpoch: state.authEpoch,
       setGeneratedPost: state.setGeneratedPost,
       setGenerationParams: state.setGenerationParams,
       setError: state.setError,
@@ -93,21 +177,31 @@ export const useGeneration = () => {
     timeoutsRef.current = [];
   }, []);
 
+  const abortActiveVideoPolls = useCallback(() => {
+    for (const ctrl of videoAbortControllersRef.current) {
+      try {
+        ctrl.abort();
+      } catch {
+        /* ignore */
+      }
+    }
+    videoAbortControllersRef.current.clear();
+  }, []);
+
+  // Authentication is a hard workspace boundary. Provider calls that cannot
+  // be cancelled are discarded by epoch checks below; Veo polling is aborted.
+  useEffect(() => {
+    cleanupTimers();
+    abortActiveVideoPolls();
+  }, [abortActiveVideoPolls, authEpoch, cleanupTimers]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       cleanupTimers();
-      // Abort any in-flight video polls.
-      for (const ctrl of videoAbortControllersRef.current) {
-        try {
-          ctrl.abort();
-        } catch {
-          /* ignore */
-        }
-      }
-      videoAbortControllersRef.current.clear();
+      abortActiveVideoPolls();
     };
-  }, [cleanupTimers]);
+  }, [abortActiveVideoPolls, cleanupTimers]);
 
   const generateMutation = useMutation({
     mutationFn: async (params: {
@@ -117,18 +211,25 @@ export const useGeneration = () => {
       customText?: string;
       creativeBrief?: string;
       platformIds?: PlatformId[];
+      mediaOutputMode: MediaOutputMode;
+      primaryFormatId: PrimaryImageProfile["primaryFormatId"];
+      imageAspectRatio: PrimaryImageProfile["imageAspectRatio"];
       meta?: GenerationMeta;
+      authEpoch: number;
     }) => {
-      if (!selectedImage || !currentDealer)
-        throw new Error("Missing required data");
+      assertOperationAuthEpoch(params.authEpoch);
+      if (!selectedImage || !currentDealer) throw new Error("Missing required data");
 
-      return runWithPersistedPhotoRelease(
+      const gated = await runWithPersistedPhotoRelease(
         params.meta?.capturedRelease,
         currentDealer.name,
         async () => {
+          assertOperationAuthEpoch(params.authEpoch);
           const { generateSocialPost } = await loadGeminiService();
-          return runGeminiTask("ai.generate", () =>
-            generateSocialPost(
+          assertOperationAuthEpoch(params.authEpoch);
+          return runGeminiTask("ai.generate", () => {
+            assertOperationAuthEpoch(params.authEpoch);
+            return generateSocialPost(
               selectedImage,
               params.style,
               params.tone,
@@ -137,12 +238,29 @@ export const useGeneration = () => {
               currentDealer.logo,
               params.customText,
               params.creativeBrief,
-            ),
-          );
+              imageQualityTier,
+              params.imageAspectRatio,
+            );
+          });
         },
+        params.authEpoch,
       );
+      assertOperationAuthEpoch(params.authEpoch);
+      const exactImage = await renderExactPrimaryImage(
+        gated.result.image,
+        params.primaryFormatId,
+      );
+      assertOperationAuthEpoch(params.authEpoch);
+      return {
+        ...gated,
+        result: {
+          ...gated.result,
+          image: exactImage,
+        },
+      };
     },
     onMutate: (variables) => {
+      cleanupTimers();
       setStep(AppStep.GENERATING);
       setError(null);
       setGenerationProgress(0);
@@ -154,50 +272,39 @@ export const useGeneration = () => {
         customText: variables.customText,
         creativeBrief: variables.creativeBrief,
         platformIds: variables.platformIds,
+        scenarioId: variables.meta?.scenarioId,
+        mediaOutputMode: variables.mediaOutputMode,
+        primaryFormatId: variables.primaryFormatId,
+        imageAspectRatio: variables.imageAspectRatio,
       });
 
       progressIntervalRef.current = setInterval(() => {
         setGenerationProgress((prev) => {
           if (prev >= 95) return prev;
           const remaining = 95 - prev;
-          const increment = Math.max(
-            0.1,
-            remaining * 0.05 * (Math.random() + 0.5),
-          );
+          const increment = Math.max(0.1, remaining * 0.05 * (Math.random() + 0.5));
           return prev + increment;
         });
       }, 800);
 
       timeoutsRef.current.push(
-        setTimeout(
-          () => setProgressMessage("Consulting the style guide..."),
-          2000,
-        ),
+        setTimeout(() => setProgressMessage("Consulting the style guide..."), 2000),
       );
       timeoutsRef.current.push(
-        setTimeout(
-          () => setProgressMessage("Crafting the perfect caption..."),
-          4500,
-        ),
+        setTimeout(() => setProgressMessage("Crafting the perfect caption..."), 4500),
       );
       timeoutsRef.current.push(
         setTimeout(() => setProgressMessage("Applying final polish..."), 7000),
       );
       timeoutsRef.current.push(
         setTimeout(
-          () =>
-            setProgressMessage(
-              "AI is thinking hard... this might take a moment.",
-            ),
+          () => setProgressMessage("AI is thinking hard... this might take a moment."),
           15000,
         ),
       );
       timeoutsRef.current.push(
         setTimeout(
-          () =>
-            setProgressMessage(
-              "Still working... generating high-quality content.",
-            ),
+          () => setProgressMessage("Still working... generating high-quality content."),
           30000,
         ),
       );
@@ -212,6 +319,7 @@ export const useGeneration = () => {
       );
     },
     onSuccess: async (gatedResult, variables) => {
+      if (variables.authEpoch !== useAppStore.getState().authEpoch) return;
       cleanupTimers();
       setGenerationProgress(100);
       setProgressMessage("Complete!");
@@ -245,27 +353,25 @@ export const useGeneration = () => {
       const compliance = preparedCaption.compliance;
       if (compliance.changed && compliance.matches.length > 0) {
         logEvent("compliance.disclosures_detected", {
-          categories: Array.from(
-            new Set(compliance.matches.map((m) => m.category)),
-          ),
+          categories: Array.from(new Set(compliance.matches.map((m) => m.category))),
         });
       }
       const platformIds = variables.platformIds?.filter(Boolean) ?? [];
       const finalPost: GeneratedPost = {
         ...result,
         text: preparedCaption.caption,
+        isBasicFallback: result.captionSource === "basic_fallback",
         disclosures: preparedCaption.disclosures,
         disclosureCategories: preparedCaption.disclosureCategories,
         platformIds: platformIds.length > 0 ? platformIds : undefined,
+        mediaOutputMode: variables.mediaOutputMode,
+        primaryFormatId: variables.primaryFormatId,
+        imageAspectRatio: variables.imageAspectRatio,
       };
 
       // Optional multi-platform caption pack. Never blocks the primary post:
       // 0–1 platforms keep primary text only; pack failures are non-fatal.
-      if (
-        shouldGenerateCaptionPack(platformIds) &&
-        selectedImage &&
-        currentDealer
-      ) {
+      if (shouldGenerateCaptionPack(platformIds) && selectedImage && currentDealer) {
         try {
           setProgressMessage("Tailoring captions per platform...");
           const packBrief = platformsToCaptionPackBrief(
@@ -273,9 +379,12 @@ export const useGeneration = () => {
             currentDealer.name,
             preparedCaption.caption,
           );
+          assertOperationAuthEpoch(variables.authEpoch);
           const { generateSocialPostText } = await loadGeminiService();
-          const rawPack = await runGeminiTask("ai.caption.pack", () =>
-            generateSocialPostText(
+          assertOperationAuthEpoch(variables.authEpoch);
+          const rawPack = await runGeminiTask("ai.caption.pack", () => {
+            assertOperationAuthEpoch(variables.authEpoch);
+            return generateSocialPostText(
               selectedImage,
               variables.tone,
               currentDealer.name,
@@ -283,8 +392,9 @@ export const useGeneration = () => {
               true,
               packBrief,
               variables.style,
-            ),
-          );
+            );
+          });
+          assertOperationAuthEpoch(variables.authEpoch);
           const parsed = parsePlatformCaptionPack(rawPack, platformIds);
           // Compliance-scan each variant; drop any that fail hard.
           const cleaned: Record<string, string> = {};
@@ -302,6 +412,12 @@ export const useGeneration = () => {
           }
           if (Object.keys(cleaned).length > 0) {
             finalPost.platformCaptions = cleaned;
+            const disclosureUnion = analyzeCaptionSetForDelivery(
+              [finalPost.text, ...Object.values(cleaned)],
+              currentDealer.banned_phrases,
+            );
+            finalPost.disclosures = disclosureUnion.disclosures;
+            finalPost.disclosureCategories = disclosureUnion.disclosureCategories;
           }
         } catch (err) {
           logError("caption.pack_failed", {
@@ -310,6 +426,7 @@ export const useGeneration = () => {
           });
         }
       }
+      if (variables.authEpoch !== useAppStore.getState().authEpoch) return;
 
       // Log post + (if a release was captured) link the already-persisted
       // release to it. The signature was durably saved before the provider
@@ -320,29 +437,51 @@ export const useGeneration = () => {
       if (currentDealer) {
         const persistPost = async () => {
           const captured = variables.meta?.capturedRelease;
-          const post = await logPost({
-            dealerId: currentDealer.id,
-            salespersonName: variables.meta?.salespersonName,
-            salespersonId: variables.meta?.salespersonId,
-            style: variables.style,
-            tone: variables.tone,
-            customerName: variables.customerName,
-            vin: variables.meta?.vin,
-            // The release route flips this true only after its protected
-            // signature file has been durably stored. Starting false avoids a
-            // false consent claim if that second write fails.
-            hasRelease: false,
-            hasVideo: false,
-            requiresApproval: !!currentDealer.requires_approval,
-            caption: finalPost.text,
-            disclosures: finalPost.disclosures,
-            imageDataUrl: finalPost.image,
-          });
+          assertOperationAuthEpoch(variables.authEpoch);
+          const post = await logPost(
+            {
+              dealerId: currentDealer.id,
+              style: variables.style,
+              tone: variables.tone,
+              customerName: variables.customerName,
+              scenarioId: variables.meta?.scenarioId,
+              vin: variables.meta?.vin,
+              // The release route flips this true only after its protected
+              // signature file has been durably stored. Starting false avoids a
+              // false consent claim if that second write fails.
+              hasRelease: false,
+              hasVideo: false,
+              requiresApproval: !!currentDealer.requires_approval,
+              caption: finalPost.text,
+              disclosures: finalPost.disclosures,
+              imageDataUrl: finalPost.image,
+              captionSource: finalPost.captionSource,
+              generationTier: finalPost.aiMeta?.selectedTier,
+              generationModel: finalPost.aiMeta?.model,
+              generationFallbackCount: finalPost.aiMeta?.fallbackCount,
+              generationLastSuccessAt: finalPost.aiMeta?.lastSuccessfulGenerationAt,
+              modelPolicyVersion: finalPost.aiMeta?.modelPolicyVersion,
+              captionAttemptId: finalPost.aiMeta?.caption.attemptId,
+              imageAttemptId: finalPost.aiMeta?.image.attemptId,
+              platformIds: finalPost.platformIds,
+              mediaOutputMode: finalPost.mediaOutputMode,
+              platformCaptions: finalPost.platformCaptions,
+              primaryFormatId: finalPost.primaryFormatId,
+              imageAspectRatio: finalPost.imageAspectRatio,
+            },
+            variables.authEpoch,
+          );
+          assertOperationAuthEpoch(variables.authEpoch);
           let releaseStatus: NonNullable<GeneratedPost["releaseStatus"]> =
-            captured ? "save_failed" : "not_required";
+            post?.release_required && post.release_status !== "saved"
+              ? "save_failed"
+              : captured
+                ? "save_failed"
+                : "not_required";
           if (captured && releaseId && post) {
             try {
-              await linkReleaseToPost(releaseId, post.id);
+              await linkReleaseToPost(releaseId, post.id, variables.authEpoch);
+              assertOperationAuthEpoch(variables.authEpoch);
               releaseStatus = "saved";
             } catch (err) {
               logError("photo_release.link_failed", {
@@ -366,6 +505,7 @@ export const useGeneration = () => {
         // post. Besides making metrics truthful, this gives subsequent video
         // and release updates an owner-scoped post id.
         const persisted = await persistPost();
+        if (variables.authEpoch !== useAppStore.getState().authEpoch) return;
         const post = persisted.post;
         finalPost.releaseStatus = persisted.releaseStatus;
         if (post) finalPost.postId = post.id;
@@ -391,12 +531,20 @@ export const useGeneration = () => {
         } else {
           finalPost.approvalStatus = "n_a";
         }
+
+        if (!post && !currentDealer.requires_approval) {
+          toastWarning(
+            "Your post was created, but it could not be saved to history. You can still share and save it now.",
+          );
+        }
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
+      if (variables.authEpoch !== useAppStore.getState().authEpoch) return;
       setGeneratedPost(finalPost);
       setStep(AppStep.RESULT);
     },
-    onError: (err) => {
+    onError: (err, variables) => {
+      if (variables.authEpoch !== useAppStore.getState().authEpoch) return;
       cleanupTimers();
       const normalized = normalizeError(err);
       const fullMsg = `Failed to generate your post. ${normalized.message} ${recoveryHint(normalized)}`;
@@ -415,7 +563,10 @@ export const useGeneration = () => {
       creativeBrief?: string,
       meta?: GenerationMeta,
       platformIds?: PlatformId[],
+      outputProfile?: PrimaryImageProfile,
+      mediaOutputMode: MediaOutputMode = "photo",
     ) => {
+      const resolvedProfile = outputProfile ?? resolvePrimaryImageProfile(platformIds);
       await generateMutation.mutateAsync({
         style,
         tone,
@@ -423,7 +574,11 @@ export const useGeneration = () => {
         customText,
         creativeBrief,
         platformIds,
+        mediaOutputMode,
+        primaryFormatId: resolvedProfile.primaryFormatId,
+        imageAspectRatio: resolvedProfile.imageAspectRatio,
         meta,
+        authEpoch: useAppStore.getState().authEpoch,
       });
     },
     [generateMutation],
@@ -431,11 +586,17 @@ export const useGeneration = () => {
 
   const regenerateImageMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedImage || !generationParams || !currentDealer)
+      const sourcePost = useAppStore.getState().generatedPost;
+      const workspaceKey = workspaceKeyForPost(sourcePost);
+      const operationAuthEpoch = useAppStore.getState().authEpoch;
+      if (!selectedImage || !generationParams || !currentDealer || !sourcePost)
         throw new Error("Missing required data");
+      assertOperationAuthEpoch(operationAuthEpoch);
       const { generateSocialPost } = await loadGeminiService();
-      return runGeminiTask("ai.regenerate.image", () =>
-        generateSocialPost(
+      assertOperationAuthEpoch(operationAuthEpoch);
+      const result = await runGeminiTask("ai.regenerate.image", () => {
+        assertOperationAuthEpoch(operationAuthEpoch);
+        return generateSocialPost(
           selectedImage,
           generationParams.style,
           generationParams.tone,
@@ -444,17 +605,38 @@ export const useGeneration = () => {
           currentDealer.logo,
           generationParams.customText || generatedPost?.text,
           generationParams.creativeBrief,
-        ),
-      );
+          imageQualityTier,
+          generationParams.imageAspectRatio ??
+            resolvePrimaryImageProfile(generationParams.platformIds).imageAspectRatio,
+        );
+      });
+      assertOperationAuthEpoch(operationAuthEpoch);
+      const formatId =
+        sourcePost.primaryFormatId ??
+        generationParams.primaryFormatId ??
+        resolvePrimaryImageProfile(
+          sourcePost.platformIds ?? generationParams.platformIds,
+        ).primaryFormatId;
+      const image = await renderExactPrimaryImage(result.image, formatId);
+      assertOperationAuthEpoch(operationAuthEpoch);
+      return {
+        workspaceKey,
+        operationAuthEpoch,
+        image,
+      };
     },
     onMutate: () => setError(null),
     // This control promises an image-only refresh. Preserve the caption,
     // disclosure, release, approval, and owner-scoped post metadata rather
     // than replacing the entire reviewed result with the provider response.
-    onSuccess: (result) => {
-      if (generatedPost) {
-        setGeneratedPost({ ...generatedPost, image: result.image });
-      }
+    onSuccess: ({ workspaceKey, operationAuthEpoch, image }) => {
+      if (
+        operationAuthEpoch !== useAppStore.getState().authEpoch ||
+        !workspaceIsCurrent(workspaceKey)
+      )
+        return;
+      const currentPost = useAppStore.getState().generatedPost;
+      if (currentPost) setGeneratedPost({ ...currentPost, image });
     },
     onError: (err) => {
       const normalized = normalizeError(err);
@@ -470,22 +652,53 @@ export const useGeneration = () => {
 
   const funModeMutation = useMutation({
     mutationFn: async (styleName?: string) => {
-      if (!selectedImage || !currentDealer)
+      const sourcePost = useAppStore.getState().generatedPost;
+      const workspaceKey = workspaceKeyForPost(sourcePost);
+      const operationAuthEpoch = useAppStore.getState().authEpoch;
+      if (!selectedImage || !currentDealer || !sourcePost)
         throw new Error("Missing required data");
+      assertOperationAuthEpoch(operationAuthEpoch);
       const { generateFunSocialPostImage } = await loadGeminiService();
-      return runGeminiTask("ai.fun", () =>
-        generateFunSocialPostImage(
+      assertOperationAuthEpoch(operationAuthEpoch);
+      const generatedImage = await runGeminiTask("ai.fun", () => {
+        assertOperationAuthEpoch(operationAuthEpoch);
+        return generateFunSocialPostImage(
           selectedImage,
           currentDealer.name,
           currentDealer.logo,
           styleName,
-        ),
-      );
+          imageQualityTier,
+          generationParams?.imageAspectRatio ??
+            generatedPost?.imageAspectRatio ??
+            resolvePrimaryImageProfile(
+              generationParams?.platformIds ?? generatedPost?.platformIds,
+            ).imageAspectRatio,
+        );
+      });
+      assertOperationAuthEpoch(operationAuthEpoch);
+      const formatId =
+        sourcePost.primaryFormatId ??
+        generationParams?.primaryFormatId ??
+        resolvePrimaryImageProfile(
+          sourcePost.platformIds ?? generationParams?.platformIds,
+        ).primaryFormatId;
+      const image = await renderExactPrimaryImage(generatedImage, formatId);
+      assertOperationAuthEpoch(operationAuthEpoch);
+      return {
+        workspaceKey,
+        operationAuthEpoch,
+        image,
+      };
     },
     onMutate: () => setError(null),
-    onSuccess: (newImage) => {
-      if (generatedPost)
-        setGeneratedPost({ ...generatedPost, image: newImage });
+    onSuccess: ({ workspaceKey, operationAuthEpoch, image }) => {
+      if (
+        operationAuthEpoch !== useAppStore.getState().authEpoch ||
+        !workspaceIsCurrent(workspaceKey)
+      )
+        return;
+      const currentPost = useAppStore.getState().generatedPost;
+      if (currentPost) setGeneratedPost({ ...currentPost, image });
     },
     onError: (err) => {
       const normalized = normalizeError(err);
@@ -504,22 +717,53 @@ export const useGeneration = () => {
 
   const editImageMutation = useMutation({
     mutationFn: async (editPrompt: string) => {
-      if (!generatedPost?.image || !editPrompt.trim() || !currentDealer)
+      const sourcePost = useAppStore.getState().generatedPost;
+      const workspaceKey = workspaceKeyForPost(sourcePost);
+      const operationAuthEpoch = useAppStore.getState().authEpoch;
+      if (!sourcePost?.image || !editPrompt.trim() || !currentDealer)
         throw new Error("Missing required data");
+      assertOperationAuthEpoch(operationAuthEpoch);
       const { editSocialPostImage } = await loadGeminiService();
-      return runGeminiTask("ai.edit.image", () =>
-        editSocialPostImage(
-          generatedPost.image,
+      assertOperationAuthEpoch(operationAuthEpoch);
+      const generatedImage = await runGeminiTask("ai.edit.image", () => {
+        assertOperationAuthEpoch(operationAuthEpoch);
+        return editSocialPostImage(
+          sourcePost.image,
           editPrompt,
           currentDealer.name,
           currentDealer.logo,
-        ),
-      );
+          imageQualityTier,
+          sourcePost.imageAspectRatio ??
+            generationParams?.imageAspectRatio ??
+            resolvePrimaryImageProfile(
+              sourcePost.platformIds ?? generationParams?.platformIds,
+            ).imageAspectRatio,
+        );
+      });
+      assertOperationAuthEpoch(operationAuthEpoch);
+      const formatId =
+        sourcePost.primaryFormatId ??
+        generationParams?.primaryFormatId ??
+        resolvePrimaryImageProfile(
+          sourcePost.platformIds ?? generationParams?.platformIds,
+        ).primaryFormatId;
+      const image = await renderExactPrimaryImage(generatedImage, formatId);
+      assertOperationAuthEpoch(operationAuthEpoch);
+      return {
+        workspaceKey,
+        operationAuthEpoch,
+        image,
+      };
     },
     onMutate: () => setError(null),
-    onSuccess: (newImage) => {
-      if (generatedPost)
-        setGeneratedPost({ ...generatedPost, image: newImage });
+    onSuccess: ({ workspaceKey, operationAuthEpoch, image }) => {
+      if (
+        operationAuthEpoch !== useAppStore.getState().authEpoch ||
+        !workspaceIsCurrent(workspaceKey)
+      )
+        return;
+      const currentPost = useAppStore.getState().generatedPost;
+      if (currentPost) setGeneratedPost({ ...currentPost, image });
     },
     onError: (err) => {
       const normalized = normalizeError(err);
@@ -541,23 +785,30 @@ export const useGeneration = () => {
     async (
       primaryCaption: string,
       platformIds: string[],
-    ): Promise<Record<string, string> | undefined> => {
-      if (
-        !shouldGenerateCaptionPack(platformIds) ||
-        !selectedImage ||
-        !currentDealer
-      ) {
+      operationAuthEpoch: number,
+    ): Promise<
+      | {
+          captions: Record<string, string>;
+          disclosures: string;
+          disclosureCategories: GeneratedPost["disclosureCategories"];
+        }
+      | undefined
+    > => {
+      if (!shouldGenerateCaptionPack(platformIds) || !selectedImage || !currentDealer) {
         return undefined;
       }
       try {
+        assertOperationAuthEpoch(operationAuthEpoch);
         const packBrief = platformsToCaptionPackBrief(
           platformIds,
           currentDealer.name,
           primaryCaption,
         );
         const { generateSocialPostText } = await loadGeminiService();
-        const rawPack = await runGeminiTask("ai.caption.pack", () =>
-          generateSocialPostText(
+        assertOperationAuthEpoch(operationAuthEpoch);
+        const rawPack = await runGeminiTask("ai.caption.pack", () => {
+          assertOperationAuthEpoch(operationAuthEpoch);
+          return generateSocialPostText(
             selectedImage,
             generationParams?.tone || preferredTone,
             currentDealer.name,
@@ -565,8 +816,9 @@ export const useGeneration = () => {
             true,
             packBrief,
             generationParams?.style,
-          ),
-        );
+          );
+        });
+        assertOperationAuthEpoch(operationAuthEpoch);
         const parsed = parsePlatformCaptionPack(rawPack, platformIds);
         const cleaned: Record<string, string> = {};
         const kit = brandKitFromDealer(currentDealer);
@@ -582,7 +834,16 @@ export const useGeneration = () => {
             /* skip prohibited variant */
           }
         }
-        return Object.keys(cleaned).length > 0 ? cleaned : undefined;
+        if (Object.keys(cleaned).length === 0) return undefined;
+        const disclosureUnion = analyzeCaptionSetForDelivery(
+          [primaryCaption, ...Object.values(cleaned)],
+          currentDealer.banned_phrases,
+        );
+        return {
+          captions: cleaned,
+          disclosures: disclosureUnion.disclosures,
+          disclosureCategories: disclosureUnion.disclosureCategories,
+        };
       } catch (err) {
         logError("caption.pack_rebuild_failed", {
           message: err instanceof Error ? err.message : String(err),
@@ -603,11 +864,17 @@ export const useGeneration = () => {
 
   const regenerateTextMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedImage || !generationParams || !currentDealer)
+      const sourcePost = useAppStore.getState().generatedPost;
+      const workspaceKey = workspaceKeyForPost(sourcePost);
+      const operationAuthEpoch = useAppStore.getState().authEpoch;
+      if (!selectedImage || !generationParams || !currentDealer || !sourcePost)
         throw new Error("Missing required data");
-      const { generateSocialPostText } = await loadGeminiService();
-      const newText = await runGeminiTask("ai.regenerate.text", () =>
-        generateSocialPostText(
+      assertOperationAuthEpoch(operationAuthEpoch);
+      const { generateSocialPostTextDetailed } = await loadGeminiService();
+      assertOperationAuthEpoch(operationAuthEpoch);
+      const captionResult = await runGeminiTask("ai.regenerate.text", () => {
+        assertOperationAuthEpoch(operationAuthEpoch);
+        return generateSocialPostTextDetailed(
           selectedImage,
           generationParams.tone,
           currentDealer.name,
@@ -615,33 +882,61 @@ export const useGeneration = () => {
           true,
           generationParams.creativeBrief,
           generationParams.style,
-        ),
-      );
+        );
+      });
+      assertOperationAuthEpoch(operationAuthEpoch);
       const prepared = prepareCaptionForDelivery(
-        newText,
+        captionResult.text,
         currentDealer.banned_phrases,
         brandKitFromDealer(currentDealer),
       );
-      const platformIds =
-        generationParams.platformIds ??
-        generatedPost?.platformIds ??
-        [];
-      const pack = await rebuildCaptionPack(prepared.caption, platformIds);
-      return { prepared, pack, platformIds };
+      const platformIds = generationParams.platformIds ?? sourcePost.platformIds ?? [];
+      const pack = await rebuildCaptionPack(
+        prepared.caption,
+        platformIds,
+        operationAuthEpoch,
+      );
+      assertOperationAuthEpoch(operationAuthEpoch);
+      return {
+        workspaceKey,
+        operationAuthEpoch,
+        prepared,
+        pack,
+        platformIds,
+        captionResult,
+      };
     },
     onMutate: () => setError(null),
-    onSuccess: ({ prepared, pack, platformIds }) => {
-      if (!generatedPost) return;
+    onSuccess: ({
+      workspaceKey,
+      operationAuthEpoch,
+      prepared,
+      pack,
+      platformIds,
+      captionResult,
+    }) => {
+      if (
+        operationAuthEpoch !== useAppStore.getState().authEpoch ||
+        !workspaceIsCurrent(workspaceKey)
+      )
+        return;
+      const currentPost = useAppStore.getState().generatedPost;
+      if (!currentPost) return;
       setGeneratedPost({
-        ...generatedPost,
+        ...currentPost,
         text: prepared.caption,
-        disclosures: prepared.disclosures,
-        disclosureCategories: prepared.disclosureCategories,
-        platformCaptions: pack,
-        platformIds:
-          platformIds.length > 0
-            ? platformIds
-            : generatedPost.platformIds,
+        captionSource: captionResult.captionSource,
+        isBasicFallback: captionResult.captionSource === "basic_fallback",
+        aiMeta: mergeCaptionProvenance(
+          currentPost.aiMeta,
+          captionResult,
+          imageQualityTier,
+        ),
+        platformCaptions: pack?.captions,
+        platformIds: platformIds.length > 0 ? platformIds : currentPost.platformIds,
+        disclosures: pack?.disclosures ?? prepared.disclosures,
+        disclosureCategories:
+          pack?.disclosureCategories ?? prepared.disclosureCategories,
       });
     },
     onError: (err) => {
@@ -660,12 +955,16 @@ export const useGeneration = () => {
   // the post. Used by the CaptionAlternativesModal which spawns 3 in parallel
   // and lets the salesperson pick — replaces state itself on selection.
   const generateCaptionVariant = useCallback(async (): Promise<string> => {
+    const operationAuthEpoch = useAppStore.getState().authEpoch;
     if (!selectedImage || !generationParams || !currentDealer) {
       throw new Error("Missing required data for caption variant");
     }
+    assertOperationAuthEpoch(operationAuthEpoch);
     const { generateSocialPostText } = await loadGeminiService();
-    const variant = await runGeminiTask("ai.caption.variant", () =>
-      generateSocialPostText(
+    assertOperationAuthEpoch(operationAuthEpoch);
+    const variant = await runGeminiTask("ai.caption.variant", () => {
+      assertOperationAuthEpoch(operationAuthEpoch);
+      return generateSocialPostText(
         selectedImage,
         generationParams.tone,
         currentDealer.name,
@@ -673,13 +972,17 @@ export const useGeneration = () => {
         true, // regeneration mode — higher temperature, guaranteed variation
         generationParams.creativeBrief,
         generationParams.style,
-      ),
-    );
+      );
+    });
+    assertOperationAuthEpoch(operationAuthEpoch);
     const prepared = prepareCaptionForDelivery(
       variant,
       currentDealer.banned_phrases,
       brandKitFromDealer(currentDealer),
     );
+    if (operationAuthEpoch !== useAppStore.getState().authEpoch) {
+      throw new Error("Your signed-in workspace changed during caption generation.");
+    }
     return prepared.caption;
   }, [
     selectedImage,
@@ -690,32 +993,96 @@ export const useGeneration = () => {
   ]);
 
   const editTextMutation = useMutation({
-    mutationFn: async (editPrompt: string) => {
-      if (!generatedPost?.text || !editPrompt.trim())
+    mutationFn: async ({
+      editPrompt,
+      originalText,
+      platformId,
+    }: {
+      editPrompt: string;
+      originalText?: string;
+      platformId?: string;
+    }) => {
+      const sourcePost = useAppStore.getState().generatedPost;
+      const workspaceKey = workspaceKeyForPost(sourcePost);
+      const operationAuthEpoch = useAppStore.getState().authEpoch;
+      const sourceText = originalText?.trim() || sourcePost?.text || "";
+      if (!sourcePost || !sourceText || !editPrompt.trim())
         throw new Error("Missing required data");
-      const { editSocialPostText } = await loadGeminiService();
+      assertOperationAuthEpoch(operationAuthEpoch);
+      const { editSocialPostTextDetailed } = await loadGeminiService();
+      assertOperationAuthEpoch(operationAuthEpoch);
       const tone = generationParams?.tone || preferredTone;
-      const newText = await runGeminiTask("ai.edit.text", () =>
-        editSocialPostText(generatedPost.text, editPrompt, tone),
-      );
+      const captionResult = await runGeminiTask("ai.edit.text", () => {
+        assertOperationAuthEpoch(operationAuthEpoch);
+        return editSocialPostTextDetailed(sourceText, editPrompt, tone);
+      });
+      assertOperationAuthEpoch(operationAuthEpoch);
       const prepared = prepareCaptionForDelivery(
-        newText,
+        captionResult.text,
         currentDealer?.banned_phrases,
         brandKitFromDealer(currentDealer),
       );
-      const platformIds = generatedPost.platformIds ?? [];
-      const pack = await rebuildCaptionPack(prepared.caption, platformIds);
-      return { prepared, pack };
+      const platformIds = sourcePost.platformIds ?? [];
+      const pack = platformId
+        ? undefined
+        : await rebuildCaptionPack(prepared.caption, platformIds, operationAuthEpoch);
+      assertOperationAuthEpoch(operationAuthEpoch);
+      return {
+        workspaceKey,
+        operationAuthEpoch,
+        platformId,
+        prepared,
+        pack,
+        captionResult,
+      };
     },
     onMutate: () => setError(null),
-    onSuccess: ({ prepared, pack }) => {
-      if (!generatedPost) return;
+    onSuccess: ({
+      workspaceKey,
+      operationAuthEpoch,
+      platformId,
+      prepared,
+      pack,
+      captionResult,
+    }) => {
+      if (
+        operationAuthEpoch !== useAppStore.getState().authEpoch ||
+        !workspaceIsCurrent(workspaceKey)
+      )
+        return;
+      const currentPost = useAppStore.getState().generatedPost;
+      if (!currentPost) return;
+      if (platformId) {
+        const platformCaptions = {
+          ...(currentPost.platformCaptions || {}),
+          [platformId]: prepared.caption,
+        };
+        const disclosureUnion = analyzeCaptionSetForDelivery(
+          [currentPost.text, ...Object.values(platformCaptions)],
+          currentDealer?.banned_phrases,
+        );
+        setGeneratedPost({
+          ...currentPost,
+          platformCaptions,
+          disclosures: disclosureUnion.disclosures,
+          disclosureCategories: disclosureUnion.disclosureCategories,
+        });
+        return;
+      }
       setGeneratedPost({
-        ...generatedPost,
+        ...currentPost,
         text: prepared.caption,
-        disclosures: prepared.disclosures,
-        disclosureCategories: prepared.disclosureCategories,
-        platformCaptions: pack,
+        captionSource: captionResult.captionSource,
+        isBasicFallback: false,
+        aiMeta: mergeCaptionProvenance(
+          currentPost.aiMeta,
+          captionResult,
+          imageQualityTier,
+        ),
+        disclosures: pack?.disclosures ?? prepared.disclosures,
+        disclosureCategories:
+          pack?.disclosureCategories ?? prepared.disclosureCategories,
+        platformCaptions: pack?.captions,
       });
     },
     onError: (err) => {
@@ -726,8 +1093,17 @@ export const useGeneration = () => {
   });
 
   const handleEditText = useCallback(
-    async (editPrompt: string) => {
-      await editTextMutation.mutateAsync(editPrompt);
+    async (
+      editPrompt: string,
+      originalText?: string,
+      platformId?: string,
+    ): Promise<string> => {
+      const result = await editTextMutation.mutateAsync({
+        editPrompt,
+        originalText,
+        platformId,
+      });
+      return result.prepared.caption;
     },
     [editTextMutation],
   );
@@ -740,22 +1116,29 @@ export const useGeneration = () => {
       style: VideoStyle;
       options: VideoRequestOptions;
     }) => {
-      if (!generatedPost?.image)
+      const sourcePost = useAppStore.getState().generatedPost;
+      const workspaceKey = workspaceKeyForPost(sourcePost);
+      const operationAuthEpoch = useAppStore.getState().authEpoch;
+      if (!sourcePost?.image)
         throw new Error("No image available for video generation");
+      assertOperationAuthEpoch(operationAuthEpoch);
       const { generatePostVideo } = await loadGeminiService();
+      assertOperationAuthEpoch(operationAuthEpoch);
       // Issue a controller bound to component lifecycle so the poll cancels
       // if the user navigates away.
       const controller = new AbortController();
       videoAbortControllersRef.current.add(controller);
       try {
-        return await runGeminiTask("ai.generate.video", () =>
-          generatePostVideo(
-            generatedPost.image,
-            style,
-            options,
-            controller.signal,
-          ),
-        );
+        const url = await runGeminiTask("ai.generate.video", () => {
+          assertOperationAuthEpoch(operationAuthEpoch);
+          return generatePostVideo(sourcePost.image, style, options, controller.signal);
+        });
+        assertOperationAuthEpoch(operationAuthEpoch);
+        if (!workspaceIsCurrent(workspaceKey)) {
+          if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+          throw new Error("This video finished after you opened another post.");
+        }
+        return { url, workspaceKey, operationAuthEpoch };
       } finally {
         videoAbortControllersRef.current.delete(controller);
       }
@@ -768,11 +1151,16 @@ export const useGeneration = () => {
   });
 
   const handleGenerateVideo = useCallback(
-    async (
-      style: VideoStyle,
-      options: VideoRequestOptions,
-    ): Promise<string> => {
-      return await generateVideoMutation.mutateAsync({ style, options });
+    async (style: VideoStyle, options: VideoRequestOptions): Promise<string> => {
+      const result = await generateVideoMutation.mutateAsync({ style, options });
+      if (
+        result.operationAuthEpoch !== useAppStore.getState().authEpoch ||
+        !workspaceIsCurrent(result.workspaceKey)
+      ) {
+        if (result.url.startsWith("blob:")) URL.revokeObjectURL(result.url);
+        throw new Error("This video finished after your signed-in workspace changed.");
+      }
+      return result.url;
     },
     [generateVideoMutation],
   );

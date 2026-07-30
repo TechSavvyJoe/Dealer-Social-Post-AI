@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  fetchSession,
-  resolveRestoredStep,
-  useAppStore,
-} from "../stores/appStore";
-import { AppStep } from "../types";
+import { fetchSession, resolveRestoredStep, useAppStore } from "../stores/appStore";
+import { AppStep, StyleOption, ToneOption } from "../types";
 
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
@@ -45,33 +41,33 @@ afterEach(() => {
 
 describe("session restore navigation", () => {
   it("never restores a result step without a complete generated post", () => {
-    expect(
-      resolveRestoredStep("salesperson", AppStep.RESULT, false, false),
-    ).toBe(AppStep.CAPTURE);
-    expect(
-      resolveRestoredStep("salesperson", AppStep.RESULT, true, false),
-    ).toBe(AppStep.CUSTOMIZE);
+    expect(resolveRestoredStep("salesperson", AppStep.RESULT, false, false)).toBe(
+      AppStep.CAPTURE,
+    );
+    expect(resolveRestoredStep("salesperson", AppStep.RESULT, true, false)).toBe(
+      AppStep.CUSTOMIZE,
+    );
   });
 
   it("recovers interrupted generation to the retained customization", () => {
-    expect(
-      resolveRestoredStep("salesperson", AppStep.GENERATING, true, false),
-    ).toBe(AppStep.CUSTOMIZE);
+    expect(resolveRestoredStep("salesperson", AppStep.GENERATING, true, false)).toBe(
+      AppStep.CUSTOMIZE,
+    );
   });
 
   it("restores a complete result and clamps admin steps to server roles", () => {
     expect(resolveRestoredStep("salesperson", AppStep.RESULT, true, true)).toBe(
       AppStep.RESULT,
     );
-    expect(
-      resolveRestoredStep("salesperson", AppStep.ADMIN, false, false),
-    ).toBe(AppStep.CAPTURE);
-    expect(
-      resolveRestoredStep("dealer_admin", AppStep.RESULT, true, true),
-    ).toBe(AppStep.DEALER_ADMIN);
-    expect(
-      resolveRestoredStep("super_admin", AppStep.CAPTURE, false, false),
-    ).toBe(AppStep.ADMIN);
+    expect(resolveRestoredStep("salesperson", AppStep.ADMIN, false, false)).toBe(
+      AppStep.CAPTURE,
+    );
+    expect(resolveRestoredStep("dealer_admin", AppStep.RESULT, true, true)).toBe(
+      AppStep.DEALER_ADMIN,
+    );
+    expect(resolveRestoredStep("super_admin", AppStep.CAPTURE, false, false)).toBe(
+      AppStep.ADMIN,
+    );
   });
 
   it("aborts a session request that exceeds its startup budget", async () => {
@@ -125,7 +121,9 @@ describe("session restore navigation", () => {
       ),
     );
 
-    await expect(useAppStore.getState().login("222222")).resolves.toBe(true);
+    await expect(useAppStore.getState().login("2222")).resolves.toEqual({
+      ok: true,
+    });
 
     const state = useAppStore.getState();
     expect(state.currentDealer?.id).toBe("dealer-b");
@@ -141,5 +139,72 @@ describe("session restore navigation", () => {
     expect(persisted.selectedImage).toBeUndefined();
     expect(persisted.generatedPost).toBeUndefined();
     expect(persisted.generationParams).toBeUndefined();
+  });
+
+  it("does not resurrect a previous generation plan after returning to Capture", async () => {
+    const previousPlan = {
+      style: StyleOption.Luxury,
+      tone: ToneOption.Promotional,
+      customerName: "Previous Customer",
+      platformIds: ["facebook_feed", "instagram_reel"],
+      mediaOutputMode: "both" as const,
+      primaryFormatId: "story_vertical" as const,
+      imageAspectRatio: "9:16" as const,
+    };
+    const dealer = { id: "dealer-a", name: "Dealer A" };
+    useAppStore.setState({
+      currentDealer: dealer,
+      role: "salesperson",
+      selectedImage: "data:image/png;base64,previous-photo",
+      generatedPost: {
+        image: "data:image/png;base64,previous-result",
+        text: "Previous post",
+      },
+      generationParams: null,
+      step: AppStep.RESULT,
+    });
+    useAppStore.getState().setGenerationParams(previousPlan);
+
+    useAppStore.getState().setStep(AppStep.CAPTURE);
+    expect(useAppStore.getState().generationParams).toBeNull();
+    const persistedAfterBack = JSON.parse(
+      localStorage.getItem("dealer-social-post-ai.session") || "{}",
+    );
+    expect(persistedAfterBack.generationParams).toBeUndefined();
+
+    useAppStore.getState().setSelectedImage("data:image/png;base64,new-customer-photo");
+    useAppStore.getState().setStep(AppStep.CUSTOMIZE);
+    const persistedAfterNewCapture = JSON.parse(
+      localStorage.getItem("dealer-social-post-ai.session") || "{}",
+    );
+    expect(persistedAfterNewCapture.generationParams).toBeUndefined();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            role: "salesperson",
+            dealer,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    useAppStore.setState({
+      currentDealer: null,
+      selectedImage: null,
+      generatedPost: null,
+      generationParams: previousPlan,
+      step: AppStep.LOGIN,
+    });
+
+    await useAppStore.getState().restoreSession();
+
+    expect(useAppStore.getState().generationParams).toBeNull();
+    const persistedAfterReload = JSON.parse(
+      localStorage.getItem("dealer-social-post-ai.session") || "{}",
+    );
+    expect(persistedAfterReload.generationParams).toBeUndefined();
   });
 });

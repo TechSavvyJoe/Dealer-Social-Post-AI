@@ -16,9 +16,10 @@ const APP_SHELL = ["/", "/index.html", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches
-      .open(STATIC_CACHE)
-      .then((cache) => cache.addAll(APP_SHELL).catch(() => {})),
+    // Keep the prior worker active if the core offline shell cannot be cached.
+    // Silently activating a worker without index.html would advertise offline
+    // support while leaving installed users with a blank navigation failure.
+    caches.open(STATIC_CACHE).then((cache) => cache.addAll(APP_SHELL)),
     // Don't auto-skipWaiting; let the client prompt the user. The user's
     // "tap to refresh" banner posts SKIP_WAITING below.
   );
@@ -36,9 +37,7 @@ self.addEventListener("activate", (event) => {
       .keys()
       .then((keys) =>
         Promise.all(
-          keys
-            .filter((key) => key !== STATIC_CACHE)
-            .map((key) => caches.delete(key)),
+          keys.filter((key) => key !== STATIC_CACHE).map((key) => caches.delete(key)),
         ),
       )
       .then(() => self.clients.claim()),

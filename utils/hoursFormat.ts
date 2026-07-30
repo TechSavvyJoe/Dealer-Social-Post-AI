@@ -13,15 +13,7 @@ export interface DayHours {
 
 export type WeekHours = Record<DayKey, DayHours>;
 
-export const DAY_ORDER: DayKey[] = [
-  "mon",
-  "tue",
-  "wed",
-  "thu",
-  "fri",
-  "sat",
-  "sun",
-];
+export const DAY_ORDER: DayKey[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
 export const DAY_LABELS: Record<DayKey, string> = {
   mon: "Mon",
@@ -46,7 +38,11 @@ export const defaultWeekHours = (): WeekHours => {
       closeMinutes: day === "sat" ? 18 * 60 : isWeekend ? DEFAULT_CLOSE : DEFAULT_CLOSE,
     };
     if (day === "sun") {
-      week[day] = { open: false, openMinutes: DEFAULT_OPEN, closeMinutes: DEFAULT_CLOSE };
+      week[day] = {
+        open: false,
+        openMinutes: DEFAULT_OPEN,
+        closeMinutes: DEFAULT_CLOSE,
+      };
     }
   }
   return week;
@@ -62,9 +58,7 @@ export const minutesToLabel = (minutes: number): string => {
 };
 
 export const labelToMinutes = (label: string): number | null => {
-  const match = label
-    .trim()
-    .match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  const match = label.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
   if (!match) return null;
   let h = parseInt(match[1], 10);
   const m = parseInt(match[2], 10);
@@ -132,7 +126,9 @@ const parseTimeToken = (raw: string): number | null => {
  * Best-effort parse of free-text hours. Returns null when unparseable so the
  * UI can start from defaults while still showing the original string once.
  */
-export const parseHoursString = (input: string | undefined | null): WeekHours | null => {
+export const parseHoursString = (
+  input: string | undefined | null,
+): WeekHours | null => {
   const text = (input || "").trim();
   if (!text) return defaultWeekHours();
 
@@ -142,7 +138,10 @@ export const parseHoursString = (input: string | undefined | null): WeekHours | 
   }
 
   let matchedAny = false;
-  const segments = text.split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
+  const segments = text
+    .split(/[,;]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   for (const segment of segments) {
     const closed = /closed/i.test(segment);
@@ -152,9 +151,7 @@ export const parseHoursString = (input: string | undefined | null): WeekHours | 
     if (!rangeMatch) continue;
 
     const startKey = DAY_ALIASES[rangeMatch[1].toLowerCase()];
-    const endKey = rangeMatch[2]
-      ? DAY_ALIASES[rangeMatch[2].toLowerCase()]
-      : startKey;
+    const endKey = rangeMatch[2] ? DAY_ALIASES[rangeMatch[2].toLowerCase()] : startKey;
     if (!startKey || !endKey) continue;
 
     const startIdx = DAY_ORDER.indexOf(startKey);
@@ -206,9 +203,7 @@ const collapseOpenRuns = (week: WeekHours): string[] => {
       const startLabel = DAY_LABELS[DAY_ORDER[i]];
       const endLabel = DAY_LABELS[DAY_ORDER[j - 1]];
       parts.push(
-        i === j - 1
-          ? `${startLabel} closed`
-          : `${startLabel}–${endLabel} closed`,
+        i === j - 1 ? `${startLabel} closed` : `${startLabel}–${endLabel} closed`,
       );
       i = j;
       continue;
@@ -225,8 +220,7 @@ const collapseOpenRuns = (week: WeekHours): string[] => {
     }
     const startLabel = DAY_LABELS[DAY_ORDER[i]];
     const endLabel = DAY_LABELS[DAY_ORDER[j - 1]];
-    const range =
-      i === j - 1 ? startLabel : `${startLabel}–${endLabel}`;
+    const range = i === j - 1 ? startLabel : `${startLabel}–${endLabel}`;
     parts.push(
       `${range} ${minutesToLabel(cur.openMinutes)}–${minutesToLabel(cur.closeMinutes)}`,
     );

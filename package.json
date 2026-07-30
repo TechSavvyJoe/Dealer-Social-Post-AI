@@ -3,8 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "packageManager": "npm@10.9.8",
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.23.1 <23"
   },
   "scripts": {
     "dev": "vite",
@@ -14,8 +15,28 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:stability": "for pass in 1 2 3; do vitest run || exit; done",
     "test:watch": "vitest",
+    "format:check": "npm run format:check:tooling && npm run format:check:backend && npm run format:check:app",
+    "format:check:tooling": "prettier --check package.json vitest.config.ts vitest.setup.ts test/framer-motion.ts vercel.ts .prettierrc.json config/gemini-model-policy.json .github/workflows/ci.yml .github/workflows/fly-deploy.yml .github/workflows/pocketbase-backup.yml scripts/check-model-policy.mjs scripts/check-vercel-config.mjs scripts/provider-stub.mjs scripts/production-provider-canary.mjs scripts/resolve-fly-backup-source.mjs scripts/lib/r2-s3.mjs scripts/pocketbase-r2-backup.mjs docs/production-backups-and-release.md README.md SETUP.md VERTEX_AI_SETUP.md",
+    "format:check:backend": "prettier --check \"pb_hooks/**/*.js\" \"pb_migrations/175080*.js\"",
+    "format:check:app": "prettier --check App.tsx global.d.ts index.html vite.config.ts \"components/**/*.{ts,tsx}\" \"hooks/**/*.{ts,tsx}\" \"services/**/*.{ts,tsx}\" \"stores/**/*.{ts,tsx}\" types.ts \"utils/**/*.{ts,tsx}\" playwright.config.ts \"e2e/**/*.{ts,tsx}\" \"__tests__/**/*.{ts,tsx}\"",
+    "format:tooling": "prettier --write package.json vitest.config.ts vitest.setup.ts test/framer-motion.ts vercel.ts .prettierrc.json config/gemini-model-policy.json .github/workflows/ci.yml .github/workflows/fly-deploy.yml .github/workflows/pocketbase-backup.yml scripts/check-model-policy.mjs scripts/check-vercel-config.mjs scripts/provider-stub.mjs scripts/production-provider-canary.mjs scripts/resolve-fly-backup-source.mjs scripts/lib/r2-s3.mjs scripts/pocketbase-r2-backup.mjs docs/production-backups-and-release.md README.md SETUP.md VERTEX_AI_SETUP.md",
+    "format:backend": "prettier --write \"pb_hooks/**/*.js\" \"pb_migrations/175080*.js\"",
+    "format:app": "prettier --write App.tsx global.d.ts index.html vite.config.ts \"components/**/*.{ts,tsx}\" \"hooks/**/*.{ts,tsx}\" \"services/**/*.{ts,tsx}\" \"stores/**/*.{ts,tsx}\" types.ts \"utils/**/*.{ts,tsx}\" playwright.config.ts \"e2e/**/*.{ts,tsx}\" \"__tests__/**/*.{ts,tsx}\"",
+    "prepare": "husky",
+    "model-policy:check": "node scripts/check-model-policy.mjs",
+    "vercel-config:check": "node --experimental-strip-types scripts/check-vercel-config.mjs",
+    "security:audit": "npm audit --audit-level=low",
     "security:secrets": "node scripts/check-secrets.mjs",
+    "backup:create": "node scripts/pocketbase-r2-backup.mjs backup",
+    "backup:download": "node scripts/pocketbase-r2-backup.mjs download",
+    "backup:restore-drill": "bash scripts/verify-pocketbase-restore.sh",
+    "release:provider-canary": "node scripts/production-provider-canary.mjs",
+    "release:provider-canary:contract": "node scripts/production-provider-canary.mjs --contract-check",
+    "release:vercel:stage": "bash scripts/vercel-staged-release.sh stage",
+    "release:vercel:promote": "bash scripts/vercel-staged-release.sh promote",
+    "smoke:dirty-upgrade": "bash scripts/dirty-upgrade-smoke.sh",
     "test:api-keys": "node scripts/test_api_keys.js",
     "sync:prod": "node scripts/sync_prod_to_local.js"
   },
@@ -26,7 +47,7 @@
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
     "framer-motion": "^12.42.2",
-    "lucide-react": "^1.24.0",
+    "lucide-react": "^1.25.0",
     "pocketbase": "^0.27.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -35,7 +56,13 @@
     "zod-validation-error": "^5.0.0",
     "zustand": "^5.0.14"
   },
+  "overrides": {
+    "@vercel/routing-utils": {
+      "path-to-regexp": "6.3.0"
+    }
+  },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.61.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -44,16 +71,19 @@
     "@types/node": "^22.20.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@vercel/config": "^0.5.5",
     "@vitejs/plugin-react": "^6.0.3",
-    "autoprefixer": "^10.5.3",
+    "autoprefixer": "^10.5.4",
     "esbuild": "^0.28.0",
+    "husky": "^9.1.7",
     "jsdom": "^27.4.0",
+    "lint-staged": "^17.2.0",
     "pocketbase-typegen": "^1.5.0",
     "postcss": "^8.5.6",
     "prettier": "^3.9.5",
     "tailwindcss": "^3.4.19",
     "typescript": "^6.0.3",
-    "vite": "^8.0.13",
+    "vite": "^8.1.5",
     "vitest": "^4.1.10"
   }
 }

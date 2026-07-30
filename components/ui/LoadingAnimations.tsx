@@ -101,7 +101,7 @@ export const Spinner: React.FC<SpinnerProps> = ({ size = "md", className }) => {
       className={cn(
         "rounded-full border-primary-500/30 border-t-primary-500",
         sizes[size],
-        className
+        className,
       )}
       animate={{ rotate: 360 }}
       transition={{
@@ -129,10 +129,7 @@ export const AnimatedGlow: React.FC<GlowProps> = ({
 }) => {
   return (
     <motion.div
-      className={cn(
-        "absolute rounded-full blur-3xl pointer-events-none",
-        className
-      )}
+      className={cn("absolute rounded-full blur-3xl pointer-events-none", className)}
       style={{
         width: size,
         height: size,

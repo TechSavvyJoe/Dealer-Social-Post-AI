@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useId, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, Trash2, Save, X, Pencil, Loader2 } from "lucide-react";
 import { Input, Textarea } from "./ui/Input";
@@ -61,13 +61,16 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
 }) => {
   const scenarios = useMemo(
     () => parseCustomScenarios(customScenariosJson),
-    [customScenariosJson]
+    [customScenariosJson],
   );
 
   const [editing, setEditing] = useState<EditingState | null>(null);
   const [hashtagsInput, setHashtagsInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const categoryId = useId();
+  const defaultStyleId = useId();
+  const defaultToneId = useId();
 
   const startNew = () => {
     setEditing(blankScenario());
@@ -170,12 +173,10 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <div className="text-sm font-semibold text-surface-50">
-            Custom scenarios
-          </div>
+          <div className="text-sm font-semibold text-surface-50">Custom scenarios</div>
           <p className="text-[11px] text-surface-400">
-            Define your own post types alongside the 12 built-in ones. They
-            appear in the showroom picker with your team's options.
+            Define your own post types alongside the 12 built-in ones. They appear in
+            the showroom picker with your team's options.
           </p>
         </div>
         {!editing && (
@@ -213,15 +214,16 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
               <Input
                 label="Label"
                 value={editing.label}
-                onChange={(e) =>
-                  setEditing({ ...editing, label: e.target.value })
-                }
+                onChange={(e) => setEditing({ ...editing, label: e.target.value })}
                 placeholder="Spring Clearance — F-150"
                 fullWidth
                 className="bg-white/5 border-white/10 focus:border-primary-400"
               />
               <div>
-                <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+                <label
+                  htmlFor={categoryId}
+                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+                >
                   Category
                 </label>
                 <div className="mt-1 flex items-center gap-2">
@@ -237,6 +239,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                     );
                   })()}
                   <select
+                    id={categoryId}
                     value={editing.category}
                     onChange={(e) =>
                       setEditing({
@@ -259,9 +262,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
             <Input
               label="Short blurb (shown on the picker tile)"
               value={editing.blurb || ""}
-              onChange={(e) =>
-                setEditing({ ...editing, blurb: e.target.value })
-              }
+              onChange={(e) => setEditing({ ...editing, blurb: e.target.value })}
               placeholder="F-150 push, April 1–30"
               fullWidth
               className="bg-white/5 border-white/10 focus:border-primary-400"
@@ -281,10 +282,14 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
-                <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+                <label
+                  htmlFor={defaultStyleId}
+                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+                >
                   Default style
                 </label>
                 <select
+                  id={defaultStyleId}
                   value={editing.defaultStyle}
                   onChange={(e) =>
                     setEditing({
@@ -302,10 +307,14 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                 </select>
               </div>
               <div>
-                <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+                <label
+                  htmlFor={defaultToneId}
+                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+                >
                   Default tone
                 </label>
                 <select
+                  id={defaultToneId}
                   value={editing.defaultTone}
                   onChange={(e) =>
                     setEditing({
@@ -411,8 +420,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
 
       {scenarios.length === 0 ? (
         <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-4 text-center text-xs text-surface-400">
-          No custom scenarios yet — add one to give your team more on-brand
-          options.
+          No custom scenarios yet — add one to give your team more on-brand options.
         </div>
       ) : (
         <ul className="space-y-2">
@@ -449,7 +457,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                   className={cn(
                     "text-[11px] px-2 py-1 rounded-md transition-colors",
                     "bg-white/5 hover:bg-white/10 text-surface-200",
-                    "flex items-center gap-1"
+                    "flex items-center gap-1",
                   )}
                   title="Edit scenario"
                 >
@@ -462,7 +470,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                   className={cn(
                     "text-[11px] px-2 py-1 rounded-md transition-colors",
                     "bg-error-500/10 hover:bg-error-500/20 text-error-200",
-                    "flex items-center gap-1"
+                    "flex items-center gap-1",
                   )}
                   title="Delete scenario"
                 >

@@ -10,7 +10,12 @@
  * `pb_hooks/main.pb.js` adds a /api/proxy/anthropic/* route that forwards to
  * api.anthropic.com so the key never reaches the browser.
  */
-import { CLAUDE_MODELS, FLAGS } from "./modelConfig";
+import { CLAUDE_MODELS, FLAGS, MODEL_POLICY_VERSION } from "./modelConfig";
+import {
+  assertAuthEpoch,
+  captureAuthEpoch,
+  notifySessionRejected,
+} from "../utils/authBoundary";
 
 const PROXY_PATH = "/api/proxy/anthropic/v1/messages";
 
@@ -20,6 +25,10 @@ interface ClaudeMessageOptions {
   maxTokens?: number;
   /** Optional system prompt (preferred over stuffing it into user content). */
   system?: string;
+  task?: "caption" | "caption_regenerate" | "caption_edit";
+  attemptId?: string;
+  /** Originating authenticated workspace for cross-provider failover. */
+  requestAuthEpoch?: number;
 }
 
 interface ClaudeMessageResponse {
@@ -32,8 +41,18 @@ interface ClaudeMessageResponse {
 // Auth: HttpOnly session cookie attached via credentials:"include" at the
 // fetch call site. VITE_PROXY_ACCESS_TOKEN removed 2026-05-28 (bundled
 // secret → bypassable per-dealer rate limits).
-const proxyHeaders = (): Record<string, string> => ({
+const proxyHeaders = (
+  task?: ClaudeMessageOptions["task"],
+  attemptId?: string,
+): Record<string, string> => ({
   "Content-Type": "application/json",
+  ...(task
+    ? {
+        "X-Generation-Task": task,
+        "X-Model-Policy-Version": MODEL_POLICY_VERSION,
+        ...(attemptId ? { "X-Generation-Attempt-ID": attemptId } : {}),
+      }
+    : {}),
 });
 
 /**
@@ -47,6 +66,7 @@ export const generateTextViaClaude = async (
   prompt: string,
   options: ClaudeMessageOptions = {},
 ): Promise<string> => {
+  const requestAuthEpoch = options.requestAuthEpoch ?? captureAuthEpoch();
   if (!FLAGS.enableClaudeFallback) {
     throw new Error(
       "Claude fallback is disabled (set VITE_ENABLE_CLAUDE_FALLBACK=true)",
@@ -66,14 +86,16 @@ export const generateTextViaClaude = async (
     ],
   };
 
+  assertAuthEpoch(requestAuthEpoch);
   const res = await fetch(PROXY_PATH, {
     method: "POST",
     credentials: "include",
-    headers: proxyHeaders(),
+    headers: proxyHeaders(options.task, options.attemptId),
     body: JSON.stringify(body),
   });
 
   if (!res.ok) {
+    if (res.status === 401) notifySessionRejected(requestAuthEpoch);
     let detail = `${res.status} ${res.statusText}`;
     try {
       const errBody = await res.json();
@@ -85,6 +107,7 @@ export const generateTextViaClaude = async (
   }
 
   const payload: ClaudeMessageResponse = await res.json();
+  assertAuthEpoch(requestAuthEpoch);
   if (payload.error) {
     throw new Error(`Claude API error: ${payload.error.message}`);
   }
@@ -99,6 +122,7 @@ export const generateTextViaClaude = async (
     throw new Error("Claude returned an empty response");
   }
 
+  assertAuthEpoch(requestAuthEpoch);
   return text;
 };
 

@@ -1,9 +1,9 @@
-import React from 'react';
-import { cn } from '../../utils/classNames';
+import React from "react";
+import { cn } from "../../utils/classNames";
 
 interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
   /** Skeleton shape variant */
-  variant?: 'text' | 'circular' | 'rectangular';
+  variant?: "text" | "circular" | "rectangular";
   /** Width of the skeleton */
   width?: string | number;
   /** Height of the skeleton */
@@ -20,34 +20,30 @@ interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
  * <Skeleton variant="rectangular" width="100%" height={200} />
  */
 export const Skeleton = React.forwardRef<HTMLDivElement, SkeletonProps>(
-  ({ className, variant = 'text', width, height, style, ...props }, ref) => {
+  ({ className, variant = "text", width, height, style, ...props }, ref) => {
     const variantStyles = {
-      text: 'h-4 w-full rounded',
-      circular: 'rounded-full',
-      rectangular: 'rounded-lg',
+      text: "h-4 w-full rounded",
+      circular: "rounded-full",
+      rectangular: "rounded-lg",
     };
 
     return (
       <div
         ref={ref}
-        className={cn(
-          'shimmer bg-surface-800',
-          variantStyles[variant],
-          className
-        )}
+        className={cn("shimmer bg-surface-800", variantStyles[variant], className)}
         style={{
           width: width,
-          height: height || (variant === 'text' ? undefined : height),
+          height: height || (variant === "text" ? undefined : height),
           ...style,
         }}
         aria-hidden="true"
         {...props}
       />
     );
-  }
+  },
 );
 
-Skeleton.displayName = 'Skeleton';
+Skeleton.displayName = "Skeleton";
 
 /**
  * Skeleton group for complex loading states
@@ -56,24 +52,24 @@ interface SkeletonGroupProps {
   /** Number of skeleton lines to display */
   lines?: number;
   /** Spacing between lines */
-  spacing?: 'tight' | 'normal' | 'relaxed';
+  spacing?: "tight" | "normal" | "relaxed";
   /** Show avatar skeleton */
   avatar?: boolean;
 }
 
 export const SkeletonGroup: React.FC<SkeletonGroupProps> = ({
   lines = 3,
-  spacing = 'normal',
+  spacing = "normal",
   avatar = false,
 }) => {
   const spacingStyles = {
-    tight: 'space-y-2',
-    normal: 'space-y-3',
-    relaxed: 'space-y-4',
+    tight: "space-y-2",
+    normal: "space-y-3",
+    relaxed: "space-y-4",
   };
 
   return (
-    <div className={cn('w-full', spacingStyles[spacing])}>
+    <div className={cn("w-full", spacingStyles[spacing])}>
       {avatar && (
         <div className="flex items-center gap-3">
           <Skeleton variant="circular" width={40} height={40} />
@@ -84,10 +80,7 @@ export const SkeletonGroup: React.FC<SkeletonGroupProps> = ({
         </div>
       )}
       {Array.from({ length: lines }).map((_, i) => (
-        <Skeleton
-          key={i}
-          width={i === lines - 1 ? '70%' : '100%'}
-        />
+        <Skeleton key={i} width={i === lines - 1 ? "70%" : "100%"} />
       ))}
     </div>
   );

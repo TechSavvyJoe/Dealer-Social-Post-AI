@@ -8,12 +8,20 @@ type Policies = {
 
 type Helpers = {
   findSessionByToken(token: string): unknown;
+  findSystemDealer(): unknown;
   createSession(
     dealerId: string,
     role: string,
     ip: string,
     userAgent: string,
+    opts?: {
+      personId?: string;
+      isImpersonation?: boolean;
+      impersonatorSessionId?: string;
+      expectedPersonPinFingerprint?: string;
+    },
   ): { token: string; expiresAt: Date };
+  sessionContext(c: unknown): unknown;
   refreshSession(session: { set(field: string, value: string): void }): Date;
 };
 
@@ -24,9 +32,7 @@ function loadPocketBaseCommonJs<T>(relativePath: string): T {
   return module.exports;
 }
 
-const policies = loadPocketBaseCommonJs<Policies>(
-  "pb_hooks/requestPolicies.js",
-);
+const policies = loadPocketBaseCommonJs<Policies>("pb_hooks/requestPolicies.js");
 const helpers = loadPocketBaseCommonJs<Helpers>("pb_hooks/helpers.js");
 const runtime = globalThis as Record<string, any>;
 const originalSecurity = runtime.$security;
@@ -71,6 +77,7 @@ describe("PocketBase sensitive-storage hardening", () => {
       sha256: () => "c".repeat(64),
     };
     runtime.Record = class {
+      id = "session-id";
       constructor(_collection: unknown, data: Record<string, unknown>) {
         savedData = data;
       }
@@ -78,6 +85,24 @@ describe("PocketBase sensitive-storage hardening", () => {
     runtime.$app = {
       dao: () => ({
         findCollectionByNameOrId: () => ({ id: "sessions" }),
+        findRecordById: (collection: string) =>
+          collection === "dealers"
+            ? {
+                id: "dealer-id",
+                getBool: () => false,
+              }
+            : {
+                id: "person-id",
+                getBool: (field: string) => field === "active",
+                getString: (field: string) =>
+                  field === "dealer"
+                    ? "dealer-id"
+                    : field === "role"
+                      ? "salesperson"
+                      : field === "pin"
+                        ? "1234"
+                        : "",
+              },
         saveRecord: () => undefined,
       }),
     };
@@ -87,6 +112,10 @@ describe("PocketBase sensitive-storage hardening", () => {
       "salesperson",
       "203.0.113.10",
       "test-agent",
+      {
+        personId: "person-id",
+        expectedPersonPinFingerprint: "c".repeat(64),
+      },
     );
 
     expect(created.token).toMatch(/^[a-f0-9]{64}$/);
@@ -94,30 +123,99 @@ describe("PocketBase sensitive-storage hardening", () => {
     expect(savedData).not.toHaveProperty("token");
   });
 
-  it("rejects a super-admin cookie after the deployment secret rotates", () => {
+  it("rejects a super-admin context after the deployment secret rotates", () => {
     const session = {
+      id: "admin-session",
       getString: (field: string) => {
         if (field === "expires_at") return "2099-01-01 00:00:00.000Z";
         if (field === "role") return "super_admin";
-        if (field === "dealer") return "old-admin-dealer";
+        if (field === "dealer") return "system-dealer";
+        if (field === "admin_secret_fingerprint") return "b".repeat(64);
         return "";
       },
+      getBool: () => false,
     };
     const deleteRecord = vi.fn();
-    runtime.$security = { sha256: () => "a".repeat(64) };
-    runtime.$os = { getenv: () => "New99999" };
+    runtime.$security = {
+      sha256: (value: string) =>
+        value.startsWith("dealer-social-post-ai:admin-session:v1:")
+          ? "c".repeat(64)
+          : "a".repeat(64),
+    };
+    runtime.$os = { getenv: () => "NewAdmin9Q2Z" };
     runtime.$app = {
       dao: () => ({
         findFirstRecordByFilter: () => session,
         findRecordById: () => ({
-          getString: (field: string) => (field === "code" ? "Old99999" : ""),
+          id: "system-dealer",
+          getBool: (field: string) => field === "is_system",
         }),
         deleteRecord,
       }),
     };
+    const clearCookie = vi.fn();
+    const context = {
+      request: () => ({
+        header: {
+          get: () => `dealer_session=${"d".repeat(64)}`,
+        },
+      }),
+      response: () => ({
+        header: () => ({ add: clearCookie }),
+      }),
+    };
 
-    expect(helpers.findSessionByToken("b".repeat(64))).toBeNull();
+    expect(helpers.sessionContext(context)).toBeNull();
     expect(deleteRecord).toHaveBeenCalledWith(session);
+    expect(clearCookie).toHaveBeenCalled();
+  });
+
+  it("preserves the bearer when session lookup infrastructure is unavailable", () => {
+    const lookupError = Object.assign(new Error("database unavailable"), {
+      code: 500,
+    });
+    const deleteRecord = vi.fn();
+    runtime.$security = { sha256: () => "a".repeat(64) };
+    runtime.$app = {
+      dao: () => ({
+        findFirstRecordByFilter: () => {
+          throw lookupError;
+        },
+        deleteRecord,
+      }),
+    };
+    const clearCookie = vi.fn();
+    const context = {
+      request: () => ({
+        header: {
+          get: () => `dealer_session=${"d".repeat(64)}`,
+        },
+      }),
+      response: () => ({
+        header: () => ({ add: clearCookie }),
+      }),
+    };
+
+    expect(() => helpers.sessionContext(context)).toThrow("database unavailable");
+    expect(deleteRecord).not.toHaveBeenCalled();
+    expect(clearCookie).not.toHaveBeenCalled();
+  });
+
+  it("treats PocketBase 0.22's exact no-row sentinel as an ordinary auth miss", () => {
+    const noRows = Object.assign(new Error("sql: no rows in result set"), {
+      name: "GoError",
+    });
+    runtime.$security = { sha256: () => "a".repeat(64) };
+    runtime.$app = {
+      dao: () => ({
+        findFirstRecordByFilter: () => {
+          throw noRows;
+        },
+      }),
+    };
+
+    expect(helpers.findSessionByToken("d".repeat(64))).toBeNull();
+    expect(helpers.findSystemDealer()).toBeNull();
   });
 
   it("slides the authoritative database expiry together with the cookie", () => {
@@ -156,10 +254,7 @@ describe("PocketBase sensitive-storage hardening", () => {
       "utf8",
     );
     const approvalMigration = readFileSync(
-      resolve(
-        process.cwd(),
-        "pb_migrations/1750300200_add_approval_creative.js",
-      ),
+      resolve(process.cwd(), "pb_migrations/1750300200_add_approval_creative.js"),
       "utf8",
     );
 
@@ -167,9 +262,7 @@ describe("PocketBase sensitive-storage hardening", () => {
       "sessions.schema.removeField(finalLegacyField.id)",
     );
     expect(sessionMigration).toContain("$security.sha256(token)");
-    expect(signatureMigration).toContain(
-      "signatureField.options.protected = true",
-    );
+    expect(signatureMigration).toContain("signatureField.options.protected = true");
     expect(signatureMigration).not.toContain("protected = false");
     expect(approvalMigration).toContain("protected: true");
     expect(approvalMigration).toContain('name: "owner_session_hash"');
@@ -178,9 +271,9 @@ describe("PocketBase sensitive-storage hardening", () => {
 
 describe("PocketBase image proxy policy", () => {
   it("allows only operator-trusted HTTPS image origins", () => {
-    expect(
-      policies.isAllowedImageProxyUrl("https://i.imgur.com/example.png"),
-    ).toBe(true);
+    expect(policies.isAllowedImageProxyUrl("https://i.imgur.com/example.png")).toBe(
+      true,
+    );
     expect(
       policies.isAllowedImageProxyUrl(
         "https://cdn.example-dealer.com/logo.jpg",
@@ -193,9 +286,9 @@ describe("PocketBase image proxy policy", () => {
         "*.trusted-cdn.example",
       ),
     ).toBe(true);
-    expect(
-      policies.isAllowedImageProxyUrl("https://i.imgur.com:443/example.png"),
-    ).toBe(true);
+    expect(policies.isAllowedImageProxyUrl("https://i.imgur.com:443/example.png")).toBe(
+      true,
+    );
   });
 
   it.each([
@@ -237,7 +330,10 @@ describe("Generated video transport", () => {
     );
 
     expect(clientSource).toContain(
-      'parsed.hostname !== "generativelanguage.googleapis.com"',
+      'parsed.origin !== "https://generativelanguage.googleapis.com"',
+    );
+    expect(clientSource).toContain(
+      String.raw`/^\/v1beta\/files\/([a-z0-9._~-]+)(?::download)?$/i`,
     );
     expect(clientSource).toContain("fetch(`/api/proxy/${proxyPath}`");
     expect(clientSource).not.toContain("await fetch(videoUri)");
@@ -248,10 +344,7 @@ describe("Generated video transport", () => {
 
 describe("PocketBase container startup", () => {
   it("fails closed on incompatible data and preserves PID 1", () => {
-    const entrypoint = readFileSync(
-      resolve(process.cwd(), "entrypoint.sh"),
-      "utf8",
-    );
+    const entrypoint = readFileSync(resolve(process.cwd(), "entrypoint.sh"), "utf8");
 
     expect(entrypoint).not.toContain("data.db.v23bak");
     expect(entrypoint).not.toMatch(/mv\s+\/pb\/pb_data/);

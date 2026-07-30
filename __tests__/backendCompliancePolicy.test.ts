@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { prepareCaptionForDelivery } from "../utils/complianceDisclosures";
+import {
+  analyzeCaptionSetForDelivery,
+  prepareCaptionForDelivery,
+} from "../utils/complianceDisclosures";
 
 type ComplianceResult = {
   ok: boolean;
@@ -13,12 +16,18 @@ type ComplianceResult = {
 };
 
 type Policies = {
-  canonicalPostCompliance(
-    caption: string,
-    bannedPhrases?: string,
-  ): ComplianceResult;
+  canonicalPostCompliance(caption: string, bannedPhrases?: string): ComplianceResult;
   validatePostCompliance(
     caption: string,
+    disclosures: string,
+    bannedPhrases?: string,
+  ): ComplianceResult;
+  canonicalPostComplianceSet(
+    captions: string[],
+    bannedPhrases?: string,
+  ): ComplianceResult;
+  validatePostComplianceSet(
+    captions: string[],
     disclosures: string,
     bannedPhrases?: string,
   ): ComplianceResult;
@@ -48,9 +57,7 @@ describe("PocketBase post compliance policy", () => {
     const serverCanonical = policies.canonicalPostCompliance(caption);
 
     expect(serverCanonical.required_disclosures).toBe(clientCanonical);
-    expect(policies.validatePostCompliance(caption, clientCanonical).ok).toBe(
-      true,
-    );
+    expect(policies.validatePostCompliance(caption, clientCanonical).ok).toBe(true);
   });
 
   it("rejects a disclosure marker without the exact required text", () => {
@@ -110,20 +117,45 @@ describe("PocketBase post compliance policy", () => {
 
   it("does not match a blocked word inside an unrelated longer word", () => {
     expect(
-      policies.validatePostCompliance("A refined carpeted interior.", "", "car")
-        .ok,
+      policies.validatePostCompliance("A refined carpeted interior.", "", "car").ok,
+    ).toBe(true);
+  });
+
+  it("validates one canonical disclosure union across all destination captions", () => {
+    const captions = [
+      "Congratulations on your delivery!",
+      "Lease for $299/mo with approved credit.",
+    ];
+    const clientCanonical = analyzeCaptionSetForDelivery(captions).disclosures;
+    const serverCanonical = policies.canonicalPostComplianceSet(captions);
+
+    expect(serverCanonical.required_disclosures).toBe(clientCanonical);
+    expect(policies.validatePostComplianceSet(captions, clientCanonical).ok).toBe(true);
+    expect(policies.validatePostComplianceSet(captions, "").error).toMatch(
+      /exact canonical/i,
+    );
+  });
+
+  it("keeps the client and server union identical when captions trigger rules out of order", () => {
+    const captions = [
+      "Lease for $299/mo with approved credit.",
+      "Qualified buyers can ask about 4.9% APR.",
+    ];
+    const clientCanonical = analyzeCaptionSetForDelivery(captions);
+    const serverCanonical = policies.canonicalPostComplianceSet(captions);
+
+    expect(clientCanonical.disclosureCategories).toEqual(["financing_apr", "lease"]);
+    expect(serverCanonical.categories).toEqual(["financing_apr", "lease"]);
+    expect(clientCanonical.disclosures).toBe(serverCanonical.required_disclosures);
+    expect(
+      policies.validatePostComplianceSet(captions, clientCanonical.disclosures).ok,
     ).toBe(true);
   });
 
   it("enforces compliance both on queue creation and before approval", () => {
-    const hook = readFileSync(
-      resolve(process.cwd(), "pb_hooks/main.pb.js"),
-      "utf8",
-    );
-    const firstValidation = hook.indexOf("policies.validatePostCompliance(");
-    const secondValidation = hook.lastIndexOf(
-      "policies.validatePostCompliance(",
-    );
+    const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
+    const firstValidation = hook.indexOf("policies.validatePostComplianceSet(");
+    const secondValidation = hook.lastIndexOf("policies.validatePostComplianceSet(");
     const postSubmit = hook.indexOf("form.submit();", firstValidation);
     const conditionalApproval = hook.indexOf(
       "\"AND approval_status = 'pending'\"",

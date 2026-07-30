@@ -4,6 +4,17 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig(() => {
   const devBackendUrl = process.env.DEV_BACKEND_URL || "http://127.0.0.1:8090";
+  const releaseSha = (
+    process.env.VITE_RELEASE_SHA ||
+    process.env.VITE_VERCEL_GIT_COMMIT_SHA ||
+    ""
+  ).trim();
+  if (releaseSha && !/^[0-9a-f]{40}$/i.test(releaseSha)) {
+    throw new Error(
+      "VITE_RELEASE_SHA (or VITE_VERCEL_GIT_COMMIT_SHA) must be a full 40-character Git SHA.",
+    );
+  }
+  const serviceWorkerVersion = `dsp-${releaseSha.toLowerCase() || "development"}`;
 
   return {
     server: {
@@ -22,8 +33,9 @@ export default defineConfig(() => {
     },
     plugins: [
       react(),
-      // Stamp the service worker with a fresh version on every build so
-      // returning users get the new app shell instead of a stale cache.
+      // Bind the service worker cache to the selected immutable release. Two
+      // builds of the same release now produce the same worker, while a new
+      // release reliably invalidates the prior app shell.
       // Runs AFTER the static-copy step (writeBundle + enforce:"post") so
       // we patch the file the user actually downloads, not a temp copy.
       {
@@ -39,23 +51,18 @@ export default defineConfig(() => {
             const outDir = (options && options.dir) || "dist";
             const swOut = pathMod.resolve(__dirname, outDir, "sw.js");
             if (!fs.existsSync(swOut)) return;
-            const stamp = `dsp-${Date.now()}`;
             const sw = fs
               .readFileSync(swOut, "utf8")
               .replace(
                 /const VERSION = "[^"]+";/,
-                `const VERSION = "${stamp}";`,
+                `const VERSION = "${serviceWorkerVersion}";`,
               );
             fs.writeFileSync(swOut, sw);
-            console.log(`[sw] stamped version ${stamp} → ${swOut}`);
+            console.log(`[sw] stamped version ${serviceWorkerVersion} → ${swOut}`);
           },
         },
       },
     ],
-    define: {
-      // Removed GEMINI_API_KEY to prevent inlining secret into client bundle
-      __SW_VERSION__: JSON.stringify(`dsp-${Date.now()}`),
-    },
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "."),
@@ -73,8 +80,7 @@ export default defineConfig(() => {
         output: {
           manualChunks(id) {
             if (id.includes("node_modules")) {
-              if (id.includes("react") || id.includes("zustand"))
-                return "vendor";
+              if (id.includes("react") || id.includes("zustand")) return "vendor";
               if (id.includes("framer-motion") || id.includes("lucide-react"))
                 return "ui";
             }

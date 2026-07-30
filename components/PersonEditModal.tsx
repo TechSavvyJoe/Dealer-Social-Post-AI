@@ -15,8 +15,13 @@ import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
 import { cn } from "../utils/classNames";
-import type { Person, PersonRole } from "../services/salespeople";
-import { updatePerson } from "../services/salespeople";
+import type { CredentialResult, Person, PersonRole } from "../services/salespeople";
+import {
+  acknowledgePinDistribution,
+  revealPersonPin,
+  rotatePersonPin,
+  updatePerson,
+} from "../services/salespeople";
 
 export interface PersonEditModalProps {
   isOpen: boolean;
@@ -24,20 +29,15 @@ export interface PersonEditModalProps {
   storeName?: string;
   /** Super-admin may change role; managers may not. */
   allowRoleEdit?: boolean;
+  /** Super-admin-only audited reveal action. */
+  allowPinReveal?: boolean;
   onClose: () => void;
   onSaved: (person: Person) => void;
+  /** Called as soon as a server-side credential/status mutation commits. */
+  onCommitted?: (person: Person) => void;
+  /** Hoists a one-time credential so closing the modal cannot discard it. */
+  onCredentialIssued?: (credential: CredentialResult) => void;
 }
-
-const generatePin = (): string => {
-  // Avoid weak patterns like 0000–0999 being only low entropy; use full 0000–9999
-  // via crypto when available.
-  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-    const buf = new Uint32Array(1);
-    crypto.getRandomValues(buf);
-    return String(buf[0] % 10000).padStart(4, "0");
-  }
-  return String(Math.floor(Math.random() * 10000)).padStart(4, "0");
-};
 
 /**
  * Profile editor for managers and salespeople.
@@ -48,8 +48,11 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
   person,
   storeName,
   allowRoleEdit = false,
+  allowPinReveal = false,
   onClose,
   onSaved,
+  onCommitted,
+  onCredentialIssued,
 }) => {
   const [name, setName] = useState("");
   const [active, setActive] = useState(true);
@@ -57,52 +60,91 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  /** When non-null, a new pin will be saved on submit. Never prefilled from API. */
-  const [pendingPin, setPendingPin] = useState<string | null>(null);
-  const [showPendingPin, setShowPendingPin] = useState(false);
-  const [manualMode, setManualMode] = useState(false);
-  const [manualPin, setManualPin] = useState("");
+  const [credentialPin, setCredentialPin] = useState<string | null>(null);
+  const [showCredentialPin, setShowCredentialPin] = useState(false);
   const [copied, setCopied] = useState(false);
   const [hasExistingCode, setHasExistingCode] = useState(false);
+  const [needsDistribution, setNeedsDistribution] = useState(false);
+  const [credentialBusy, setCredentialBusy] = useState(false);
+  const [confirmingRotate, setConfirmingRotate] = useState(false);
+  const roleSelectId = React.useId();
 
   useEffect(() => {
     if (!person || !isOpen) return;
     setName(person.name || "");
     setActive(person.active !== false);
     setRole(person.role === "manager" ? "manager" : "salesperson");
-    setHasExistingCode(Boolean(person.pin && person.pin.length > 0));
-    setPendingPin(null);
-    setShowPendingPin(false);
-    setManualMode(false);
-    setManualPin("");
+    setHasExistingCode(person.hasPin);
+    setNeedsDistribution(person.pinNeedsDistribution);
+    setCredentialPin(null);
+    setShowCredentialPin(false);
     setCopied(false);
+    setConfirmingRotate(false);
     setError(null);
   }, [person, isOpen]);
 
-  const handleRotate = () => {
-    const next = generatePin();
-    setPendingPin(next);
-    setShowPendingPin(true);
-    setManualMode(false);
-    setManualPin("");
+  const showCredential = (pin: string, pinNeedsDistribution: boolean) => {
+    setCredentialPin(pin);
+    setShowCredentialPin(true);
+    setHasExistingCode(true);
+    setNeedsDistribution(pinNeedsDistribution);
     setCopied(false);
+    setConfirmingRotate(false);
   };
 
-  const handleManualApply = () => {
-    if (!/^\d{4}$/.test(manualPin)) {
-      setError("Access code must be exactly 4 digits.");
-      return;
-    }
-    setPendingPin(manualPin);
-    setShowPendingPin(true);
+  const handleRotate = async () => {
+    if (!person?.id) return;
+    setCredentialBusy(true);
     setError(null);
-    setCopied(false);
+    try {
+      const result = await rotatePersonPin(person.id);
+      showCredential(result.pin, result.person.pinNeedsDistribution);
+      onCommitted?.(result.person);
+      onCredentialIssued?.(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not rotate the code.");
+    } finally {
+      setCredentialBusy(false);
+    }
+  };
+
+  const handleReveal = async () => {
+    if (!person?.id || !allowPinReveal) return;
+    setCredentialBusy(true);
+    setError(null);
+    try {
+      const result = await revealPersonPin(person.id);
+      showCredential(result.pin, result.person.pinNeedsDistribution);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not reveal the code.");
+    } finally {
+      setCredentialBusy(false);
+    }
+  };
+
+  const handleAcknowledge = async () => {
+    if (!person?.id) return;
+    setCredentialBusy(true);
+    setError(null);
+    try {
+      const updated = await acknowledgePinDistribution(person.id);
+      setNeedsDistribution(updated.pinNeedsDistribution);
+      setCredentialPin(null);
+      setShowCredentialPin(false);
+      onCommitted?.(updated);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not mark the code as shared.",
+      );
+    } finally {
+      setCredentialBusy(false);
+    }
   };
 
   const handleCopy = async () => {
-    if (!pendingPin) return;
+    if (!credentialPin) return;
     try {
-      await navigator.clipboard.writeText(pendingPin);
+      await navigator.clipboard.writeText(credentialPin);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -117,26 +159,21 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
       setError("Name is required.");
       return;
     }
-    if (pendingPin && !/^\d{4}$/.test(pendingPin)) {
-      setError("Access code must be exactly 4 digits.");
-      return;
-    }
     setSaving(true);
     setError(null);
     try {
-      const fields: Partial<Pick<Person, "name" | "pin" | "active" | "role">> = {
+      const fields: Partial<Pick<Person, "name" | "active" | "role">> = {
         name: trimmed,
         active,
       };
-      if (pendingPin) fields.pin = pendingPin;
       if (allowRoleEdit) fields.role = role;
       const updated = await updatePerson(person.id, fields);
       onSaved({
         ...person,
         ...updated,
         name: trimmed,
-        // Do not echo pin back into list state for display
-        pin: pendingPin ? undefined : person.pin ? "****" : undefined,
+        hasPin: hasExistingCode,
+        pinNeedsDistribution: needsDistribution,
         active,
         role: allowRoleEdit ? role : person.role,
       });
@@ -149,9 +186,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
   };
 
   const roleLabel =
-    (allowRoleEdit ? role : person?.role) === "manager"
-      ? "Manager"
-      : "Salesperson";
+    (allowRoleEdit ? role : person?.role) === "manager" ? "Manager" : "Salesperson";
 
   return (
     <Modal
@@ -159,11 +194,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
       onClose={onClose}
       size="md"
       title="Account settings"
-      description={
-        storeName
-          ? `${storeName} · secure profile`
-          : "Secure profile"
-      }
+      description={storeName ? `${storeName} · secure profile` : "Secure profile"}
       footer={
         <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button
@@ -211,9 +242,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                 <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 font-medium text-surface-300">
                   {roleLabel}
                 </span>
-                {storeName ? (
-                  <span className="truncate">{storeName}</span>
-                ) : null}
+                {storeName ? <span className="truncate">{storeName}</span> : null}
               </div>
             </div>
           </div>
@@ -234,24 +263,22 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
 
           {allowRoleEdit && (
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-surface-300">
+              <label
+                htmlFor={roleSelectId}
+                className="mb-1.5 block text-sm font-medium text-surface-300"
+              >
                 Role
               </label>
               <select
+                id={roleSelectId}
                 value={role}
                 onChange={(e) =>
-                  setRole(
-                    e.target.value === "manager" ? "manager" : "salesperson",
-                  )
+                  setRole(e.target.value === "manager" ? "manager" : "salesperson")
                 }
                 className="w-full rounded-xl border border-surface-700 bg-surface-900/70 px-4 py-3 text-surface-50 focus:border-primary-500 focus:outline-none"
               >
-                <option value="salesperson">
-                  Salesperson — create posts
-                </option>
-                <option value="manager">
-                  Manager — store dashboard & team
-                </option>
+                <option value="salesperson">Salesperson — create posts</option>
+                <option value="manager">Manager — store dashboard & team</option>
               </select>
             </div>
           )}
@@ -266,7 +293,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
             </h3>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-surface-950/50 p-4 space-y-3">
+          <div className="space-y-3 rounded-2xl border border-white/10 bg-surface-950/50 p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-start gap-3">
                 <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-white/5 ring-1 ring-white/10">
@@ -277,54 +304,48 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                     Access code
                   </div>
                   <p className="mt-0.5 text-xs leading-relaxed text-surface-400">
-                    4-digit sign-in code. Never shown in lists. Share only in
-                    person or a private channel. Generating a new code ends
-                    their current sessions — next sign-in must use the new
-                    code.
+                    4-digit sign-in code. Never shown in lists. Share only in person or
+                    a private channel. Generating a new code ends their current sessions
+                    — next sign-in must use the new code.
                   </p>
                 </div>
               </div>
               <span
                 className={cn(
                   "shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide",
-                  pendingPin
+                  needsDistribution
                     ? "bg-warning-500/15 text-warning-200 ring-1 ring-warning-500/30"
                     : hasExistingCode
                       ? "bg-success-500/15 text-success-200 ring-1 ring-success-500/25"
                       : "bg-surface-800 text-surface-400 ring-1 ring-white/10",
                 )}
               >
-                {pendingPin
-                  ? "New code"
+                {needsDistribution
+                  ? "Share needed"
                   : hasExistingCode
                     ? "Protected"
                     : "Not set"}
               </span>
             </div>
 
-            {pendingPin ? (
-              <div className="rounded-xl border border-primary-500/25 bg-primary-500/10 px-3 py-3 space-y-2">
+            {credentialPin ? (
+              <div className="space-y-3 rounded-xl border border-primary-500/25 bg-primary-500/10 px-3 py-3">
                 <p className="text-[11px] font-medium text-primary-100/90">
-                  Save this code now — it won’t appear in the roster after you
-                  leave this screen. On save, their open sessions end so the
-                  next sign-in uses this code only.
+                  This credential is visible only in this protected action. Copy it
+                  privately, then mark it as shared.
                 </p>
                 <div className="flex items-center gap-2">
                   <div className="flex flex-1 items-center justify-between rounded-lg border border-white/10 bg-surface-950/80 px-3 py-2.5 font-mono text-lg tracking-[0.35em] text-surface-50">
-                    <span>
-                      {showPendingPin
-                        ? pendingPin
-                        : "••••"}
-                    </span>
+                    <span>{showCredentialPin ? credentialPin : "••••"}</span>
                     <button
                       type="button"
-                      onClick={() => setShowPendingPin((v) => !v)}
+                      onClick={() => setShowCredentialPin((v) => !v)}
                       className="ml-2 inline-flex min-h-9 min-w-9 items-center justify-center rounded-md text-surface-400 hover:bg-white/5 hover:text-surface-100"
                       aria-label={
-                        showPendingPin ? "Hide access code" : "Show access code"
+                        showCredentialPin ? "Hide access code" : "Show access code"
                       }
                     >
-                      {showPendingPin ? (
+                      {showCredentialPin ? (
                         <EyeOff className="h-4 w-4" />
                       ) : (
                         <Eye className="h-4 w-4" />
@@ -348,79 +369,100 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                     {copied ? "Copied" : "Copy"}
                   </Button>
                 </div>
+                {needsDistribution ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    fullWidth
+                    disabled={credentialBusy}
+                    onClick={() => void handleAcknowledge()}
+                    leftIcon={<Check className="h-3.5 w-3.5" />}
+                  >
+                    Mark code as shared
+                  </Button>
+                ) : null}
               </div>
             ) : null}
 
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="min-h-11 flex-1"
-                leftIcon={<RefreshCw className="h-3.5 w-3.5" />}
-                onClick={handleRotate}
+            {confirmingRotate ? (
+              <div
+                className="space-y-3 rounded-xl border border-warning-500/30 bg-warning-500/10 p-3"
+                role="alert"
               >
-                {hasExistingCode || pendingPin
-                  ? "Generate new code"
-                  : "Generate code"}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="min-h-11 flex-1"
-                onClick={() => {
-                  setManualMode((v) => !v);
-                  setError(null);
-                }}
-              >
-                {manualMode ? "Cancel manual entry" : "Set code manually"}
-              </Button>
-            </div>
-
-            {manualMode && (
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                <div className="flex-1">
-                  <Input
-                    label="New 4-digit code"
-                    value={manualPin}
-                    onChange={(e) =>
-                      setManualPin(e.target.value.replace(/\D/g, "").slice(0, 4))
-                    }
-                    inputMode="numeric"
-                    maxLength={4}
-                    autoComplete="new-password"
-                    fullWidth
-                    className="font-mono tracking-[0.3em]"
-                    helperText="Unique across all active users."
-                  />
+                <div>
+                  <p className="text-sm font-semibold text-warning-100">
+                    Replace {person?.name}&apos;s access code?
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-warning-100/75">
+                    Their current code stops working and all active sessions end
+                    immediately.
+                  </p>
                 </div>
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="min-h-11"
+                    disabled={credentialBusy}
+                    onClick={() => setConfirmingRotate(false)}
+                  >
+                    Keep current code
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    className="min-h-11"
+                    disabled={credentialBusy}
+                    leftIcon={
+                      credentialBusy ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )
+                    }
+                    onClick={() => void handleRotate()}
+                  >
+                    {credentialBusy ? "Replacing…" : "Replace code"}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2 sm:flex-row">
                 <Button
                   type="button"
-                  variant="primary"
+                  variant="outline"
                   size="sm"
-                  className="min-h-11 sm:mb-0.5"
-                  disabled={manualPin.length !== 4}
-                  onClick={handleManualApply}
+                  className="min-h-11 flex-1"
+                  leftIcon={<RefreshCw className="h-3.5 w-3.5" />}
+                  disabled={credentialBusy}
+                  onClick={() => {
+                    if (hasExistingCode) setConfirmingRotate(true);
+                    else void handleRotate();
+                  }}
                 >
-                  Use this code
+                  {credentialBusy
+                    ? "Working…"
+                    : hasExistingCode
+                      ? "Generate new code"
+                      : "Generate code"}
                 </Button>
+                {allowPinReveal && hasExistingCode ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="min-h-11 flex-1"
+                    disabled={credentialBusy}
+                    leftIcon={<Eye className="h-3.5 w-3.5" />}
+                    onClick={() => void handleReveal()}
+                  >
+                    Reveal current code
+                  </Button>
+                ) : null}
               </div>
-            )}
-
-            {pendingPin && (
-              <button
-                type="button"
-                className="text-xs font-medium text-surface-500 underline-offset-2 hover:text-surface-300 hover:underline"
-                onClick={() => {
-                  setPendingPin(null);
-                  setShowPendingPin(false);
-                  setManualPin("");
-                  setManualMode(false);
-                }}
-              >
-                Discard new code (keep current)
-              </button>
             )}
           </div>
 
@@ -436,8 +478,8 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                 Account active
               </span>
               <span className="block text-xs text-surface-500">
-                When off, this person can’t sign in and won’t appear in the
-                showroom picker. Past posts stay intact.
+                When off, this person can’t sign in. Their active sessions end
+                immediately; past posts stay intact.
               </span>
             </span>
           </label>

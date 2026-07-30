@@ -23,6 +23,7 @@ import {
   ChevronDown,
   CircleCheck,
   Camera,
+  Calendar,
   type LucideIcon,
 } from "lucide-react";
 import confetti from "canvas-confetti";
@@ -34,10 +35,16 @@ import { cn } from "../utils/classNames";
 import { ProgressBar } from "./ui/ProgressBar";
 import { normalizeError, recoveryHint } from "../utils/errorHandler";
 import { MultiFormatExportModal } from "./MultiFormatExportModal";
+import { ScheduleDialog } from "./ScheduleDialog";
 import { LayoutGrid } from "lucide-react";
 import { PlatformLimitMeter } from "./PlatformLimitMeter";
 import { CaptionStudio } from "./CaptionStudio";
-import { ShareDialog } from "./ShareDialog";
+import { ShareDialog, type PlatformShareCaption } from "./ShareDialog";
+import {
+  PlatformDeliveryBoard,
+  type PlatformDeliveryOutput,
+} from "./PlatformDeliveryBoard";
+import { MobilePublishStudio } from "./MobilePublishStudio";
 import { CaptionAlternativesModal } from "./CaptionAlternativesModal";
 import { ProgressiveImage } from "./ui/ProgressiveImage";
 import { useToast } from "./ui/Toast";
@@ -46,21 +53,41 @@ import { Button } from "./ui/Button";
 import {
   getPostApprovalStatus,
   markPostVideoGenerated,
+  schedulePost,
+  updatePostDraft,
 } from "../services/posts";
 import {
   analyzeCaptionForDelivery,
+  analyzeCaptionSetForDelivery,
   prohibitedClaimsMessage,
 } from "../utils/complianceDisclosures";
 import {
   preferredExportFormatIds,
+  resolvePrimaryImageProfile,
   resolvePlatformOption,
 } from "../services/platformCopy";
 import {
   isMobilePhotoDevice,
-  saveMediaToLibrary,
+  prepareMediaForSave,
+  savePreparedMediaToLibrary,
   saveResultToastMessage,
+  validateVideoMetadata,
+  type PreparedMediaSave,
 } from "../utils/mediaSave";
 import { useAppStore } from "../stores/appStore";
+import { archiveDealerMedia } from "../utils/creativeStorage";
+import { EXPORT_FORMATS, renderFormatIfNeeded } from "../utils/multiFormatExport";
+import { logError } from "../utils/telemetry";
+import {
+  derivePlatformDeliveryPlan,
+  type PlannedPlatformDelivery,
+} from "../services/platformOutputs";
+import type { PublishContent } from "../services/publishTargets";
+import {
+  appendDealershipMention,
+  dealershipMentionFor,
+} from "../utils/socialAttribution";
+import { retainNewestVideoJobs } from "../utils/videoJobRetention";
 
 // Lazy load modals for performance
 const LazyImagePreviewModal = React.lazy(() =>
@@ -103,6 +130,7 @@ const ActionTile: React.FC<{
   label: string;
   onClick: () => void;
   tooltip?: string;
+  ariaLabel?: string;
   disabled?: boolean;
   busy?: boolean;
   iconClassName?: string;
@@ -111,6 +139,7 @@ const ActionTile: React.FC<{
   label,
   onClick,
   tooltip,
+  ariaLabel,
   disabled = false,
   busy = false,
   iconClassName,
@@ -124,6 +153,7 @@ const ActionTile: React.FC<{
         onClick();
       }}
       disabled={disabled}
+      aria-label={ariaLabel}
       aria-busy={busy || undefined}
       className={cn(TILE_BASE, TILE_NEUTRAL)}
       whileHover={shouldReduceMotion ? undefined : { x: disabled ? 0 : 2 }}
@@ -160,14 +190,18 @@ interface PostResultProps {
   onRegenerateImage: () => Promise<void>;
   onEditImage: (prompt: string) => Promise<void>;
   onRegenerateText: () => Promise<void>;
-  onEditText: (prompt: string) => Promise<void>;
-  onFunMode: (styleName?: string) => Promise<void>;
-  onGenerateVideo: (
-    style: VideoStyle,
-    options: VideoRequestOptions,
+  onEditText: (
+    prompt: string,
+    originalText?: string,
+    platformId?: string,
   ) => Promise<string>;
+  onFunMode: (styleName?: string) => Promise<void>;
+  onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
   /** One-shot caption generator for the 3-variant alternatives modal. */
   onGenerateCaptionVariant?: () => Promise<string>;
+  onShowSettings?: () => void;
+  onShowHistory?: () => void;
+  onRequestLogout?: () => void;
   error?: string | null;
   isDesktopLayout: boolean;
   requiresApproval?: boolean;
@@ -175,8 +209,8 @@ interface PostResultProps {
   bannedPhrases?: string;
 }
 
-const BusyOverlay: React.FC<{ message: string; progress?: number }> =
-  React.memo(({ message, progress }) => {
+const BusyOverlay: React.FC<{ message: string; progress?: number }> = React.memo(
+  ({ message, progress }) => {
     const shouldReduceMotion = useReducedMotion();
 
     return (
@@ -208,7 +242,8 @@ const BusyOverlay: React.FC<{ message: string; progress?: number }> =
         ) : null}
       </div>
     );
-  });
+  },
+);
 
 export const PostResult: React.FC<PostResultProps> = ({
   post,
@@ -221,6 +256,9 @@ export const PostResult: React.FC<PostResultProps> = ({
   onFunMode,
   onGenerateVideo,
   onGenerateCaptionVariant,
+  onShowSettings,
+  onShowHistory,
+  onRequestLogout,
   error,
   isDesktopLayout,
   requiresApproval = false,
@@ -229,33 +267,45 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [copied, setCopied] = useState(false);
   const toast = useToast();
   const shouldReduceMotion = useReducedMotion();
-  const enabledFunStyles = useAppStore(
-    (s) => s.currentDealer?.enabled_fun_styles,
-  );
+  const enabledFunStyles = useAppStore((s) => s.currentDealer?.enabled_fun_styles);
+  const dealerId = useAppStore((s) => s.currentDealer?.id || "");
+  const currentDealer = useAppStore((s) => s.currentDealer);
+  const currentPersonName = useAppStore((s) => s.currentPerson?.name || "");
+  const hasOriginalCapture = useAppStore((s) => Boolean(s.selectedImage));
 
   const [isImageEditing, setIsImageEditing] = useState(false);
   const [imageEditPrompt, setImageEditPrompt] = useState("");
   const [isImageLoading, setIsImageLoading] = useState(false);
-  const [imageLoadingMessage, setImageLoadingMessage] =
-    useState("Updating Image...");
+  const [imageLoadingMessage, setImageLoadingMessage] = useState("Updating Image...");
   const [imageLoadingProgress, setImageLoadingProgress] = useState(0);
 
   const [editedText, setEditedText] = useState(post.text);
+  /** Primary caption survives visits to destination-specific caption tabs. */
+  const [primaryCaption, setPrimaryCaption] = useState(post.text);
   const [isTextEditing, setIsTextEditing] = useState(false);
   const [isTextLoading, setIsTextLoading] = useState(false);
   /** Active caption-pack platform tab; null = primary post.text. */
-  const [activeCaptionPlatform, setActiveCaptionPlatform] = useState<
-    string | null
-  >(null);
+  const [activeCaptionPlatform, setActiveCaptionPlatform] = useState<string | null>(
+    null,
+  );
+  const captionTabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   // Text history for undo/redo
   const [textHistory, setTextHistory] = useState<string[]>([post.text]);
   const [historyIndex, setHistoryIndex] = useState(0);
 
   const [isVideoDirectorOpen, setIsVideoDirectorOpen] = useState(false);
+  const [videoDirectorDeliveryId, setVideoDirectorDeliveryId] = useState<string | null>(
+    null,
+  );
   const [isFunModeDirectorOpen, setIsFunModeDirectorOpen] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  /** Legacy free-form video selection stays separate from an exact delivery row. */
+  const [manualVideoSelected, setManualVideoSelected] = useState(false);
   const [isVideoLoading, setIsVideoLoading] = useState(false);
+  /** Synchronous guard: React state alone cannot stop two taps in one frame. */
+  const videoGenerationActiveRef = useRef(false);
+  const videoJobSequenceRef = useRef(0);
   const [videoLoadingMessage, setVideoLoadingMessage] = useState("");
   /** Browser is buffering / decoding the blob after generation finishes. */
   const [isVideoBuffering, setIsVideoBuffering] = useState(false);
@@ -265,6 +315,7 @@ export const PostResult: React.FC<PostResultProps> = ({
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   /** Own blob URLs so we only revoke the previous one when replacing/unmounting. */
   const activeVideoBlobRef = useRef<string | null>(null);
+  const ownedVideoBlobUrlsRef = useRef<Set<string>>(new Set());
   const [videoJobs, setVideoJobs] = useState<
     Array<{
       id: string;
@@ -276,57 +327,115 @@ export const PostResult: React.FC<PostResultProps> = ({
       resolution: VideoRequestOptions["resolution"];
       pacing: VideoRequestOptions["pacing"];
       createdAt: string;
+      /** Exact source creative revision used to generate this clip. */
+      sourceCreativeKey: string;
       url?: string;
       error?: string;
     }>
   >([]);
 
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const [isMultiFormatOpen, setIsMultiFormatOpen] = useState(false);
-  const [isCaptionAltsOpen, setIsCaptionAltsOpen] = useState(false);
-  const [isToolsOpen, setIsToolsOpen] = useState(isDesktopLayout);
-  /** Guarded navigation away from this result: full reset or same-photo remix. */
-  const [leaveConfirm, setLeaveConfirm] = useState<"startOver" | "remix" | null>(
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const [focusedShareDeliveryId, setFocusedShareDeliveryId] = useState<string | null>(
     null,
   );
+  const [focusedShareContent, setFocusedShareContent] = useState<PublishContent | null>(
+    null,
+  );
+  const [batchDeliveryIds, setBatchDeliveryIds] = useState<Set<string>>(new Set());
+  const [shareQueue, setShareQueue] = useState<string[]>([]);
+  const [shareQueueIndex, setShareQueueIndex] = useState(0);
+  const shareQueueOpenedRef = useRef<string | null>(null);
+  const [isScheduleOpen, setIsScheduleOpen] = useState(false);
+  const [isScheduling, setIsScheduling] = useState(false);
+  const [captionAlts, setCaptionAlts] = useState<string[]>([]);
+  const [isCaptionAltsOpen, setIsCaptionAltsOpen] = useState(false);
+  const [isToolsOpen, setIsToolsOpen] = useState(false);
+  /** Guarded navigation away from this result: full reset or same-photo remix. */
+  const [leaveConfirm, setLeaveConfirm] = useState<"startOver" | "remix" | null>(null);
   const [hasSavedMedia, setHasSavedMedia] = useState(false);
   const [hasCopiedCaption, setHasCopiedCaption] = useState(false);
   const [approvalStatus, setApprovalStatus] = useState<
     NonNullable<GeneratedPost["approvalStatus"]>
   >(
     post.approvalStatus ??
-      (requiresApproval
-        ? post.postId
-          ? "pending"
-          : "submission_failed"
-        : "n_a"),
+      (requiresApproval ? (post.postId ? "pending" : "submission_failed") : "n_a"),
   );
-  const [approvalCheckError, setApprovalCheckError] = useState<string | null>(
-    null,
-  );
-  // Local override for the disclosure footer + categories — set when the
-  // user picks an alternative caption from the modal so the displayed
-  // compliance block matches the chosen variant.
-  const [disclosureOverride, setDisclosureOverride] = useState<{
-    text: string;
-    categories: string[];
-  } | null>(null);
+  const [approvalCheckError, setApprovalCheckError] = useState<string | null>(null);
   /** Local edits to per-platform pack captions (share + tab switch must honor these). */
-  const [packOverrides, setPackOverrides] = useState<Record<string, string>>(
-    {},
-  );
+  const [packOverrides, setPackOverrides] = useState<Record<string, string>>({});
   /** Prior image versions after regen/fun/edit (local compare stack, max 5). */
   const [imageVersions, setImageVersions] = useState<string[]>([]);
+  const [preparedSave, setPreparedSave] = useState<PreparedMediaSave | null>(null);
+  /** Prevent a prepared file from ever being used under a different delivery row. */
+  const [preparedSaveForKey, setPreparedSaveForKey] = useState<string | null>(null);
+  const [mediaPreparationError, setMediaPreparationError] = useState<string | null>(
+    null,
+  );
+  const [mediaPreparationNonce, setMediaPreparationNonce] = useState(0);
+  const [formattedPreviewUrl, setFormattedPreviewUrl] = useState<string | null>(null);
+  const [selectedDeliveryId, setSelectedDeliveryId] = useState<string | null>(null);
+  const [isPreparingSave, setIsPreparingSave] = useState(false);
+  const [draftSyncStatus, setDraftSyncStatus] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const draftSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingDraftSyncRef = useRef<{
+    caption: string;
+    disclosures: string;
+    imageDataUrl?: string;
+    platformCaptions?: Record<string, string>;
+  } | null>(null);
+  const draftSyncChainRef = useRef<Promise<void>>(Promise.resolve());
+  const draftSyncMountedRef = useRef(true);
+  const lastSyncedDraftRef = useRef({
+    caption: post.text,
+    disclosures: post.disclosures || "",
+    image: post.image,
+    platformCaptions: JSON.stringify(post.platformCaptions || {}),
+  });
   const prevImageRef = useRef(post.image);
-  // Reset override whenever the source post changes (regenerate, new post).
+  const resultIdentity =
+    post.postId ||
+    post.aiMeta?.image.attemptId ||
+    post.aiMeta?.lastSuccessfulGenerationAt ||
+    "local-result";
+  const videoCreativeRevisionRef = useRef({
+    image: post.image,
+    resultIdentity,
+    revision: 0,
+  });
+  if (
+    videoCreativeRevisionRef.current.image !== post.image ||
+    videoCreativeRevisionRef.current.resultIdentity !== resultIdentity
+  ) {
+    const previous = videoCreativeRevisionRef.current;
+    videoCreativeRevisionRef.current = {
+      image: post.image,
+      resultIdentity,
+      revision: previous.resultIdentity === resultIdentity ? previous.revision + 1 : 0,
+    };
+  }
+  const currentVideoCreativeKey = `${resultIdentity}:${videoCreativeRevisionRef.current.revision}`;
+  const previousResultIdentityRef = useRef(resultIdentity);
+  const previousPostTextRef = useRef(post.text);
+  // Caption state follows a new result/caption pack, but image-only
+  // regeneration/editing must not erase salesperson edits already saved into
+  // destination captions.
   useEffect(() => {
-    setDisclosureOverride(null);
+    if (previousResultIdentityRef.current === resultIdentity) return;
+    previousResultIdentityRef.current = resultIdentity;
     setPackOverrides({});
     setHasSavedMedia(false);
     setHasCopiedCaption(false);
     setActiveCaptionPlatform(null);
-  }, [post.image, post.text, post.platformCaptions]);
+    previousPostTextRef.current = post.text;
+    setPrimaryCaption(post.text);
+    setEditedText(post.text);
+    setTextHistory([post.text]);
+    setHistoryIndex(0);
+  }, [post.text, resultIdentity]);
 
   // Push previous creative onto a small version stack when image is replaced.
   useEffect(() => {
@@ -351,8 +460,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     const pack = effectivePack;
     if (!pack || Object.keys(pack).length === 0) return [];
     const orderedIds =
-      post.platformIds?.filter((id) => Boolean(pack[id])) ??
-      Object.keys(pack);
+      post.platformIds?.filter((id) => Boolean(pack[id])) ?? Object.keys(pack);
     for (const id of Object.keys(pack)) {
       if (!orderedIds.includes(id)) orderedIds.push(id);
     }
@@ -367,24 +475,292 @@ export const PostResult: React.FC<PostResultProps> = ({
     () => preferredExportFormatIds(post.platformIds ?? []),
     [post.platformIds],
   );
+  const primarySaveFormat = useMemo(() => {
+    const formatId =
+      post.primaryFormatId ??
+      resolvePrimaryImageProfile(post.platformIds).primaryFormatId;
+    return EXPORT_FORMATS.find((format) => format.id === formatId);
+  }, [post.platformIds, post.primaryFormatId]);
+  const deliveryPlan = useMemo(() => {
+    const requestedMode =
+      videoJobs.length > 0 && post.mediaOutputMode !== "video"
+        ? "both"
+        : (post.mediaOutputMode ?? "photo");
+    const fallbackPlatform =
+      primarySaveFormat?.id === "feed_portrait"
+        ? "instagram_feed"
+        : primarySaveFormat?.id === "gbp"
+          ? "gbp"
+          : primarySaveFormat?.id === "marketplace"
+            ? "marketplace"
+            : "instagram_story";
+    return derivePlatformDeliveryPlan(
+      post.platformIds?.length ? post.platformIds : [fallbackPlatform],
+      requestedMode,
+      post.postId ? `dealer-social-${post.postId}` : "dealer-social-post",
+    );
+  }, [
+    post.mediaOutputMode,
+    post.platformIds,
+    post.postId,
+    primarySaveFormat?.id,
+    videoJobs.length,
+  ]);
+  const deliveriesById = useMemo(
+    () =>
+      new Map<string, PlannedPlatformDelivery>(
+        deliveryPlan.deliveries.map((delivery) => [delivery.id, delivery]),
+      ),
+    [deliveryPlan.deliveries],
+  );
+  const deliveryPlanSignature = deliveryPlan.deliveries
+    .map((delivery) => delivery.id)
+    .join("|");
+  useEffect(() => {
+    setBatchDeliveryIds(
+      new Set(
+        deliveryPlan.deliveries
+          .filter((delivery) => delivery.mediaKind === "photo")
+          .map((delivery) => delivery.id),
+      ),
+    );
+    setShareQueue([]);
+    setShareQueueIndex(0);
+    shareQueueOpenedRef.current = null;
+  }, [deliveryPlanSignature, resultIdentity]);
+  const selectedDelivery = selectedDeliveryId
+    ? deliveriesById.get(selectedDeliveryId)
+    : undefined;
+  const latestVideoJobBySpec = useMemo(() => {
+    const bySpec = new Map<string, (typeof videoJobs)[number]>();
+    for (const job of videoJobs) {
+      if (job.sourceCreativeKey !== currentVideoCreativeKey) continue;
+      if (job.aspectPreference === "9:16" || job.aspectPreference === "16:9") {
+        bySpec.set(`${job.aspectPreference}:${job.resolution}:${job.duration}`, job);
+      }
+    }
+    return bySpec;
+  }, [currentVideoCreativeKey, videoJobs]);
+  const videoJobForDelivery = useCallback(
+    (delivery: PlannedPlatformDelivery) => {
+      if (
+        delivery.mediaKind !== "video" ||
+        delivery.profile.preparation.kind !== "veo"
+      ) {
+        return undefined;
+      }
+      const preparation = delivery.profile.preparation;
+      return latestVideoJobBySpec.get(
+        `${preparation.nativeAspectRatio}:${preparation.resolution}:${preparation.durationSeconds}`,
+      );
+    },
+    [latestVideoJobBySpec],
+  );
+  const selectedVideoJob =
+    selectedDelivery?.mediaKind === "video"
+      ? videoJobForDelivery(selectedDelivery)
+      : undefined;
+  const preparationKeyForDelivery = useCallback(
+    (delivery: PlannedPlatformDelivery) => {
+      const job =
+        delivery.mediaKind === "video" ? videoJobForDelivery(delivery) : undefined;
+      return `delivery:${delivery.id}:${job?.id || "asset"}`;
+    },
+    [videoJobForDelivery],
+  );
+  const batchEligibleDeliveryIds = useMemo(
+    () =>
+      new Set<string>(
+        deliveryPlan.deliveries
+          .filter((delivery) => {
+            if (delivery.mediaKind === "photo") return true;
+            const job = videoJobForDelivery(delivery);
+            return job?.status === "completed" && Boolean(job.url);
+          })
+          .map((delivery) => delivery.id),
+      ),
+    [deliveryPlan.deliveries, videoJobForDelivery],
+  );
+  useEffect(() => {
+    setBatchDeliveryIds((current) => {
+      const next = new Set(
+        [...current].filter((deliveryId) => batchEligibleDeliveryIds.has(deliveryId)),
+      );
+      if (
+        next.size === current.size &&
+        [...next].every((deliveryId) => current.has(deliveryId))
+      ) {
+        return current;
+      }
+      return next;
+    });
+  }, [batchEligibleDeliveryIds]);
+  const selectedPreparationKey = manualVideoSelected
+    ? `manual-video:${videoUrl || "pending"}`
+    : selectedDelivery
+      ? preparationKeyForDelivery(selectedDelivery)
+      : `primary:${resultIdentity}`;
+  const activePreparedSave =
+    preparedSaveForKey === selectedPreparationKey ? preparedSave : null;
+  const activeImageFormat = useMemo(() => {
+    if (selectedDelivery?.mediaKind === "photo") {
+      return EXPORT_FORMATS.find(
+        (format) => format.id === selectedDelivery.profile.legacyExportFormatId,
+      );
+    }
+    return primarySaveFormat;
+  }, [primarySaveFormat, selectedDelivery]);
 
   useEffect(() => {
-    setIsToolsOpen(isDesktopLayout);
+    if (
+      selectedDeliveryId &&
+      deliveryPlan.deliveries.some((delivery) => delivery.id === selectedDeliveryId)
+    ) {
+      return;
+    }
+    setSelectedDeliveryId(deliveryPlan.deliveries[0]?.id || null);
+  }, [deliveryPlan.deliveries, selectedDeliveryId]);
+
+  useEffect(() => {
+    setIsToolsOpen(false);
   }, [isDesktopLayout]);
   const captionAnalysis = useMemo(
     () => analyzeCaptionForDelivery(editedText, bannedPhrases),
     [bannedPhrases, editedText],
   );
+  const captionSetAnalysis = useMemo(() => {
+    const currentPrimaryCaption = activeCaptionPlatform ? primaryCaption : editedText;
+    const variants = { ...(effectivePack || {}) };
+    if (activeCaptionPlatform) variants[activeCaptionPlatform] = editedText;
+    return analyzeCaptionSetForDelivery(
+      [currentPrimaryCaption, ...Object.values(variants)],
+      bannedPhrases,
+    );
+  }, [activeCaptionPlatform, bannedPhrases, editedText, effectivePack, primaryCaption]);
   const imageBusy = isImageLoading || isVideoLoading;
   const textBusy = isTextLoading;
-  const approvalLocked = requiresApproval && approvalStatus !== "approved";
+  const reviewRequired =
+    post.approvalStatus !== undefined
+      ? post.approvalStatus !== "n_a"
+      : requiresApproval;
+  const approvalLocked = reviewRequired && approvalStatus !== "approved";
   const releaseLocked = post.releaseStatus === "save_failed";
-  const claimLocked = captionAnalysis.compliance.prohibited.length > 0;
+  const claimLocked = captionSetAnalysis.prohibited.length > 0;
   const deliveryLocked = approvalLocked || releaseLocked || claimLocked;
   // Once a creative has entered the review workflow it must remain byte-for-
   // byte equivalent to what the manager saw. Delivery unlocks on approval,
   // while edits require starting a new review submission.
-  const creativeLockedForReview = requiresApproval;
+  const creativeLockedForReview = reviewRequired;
+  const videoReviewLockMessage =
+    "This reviewed creative must stay unchanged. Start a new post to create a video.";
+  const historyReadOnly = Boolean(post.historyReadOnly);
+  const editableDraft = !reviewRequired && !historyReadOnly;
+  const originalRequiredMessage =
+    "This tool needs the original captured photo. Reopened History keeps the finished creative, so use Edit image or start a new photo instead.";
+
+  const flushPendingDraft = useCallback((): Promise<boolean> => {
+    const draft = pendingDraftSyncRef.current;
+    if (draftSyncTimeoutRef.current) {
+      clearTimeout(draftSyncTimeoutRef.current);
+      draftSyncTimeoutRef.current = null;
+    }
+    if (!draft || !post.postId || !editableDraft) return Promise.resolve(true);
+
+    const operation = draftSyncChainRef.current.then(async () => {
+      try {
+        await updatePostDraft(post.postId as string, draft);
+        lastSyncedDraftRef.current = {
+          caption: draft.caption,
+          disclosures: draft.disclosures,
+          image: draft.imageDataUrl || lastSyncedDraftRef.current.image,
+          platformCaptions: JSON.stringify(draft.platformCaptions || {}),
+        };
+        if (pendingDraftSyncRef.current === draft) {
+          pendingDraftSyncRef.current = null;
+        }
+        if (draftSyncMountedRef.current) {
+          setDraftSyncStatus(pendingDraftSyncRef.current ? "saving" : "saved");
+        }
+        return true;
+      } catch (err) {
+        logError("post.draft_sync_failed", {
+          postId: post.postId,
+          message: err instanceof Error ? err.message : String(err),
+        });
+        if (draftSyncMountedRef.current) setDraftSyncStatus("error");
+        return false;
+      }
+    });
+    draftSyncChainRef.current = operation.then(() => undefined);
+    return operation;
+  }, [editableDraft, post.postId]);
+
+  useEffect(() => {
+    if (!post.postId || !editableDraft) return;
+    const historyCaption = activeCaptionPlatform ? primaryCaption : editedText;
+    const historyAnalysis = activeCaptionPlatform
+      ? analyzeCaptionForDelivery(primaryCaption, bannedPhrases)
+      : captionAnalysis;
+    if (
+      !historyCaption.trim() ||
+      historyAnalysis.compliance.prohibited.length > 0 ||
+      captionSetAnalysis.prohibited.length > 0
+    ) {
+      return;
+    }
+    const last = lastSyncedDraftRef.current;
+    const caption = historyAnalysis.caption;
+    const disclosures = captionSetAnalysis.disclosures;
+    const imageChanged = post.image !== last.image;
+    const platformCaptionsJson = JSON.stringify(effectivePack || {});
+    const platformCaptionsChanged = platformCaptionsJson !== last.platformCaptions;
+    if (
+      caption === last.caption &&
+      disclosures === last.disclosures &&
+      !imageChanged &&
+      !platformCaptionsChanged
+    ) {
+      return;
+    }
+    pendingDraftSyncRef.current = {
+      caption,
+      disclosures,
+      ...(imageChanged ? { imageDataUrl: post.image } : {}),
+      platformCaptions: effectivePack,
+    };
+    setDraftSyncStatus("saving");
+    if (draftSyncTimeoutRef.current) clearTimeout(draftSyncTimeoutRef.current);
+    draftSyncTimeoutRef.current = setTimeout(() => {
+      void flushPendingDraft();
+    }, 600);
+  }, [
+    activeCaptionPlatform,
+    bannedPhrases,
+    captionAnalysis,
+    captionSetAnalysis,
+    editedText,
+    effectivePack,
+    flushPendingDraft,
+    post.image,
+    post.postId,
+    primaryCaption,
+    editableDraft,
+  ]);
+
+  useEffect(() => {
+    draftSyncMountedRef.current = true;
+    return () => {
+      draftSyncMountedRef.current = false;
+      if (draftSyncTimeoutRef.current) {
+        clearTimeout(draftSyncTimeoutRef.current);
+        draftSyncTimeoutRef.current = null;
+      }
+      // Queue the last edit behind any in-flight save so an older response can
+      // never overwrite a newer draft during navigation.
+      void flushPendingDraft();
+    };
+  }, [flushPendingDraft]);
+
   const approvalGateMessage =
     approvalStatus === "approved"
       ? "Manager approved this exact creative. Save, share, and export are unlocked; start a new post to make changes."
@@ -396,7 +772,7 @@ export const PostResult: React.FC<PostResultProps> = ({
   const releaseGateMessage =
     "The signed photo release was not stored, so consent cannot be verified. Copy, share, save, and export remain locked; check your connection and create another post to retry.";
   const claimGateMessage = claimLocked
-    ? prohibitedClaimsMessage(captionAnalysis.compliance.prohibited)
+    ? prohibitedClaimsMessage(captionSetAnalysis.prohibited)
     : "";
   const deliveryGateMessage = claimLocked
     ? claimGateMessage
@@ -412,17 +788,13 @@ export const PostResult: React.FC<PostResultProps> = ({
   useEffect(() => {
     setApprovalStatus(
       post.approvalStatus ??
-        (requiresApproval
-          ? post.postId
-            ? "pending"
-            : "submission_failed"
-          : "n_a"),
+        (requiresApproval ? (post.postId ? "pending" : "submission_failed") : "n_a"),
     );
     setApprovalCheckError(null);
   }, [post.postId, post.approvalStatus, requiresApproval]);
 
   useEffect(() => {
-    if (!requiresApproval || approvalStatus !== "pending" || !post.postId) {
+    if (!reviewRequired || approvalStatus !== "pending" || !post.postId) {
       return;
     }
 
@@ -457,10 +829,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         }
         schedule();
       } catch (err) {
-        if (
-          !active ||
-          (err instanceof DOMException && err.name === "AbortError")
-        ) {
+        if (!active || (err instanceof DOMException && err.name === "AbortError")) {
           return;
         }
         setApprovalCheckError(
@@ -476,13 +845,17 @@ export const PostResult: React.FC<PostResultProps> = ({
       controller.abort();
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [approvalStatus, post.postId, requiresApproval, toast]);
+  }, [approvalStatus, post.postId, reviewRequired, toast]);
 
   useEffect(() => {
+    if (previousPostTextRef.current === post.text) return;
+    previousPostTextRef.current = post.text;
+    setPrimaryCaption(post.text);
+    if (activeCaptionPlatform !== null) return;
     setEditedText(post.text);
     setTextHistory([post.text]);
     setHistoryIndex(0);
-  }, [post.text]);
+  }, [activeCaptionPlatform, post.text]);
 
   // Keyboard shortcuts for undo/redo
   useEffect(() => {
@@ -491,10 +864,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       const isTyping =
         target instanceof HTMLElement &&
         (target.matches("input, textarea, select") || target.isContentEditable);
-      if (
-        isTyping ||
-        document.querySelector('[role="dialog"][aria-modal="true"]')
-      ) {
+      if (isTyping || document.querySelector('[role="dialog"][aria-modal="true"]')) {
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
@@ -516,6 +886,7 @@ export const PostResult: React.FC<PostResultProps> = ({
   const handleTextChange = useCallback(
     (newText: string) => {
       setEditedText(newText);
+      if (activeCaptionPlatform === null) setPrimaryCaption(newText);
       setHasCopiedCaption(false);
       // Add to history, removing any future history if we're not at the end
       const newHistory = textHistory.slice(0, historyIndex + 1);
@@ -523,7 +894,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       setTextHistory(newHistory);
       setHistoryIndex(newHistory.length - 1);
     },
-    [historyIndex, textHistory],
+    [activeCaptionPlatform, historyIndex, textHistory],
   );
 
   const handleUndo = useCallback(() => {
@@ -531,31 +902,32 @@ export const PostResult: React.FC<PostResultProps> = ({
       const newIndex = historyIndex - 1;
       setHistoryIndex(newIndex);
       setEditedText(textHistory[newIndex]);
+      if (activeCaptionPlatform === null) {
+        setPrimaryCaption(textHistory[newIndex]);
+      }
       setHasCopiedCaption(false);
       triggerHapticFeedback();
     }
-  }, [historyIndex, textHistory]);
+  }, [activeCaptionPlatform, historyIndex, textHistory]);
 
   const handleRedo = useCallback(() => {
     if (historyIndex < textHistory.length - 1) {
       const newIndex = historyIndex + 1;
       setHistoryIndex(newIndex);
       setEditedText(textHistory[newIndex]);
+      if (activeCaptionPlatform === null) {
+        setPrimaryCaption(textHistory[newIndex]);
+      }
       setHasCopiedCaption(false);
       triggerHapticFeedback();
     }
-  }, [historyIndex, textHistory]);
+  }, [activeCaptionPlatform, historyIndex, textHistory]);
 
   const adoptVideoUrl = useCallback((url: string | null) => {
-    // Revoke only the previous blob we own — never revoke the URL still shown.
-    const prev = activeVideoBlobRef.current;
-    if (prev && prev !== url && prev.startsWith("blob:")) {
-      try {
-        URL.revokeObjectURL(prev);
-      } catch {
-        /* ignore */
-      }
-    }
+    // Preview selection must not revoke a completed queue asset. The user can
+    // switch video → photo → video without turning the retained URL into a
+    // dead pointer. URLs are revoked only on explicit removal or unmount.
+    if (url?.startsWith("blob:")) ownedVideoBlobUrlsRef.current.add(url);
     activeVideoBlobRef.current = url;
     setVideoUrl(url);
     setVideoPlayError(null);
@@ -564,55 +936,233 @@ export const PostResult: React.FC<PostResultProps> = ({
     setVideoMuted(true);
   }, []);
 
-  // Unmount-only revoke (avoid React Strict Mode / effect re-runs killing the
-  // blob while <video> still points at it — that causes endless play spinners).
+  useEffect(() => {
+    if (!videoUrl) return;
+    const activeJob = [...videoJobs].reverse().find((job) => job.url === videoUrl);
+    if (
+      !activeJob ||
+      activeJob.sourceCreativeKey !== currentVideoCreativeKey ||
+      (activeJob.aspectPreference !== "9:16" && activeJob.aspectPreference !== "16:9")
+    ) {
+      setManualVideoSelected(false);
+      adoptVideoUrl(null);
+      return;
+    }
+    if (manualVideoSelected) return;
+    const matchingDelivery = deliveryPlan.deliveries.find(
+      (delivery) =>
+        delivery.mediaKind === "video" &&
+        delivery.profile.preparation.kind === "veo" &&
+        delivery.profile.preparation.nativeAspectRatio === activeJob.aspectPreference &&
+        delivery.profile.preparation.resolution === activeJob.resolution &&
+        delivery.profile.preparation.durationSeconds === activeJob.duration,
+    );
+    if (matchingDelivery && matchingDelivery.id !== selectedDeliveryId) {
+      setSelectedDeliveryId(matchingDelivery.id);
+    }
+  }, [
+    adoptVideoUrl,
+    currentVideoCreativeKey,
+    deliveryPlan.deliveries,
+    manualVideoSelected,
+    selectedDeliveryId,
+    videoJobs,
+    videoUrl,
+  ]);
+
+  // Unmount-only bulk cleanup. Selecting a different asset never destroys it.
   useEffect(() => {
     return () => {
-      const owned = activeVideoBlobRef.current;
-      if (owned && owned.startsWith("blob:")) {
+      ownedVideoBlobUrlsRef.current.forEach((owned) => {
         try {
           URL.revokeObjectURL(owned);
         } catch {
           /* ignore */
         }
-        activeVideoBlobRef.current = null;
-      }
+      });
+      ownedVideoBlobUrlsRef.current.clear();
+      activeVideoBlobRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    setVideoJobs([]);
-    adoptVideoUrl(null);
-  }, [post.image, adoptVideoUrl]);
+    const retained = new Set(
+      videoJobs.map((job) => job.url).filter((url): url is string => Boolean(url)),
+    );
+    ownedVideoBlobUrlsRef.current.forEach((owned) => {
+      if (retained.has(owned) || activeVideoBlobRef.current === owned) return;
+      URL.revokeObjectURL(owned);
+      ownedVideoBlobUrlsRef.current.delete(owned);
+    });
+  }, [videoJobs, videoUrl]);
 
   useEffect(() => {
     setHasSavedMedia(false);
   }, [videoUrl]);
 
-  const saveKind = videoUrl ? "video" : "image";
+  useEffect(() => {
+    let active = true;
+    setPreparedSave(null);
+    setPreparedSaveForKey(null);
+    setMediaPreparationError(null);
+    const preparationKey = selectedPreparationKey;
+
+    const selectedVideoUrl =
+      !manualVideoSelected &&
+      selectedDelivery?.mediaKind === "video" &&
+      selectedVideoJob?.status === "completed"
+        ? selectedVideoJob.url
+        : undefined;
+    if (
+      !manualVideoSelected &&
+      selectedDelivery?.mediaKind === "video" &&
+      !selectedVideoUrl
+    ) {
+      setIsPreparingSave(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setIsPreparingSave(true);
+    void (async () => {
+      const isVideo = manualVideoSelected
+        ? Boolean(videoUrl)
+        : selectedDelivery
+          ? selectedDelivery.mediaKind === "video"
+          : Boolean(videoUrl);
+      const sourceUrl =
+        !isVideo && activeImageFormat
+          ? await renderFormatIfNeeded(post.image, activeImageFormat)
+          : selectedVideoUrl || videoUrl || post.image;
+      if (
+        isVideo &&
+        !manualVideoSelected &&
+        selectedDelivery?.mediaKind === "video" &&
+        selectedDelivery.profile.preparation.kind === "veo" &&
+        selectedVideoUrl
+      ) {
+        await validateVideoMetadata(selectedVideoUrl, {
+          width: selectedDelivery.profile.output.width,
+          height: selectedDelivery.profile.output.height,
+          durationSeconds: selectedDelivery.profile.preparation.durationSeconds,
+        });
+      }
+      const basename = isVideo
+        ? (!manualVideoSelected && selectedDelivery?.mediaKind === "video"
+            ? selectedDelivery.filename.replace(/\.[^.]+$/, "")
+            : undefined) || "dealer-social-video"
+        : selectedDelivery?.filename.replace(/\.[^.]+$/, "") ||
+          activeImageFormat?.filename.replace(/\.[^.]+$/, "") ||
+          "dealer-social-post";
+      return prepareMediaForSave({
+        sourceUrl,
+        kind: isVideo ? "video" : "image",
+        basename,
+      });
+    })()
+      .then((prepared) => {
+        if (active) {
+          setPreparedSave(prepared);
+          setPreparedSaveForKey(preparationKey);
+        }
+      })
+      .catch((err) => {
+        if (!active) return;
+        setPreparedSave(null);
+        setPreparedSaveForKey(null);
+        setMediaPreparationError(
+          err instanceof Error
+            ? err.message
+            : "The exact platform file could not be prepared.",
+        );
+      })
+      .finally(() => {
+        if (active) setIsPreparingSave(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [
+    activeImageFormat,
+    manualVideoSelected,
+    post.image,
+    mediaPreparationNonce,
+    selectedDelivery,
+    selectedPreparationKey,
+    selectedVideoJob,
+    videoUrl,
+  ]);
+
+  useEffect(() => {
+    if (
+      !activePreparedSave ||
+      activePreparedSave.kind !== "image" ||
+      videoUrl ||
+      typeof URL.createObjectURL !== "function"
+    ) {
+      setFormattedPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(activePreparedSave.file);
+    setFormattedPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [activePreparedSave, videoUrl]);
+
+  const displayImageUrl = formattedPreviewUrl || post.image;
+
+  const saveKind =
+    manualVideoSelected && videoUrl
+      ? "video"
+      : selectedDelivery?.mediaKind === "video"
+        ? "video"
+        : "image";
   const saveToPhotos = isMobilePhotoDevice();
   const saveButtonLabel = saveToPhotos
-    ? "Save to Photos"
+    ? activeImageFormat && saveKind === "image"
+      ? `Save ${activeImageFormat.width}×${activeImageFormat.height}`
+      : "Save to Photos"
     : saveKind === "video"
       ? "Save video"
-      : "Save image";
+      : activeImageFormat
+        ? `Save ${activeImageFormat.width}×${activeImageFormat.height}`
+        : "Save image";
   const saveAriaLabel = (locked: boolean) =>
-    locked
-      ? `Save ${saveKind} (${deliveryLockLabel.toLowerCase()})`
-      : saveButtonLabel;
+    locked ? `Save ${saveKind} (${deliveryLockLabel.toLowerCase()})` : saveButtonLabel;
 
-  const handleSave = async () => {
+  const handleSave = async (deliveryId?: string) => {
     triggerHapticFeedback();
     if (deliveryLocked) {
       toast.warning(deliveryGateMessage);
       return;
     }
+    if (deliveryId && deliveryId !== selectedDeliveryId) {
+      toast.warning("Select this output and wait until its exact file is ready.");
+      return;
+    }
+    if (!activePreparedSave) {
+      toast.warning(
+        isPreparingSave
+          ? "Media is still preparing. Try Save again in a moment."
+          : "Media could not be prepared. Switch to another version or retry.",
+      );
+      return;
+    }
 
-    const result = await saveMediaToLibrary({
-      sourceUrl: videoUrl || post.image,
-      kind: videoUrl ? "video" : "image",
-      basename: videoUrl ? "social-media-video" : "social-media-post",
-    });
+    // WebKit consumes transient activation at the first asynchronous boundary.
+    // The prepared File is ready already, so invoke navigator.share (inside this
+    // helper) immediately from this click before starting this click's History
+    // flush. A background autosave that began earlier may still be in flight,
+    // but it is never awaited on the fresh user-activation path.
+    const mediaSavePromise = savePreparedMediaToLibrary(activePreparedSave);
+    const draftSavePromise = flushPendingDraft();
+    const result = await mediaSavePromise;
+    const draftSaved = await draftSavePromise;
+    if (!draftSaved) {
+      toast.warning(
+        "The media is ready, but the latest History update did not save. You can continue or use Retry history save.",
+      );
+    }
 
     if (result.method === "cancelled") {
       toast.warning(saveResultToastMessage(result));
@@ -661,32 +1211,26 @@ export const PostResult: React.FC<PostResultProps> = ({
   // copy + share + download we always paste the caption + disclosure block
   // together so the dealer's actual social post is compliant.
   //
-  // disclosureOverride takes precedence over post.disclosures when the user
-  // picked an alternative from the CaptionAlternativesModal (each variant
-  // may trigger a different compliance language set).
   const sourceCaptionForActive =
     activeCaptionPlatform && effectivePack?.[activeCaptionPlatform]
       ? effectivePack[activeCaptionPlatform]
       : post.text;
   const captionWasEdited = editedText !== sourceCaptionForActive;
-  const activeDisclosures = (
-    captionWasEdited
-      ? captionAnalysis.disclosures
-      : (disclosureOverride?.text ?? post.disclosures ?? "")
-  ).trim();
-  const activeDisclosureCategories = captionWasEdited
-    ? captionAnalysis.disclosureCategories
-    : (disclosureOverride?.categories ?? post.disclosureCategories ?? []);
-  const appendDisclosures = (caption: string): string => {
+  // Always derive the footer from the actual visible caption. Platform
+  // variants and salesperson edits may advertise different terms.
+  const activeDisclosures = captionAnalysis.disclosures.trim();
+  const activeDisclosureCategories = captionAnalysis.disclosureCategories;
+  const appendDisclosureText = (caption: string, disclosures: string): string => {
     const cap = caption.trim();
-    if (!activeDisclosures) return cap;
+    const disclosureText = disclosures.trim();
+    if (!disclosureText) return cap;
     return `${cap}\n\n${
-      activeDisclosures.startsWith("— Disclosures —")
-        ? activeDisclosures
-        : `— Disclosures —\n${activeDisclosures}`
+      disclosureText.startsWith("— Disclosures —")
+        ? disclosureText
+        : `— Disclosures —\n${disclosureText}`
     }`;
   };
-  const captionWithDisclosures = appendDisclosures(editedText);
+  const captionWithDisclosures = appendDisclosureText(editedText, activeDisclosures);
 
   // Persist textarea edits into the active pack slot so Share uses salesperson edits.
   useEffect(() => {
@@ -699,63 +1243,90 @@ export const PostResult: React.FC<PostResultProps> = ({
     });
   }, [editedText, activeCaptionPlatform]);
 
-  /** Pack captions (with local overrides) + disclosures for ShareDialog. */
+  /** Re-scan every outgoing variant; one platform can trigger a different disclosure. */
   const sharePlatformCaptions = useMemo(() => {
     if (!effectivePack) return undefined;
-    const baseDisc = (post.disclosures ?? "").trim();
-    const out: Record<string, string> = {};
+    const out: Record<string, PlatformShareCaption> = {};
     for (const [id, cap] of Object.entries(effectivePack)) {
       // Active platform: use live editor text (includes in-progress edits)
-      const base =
-        id === activeCaptionPlatform
-          ? editedText.trim()
-          : cap?.trim();
+      const base = id === activeCaptionPlatform ? editedText.trim() : cap?.trim();
       if (!base) continue;
-      if (!baseDisc) {
-        out[id] = base;
-      } else {
-        out[id] = `${base}\n\n${
-          baseDisc.startsWith("— Disclosures —")
-            ? baseDisc
-            : `— Disclosures —\n${baseDisc}`
-        }`;
-      }
+      const attributed = appendDealershipMention(base, id, currentDealer);
+      const prepared = analyzeCaptionForDelivery(attributed, bannedPhrases);
+      out[id] = {
+        text: prepared.caption,
+        disclosures: prepared.disclosures || undefined,
+        blockedReason:
+          prepared.compliance.prohibited.length > 0
+            ? prohibitedClaimsMessage(prepared.compliance.prohibited)
+            : undefined,
+      };
+    }
+    if (out.instagram_feed && !out.instagram_reel) {
+      out.instagram_reel = out.instagram_feed;
     }
     return Object.keys(out).length > 0 ? out : undefined;
-  }, [
-    effectivePack,
-    post.disclosures,
-    activeCaptionPlatform,
-    editedText,
-  ]);
+  }, [activeCaptionPlatform, bannedPhrases, currentDealer, editedText, effectivePack]);
 
   const selectCaptionPlatform = useCallback(
-    (platformId: string | null) => {
+    (platformId: string | null, withHaptic = true) => {
       // Flush current editor into pack before switching
       if (activeCaptionPlatform && editedText.trim()) {
         setPackOverrides((prev) => ({
           ...prev,
           [activeCaptionPlatform]: editedText.trim(),
         }));
+      } else if (activeCaptionPlatform === null) {
+        setPrimaryCaption(editedText);
       }
       const pack = { ...(post.platformCaptions || {}), ...packOverrides };
       const nextText =
-        platformId && pack[platformId] ? pack[platformId] : post.text;
+        platformId && pack[platformId] ? pack[platformId] : primaryCaption;
       setActiveCaptionPlatform(platformId);
       setEditedText(nextText);
       setTextHistory([nextText]);
       setHistoryIndex(0);
       setHasCopiedCaption(false);
-      triggerHapticFeedback();
+      if (withHaptic) triggerHapticFeedback();
     },
     [
       activeCaptionPlatform,
       editedText,
       packOverrides,
+      primaryCaption,
       post.platformCaptions,
-      post.text,
     ],
   );
+
+  const handleCaptionTabKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>, currentIndex: number) => {
+      const tabCount = platformCaptionTabs.length + 1;
+      let nextIndex: number | null = null;
+
+      if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabCount;
+      if (event.key === "ArrowLeft") {
+        nextIndex = (currentIndex - 1 + tabCount) % tabCount;
+      }
+      if (event.key === "Home") nextIndex = 0;
+      if (event.key === "End") nextIndex = tabCount - 1;
+      if (nextIndex === null) return;
+
+      event.preventDefault();
+      const nextPlatformId =
+        nextIndex === 0 ? null : platformCaptionTabs[nextIndex - 1]?.id || null;
+      selectCaptionPlatform(nextPlatformId);
+      requestAnimationFrame(() => captionTabRefs.current[nextIndex]?.focus());
+    },
+    [platformCaptionTabs, selectCaptionPlatform],
+  );
+
+  const activeCaptionTabIndex =
+    activeCaptionPlatform === null
+      ? 0
+      : Math.max(
+          0,
+          platformCaptionTabs.findIndex(({ id }) => id === activeCaptionPlatform) + 1,
+        );
 
   const handleCopy = async () => {
     triggerHapticFeedback();
@@ -763,8 +1334,27 @@ export const PostResult: React.FC<PostResultProps> = ({
       toast.warning(deliveryGateMessage);
       return;
     }
+    const draftSaved = await flushPendingDraft();
+    if (!draftSaved) {
+      toast.warning(
+        "The caption can still be copied, but its latest History update did not save.",
+      );
+    }
     let success = false;
-    const textToCopy = captionWithDisclosures;
+    const copyDestinationId =
+      activeCaptionPlatform || selectedDelivery?.destinationId || post.platformIds?.[0];
+    const attributedCaption = copyDestinationId
+      ? appendDealershipMention(editedText, copyDestinationId, currentDealer)
+      : editedText;
+    const preparedCopy = analyzeCaptionForDelivery(attributedCaption, bannedPhrases);
+    if (preparedCopy.compliance.prohibited.length > 0) {
+      toast.warning(prohibitedClaimsMessage(preparedCopy.compliance.prohibited));
+      return;
+    }
+    const textToCopy = appendDisclosureText(
+      preparedCopy.caption,
+      preparedCopy.disclosures,
+    );
     if (navigator.clipboard) {
       try {
         await navigator.clipboard.writeText(textToCopy);
@@ -788,6 +1378,42 @@ export const PostResult: React.FC<PostResultProps> = ({
         "The caption could not be copied. Select the text and copy it manually.",
       );
     }
+  };
+
+  const handleOpenShare = async () => {
+    triggerHapticFeedback();
+    if (deliveryLocked) {
+      toast.warning(deliveryGateMessage);
+      return;
+    }
+    if (!manualVideoSelected && selectedDelivery) {
+      await handleShareDelivery(selectedDelivery.id);
+      return;
+    }
+    if (!manualVideoSelected || !videoUrl || !activePreparedSave) {
+      toast.warning(
+        selectedDelivery?.mediaKind === "video"
+          ? "Create this exact video output before sharing it."
+          : "Select a platform output and wait until its exact file is ready.",
+      );
+      return;
+    }
+    const draftSaved = await flushPendingDraft();
+    if (!draftSaved) {
+      toast.warning(
+        "Sharing is available, but the latest History update did not save.",
+      );
+    }
+    // A free-form legacy render is shareable through the device sheet, but it
+    // is never mislabeled as an exact Facebook/Instagram/Google deliverable.
+    setFocusedShareDeliveryId("native_share:manual");
+    setFocusedShareContent({
+      text: editedText,
+      disclosures: activeDisclosures || undefined,
+      videoUrl,
+      preparedFile: activePreparedSave.file,
+    });
+    setIsShareDialogOpen(true);
   };
 
   const handleImageAction = async (
@@ -833,8 +1459,17 @@ export const PostResult: React.FC<PostResultProps> = ({
   };
 
   const handleTextEditSubmit = async (prompt: string) => {
-    await handleTextAction(() => onEditText(prompt));
-    setIsTextEditing(false); // Close modal after action completes
+    const sourceText = editedText;
+    let updatedText = "";
+    await handleTextAction(async () => {
+      updatedText = activeCaptionPlatform
+        ? await onEditText(prompt, sourceText, activeCaptionPlatform)
+        : await onEditText(prompt, sourceText);
+    });
+    if (updatedText) {
+      handleTextChange(updatedText);
+    }
+    setIsTextEditing(false);
   };
 
   const startVideoJob = async (
@@ -842,6 +1477,11 @@ export const PostResult: React.FC<PostResultProps> = ({
     options: VideoRequestOptions,
     existingJobId?: string,
   ) => {
+    if (videoGenerationActiveRef.current) {
+      toast.warning("A video is already rendering. Wait for it to finish first.");
+      return;
+    }
+    videoGenerationActiveRef.current = true;
     setIsVideoLoading(true);
 
     const messages = [
@@ -870,40 +1510,55 @@ export const PostResult: React.FC<PostResultProps> = ({
       setVideoLoadingMessage(`${messages[messageIndex]} (${formatElapsed()})`);
     }, 1000);
 
-    const jobId = existingJobId || `video-${Date.now()}`;
+    videoJobSequenceRef.current += 1;
+    const randomJobId =
+      typeof globalThis.crypto?.randomUUID === "function"
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now()}-${videoJobSequenceRef.current}`;
+    const jobId = existingJobId || `video-${randomJobId}`;
     if (!existingJobId) {
-      setVideoJobs((prev) => [
-        ...prev,
-        {
-          id: jobId,
-          style,
-          status: "queued",
-          duration: options.durationSeconds,
-          soundtrack: options.soundtrack,
-          aspectPreference: options.aspectPreference,
-          resolution: options.resolution,
-          pacing: options.pacing,
-          createdAt: new Date().toISOString(),
-        },
-      ]);
+      setVideoJobs((prev) =>
+        retainNewestVideoJobs([
+          ...prev,
+          {
+            id: jobId,
+            style,
+            status: "queued" as const,
+            duration: options.durationSeconds,
+            soundtrack: options.soundtrack,
+            aspectPreference: options.aspectPreference,
+            resolution: options.resolution,
+            pacing: options.pacing,
+            createdAt: new Date().toISOString(),
+            sourceCreativeKey: currentVideoCreativeKey,
+          },
+        ]),
+      );
     }
 
     // Mark job as processing
     setVideoJobs((prev) =>
       prev.map((job) =>
-        job.id === jobId
-          ? { ...job, status: "processing", error: undefined }
-          : job,
+        job.id === jobId ? { ...job, status: "processing", error: undefined } : job,
       ),
     );
 
-    const maxAttempts = 3;
+    // The provider service owns bounded model/poll retries. Retrying the whole
+    // request here could create multiple paid Veo jobs after a lost response.
+    const maxAttempts = 1;
     const runAttempt = async (attempt: number): Promise<void> => {
       try {
         const url = await onGenerateVideo(style, options);
         // Always show the latest successful render (previous logic kept a
         // stale/null URL if something odd was already set).
         adoptVideoUrl(url);
+        if (dealerId) {
+          void archiveDealerMedia(dealerId, {
+            kind: "video",
+            source: url,
+            label: `${style} video`,
+          });
+        }
         setVideoJobs((prev) =>
           prev.map((job) =>
             job.id === jobId ? { ...job, status: "completed", url } : job,
@@ -952,9 +1607,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         setVideoLoadingMessage(finalMessage);
         setVideoJobs((prev) =>
           prev.map((job) =>
-            job.id === jobId
-              ? { ...job, status: "failed", error: finalMessage }
-              : job,
+            job.id === jobId ? { ...job, status: "failed", error: finalMessage } : job,
           ),
         );
         throw normalized;
@@ -966,6 +1619,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     } catch (err) {
       // Failure is already recorded in job state; no additional action needed here.
     } finally {
+      videoGenerationActiveRef.current = false;
       setIsVideoLoading(false);
       clearInterval(intervalId);
     }
@@ -975,7 +1629,9 @@ export const PostResult: React.FC<PostResultProps> = ({
     style: VideoStyle,
     options: VideoRequestOptions,
   ) => {
+    setManualVideoSelected(!videoDirectorDeliveryId);
     setIsVideoDirectorOpen(false);
+    setVideoDirectorDeliveryId(null);
     await startVideoJob(style, options);
   };
 
@@ -989,12 +1645,378 @@ export const PostResult: React.FC<PostResultProps> = ({
       resolution: job.resolution,
       pacing: job.pacing,
     };
-    await startVideoJob(job.style, options, jobId);
+    await startVideoJob(
+      job.style,
+      options,
+      job.sourceCreativeKey === currentVideoCreativeKey ? jobId : undefined,
+    );
   };
 
   const handleRemoveVideoJob = (jobId: string) => {
+    const removed = videoJobs.find((job) => job.id === jobId);
+    if (removed?.url && activeVideoBlobRef.current === removed.url) {
+      adoptVideoUrl(null);
+      setManualVideoSelected(false);
+    }
+    if (removed?.url?.startsWith("blob:")) {
+      ownedVideoBlobUrlsRef.current.delete(removed.url);
+      URL.revokeObjectURL(removed.url);
+    }
     setVideoJobs((prev) => prev.filter((job) => job.id !== jobId));
   };
+
+  const handleSelectDelivery = (deliveryId: string) => {
+    const delivery = deliveriesById.get(deliveryId);
+    if (!delivery) return;
+    triggerHapticFeedback();
+    setPreparedSave(null);
+    setPreparedSaveForKey(null);
+    setIsPreparingSave(delivery.mediaKind === "photo");
+    setSelectedDeliveryId(deliveryId);
+    setMediaPreparationError(null);
+    setManualVideoSelected(false);
+    if (delivery.mediaKind === "photo") {
+      adoptVideoUrl(null);
+      return;
+    }
+    const job = videoJobForDelivery(delivery);
+    adoptVideoUrl(job?.status === "completed" && job.url ? job.url : null);
+  };
+
+  const handleSelectMobileDelivery = (deliveryId: string) => {
+    const delivery = deliveriesById.get(deliveryId);
+    if (!delivery) return;
+
+    handleSelectDelivery(deliveryId);
+
+    const destinationId =
+      delivery.destinationId === "instagram_reel" &&
+      !effectivePack?.instagram_reel &&
+      effectivePack?.instagram_feed
+        ? "instagram_feed"
+        : delivery.destinationId;
+    const nextCaptionPlatform = effectivePack?.[destinationId] ? destinationId : null;
+    if (nextCaptionPlatform !== activeCaptionPlatform) {
+      // The output selection already supplied haptic feedback. Keep the
+      // destination-specific caption synchronized without buzzing twice.
+      selectCaptionPlatform(nextCaptionPlatform, false);
+    }
+  };
+
+  const handleShareDelivery = async (deliveryId: string) => {
+    if (deliveryLocked) {
+      toast.warning(deliveryGateMessage);
+      return;
+    }
+    const delivery = deliveriesById.get(deliveryId);
+    const expectedPreparationKey = delivery
+      ? preparationKeyForDelivery(delivery)
+      : null;
+    if (
+      !delivery ||
+      deliveryId !== selectedDeliveryId ||
+      manualVideoSelected ||
+      preparedSaveForKey !== expectedPreparationKey ||
+      !activePreparedSave
+    ) {
+      toast.warning("Select this output and wait until its exact file is ready.");
+      return;
+    }
+
+    const captionVariant = sharePlatformCaptions?.[delivery.destinationId];
+    if (
+      captionVariant &&
+      typeof captionVariant !== "string" &&
+      captionVariant.blockedReason
+    ) {
+      toast.warning(captionVariant.blockedReason);
+      return;
+    }
+    const baseCaption =
+      typeof captionVariant === "string"
+        ? captionVariant
+        : captionVariant?.text || editedText;
+    const caption = appendDealershipMention(
+      baseCaption,
+      delivery.destinationId,
+      currentDealer,
+    );
+    const disclosures =
+      typeof captionVariant === "string"
+        ? undefined
+        : captionVariant?.disclosures || activeDisclosures || undefined;
+    const job =
+      delivery.mediaKind === "video" ? videoJobForDelivery(delivery) : undefined;
+    if (delivery.mediaKind === "video" && (!job?.url || job.status !== "completed")) {
+      toast.warning("Create this exact video output before sharing it.");
+      return;
+    }
+
+    const draftSaved = await flushPendingDraft();
+    if (!draftSaved) {
+      toast.warning(
+        "Sharing is available, but the latest History update did not save.",
+      );
+    }
+
+    setFocusedShareDeliveryId(delivery.id);
+    setFocusedShareContent({
+      text: caption,
+      disclosures,
+      preparedFile: activePreparedSave.file,
+      ...(delivery.mediaKind === "video"
+        ? { videoUrl: job?.url }
+        : { imageDataUrl: formattedPreviewUrl || post.image }),
+    });
+    setIsShareDialogOpen(true);
+  };
+
+  const handleToggleBatchDelivery = (deliveryId: string, selected: boolean) => {
+    if (
+      !deliveriesById.has(deliveryId) ||
+      (selected && !batchEligibleDeliveryIds.has(deliveryId))
+    ) {
+      return;
+    }
+    setBatchDeliveryIds((current) => {
+      const next = new Set(current);
+      if (selected) next.add(deliveryId);
+      else next.delete(deliveryId);
+      return next;
+    });
+  };
+
+  const handleToggleAllBatchDeliveries = (selected: boolean) => {
+    setBatchDeliveryIds(
+      selected ? new Set<string>(batchEligibleDeliveryIds) : new Set(),
+    );
+  };
+
+  const handleStartShareBatch = () => {
+    if (deliveryLocked) {
+      toast.warning(deliveryGateMessage);
+      return;
+    }
+
+    const selectedDeliveries = deliveryPlan.deliveries.filter((delivery) =>
+      batchDeliveryIds.has(delivery.id),
+    );
+    if (selectedDeliveries.length === 0) {
+      toast.warning("Choose at least one platform file to share.");
+      return;
+    }
+
+    const unavailableDelivery = selectedDeliveries.find(
+      (delivery) => !batchEligibleDeliveryIds.has(delivery.id),
+    );
+    if (unavailableDelivery) {
+      setBatchDeliveryIds((current) => {
+        const next = new Set(current);
+        next.delete(unavailableDelivery.id);
+        return next;
+      });
+      toast.warning(
+        `${unavailableDelivery.profile.destinationLabel} was removed from this share sequence because its exact file is not ready.`,
+      );
+      return;
+    }
+
+    const blockedCaption = selectedDeliveries.find((delivery) => {
+      const variant = sharePlatformCaptions?.[delivery.destinationId];
+      return variant && typeof variant !== "string" && Boolean(variant.blockedReason);
+    });
+    if (blockedCaption) {
+      const variant = sharePlatformCaptions?.[blockedCaption.destinationId];
+      toast.warning(
+        typeof variant !== "string" && variant?.blockedReason
+          ? variant.blockedReason
+          : "A selected destination caption needs attention before sharing.",
+      );
+      handleSelectDelivery(blockedCaption.id);
+      return;
+    }
+
+    const queue = selectedDeliveries.map((delivery) => delivery.id);
+    shareQueueOpenedRef.current = null;
+    setShareQueue(queue);
+    setShareQueueIndex(0);
+    setIsShareDialogOpen(false);
+    setFocusedShareDeliveryId(null);
+    setFocusedShareContent(null);
+    const firstDelivery = deliveriesById.get(queue[0]);
+    const firstPreparationKey = firstDelivery
+      ? preparationKeyForDelivery(firstDelivery)
+      : null;
+    if (
+      selectedDeliveryId !== queue[0] ||
+      manualVideoSelected ||
+      preparedSaveForKey !== firstPreparationKey
+    ) {
+      handleSelectDelivery(queue[0]);
+    } else if (!activePreparedSave) {
+      setMediaPreparationError(null);
+      setMediaPreparationNonce((value) => value + 1);
+    }
+  };
+
+  const handleCancelShareQueue = () => {
+    setIsShareDialogOpen(false);
+    setFocusedShareDeliveryId(null);
+    setFocusedShareContent(null);
+    setShareQueue([]);
+    setShareQueueIndex(0);
+    shareQueueOpenedRef.current = null;
+  };
+
+  const handleAdvanceShareQueue = () => {
+    const nextIndex = shareQueueIndex + 1;
+    setIsShareDialogOpen(false);
+    setFocusedShareDeliveryId(null);
+    setFocusedShareContent(null);
+
+    if (nextIndex >= shareQueue.length) {
+      setShareQueue([]);
+      setShareQueueIndex(0);
+      shareQueueOpenedRef.current = null;
+      toast.success(
+        "Share sequence finished — verify each post in its destination app.",
+      );
+      return;
+    }
+
+    const nextDeliveryId = shareQueue[nextIndex];
+    setShareQueueIndex(nextIndex);
+    handleSelectDelivery(nextDeliveryId);
+  };
+
+  const handleRetryDelivery = async (deliveryId: string) => {
+    const delivery = deliveriesById.get(deliveryId);
+    if (!delivery) return;
+    if (delivery.mediaKind === "photo") {
+      handleSelectDelivery(deliveryId);
+      setMediaPreparationNonce((value) => value + 1);
+      return;
+    }
+    if (creativeLockedForReview) {
+      toast.warning(videoReviewLockMessage);
+      return;
+    }
+    if (videoGenerationActiveRef.current || isVideoLoading) {
+      toast.warning("A video is already rendering. Wait for it to finish first.");
+      return;
+    }
+    const job = videoJobForDelivery(delivery);
+    if (job?.status === "failed") {
+      await handleRetryVideo(job.id);
+      return;
+    }
+    if (delivery.profile.preparation.kind !== "veo") return;
+    setSelectedDeliveryId(deliveryId);
+    setVideoDirectorDeliveryId(deliveryId);
+    setIsVideoDirectorOpen(true);
+  };
+
+  const queuedDeliveryId = shareQueue[shareQueueIndex];
+  const queuedDelivery = queuedDeliveryId
+    ? deliveriesById.get(queuedDeliveryId)
+    : undefined;
+  useEffect(() => {
+    if (
+      !queuedDeliveryId ||
+      isShareDialogOpen ||
+      selectedDeliveryId !== queuedDeliveryId ||
+      isPreparingSave ||
+      !activePreparedSave
+    ) {
+      return;
+    }
+    const openKey = `${shareQueueIndex}:${queuedDeliveryId}`;
+    if (shareQueueOpenedRef.current === openKey) return;
+    shareQueueOpenedRef.current = openKey;
+    void handleShareDelivery(queuedDeliveryId);
+  }, [
+    activePreparedSave,
+    isPreparingSave,
+    isShareDialogOpen,
+    queuedDeliveryId,
+    selectedDeliveryId,
+    shareQueueIndex,
+  ]);
+
+  const deliveryOutputs = useMemo<PlatformDeliveryOutput[]>(
+    () =>
+      deliveryPlan.deliveries.map((delivery) => {
+        const selected = delivery.id === selectedDeliveryId;
+        const videoJob =
+          delivery.mediaKind === "video" ? videoJobForDelivery(delivery) : undefined;
+        let status: PlatformDeliveryOutput["status"] = selected
+          ? activePreparedSave
+            ? "ready"
+            : "generating"
+          : "available";
+
+        if (delivery.mediaKind === "video") {
+          status = !videoJob
+            ? "pending"
+            : videoJob.status === "completed"
+              ? selected
+                ? activePreparedSave
+                  ? "ready"
+                  : "generating"
+                : "available"
+              : videoJob.status === "failed"
+                ? "failed"
+                : "generating";
+        }
+        if (selected && !manualVideoSelected && isPreparingSave) {
+          status = "generating";
+        }
+        if (selected && !manualVideoSelected && mediaPreparationError) {
+          status = "failed";
+        }
+
+        return {
+          id: delivery.id,
+          platformLabel: delivery.profile.destinationLabel,
+          mediaKind: delivery.mediaKind === "photo" ? "image" : "video",
+          ratio: delivery.profile.output.aspectRatio,
+          width: delivery.profile.output.width,
+          height: delivery.profile.output.height,
+          status,
+          thumbnail:
+            delivery.mediaKind === "video" && videoJob?.url ? videoJob.url : post.image,
+          poster: delivery.mediaKind === "video" ? post.image : undefined,
+          selected,
+          batchSelected: batchDeliveryIds.has(delivery.id),
+          batchEligible: batchEligibleDeliveryIds.has(delivery.id),
+          actionsReady:
+            selected &&
+            !manualVideoSelected &&
+            status === "ready" &&
+            Boolean(activePreparedSave) &&
+            !isPreparingSave,
+          recoveryDisabled: delivery.mediaKind === "video" && creativeLockedForReview,
+          recoveryDisabledReason:
+            delivery.mediaKind === "video" && creativeLockedForReview
+              ? videoReviewLockMessage
+              : undefined,
+        };
+      }),
+    [
+      deliveryPlan.deliveries,
+      isPreparingSave,
+      manualVideoSelected,
+      mediaPreparationError,
+      post.image,
+      activePreparedSave,
+      batchDeliveryIds,
+      batchEligibleDeliveryIds,
+      creativeLockedForReview,
+      selectedDeliveryId,
+      videoReviewLockMessage,
+      videoJobForDelivery,
+    ],
+  );
 
   const hasWorkAtRisk =
     !hasSavedMedia ||
@@ -1023,6 +2045,32 @@ export const PostResult: React.FC<PostResultProps> = ({
 
   const handleCreateAnotherRequest = () => requestLeaveResult("startOver");
   const handleRemixRequest = () => requestLeaveResult("remix");
+  const activePublishOutput =
+    deliveryOutputs.find((output) => output.selected) ?? deliveryOutputs[0];
+  const selectedFileTitle = historyReadOnly
+    ? "Saved post"
+    : manualVideoSelected && videoUrl
+      ? "Video ready to review"
+      : !activePublishOutput
+        ? "Review your post"
+        : activePublishOutput.status === "ready" && activePublishOutput.actionsReady
+          ? "Ready to save and share"
+          : activePublishOutput.status === "failed"
+            ? "File needs attention"
+            : activePublishOutput.status === "pending"
+              ? "Create this video to continue"
+              : "Preparing platform file";
+  const publishTitle = claimLocked
+    ? "Caption claim needs attention"
+    : releaseLocked
+      ? "Photo release needs attention"
+      : reviewRequired
+        ? approvalStatus === "rejected"
+          ? "Manager requested changes"
+          : approvalStatus === "approved"
+            ? selectedFileTitle
+            : "Ready for manager review"
+        : selectedFileTitle;
 
   const confirmLeaveResult = () => {
     const mode = leaveConfirm;
@@ -1031,13 +2079,324 @@ export const PostResult: React.FC<PostResultProps> = ({
     else if (mode === "startOver") onStartOver();
   };
 
+  const renderMediaHistoryRail = (desktop = false) => {
+    if (creativeLockedForReview) return null;
+
+    const completedVideos = videoJobs.filter(
+      (job) => job.url && job.sourceCreativeKey === currentVideoCreativeKey,
+    );
+    const mediaCount = 1 + imageVersions.length + completedVideos.length;
+
+    return (
+      <section
+        className={cn(
+          "w-full rounded-xl border border-white/10 bg-surface-950/80 p-2.5 shadow-xl shadow-black/20 backdrop-blur-xl",
+          desktop && "sticky bottom-3 z-20",
+        )}
+        aria-labelledby={desktop ? "media-history-heading" : undefined}
+      >
+        <div
+          className={cn(
+            "mb-2 flex items-center justify-between gap-2",
+            desktop && "lg:mb-0 lg:grid lg:grid-cols-[8.5rem_minmax(0,1fr)_auto]",
+          )}
+        >
+          <div className="min-w-0">
+            <p
+              id={desktop ? "media-history-heading" : undefined}
+              className="text-xs font-semibold text-surface-100"
+            >
+              {desktop ? "Media history" : "Media tray"}
+            </p>
+            <p className="text-[10px] leading-relaxed text-surface-500">
+              {desktop
+                ? "Return to any photo or finished video."
+                : "Photos and completed videos stay available while you work."}
+            </p>
+          </div>
+          <div
+            className={cn(
+              "flex gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]",
+              desktop && "lg:pb-0",
+            )}
+            aria-label={desktop ? "Generated media history" : "Generated media tray"}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                triggerHapticFeedback();
+                setManualVideoSelected(false);
+                setSelectedDeliveryId(
+                  deliveryPlan.deliveries.find(
+                    (delivery) => delivery.mediaKind === "photo",
+                  )?.id || null,
+                );
+                adoptVideoUrl(null);
+              }}
+              className={cn(
+                "relative shrink-0 overflow-hidden rounded-lg border bg-surface-950 ring-offset-2 ring-offset-surface-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400",
+                desktop ? "h-[4.5rem] w-[5.5rem]" : "h-20 w-20",
+                !videoUrl
+                  ? "border-primary-300 ring-2 ring-primary-400/45"
+                  : "border-white/15 hover:border-primary-400/60",
+              )}
+              aria-label="Show current generated photo"
+              aria-current={!videoUrl ? "true" : undefined}
+            >
+              <img
+                src={post.image}
+                alt=""
+                className="h-full w-full object-cover"
+                loading="lazy"
+              />
+              <span className="absolute inset-x-0 bottom-0 bg-black/80 px-1 py-0.5 text-center text-[9px] font-semibold text-white">
+                Current
+              </span>
+            </button>
+            {imageVersions.map((url, i) => (
+              <button
+                key={`${i}-${url.slice(0, 24)}`}
+                type="button"
+                onClick={() => {
+                  triggerHapticFeedback();
+                  const current = post.image;
+                  useAppStore.getState().setGeneratedPost({
+                    ...post,
+                    image: url,
+                  });
+                  setImageVersions((stack) => {
+                    const rest = stack.filter((u) => u !== url);
+                    return current ? [current, ...rest].slice(0, 5) : rest.slice(0, 5);
+                  });
+                }}
+                className={cn(
+                  "relative shrink-0 overflow-hidden rounded-lg border border-white/15 bg-surface-950 ring-offset-2 ring-offset-surface-900 hover:border-primary-400/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400",
+                  desktop ? "h-[4.5rem] w-[5.5rem]" : "h-20 w-20",
+                )}
+                aria-label={`Restore previous image version ${i + 1}`}
+              >
+                <img
+                  src={url}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+                <span className="absolute inset-x-0 bottom-0 bg-black/80 px-1 py-0.5 text-center text-[9px] font-semibold text-white">
+                  Version {i + 1}
+                </span>
+              </button>
+            ))}
+            {completedVideos.map((job, index) => (
+              <button
+                key={`tray-${job.id}`}
+                type="button"
+                onClick={() => {
+                  triggerHapticFeedback();
+                  setManualVideoSelected(true);
+                  adoptVideoUrl(job.url || null);
+                }}
+                className={cn(
+                  "relative flex shrink-0 flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border bg-surface-900 px-2 text-center ring-offset-2 ring-offset-surface-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400",
+                  desktop ? "h-[4.5rem] w-[6.25rem]" : "h-20 w-24",
+                  videoUrl === job.url
+                    ? "border-primary-300 ring-2 ring-primary-400/45"
+                    : "border-white/15 hover:border-primary-400/60",
+                )}
+                aria-label={`Show ${job.style} video`}
+                aria-current={videoUrl === job.url ? "true" : undefined}
+              >
+                <Film className="h-5 w-5 text-primary-300" aria-hidden="true" />
+                <span className="line-clamp-1 text-[9px] font-semibold leading-tight text-surface-100">
+                  {job.style}
+                </span>
+                <span className="text-[8px] uppercase tracking-wide text-surface-500">
+                  Video {index + 1}
+                </span>
+              </button>
+            ))}
+          </div>
+          <Badge variant="neutral" uppercase={false}>
+            {mediaCount} {mediaCount === 1 ? "item" : "items"}
+          </Badge>
+        </div>
+      </section>
+    );
+  };
+
+  const renderMobileFocusedMedia = () => (
+    <div className="relative grid h-full min-h-0 w-full place-items-center overflow-hidden">
+      {(isImageLoading || isVideoLoading) && (
+        <BusyOverlay
+          message={isVideoLoading ? videoLoadingMessage : imageLoadingMessage}
+          progress={isVideoLoading ? undefined : imageLoadingProgress}
+        />
+      )}
+      {videoUrl ? (
+        <div className="w-full space-y-2 p-2 [@media(max-height:700px)]:flex [@media(max-height:700px)]:h-full [@media(max-height:700px)]:min-h-0 [@media(max-height:700px)]:flex-col [@media(max-height:700px)]:gap-1 [@media(max-height:700px)]:space-y-0 [@media(max-height:700px)]:p-1">
+          {isVideoBuffering && !isVideoLoading && !videoPlayError ? (
+            <div
+              className="pointer-events-none absolute inset-0 z-[5] grid place-items-center bg-surface-950/45"
+              role="status"
+              aria-label="Loading video preview"
+            >
+              <Loader2
+                className="h-8 w-8 animate-spin text-primary-300 motion-reduce:animate-none"
+                aria-hidden="true"
+              />
+            </div>
+          ) : null}
+          <video
+            ref={videoElRef}
+            key={videoUrl}
+            src={videoUrl}
+            controls
+            playsInline
+            preload="auto"
+            autoPlay={!shouldReduceMotion}
+            loop={!shouldReduceMotion}
+            muted={videoMuted}
+            aria-label="Generated social media video preview"
+            onLoadStart={() => setIsVideoBuffering(true)}
+            onLoadedData={() => {
+              setIsVideoBuffering(false);
+              setVideoPlayError(null);
+            }}
+            onCanPlay={() => {
+              setIsVideoBuffering(false);
+              setVideoPlayError(null);
+              const element = videoElRef.current;
+              if (element && !shouldReduceMotion) {
+                void element.play().catch(() => {
+                  // Autoplay may be blocked; native controls stay available.
+                });
+              }
+            }}
+            onVolumeChange={(event) => {
+              setVideoMuted(event.currentTarget.muted);
+            }}
+            onError={() => {
+              setIsVideoBuffering(false);
+              setVideoPlayError(
+                "This video could not be played. Try Save video, or create it again.",
+              );
+            }}
+            className="max-h-[62dvh] w-full rounded-xl bg-black object-contain [@media(max-height:700px)]:min-h-0 [@media(max-height:700px)]:flex-1 [@media(max-height:700px)]:max-h-full"
+          />
+          {videoMuted && !videoPlayError ? (
+            <button
+              type="button"
+              onClick={() => {
+                triggerHapticFeedback();
+                const element = videoElRef.current;
+                if (!element) return;
+                element.muted = false;
+                setVideoMuted(false);
+                void element.play().catch(() => undefined);
+              }}
+              className="flex min-h-11 w-full items-center justify-center rounded-xl border border-primary-400/40 bg-primary-500/15 px-3 text-sm font-semibold text-primary-50"
+            >
+              Turn on sound
+            </button>
+          ) : null}
+          {videoPlayError ? (
+            <div
+              className="space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 p-3 text-xs text-error-100"
+              role="alert"
+            >
+              <p>{videoPlayError}</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className="min-h-10 rounded-lg border border-white/15 bg-white/5 px-3 font-semibold text-surface-100"
+                  onClick={() => {
+                    const element = videoElRef.current;
+                    if (!element || !videoUrl) return;
+                    setVideoPlayError(null);
+                    setIsVideoBuffering(true);
+                    element.load();
+                    void element.play().catch(() => setIsVideoBuffering(false));
+                  }}
+                >
+                  Retry play
+                </button>
+                <button
+                  type="button"
+                  className="min-h-10 rounded-lg border border-white/15 bg-white/5 px-3 font-semibold text-surface-100"
+                  onClick={() => {
+                    setManualVideoSelected(false);
+                    setSelectedDeliveryId(
+                      deliveryPlan.deliveries.find(
+                        (delivery) => delivery.mediaKind === "photo",
+                      )?.id || null,
+                    );
+                    adoptVideoUrl(null);
+                    setVideoPlayError(null);
+                  }}
+                >
+                  Show photo
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                triggerHapticFeedback();
+                const photoDelivery = deliveryPlan.deliveries.find(
+                  (delivery) => delivery.mediaKind === "photo",
+                );
+                setManualVideoSelected(false);
+                setSelectedDeliveryId(photoDelivery?.id || null);
+                adoptVideoUrl(null);
+              }}
+              className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/[0.05] px-3 text-sm font-semibold text-surface-100"
+            >
+              <Camera className="h-4 w-4" aria-hidden="true" />
+              Back to photos
+            </button>
+          )}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            triggerHapticFeedback();
+            setIsPreviewOpen(true);
+          }}
+          className="relative mx-auto grid w-full place-items-center overflow-hidden rounded-xl bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 [@media(max-height:700px)]:!h-full [@media(max-height:700px)]:!w-auto [@media(max-height:700px)]:max-w-full"
+          style={
+            activeImageFormat
+              ? {
+                  width: "calc(100% - 0.75rem)",
+                  aspectRatio: `${activeImageFormat.width} / ${activeImageFormat.height}`,
+                  maxWidth: `min(100%, calc(62dvh * ${activeImageFormat.width} / ${activeImageFormat.height}))`,
+                }
+              : undefined
+          }
+          aria-label="Enlarge image"
+        >
+          <ProgressiveImage
+            src={displayImageUrl}
+            alt="Generated social media post"
+            className="h-full w-full rounded-xl object-contain"
+          />
+          {selectedDelivery?.mediaKind === "video" ? (
+            <span className="absolute inset-x-3 bottom-3 rounded-lg border border-white/15 bg-black/75 px-3 py-2 text-center text-xs font-semibold text-white backdrop-blur">
+              Video poster · create this output to preview motion
+            </span>
+          ) : null}
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <>
       <Suspense fallback={null}>
         <LazyImagePreviewModal
           isOpen={isPreviewOpen && !videoUrl}
           onClose={() => setIsPreviewOpen(false)}
-          imageSrc={post.image}
+          imageSrc={displayImageUrl}
         />
       </Suspense>
 
@@ -1049,32 +2408,68 @@ export const PostResult: React.FC<PostResultProps> = ({
       />
       <ShareDialog
         isOpen={isShareDialogOpen && !deliveryLocked}
-        onClose={() => setIsShareDialogOpen(false)}
-        content={{
-          text: captionWithDisclosures,
-          imageDataUrl: post.image,
-          videoUrl: videoUrl || undefined,
-        }}
+        onClose={
+          shareQueue.length > 0
+            ? handleCancelShareQueue
+            : () => {
+                setIsShareDialogOpen(false);
+                setFocusedShareDeliveryId(null);
+                setFocusedShareContent(null);
+              }
+        }
+        content={
+          focusedShareContent || {
+            text: editedText,
+            disclosures: activeDisclosures || undefined,
+            imageDataUrl: post.image,
+            videoUrl: videoUrl || undefined,
+          }
+        }
         platformCaptions={sharePlatformCaptions}
-        selectedPlatformIds={post.platformIds}
+        selectedPlatformIds={
+          focusedShareDeliveryId
+            ? [
+                deliveriesById.get(focusedShareDeliveryId)?.destinationId ||
+                  "native_share",
+              ]
+            : post.platformIds
+        }
+        focusedTargetId={
+          focusedShareDeliveryId
+            ? deliveriesById.get(focusedShareDeliveryId)?.destinationId
+            : undefined
+        }
+        dealershipMention={
+          focusedShareDeliveryId
+            ? dealershipMentionFor(
+                deliveriesById.get(focusedShareDeliveryId)?.destinationId || "",
+                currentDealer,
+              )
+            : undefined
+        }
+        queueProgress={
+          shareQueue.length > 0
+            ? {
+                current: shareQueueIndex + 1,
+                total: shareQueue.length,
+                nextLabel: shareQueue[shareQueueIndex + 1]
+                  ? deliveriesById.get(shareQueue[shareQueueIndex + 1])?.profile
+                      .destinationLabel
+                  : undefined,
+              }
+            : undefined
+        }
+        onQueueAdvance={shareQueue.length > 0 ? handleAdvanceShareQueue : undefined}
       />
       <Modal
         isOpen={leaveConfirm !== null}
         onClose={() => setLeaveConfirm(null)}
         size="sm"
-        title={
-          leaveConfirm === "remix"
-            ? "Remix this photo?"
-            : "Create another post?"
-        }
+        title={leaveConfirm === "remix" ? "Remix this photo?" : "Create another post?"}
         description="This result is not fully preserved yet."
         footer={
           <>
-            <Button
-              variant="outline"
-              onClick={() => setLeaveConfirm(null)}
-              fullWidth
-            >
+            <Button variant="outline" onClick={() => setLeaveConfirm(null)} fullWidth>
               Keep editing
             </Button>
             <Button variant="danger" onClick={confirmLeaveResult} fullWidth>
@@ -1091,39 +2486,90 @@ export const PostResult: React.FC<PostResultProps> = ({
       </Modal>
       {onGenerateCaptionVariant && (
         <CaptionAlternativesModal
-          isOpen={isCaptionAltsOpen && !creativeLockedForReview}
+          isOpen={
+            isCaptionAltsOpen &&
+            !creativeLockedForReview &&
+            !historyReadOnly &&
+            hasOriginalCapture
+          }
           onClose={() => setIsCaptionAltsOpen(false)}
           generateOne={onGenerateCaptionVariant}
           bannedPhrases={bannedPhrases}
-          onSelect={({ text, disclosures, disclosureCategories }) => {
+          onSelect={({ text }) => {
             handleTextChange(text);
-            setDisclosureOverride({
-              text: disclosures,
-              categories: disclosureCategories,
-            });
           }}
         />
       )}
 
       <Suspense fallback={null}>
         <LazyEditTextModal
-          isOpen={isTextEditing && !creativeLockedForReview}
+          isOpen={isTextEditing && !creativeLockedForReview && !historyReadOnly}
           onClose={() => setIsTextEditing(false)}
           onSubmit={handleTextEditSubmit}
-          originalText={post.text}
+          originalText={editedText}
           isLoading={isTextLoading}
         />
       </Suspense>
       <Suspense fallback={null}>
         <LazyVideoDirectorModal
           isOpen={isVideoDirectorOpen && !creativeLockedForReview}
-          onClose={() => setIsVideoDirectorOpen(false)}
+          onClose={() => {
+            setIsVideoDirectorOpen(false);
+            setVideoDirectorDeliveryId(null);
+          }}
           onSelectStyle={handleGenerateVideo}
+          defaultAspect={
+            post.imageAspectRatio === "9:16" || post.imageAspectRatio === "4:5"
+              ? "9:16"
+              : "16:9"
+          }
+          lockedAspect={(() => {
+            const delivery = videoDirectorDeliveryId
+              ? deliveriesById.get(videoDirectorDeliveryId)
+              : undefined;
+            return delivery?.profile.preparation.kind === "veo"
+              ? delivery.profile.preparation.nativeAspectRatio
+              : undefined;
+          })()}
+          deliveryLabel={
+            videoDirectorDeliveryId
+              ? deliveriesById.get(videoDirectorDeliveryId)?.profile.destinationLabel
+              : undefined
+          }
+          isSubmitting={isVideoLoading}
+        />
+        <ScheduleDialog
+          isOpen={isScheduleOpen && !historyReadOnly}
+          onClose={() => setIsScheduleOpen(false)}
+          isLoading={isScheduling}
+          onSchedule={async (isoString) => {
+            if (post.postId) {
+              setIsScheduling(true);
+              try {
+                await schedulePost(post.postId, isoString);
+                toast.success(
+                  "Post scheduled for " + new Date(isoString).toLocaleString(),
+                );
+                setIsScheduleOpen(false);
+              } catch (err) {
+                toast.error(
+                  err instanceof Error ? err.message : "Failed to schedule post",
+                );
+              } finally {
+                setIsScheduling(false);
+              }
+            } else {
+              setIsScheduleOpen(false);
+              toast.success("Scheduled for " + new Date(isoString).toLocaleString());
+            }
+          }}
         />
       </Suspense>
       <Suspense fallback={null}>
         <LazyFunModeDirectorModal
-          isOpen={isFunModeDirectorOpen && !creativeLockedForReview}
+          isOpen={
+            isFunModeDirectorOpen && !creativeLockedForReview && hasOriginalCapture
+          }
           onClose={() => setIsFunModeDirectorOpen(false)}
           enabledFunStyles={enabledFunStyles}
           onSelectStyle={(styleName) => {
@@ -1149,49 +2595,152 @@ export const PostResult: React.FC<PostResultProps> = ({
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: shouldReduceMotion ? 0 : 0.3 }}
         aria-busy={imageBusy || textBusy}
+        style={
+          isDesktopLayout
+            ? {
+                paddingTop: "0.75rem",
+                paddingBottom: "1rem",
+              }
+            : undefined
+        }
       >
-        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div className="min-w-0">
-            <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-primary-300">
-              <CircleCheck className="h-4 w-4" aria-hidden="true" />
-              Post workspace
+        {isDesktopLayout ? <h2 className="sr-only">{publishTitle}</h2> : null}
+        {isDesktopLayout ? (
+          <nav
+            className="flex items-center gap-4 rounded-xl border border-white/[0.08] bg-surface-950/35 px-4 py-2.5"
+            aria-label="Publishing progress"
+          >
+            <ol className="grid min-w-0 flex-1 grid-cols-3" role="list">
+              {[
+                {
+                  label: "Destinations",
+                  detail: `${deliveryPlan.deliveries.length} output${deliveryPlan.deliveries.length === 1 ? "" : "s"} selected`,
+                },
+                {
+                  label: "Create outputs",
+                  detail:
+                    deliveryOutputs.length > 0 &&
+                    deliveryOutputs.every(
+                      (output) =>
+                        output.status === "ready" || output.status === "available",
+                    )
+                      ? "Files prepared"
+                      : "Review file status",
+                },
+                {
+                  label: "Save & share",
+                  detail: "Review, save, and publish",
+                },
+              ].map((step, index) => {
+                const active = index === 2;
+                return (
+                  <li
+                    key={step.label}
+                    className={cn("relative min-w-0 pr-4", index > 0 && "pl-5")}
+                    aria-current={active ? "step" : undefined}
+                  >
+                    {index > 0 ? (
+                      <span
+                        className="absolute left-0 top-3 h-px w-4 -translate-y-1/2 bg-primary-400/55"
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                    <div className="flex min-w-0 items-start gap-2.5">
+                      <span
+                        className={cn(
+                          "grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[11px] font-bold",
+                          active
+                            ? "border-primary-300 bg-primary-500 text-white shadow-[0_0_18px_rgba(59,130,246,0.3)]"
+                            : "border-primary-400/45 bg-primary-500/15 text-primary-200",
+                        )}
+                        aria-hidden="true"
+                      >
+                        {active ? index + 1 : <Check className="h-3.5 w-3.5" />}
+                      </span>
+                      <span className="min-w-0">
+                        <span
+                          className={cn(
+                            "block truncate text-xs font-semibold",
+                            active ? "text-surface-50" : "text-surface-200",
+                          )}
+                        >
+                          {step.label}
+                        </span>
+                        <span className="mt-0.5 block truncate text-[10px] text-surface-500">
+                          {step.detail}
+                        </span>
+                      </span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+            <div
+              className="flex shrink-0 items-center gap-2 border-l border-white/10 pl-4"
+              aria-label="Workspace actions"
+            >
+              {hasOriginalCapture ? (
+                <button
+                  type="button"
+                  onClick={handleRemixRequest}
+                  className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border border-primary-400/35 bg-primary-500/10 px-3 text-xs font-semibold text-primary-100 transition-colors hover:border-primary-400/55 hover:bg-primary-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
+                >
+                  <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                  Remix
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={handleCreateAnotherRequest}
+                className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-surface-200 transition-colors hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
+              >
+                <Camera className="h-3.5 w-3.5" aria-hidden="true" />
+                New photo
+              </button>
             </div>
-            <h2 className="text-2xl font-semibold tracking-tight text-surface-50 sm:text-3xl">
-              {claimLocked
-                ? "Caption claim needs attention"
-                : releaseLocked
-                  ? "Photo release needs attention"
-                  : requiresApproval
-                    ? approvalStatus === "approved"
-                      ? "Approved and ready to publish"
-                      : approvalStatus === "rejected"
-                        ? "Manager requested changes"
-                        : "Ready for manager review"
-                    : "Ready to publish"}
-            </h2>
-            <p className="mt-1 text-sm text-surface-400">
-              Review the media and caption, then copy, share, or save.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto">
-            <button
-              type="button"
-              onClick={handleRemixRequest}
-              className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-primary-400/35 bg-primary-500/10 px-4 text-sm font-semibold text-primary-100 transition-colors hover:border-primary-400/55 hover:bg-primary-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 sm:min-h-[44px] sm:flex-none"
+          </nav>
+        ) : null}
+        {post.isBasicFallback || post.captionSource === "basic_fallback" ? (
+          <motion.div
+            className="mx-auto flex max-w-3xl flex-col gap-3 rounded-2xl border border-warning-500/30 bg-warning-500/10 px-4 py-4 text-warning-100 shadow-lg shadow-black/10 sm:flex-row sm:items-center"
+            initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
+            role="status"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-semibold">Basic caption used</p>
+                <Badge variant="warning" uppercase={false}>
+                  AI was unavailable
+                </Badge>
+              </div>
+              <p className="mt-1 text-sm leading-relaxed text-warning-100/80">
+                Your post is safe to use, but this caption came from a basic template.
+                Try AI again when the connection is ready.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-h-11 shrink-0 border-warning-300/30 text-warning-50"
+              disabled={textBusy || creativeLockedForReview || !hasOriginalCapture}
+              title={!hasOriginalCapture ? originalRequiredMessage : undefined}
+              leftIcon={
+                textBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )
+              }
+              onClick={() =>
+                void handleTextAction(onRegenerateText).catch(() => undefined)
+              }
             >
-              <Sparkles className="h-4 w-4" aria-hidden="true" />
-              Remix this photo
-            </button>
-            <button
-              type="button"
-              onClick={handleCreateAnotherRequest}
-              className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-surface-200 transition-colors hover:border-white/20 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 sm:min-h-[44px] sm:flex-none"
-            >
-              <Camera className="h-4 w-4" aria-hidden="true" />
-              New photo
-            </button>
-          </div>
-        </header>
+              Try AI again
+            </Button>
+          </motion.div>
+        ) : null}
         {claimLocked && (
           <motion.div
             id="caption-compliance-alert"
@@ -1241,7 +2790,7 @@ export const PostResult: React.FC<PostResultProps> = ({
             </div>
           </motion.div>
         )}
-        {requiresApproval && (
+        {reviewRequired && (
           <motion.div
             className={cn(
               "mx-auto flex max-w-3xl flex-col gap-3 rounded-2xl px-4 py-4 shadow-lg shadow-black/10 sm:flex-row sm:items-start",
@@ -1306,784 +2855,1183 @@ export const PostResult: React.FC<PostResultProps> = ({
             initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.3 }}
+            role="alert"
           >
-            <AlertCircle className="w-5 h-5" />
+            <AlertCircle className="w-5 h-5" aria-hidden="true" />
             <span>{error}</span>
           </motion.div>
         )}
+        {!isDesktopLayout ? (
+          <MobilePublishStudio
+            outputs={deliveryOutputs}
+            title={publishTitle}
+            mediaPreview={renderMobileFocusedMedia()}
+            caption={captionWithDisclosures}
+            postingAs={currentPersonName || undefined}
+            captionNote={
+              historyReadOnly
+                ? "View-only history. You can still copy or share this saved post."
+                : selectedDelivery &&
+                    dealershipMentionFor(selectedDelivery.destinationId, currentDealer)
+                  ? "Dealership tag and required disclosures are included when you share."
+                  : activeDisclosures
+                    ? "Required disclosures are included when you copy or share."
+                    : "The exact destination caption is included when you share."
+            }
+            copied={copied}
+            onSelect={handleSelectMobileDelivery}
+            onRetry={handleRetryDelivery}
+            onToggleBatch={handleToggleBatchDelivery}
+            onToggleAll={handleToggleAllBatchDeliveries}
+            onShareBatch={handleStartShareBatch}
+            onCopyCaption={handleCopy}
+            onEditCaption={() => setIsTextEditing(true)}
+            onBack={handleCreateAnotherRequest}
+            onRemix={hasOriginalCapture ? handleRemixRequest : undefined}
+            onShowSettings={onShowSettings}
+            onShowHistory={onShowHistory}
+            onRequestLogout={onRequestLogout}
+            actionsDisabled={deliveryLocked}
+            recoveryDisabled={isVideoLoading}
+            batchActionDisabled={
+              deliveryLocked || isVideoLoading || shareQueue.length > 0
+            }
+            copyCaptionDisabled={deliveryLocked}
+            editCaptionDisabled={
+              textBusy ||
+              creativeLockedForReview ||
+              historyReadOnly ||
+              !hasOriginalCapture
+            }
+          />
+        ) : null}
         <div
-          className={`grid w-full ${
-            isDesktopLayout
-              ? "grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-8"
-              : "grid-cols-1 gap-6"
-          }`}
+          className={cn(
+            "grid w-full grid-cols-1 items-start gap-4",
+            isDesktopLayout && "grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.9fr)]",
+          )}
         >
-          <section
-            className="flex flex-col items-center space-y-4 rounded-2xl border border-white/10 bg-white/[0.04] p-3 shadow-2xl shadow-black/20 sm:p-4"
-            aria-labelledby="media-preview-heading"
-            aria-busy={imageBusy}
+          <aside
+            className={cn(
+              "min-w-0 space-y-3",
+              isDesktopLayout &&
+                "sticky top-4 col-start-2 row-start-1 max-h-[calc(100dvh-2rem)] overflow-y-auto pr-0.5 [scrollbar-width:thin]",
+              !isDesktopLayout &&
+                (shareQueue.length === 0 || isShareDialogOpen) &&
+                deliveryPlan.unsupported.length === 0 &&
+                deliveryPlan.unknown.length === 0 &&
+                "hidden",
+            )}
+            aria-label="Platform delivery workspace"
           >
-            <div className="flex w-full items-center justify-between px-1">
-              <h3
-                id="media-preview-heading"
-                className="text-sm font-semibold text-surface-100"
+            {isDesktopLayout ? (
+              <PlatformDeliveryBoard
+                className="w-full"
+                outputs={deliveryOutputs}
+                onSelect={handleSelectDelivery}
+                onSave={handleSave}
+                onShare={handleShareDelivery}
+                onRetry={handleRetryDelivery}
+                onToggleBatch={handleToggleBatchDelivery}
+                onToggleAll={handleToggleAllBatchDeliveries}
+                onShareBatch={handleStartShareBatch}
+                actionsDisabled={deliveryLocked}
+                recoveryDisabled={isVideoLoading}
+                batchActionDisabled={
+                  deliveryLocked || isVideoLoading || shareQueue.length > 0
+                }
+                compact
+                description={
+                  post.mediaOutputMode === "both"
+                    ? "Photo and video versions are separated by destination. Select a row, wait for Ready, then save or share that exact file."
+                    : "Select a destination output, wait for Ready, then save or share its exact file."
+                }
+              />
+            ) : null}
+            {shareQueue.length > 0 && !isShareDialogOpen ? (
+              <div
+                className={cn(
+                  "w-full rounded-xl border px-4 py-3",
+                  mediaPreparationError
+                    ? "border-error-500/35 bg-error-500/10"
+                    : "border-primary-400/30 bg-primary-500/10",
+                )}
+                role={mediaPreparationError ? "alert" : "status"}
+                aria-live="polite"
               >
-                Media preview
-              </h3>
-              <Badge variant={videoUrl ? "info" : "neutral"} uppercase={false}>
-                {videoUrl ? "Video" : "Image"}
-              </Badge>
-            </div>
-            <div className="relative w-full overflow-hidden rounded-xl bg-surface-950/60">
-              {(isImageLoading || isVideoLoading) && (
-                <BusyOverlay
-                  message={
-                    isVideoLoading ? videoLoadingMessage : imageLoadingMessage
-                  }
-                  progress={isVideoLoading ? undefined : imageLoadingProgress}
-                />
-              )}
-              {videoUrl && isVideoBuffering && !isVideoLoading && !videoPlayError ? (
-                <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center bg-surface-950/40">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary-300" />
-                </div>
-              ) : null}
-
-              {videoUrl ? (
-                <div className="w-full space-y-2">
-                  <video
-                    ref={videoElRef}
-                    key={videoUrl}
-                    src={videoUrl}
-                    controls
-                    playsInline
-                    preload="auto"
-                    autoPlay={!shouldReduceMotion}
-                    loop={!shouldReduceMotion}
-                    muted={videoMuted}
-                    onLoadStart={() => setIsVideoBuffering(true)}
-                    onLoadedData={() => {
-                      setIsVideoBuffering(false);
-                      setVideoPlayError(null);
-                    }}
-                    onCanPlay={() => {
-                      setIsVideoBuffering(false);
-                      setVideoPlayError(null);
-                      const el = videoElRef.current;
-                      if (el && !shouldReduceMotion) {
-                        void el.play().catch(() => {
-                          // Autoplay blocked — controls still work for manual play.
-                        });
-                      }
-                    }}
-                    onVolumeChange={(e) => {
-                      setVideoMuted(e.currentTarget.muted);
-                    }}
-                    onError={() => {
-                      setIsVideoBuffering(false);
-                      setVideoPlayError(
-                        "This video could not be played. Try Save video, or generate again.",
-                      );
-                    }}
-                    className="max-h-[70dvh] w-full rounded-xl object-contain shadow-2xl bg-black"
-                  />
-                  {videoMuted && !videoPlayError ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        triggerHapticFeedback();
-                        const el = videoElRef.current;
-                        if (!el) return;
-                        el.muted = false;
-                        setVideoMuted(false);
-                        void el.play().catch(() => undefined);
-                      }}
-                      className="flex w-full min-h-11 items-center justify-center gap-2 rounded-xl border border-primary-400/40 bg-primary-500/15 px-3 py-2 text-sm font-semibold text-primary-50"
-                    >
-                      Tap for sound
-                    </button>
-                  ) : null}
-                  {videoPlayError ? (
-                    <div className="space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 px-3 py-2 text-xs text-error-100">
-                      <p>{videoPlayError}</p>
-                      <div className="flex flex-wrap gap-2">
+                <div className="flex flex-col gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-surface-50">
+                      {mediaPreparationError
+                        ? `Could not prepare ${queuedDelivery?.profile.destinationLabel || "this output"}`
+                        : `Preparing ${queuedDelivery?.profile.destinationLabel || "selected output"} · ${shareQueueIndex + 1} of ${shareQueue.length}`}
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-surface-300">
+                      {mediaPreparationError ||
+                        "You can cancel the sequence while the exact file is prepared."}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {mediaPreparationError && queuedDelivery ? (
+                      <>
                         <button
                           type="button"
-                          className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 font-semibold text-surface-100"
+                          className="min-h-11 rounded-lg border border-primary-400/40 bg-primary-500/15 px-3 text-xs font-semibold text-surface-50"
                           onClick={() => {
-                            const el = videoElRef.current;
-                            if (!el || !videoUrl) return;
-                            setVideoPlayError(null);
-                            setIsVideoBuffering(true);
-                            el.load();
-                            void el.play().catch(() => setIsVideoBuffering(false));
+                            setMediaPreparationError(null);
+                            shareQueueOpenedRef.current = null;
+                            if (queuedDelivery.mediaKind === "video") {
+                              handleCancelShareQueue();
+                              void handleRetryDelivery(queuedDelivery.id);
+                            } else {
+                              handleSelectDelivery(queuedDelivery.id);
+                              setMediaPreparationNonce((value) => value + 1);
+                            }
                           }}
                         >
-                          Retry play
+                          {queuedDelivery.mediaKind === "video"
+                            ? "Create again"
+                            : "Retry file"}
                         </button>
                         <button
                           type="button"
-                          className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 font-semibold text-surface-100"
-                          onClick={() => {
-                            adoptVideoUrl(null);
-                            setVideoPlayError(null);
-                          }}
+                          className="min-h-11 rounded-lg border border-surface-600 px-3 text-xs font-semibold text-surface-200"
+                          onClick={handleAdvanceShareQueue}
                         >
-                          Show photo
+                          Skip this output
                         </button>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-                <button
-                  onClick={() => {
-                    triggerHapticFeedback();
-                    setIsPreviewOpen(true);
-                  }}
-                  className="w-full block rounded-xl overflow-hidden focus:outline-none focus:ring-4 focus:ring-primary-500/50 transition-all hover:ring-2 hover:ring-primary-400/30"
-                  aria-label="Enlarge image"
-                >
-                  <ProgressiveImage
-                    src={post.image}
-                    alt="Generated social media post"
-                    className="max-h-[70dvh] w-full rounded-xl object-contain shadow-2xl"
-                  />
-                </button>
-              )}
-            </div>
-
-            {imageVersions.length > 0 && !videoUrl && !creativeLockedForReview ? (
-              <div className="w-full">
-                <p className="mb-1.5 text-[10px] uppercase tracking-wide text-surface-500">
-                  Previous versions — tap to restore
-                </p>
-                <div className="flex gap-2 overflow-x-auto pb-1">
-                  {imageVersions.map((url, i) => (
+                      </>
+                    ) : null}
                     <button
-                      key={`${i}-${url.slice(0, 24)}`}
                       type="button"
-                      onClick={() => {
-                        triggerHapticFeedback();
-                        const current = post.image;
-                        useAppStore.getState().setGeneratedPost({
-                          ...post,
-                          image: url,
-                        });
-                        setImageVersions((stack) => {
-                          const rest = stack.filter((u) => u !== url);
-                          return current
-                            ? [current, ...rest].slice(0, 5)
-                            : rest.slice(0, 5);
-                        });
-                      }}
-                      className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-white/15 bg-surface-950 ring-offset-2 ring-offset-surface-900 hover:ring-2 hover:ring-primary-400/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
-                      aria-label={`Restore previous image version ${i + 1}`}
+                      className="min-h-11 rounded-lg border border-surface-600 px-3 text-xs font-semibold text-surface-200"
+                      onClick={handleCancelShareQueue}
                     >
-                      <img
-                        src={url}
-                        alt=""
-                        className="h-full w-full object-cover"
-                      />
+                      Cancel sequence
                     </button>
-                  ))}
+                  </div>
                 </div>
               </div>
             ) : null}
-
-            <div className="w-full space-y-3">
-              <button
-                type="button"
-                onClick={() => setIsToolsOpen((open) => !open)}
-                aria-expanded={isToolsOpen}
-                aria-controls="creative-tools-panel"
-                className="flex min-h-[48px] w-full items-center gap-3 rounded-xl border border-white/10 bg-surface-950/35 px-3 text-left transition-colors hover:border-white/20 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-500/15 text-primary-300">
-                  <Sparkles className="h-4 w-4" aria-hidden="true" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold text-surface-100">
-                    Creative tools
-                  </span>
-                  <span className="block truncate text-xs text-surface-400">
-                    Optional image, caption, video, and export controls
-                  </span>
-                </span>
-                <ChevronDown
-                  className={cn(
-                    "h-4 w-4 shrink-0 text-surface-400 transition-transform",
-                    isToolsOpen && "rotate-180",
-                  )}
-                  aria-hidden="true"
-                />
-              </button>
-
+            {(deliveryPlan.unsupported.length > 0 ||
+              deliveryPlan.unknown.length > 0) && (
               <div
-                id="creative-tools-panel"
-                data-testid="creative-tools-panel"
-                hidden={!isToolsOpen}
-                className={cn(
-                  "grid grid-cols-2 gap-2 lg:grid-cols-3",
-                  !isToolsOpen && "hidden",
-                )}
+                className="w-full rounded-xl border border-warning-500/25 bg-warning-500/10 px-4 py-3 text-sm text-warning-100"
+                role="status"
               >
-                <ActionTile
-                  icon={Film}
-                  iconClassName={TILE_ICON_ACCENT}
-                  tooltip="Turn your image into a video"
-                  disabled={
-                    imageBusy || isVideoLoading || creativeLockedForReview
-                  }
-                  busy={isVideoLoading}
-                  label={
-                    isVideoLoading
-                      ? "Rendering…"
-                      : videoUrl
-                        ? "New video"
-                        : "Animate with AI"
-                  }
-                  onClick={() => setIsVideoDirectorOpen(true)}
-                />
-
-                <ActionTile
-                  icon={LayoutGrid}
-                  iconClassName="text-amber-300"
-                  tooltip={
-                    deliveryLocked
-                      ? deliveryGateMessage
-                      : "Export Story, Feed, Marketplace & Google sizes — full creative, no crop"
-                  }
-                  disabled={imageBusy || deliveryLocked}
-                  label="Export sizes"
-                  onClick={() => {
-                    if (deliveryLocked) {
-                      toast.warning(deliveryGateMessage);
-                      return;
-                    }
-                    setIsMultiFormatOpen(true);
-                  }}
-                />
-
-                <ActionTile
-                  icon={RefreshCw}
-                  iconClassName="text-surface-300"
-                  tooltip="Generate a new image version"
-                  disabled={imageBusy || !!videoUrl || creativeLockedForReview}
-                  busy={imageBusy}
-                  label={imageBusy ? "Updating image..." : "Regenerate image"}
-                  onClick={() => {
-                    void handleImageAction(onRegenerateImage, [
-                      "Refreshing with your chosen style...",
-                      "Balancing lighting and color...",
-                      "Finishing touches...",
-                    ]).catch(() => undefined);
-                  }}
-                />
-
-                <ActionTile
-                  icon={Edit3}
-                  iconClassName={TILE_ICON_ACCENT}
-                  tooltip="Change specific details"
-                  disabled={imageBusy || !!videoUrl || creativeLockedForReview}
-                  busy={imageBusy}
-                  label={
-                    imageBusy
-                      ? "Updating image..."
-                      : isImageEditing
-                        ? "Cancel"
-                        : "AI image edit"
-                  }
-                  onClick={() => setIsImageEditing(!isImageEditing)}
-                />
-
-                <ActionTile
-                  icon={RefreshCw}
-                  iconClassName="text-surface-300"
-                  tooltip="Generate a new caption"
-                  disabled={textBusy || creativeLockedForReview}
-                  busy={textBusy}
-                  label={
-                    textBusy ? "Updating caption..." : "Regenerate caption"
-                  }
-                  onClick={() => {
-                    void handleTextAction(onRegenerateText).catch(
-                      () => undefined,
-                    );
-                  }}
-                />
-
-                <ActionTile
-                  icon={Edit3}
-                  iconClassName={TILE_ICON_ACCENT}
-                  tooltip="Describe a caption change"
-                  disabled={textBusy || creativeLockedForReview}
-                  busy={textBusy}
-                  label={textBusy ? "Updating caption..." : "AI caption edit"}
-                  onClick={() => setIsTextEditing(true)}
-                />
-
-                {onGenerateCaptionVariant ? (
-                  <ActionTile
-                    icon={Sparkles}
-                    iconClassName={TILE_ICON_ACCENT}
-                    tooltip="Generate three caption options"
-                    disabled={textBusy || creativeLockedForReview}
-                    label="Three caption ideas"
-                    onClick={() => setIsCaptionAltsOpen(true)}
-                  />
-                ) : null}
-
-                <ActionTile
-                  icon={Sparkles}
-                  iconClassName="text-primary-300"
-                  tooltip="Artistic style (optional — may change the look)"
-                  disabled={imageBusy || !!videoUrl || creativeLockedForReview}
-                  busy={imageBusy}
-                  label={imageBusy ? "Working..." : "Fun mode"}
-                  onClick={() => setIsFunModeDirectorOpen(true)}
-                />
+                <p className="font-semibold">Some saved destinations need attention</p>
+                <ul className="mt-1 list-disc space-y-1 pl-5 text-xs leading-relaxed">
+                  {deliveryPlan.unsupported.map((profile) => (
+                    <li key={profile.profileId}>{profile.reason}</li>
+                  ))}
+                  {deliveryPlan.unknown.map((item) => (
+                    <li key={item.platformId}>
+                      {item.platformId}: {item.reason}
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <AnimatePresence>
-                {isToolsOpen && isImageEditing && (
-                  <motion.div
-                    className="space-y-2 rounded-xl border border-white/10 bg-surface-800/50 p-3"
-                    initial={
-                      shouldReduceMotion ? false : { opacity: 0, height: 0 }
-                    }
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
-                  >
-                    <label
-                      htmlFor="image-edit-request"
-                      className="text-xs font-semibold text-surface-200"
+            )}
+          </aside>
+          <div
+            className={cn(
+              "grid min-w-0 grid-cols-1",
+              isDesktopLayout ? "col-start-1 row-start-1 gap-4" : "row-start-2 gap-6",
+            )}
+          >
+            <section
+              className={cn(
+                "flex flex-col items-center space-y-4 rounded-2xl border border-white/10 bg-white/[0.04] p-3 shadow-2xl shadow-black/20 sm:p-4",
+                isDesktopLayout && "lg:space-y-3 lg:p-3",
+              )}
+              aria-labelledby={isDesktopLayout ? "media-preview-heading" : undefined}
+              aria-label={
+                isDesktopLayout ? undefined : "Creative tools and media history"
+              }
+              aria-busy={imageBusy}
+            >
+              {isDesktopLayout ? (
+                <>
+                  <div className="flex w-full items-center justify-between px-1">
+                    <h3
+                      id="media-preview-heading"
+                      className="text-sm font-semibold text-surface-100"
                     >
-                      Image edit request
-                    </label>
-                    <textarea
-                      id="image-edit-request"
-                      value={imageEditPrompt}
-                      onChange={(e) => setImageEditPrompt(e.target.value)}
-                      placeholder="Example: Make the headline gold and brighten the vehicle."
-                      className="w-full bg-surface-800/50 text-surface-50 border-2 border-white/20 rounded-xl px-3 py-2 focus:ring-2 focus:ring-primary-400 focus:border-primary-400 outline-none transition text-sm"
-                      rows={2}
-                    />
-                    <Button
-                      onClick={() => {
-                        void handleImageAction(
-                          () => onEditImage(imageEditPrompt),
-                          [
-                            "Applying your edit request...",
-                            "Re-rendering safely around people and cars...",
-                            "Finalizing the updated image...",
-                          ],
-                        )
-                          .then(() => {
-                            setIsImageEditing(false);
-                            setImageEditPrompt("");
-                          })
-                          .catch(() => undefined);
-                      }}
-                      disabled={!imageEditPrompt.trim()}
-                      fullWidth
-                      size="sm"
-                    >
-                      Apply image edit
-                    </Button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-              {isToolsOpen && videoJobs.length > 0 && (
-                <motion.div
-                  className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-3"
-                  initial={shouldReduceMotion ? false : { opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-surface-50">
-                      Video queue
-                    </span>
-                    <span
-                      className="text-[10px] text-primary-200/70"
-                      role="status"
-                      aria-live="polite"
-                    >
-                      {
-                        videoJobs.filter((job) => job.status === "processing")
-                          .length
-                      }{" "}
-                      active
-                    </span>
-                  </div>
-                  <ul
-                    className="space-y-2"
-                    role="list"
-                    aria-label="Video queue list"
-                  >
-                    {videoJobs.map((job) => (
-                      <motion.li
-                        key={job.id}
-                        className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-surface-900/40 px-3 py-2 text-xs"
-                        initial={
-                          shouldReduceMotion
-                            ? false
-                            : { opacity: 0, scale: 0.95 }
-                        }
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ duration: shouldReduceMotion ? 0 : 0.2 }}
-                      >
-                        <div className="flex flex-col">
-                          <span className="font-semibold text-surface-50">
-                            {job.style}
-                          </span>
-                          <span className="text-primary-200/70">
-                            {job.duration}s ·{" "}
-                            {job.soundtrack === "none"
-                              ? "No soundtrack"
-                              : job.soundtrack}{" "}
-                            ·{" "}
-                            {job.aspectPreference === "auto"
-                              ? "auto"
-                              : job.aspectPreference}{" "}
-                            · {job.resolution} · {job.pacing}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {job.status === "completed" && (
-                            <Badge variant="success">Ready</Badge>
-                          )}
-                          {job.status === "processing" && (
-                            <Badge variant="info">Rendering</Badge>
-                          )}
-                          {job.status === "queued" && (
-                            <Badge variant="neutral">Queued</Badge>
-                          )}
-                          {job.status === "failed" && (
-                            <Badge variant="warning">Failed</Badge>
-                          )}
-                          {job.url && (
+                      Media preview
+                    </h3>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      {historyReadOnly ? (
+                        <Badge variant="neutral" uppercase={false}>
+                          View-only history
+                        </Badge>
+                      ) : editableDraft && draftSyncStatus !== "idle" ? (
+                        <div className="flex items-center gap-1.5">
+                          <Badge
+                            variant={
+                              draftSyncStatus === "error"
+                                ? "error"
+                                : draftSyncStatus === "saved"
+                                  ? "success"
+                                  : "info"
+                            }
+                            uppercase={false}
+                          >
+                            {draftSyncStatus === "error"
+                              ? "History save failed"
+                              : draftSyncStatus === "saved"
+                                ? "Saved to My work"
+                                : "Saving to My work…"}
+                          </Badge>
+                          {draftSyncStatus === "error" ? (
                             <button
-                              onClick={() => adoptVideoUrl(job.url || null)}
-                              className="text-[10px] font-semibold uppercase tracking-wide text-primary-200 hover:text-surface-50 transition-colors"
-                            >
-                              Preview
-                            </button>
-                          )}
-                          {job.status === "failed" && (
-                            <button
-                              onClick={() => handleRetryVideo(job.id)}
-                              className="text-[10px] font-semibold uppercase tracking-wide text-amber-200 hover:text-amber-50 transition-colors"
+                              type="button"
+                              className="min-h-8 rounded-lg border border-error-400/30 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100"
+                              onClick={() => void flushPendingDraft()}
                             >
                               Retry
                             </button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      <Badge variant={videoUrl ? "info" : "neutral"} uppercase={false}>
+                        {videoUrl
+                          ? "Video"
+                          : activeImageFormat
+                            ? `Saves as ${activeImageFormat.width}×${activeImageFormat.height}`
+                            : "Image"}
+                      </Badge>
+                      {!videoUrl && activePreparedSave ? (
+                        <Badge variant="neutral" uppercase={false}>
+                          {activePreparedSave.filename
+                            .split(".")
+                            .pop()
+                            ?.toUpperCase() || "JPG"}
+                        </Badge>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="relative w-full overflow-hidden rounded-xl bg-surface-950/60">
+                    {(isImageLoading || isVideoLoading) && (
+                      <BusyOverlay
+                        message={
+                          isVideoLoading ? videoLoadingMessage : imageLoadingMessage
+                        }
+                        progress={isVideoLoading ? undefined : imageLoadingProgress}
+                      />
+                    )}
+                    {videoUrl &&
+                    isVideoBuffering &&
+                    !isVideoLoading &&
+                    !videoPlayError ? (
+                      <div
+                        className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center bg-surface-950/40"
+                        role="status"
+                        aria-label="Loading video preview"
+                      >
+                        <Loader2
+                          className="h-8 w-8 animate-spin text-primary-300"
+                          aria-hidden="true"
+                        />
+                      </div>
+                    ) : null}
+
+                    {videoUrl ? (
+                      <div className="w-full space-y-2">
+                        <video
+                          ref={videoElRef}
+                          key={videoUrl}
+                          src={videoUrl}
+                          controls
+                          playsInline
+                          preload="auto"
+                          autoPlay={!shouldReduceMotion}
+                          loop={!shouldReduceMotion}
+                          muted={videoMuted}
+                          aria-label="Generated social media video preview"
+                          onLoadStart={() => setIsVideoBuffering(true)}
+                          onLoadedData={() => {
+                            setIsVideoBuffering(false);
+                            setVideoPlayError(null);
+                          }}
+                          onCanPlay={() => {
+                            setIsVideoBuffering(false);
+                            setVideoPlayError(null);
+                            const el = videoElRef.current;
+                            if (el && !shouldReduceMotion) {
+                              void el.play().catch(() => {
+                                // Autoplay blocked — controls still work for manual play.
+                              });
+                            }
+                          }}
+                          onVolumeChange={(e) => {
+                            setVideoMuted(e.currentTarget.muted);
+                          }}
+                          onError={() => {
+                            setIsVideoBuffering(false);
+                            setVideoPlayError(
+                              "This video could not be played. Try Save video, or generate again.",
+                            );
+                          }}
+                          className={cn(
+                            "w-full rounded-xl bg-black object-contain shadow-2xl",
+                            isDesktopLayout ? "max-h-[36dvh]" : "max-h-[70dvh]",
                           )}
+                        />
+                        {videoMuted && !videoPlayError ? (
                           <button
-                            onClick={() => handleRemoveVideoJob(job.id)}
-                            className="text-[10px] font-semibold uppercase tracking-wide text-surface-200/70 hover:text-surface-50 transition-colors"
+                            type="button"
+                            onClick={() => {
+                              triggerHapticFeedback();
+                              const el = videoElRef.current;
+                              if (!el) return;
+                              el.muted = false;
+                              setVideoMuted(false);
+                              void el.play().catch(() => undefined);
+                            }}
+                            className="flex w-full min-h-11 items-center justify-center gap-2 rounded-xl border border-primary-400/40 bg-primary-500/15 px-3 py-2 text-sm font-semibold text-primary-50"
                           >
-                            Remove
+                            Turn on sound
                           </button>
-                        </div>
-                        <div className="flex flex-col gap-1 text-xs text-warning-200">
-                          {job.error && <span>{job.error}</span>}
-                          <span className="text-surface-400">
-                            Started{" "}
-                            {new Date(job.createdAt).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                        </div>
-                      </motion.li>
-                    ))}
-                  </ul>
-                </motion.div>
-              )}
-            </div>
-          </section>
-
-          <motion.section
-            className="flex flex-col rounded-2xl border border-white/10 bg-surface-900/70 p-4 backdrop-blur-lg lg:p-6"
-            initial={shouldReduceMotion ? false : { opacity: 0, x: 12 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{
-              delay: shouldReduceMotion ? 0 : 0.12,
-              duration: shouldReduceMotion ? 0 : 0.3,
-            }}
-            aria-labelledby="caption-delivery-heading"
-            aria-busy={textBusy}
-          >
-            <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <h3
-                  id="caption-delivery-heading"
-                  className="text-xl font-semibold text-surface-50"
-                >
-                  Caption studio
-                </h3>
-                <p className="mt-0.5 text-xs text-surface-400">
-                  {creativeLockedForReview
-                    ? "Review copy is locked to the exact creative submitted to the manager."
-                    : "Ready to copy and post. Tap New caption if you want a different version."}
-                </p>
-              </div>
-              <div className="flex shrink-0 flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleTextAction(onRegenerateText).catch(
-                      () => undefined,
-                    );
-                  }}
-                  disabled={textBusy || creativeLockedForReview}
-                  className={cn(
-                    "inline-flex min-h-11 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors",
-                    "border-primary-400/45 bg-primary-500/15 text-primary-50",
-                    "hover:border-primary-400/65 hover:bg-primary-500/25",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
-                    "disabled:cursor-not-allowed disabled:opacity-40",
-                  )}
-                  title="Generate a full new marketing caption and hashtags"
-                  aria-label="New caption"
-                >
-                  {textBusy ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4" />
-                  )}
-                  {textBusy ? "Writing..." : "New caption"}
-                </button>
-                {onGenerateCaptionVariant ? (
-                  <button
-                    type="button"
-                    onClick={() => setIsCaptionAltsOpen(true)}
-                    disabled={textBusy || creativeLockedForReview}
-                    className={cn(
-                      "inline-flex min-h-11 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors",
-                      "border-white/10 bg-white/[0.04] text-surface-200",
-                      "hover:border-white/20 hover:bg-white/[0.08]",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
-                      "disabled:cursor-not-allowed disabled:opacity-40",
-                    )}
-                    title="Generate three full caption options"
-                    aria-label="Three caption ideas"
-                  >
-                    <Sparkles className="h-4 w-4 text-primary-300" />
-                    3 options
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={handleUndo}
-                  disabled={historyIndex === 0 || creativeLockedForReview}
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-surface-200 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 disabled:cursor-not-allowed disabled:opacity-30"
-                  title="Undo (Ctrl+Z)"
-                  aria-label="Undo caption change"
-                >
-                  <Undo2 className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRedo}
-                  disabled={
-                    historyIndex === textHistory.length - 1 ||
-                    creativeLockedForReview
-                  }
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-surface-200 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 disabled:cursor-not-allowed disabled:opacity-30"
-                  title="Redo (Ctrl+Y)"
-                  aria-label="Redo caption change"
-                >
-                  <Redo2 className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-            {platformCaptionTabs.length > 0 && (
-              <div
-                className="mb-3 flex flex-wrap gap-2"
-                role="tablist"
-                aria-label="Platform captions"
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeCaptionPlatform === null}
-                  onClick={() => selectCaptionPlatform(null)}
-                  className={cn(
-                    "min-h-[40px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
-                    activeCaptionPlatform === null
-                      ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
-                      : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
-                  )}
-                >
-                  Primary
-                </button>
-                {platformCaptionTabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={activeCaptionPlatform === tab.id}
-                    onClick={() => selectCaptionPlatform(tab.id)}
-                    className={cn(
-                      "min-h-[40px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
-                      activeCaptionPlatform === tab.id
-                        ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
-                        : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
-                    )}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className="relative mb-4">
-              {isTextLoading && <BusyOverlay message="Updating caption..." />}
-              {captionWasEdited && (
-                <div className="mb-2 flex items-center gap-2 text-xs text-warning-300">
-                  <Edit3 className="w-3 h-3" />
-                  <span>Caption edited for this platform</span>
-                </div>
-              )}
-              <CaptionStudio
-                value={editedText}
-                onChange={handleTextChange}
-                disabled={isTextLoading || creativeLockedForReview}
-                platformId={activeCaptionPlatform}
-                claimLocked={claimLocked}
-              />
-            </div>
-
-            {/* Desktop: delivery actions sit with the caption panel. */}
-            {isDesktopLayout ? (
-              <div
-                className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3"
-                aria-label="Post delivery actions"
-              >
-                <Button
-                  variant="outline"
-                  onClick={handleCopy}
-                  disabled={deliveryLocked}
-                  aria-label={
-                    deliveryLocked
-                      ? `Copy caption (${deliveryLockLabel.toLowerCase()})`
-                      : "Copy caption"
-                  }
-                  leftIcon={
-                    copied ? (
-                      <Check className="h-4 w-4" />
+                        ) : null}
+                        {!videoPlayError ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              triggerHapticFeedback();
+                              setManualVideoSelected(false);
+                              setSelectedDeliveryId(
+                                deliveryPlan.deliveries.find(
+                                  (delivery) => delivery.mediaKind === "photo",
+                                )?.id || null,
+                              );
+                              adoptVideoUrl(null);
+                            }}
+                            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/[0.05] px-3 py-2 text-sm font-semibold text-surface-100 transition-colors hover:bg-white/[0.09]"
+                          >
+                            <Camera className="h-4 w-4" aria-hidden="true" />
+                            Back to photos
+                          </button>
+                        ) : null}
+                        {videoPlayError ? (
+                          <div
+                            className="space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 px-3 py-2 text-xs text-error-100"
+                            role="alert"
+                          >
+                            <p>{videoPlayError}</p>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 font-semibold text-surface-100"
+                                onClick={() => {
+                                  const el = videoElRef.current;
+                                  if (!el || !videoUrl) return;
+                                  setVideoPlayError(null);
+                                  setIsVideoBuffering(true);
+                                  el.load();
+                                  void el
+                                    .play()
+                                    .catch(() => setIsVideoBuffering(false));
+                                }}
+                              >
+                                Retry play
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 font-semibold text-surface-100"
+                                onClick={() => {
+                                  setManualVideoSelected(false);
+                                  setSelectedDeliveryId(
+                                    deliveryPlan.deliveries.find(
+                                      (delivery) => delivery.mediaKind === "photo",
+                                    )?.id || null,
+                                  );
+                                  adoptVideoUrl(null);
+                                  setVideoPlayError(null);
+                                }}
+                              >
+                                Show photo
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
                     ) : (
-                      <Copy className="h-4 w-4" />
-                    )
-                  }
-                  fullWidth
-                  disableHaptics
+                      <button
+                        onClick={() => {
+                          triggerHapticFeedback();
+                          setIsPreviewOpen(true);
+                        }}
+                        className={cn(
+                          "mx-auto block w-full overflow-hidden rounded-xl bg-black transition-all hover:ring-2 hover:ring-primary-400/30 focus:outline-none focus:ring-4 focus:ring-primary-500/50",
+                          isDesktopLayout && "max-h-[36dvh]",
+                        )}
+                        style={
+                          activeImageFormat
+                            ? {
+                                aspectRatio: `${activeImageFormat.width} / ${activeImageFormat.height}`,
+                                maxWidth: `min(100%, calc(${isDesktopLayout ? "36dvh" : "70dvh"} * ${activeImageFormat.width} / ${activeImageFormat.height}))`,
+                              }
+                            : undefined
+                        }
+                        aria-label="Enlarge image"
+                      >
+                        <ProgressiveImage
+                          src={displayImageUrl}
+                          alt="Generated social media post"
+                          className="h-full w-full rounded-xl object-contain shadow-2xl"
+                        />
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : null}
+
+              {!isDesktopLayout ? renderMediaHistoryRail() : null}
+
+              <div className="w-full space-y-2 mb-2">
+                <div
+                  className={cn(
+                    "gap-1.5 bg-surface-950/35 border border-white/10 rounded-xl p-1.5",
+                    isDesktopLayout
+                      ? "flex flex-wrap items-center justify-between"
+                      : "grid grid-cols-[minmax(0,1fr)_auto] items-stretch",
+                  )}
                 >
-                  <span aria-live="polite">
-                    {deliveryLocked
-                      ? deliveryLockLabel
-                      : copied
-                        ? "Copied"
-                        : "Copy caption"}
-                  </span>
-                </Button>
-                <Button
-                  variant="filled"
-                  onClick={() => {
-                    if (deliveryLocked) {
-                      toast.warning(deliveryGateMessage);
-                      return;
+                  <div
+                    className={cn(
+                      "gap-1.5 min-w-0",
+                      isDesktopLayout ? "flex flex-1" : "grid grid-cols-3",
+                    )}
+                  >
+                    <ActionTile
+                      icon={Film}
+                      iconClassName={TILE_ICON_ACCENT}
+                      tooltip={
+                        historyReadOnly
+                          ? "This teammate's saved post is view-only"
+                          : "Turn your image into a video"
+                      }
+                      disabled={
+                        imageBusy ||
+                        isVideoLoading ||
+                        creativeLockedForReview ||
+                        historyReadOnly
+                      }
+                      busy={isVideoLoading}
+                      label={
+                        isVideoLoading ? "Render" : videoUrl ? "New video" : "Video"
+                      }
+                      onClick={() => {
+                        setVideoDirectorDeliveryId(null);
+                        setIsVideoDirectorOpen(true);
+                      }}
+                    />
+                    <ActionTile
+                      icon={Sparkles}
+                      iconClassName="text-primary-300"
+                      tooltip={
+                        hasOriginalCapture
+                          ? "Artistic style (optional)"
+                          : originalRequiredMessage
+                      }
+                      disabled={
+                        imageBusy ||
+                        !!videoUrl ||
+                        creativeLockedForReview ||
+                        historyReadOnly ||
+                        !hasOriginalCapture
+                      }
+                      busy={imageBusy}
+                      label={imageBusy ? "Wait" : "Fun mode"}
+                      onClick={() => setIsFunModeDirectorOpen(true)}
+                    />
+                    <ActionTile
+                      icon={Calendar}
+                      iconClassName="text-emerald-300"
+                      tooltip="Schedule post for later"
+                      disabled={deliveryLocked || historyReadOnly}
+                      label="Schedule"
+                      onClick={() => {
+                        if (deliveryLocked || historyReadOnly) {
+                          toast.warning(
+                            historyReadOnly
+                              ? "This teammate's saved post is view-only."
+                              : deliveryGateMessage,
+                          );
+                          return;
+                        }
+                        setIsScheduleOpen(true);
+                      }}
+                    />
+                    {isDesktopLayout ? (
+                      <>
+                        <ActionTile
+                          icon={Share2}
+                          iconClassName="text-blue-300"
+                          tooltip="Share post"
+                          ariaLabel={
+                            deliveryLocked
+                              ? `Share post (${deliveryLockLabel.toLowerCase()})`
+                              : "Share post"
+                          }
+                          disabled={
+                            deliveryLocked ||
+                            (!manualVideoSelected && !activePreparedSave) ||
+                            isPreparingSave
+                          }
+                          label="Share"
+                          onClick={handleOpenShare}
+                        />
+                        <ActionTile
+                          icon={Download}
+                          iconClassName="text-success-300"
+                          tooltip="Save media"
+                          ariaLabel={saveAriaLabel(deliveryLocked)}
+                          disabled={
+                            imageBusy ||
+                            deliveryLocked ||
+                            isPreparingSave ||
+                            !activePreparedSave
+                          }
+                          busy={imageBusy || isPreparingSave}
+                          label={isPreparingSave ? "Preparing" : "Save"}
+                          onClick={() => void handleSave()}
+                        />
+                      </>
+                    ) : null}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsToolsOpen((open) => !open)}
+                    aria-label={
+                      isToolsOpen ? "Hide creative tools" : "Show creative tools"
                     }
-                    setIsShareDialogOpen(true);
-                  }}
-                  disabled={deliveryLocked}
-                  aria-label={
-                    deliveryLocked
-                      ? `Share post (${deliveryLockLabel.toLowerCase()})`
-                      : "Share post"
-                  }
-                  leftIcon={<Share2 className="h-4 w-4" />}
-                  fullWidth
-                >
-                  {deliveryLocked ? deliveryLockLabel : "Share post"}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    void handleSave();
-                  }}
-                  disabled={imageBusy || deliveryLocked}
-                  loading={imageBusy}
-                  aria-label={saveAriaLabel(deliveryLocked)}
-                  leftIcon={<Download className="h-4 w-4" />}
-                  className="border-success-500/35 text-success-100 hover:border-success-400/60 hover:bg-success-500/10"
-                  fullWidth
-                  disableHaptics
-                >
-                  {deliveryLocked ? deliveryLockLabel : saveButtonLabel}
-                </Button>
-              </div>
-            ) : null}
+                    aria-expanded={isToolsOpen}
+                    aria-controls="creative-tools-panel"
+                    className={cn(
+                      "flex shrink-0 min-h-[44px] px-3 items-center justify-center gap-1.5 rounded-lg border border-transparent text-sm font-semibold text-surface-200 transition-colors",
+                      isToolsOpen ? "bg-white/[0.08]" : "hover:bg-white/[0.04]",
+                      !isDesktopLayout && "px-2",
+                    )}
+                  >
+                    More
+                    <ChevronDown
+                      className={cn(
+                        "h-4 w-4 shrink-0 text-surface-400 transition-transform",
+                        isToolsOpen && "rotate-180",
+                      )}
+                      aria-hidden="true"
+                    />
+                  </button>
+                </div>
 
-            {requiresApproval ? (
-              <p
-                className={cn(
-                  "mb-4 text-xs",
-                  approvalStatus === "approved"
-                    ? "text-success-200"
-                    : "text-warning-200",
+                <div
+                  id="creative-tools-panel"
+                  data-testid="creative-tools-panel"
+                  hidden={!isToolsOpen}
+                  className={cn(
+                    "grid grid-cols-2 gap-2 sm:grid-cols-3 mt-1",
+                    !isToolsOpen && "hidden",
+                  )}
+                >
+                  <ActionTile
+                    icon={LayoutGrid}
+                    iconClassName="text-amber-300"
+                    tooltip={
+                      deliveryLocked
+                        ? deliveryGateMessage
+                        : "Export Story, Feed, Marketplace & Google sizes"
+                    }
+                    disabled={imageBusy || deliveryLocked}
+                    label="Export sizes"
+                    onClick={() => {
+                      if (deliveryLocked) {
+                        toast.warning(deliveryGateMessage);
+                        return;
+                      }
+                      setIsMultiFormatOpen(true);
+                    }}
+                  />
+
+                  <ActionTile
+                    icon={RefreshCw}
+                    iconClassName="text-surface-300"
+                    tooltip={
+                      hasOriginalCapture
+                        ? "Generate a new image version"
+                        : originalRequiredMessage
+                    }
+                    ariaLabel="Regenerate image"
+                    disabled={
+                      imageBusy ||
+                      !!videoUrl ||
+                      creativeLockedForReview ||
+                      historyReadOnly ||
+                      !hasOriginalCapture
+                    }
+                    busy={imageBusy}
+                    label={imageBusy ? "Wait..." : "Regen image"}
+                    onClick={() => {
+                      void handleImageAction(onRegenerateImage, [
+                        "Refreshing with your chosen style...",
+                        "Balancing lighting and color...",
+                        "Finishing touches...",
+                      ]).catch(() => undefined);
+                    }}
+                  />
+
+                  <ActionTile
+                    icon={Edit3}
+                    iconClassName={TILE_ICON_ACCENT}
+                    tooltip={
+                      historyReadOnly
+                        ? "This teammate's saved post is view-only"
+                        : "Change specific details"
+                    }
+                    disabled={
+                      imageBusy ||
+                      !!videoUrl ||
+                      creativeLockedForReview ||
+                      historyReadOnly
+                    }
+                    busy={imageBusy}
+                    label={
+                      imageBusy ? "Wait..." : isImageEditing ? "Cancel" : "Edit image"
+                    }
+                    onClick={() => setIsImageEditing(!isImageEditing)}
+                  />
+
+                  <ActionTile
+                    icon={RefreshCw}
+                    iconClassName="text-surface-300"
+                    tooltip={
+                      hasOriginalCapture
+                        ? "Generate a new caption"
+                        : originalRequiredMessage
+                    }
+                    ariaLabel="Regenerate caption"
+                    disabled={
+                      textBusy ||
+                      creativeLockedForReview ||
+                      historyReadOnly ||
+                      !hasOriginalCapture
+                    }
+                    busy={textBusy}
+                    label={textBusy ? "Wait..." : "Regen text"}
+                    onClick={() => {
+                      void handleTextAction(onRegenerateText).catch(() => undefined);
+                    }}
+                  />
+
+                  <ActionTile
+                    icon={Edit3}
+                    iconClassName={TILE_ICON_ACCENT}
+                    tooltip={
+                      historyReadOnly
+                        ? "This teammate's saved post is view-only"
+                        : "Describe a caption change"
+                    }
+                    disabled={textBusy || creativeLockedForReview || historyReadOnly}
+                    busy={textBusy}
+                    label={textBusy ? "Wait..." : "Edit text"}
+                    onClick={() => setIsTextEditing(true)}
+                  />
+
+                  {onGenerateCaptionVariant ? (
+                    <ActionTile
+                      icon={Sparkles}
+                      iconClassName={TILE_ICON_ACCENT}
+                      tooltip={
+                        hasOriginalCapture
+                          ? "Generate three caption options"
+                          : originalRequiredMessage
+                      }
+                      disabled={
+                        textBusy ||
+                        creativeLockedForReview ||
+                        historyReadOnly ||
+                        !hasOriginalCapture
+                      }
+                      label="3 text ideas"
+                      onClick={() => setIsCaptionAltsOpen(true)}
+                    />
+                  ) : null}
+                </div>
+                <AnimatePresence>
+                  {isToolsOpen && isImageEditing && (
+                    <motion.div
+                      className="space-y-2 rounded-xl border border-white/10 bg-surface-800/50 p-3"
+                      initial={shouldReduceMotion ? false : { opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
+                    >
+                      <label
+                        htmlFor="image-edit-request"
+                        className="text-xs font-semibold text-surface-200"
+                      >
+                        Image edit request
+                      </label>
+                      <textarea
+                        id="image-edit-request"
+                        value={imageEditPrompt}
+                        onChange={(e) => setImageEditPrompt(e.target.value)}
+                        placeholder="Example: Make the headline gold and brighten the vehicle."
+                        className="w-full bg-surface-800/50 text-surface-50 border-2 border-white/20 rounded-xl px-3 py-2 focus:ring-2 focus:ring-primary-400 focus:border-primary-400 outline-none transition text-sm"
+                        rows={2}
+                      />
+                      <Button
+                        onClick={() => {
+                          void handleImageAction(
+                            () => onEditImage(imageEditPrompt),
+                            [
+                              "Applying your edit request...",
+                              "Re-rendering safely around people and cars...",
+                              "Finalizing the updated image...",
+                            ],
+                          )
+                            .then(() => {
+                              setIsImageEditing(false);
+                              setImageEditPrompt("");
+                            })
+                            .catch(() => undefined);
+                        }}
+                        disabled={!imageEditPrompt.trim()}
+                        fullWidth
+                        size="sm"
+                      >
+                        Apply image edit
+                      </Button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                {isToolsOpen && videoJobs.length > 0 && (
+                  <motion.div
+                    className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-3"
+                    initial={shouldReduceMotion ? false : { opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-surface-50">
+                        Video queue
+                      </span>
+                      <span
+                        className="text-[10px] text-primary-200/70"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {videoJobs.filter((job) => job.status === "processing").length}{" "}
+                        active
+                      </span>
+                    </div>
+                    <ul className="space-y-2" role="list" aria-label="Video queue list">
+                      {videoJobs.map((job) => (
+                        <motion.li
+                          key={job.id}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-surface-900/40 px-3 py-2 text-xs"
+                          initial={
+                            shouldReduceMotion ? false : { opacity: 0, scale: 0.95 }
+                          }
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ duration: shouldReduceMotion ? 0 : 0.2 }}
+                        >
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-surface-50">
+                              {job.style}
+                            </span>
+                            <span className="text-primary-200/70">
+                              {job.duration}s ·{" "}
+                              {job.soundtrack === "none"
+                                ? "No soundtrack"
+                                : job.soundtrack}{" "}
+                              ·{" "}
+                              {job.aspectPreference === "auto"
+                                ? "auto"
+                                : job.aspectPreference}{" "}
+                              · {job.resolution} · {job.pacing}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {job.status === "completed" && (
+                              <Badge variant="success">Ready</Badge>
+                            )}
+                            {job.status === "processing" && (
+                              <Badge variant="info">Rendering</Badge>
+                            )}
+                            {job.status === "queued" && (
+                              <Badge variant="neutral">Queued</Badge>
+                            )}
+                            {job.status === "failed" && (
+                              <Badge variant="warning">Failed</Badge>
+                            )}
+                            {job.url && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setManualVideoSelected(true);
+                                  adoptVideoUrl(job.url || null);
+                                }}
+                                aria-label={`Preview ${job.style} video`}
+                                className="text-[10px] font-semibold uppercase tracking-wide text-primary-200 hover:text-surface-50 transition-colors"
+                              >
+                                Preview
+                              </button>
+                            )}
+                            {job.status === "failed" && (
+                              <button
+                                type="button"
+                                onClick={() => handleRetryVideo(job.id)}
+                                aria-label={`Retry ${job.style} video`}
+                                className="text-[10px] font-semibold uppercase tracking-wide text-amber-200 hover:text-amber-50 transition-colors"
+                              >
+                                Retry
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveVideoJob(job.id)}
+                              aria-label={`Remove ${job.style} video job`}
+                              className="text-[10px] font-semibold uppercase tracking-wide text-surface-200/70 hover:text-surface-50 transition-colors"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                          <div className="flex flex-col gap-1 text-xs text-warning-200">
+                            {job.error && <span>{job.error}</span>}
+                            <span className="text-surface-400">
+                              Started{" "}
+                              {new Date(job.createdAt).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                          </div>
+                        </motion.li>
+                      ))}
+                    </ul>
+                  </motion.div>
                 )}
-                role="status"
+              </div>
+            </section>
+
+            {isDesktopLayout ? (
+              <motion.section
+                className="flex flex-col rounded-2xl border border-white/10 bg-surface-900/70 p-4 backdrop-blur-lg lg:p-4"
+                initial={shouldReduceMotion ? false : { opacity: 0, x: 12 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{
+                  delay: shouldReduceMotion ? 0 : 0.12,
+                  duration: shouldReduceMotion ? 0 : 0.3,
+                }}
+                aria-labelledby="caption-delivery-heading"
+                aria-busy={textBusy}
               >
-                {approvalStatus === "approved"
-                  ? "Approved creative: copy, share, save, and export are available."
-                  : "Copy, share, save, and export unlock after manager approval."}
-              </p>
-            ) : null}
+                <div
+                  className={cn(
+                    "mb-3 flex flex-col gap-3",
+                    isDesktopLayout && "lg:mb-2 lg:gap-2",
+                  )}
+                >
+                  <div className="min-w-0">
+                    <h3
+                      id="caption-delivery-heading"
+                      className={cn(
+                        "font-semibold text-surface-50",
+                        isDesktopLayout ? "text-base" : "text-xl",
+                      )}
+                    >
+                      Caption studio
+                    </h3>
+                    <p className="mt-0.5 text-xs text-surface-400">
+                      {historyReadOnly
+                        ? "This teammate's saved copy is view-only. You can still copy, share, or export it."
+                        : creativeLockedForReview
+                          ? "Review copy is locked to the exact creative submitted to the manager."
+                          : "Ready to copy and post. Tap New caption if you want a different version."}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleTextAction(onRegenerateText).catch(() => undefined);
+                      }}
+                      disabled={
+                        textBusy ||
+                        creativeLockedForReview ||
+                        historyReadOnly ||
+                        !hasOriginalCapture
+                      }
+                      className={cn(
+                        "inline-flex min-h-11 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors",
+                        isDesktopLayout &&
+                          "lg:min-h-9 lg:rounded-lg lg:px-3 lg:py-1.5 lg:text-xs",
+                        "border-primary-400/45 bg-primary-500/15 text-primary-50",
+                        "hover:border-primary-400/65 hover:bg-primary-500/25",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
+                        "disabled:cursor-not-allowed disabled:opacity-40",
+                      )}
+                      title={
+                        historyReadOnly
+                          ? "This teammate's saved post is view-only"
+                          : !hasOriginalCapture
+                            ? originalRequiredMessage
+                            : "Generate a full new marketing caption and hashtags"
+                      }
+                      aria-label="New caption"
+                    >
+                      {textBusy ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4" />
+                      )}
+                      {textBusy ? "Writing..." : "New caption"}
+                    </button>
+                    {onGenerateCaptionVariant ? (
+                      <button
+                        type="button"
+                        onClick={() => setIsCaptionAltsOpen(true)}
+                        disabled={
+                          textBusy ||
+                          creativeLockedForReview ||
+                          historyReadOnly ||
+                          !hasOriginalCapture
+                        }
+                        className={cn(
+                          "inline-flex min-h-11 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors",
+                          isDesktopLayout &&
+                            "lg:min-h-9 lg:rounded-lg lg:px-3 lg:py-1.5 lg:text-xs",
+                          "border-white/10 bg-white/[0.04] text-surface-200",
+                          "hover:border-white/20 hover:bg-white/[0.08]",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
+                          "disabled:cursor-not-allowed disabled:opacity-40",
+                        )}
+                        title={
+                          historyReadOnly
+                            ? "This teammate's saved post is view-only"
+                            : !hasOriginalCapture
+                              ? originalRequiredMessage
+                              : "Generate three full caption options"
+                        }
+                        aria-label="Three caption ideas"
+                      >
+                        <Sparkles className="h-4 w-4 text-primary-300" />3 options
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={handleUndo}
+                      disabled={
+                        historyIndex === 0 || creativeLockedForReview || historyReadOnly
+                      }
+                      className={cn(
+                        "inline-flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-surface-200 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 disabled:cursor-not-allowed disabled:opacity-30",
+                        isDesktopLayout && "lg:h-9 lg:w-9",
+                      )}
+                      title="Undo (Ctrl+Z)"
+                      aria-label="Undo caption change"
+                    >
+                      <Undo2 className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRedo}
+                      disabled={
+                        historyIndex === textHistory.length - 1 ||
+                        creativeLockedForReview ||
+                        historyReadOnly
+                      }
+                      className={cn(
+                        "inline-flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-surface-200 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 disabled:cursor-not-allowed disabled:opacity-30",
+                        isDesktopLayout && "lg:h-9 lg:w-9",
+                      )}
+                      title="Redo (Ctrl+Y)"
+                      aria-label="Redo caption change"
+                    >
+                      <Redo2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+                {platformCaptionTabs.length > 0 && (
+                  <div
+                    className="mb-3 flex flex-wrap gap-2"
+                    role="tablist"
+                    aria-label="Platform captions"
+                  >
+                    <button
+                      ref={(node) => {
+                        captionTabRefs.current[0] = node;
+                      }}
+                      id="caption-platform-tab-0"
+                      type="button"
+                      role="tab"
+                      aria-selected={activeCaptionPlatform === null}
+                      aria-controls="caption-platform-panel"
+                      tabIndex={activeCaptionPlatform === null ? 0 : -1}
+                      onClick={() => selectCaptionPlatform(null)}
+                      onKeyDown={(event) => handleCaptionTabKeyDown(event, 0)}
+                      className={cn(
+                        "min-h-[40px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
+                        isDesktopLayout && "lg:min-h-9 lg:px-3 lg:py-1",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
+                        activeCaptionPlatform === null
+                          ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
+                          : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
+                      )}
+                    >
+                      Primary
+                    </button>
+                    {platformCaptionTabs.map((tab, index) => (
+                      <button
+                        key={tab.id}
+                        ref={(node) => {
+                          captionTabRefs.current[index + 1] = node;
+                        }}
+                        id={`caption-platform-tab-${index + 1}`}
+                        type="button"
+                        role="tab"
+                        aria-selected={activeCaptionPlatform === tab.id}
+                        aria-controls="caption-platform-panel"
+                        tabIndex={activeCaptionPlatform === tab.id ? 0 : -1}
+                        onClick={() => selectCaptionPlatform(tab.id)}
+                        onKeyDown={(event) => handleCaptionTabKeyDown(event, index + 1)}
+                        className={cn(
+                          "min-h-[40px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
+                          isDesktopLayout && "lg:min-h-9 lg:px-3 lg:py-1",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
+                          activeCaptionPlatform === tab.id
+                            ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
+                            : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
+                        )}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
-            <PlatformLimitMeter
-              text={captionWithDisclosures}
-              platformIds={post.platformIds}
-              className="mb-4"
-            />
+                <div
+                  id="caption-platform-panel"
+                  role={platformCaptionTabs.length > 0 ? "tabpanel" : undefined}
+                  aria-labelledby={
+                    platformCaptionTabs.length > 0
+                      ? `caption-platform-tab-${activeCaptionTabIndex}`
+                      : undefined
+                  }
+                  className={cn("relative mb-4", isDesktopLayout && "lg:mb-3")}
+                >
+                  {isTextLoading && <BusyOverlay message="Updating caption..." />}
+                  {captionWasEdited && (
+                    <div className="mb-2 flex items-center gap-2 text-xs text-warning-300">
+                      <Edit3 className="w-3 h-3" />
+                      <span>Caption edited for this platform</span>
+                    </div>
+                  )}
+                  <CaptionStudio
+                    value={editedText}
+                    onChange={handleTextChange}
+                    disabled={
+                      isTextLoading || creativeLockedForReview || historyReadOnly
+                    }
+                    platformId={activeCaptionPlatform}
+                    claimLocked={claimLocked}
+                    compact={isDesktopLayout}
+                  />
+                </div>
 
-            {/* Locked compliance disclosure block. Read-only so a salesperson
+                {/* Desktop: delivery actions sit with the caption panel. */}
+                {isDesktopLayout ? (
+                  <div className="mb-3" aria-label="Post delivery actions">
+                    <Button
+                      variant="outline"
+                      onClick={handleCopy}
+                      disabled={deliveryLocked}
+                      aria-label={
+                        deliveryLocked
+                          ? `Copy caption (${deliveryLockLabel.toLowerCase()})`
+                          : "Copy caption"
+                      }
+                      leftIcon={
+                        copied ? (
+                          <Check className="h-4 w-4" />
+                        ) : (
+                          <Copy className="h-4 w-4" />
+                        )
+                      }
+                      fullWidth
+                      disableHaptics
+                    >
+                      <span aria-live="polite">
+                        {deliveryLocked
+                          ? deliveryLockLabel
+                          : copied
+                            ? "Copied"
+                            : "Copy caption"}
+                      </span>
+                    </Button>
+                  </div>
+                ) : null}
+
+                {reviewRequired ? (
+                  <p
+                    className={cn(
+                      "mb-4 text-xs",
+                      approvalStatus === "approved"
+                        ? "text-success-200"
+                        : "text-warning-200",
+                    )}
+                    role="status"
+                  >
+                    {approvalStatus === "approved"
+                      ? "Approved creative: copy, share, save, and export are available."
+                      : "Copy, share, save, and export unlock after manager approval."}
+                  </p>
+                ) : null}
+
+                <PlatformLimitMeter
+                  text={captionWithDisclosures}
+                  platformIds={post.platformIds}
+                  className={isDesktopLayout ? "mb-3" : "mb-4"}
+                />
+
+                {/* Locked compliance disclosure block. Read-only so a salesperson
                 can't silently delete it. Bundled with the caption automatically
                 on copy/share. Media downloads remain media-only. */}
-            {activeDisclosures && (
-              <motion.div
-                initial={shouldReduceMotion ? false : { opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: shouldReduceMotion ? 0 : 0.2 }}
-                className="mb-4 rounded-xl border border-warning-700/40 bg-warning-900/20 p-3"
-              >
-                <div className="flex items-center gap-2 mb-1.5">
-                  <AlertCircle className="w-4 h-4 text-warning-300" />
-                  <span className="text-xs uppercase tracking-wide text-warning-200 font-semibold">
-                    Required compliance disclosures
-                    {activeDisclosureCategories.length
-                      ? ` · ${activeDisclosureCategories.join(", ")}`
-                      : ""}
-                  </span>
-                </div>
-                <div className="text-sm text-warning-100/90 whitespace-pre-line leading-relaxed select-text">
-                  {activeDisclosures.replace(/^—\s*Disclosures\s*—\s*\n?/, "")}
-                </div>
-                <div className="text-xs text-warning-300/70 mt-2">
-                  Included automatically when you copy or share. Saving media
-                  downloads only the image or video, so copy the caption too.
-                </div>
-              </motion.div>
-            )}
-          </motion.section>
+                {activeDisclosures && (
+                  <motion.div
+                    initial={shouldReduceMotion ? false : { opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: shouldReduceMotion ? 0 : 0.2 }}
+                    className="mb-4 rounded-xl border border-warning-700/40 bg-warning-900/20 p-3"
+                  >
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <AlertCircle className="w-4 h-4 text-warning-300" />
+                      <span className="text-xs uppercase tracking-wide text-warning-200 font-semibold">
+                        Required compliance disclosures
+                        {activeDisclosureCategories.length
+                          ? ` · ${activeDisclosureCategories.join(", ")}`
+                          : ""}
+                      </span>
+                    </div>
+                    <div className="text-sm text-warning-100/90 whitespace-pre-line leading-relaxed select-text">
+                      {activeDisclosures.replace(/^—\s*Disclosures\s*—\s*\n?/, "")}
+                    </div>
+                    <div className="text-xs text-warning-300/70 mt-2">
+                      Included automatically when you copy or share. Saving media
+                      downloads only the image or video, so copy the caption too.
+                    </div>
+                  </motion.div>
+                )}
+              </motion.section>
+            ) : null}
+          </div>
         </div>
+        {isDesktopLayout ? renderMediaHistoryRail(true) : null}
       </motion.section>
 
-      {/* Mobile/narrow: sticky bottom delivery bar (Copy · Share · Save).
+      {/* Mobile/narrow: sticky bottom delivery bar (Save · Share · Copy).
           Creative tools stay collapsed above; desktop keeps in-panel CTAs. */}
       {!isDesktopLayout ? (
         <div
@@ -2099,7 +4047,50 @@ export const PostResult: React.FC<PostResultProps> = ({
             aria-label="Post delivery actions"
           >
             <Button
+              variant="primary"
+              onClick={() => void handleSave()}
+              disabled={
+                deliveryLocked || imageBusy || isPreparingSave || !activePreparedSave
+              }
+              aria-label={saveAriaLabel(deliveryLocked)}
+              leftIcon={
+                isPreparingSave ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )
+              }
+              fullWidth
+              className="min-w-0 px-2"
+              disableHaptics
+            >
+              {isPreparingSave ? "Ready…" : "Save"}
+            </Button>
+            <Button
               variant="outline"
+              onClick={handleOpenShare}
+              disabled={
+                deliveryLocked ||
+                isPreparingSave ||
+                !activePreparedSave ||
+                (!manualVideoSelected &&
+                  selectedDelivery?.mediaKind === "video" &&
+                  selectedVideoJob?.status !== "completed")
+              }
+              aria-label={
+                deliveryLocked
+                  ? `Share post (${deliveryLockLabel.toLowerCase()})`
+                  : "Share post"
+              }
+              leftIcon={<Share2 className="h-4 w-4" />}
+              fullWidth
+              className="min-w-0 px-2"
+              disableHaptics
+            >
+              Share
+            </Button>
+            <Button
+              variant="tinted"
               onClick={handleCopy}
               disabled={deliveryLocked}
               aria-label={
@@ -2108,57 +4099,15 @@ export const PostResult: React.FC<PostResultProps> = ({
                   : "Copy caption"
               }
               leftIcon={
-                copied ? (
-                  <Check className="h-4 w-4" />
-                ) : (
-                  <Copy className="h-4 w-4" />
-                )
+                copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />
               }
               fullWidth
+              className="min-w-0 px-2"
               disableHaptics
             >
               <span aria-live="polite">
                 {deliveryLocked ? deliveryLockLabel : copied ? "Copied" : "Copy"}
               </span>
-            </Button>
-            <Button
-              variant="filled"
-              onClick={() => {
-                if (deliveryLocked) {
-                  toast.warning(deliveryGateMessage);
-                  return;
-                }
-                setIsShareDialogOpen(true);
-              }}
-              disabled={deliveryLocked}
-              aria-label={
-                deliveryLocked
-                  ? `Share post (${deliveryLockLabel.toLowerCase()})`
-                  : "Share post"
-              }
-              leftIcon={<Share2 className="h-4 w-4" />}
-              fullWidth
-            >
-              {deliveryLocked ? deliveryLockLabel : "Share"}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                void handleSave();
-              }}
-              disabled={imageBusy || deliveryLocked}
-              loading={imageBusy}
-              aria-label={saveAriaLabel(deliveryLocked)}
-              leftIcon={<Download className="h-4 w-4" />}
-              className="border-success-500/35 text-success-100 hover:border-success-400/60 hover:bg-success-500/10"
-              fullWidth
-              disableHaptics
-            >
-              {deliveryLocked
-                ? deliveryLockLabel
-                : saveToPhotos
-                  ? "Photos"
-                  : "Save"}
             </Button>
           </div>
         </div>

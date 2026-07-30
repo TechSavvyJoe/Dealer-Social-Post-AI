@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { Button } from "./ui/Button";
 import { cn } from "../utils/classNames";
+import { assertAuthEpoch, captureAuthEpoch } from "../utils/authBoundary";
+import { readApiError } from "../services/apiErrors";
 
 interface HealthPayload {
   ok: boolean;
@@ -27,6 +29,13 @@ interface HealthPayload {
     claude_fallback_enabled: boolean;
     openai_fallback_enabled: boolean;
     admin_dealer_code_set: boolean;
+    turnstile_enforcement_enabled: boolean;
+    turnstile_secret_set: boolean;
+    turnstile_site_key_set: boolean;
+    trusted_proxy_configured: boolean;
+    legacy_client_compatibility_enabled: boolean;
+    off_box_backup_configured: boolean;
+    off_box_restore_ready: boolean;
   };
   counts?: {
     dealers: number;
@@ -34,7 +43,92 @@ interface HealthPayload {
     photo_releases_24h: number;
   };
   version: string;
+  releaseSha: string;
+  apiContractVersion: string;
+  modelPolicyVersion: string;
+  backup: {
+    configured: boolean;
+    lastVerifiedAt: string | null;
+    verifiedReleaseSha: string | null;
+    maxAgeHours: number;
+    status:
+      | "not_configured"
+      | "verification_required"
+      | "release_unknown"
+      | "release_mismatch"
+      | "stale"
+      | "verified";
+  };
+  generation?: {
+    aiSuccesses24h: number;
+    basicFallbacks24h: number;
+    fallbackAttempts24h: number;
+    standardTier24h: number;
+    studioTier24h: number;
+    lastSuccessfulAt: string | null;
+    providerAttempts24h: number;
+    providerFailures24h: number;
+    lastProviderAttemptAt: string | null;
+  };
+  recentErrors?: {
+    total24h: number;
+    topActions: Array<{ name: string; count: number }>;
+  };
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const healthCheckKeys: Array<keyof HealthPayload["checks"]> = [
+  "pocketbase",
+  "gemini_key_set",
+  "proxy_token_set",
+  "anthropic_key_set",
+  "openai_key_set",
+  "claude_fallback_enabled",
+  "openai_fallback_enabled",
+  "admin_dealer_code_set",
+  "turnstile_enforcement_enabled",
+  "turnstile_secret_set",
+  "turnstile_site_key_set",
+  "trusted_proxy_configured",
+  "legacy_client_compatibility_enabled",
+  "off_box_backup_configured",
+  "off_box_restore_ready",
+];
+
+const backupStatuses: HealthPayload["backup"]["status"][] = [
+  "not_configured",
+  "verification_required",
+  "release_unknown",
+  "release_mismatch",
+  "stale",
+  "verified",
+];
+
+const isHealthPayload = (value: unknown): value is HealthPayload => {
+  if (!isRecord(value) || !isRecord(value.checks) || !isRecord(value.backup)) {
+    return false;
+  }
+  const checks = value.checks;
+  const backup = value.backup;
+
+  return (
+    typeof value.ok === "boolean" &&
+    typeof value.ts === "string" &&
+    typeof value.version === "string" &&
+    typeof value.releaseSha === "string" &&
+    typeof value.apiContractVersion === "string" &&
+    typeof value.modelPolicyVersion === "string" &&
+    healthCheckKeys.every((key) => typeof checks[key] === "boolean") &&
+    typeof backup.configured === "boolean" &&
+    (backup.lastVerifiedAt === null || typeof backup.lastVerifiedAt === "string") &&
+    (backup.verifiedReleaseSha === null ||
+      typeof backup.verifiedReleaseSha === "string") &&
+    backupStatuses.includes(backup.status as HealthPayload["backup"]["status"]) &&
+    typeof backup.maxAgeHours === "number"
+  );
+};
 
 const checkRows: Array<{
   key: keyof HealthPayload["checks"];
@@ -56,13 +150,6 @@ const checkRows: Array<{
     icon: KeyRound,
     critical: true,
     hint: "GEMINI_API_KEY env var. Required for text, image, and Veo video generation.",
-  },
-  {
-    key: "proxy_token_set",
-    label: "Proxy access token",
-    icon: ShieldCheck,
-    critical: false,
-    hint: "Optional server-to-server proxy hardening. Browser access no longer requires PROXY_ACCESS_TOKEN.",
   },
   {
     key: "anthropic_key_set",
@@ -97,7 +184,49 @@ const checkRows: Array<{
     label: "ADMIN_DEALER_CODE",
     icon: ShieldCheck,
     critical: true,
-    hint: "Required for super-admin login; must be 6-12 alphanumeric characters.",
+    hint: "Required for exact-case super-admin login; final releases use 12 mixed-case alphanumeric characters.",
+  },
+  {
+    key: "trusted_proxy_configured",
+    label: "Vercel to Fly trust",
+    icon: ShieldCheck,
+    critical: true,
+    hint: "Authenticates Vercel's original-client-IP header before login rate limiting uses it.",
+  },
+  {
+    key: "turnstile_enforcement_enabled",
+    label: "Turnstile enforcement",
+    icon: ShieldCheck,
+    critical: false,
+    hint: "Enabled only after the staged challenge-capable frontend is promoted.",
+  },
+  {
+    key: "turnstile_secret_set",
+    label: "Turnstile verifier",
+    icon: KeyRound,
+    critical: false,
+    hint: "Server-only production siteverify credential; Cloudflare test keys are rejected on Fly.",
+  },
+  {
+    key: "turnstile_site_key_set",
+    label: "Turnstile site key",
+    icon: ShieldCheck,
+    critical: false,
+    hint: "Public widget key compiled into the exact frontend artifact and recorded at runtime.",
+  },
+  {
+    key: "legacy_client_compatibility_enabled",
+    label: "Legacy client bridge",
+    icon: AlertTriangle,
+    critical: false,
+    hint: "Temporary masked-roster/PIN-edit bridge; disable immediately after frontend promotion.",
+  },
+  {
+    key: "off_box_restore_ready",
+    label: "Release restore evidence",
+    icon: Database,
+    critical: true,
+    hint: "A recent R2 restore drill must match the exact running release.",
   },
 ];
 
@@ -113,12 +242,59 @@ export const SystemHealthPanel: React.FC = () => {
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
 
   const load = useCallback(async () => {
+    const requestAuthEpoch = captureAuthEpoch();
     setLoading(true);
     setError(null);
+    let res: Response;
     try {
-      const res = await fetch("/api/app/health", { credentials: "include" });
-      if (!res.ok) throw new Error(`/api/app/health ${res.status}`);
-      const body = (await res.json()) as HealthPayload;
+      assertAuthEpoch(requestAuthEpoch);
+      res = await fetch("/api/app/health", { credentials: "include" });
+    } catch (err) {
+      // A transport failure means the old snapshot can no longer describe the
+      // service we are connected to. Clear it instead of showing stale green.
+      setData(null);
+      setLastChecked(null);
+      setError(err instanceof Error ? err.message : String(err));
+      setLoading(false);
+      return;
+    }
+
+    if (res.status === 401) {
+      const authError = await readApiError(res, { requestAuthEpoch });
+      setData(null);
+      setLastChecked(null);
+      setError(authError.message);
+      setLoading(false);
+      return;
+    }
+
+    let body: unknown;
+    try {
+      body = await res.json();
+      assertAuthEpoch(requestAuthEpoch);
+    } catch {
+      // HTML proxy errors and truncated responses are not health snapshots.
+      setData(null);
+      setLastChecked(null);
+      setError(`Health response was not valid JSON (${res.status}).`);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      if (!isHealthPayload(body)) {
+        // A JSON error envelope is useful evidence that the endpoint replied,
+        // but it must not replace (or erase) the last rich diagnostics payload.
+        const detail =
+          isRecord(body) && typeof body.error === "string"
+            ? body.error
+            : "Health response did not include diagnostics.";
+        setError(`${detail} (${res.status})`);
+        return;
+      }
+
+      // Readiness failures deliberately use HTTP 503. The structured payload
+      // is the diagnostic UI, so render it regardless of HTTP success status.
       setData(body);
       setLastChecked(new Date());
     } catch (err) {
@@ -203,9 +379,8 @@ export const SystemHealthPanel: React.FC = () => {
 
       {criticalFailures.length > 0 && (
         <div className="rounded-xl border border-error-700/50 bg-error-900/30 px-3 py-2 text-error-100 text-xs">
-          <strong>Critical:</strong>{" "}
-          {criticalFailures.map((c) => c.label).join(", ")} — fix before users
-          hit the app.
+          <strong>Critical:</strong> {criticalFailures.map((c) => c.label).join(", ")} —
+          fix before users hit the app.
         </div>
       )}
 
@@ -219,9 +394,7 @@ export const SystemHealthPanel: React.FC = () => {
               className={cn(
                 "rounded-xl border p-3 flex items-start gap-3",
                 ok === true && "border-success-500/30 bg-success-500/5",
-                ok === false &&
-                  row.critical &&
-                  "border-error-500/40 bg-error-500/5",
+                ok === false && row.critical && "border-error-500/40 bg-error-500/5",
                 ok === false &&
                   !row.critical &&
                   "border-warning-500/30 bg-warning-500/5",
@@ -238,9 +411,7 @@ export const SystemHealthPanel: React.FC = () => {
                 )}
               />
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-surface-50">
-                  {row.label}
-                </div>
+                <div className="text-sm font-semibold text-surface-50">{row.label}</div>
                 <div className="text-[11px] text-surface-400 leading-relaxed">
                   {row.hint}
                 </div>
@@ -275,16 +446,174 @@ export const SystemHealthPanel: React.FC = () => {
           Activity counts are unavailable from this health endpoint.
         </div>
       ) : null}
+
+      {data ? (
+        <div className="grid gap-3 border-t border-surface-800 pt-3 lg:grid-cols-[1fr_1fr]">
+          <section className="rounded-xl border border-surface-800 bg-surface-950/45 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
+                  Release contract
+                </p>
+                <p className="mt-1 font-mono text-xs text-surface-200">
+                  {data.releaseSha === "unknown"
+                    ? "Release SHA unavailable"
+                    : data.releaseSha.slice(0, 16)}
+                </p>
+              </div>
+              <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold text-surface-300">
+                API {data.apiContractVersion}
+              </span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-surface-400">
+              <span>Health v{data.version}</span>
+              <span aria-hidden="true">·</span>
+              <span>Model policy v{data.modelPolicyVersion}</span>
+            </div>
+          </section>
+
+          <section
+            className={cn(
+              "rounded-xl border p-4",
+              data.backup.status === "verified"
+                ? "border-success-500/25 bg-success-500/5"
+                : "border-warning-500/25 bg-warning-500/5",
+            )}
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
+              Recovery readiness
+            </p>
+            <p className="mt-1 text-sm font-semibold text-surface-100">
+              {data.backup.status === "verified"
+                ? "Off-box restore verified"
+                : data.backup.status === "verification_required"
+                  ? "Restore drill required"
+                  : data.backup.status === "release_unknown"
+                    ? "Running release is unidentified"
+                    : data.backup.status === "release_mismatch"
+                      ? "Restore evidence is for another release"
+                      : data.backup.status === "stale"
+                        ? "Restore evidence has expired"
+                        : "R2 backup not configured"}
+            </p>
+            <p className="mt-1 text-xs text-surface-400">
+              {data.backup.lastVerifiedAt
+                ? `Last verified ${new Date(data.backup.lastVerifiedAt).toLocaleString()}`
+                : "No verified restore timestamp is available for this release."}
+            </p>
+            <p className="mt-1 text-[11px] text-surface-500">
+              Evidence expires after {data.backup.maxAgeHours} hours and must match this
+              release SHA.
+            </p>
+          </section>
+        </div>
+      ) : null}
+
+      {data?.generation ? (
+        <section className="space-y-3 rounded-xl border border-surface-800 bg-surface-950/35 p-4">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
+                Generation · last 24 hours
+              </p>
+              <p className="mt-1 text-sm text-surface-300">
+                Provider results and clearly labeled safe-template fallbacks.
+              </p>
+            </div>
+            <p className="text-xs text-surface-500">
+              {data.generation.lastSuccessfulAt
+                ? `Last success ${new Date(data.generation.lastSuccessfulAt).toLocaleString()}`
+                : "No recent provider success"}
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+            <MiniStat label="AI success" value={data.generation.aiSuccesses24h} />
+            <MiniStat
+              label="Basic fallback"
+              value={data.generation.basicFallbacks24h}
+              warning={data.generation.basicFallbacks24h > 0}
+            />
+            <MiniStat
+              label="Fallback hops"
+              value={data.generation.fallbackAttempts24h}
+            />
+            <MiniStat label="Standard" value={data.generation.standardTier24h} />
+            <MiniStat label="Studio" value={data.generation.studioTier24h} />
+            <MiniStat
+              label="Provider attempts"
+              value={data.generation.providerAttempts24h}
+            />
+            <MiniStat
+              label="Provider failures"
+              value={data.generation.providerFailures24h}
+              warning={data.generation.providerFailures24h > 0}
+            />
+          </div>
+        </section>
+      ) : null}
+
+      {data?.recentErrors ? (
+        <section className="rounded-xl border border-surface-800 bg-surface-950/35 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
+                Actionable client errors · 24 hours
+              </p>
+              <p className="mt-1 text-sm text-surface-300">
+                Redacted aggregates only; retained for 14 days.
+              </p>
+            </div>
+            <span className="text-2xl font-bold tabular-nums text-surface-50">
+              {data.recentErrors.total24h}
+            </span>
+          </div>
+          {data.recentErrors.topActions.length > 0 ? (
+            <ul className="mt-3 divide-y divide-white/5 text-xs">
+              {data.recentErrors.topActions.map((action) => (
+                <li
+                  key={action.name}
+                  className="flex items-center justify-between gap-3 py-2 text-surface-300"
+                >
+                  <code className="min-w-0 truncate">{action.name}</code>
+                  <span className="font-semibold tabular-nums text-surface-100">
+                    {action.count}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-3 text-xs text-success-300">
+              No redacted client errors recorded in this window.
+            </p>
+          )}
+        </section>
+      ) : null}
     </motion.div>
   );
 };
 
 const Stat: React.FC<{ label: string; value: number }> = ({ label, value }) => (
   <div className="rounded-xl border border-surface-800 bg-surface-900/40 px-3 py-2 text-center">
-    <div className="text-2xl font-bold text-surface-50 tabular-nums">
-      {value}
-    </div>
-    <div className="text-[10px] uppercase tracking-wide text-surface-400">
+    <div className="text-2xl font-bold text-surface-50 tabular-nums">{value}</div>
+    <div className="text-[10px] uppercase tracking-wide text-surface-400">{label}</div>
+  </div>
+);
+
+const MiniStat: React.FC<{
+  label: string;
+  value: number;
+  warning?: boolean;
+}> = ({ label, value, warning = false }) => (
+  <div
+    className={cn(
+      "rounded-lg border px-3 py-2",
+      warning
+        ? "border-warning-500/20 bg-warning-500/5"
+        : "border-white/5 bg-white/[0.025]",
+    )}
+  >
+    <div className="text-lg font-bold tabular-nums text-surface-50">{value}</div>
+    <div className="text-[9px] font-semibold uppercase tracking-wide text-surface-500">
       {label}
     </div>
   </div>

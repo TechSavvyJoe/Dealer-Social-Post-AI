@@ -1,12 +1,12 @@
-import React from 'react';
-import { motion, type HTMLMotionProps } from 'framer-motion';
-import { cn } from '../../utils/classNames';
+import React from "react";
+import { motion, type HTMLMotionProps } from "framer-motion";
+import { cn } from "../../utils/classNames";
 
 /**
  * Card component with refined glass morphism and elevation system.
  * Based on Apple's card design with subtle depth and blur effects.
  */
-export interface CardProps extends HTMLMotionProps<'div'> {
+export interface CardProps extends HTMLMotionProps<"div"> {
   /** Enable hover effects for interactive cards */
   interactive?: boolean;
   /** Elevation level (1-5) following Material Design */
@@ -16,45 +16,53 @@ export interface CardProps extends HTMLMotionProps<'div'> {
 }
 
 export const Card = React.forwardRef<HTMLDivElement, CardProps>(
-  ({ className, interactive = false, elevation = 2, solid = false, children, ...props }, ref) => {
+  (
+    {
+      className,
+      interactive = false,
+      elevation = 2,
+      solid = false,
+      children,
+      ...props
+    },
+    ref,
+  ) => {
     return (
       <motion.div
         ref={ref}
         className={cn(
           // Base styles
-          'rounded-2xl overflow-hidden',
-          'transition-all duration-300 ease-apple',
+          "rounded-2xl overflow-hidden",
+          "transition-all duration-300 ease-apple",
 
           // Glass morphism or solid background
-          solid
-            ? 'bg-surface-900 border border-surface-800'
-            : 'glass', // Using the utility class from globals.css
+          solid ? "bg-surface-900 border border-surface-800" : "glass", // Using the utility class from globals.css
 
           // Elevation shadows
-          elevation === 1 && 'shadow-elevation-1',
-          elevation === 2 && 'shadow-elevation-2',
-          elevation === 3 && 'shadow-elevation-3',
-          elevation === 4 && 'shadow-elevation-4',
-          elevation === 5 && 'shadow-elevation-5',
+          elevation === 1 && "shadow-elevation-1",
+          elevation === 2 && "shadow-elevation-2",
+          elevation === 3 && "shadow-elevation-3",
+          elevation === 4 && "shadow-elevation-4",
+          elevation === 5 && "shadow-elevation-5",
 
           // Interactive states
-          interactive && 'card-hover cursor-pointer',
+          interactive && "card-hover cursor-pointer",
 
-          className
+          className,
         )}
         initial={false}
         whileHover={interactive ? { y: -4, scale: 1.01 } : undefined}
         whileTap={interactive ? { scale: 0.99 } : undefined}
-        transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+        transition={{ type: "spring", stiffness: 300, damping: 25 }}
         {...props}
       >
         {children}
       </motion.div>
     );
-  }
+  },
 );
 
-Card.displayName = 'Card';
+Card.displayName = "Card";
 
 /**
  * Card header with bottom border and proper spacing
@@ -69,57 +77,52 @@ export const CardHeader = React.forwardRef<HTMLDivElement, CardHeaderProps>(
     <div
       ref={ref}
       className={cn(
-        'border-b border-white/5',
-        padded ? 'px-6 py-5' : 'px-5 py-4',
-        className
+        "border-b border-white/5",
+        padded ? "px-6 py-5" : "px-5 py-4",
+        className,
       )}
       {...props}
     />
-  )
+  ),
 );
 
-CardHeader.displayName = 'CardHeader';
+CardHeader.displayName = "CardHeader";
 
 /**
  * Card title - semantic heading with proper typography
  */
 export interface CardTitleProps extends React.HTMLAttributes<HTMLHeadingElement> {
   /** Heading level */
-  as?: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
+  as?: "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
 }
 
 export const CardTitle = React.forwardRef<HTMLHeadingElement, CardTitleProps>(
-  ({ className, as: Component = 'h3', ...props }, ref) => (
+  ({ className, as: Component = "h3", ...props }, ref) => (
     <Component
       ref={ref}
-      className={cn(
-        'font-semibold text-lg text-surface-50 tracking-tight',
-        className
-      )}
+      className={cn("font-semibold text-lg text-surface-50 tracking-tight", className)}
       {...props}
     />
-  )
+  ),
 );
 
-CardTitle.displayName = 'CardTitle';
+CardTitle.displayName = "CardTitle";
 
 /**
  * Card description - subtle subtitle text
  */
-export const CardDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
-  ({ className, ...props }, ref) => (
-    <p
-      ref={ref}
-      className={cn(
-        'text-sm text-surface-400 mt-1.5 leading-relaxed',
-        className
-      )}
-      {...props}
-    />
-  )
-);
+export const CardDescription = React.forwardRef<
+  HTMLParagraphElement,
+  React.HTMLAttributes<HTMLParagraphElement>
+>(({ className, ...props }, ref) => (
+  <p
+    ref={ref}
+    className={cn("text-sm text-surface-400 mt-1.5 leading-relaxed", className)}
+    {...props}
+  />
+));
 
-CardDescription.displayName = 'CardDescription';
+CardDescription.displayName = "CardDescription";
 
 /**
  * Card content area with consistent padding
@@ -135,20 +138,13 @@ export const CardContent = React.forwardRef<HTMLDivElement, CardContentProps>(
   ({ className, padded = false, noPadding = false, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn(
-        noPadding
-          ? ''
-          : padded
-          ? 'px-6 py-5'
-          : 'px-5 py-4',
-        className
-      )}
+      className={cn(noPadding ? "" : padded ? "px-6 py-5" : "px-5 py-4", className)}
       {...props}
     />
-  )
+  ),
 );
 
-CardContent.displayName = 'CardContent';
+CardContent.displayName = "CardContent";
 
 /**
  * Card footer with top border and button actions
@@ -163,14 +159,14 @@ export const CardFooter = React.forwardRef<HTMLDivElement, CardFooterProps>(
     <div
       ref={ref}
       className={cn(
-        'border-t border-white/5',
-        'flex items-center gap-3',
-        padded ? 'px-6 py-5' : 'px-5 py-4',
-        className
+        "border-t border-white/5",
+        "flex items-center gap-3",
+        padded ? "px-6 py-5" : "px-5 py-4",
+        className,
       )}
       {...props}
     />
-  )
+  ),
 );
 
-CardFooter.displayName = 'CardFooter';
+CardFooter.displayName = "CardFooter";

@@ -31,9 +31,7 @@ describe("useTouchGestures", () => {
     );
 
     act(() => {
-      result.current.onTouchStart(
-        touchEvent({ x: 120, y: 40, target: surface }),
-      );
+      result.current.onTouchStart(touchEvent({ x: 120, y: 40, target: surface }));
       result.current.onTouchMove(touchEvent({ x: 40, y: 45, target: surface }));
       result.current.onTouchEnd();
     });
@@ -41,12 +39,8 @@ describe("useTouchGestures", () => {
     expect(onSwipeRight).not.toHaveBeenCalled();
 
     act(() => {
-      result.current.onTouchStart(
-        touchEvent({ x: 40, y: 40, target: surface }),
-      );
-      result.current.onTouchMove(
-        touchEvent({ x: 120, y: 44, target: surface }),
-      );
+      result.current.onTouchStart(touchEvent({ x: 40, y: 40, target: surface }));
+      result.current.onTouchMove(touchEvent({ x: 120, y: 44, target: surface }));
       result.current.onTouchEnd();
     });
 
@@ -72,9 +66,7 @@ describe("usePullToRefresh", () => {
   it("uses the latest pull distance when deciding to refresh", async () => {
     const onRefresh = vi.fn(async () => undefined);
     const surface = document.createElement("div");
-    const { result } = renderHook(() =>
-      usePullToRefresh({ onRefresh, threshold: 80 }),
-    );
+    const { result } = renderHook(() => usePullToRefresh({ onRefresh, threshold: 80 }));
 
     act(() => {
       result.current.handlers.onTouchStart(

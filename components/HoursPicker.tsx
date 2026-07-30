@@ -19,6 +19,16 @@ interface HoursPickerProps {
   disabled?: boolean;
 }
 
+const DAY_ACCESSIBLE_LABELS: Record<DayKey, string> = {
+  mon: "Monday",
+  tue: "Tuesday",
+  wed: "Wednesday",
+  thu: "Thursday",
+  fri: "Friday",
+  sat: "Saturday",
+  sun: "Sunday",
+};
+
 export const HoursPicker: React.FC<HoursPickerProps> = ({
   value,
   onChange,
@@ -26,6 +36,7 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
   className,
   disabled = false,
 }) => {
+  const controlIdPrefix = `hours-${React.useId().replace(/:/g, "")}`;
   const selectClass =
     "rounded-lg border border-white/10 bg-surface-950/60 px-2 py-1.5 text-sm text-surface-100 focus:border-primary-400 focus:outline-none disabled:opacity-50";
 
@@ -125,11 +136,11 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
 
               {row.open ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  <label className="sr-only" htmlFor={`hours-open-${day}`}>
-                    {DAY_LABELS[day]} opens
+                  <label className="sr-only" htmlFor={`${controlIdPrefix}-open-${day}`}>
+                    {DAY_ACCESSIBLE_LABELS[day]} opens
                   </label>
                   <select
-                    id={`hours-open-${day}`}
+                    id={`${controlIdPrefix}-open-${day}`}
                     disabled={disabled}
                     className={selectClass}
                     value={timeValue(row.openMinutes)}
@@ -145,11 +156,14 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
                     ))}
                   </select>
                   <span className="text-xs text-surface-500">to</span>
-                  <label className="sr-only" htmlFor={`hours-close-${day}`}>
-                    {DAY_LABELS[day]} closes
+                  <label
+                    className="sr-only"
+                    htmlFor={`${controlIdPrefix}-close-${day}`}
+                  >
+                    {DAY_ACCESSIBLE_LABELS[day]} closes
                   </label>
                   <select
-                    id={`hours-close-${day}`}
+                    id={`${controlIdPrefix}-close-${day}`}
                     disabled={disabled}
                     className={selectClass}
                     value={timeValue(row.closeMinutes)}
@@ -177,8 +191,7 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
 
       {preview ? (
         <p className="text-xs text-surface-400">
-          Preview:{" "}
-          <span className="font-mono text-primary-200/90">{preview}</span>
+          Preview: <span className="font-mono text-primary-200/90">{preview}</span>
         </p>
       ) : null}
     </div>

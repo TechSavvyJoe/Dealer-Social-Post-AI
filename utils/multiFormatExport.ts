@@ -2,8 +2,10 @@
  * Multi-format export for dealership social creatives.
  *
  * Same designed post → platform canvas sizes:
- *  - 1:1     1080×1080  Facebook / Instagram Feed
+ *  - 4:5     1080×1350  Instagram / Facebook portrait feed
+ *  - 1:1     1080×1080  Square feed compatibility
  *  - 9:16    1080×1920  IG Story, Reels, TikTok, Shorts
+ *  - 16:9    1200×675   X / LinkedIn landscape compatibility
  *  - 1.91:1  1200×628   Facebook Marketplace / OG
  *  - 4:3     1200×900   Google Business Profile
  *
@@ -14,8 +16,10 @@
  */
 
 export type ExportFormatId =
+  | "feed_portrait"
   | "feed_square"
   | "story_vertical"
+  | "social_landscape"
   | "marketplace"
   | "gbp";
 
@@ -39,12 +43,28 @@ export const EXPORT_FORMATS: ExportFormat[] = [
     description: "IG Story, Reels, TikTok, YouTube Shorts",
   },
   {
+    id: "feed_portrait",
+    label: "Feed portrait (4:5)",
+    filename: "post-feed-4x5.jpg",
+    width: 1080,
+    height: 1350,
+    description: "Instagram Feed, Facebook Feed",
+  },
+  {
     id: "feed_square",
     label: "Feed (1:1)",
     filename: "post-feed-1x1.jpg",
     width: 1080,
     height: 1080,
     description: "Instagram Feed, Facebook Feed",
+  },
+  {
+    id: "social_landscape",
+    label: "Social landscape (16:9)",
+    filename: "post-social-16x9.jpg",
+    width: 1200,
+    height: 675,
+    description: "X, LinkedIn, landscape social posts",
   },
   {
     id: "marketplace",
@@ -74,6 +94,20 @@ const loadImage = (src: string): Promise<HTMLImageElement> =>
     img.src = src;
   });
 
+const decodedPixelDimensions = (
+  img: HTMLImageElement,
+): { width: number; height: number } => ({
+  width: img.naturalWidth || img.width,
+  height: img.naturalHeight || img.height,
+});
+
+/** Whether a decoded image already has the exact pixels required by a profile. */
+export const imageMatchesExportFormat = (
+  width: number,
+  height: number,
+  format: Pick<ExportFormat, "width" | "height">,
+): boolean => width === format.width && height === format.height;
+
 /** Pure layout helper — contain (letterbox), never cover-crop. */
 export const computeContainRect = (
   srcW: number,
@@ -81,7 +115,7 @@ export const computeContainRect = (
   dstW: number,
   dstH: number,
 ): { drawW: number; drawH: number; dx: number; dy: number; scale: number } => {
-  const scale = Math.min(dstW / srcW, dstH / srcH);
+  const scale = Math.min(dstW / Math.max(srcW, 1), dstH / Math.max(srcH, 1));
   const drawW = Math.round(srcW * scale);
   const drawH = Math.round(srcH * scale);
   const dx = Math.round((dstW - drawW) / 2);
@@ -96,7 +130,7 @@ export const computeCoverRect = (
   dstW: number,
   dstH: number,
 ): { drawW: number; drawH: number; dx: number; dy: number } => {
-  const scale = Math.max(dstW / srcW, dstH / srcH) * 1.12;
+  const scale = Math.max(dstW / Math.max(srcW, 1), dstH / Math.max(srcH, 1)) * 1.12;
   const drawW = Math.round(srcW * scale);
   const drawH = Math.round(srcH * scale);
   const dx = Math.round((dstW - drawW) / 2);
@@ -155,7 +189,8 @@ const drawBlurredCoverBackground = (
   const tctx = tiny.getContext("2d");
   if (!tctx) return;
 
-  const cover = computeCoverRect(img.width, img.height, tinyW, tinyH);
+  const source = decodedPixelDimensions(img);
+  const cover = computeCoverRect(source.width, source.height, tinyW, tinyH);
   tctx.imageSmoothingEnabled = true;
   tctx.imageSmoothingQuality = "low";
   tctx.drawImage(img, cover.dx, cover.dy, cover.drawW, cover.drawH);
@@ -175,12 +210,7 @@ const drawBlurredCoverBackground = (
  * Draw the full creative into the target canvas using contain + soft blur pad.
  * Never crops store text, faces, or vehicle out of the designed post.
  */
-export const renderFormat = async (
-  sourceDataUrl: string,
-  format: ExportFormat,
-): Promise<string> => {
-  const img = await loadImage(sourceDataUrl);
-
+const renderLoadedFormat = (img: HTMLImageElement, format: ExportFormat): string => {
   const canvas = document.createElement("canvas");
   canvas.width = format.width;
   canvas.height = format.height;
@@ -188,9 +218,10 @@ export const renderFormat = async (
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas 2D context unavailable");
 
+  const source = decodedPixelDimensions(img);
   const { drawW, drawH, dx, dy } = computeContainRect(
-    img.width,
-    img.height,
+    source.width,
+    source.height,
     format.width,
     format.height,
   );
@@ -233,8 +264,33 @@ export const renderFormat = async (
   return canvas.toDataURL("image/jpeg", 0.94);
 };
 
+export const renderFormat = async (
+  sourceDataUrl: string,
+  format: ExportFormat,
+): Promise<string> => renderLoadedFormat(await loadImage(sourceDataUrl), format);
+
 /**
- * Renders all four formats in parallel and returns them keyed by id.
+ * Preserve only an exact JPEG source. Platform output profiles promise a JPEG
+ * file, so exact-size PNG/WebP/HEIC sources still need a deterministic encode.
+ * Legacy and mismatched media use the normal premium contain render.
+ */
+export const renderFormatIfNeeded = async (
+  sourceDataUrl: string,
+  format: ExportFormat,
+): Promise<string> => {
+  const img = await loadImage(sourceDataUrl);
+  const source = decodedPixelDimensions(img);
+  if (
+    imageMatchesExportFormat(source.width, source.height, format) &&
+    /^data:image\/jpe?g(?:;|,)/i.test(sourceDataUrl)
+  ) {
+    return sourceDataUrl;
+  }
+  return renderLoadedFormat(img, format);
+};
+
+/**
+ * Renders every configured format in parallel and returns them keyed by id.
  */
 export const renderAllFormats = async (
   sourceDataUrl: string,
@@ -245,6 +301,19 @@ export const renderAllFormats = async (
     ),
   );
   return Object.fromEntries(entries) as Record<ExportFormatId, string>;
+};
+
+/** Resolve a de-duplicated, validated export-format selection. */
+export const resolveExportFormats = (formatIds?: ExportFormatId[]): ExportFormat[] => {
+  if (!formatIds?.length) return [...EXPORT_FORMATS];
+  const seen = new Set<ExportFormatId>();
+  return formatIds
+    .map((id) => EXPORT_FORMATS.find((format) => format.id === id))
+    .filter((format): format is ExportFormat => {
+      if (!format || seen.has(format.id)) return false;
+      seen.add(format.id);
+      return true;
+    });
 };
 
 const triggerDownload = (dataUrl: string, filename: string): void => {
@@ -259,22 +328,20 @@ const triggerDownload = (dataUrl: string, filename: string): void => {
 /**
  * Downloads formats. Browsers throttle multiple downloads from a single user
  * gesture, so we space them out 250ms apart.
- * @param formatIds optional subset; defaults to all four export sizes
+ * @param formatIds optional subset; defaults to every configured export size
  */
 export const downloadAllFormats = async (
   sourceDataUrl: string,
   formatIds?: ExportFormatId[],
 ): Promise<void> => {
-  const rendered = await renderAllFormats(sourceDataUrl);
-  const formats =
-    formatIds && formatIds.length > 0
-      ? formatIds
-          .map((id) => EXPORT_FORMATS.find((f) => f.id === id))
-          .filter((f): f is ExportFormat => Boolean(f))
-      : EXPORT_FORMATS;
+  const formats = resolveExportFormats(formatIds);
   for (let i = 0; i < formats.length; i++) {
     const fmt = formats[i];
-    triggerDownload(rendered[fmt.id], fmt.filename);
+    // Render only the requested variants and release each large canvas result
+    // before moving on. Four parallel 1080p data URLs can otherwise exhaust a
+    // mobile Safari tab.
+    const rendered = await renderFormat(sourceDataUrl, fmt);
+    triggerDownload(rendered, fmt.filename);
     if (i < formats.length - 1) {
       await new Promise((r) => setTimeout(r, 250));
     }

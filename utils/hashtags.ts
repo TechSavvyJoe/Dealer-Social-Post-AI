@@ -152,10 +152,7 @@ export const normalizeCaptionHashtags = (text: string): string => {
  * Fit a caption into a platform character budget without mid-hashtag cuts.
  * Prefers dropping trailing hashtags first, then soft-trims the body.
  */
-export const fitCaptionToBudget = (
-  text: string,
-  maxChars: number,
-): string => {
+export const fitCaptionToBudget = (text: string, maxChars: number): string => {
   const normalized = normalizeCaptionHashtags(text ?? "").trim();
   if (!normalized || maxChars <= 0) return normalized;
   if (normalized.length <= maxChars) return normalized;
@@ -265,9 +262,7 @@ export const splitCaptionBodyAndTags = (
 
   const lastLine = lines[lastIdx].trim();
   const tagMatches = lastLine.match(/#[A-Za-z0-9_]+/g) || [];
-  const withoutTags = lastLine
-    .replace(/#[A-Za-z0-9_]+/g, "")
-    .replace(/\s+/g, "");
+  const withoutTags = lastLine.replace(/#[A-Za-z0-9_]+/g, "").replace(/\s+/g, "");
 
   // Pure (or nearly pure) hashtag line
   if (tagMatches.length >= 1 && withoutTags.length <= 2) {
@@ -295,10 +290,7 @@ export const splitCaptionBodyAndTags = (
 };
 
 /** Reassemble body + hashtag chips into a paste-ready caption. */
-export const joinCaptionBodyAndTags = (
-  body: string,
-  tags: string[],
-): string => {
+export const joinCaptionBodyAndTags = (body: string, tags: string[]): string => {
   const cleanBody = (body ?? "").replace(/\s+$/g, "");
   const unique = uniqueFormattedHashtags(tags);
   if (unique.length === 0) return cleanBody.trimEnd();

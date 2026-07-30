@@ -27,18 +27,22 @@ describe("proxied Gemini client", () => {
     });
 
     const response = await getGeminiClient().models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-3.6-flash",
+      task: "caption",
       contents: { parts: [{ text: "Write a caption" }] },
-      generationConfig: { maxOutputTokens: 600 },
+      generationConfig: { maxOutputTokens: 2048 },
     });
 
     expect(fetchFromProxy).toHaveBeenCalledWith(
       "POST",
-      "v1beta/models/gemini-3.5-flash:generateContent",
+      "v1beta/models/gemini-3.6-flash:generateContent",
       {
         contents: [{ parts: [{ text: "Write a caption" }] }],
-        generationConfig: { maxOutputTokens: 600 },
+        generationConfig: { maxOutputTokens: 2048 },
       },
+      "caption",
+      undefined,
+      undefined,
     );
     expect(response.text()).toBe("First second");
   });
@@ -51,14 +55,18 @@ describe("proxied Gemini client", () => {
     ];
 
     await getGeminiClient().models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-3.6-flash",
+      task: "caption_regenerate",
       contents,
     });
 
     expect(fetchFromProxy).toHaveBeenCalledWith(
       "POST",
-      "v1beta/models/gemini-3.5-flash:generateContent",
+      "v1beta/models/gemini-3.6-flash:generateContent",
       { contents },
+      "caption_regenerate",
+      undefined,
+      undefined,
     );
   });
 
@@ -66,6 +74,7 @@ describe("proxied Gemini client", () => {
     await expect(
       getGeminiClient().models.generateContent({
         model: "../unexpected/path",
+        task: "caption",
         contents: { parts: [{ text: "test" }] },
       }),
     ).rejects.toThrow("model identifier is invalid");
@@ -76,7 +85,8 @@ describe("proxied Gemini client", () => {
   it("rejects missing contents before contacting the proxy", async () => {
     await expect(
       getGeminiClient().models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-3.6-flash",
+        task: "caption",
         contents: null,
       }),
     ).rejects.toThrow("contents are required");

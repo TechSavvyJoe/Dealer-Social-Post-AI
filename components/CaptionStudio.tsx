@@ -18,6 +18,8 @@ export interface CaptionStudioProps {
   platformId?: string | null;
   /** Compliance / a11y linkage when claims are blocked. */
   claimLocked?: boolean;
+  /** Keeps the editor within the desktop publishing workspace's first viewport. */
+  compact?: boolean;
   className?: string;
 }
 
@@ -31,6 +33,7 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
   disabled = false,
   platformId = null,
   claimLocked = false,
+  compact = false,
   className,
 }) => {
   const [body, setBody] = useState("");
@@ -118,11 +121,11 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
   }, [budget, tagCount]);
 
   return (
-    <div className={cn("space-y-3", className)}>
+    <div className={cn(compact ? "space-y-2" : "space-y-3", className)}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2 text-[11px] text-surface-400">
           <span className="font-semibold text-surface-200">{platformLabel}</span>
-          <span className="font-mono tabular-nums text-surface-500">
+          <span className="font-mono tabular-nums text-surface-400">
             {totalChars} chars
           </span>
           {budget && (
@@ -183,7 +186,9 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
           disabled={disabled}
           placeholder="Your social post appears here automatically…"
           className={cn(
-            "min-h-[12rem] h-56 w-full lg:h-72 lg:max-h-[28rem]",
+            compact
+              ? "h-36 min-h-[8rem] w-full lg:h-40 lg:max-h-[18rem]"
+              : "h-56 min-h-[12rem] w-full lg:h-72 lg:max-h-[28rem]",
             "bg-surface-800/50 text-surface-100 p-4 rounded-xl text-base",
             "resize-y border-2 border-transparent leading-relaxed",
             "focus:border-primary-400 focus:ring-2 focus:ring-primary-400",
@@ -211,15 +216,15 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
               id="caption-body-editor"
               aria-label="Caption body without hashtags"
               aria-invalid={claimLocked || undefined}
-              aria-describedby={
-                claimLocked ? "caption-compliance-alert" : undefined
-              }
+              aria-describedby={claimLocked ? "caption-compliance-alert" : undefined}
               value={body}
               onChange={(e) => handleBodyChange(e.target.value)}
               disabled={disabled}
               placeholder="Post body…"
               className={cn(
-                "h-36 w-full lg:h-44 lg:max-h-[20rem]",
+                compact
+                  ? "h-28 w-full lg:h-32 lg:max-h-[15rem]"
+                  : "h-36 w-full lg:h-44 lg:max-h-[20rem]",
                 "bg-surface-800/50 text-surface-100 p-4 rounded-xl text-base",
                 "resize-y border-2 border-transparent leading-relaxed",
                 "focus:border-primary-400 focus:ring-2 focus:ring-primary-400",
@@ -278,8 +283,8 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
               </ul>
             ) : (
               <p className="text-[11px] text-surface-500">
-                Hashtags appear automatically with each AI caption. Add more only
-                if you want a custom tag.
+                Hashtags appear automatically with each AI caption. Add more only if you
+                want a custom tag.
               </p>
             )}
 
@@ -320,8 +325,8 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
               </button>
             </div>
             <p className="text-[10px] leading-relaxed text-surface-500">
-              AI ships 4–5 discovery tags plus your store brand tag. Optional:
-              type a phrase and press Enter to add. Tap a chip to remove.
+              AI ships 4–5 discovery tags plus your store brand tag. Optional: type a
+              phrase and press Enter to add. Tap a chip to remove.
             </p>
           </div>
         </>

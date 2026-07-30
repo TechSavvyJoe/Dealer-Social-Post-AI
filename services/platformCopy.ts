@@ -4,6 +4,7 @@
  */
 import { PUBLISH_TARGETS, type PublishTarget } from "./publishTargets";
 import type { ExportFormatId } from "../utils/multiFormatExport";
+import type { ImageAspectRatio, PrimaryImageFormatId } from "../types";
 
 export type PlatformId = string;
 
@@ -18,16 +19,90 @@ export interface PlatformOption {
   verticalPreferred: boolean;
 }
 
+export interface PrimaryImageProfile {
+  primaryFormatId: PrimaryImageFormatId;
+  imageAspectRatio: ImageAspectRatio;
+  label: string;
+}
+
+const PRIMARY_IMAGE_PROFILES: Record<
+  PrimaryImageFormatId,
+  Omit<PrimaryImageProfile, "primaryFormatId">
+> = {
+  feed_portrait: {
+    imageAspectRatio: "4:5",
+    label: "Feed portrait · 4:5",
+  },
+  story_vertical: {
+    imageAspectRatio: "9:16",
+    label: "Story / Reel · 9:16",
+  },
+  feed_square: {
+    imageAspectRatio: "1:1",
+    label: "Social Feed · 1:1",
+  },
+  marketplace: {
+    // Gemini does not offer the exact 1.91:1 Marketplace ratio. Generate the
+    // closest native landscape canvas, then use the lossless export adapter.
+    imageAspectRatio: "16:9",
+    label: "Marketplace · 16:9 master",
+  },
+  gbp: {
+    imageAspectRatio: "4:3",
+    label: "Google Business · 4:3",
+  },
+};
+
+export const getPrimaryImageProfile = (
+  primaryFormatId: PrimaryImageFormatId,
+): PrimaryImageProfile => ({
+  primaryFormatId,
+  ...PRIMARY_IMAGE_PROFILES[primaryFormatId],
+});
+
+/**
+ * Resolve one deterministic native generation canvas from a destination mix.
+ *
+ * Vertical destinations lead because Stories/Reels/TikTok cannot recover
+ * useful portrait composition from a square or landscape master. When no
+ * vertical destination is selected, a 4:5 portrait feed leads mixed sets;
+ * GBP and Marketplace retain their native profile when selected alone.
+ */
+export const resolvePrimaryImageProfile = (
+  platformIds: PlatformId[] | undefined | null,
+): PrimaryImageProfile => {
+  const formats = resolvePlatformOptions(platformIds ?? []).map(
+    (option) => option.format,
+  );
+  if (formats.includes("story_vertical")) {
+    return getPrimaryImageProfile("story_vertical");
+  }
+  if (formats.includes("feed_portrait")) {
+    return getPrimaryImageProfile("feed_portrait");
+  }
+  if (formats.includes("feed_square")) {
+    return getPrimaryImageProfile("feed_square");
+  }
+  if (formats.includes("gbp")) {
+    return getPrimaryImageProfile("gbp");
+  }
+  if (formats.includes("marketplace")) {
+    return getPrimaryImageProfile("marketplace");
+  }
+  return getPrimaryImageProfile("story_vertical");
+};
+
 const SHORT: Record<string, string> = {
   facebook_feed: "Facebook",
   instagram_feed: "IG Feed",
+  instagram_reel: "IG Reel",
   instagram_story: "IG Story",
   tiktok: "TikTok",
   gbp: "Google",
   x_twitter: "X",
   linkedin: "LinkedIn",
   marketplace: "Marketplace",
-  native_share: "More",
+  native_share: "Device share",
 };
 
 /** Curated subset for the generate screen — keep it phone-thumb friendly. */
@@ -47,14 +122,22 @@ const toPlatformOption = (t: PublishTarget): PlatformOption => ({
   format: t.format,
   charBudget: t.charBudget,
   verticalPreferred:
-    t.format === "story_vertical" ||
-    t.id === "tiktok" ||
-    t.id === "instagram_story",
+    t.format === "story_vertical" || t.id === "tiktok" || t.id === "instagram_story",
 });
 
 export const getPlatformOptions = (): PlatformOption[] => {
   return PUBLISH_TARGETS.filter((t) =>
     (PRIMARY_PLATFORM_IDS as readonly string[]).includes(t.id),
+  ).map(toPlatformOption);
+};
+
+/**
+ * Secondary destinations stay collapsed in the editor, but are sourced from
+ * the same canonical publish registry as the share dialog and delivery board.
+ */
+export const getSecondaryPlatformOptions = (): PlatformOption[] => {
+  return PUBLISH_TARGETS.filter(
+    (target) => !(PRIMARY_PLATFORM_IDS as readonly string[]).includes(target.id),
   ).map(toPlatformOption);
 };
 
@@ -66,9 +149,7 @@ export const resolvePlatformOption = (
   return target ? toPlatformOption(target) : undefined;
 };
 
-export const resolvePlatformOptions = (
-  platformIds: PlatformId[],
-): PlatformOption[] => {
+export const resolvePlatformOptions = (platformIds: PlatformId[]): PlatformOption[] => {
   return platformIds
     .map(resolvePlatformOption)
     .filter((p): p is PlatformOption => Boolean(p));
@@ -143,7 +224,8 @@ export const platformCopyGuidance = (platformId: PlatformId): string => {
       return `Marketplace listing tone: clear vehicle/value pitch, store name, contact CTA. Prefer keywords in body over hashtags (0–1). ${tagFmt}`;
     default: {
       const opt = resolvePlatformOption(platformId);
-      if (!opt) return `Platform ${platformId}: stay on-brand and under typical social length. ${tagFmt}`;
+      if (!opt)
+        return `Platform ${platformId}: stay on-brand and under typical social length. ${tagFmt}`;
       return `${opt.label}: respect ≤${Math.min(opt.charBudget, 400)} chars for the hook; name the store. ${tagFmt}`;
     }
   }

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { cn } from "../../utils/classNames";
@@ -34,6 +34,7 @@ export const Modal: React.FC<ModalProps> = ({
   const previouslyFocused = useRef<HTMLElement | null>(null);
   const titleId = React.useId();
   const descriptionId = React.useId();
+  const shouldReduceMotion = useReducedMotion();
 
   // Prevent body scroll when modal is open
   useEffect(() => {
@@ -108,13 +109,13 @@ export const Modal: React.FC<ModalProps> = ({
   return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center sm:p-4">
+        <div className="modal-viewport fixed inset-0 z-[100] flex items-end justify-center sm:items-center">
           {/* Backdrop */}
           <motion.div
-            initial={{ opacity: 0 }}
+            initial={shouldReduceMotion ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.2 }}
             className="absolute inset-0 bg-surface-950/80 backdrop-blur-sm"
             onClick={onClose}
             aria-hidden="true"
@@ -129,10 +130,14 @@ export const Modal: React.FC<ModalProps> = ({
             aria-label={title ? undefined : "Dialog"}
             aria-describedby={description ? descriptionId : undefined}
             tabIndex={-1}
-            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={{ type: "spring", duration: 0.4, bounce: 0 }}
+            transition={
+              shouldReduceMotion
+                ? { duration: 0 }
+                : { type: "spring", duration: 0.4, bounce: 0 }
+            }
             className={cn(
               "relative w-full bg-surface-900 border border-white/10 shadow-2xl overflow-hidden flex flex-col",
               "rounded-t-2xl sm:rounded-2xl", // Sheet-like on mobile
@@ -184,13 +189,18 @@ export const Modal: React.FC<ModalProps> = ({
             )}
 
             {/* Body */}
-            <div className="p-6 overflow-y-auto custom-scrollbar relative">
+            <div
+              className={cn(
+                "relative overflow-y-auto px-4 py-4 custom-scrollbar sm:p-6",
+                !footer && "pb-[max(1rem,var(--sab))]",
+              )}
+            >
               {children}
             </div>
 
             {/* Footer */}
             {footer && (
-              <div className="px-6 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-surface-950/30 border-t border-white/5 flex justify-end gap-3 rounded-b-2xl">
+              <div className="flex flex-wrap justify-end gap-2 rounded-b-2xl border-t border-white/5 bg-surface-950/30 px-4 pt-3 pb-[max(1rem,var(--sab))] sm:gap-3 sm:px-6 sm:pt-4">
                 {footer}
               </div>
             )}

@@ -46,9 +46,7 @@ const parseHashtagList = (raw?: string): string[] => {
   );
 };
 
-const splitBodyAndTags = (
-  caption: string,
-): { body: string; tags: string[] } => {
+const splitBodyAndTags = (caption: string): { body: string; tags: string[] } => {
   const normalized = normalizeCaptionHashtags(caption).trim();
   if (!normalized) return { body: "", tags: [] };
 
@@ -94,10 +92,7 @@ const splitBodyAndTags = (
  * If the model returned a stub, append a warm agency CTA that names the store.
  * Does not invent vehicle facts — only store-visit invitation language.
  */
-const ensureMarketingBodyFloor = (
-  body: string,
-  storeName?: string,
-): string => {
+const ensureMarketingBodyFloor = (body: string, storeName?: string): string => {
   const trimmed = (body ?? "").trim();
   const proseLen = trimmed.replace(/\s+/g, " ").length;
   if (proseLen >= MIN_MARKETING_BODY_CHARS) return trimmed;

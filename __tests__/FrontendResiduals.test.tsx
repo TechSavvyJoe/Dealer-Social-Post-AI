@@ -58,11 +58,7 @@ const PickerHarness: React.FC<{ dealerId: string }> = ({ dealerId }) => {
   });
   return (
     <>
-      <SalespersonPicker
-        dealerId={dealerId}
-        value={value}
-        onChange={setValue}
-      />
+      <SalespersonPicker dealerId={dealerId} value={value} onChange={setValue} />
       <output data-testid="picker-value">{JSON.stringify(value)}</output>
     </>
   );
@@ -130,9 +126,7 @@ describe("final frontend residuals", () => {
     });
     expect(trigger).toHaveTextContent("Pick yourself");
     await waitFor(() =>
-      expect(
-        localStorage.getItem(salespersonStorageKey("dealer-b")),
-      ).toBeNull(),
+      expect(localStorage.getItem(salespersonStorageKey("dealer-b"))).toBeNull(),
     );
     await user.click(trigger);
     const option = screen.getByRole("option", { name: /Bob B\./i });
@@ -162,10 +156,32 @@ describe("final frontend residuals", () => {
     await user.click(screen.getByRole("button", { name: "Keep working" }));
     expect(onLogout).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Log out" }));
-    await user.click(
-      await screen.findByRole("button", { name: "Log out anyway" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Log out anyway" }));
     expect(onLogout).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses truthful neutral studio chrome and the signed-in posting identity", () => {
+    render(
+      <Header
+        dealer={{ id: "dealer-b", name: "Northstar Motors" }}
+        person={{
+          id: "person-b",
+          dealer: "dealer-b",
+          name: "Jamie Rivera",
+          role: "salesperson",
+          active: true,
+        }}
+        onLogout={vi.fn()}
+        onShowSettings={vi.fn()}
+        studioMode
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Publish studio" }),
+    ).toBeVisible();
+    expect(screen.queryByText("Ready to publish")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Posting as Jamie Rivera")).toBeVisible();
   });
 
   it("defers every page-level shortcut while an aria-modal dialog is open", async () => {

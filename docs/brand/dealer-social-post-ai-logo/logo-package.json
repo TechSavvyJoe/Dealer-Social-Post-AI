@@ -1,0 +1,27 @@
+{
+  "brand_name": "Dealer Social Post AI",
+  "canonical_wordmark": "Dealer Social Post AI",
+  "artwork_status": "production-candidate",
+  "editable_wordmark_source": "source/dealer-social-post-ai-editable-wordmark.svg",
+  "selected_territory": "Key Moment Post",
+  "font": {
+    "family": "Inter",
+    "weight": 800,
+    "package": "@fontsource/inter",
+    "license": "OFL-1.1"
+  },
+  "variants": [
+    { "role": "horizontal", "path": "master/horizontal.svg" },
+    { "role": "stacked", "path": "master/stacked.svg" },
+    { "role": "symbol", "path": "master/symbol.svg" },
+    { "role": "micro", "path": "master/micro.svg" },
+    { "role": "black", "path": "monochrome/black.svg" },
+    { "role": "reverse", "path": "monochrome/white.svg" }
+  ],
+  "approval_gates": [
+    "client symbol approval",
+    "name and trademark clearance",
+    "verified outlined wordmark",
+    "outlined versus live-text render comparison"
+  ]
+}

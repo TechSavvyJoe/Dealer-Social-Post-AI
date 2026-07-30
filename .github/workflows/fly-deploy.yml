@@ -9,45 +9,362 @@ permissions:
   contents: read
 
 concurrency:
-  group: production-fly
+  group: production-release-and-backup
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Deploy verified backend
+  backup-gate:
+    name: Verify pre-release off-box recovery
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production-backup
+    outputs:
+      restore_verified_at: ${{ steps.restore-evidence.outputs.verified_at }}
+      candidate_image_ref: ${{ steps.restore-evidence.outputs.image_ref }}
+      candidate_image_digest: ${{ steps.restore-evidence.outputs.image_digest }}
+      turnstile_site_key_sha256: ${{ steps.restore-evidence.outputs.turnstile_site_key_sha256 }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master 2026-07-15
+        with:
+          version: 0.4.71
+
+      - name: Refuse a superseded main release
+        env:
+          CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          current_main="$(git ls-remote --exit-code origin refs/heads/main | awk 'NR == 1 { print $1 }')"
+          if [ "$current_main" != "$CANDIDATE_SHA" ]; then
+            echo "Production release blocked: this CI result is no longer the current main commit." >&2
+            exit 1
+          fi
+
+      - name: Require the production backup gate
+        env:
+          BACKUPS_ENABLED: ${{ vars.POCKETBASE_R2_BACKUPS_ENABLED }}
+        run: |
+          if [ "$BACKUPS_ENABLED" != "true" ]; then
+            echo "Production deploy blocked: configure and enable the private R2 backup gate first." >&2
+            exit 1
+          fi
+
+      - name: Identify the exact running production source
+        id: source-release
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_BACKUP_APP: dealer-social-post-ai-production
+          POCKETBASE_EXPECTED_ORIGIN: https://dealer-social-post-ai-production.fly.dev
+          EXPECTED_GITHUB_REPOSITORY: ${{ github.repository }}
+          ALLOW_FLY_IMAGE_IDENTITY_BOOTSTRAP: ${{ vars.ALLOW_FLY_IMAGE_IDENTITY_BOOTSTRAP }}
+          FLY_IMAGE_IDENTITY_BOOTSTRAP_EXPIRES_AT: ${{ vars.FLY_IMAGE_IDENTITY_BOOTSTRAP_EXPIRES_AT }}
+        run: |
+          node scripts/resolve-fly-backup-source.mjs | tee /tmp/source-identity.json
+          node -e '
+            const fs = require("node:fs");
+            const payload = JSON.parse(fs.readFileSync("/tmp/source-identity.json", "utf8"));
+            const output = process.env.GITHUB_OUTPUT;
+            fs.appendFileSync(output, `sha=${payload.releaseSha}\n`);
+            fs.appendFileSync(output, `identity=${payload.sourceIdentity}\n`);
+            fs.appendFileSync(output, `digest=${payload.sourceImageDigest}\n`);
+            fs.appendFileSync(output, `bootstrap_verified=${payload.bootstrapIdentityVerified}\n`);
+          '
+
+      - name: Create the pre-release full backup in private R2
+        id: backup
+        env:
+          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+          POCKETBASE_BACKUP_URL: ${{ vars.POCKETBASE_BACKUP_URL }}
+          POCKETBASE_EXPECTED_ORIGIN: https://dealer-social-post-ai-production.fly.dev
+          POCKETBASE_EXPECTED_RELEASE_SHA: ${{ steps.source-release.outputs.sha }}
+          POCKETBASE_TARGET_RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          POCKETBASE_SOURCE_IDENTITY: ${{ steps.source-release.outputs.identity }}
+          POCKETBASE_SOURCE_IMAGE_DIGEST: ${{ steps.source-release.outputs.digest }}
+          POCKETBASE_BOOTSTRAP_IDENTITY_VERIFIED: ${{ steps.source-release.outputs.bootstrap_verified }}
+          POCKETBASE_ADMIN_EMAIL: ${{ secrets.POCKETBASE_ADMIN_EMAIL }}
+          POCKETBASE_ADMIN_PASSWORD: ${{ secrets.POCKETBASE_ADMIN_PASSWORD }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BACKUP_PREFIX: ${{ vars.R2_BACKUP_PREFIX }}
+        run: |
+          node scripts/pocketbase-r2-backup.mjs backup | tee /tmp/backup-result.json
+          backup_key="$(node -e '
+            const fs = require("node:fs");
+            const payload = JSON.parse(fs.readFileSync("/tmp/backup-result.json", "utf8"));
+            process.stdout.write(String(payload.key || ""));
+          ')"
+          if [ -z "$backup_key" ]; then
+            echo "Backup tooling did not return an immutable R2 object key." >&2
+            exit 1
+          fi
+          echo "key=$backup_key" >> "$GITHUB_OUTPUT"
+
+      - name: Download the exact archive and verify its manifest
+        env:
+          POCKETBASE_EXPECTED_ORIGIN: https://dealer-social-post-ai-production.fly.dev
+          POCKETBASE_EXPECTED_RELEASE_SHA: ${{ steps.source-release.outputs.sha }}
+          POCKETBASE_TARGET_RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          POCKETBASE_SOURCE_IDENTITY: ${{ steps.source-release.outputs.identity }}
+          POCKETBASE_SOURCE_IMAGE_DIGEST: ${{ steps.source-release.outputs.digest }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BACKUP_PREFIX: ${{ vars.R2_BACKUP_PREFIX }}
+        run: >-
+          node scripts/pocketbase-r2-backup.mjs download
+          --key "${{ steps.backup.outputs.key }}"
+          --output /tmp/pre-release-pocketbase.zip
+
+      - name: Reconfirm the production source after backup
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_BACKUP_APP: dealer-social-post-ai-production
+          POCKETBASE_EXPECTED_ORIGIN: https://dealer-social-post-ai-production.fly.dev
+          EXPECTED_GITHUB_REPOSITORY: ${{ github.repository }}
+          ALLOW_FLY_IMAGE_IDENTITY_BOOTSTRAP: ${{ vars.ALLOW_FLY_IMAGE_IDENTITY_BOOTSTRAP }}
+          FLY_IMAGE_IDENTITY_BOOTSTRAP_EXPIRES_AT: ${{ vars.FLY_IMAGE_IDENTITY_BOOTSTRAP_EXPIRES_AT }}
+          EXPECTED_SOURCE_SHA: ${{ steps.source-release.outputs.sha }}
+          EXPECTED_SOURCE_IDENTITY: ${{ steps.source-release.outputs.identity }}
+          EXPECTED_SOURCE_DIGEST: ${{ steps.source-release.outputs.digest }}
+        run: |
+          node scripts/resolve-fly-backup-source.mjs > /tmp/source-identity-after-backup.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const source = JSON.parse(
+            fs.readFileSync("/tmp/source-identity-after-backup.json", "utf8"),
+          );
+          if (
+            source.releaseSha !== process.env.EXPECTED_SOURCE_SHA ||
+            source.sourceIdentity !== process.env.EXPECTED_SOURCE_IDENTITY ||
+            source.sourceImageDigest !== process.env.EXPECTED_SOURCE_DIGEST
+          ) {
+            console.error("Production source identity changed while its backup was created.");
+            process.exit(1);
+          }
+          NODE
+
+      - name: Build, publish, and restore-test one immutable candidate image
+        id: restore-evidence
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY }}
+        run: |
+          case "$TURNSTILE_SITE_KEY" in
+            1x00000000000000000000AA|2x00000000000000000000AB|1x00000000000000000000BB|2x00000000000000000000BB|3x00000000000000000000FF)
+              echo "Production candidate build blocked: Cloudflare test sitekeys are CI-only." >&2
+              exit 1
+              ;;
+          esac
+          if ! printf '%s' "$TURNSTILE_SITE_KEY" | grep --quiet --extended-regexp '^[A-Za-z0-9_-]{20,}$'; then
+            echo "Production candidate build blocked: configure VITE_TURNSTILE_SITE_KEY in production-backup." >&2
+            exit 1
+          fi
+
+          image_tag="registry.fly.io/dealer-social-post-ai-production:candidate-${RELEASE_SHA}"
+          flyctl auth docker
+          docker build \
+            --build-arg VITE_TURNSTILE_SITE_KEY="$TURNSTILE_SITE_KEY" \
+            --build-arg VITE_RELEASE_SHA="$RELEASE_SHA" \
+            --label "GH_REPO=${GITHUB_REPOSITORY}" \
+            --label "GH_SHA=${RELEASE_SHA}" \
+            --label "org.opencontainers.image.revision=${RELEASE_SHA}" \
+            --tag "$image_tag" .
+          docker push "$image_tag" 2>&1 | tee /tmp/candidate-image-push.txt
+          image_digest="$(sed -n 's/^.*digest: \(sha256:[0-9a-f]\{64\}\).*$/\1/p' /tmp/candidate-image-push.txt | tail -1)"
+          if ! printf '%s' "$image_digest" | grep --quiet --extended-regexp '^sha256:[0-9a-f]{64}$'; then
+            echo "Candidate image push did not return an immutable registry digest." >&2
+            exit 1
+          fi
+          image_ref="registry.fly.io/dealer-social-post-ai-production@${image_digest}"
+          docker pull "$image_ref"
+
+          verified_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          RESTORE_RELEASE_SHA="$RELEASE_SHA" RESTORE_VERIFIED_AT="$verified_at" \
+            bash scripts/verify-pocketbase-restore.sh /tmp/pre-release-pocketbase.zip "$image_ref"
+          site_key_sha256="$(printf '%s' "$TURNSTILE_SITE_KEY" | sha256sum | awk '{ print $1 }')"
+          echo "verified_at=$verified_at" >> "$GITHUB_OUTPUT"
+          echo "image_ref=$image_ref" >> "$GITHUB_OUTPUT"
+          echo "image_digest=$image_digest" >> "$GITHUB_OUTPUT"
+          echo "turnstile_site_key_sha256=$site_key_sha256" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy verified backend
+    needs: backup-gate
+    if: needs.backup-gate.result == 'success'
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
       - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master 2026-07-15
+        with:
+          version: 0.4.71
 
-      - name: Deploy backend
-        run: flyctl deploy --remote-only --wait-timeout 10m
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+
+      - name: Refuse a superseded main release
+        env:
+          CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          current_main="$(git ls-remote --exit-code origin refs/heads/main | awk 'NR == 1 { print $1 }')"
+          if [ "$current_main" != "$CANDIDATE_SHA" ]; then
+            echo "Production release blocked: a newer main commit exists." >&2
+            exit 1
+          fi
+
+      - name: Require server-only runtime credentials
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl secrets list --app dealer-social-post-ai-production --json \
+            > /tmp/fly-secret-names.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const secrets = JSON.parse(fs.readFileSync("/tmp/fly-secret-names.json", "utf8"));
+          const names = new Set(
+            (Array.isArray(secrets) ? secrets : []).map((entry) =>
+              String(entry.Name || entry.name || ""),
+            ),
+          );
+          const required = [
+            "ADMIN_DEALER_CODE",
+            "GEMINI_API_KEY",
+            "TURNSTILE_SECRET",
+            "VERCEL_TO_FLY_PROXY_SECRET",
+          ];
+          const missing = required.filter((name) => !names.has(name));
+          if (missing.length) {
+            console.error(
+              `Production deploy blocked: missing Fly runtime secret names: ${missing.join(", ")}`,
+            );
+            process.exit(1);
+          }
+          NODE
+
+      - name: Deploy backend
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RESTORE_VERIFIED_AT: ${{ needs.backup-gate.outputs.restore_verified_at }}
+          CANDIDATE_IMAGE_REF: ${{ needs.backup-gate.outputs.candidate_image_ref }}
+          CANDIDATE_IMAGE_DIGEST: ${{ needs.backup-gate.outputs.candidate_image_digest }}
+          EXPECTED_SITE_KEY_SHA256: ${{ needs.backup-gate.outputs.turnstile_site_key_sha256 }}
+          TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY }}
+          TURNSTILE_HOSTNAMES: ${{ vars.TURNSTILE_ALLOWED_HOSTNAMES }}
+          TURNSTILE_ENFORCEMENT: ${{ vars.TURNSTILE_ENFORCEMENT_ENABLED || 'false' }}
+          LEGACY_CLIENT_COMPATIBILITY: ${{ vars.LEGACY_CLIENT_COMPATIBILITY_ENABLED }}
+        run: |
+          if ! printf '%s' "$TURNSTILE_SITE_KEY" | grep --quiet --extended-regexp '^[A-Za-z0-9_-]{20,}$'; then
+            echo "Production deploy blocked: configure VITE_TURNSTILE_SITE_KEY in the production environment." >&2
+            exit 1
+          fi
+          case "$TURNSTILE_SITE_KEY" in
+            1x00000000000000000000AA|2x00000000000000000000AB|1x00000000000000000000BB|2x00000000000000000000BB|3x00000000000000000000FF)
+              echo "Production deploy blocked: Cloudflare test sitekeys are CI-only." >&2
+              exit 1
+              ;;
+          esac
+          actual_site_key_sha256="$(printf '%s' "$TURNSTILE_SITE_KEY" | sha256sum | awk '{ print $1 }')"
+          if [ "$actual_site_key_sha256" != "$EXPECTED_SITE_KEY_SHA256" ]; then
+            echo "Production deploy blocked: production and production-backup Turnstile sitekeys differ." >&2
+            exit 1
+          fi
+          if ! printf '%s' "$CANDIDATE_IMAGE_REF" | grep --quiet --extended-regexp '^registry\.fly\.io/dealer-social-post-ai-production@sha256:[0-9a-f]{64}$' ||
+             [ "$CANDIDATE_IMAGE_REF" != "registry.fly.io/dealer-social-post-ai-production@${CANDIDATE_IMAGE_DIGEST}" ]; then
+            echo "Production deploy blocked: restore evidence did not identify one immutable candidate image." >&2
+            exit 1
+          fi
+          if [ -z "$TURNSTILE_HOSTNAMES" ]; then
+            echo "Production deploy blocked: configure TURNSTILE_ALLOWED_HOSTNAMES." >&2
+            exit 1
+          fi
+          if [ "$TURNSTILE_ENFORCEMENT" != "true" ] && [ "$TURNSTILE_ENFORCEMENT" != "false" ]; then
+            echo "TURNSTILE_ENFORCEMENT_ENABLED must be true or false." >&2
+            exit 1
+          fi
+          if [ "$LEGACY_CLIENT_COMPATIBILITY" != "true" ] && [ "$LEGACY_CLIENT_COMPATIBILITY" != "false" ]; then
+            echo "LEGACY_CLIENT_COMPATIBILITY_ENABLED must be explicitly true or false." >&2
+            exit 1
+          fi
+          # Stage every mutable runtime value through Fly secrets so an older
+          # secret can never override lower-precedence app configuration.
+          flyctl secrets set --stage --app dealer-social-post-ai-production \
+            RELEASE_SHA="$RELEASE_SHA" \
+            TURNSTILE_SITE_KEY="$TURNSTILE_SITE_KEY" \
+            TURNSTILE_ALLOWED_HOSTNAMES="$TURNSTILE_HOSTNAMES" \
+            TURNSTILE_ENFORCEMENT_ENABLED="$TURNSTILE_ENFORCEMENT" \
+            LEGACY_CLIENT_COMPATIBILITY_ENABLED="$LEGACY_CLIENT_COMPATIBILITY" \
+            POCKETBASE_R2_BACKUPS_ENABLED=true \
+            POCKETBASE_BACKUP_LAST_VERIFIED_AT="$RESTORE_VERIFIED_AT" \
+            POCKETBASE_BACKUP_VERIFIED_RELEASE_SHA="$RELEASE_SHA"
+          flyctl deploy --app dealer-social-post-ai-production \
+            --image "$CANDIDATE_IMAGE_REF" \
+            --wait-timeout 10m
 
       - name: Verify direct backend readiness
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          EXPECTED_RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          EXPECTED_IMAGE_DIGEST: ${{ needs.backup-gate.outputs.candidate_image_digest }}
+          EXPECTED_GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
+          ready=false
           for attempt in $(seq 1 30); do
             if curl --silent --show-error --fail --max-time 10 \
               https://dealer-social-post-ai-production.fly.dev/api/app/health \
-              --output /tmp/fly-health.json; then
-              grep --fixed-strings '"ok":true' /tmp/fly-health.json
-              exit 0
+              --output /tmp/fly-health.json &&
+              grep --quiet --fixed-strings '"ok":true' /tmp/fly-health.json &&
+              grep --quiet --fixed-strings '"status":"verified"' /tmp/fly-health.json &&
+              grep --quiet --fixed-strings "\"releaseSha\":\"${EXPECTED_RELEASE_SHA}\"" /tmp/fly-health.json; then
+              ready=true
+              break
             fi
             sleep 5
           done
-          echo "Fly readiness did not pass after deployment." >&2
-          exit 1
+          if [ "$ready" != "true" ]; then
+            echo "Fly readiness did not pass after deployment." >&2
+            exit 1
+          fi
+          flyctl machine list --app dealer-social-post-ai-production --json > /tmp/deployed-machines.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const machines = JSON.parse(fs.readFileSync("/tmp/deployed-machines.json", "utf8"));
+          const started = (Array.isArray(machines) ? machines : []).filter(
+            (machine) => machine?.state === "started",
+          );
+          const mismatch =
+            !started.length ||
+            started.some(
+              (machine) =>
+                machine?.image_ref?.digest !== process.env.EXPECTED_IMAGE_DIGEST ||
+                machine?.image_ref?.labels?.GH_SHA !== process.env.EXPECTED_RELEASE_SHA ||
+                machine?.image_ref?.labels?.GH_REPO !== process.env.EXPECTED_GITHUB_REPOSITORY,
+            );
+          if (mismatch) {
+            console.error("Fly deployment is not running the restore-tested image digest.");
+            process.exit(1);
+          }
+          NODE
 
       - name: Capture Fly diagnostics on failure
         if: failure()

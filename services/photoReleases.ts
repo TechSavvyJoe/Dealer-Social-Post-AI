@@ -6,6 +6,8 @@
  * field server-side.
  */
 import { dataUrlToBlob } from "../utils/imageUtils";
+import { assertAuthEpoch, captureAuthEpoch } from "../utils/authBoundary";
+import { readApiError } from "./apiErrors";
 
 export interface PhotoReleaseInput {
   /** Kept for backwards compat; ignored — the server uses the session dealer. */
@@ -44,20 +46,19 @@ export interface LinkedPhotoReleaseRecord {
 }
 
 export const saveRelease = async (
-  input: PhotoReleaseInput
+  input: PhotoReleaseInput,
+  requestAuthEpoch: number = captureAuthEpoch(),
 ): Promise<PhotoReleaseRecord> => {
+  assertAuthEpoch(requestAuthEpoch);
   const sigBlob = await dataUrlToBlob(input.signaturePngDataUrl);
 
   const form = new FormData();
   form.append("customer_name", input.customerName.trim());
   form.append("signature_png", sigBlob, "signature.png");
-  form.append("signed_at", new Date().toISOString());
   if (input.vin) form.append("vin", input.vin);
   if (input.notes) form.append("notes", input.notes);
-  if (typeof navigator !== "undefined" && navigator.userAgent) {
-    form.append("user_agent", navigator.userAgent.slice(0, 500));
-  }
 
+  assertAuthEpoch(requestAuthEpoch);
   const res = await fetch("/api/app/photo_releases", {
     method: "POST",
     body: form,
@@ -65,17 +66,15 @@ export const saveRelease = async (
   });
 
   if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const body = await res.json();
-      detail = body?.error || detail;
-    } catch {
-      /* not json */
-    }
-    throw new Error(`Photo release failed: ${detail}`);
+    const detail = await readApiError(res, { requestAuthEpoch });
+    throw new Error(`Photo release failed: ${detail.message}`, {
+      cause: detail,
+    });
   }
 
-  return await res.json();
+  const saved = (await res.json()) as PhotoReleaseRecord;
+  assertAuthEpoch(requestAuthEpoch);
+  return saved;
 };
 
 /**
@@ -88,21 +87,29 @@ export const runWithPersistedPhotoRelease = async <T>(
   captured: CapturedRelease | undefined,
   dealershipName: string,
   providerTask: () => Promise<T>,
+  requestAuthEpoch: number = captureAuthEpoch(),
 ): Promise<{ result: T; releaseId?: string }> => {
+  assertAuthEpoch(requestAuthEpoch);
   let releaseId = captured?.releaseId;
 
   if (captured && !releaseId) {
-    const saved = await saveRelease({
-      customerName: captured.customerName,
-      signaturePngDataUrl: captured.signaturePngDataUrl,
-      vin: captured.vin,
-      notes: `Released for social media use by ${dealershipName}.`,
-    });
+    const saved = await saveRelease(
+      {
+        customerName: captured.customerName,
+        signaturePngDataUrl: captured.signaturePngDataUrl,
+        vin: captured.vin,
+        notes: `Released for social media use by ${dealershipName}.`,
+      },
+      requestAuthEpoch,
+    );
+    assertAuthEpoch(requestAuthEpoch);
     releaseId = saved.id;
     captured.releaseId = saved.id;
   }
 
+  assertAuthEpoch(requestAuthEpoch);
   const result = await providerTask();
+  assertAuthEpoch(requestAuthEpoch);
   return { result, releaseId };
 };
 
@@ -110,7 +117,9 @@ export const runWithPersistedPhotoRelease = async <T>(
 export const linkReleaseToPost = async (
   releaseId: string,
   postId: string,
+  requestAuthEpoch: number = captureAuthEpoch(),
 ): Promise<LinkedPhotoReleaseRecord> => {
+  assertAuthEpoch(requestAuthEpoch);
   const res = await fetch(
     `/api/app/photo_releases/${encodeURIComponent(releaseId)}/link-post`,
     {
@@ -122,15 +131,13 @@ export const linkReleaseToPost = async (
   );
 
   if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const body = await res.json();
-      detail = body?.error || detail;
-    } catch {
-      /* not json */
-    }
-    throw new Error(`Photo release link failed: ${detail}`);
+    const detail = await readApiError(res, { requestAuthEpoch });
+    throw new Error(`Photo release link failed: ${detail.message}`, {
+      cause: detail,
+    });
   }
 
-  return (await res.json()) as LinkedPhotoReleaseRecord;
+  const linked = (await res.json()) as LinkedPhotoReleaseRecord;
+  assertAuthEpoch(requestAuthEpoch);
+  return linked;
 };

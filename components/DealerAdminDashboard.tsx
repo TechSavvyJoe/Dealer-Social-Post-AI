@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Settings,
@@ -12,11 +12,14 @@ import {
   Save,
   ShieldCheck,
   Pencil,
+  Check,
+  Copy,
 } from "lucide-react";
 import { PersonEditModal } from "./PersonEditModal";
-import type { Person } from "../services/salespeople";
+import type { CredentialResult, Person } from "../services/salespeople";
 import { Button } from "./ui/Button";
 import { Input, Textarea } from "./ui/Input";
+import { Modal } from "./ui/Modal";
 import { Leaderboard } from "./Leaderboard";
 import { ApprovalQueue } from "./ApprovalQueue";
 import { PostHistory } from "./PostHistory";
@@ -34,12 +37,14 @@ import {
   serializeHours,
   type WeekHours,
 } from "../utils/hoursFormat";
+import { getLeaderboard } from "../services/posts";
+import { normalizeDealerSocialProfileValue } from "../utils/socialAttribution";
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
 /**
  * Per-dealership admin dashboard. The GSM/GM lands here when they log in
- * with their dealership's `admin_code` (not the shared salesperson code).
+ * with their personal four-digit manager code.
  *
  * Scoped to their own dealership only — all the data on this screen
  * (leaderboard, approvals, history) is already filtered to the session
@@ -53,18 +58,47 @@ type Tab = "overview" | "settings" | "team";
 export const DealerAdminDashboard: React.FC = () => {
   const dealer = useAppStore((s) => s.currentDealer);
   const [tab, setTab] = useState<Tab>("overview");
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [pendingTab, setPendingTab] = useState<Tab | null>(null);
+  const tabRefs = React.useRef<Record<Tab, HTMLButtonElement | null>>({
+    overview: null,
+    settings: null,
+    team: null,
+  });
 
   // First-time setup wizard surfaces if brand voice + color aren't set yet.
   const [wizardDismissed, setWizardDismissed] = useState(() => {
     if (typeof window === "undefined") return false;
     try {
-      return localStorage.getItem("dsp.dealerSetupDismissed") === "1";
+      return dealer
+        ? localStorage.getItem(`dsp.dealerSetupDismissed.v1.${dealer.id}`) === "1"
+        : false;
     } catch {
       return false;
     }
   });
+  useEffect(() => {
+    if (!dealer || typeof window === "undefined") return;
+    try {
+      setWizardDismissed(
+        localStorage.getItem(`dsp.dealerSetupDismissed.v1.${dealer.id}`) === "1",
+      );
+    } catch {
+      setWizardDismissed(false);
+    }
+  }, [dealer?.id]);
   const showWizard =
     !wizardDismissed && dealer && (!dealer.brand_voice || !dealer.brand_color);
+
+  useEffect(() => {
+    if (!settingsDirty) return;
+    const preventAccidentalUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", preventAccidentalUnload);
+    return () => window.removeEventListener("beforeunload", preventAccidentalUnload);
+  }, [settingsDirty]);
 
   if (!dealer) {
     return (
@@ -77,7 +111,7 @@ export const DealerAdminDashboard: React.FC = () => {
   const handleWizardSave = async (fields: Record<string, string | boolean>) => {
     const fd = new FormData();
     Object.entries(fields).forEach(([k, v]) =>
-      fd.append(k, typeof v === "boolean" ? (v ? "true" : "false") : v)
+      fd.append(k, typeof v === "boolean" ? (v ? "true" : "false") : v),
     );
     const updated = await db.updateDealerWithFile(dealer.id, fd);
     useAppStore.setState((s) => ({
@@ -86,6 +120,36 @@ export const DealerAdminDashboard: React.FC = () => {
         : s.currentDealer,
     }));
     return updated;
+  };
+
+  const requestTab = (nextTab: Tab) => {
+    if (nextTab === tab) return;
+    if (tab === "settings" && settingsDirty) {
+      setPendingTab(nextTab);
+      return;
+    }
+    setTab(nextTab);
+  };
+
+  const tabOrder: Tab[] = ["overview", "settings", "team"];
+  const handleTabKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    currentTab: Tab,
+  ) => {
+    let nextIndex: number | null = null;
+    const currentIndex = tabOrder.indexOf(currentTab);
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % tabOrder.length;
+    if (event.key === "ArrowLeft")
+      nextIndex = (currentIndex - 1 + tabOrder.length) % tabOrder.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = tabOrder.length - 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextTab = tabOrder[nextIndex];
+    requestTab(nextTab);
+    if (!(tab === "settings" && settingsDirty)) {
+      requestAnimationFrame(() => tabRefs.current[nextTab]?.focus());
+    }
   };
 
   return (
@@ -115,9 +179,9 @@ export const DealerAdminDashboard: React.FC = () => {
             </div>
           )}
           <div className="min-w-0">
-            <div className="truncate text-lg font-bold text-surface-50 sm:text-xl">
+            <h1 className="truncate text-lg font-bold text-surface-50 sm:text-xl">
               {dealer.name}
-            </div>
+            </h1>
             <div className="flex items-center gap-2 text-[11px] text-surface-400">
               <ShieldCheck className="h-3 w-3 text-success-300" />
               Manager dashboard
@@ -133,7 +197,7 @@ export const DealerAdminDashboard: React.FC = () => {
           onDismiss={() => {
             setWizardDismissed(true);
             try {
-              localStorage.setItem("dsp.dealerSetupDismissed", "1");
+              localStorage.setItem(`dsp.dealerSetupDismissed.v1.${dealer.id}`, "1");
             } catch {
               /* ignore */
             }
@@ -143,7 +207,11 @@ export const DealerAdminDashboard: React.FC = () => {
 
       {/* Tabs — sticky on mobile so managers can switch without scrolling up */}
       <div className="sticky top-0 z-20 -mx-0 bg-surface-950/90 py-1 backdrop-blur-md sm:static sm:bg-transparent sm:py-0 sm:backdrop-blur-none">
-        <div className="flex w-full gap-1 rounded-xl border border-surface-800 bg-surface-950/60 p-1 sm:inline-flex sm:w-auto">
+        <div
+          role="tablist"
+          aria-label="Manager dashboard"
+          className="flex w-full gap-1 rounded-xl border border-surface-800 bg-surface-950/60 p-1 sm:inline-flex sm:w-auto"
+        >
           {(
             [
               { key: "overview", label: "Overview", icon: Trophy },
@@ -154,11 +222,21 @@ export const DealerAdminDashboard: React.FC = () => {
             const Icon = t.icon;
             return (
               <button
+                ref={(element) => {
+                  tabRefs.current[t.key] = element;
+                }}
                 key={t.key}
+                id={`manager-tab-${t.key}`}
+                role="tab"
+                type="button"
+                aria-selected={tab === t.key}
+                aria-controls={`manager-panel-${t.key}`}
+                tabIndex={tab === t.key ? 0 : -1}
                 onClick={() => {
                   triggerHapticFeedback();
-                  setTab(t.key);
+                  requestTab(t.key);
                 }}
+                onKeyDown={(event) => handleTabKeyDown(event, t.key)}
                 className={cn(
                   "flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors sm:min-h-0 sm:flex-none sm:gap-2 sm:px-4",
                   tab === t.key
@@ -175,18 +253,70 @@ export const DealerAdminDashboard: React.FC = () => {
       </div>
 
       {tab === "overview" && (
-        <>
+        <div
+          id="manager-panel-overview"
+          role="tabpanel"
+          aria-labelledby="manager-tab-overview"
+          className="space-y-4 sm:space-y-6"
+        >
           <Leaderboard />
           <ApprovalQueue />
           <PostHistory />
-        </>
+        </div>
       )}
 
       {tab === "settings" && (
-        <DealerSettingsCard dealer={dealer} onSaved={handleWizardSave} />
+        <div
+          id="manager-panel-settings"
+          role="tabpanel"
+          aria-labelledby="manager-tab-settings"
+        >
+          <DealerSettingsCard
+            dealer={dealer}
+            onSaved={handleWizardSave}
+            onDirtyChange={setSettingsDirty}
+          />
+        </div>
       )}
 
-      {tab === "team" && <DealerTeamCard />}
+      {tab === "team" && (
+        <div id="manager-panel-team" role="tabpanel" aria-labelledby="manager-tab-team">
+          <DealerTeamCard />
+        </div>
+      )}
+
+      <Modal
+        isOpen={pendingTab !== null}
+        onClose={() => setPendingTab(null)}
+        size="sm"
+        title="Discard unsaved settings?"
+        footer={
+          <>
+            <Button variant="outline" fullWidth onClick={() => setPendingTab(null)}>
+              Keep editing
+            </Button>
+            <Button
+              variant="danger"
+              fullWidth
+              onClick={() => {
+                if (!pendingTab) return;
+                const nextTab = pendingTab;
+                setPendingTab(null);
+                setSettingsDirty(false);
+                setTab(nextTab);
+                requestAnimationFrame(() => tabRefs.current[nextTab]?.focus());
+              }}
+            >
+              Discard changes
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-surface-300">
+          You have dealership settings that have not been saved. Leaving this tab will
+          discard them.
+        </p>
+      </Modal>
     </div>
   );
 };
@@ -197,9 +327,14 @@ export const DealerAdminDashboard: React.FC = () => {
 interface DealerSettingsProps {
   dealer: NonNullable<ReturnType<typeof useAppStore.getState>["currentDealer"]>;
   onSaved: (fields: Record<string, string | boolean>) => Promise<unknown>;
+  onDirtyChange: (dirty: boolean) => void;
 }
 
-const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) => {
+const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
+  dealer,
+  onSaved,
+  onDirtyChange,
+}) => {
   // Voice / brand
   const [voice, setVoice] = useState(dealer.brand_voice || "");
   const [banned, setBanned] = useState(dealer.banned_phrases || "");
@@ -219,24 +354,31 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
 
   // Social
   const [facebookUrl, setFacebookUrl] = useState(dealer.facebook_url || "");
-  const [instagramHandle, setInstagramHandle] = useState(
-    dealer.instagram_handle || ""
+  const [facebookPageTag, setFacebookPageTag] = useState(
+    dealer.facebook_page_tag || "",
   );
+  const [instagramHandle, setInstagramHandle] = useState(dealer.instagram_handle || "");
   const [tiktokHandle, setTiktokHandle] = useState(dealer.tiktok_handle || "");
   const [xHandle, setXHandle] = useState(dealer.x_handle || "");
+  const [linkedinCompanyTag, setLinkedinCompanyTag] = useState(
+    dealer.linkedin_company_tag || "",
+  );
   const [gbpUrl, setGbpUrl] = useState(dealer.gbp_url || "");
 
   // Generation defaults
-  const [defaultHashtags, setDefaultHashtags] = useState(
-    dealer.default_hashtags || ""
-  );
+  const [defaultHashtags, setDefaultHashtags] = useState(dealer.default_hashtags || "");
   const [defaultFooter, setDefaultFooter] = useState(dealer.default_footer || "");
 
   // Overlay preferences
   const [enabledStyles, setEnabledStyles] = useState<Set<string>>(() => {
     const raw = (dealer.enabled_styles || "").trim();
     return raw
-      ? new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))
+      ? new Set(
+          raw
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        )
       : new Set(Object.values(StyleOption));
   });
   const [defaultStyle, setDefaultStyle] = useState(dealer.default_style || "");
@@ -244,6 +386,8 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const noApprovalRef = useRef<HTMLButtonElement>(null);
+  const approvalRequiredRef = useRef<HTMLButtonElement>(null);
 
   const enabledStylesStr = Array.from(enabledStyles).join(",");
 
@@ -259,14 +403,20 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
     hoursSerialized !== (dealer.hours || "") ||
     tagline !== (dealer.tagline || "") ||
     facebookUrl !== (dealer.facebook_url || "") ||
+    facebookPageTag !== (dealer.facebook_page_tag || "") ||
     instagramHandle !== (dealer.instagram_handle || "") ||
     tiktokHandle !== (dealer.tiktok_handle || "") ||
     xHandle !== (dealer.x_handle || "") ||
+    linkedinCompanyTag !== (dealer.linkedin_company_tag || "") ||
     gbpUrl !== (dealer.gbp_url || "") ||
     defaultHashtags !== (dealer.default_hashtags || "") ||
     defaultFooter !== (dealer.default_footer || "") ||
     enabledStylesStr !== (dealer.enabled_styles || "") ||
     defaultStyle !== (dealer.default_style || "");
+
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
 
   const toggleStyle = (id: string) => {
     setEnabledStyles((prev) => {
@@ -302,9 +452,20 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
         hours: hoursSerialized,
         tagline: tagline.trim(),
         facebook_url: facebookUrl.trim(),
-        instagram_handle: instagramHandle.trim().replace(/^@/, ""),
-        tiktok_handle: tiktokHandle.trim().replace(/^@/, ""),
-        x_handle: xHandle.trim().replace(/^@/, ""),
+        facebook_page_tag: normalizeDealerSocialProfileValue(
+          "facebook_page_tag",
+          facebookPageTag,
+        ),
+        instagram_handle: normalizeDealerSocialProfileValue(
+          "instagram_handle",
+          instagramHandle,
+        ),
+        tiktok_handle: normalizeDealerSocialProfileValue("tiktok_handle", tiktokHandle),
+        x_handle: normalizeDealerSocialProfileValue("x_handle", xHandle),
+        linkedin_company_tag: normalizeDealerSocialProfileValue(
+          "linkedin_company_tag",
+          linkedinCompanyTag,
+        ),
         gbp_url: gbpUrl.trim(),
         default_hashtags: defaultHashtags.trim(),
         default_footer: defaultFooter.trim(),
@@ -348,9 +509,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
 
       {/* ---- Contact + identity ---- */}
       <section className="space-y-2">
-        <div className="text-sm font-semibold text-surface-50">
-          Contact & identity
-        </div>
+        <div className="text-sm font-semibold text-surface-50">Contact & identity</div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <Input
             label="Website"
@@ -394,18 +553,27 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
 
       {/* ---- Social handles ---- */}
       <section className="space-y-2">
-        <div className="text-sm font-semibold text-surface-50">
-          Social presence
+        <div className="text-sm font-semibold text-surface-50">Social presence</div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <Input
+            label="Facebook page URL"
+            value={facebookUrl}
+            onChange={(e) => setFacebookUrl(e.target.value)}
+            placeholder="https://www.facebook.com/yourdealership"
+            fullWidth
+            className="bg-white/5 border-white/10 focus:border-primary-400"
+          />
+          <Input
+            label="Facebook Page tag"
+            value={facebookPageTag}
+            onChange={(e) => setFacebookPageTag(e.target.value)}
+            placeholder="@Your Dealership"
+            helperText="Added to Facebook/Marketplace captions. Facebook may ask the salesperson to tap the Page suggestion once."
+            fullWidth
+            className="bg-white/5 border-white/10 focus:border-primary-400"
+          />
         </div>
-        <Input
-          label="Facebook page URL"
-          value={facebookUrl}
-          onChange={(e) => setFacebookUrl(e.target.value)}
-          placeholder="https://www.facebook.com/yourdealership"
-          fullWidth
-          className="bg-white/5 border-white/10 focus:border-primary-400"
-        />
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <Input
             label="Instagram"
             value={instagramHandle}
@@ -427,6 +595,15 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
             value={xHandle}
             onChange={(e) => setXHandle(e.target.value)}
             placeholder="@yourdealership"
+            fullWidth
+            className="bg-white/5 border-white/10 focus:border-primary-400"
+          />
+          <Input
+            label="LinkedIn company tag"
+            value={linkedinCompanyTag}
+            onChange={(e) => setLinkedinCompanyTag(e.target.value)}
+            placeholder="@your-company"
+            helperText="LinkedIn may ask the salesperson to choose the company suggestion."
             fullWidth
             className="bg-white/5 border-white/10 focus:border-primary-400"
           />
@@ -490,8 +667,8 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
           Image overlay styles
         </div>
         <p className="text-[11px] text-surface-400">
-          Pick which design styles your team can use. Star one to preselect it
-          when a salesperson opens the customizer.
+          Pick which design styles your team can use. Star one to preselect it when a
+          salesperson opens the customizer.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {Object.values(StyleOption).map((s) => {
@@ -504,13 +681,11 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
                   "rounded-xl border px-3 py-2.5 flex items-center justify-between gap-2",
                   enabled
                     ? "border-primary-500/40 bg-primary-500/5"
-                    : "border-white/10 bg-white/5 opacity-60"
+                    : "border-white/10 bg-white/5 opacity-60",
                 )}
               >
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-surface-50">
-                    {s}
-                  </div>
+                  <div className="text-sm font-semibold text-surface-50">{s}</div>
                   <div className="text-[10px] text-surface-400">
                     {enabled ? "available to salespeople" : "hidden"}
                   </div>
@@ -525,7 +700,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
                       isDefault
                         ? "bg-amber-500/30 text-amber-100"
                         : "bg-white/5 hover:bg-white/10 text-surface-300",
-                      !enabled && "opacity-30 cursor-not-allowed"
+                      !enabled && "opacity-30 cursor-not-allowed",
                     )}
                   >
                     {isDefault ? "★ default" : "Set default"}
@@ -537,7 +712,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
                       "text-[10px] px-2 py-1 rounded-md transition-colors",
                       enabled
                         ? "bg-white/5 hover:bg-white/10 text-surface-300"
-                        : "bg-success-500/20 hover:bg-success-500/30 text-success-100"
+                        : "bg-success-500/20 hover:bg-success-500/30 text-success-100",
                     )}
                   >
                     {enabled ? "Disable" : "Enable"}
@@ -599,9 +774,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
           </div>
         </div>
         <div className="space-y-2">
-          <div className="text-sm font-semibold text-surface-50">
-            OEM affiliation
-          </div>
+          <div className="text-sm font-semibold text-surface-50">OEM affiliation</div>
           <Input
             label=""
             aria-label="OEM affiliation"
@@ -615,30 +788,52 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
       </section>
 
       <section className="space-y-2">
-        <div className="text-sm font-semibold text-surface-50">
-          Manager approval
-        </div>
-        <div className="flex items-center gap-2">
+        <div className="text-sm font-semibold text-surface-50">Manager approval</div>
+        <div
+          role="radiogroup"
+          aria-label="Manager approval requirement"
+          className="flex flex-col gap-2 sm:flex-row sm:items-center"
+          onKeyDown={(event) => {
+            if (
+              !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
+            )
+              return;
+            event.preventDefault();
+            const nextApproval = !approval;
+            setApproval(nextApproval);
+            requestAnimationFrame(() =>
+              (nextApproval ? approvalRequiredRef : noApprovalRef).current?.focus(),
+            );
+          }}
+        >
           <button
+            ref={noApprovalRef}
             type="button"
+            role="radio"
+            aria-checked={!approval}
+            tabIndex={!approval ? 0 : -1}
             onClick={() => setApproval(false)}
             className={cn(
               "px-3 py-2 rounded-lg text-sm transition-colors border",
               !approval
                 ? "border-success-500/40 bg-success-500/10 text-success-100"
-                : "border-white/10 bg-white/5 text-surface-300"
+                : "border-white/10 bg-white/5 text-surface-300",
             )}
           >
-            Auto-publish
+            No approval required
           </button>
           <button
+            ref={approvalRequiredRef}
             type="button"
+            role="radio"
+            aria-checked={approval}
+            tabIndex={approval ? 0 : -1}
             onClick={() => setApproval(true)}
             className={cn(
               "px-3 py-2 rounded-lg text-sm transition-colors border",
               approval
                 ? "border-warning-500/40 bg-warning-500/10 text-warning-100"
-                : "border-white/10 bg-white/5 text-surface-300"
+                : "border-white/10 bg-white/5 text-surface-300",
             )}
           >
             Require manager approval
@@ -647,12 +842,15 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
       </section>
 
       {error && (
-        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs">
+        <div
+          role="alert"
+          className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs"
+        >
           {error}
         </div>
       )}
 
-      <div className="flex items-center justify-between pt-3 border-t border-white/10">
+      <div className="sticky bottom-2 z-10 flex items-center justify-between rounded-xl border border-white/10 bg-surface-950/95 px-3 py-3 shadow-elevation-3 backdrop-blur-xl">
         <div className="text-[11px] text-surface-500">
           {savedAt
             ? `Saved ${savedAt.toLocaleTimeString([], {
@@ -660,8 +858,8 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
                 minute: "2-digit",
               })}`
             : dirty
-            ? "Unsaved changes"
-            : "Up to date"}
+              ? "Unsaved changes"
+              : "Up to date"}
         </div>
         <Button
           variant="filled"
@@ -692,12 +890,13 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({ dealer, onSaved }) 
 // Listed members are deduped against the post log so the GSM can see who has
 // generated posts even if they haven't been added to the formal roster yet.
 // ----------------------------------------------------------------------------
-const DealerTeamCard: React.FC = () => {
+export const DealerTeamCard: React.FC = () => {
   const [roster, setRoster] = useState<
     Array<{
       id?: string;
       name: string;
-      pin?: string;
+      hasPin?: boolean;
+      pinNeedsDistribution?: boolean;
       active: boolean;
       count: number;
       lastAt?: string;
@@ -707,38 +906,39 @@ const DealerTeamCard: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
-  const [newPin, setNewPin] = useState("");
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
   const [oneTimeCode, setOneTimeCode] = useState<{
+    id: string;
     name: string;
     pin: string;
   } | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [codeBusy, setCodeBusy] = useState(false);
   const dealer = useAppStore((s) => s.currentDealer);
 
   const load = React.useCallback(async () => {
+    if (!dealer) return;
     setLoading(true);
     setError(null);
     try {
       const [sp, postsRes] = await Promise.all([
         import("../services/salespeople").then((m) => m.listSalespeople(true)),
-        fetch("/api/app/posts?limit=1000", { credentials: "include" }).then(
-          (r) => (r.ok ? r.json() : { items: [] })
-        ),
+        getLeaderboard(dealer.id, new Date(Date.UTC(2000, 0, 1))),
       ]);
       const counts = new Map<string, { count: number; lastAt: string }>();
       const looseNames = new Map<string, { count: number; lastAt: string }>();
-      for (const p of (postsRes.items as any[]) || []) {
-        const stamp = p.generated_at as string;
-        if (p.salesperson_id) {
-          const cur = counts.get(p.salesperson_id) || { count: 0, lastAt: stamp };
-          cur.count += 1;
+      for (const p of postsRes) {
+        const stamp = p.lastPostedAt;
+        if (p.salespersonId) {
+          const cur = counts.get(p.salespersonId) || { count: 0, lastAt: stamp };
+          cur.count += p.count;
           if (stamp > cur.lastAt) cur.lastAt = stamp;
-          counts.set(p.salesperson_id, cur);
-        } else if (p.salesperson_name) {
-          const key = (p.salesperson_name as string).trim();
+          counts.set(p.salespersonId, cur);
+        } else if (p.salesperson) {
+          const key = p.salesperson.trim();
           if (!key) continue;
           const cur = looseNames.get(key) || { count: 0, lastAt: stamp };
-          cur.count += 1;
+          cur.count += p.count;
           if (stamp > cur.lastAt) cur.lastAt = stamp;
           looseNames.set(key, cur);
         }
@@ -747,7 +947,8 @@ const DealerTeamCard: React.FC = () => {
       const rosterRows = sp.map((p) => ({
         id: p.id,
         name: p.name,
-        pin: p.pin,
+        hasPin: p.hasPin,
+        pinNeedsDistribution: p.pinNeedsDistribution,
         active: p.active,
         count: counts.get(p.id)?.count || 0,
         lastAt: counts.get(p.id)?.lastAt,
@@ -763,16 +964,14 @@ const DealerTeamCard: React.FC = () => {
           lastAt: v.lastAt,
         }));
 
-      const combined = [...rosterRows, ...looseRows].sort(
-        (a, b) => b.count - a.count
-      );
+      const combined = [...rosterRows, ...looseRows].sort((a, b) => b.count - a.count);
       setRoster(combined);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [dealer]);
 
   React.useEffect(() => {
     void load();
@@ -784,21 +983,19 @@ const DealerTeamCard: React.FC = () => {
     setSaving(true);
     try {
       const m = await import("../services/salespeople");
-      if (newPin.trim() && !/^\d{4}$/.test(newPin.trim())) {
-        setError("Access code must be exactly 4 digits (or leave blank).");
-        setSaving(false);
-        return;
-      }
       const created = await m.addSalesperson({
         name: newName.trim(),
-        pin: newPin.trim() || undefined,
         role: "salesperson",
       });
       setNewName("");
-      setNewPin("");
       if (created.pin) {
         setError(null);
-        setOneTimeCode({ name: created.name, pin: created.pin });
+        setCodeCopied(false);
+        setOneTimeCode({
+          id: created.person.id,
+          name: created.person.name,
+          pin: created.pin,
+        });
       }
       await load();
     } catch (err) {
@@ -822,12 +1019,77 @@ const DealerTeamCard: React.FC = () => {
     setSaving(true);
     try {
       const m = await import("../services/salespeople");
-      await m.addSalesperson({ name });
+      const created = await m.addSalesperson({ name, role: "salesperson" });
+      setCodeCopied(false);
+      setOneTimeCode({
+        id: created.person.id,
+        name: created.person.name,
+        pin: created.pin,
+      });
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handlePersonCommitted = React.useCallback((updated: Person) => {
+    setRoster((current) =>
+      current.map((person) =>
+        person.id === updated.id
+          ? {
+              ...person,
+              name: updated.name,
+              active: updated.active,
+              hasPin: updated.hasPin,
+              pinNeedsDistribution: updated.pinNeedsDistribution,
+            }
+          : person,
+      ),
+    );
+    setEditingPerson((current) =>
+      current?.id === updated.id ? { ...current, ...updated } : current,
+    );
+    if (!updated.pinNeedsDistribution) {
+      setOneTimeCode((current) => (current?.id === updated.id ? null : current));
+    }
+  }, []);
+
+  const handleCredentialIssued = React.useCallback((credential: CredentialResult) => {
+    setCodeCopied(false);
+    setOneTimeCode({
+      id: credential.person.id,
+      name: credential.person.name,
+      pin: credential.pin,
+    });
+  }, []);
+
+  const handleCopyOneTimeCode = async () => {
+    if (!oneTimeCode) return;
+    try {
+      await navigator.clipboard.writeText(oneTimeCode.pin);
+      setCodeCopied(true);
+    } catch {
+      setError("Could not copy the code. Write it down before marking it shared.");
+    }
+  };
+
+  const handleAcknowledgeOneTimeCode = async () => {
+    if (!oneTimeCode || codeBusy) return;
+    setCodeBusy(true);
+    setError(null);
+    try {
+      const m = await import("../services/salespeople");
+      const updated = await m.acknowledgePinDistribution(oneTimeCode.id);
+      handlePersonCommitted(updated);
+      setOneTimeCode(null);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not mark the code as shared.",
+      );
+    } finally {
+      setCodeBusy(false);
     }
   };
 
@@ -852,40 +1114,28 @@ const DealerTeamCard: React.FC = () => {
             Your team
           </h3>
           <p className="text-xs text-surface-400">
-            Each salesperson gets a personal 4-digit code for sign-in and
-            appears in the showroom picker. Deactivate anyone who leaves —
-            historical posts stay intact.
+            Each salesperson gets a personal 4-digit code for sign-in and is tied to
+            their posts automatically. Deactivate anyone who leaves — historical posts
+            stay intact.
           </p>
         </div>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
         <div className="flex-1">
-          <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+          <label
+            htmlFor="manager-add-salesperson"
+            className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+          >
             Add salesperson
           </label>
           <input
+            id="manager-add-salesperson"
             type="text"
             value={newName}
             onChange={(e) => setNewName(e.target.value.slice(0, 120))}
             placeholder="e.g. Sarah Chen"
             className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-surface-100 focus:border-primary-400 focus:outline-none"
-          />
-        </div>
-        <div className="sm:w-32">
-          <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
-            Code (4 dig.)
-          </label>
-          <input
-            type="text"
-            value={newPin}
-            onChange={(e) =>
-              setNewPin(e.target.value.replace(/\D/g, "").slice(0, 4))
-            }
-            placeholder="auto"
-            inputMode="numeric"
-            maxLength={4}
-            className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-surface-100 font-mono tracking-widest focus:border-primary-400 focus:outline-none"
           />
         </div>
         <Button
@@ -910,22 +1160,54 @@ const DealerTeamCard: React.FC = () => {
       </div>
 
       {oneTimeCode && (
-        <div className="rounded-xl border border-primary-500/30 bg-primary-500/10 px-3 py-3 text-sm text-primary-50">
-          <div className="font-semibold">{oneTimeCode.name} added</div>
-          <p className="mt-1 text-xs text-primary-100/80">
-            Share this access code privately — it won’t show in the list again.
+        <div
+          className="rounded-xl border border-warning-400/30 bg-warning-500/10 px-3 py-3 text-sm text-warning-50"
+          role="status"
+          aria-label="Access code ready to share"
+        >
+          <div className="font-semibold">
+            {oneTimeCode.name}&apos;s access code is ready
+          </div>
+          <p className="mt-1 text-xs text-warning-100/80">
+            Copy this one-time access code and share it privately. This handoff stays
+            here until you mark it as shared.
           </p>
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <span className="font-mono text-lg tracking-[0.3em]">
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <span className="flex-1 rounded-lg border border-white/10 bg-surface-950/70 px-3 py-2.5 text-center font-mono text-lg tracking-[0.3em] text-surface-50">
               {oneTimeCode.pin}
             </span>
-            <button
-              type="button"
-              className="text-xs font-semibold text-primary-200 underline-offset-2 hover:underline"
-              onClick={() => setOneTimeCode(null)}
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-h-11"
+              disabled={codeBusy}
+              leftIcon={
+                codeCopied ? (
+                  <Check className="h-3.5 w-3.5" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )
+              }
+              onClick={() => void handleCopyOneTimeCode()}
             >
-              Dismiss
-            </button>
+              {codeCopied ? "Copied" : "Copy"}
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              className="min-h-11"
+              disabled={codeBusy}
+              leftIcon={
+                codeBusy ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Check className="h-3.5 w-3.5" />
+                )
+              }
+              onClick={() => void handleAcknowledgeOneTimeCode()}
+            >
+              {codeBusy ? "Updating…" : "Mark as shared"}
+            </Button>
           </div>
         </div>
       )}
@@ -952,8 +1234,10 @@ const DealerTeamCard: React.FC = () => {
               className={cn(
                 "flex items-center justify-between rounded-xl border px-3 py-2.5 transition-colors",
                 p.active
-                  ? "border-white/10 bg-surface-900/40"
-                  : "border-white/5 bg-surface-900/20 opacity-60"
+                  ? p.pinNeedsDistribution
+                    ? "border-warning-400/25 bg-warning-500/[0.06]"
+                    : "border-white/10 bg-surface-900/40"
+                  : "border-white/5 bg-surface-900/20 opacity-60",
               )}
             >
               <div className="min-w-0">
@@ -973,12 +1257,18 @@ const DealerTeamCard: React.FC = () => {
                     <span
                       className={cn(
                         "text-[10px] uppercase tracking-wide font-semibold rounded-full px-2 py-0.5",
-                        p.pin
-                          ? "bg-success-500/10 text-success-300"
-                          : "bg-surface-800 text-surface-500",
+                        p.pinNeedsDistribution
+                          ? "bg-warning-500/15 text-warning-200"
+                          : p.hasPin
+                            ? "bg-success-500/10 text-success-300"
+                            : "bg-surface-800 text-surface-500",
                       )}
                     >
-                      {p.pin ? "Code set" : "No code"}
+                      {p.pinNeedsDistribution
+                        ? "Code to share"
+                        : p.hasPin
+                          ? "Code set"
+                          : "No code"}
                     </span>
                   )}
                 </div>
@@ -1005,9 +1295,10 @@ const DealerTeamCard: React.FC = () => {
                           id: p.id!,
                           dealer: dealer?.id || "",
                           name: p.name,
-                          pin: p.pin,
                           active: p.active,
                           role: "salesperson",
+                          hasPin: Boolean(p.hasPin),
+                          pinNeedsDistribution: Boolean(p.pinNeedsDistribution),
                         })
                       }
                       className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md bg-white/5 text-surface-300 hover:bg-white/10"
@@ -1053,7 +1344,10 @@ const DealerTeamCard: React.FC = () => {
         storeName={dealer?.name}
         allowRoleEdit={false}
         onClose={() => setEditingPerson(null)}
-        onSaved={() => {
+        onCommitted={handlePersonCommitted}
+        onCredentialIssued={handleCredentialIssued}
+        onSaved={(updated) => {
+          handlePersonCommitted(updated);
           setEditingPerson(null);
           void load();
         }}

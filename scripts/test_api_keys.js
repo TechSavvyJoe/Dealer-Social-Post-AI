@@ -7,7 +7,7 @@
  */
 
 const GEMINI_MODEL =
-  process.env.GEMINI_SMOKE_MODEL?.trim() || "gemini-3.5-flash";
+  process.env.GEMINI_SMOKE_MODEL?.trim() || "gemini-3.6-flash";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY?.trim();
 
 const testGemini = async () => {

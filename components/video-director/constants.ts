@@ -35,6 +35,11 @@ export const durations = [
     description: "Quick loop for Stories.",
   },
   { value: 6, label: "6s", description: "Best for Reels / TikTok delivery posts." },
+  {
+    value: 8,
+    label: "8s",
+    description: "Full-length showcase; required for 1080p quality.",
+  },
 ];
 
 export const soundtracks: Array<{
@@ -73,16 +78,6 @@ export const aspectRatios: Array<{
     value: "16:9",
     label: "16:9 Wide",
     description: "YouTube, Facebook landscape, ads.",
-  },
-  {
-    value: "1:1",
-    label: "Square-ish",
-    description: "Feed-friendly (letterboxed into Veo 9:16/16:9).",
-  },
-  {
-    value: "auto",
-    label: "Auto",
-    description: "Follow the photo orientation.",
   },
 ];
 

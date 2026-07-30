@@ -39,10 +39,7 @@ export const cleanSocialCaption = (raw: string): string => {
     /^\s*(HOOK|STORY|CTA|HASHTAGS?|BODY|CAPTION|POST|OUTPUT|RULES?|FORMAT)\s*[:.\-)–—]\s*/gim,
     "",
   );
-  text = text.replace(
-    /^\s*[\d]+[.)]\s*(HOOK|STORY|CTA|HASHTAGS?)\b.*$/gim,
-    "",
-  );
+  text = text.replace(/^\s*[\d]+[.)]\s*(HOOK|STORY|CTA|HASHTAGS?)\b.*$/gim, "");
 
   // Strip bullet / markdown noise
   text = text
@@ -89,7 +86,10 @@ export const isLowQualityCaption = (caption: string): boolean => {
 
   // Structural junk still present
   if (/<\/?[a-zA-Z_][\w:-]*\b/.test(cleaned)) return true;
-  if (/\b(HOOK|STORY|CTA|HASHTAGS?|OUTPUT FORMAT)\b/i.test(cleaned) && cleaned.length < 280) {
+  if (
+    /\b(HOOK|STORY|CTA|HASHTAGS?|OUTPUT FORMAT)\b/i.test(cleaned) &&
+    cleaned.length < 280
+  ) {
     return true;
   }
   if (/^\s*\{[\s\S]*\}\s*$/.test(cleaned)) return true;
@@ -131,9 +131,7 @@ export interface SafeCaptionOptions {
 }
 
 /** Deterministic, paste-ready marketing caption when AI fails quality checks. */
-export const buildSafeMarketingCaption = (
-  opts: SafeCaptionOptions,
-): string => {
+export const buildSafeMarketingCaption = (opts: SafeCaptionOptions): string => {
   const store = (opts.storeName || "our dealership").trim();
   const who = opts.customerName?.trim()
     ? opts.customerName.trim()

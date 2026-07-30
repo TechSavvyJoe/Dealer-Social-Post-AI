@@ -61,8 +61,7 @@ const ERROR_MESSAGES: Record<string, ErrorMessage> = {
   // Image errors
   IMAGE_LOAD_FAILED: {
     title: "Image Load Failed",
-    description:
-      "We couldn't load the image. Please try uploading a different photo.",
+    description: "We couldn't load the image. Please try uploading a different photo.",
     action: "upload",
     actionLabel: "Upload New",
   },
@@ -123,7 +122,7 @@ export function getErrorMessage(error: unknown): ErrorMessage {
  */
 export function formatErrorForDisplay(
   error: unknown,
-  customTitle?: string
+  customTitle?: string,
 ): { title: string; description: string } {
   const errorMessage = getErrorMessage(error);
   return {

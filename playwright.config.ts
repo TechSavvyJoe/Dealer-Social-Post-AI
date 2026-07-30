@@ -1,4 +1,18 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
+
+const viewports = [
+  { name: "phone-fold-280", width: 280, height: 653, mobile: true },
+  { name: "phone-320", width: 320, height: 568, mobile: true },
+  { name: "android-360", width: 360, height: 800, mobile: true },
+  { name: "phone-390", width: 390, height: 844, mobile: true },
+  { name: "phone-large-440", width: 440, height: 956, mobile: true },
+  { name: "phone-landscape-844", width: 844, height: 390, mobile: true },
+  { name: "tablet-768", width: 768, height: 1024, mobile: false },
+  { name: "desktop-1440", width: 1440, height: 1000, mobile: false },
+] as const;
+
+const browsers = ["chromium", "webkit"] as const;
+const externalBaseUrl = process.env.E2E_BASE_URL;
 
 /**
  * Frontend smoke e2e. The login-failure test stubs /api/app/session so CI does
@@ -9,22 +23,33 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // WebKit + service-worker + IndexedDB cases can starve one another on a
+  // developer laptop when Playwright expands to every core. Two local workers
+  // retain useful parallelism while keeping the full device matrix repeatable.
+  workers: process.env.CI ? 1 : 2,
   reporter: "html",
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL: externalBaseUrl || "http://localhost:5173",
     trace: "on-first-retry",
   },
-  projects: [
-    {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
-    },
-  ],
-  webServer: {
-    command: "npm run dev -- --host 127.0.0.1 --port 5173",
-    url: "http://127.0.0.1:5173",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  projects: browsers.flatMap((browserName) =>
+    viewports.map(({ name, width, height, mobile }) => ({
+      name: `${browserName}-${name}`,
+      use: {
+        browserName,
+        viewport: { width, height },
+        hasTouch: mobile,
+        isMobile: mobile,
+        deviceScaleFactor: mobile ? 2 : 1,
+      },
+    })),
+  ),
+  webServer: externalBaseUrl
+    ? undefined
+    : {
+        command: "npm run dev -- --host 127.0.0.1 --port 5173",
+        url: "http://127.0.0.1:5173",
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+      },
 });

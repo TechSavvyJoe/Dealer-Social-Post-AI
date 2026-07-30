@@ -49,9 +49,7 @@ export const imageFileExtension = (source: string): string => {
     const pathname = new URL(source, "https://local.invalid").pathname;
     const extension = pathname.match(/\.(png|jpe?g|webp|avif)$/i)?.[1];
     if (extension) {
-      return extension.toLowerCase() === "jpeg"
-        ? "jpg"
-        : extension.toLowerCase();
+      return extension.toLowerCase() === "jpeg" ? "jpg" : extension.toLowerCase();
     }
   } catch {
     /* fall through to the interoperable photo default */
@@ -89,10 +87,8 @@ export const letterboxImageForVideo = async (
   if (typeof document === "undefined") return dataUrl;
 
   const targetRatio = aspect === "16:9" ? 16 / 9 : 9 / 16;
-  const outW =
-    aspect === "16:9" ? longEdge : Math.round(longEdge * (9 / 16));
-  const outH =
-    aspect === "16:9" ? Math.round(longEdge * (9 / 16)) : longEdge;
+  const outW = aspect === "16:9" ? longEdge : Math.round(longEdge * (9 / 16));
+  const outH = aspect === "16:9" ? Math.round(longEdge * (9 / 16)) : longEdge;
 
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const el = new Image();
@@ -116,7 +112,9 @@ export const letterboxImageForVideo = async (
   ctx.fillStyle = "#0a0a0c";
   ctx.fillRect(0, 0, outW, outH);
 
-  const scale = Math.min(outW / img.width, outH / img.height);
+  const safeW = Math.max(img.width, 1);
+  const safeH = Math.max(img.height, 1);
+  const scale = Math.min(outW / safeW, outH / safeH);
   const dw = Math.round(img.width * scale);
   const dh = Math.round(img.height * scale);
   const dx = Math.round((outW - dw) / 2);
@@ -137,6 +135,8 @@ export const letterboxImageForVideo = async (
 export const resolveVeoAspect = (
   width: number,
   height: number,
+  // "1:1" remains accepted only for one-release compatibility with a stale
+  // persisted request; the current UI and public type expose real Veo ratios.
   preference: "auto" | "16:9" | "9:16" | "1:1",
 ): "16:9" | "9:16" => {
   if (preference === "16:9" || preference === "1:1") return "16:9";
@@ -157,70 +157,81 @@ export const getJpegExifOrientation = (file: File): Promise<number> => {
       return;
     }
     const reader = new FileReader();
+    reader.onerror = () => resolve(1);
     reader.onload = () => {
-      const view = new DataView(reader.result as ArrayBuffer);
-      // JPEG starts with 0xFFD8
-      if (view.getUint16(0, false) !== 0xffd8) {
-        resolve(1);
-        return;
-      }
-      let offset = 2;
-      const length = view.byteLength;
-      while (offset < length) {
-        const marker = view.getUint16(offset, false);
-        offset += 2;
-        if (marker === 0xffe1) {
-          // APP1
-          const segmentLength = view.getUint16(offset, false);
+      try {
+        const view = new DataView(reader.result as ArrayBuffer);
+        const length = view.byteLength;
+        // JPEG starts with 0xFFD8
+        if (length < 4 || view.getUint16(0, false) !== 0xffd8) {
+          resolve(1);
+          return;
+        }
+        let offset = 2;
+        while (offset + 4 <= length) {
+          const marker = view.getUint16(offset, false);
           offset += 2;
-          // Check for Exif header ("Exif\0\0")
-          if (
-            view.getUint32(offset, false) === 0x45786966 && // 'Exif'
-            view.getUint16(offset + 4, false) === 0x0000
-          ) {
-            let tiffOffset = offset + 6;
-            const endianness = view.getUint16(tiffOffset, false);
-            const littleEndian = endianness === 0x4949; // 'II'
-            if (!littleEndian && endianness !== 0x4d4d) {
-              // 'MM'
-              resolve(1);
-              return;
-            }
-            // Validate TIFF magic number 0x002A
-            if (view.getUint16(tiffOffset + 2, littleEndian) !== 0x002a) {
-              resolve(1);
-              return;
-            }
-            const firstIFDOffset = view.getUint32(tiffOffset + 4, littleEndian);
-            let ifdOffset = tiffOffset + firstIFDOffset;
-            const entries = view.getUint16(ifdOffset, littleEndian);
-            for (let i = 0; i < entries; i++) {
-              const entryOffset = ifdOffset + 2 + i * 12;
-              const tag = view.getUint16(entryOffset, littleEndian);
-              if (tag === 0x0112) {
-                // Orientation tag
-                const valueOffset = entryOffset + 8;
-                const orientation = view.getUint16(valueOffset, littleEndian);
-                resolve(orientation);
+          if (marker === 0xffe1) {
+            // APP1
+            if (offset + 2 > length) break;
+            const segmentLength = view.getUint16(offset, false);
+            offset += 2;
+            // Check for Exif header ("Exif\0\0")
+            if (
+              offset + 6 <= length &&
+              view.getUint32(offset, false) === 0x45786966 && // 'Exif'
+              view.getUint16(offset + 4, false) === 0x0000
+            ) {
+              let tiffOffset = offset + 6;
+              if (tiffOffset + 8 > length) break;
+              const endianness = view.getUint16(tiffOffset, false);
+              const littleEndian = endianness === 0x4949; // 'II'
+              if (!littleEndian && endianness !== 0x4d4d) {
+                // 'MM'
+                resolve(1);
                 return;
               }
+              // Validate TIFF magic number 0x002A
+              if (view.getUint16(tiffOffset + 2, littleEndian) !== 0x002a) {
+                resolve(1);
+                return;
+              }
+              const firstIFDOffset = view.getUint32(tiffOffset + 4, littleEndian);
+              let ifdOffset = tiffOffset + firstIFDOffset;
+              if (ifdOffset + 2 > length) break;
+              const entries = view.getUint16(ifdOffset, littleEndian);
+              for (let i = 0; i < entries; i++) {
+                const entryOffset = ifdOffset + 2 + i * 12;
+                if (entryOffset + 10 > length) break;
+                const tag = view.getUint16(entryOffset, littleEndian);
+                if (tag === 0x0112) {
+                  // Orientation tag
+                  const valueOffset = entryOffset + 8;
+                  const orientation = view.getUint16(valueOffset, littleEndian);
+                  resolve(orientation);
+                  return;
+                }
+              }
+              resolve(1);
+              return;
             }
-            resolve(1);
-            return;
+          } else if ((marker & 0xff00) !== 0xff00) {
+            // Invalid marker
+            break;
+          } else {
+            // Skip segment
+            if (offset + 2 > length) break;
+            const segmentLength = view.getUint16(offset, false);
+            offset += segmentLength;
           }
-        } else if ((marker & 0xff00) !== 0xff00) {
-          // Invalid marker
-          break;
-        } else {
-          // Skip segment
-          const segmentLength = view.getUint16(offset, false);
-          offset += segmentLength;
         }
+      } catch {
+        /* Fall back gracefully for malformed EXIF data */
       }
       resolve(1);
     };
-    reader.onerror = () => resolve(1);
-    reader.readAsArrayBuffer(file);
+    // Only slice first 128KB to speed up EXIF extraction on large raw photos
+    reader.readAsArrayBuffer(file.slice(0, 128 * 1024));
   });
 };
 
@@ -234,6 +245,8 @@ export const getJpegExifOrientation = (file: File): Promise<number> => {
  */
 export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
   const maxDimension = 2048;
+  const fileType = file.type.toLowerCase();
+  const isHeic = /image\/hei[cf]/.test(fileType) || /\.(?:heic|heif)$/i.test(file.name);
 
   // Modern browsers (Chrome 81+, Safari 15+, Firefox 98+) support createImageBitmap
   // with automatic orientation handling via imageOrientation option
@@ -243,11 +256,12 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
       const bitmap = await createImageBitmap(file, {
         imageOrientation: "from-image", // Respect EXIF orientation
       });
+      if (!bitmap.width || !bitmap.height) {
+        bitmap.close();
+        throw new Error("The selected image has no readable dimensions.");
+      }
 
-      const scale = Math.min(
-        1,
-        maxDimension / Math.max(bitmap.width, bitmap.height),
-      );
+      const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
       const outputWidth = Math.max(1, Math.round(bitmap.width * scale));
       const outputHeight = Math.max(1, Math.round(bitmap.height * scale));
 
@@ -265,6 +279,7 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
         return canvas.toDataURL(mimeType, 0.92);
       }
       bitmap.close();
+      throw new Error("This browser could not create an image preview.");
     } catch (e) {
       console.warn(
         "createImageBitmap failed, falling back to manual EXIF handling:",
@@ -282,35 +297,42 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
     orientation = 1;
   }
 
-  // If orientation is 1 and not JPEG, just return original
-  if (orientation === 1 && file.type !== "image/jpeg") {
-    return originalDataUrl;
-  }
-
-  // Load image into canvas and apply transforms
+  // Always prove that the browser can decode the fallback before returning a
+  // preview. Returning a raw HEIC data URL here made the next screen appear
+  // blank on browsers that cannot decode HEIC.
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const i = new Image();
     i.onload = () => resolve(i);
-    i.onerror = reject;
+    i.onerror = () =>
+      reject(
+        new Error(
+          isHeic
+            ? "This browser cannot preview this HEIC photo. Convert it to JPG or PNG and try again."
+            : "This browser could not decode the selected image.",
+        ),
+      );
     i.src = originalDataUrl;
   });
+  if (!img.width || !img.height) {
+    throw new Error("The selected image has no readable dimensions.");
+  }
 
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
   if (!ctx) {
-    return originalDataUrl;
+    throw new Error("This browser could not create an image preview.");
   }
 
   const { width, height } = img;
+  const swapsAxes = orientation > 4 && orientation < 9;
+  const orientedWidth = swapsAxes ? height : width;
+  const orientedHeight = swapsAxes ? width : height;
+  const scale = Math.min(1, maxDimension / Math.max(orientedWidth, orientedHeight));
 
   // Set canvas size depending on rotation
-  if (orientation > 4 && orientation < 9) {
-    canvas.width = height;
-    canvas.height = width;
-  } else {
-    canvas.width = width;
-    canvas.height = height;
-  }
+  canvas.width = Math.max(1, Math.round(orientedWidth * scale));
+  canvas.height = Math.max(1, Math.round(orientedHeight * scale));
+  ctx.scale(scale, scale);
 
   // Apply orientation transforms
   switch (orientation) {
@@ -349,7 +371,7 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
   }
 
   ctx.drawImage(img, 0, 0);
-  const mimeType = file.type === "image/jpeg" ? "image/jpeg" : file.type;
+  const mimeType = fileType === "image/png" ? "image/png" : "image/jpeg";
   return canvas.toDataURL(mimeType, 0.92);
 };
 

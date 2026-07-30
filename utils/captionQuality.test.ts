@@ -29,9 +29,9 @@ CTA: Visit us
 
 describe("isLowQualityCaption", () => {
   it("rejects gibberish and accepts a normal post", () => {
-    expect(
-      isLowQualityCaption("xqzplm vrrntqplk asdfghjkl qwertyuiop zxcvbnm"),
-    ).toBe(true);
+    expect(isLowQualityCaption("xqzplm vrrntqplk asdfghjkl qwertyuiop zxcvbnm")).toBe(
+      true,
+    );
     expect(
       isLowQualityCaption(
         "Keys in hand and big smiles — Jordan just drove off in their new ride.\n\nMoments like this are why we love Sunrise Ford.\n\nVisit Sunrise Ford this week.\n#SunriseFord #NewCarDelivery #HappyCustomer",

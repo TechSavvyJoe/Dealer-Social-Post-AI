@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset=".48" stop-color="#071521" stop-opacity="0"/>
+      <stop offset="1" stop-color="#071521" stop-opacity=".92"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#shade)"/>
+  <rect x="72" y="715" width="7" height="106" rx="3.5" fill="#5ED3FF"/>
+  <text x="108" y="757" fill="#F7F6F2" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="800" letter-spacing="1">NORTHLINE MOTORS</text>
+  <text x="108" y="807" fill="#F7F6F2" font-family="Inter, Arial, sans-serif" font-size="25" font-weight="500">A standout delivery deserves a standout moment.</text>
+  <path d="M1465 733l10 27 27 10-27 10-10 27-10-27-27-10 27-10z" fill="#5ED3FF"/>
+  <circle cx="1516" cy="742" r="9" fill="#FF7A59"/>
+</svg>

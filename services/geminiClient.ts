@@ -1,4 +1,5 @@
 import { fetchFromProxy } from "./geminiProxy";
+import type { ModelTaskName } from "./modelConfig";
 
 /**
  * Minimal browser-side facade for Gemini GenerateContent.
@@ -12,13 +13,24 @@ interface GenerateContentParams {
   model: string;
   contents: unknown;
   generationConfig?: Record<string, unknown>;
+  task: Extract<
+    ModelTaskName,
+    | "caption"
+    | "caption_regenerate"
+    | "caption_edit"
+    | "image_standard"
+    | "image_studio"
+  >;
+  attemptId?: string;
+  requestAuthEpoch?: number;
 }
 
 class ProxiedGeminiClient {
   get models() {
     return {
       generateContent: async (params: GenerateContentParams) => {
-        const { model, contents, generationConfig } = params;
+        const { model, contents, generationConfig, task, attemptId, requestAuthEpoch } =
+          params;
         if (!/^[a-z0-9][a-z0-9._-]{0,127}$/i.test(model)) {
           throw new Error("Gemini model identifier is invalid.");
         }
@@ -36,6 +48,9 @@ class ProxiedGeminiClient {
           "POST",
           `v1beta/models/${model}:generateContent`,
           body,
+          task,
+          attemptId,
+          requestAuthEpoch,
         );
         if (!rawResponse || typeof rawResponse !== "object") {
           throw new Error("Gemini returned an invalid response.");

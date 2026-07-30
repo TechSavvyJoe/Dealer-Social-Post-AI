@@ -1,21 +1,27 @@
-import React from 'react';
-import { cn } from '../../utils/classNames';
-import { triggerHapticFeedback } from '../../utils/haptics';
-import { durations, soundtracks, aspectRatios, pacingOptions, defaultResolution } from './constants';
-import { VideoRequestOptions } from '../../types';
+import React from "react";
+import { cn } from "../../utils/classNames";
+import { triggerHapticFeedback } from "../../utils/haptics";
+import {
+  durations,
+  soundtracks,
+  aspectRatios,
+  pacingOptions,
+  defaultResolution,
+} from "./constants";
+import { VideoRequestOptions } from "../../types";
 
 interface ConfigPanelProps {
   values: {
     duration: number;
-    soundtrack: VideoRequestOptions['soundtrack'];
-    aspectPreference: VideoRequestOptions['aspectPreference'];
-    pacing: VideoRequestOptions['pacing'];
+    soundtrack: VideoRequestOptions["soundtrack"];
+    aspectPreference: VideoRequestOptions["aspectPreference"];
+    pacing: VideoRequestOptions["pacing"];
   };
-  onChange: (key: keyof ConfigPanelProps['values'], value: any) => void;
+  onChange: (key: keyof ConfigPanelProps["values"], value: any) => void;
 }
 
 export const ConfigPanel: React.FC<ConfigPanelProps> = ({ values, onChange }) => {
-  const handleChange = (key: keyof ConfigPanelProps['values'], value: any) => {
+  const handleChange = (key: keyof ConfigPanelProps["values"], value: any) => {
     triggerHapticFeedback();
     onChange(key, value);
   };
@@ -29,12 +35,12 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ values, onChange }) =>
           {durations.map(({ value, label }) => (
             <button
               key={value}
-              onClick={() => handleChange('duration', value)}
+              onClick={() => handleChange("duration", value)}
               className={cn(
-                'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all',
+                "flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all",
                 values.duration === value
-                  ? 'border-primary-400 bg-primary-500/20 text-white'
-                  : 'border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50'
+                  ? "border-primary-400 bg-primary-500/20 text-white"
+                  : "border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50",
               )}
             >
               {label}
@@ -50,12 +56,12 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ values, onChange }) =>
           {aspectRatios.map(({ value, label }) => (
             <button
               key={value}
-              onClick={() => handleChange('aspectPreference', value)}
+              onClick={() => handleChange("aspectPreference", value)}
               className={cn(
-                'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all',
+                "flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all",
                 values.aspectPreference === value
-                  ? 'border-primary-400 bg-primary-500/20 text-white'
-                  : 'border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50'
+                  ? "border-primary-400 bg-primary-500/20 text-white"
+                  : "border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50",
               )}
             >
               {label}
@@ -67,19 +73,23 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ values, onChange }) =>
       {/* Quality row - Resolution + Pacing */}
       <div className="space-y-1">
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-white/80">Motion feel (optional)</h3>
-          <span className="text-[10px] text-white/50">Resolution locked at {defaultResolution}</span>
+          <h3 className="text-xs font-semibold text-white/80">
+            Motion feel (optional)
+          </h3>
+          <span className="text-[10px] text-white/50">
+            Resolution locked at {defaultResolution}
+          </span>
         </div>
         <div className="grid grid-cols-2 gap-2">
           {pacingOptions.map(({ value, label }) => (
             <button
               key={value}
-              onClick={() => handleChange('pacing', value)}
+              onClick={() => handleChange("pacing", value)}
               className={cn(
-                'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
+                "rounded-lg border px-3 py-1.5 text-sm font-medium transition-all",
                 values.pacing === value
-                  ? 'border-primary-400 bg-primary-500/20 text-white'
-                  : 'border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50'
+                  ? "border-primary-400 bg-primary-500/20 text-white"
+                  : "border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50",
               )}
             >
               {label}
@@ -95,12 +105,12 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ values, onChange }) =>
           {soundtracks.map(({ value, label }) => (
             <button
               key={value}
-              onClick={() => handleChange('soundtrack', value)}
+              onClick={() => handleChange("soundtrack", value)}
               className={cn(
-                'flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all',
+                "flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all",
                 values.soundtrack === value
-                  ? 'border-primary-400 bg-primary-500/20 text-white'
-                  : 'border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50'
+                  ? "border-primary-400 bg-primary-500/20 text-white"
+                  : "border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50",
               )}
             >
               {label}

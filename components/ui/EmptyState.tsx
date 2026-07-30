@@ -29,7 +29,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
     <motion.div
       className={cn(
         "flex flex-col items-center justify-center text-center py-12 px-6",
-        className
+        className,
       )}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}

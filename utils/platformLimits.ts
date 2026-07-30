@@ -74,7 +74,14 @@ let _graphemeInit = false;
 const countGraphemes = (text: string): number => {
   if (!_graphemeInit) {
     _graphemeInit = true;
-    const Ctor = (Intl as { Segmenter?: new (l: string | undefined, o: { granularity: string }) => { segment: (s: string) => Iterable<unknown> } }).Segmenter;
+    const Ctor = (
+      Intl as {
+        Segmenter?: new (
+          l: string | undefined,
+          o: { granularity: string },
+        ) => { segment: (s: string) => Iterable<unknown> };
+      }
+    ).Segmenter;
     if (typeof Ctor === "function") {
       try {
         _grapheme = new Ctor(undefined, { granularity: "grapheme" });
@@ -93,7 +100,7 @@ const countGraphemes = (text: string): number => {
 
 export const evaluate = (
   text: string,
-  limit: PlatformLimit
+  limit: PlatformLimit,
 ): { count: number; state: CountState; remaining: number } => {
   const count = countGraphemes(text);
   let state: CountState = "ok";

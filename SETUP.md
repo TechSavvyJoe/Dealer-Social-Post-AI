@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js 22.12 or newer
+- Node.js 22 (`22.23.1` is pinned in `.node-version` and `.nvmrc`)
 - `curl` and `unzip` for the verified PocketBase download
 - A Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
 
@@ -21,8 +21,13 @@ At minimum, configure:
 # Server-side only. Do not rename this to a VITE_-prefixed variable.
 GEMINI_API_KEY=your-gemini-api-key
 
+# Local-only bootstrap credential. Production must use a separately generated
+# exact-case 12-character alphanumeric value.
+ADMIN_DEALER_CODE=your-12-character-code
+
 # Public frontend configuration.
 VITE_POCKETBASE_URL=http://127.0.0.1:8090
+VITE_TURNSTILE_SITE_KEY=1x00000000000000000000AA
 ```
 
 Optional provider configuration:
@@ -43,9 +48,16 @@ VITE_ENABLE_OPENAI_FALLBACK=false
 
 ```bash
 fly deploy \
+  --build-arg VITE_TURNSTILE_SITE_KEY=YOUR_PUBLIC_SITE_KEY \
+  --build-arg VITE_RELEASE_SHA="$(git rev-parse HEAD)" \
   --build-arg VITE_ENABLE_CLAUDE_FALLBACK=true \
   --build-arg VITE_ENABLE_OPENAI_FALLBACK=true
 ```
+
+The example Turnstile key is Cloudflare's public always-pass test key. Use it
+only for local development and CI. Production requires its own public site key
+at build time plus `TURNSTILE_SECRET` and exact
+`TURNSTILE_ALLOWED_HOSTNAMES` values in the PocketBase runtime.
 
 For dealer and administrator login provisioning, follow [DEALER_CODE_SETUP.md](DEALER_CODE_SETUP.md); it is the authoritative credential guide.
 
@@ -87,17 +99,21 @@ Do not call Google directly from browser code or expose a provider key through a
 
 ## Model routing
 
-The active, production-oriented routing lives in `services/modelConfig.ts`:
+The active production routing is defined in `config/gemini-model-policy.json`:
 
-| Workload           | Models                                                                          |
-| ------------------ | ------------------------------------------------------------------------------- |
-| Text/captions      | `gemini-3.5-flash` → `gemini-3.1-flash-lite` → `gemini-2.5-flash`               |
-| Images/edits       | `gemini-3-pro-image` → `gemini-3.1-flash-image` → `gemini-3.1-flash-lite-image` |
-| Video (Gemini API) | `veo-3.1-generate-preview` → `veo-3.1-fast-generate-preview`                    |
+| Task                 | Tier     | Routing order                                                                   | Output contract            |
+| -------------------- | -------- | ------------------------------------------------------------------------------- | -------------------------- |
+| `caption`            | quality  | `gemini-3.6-flash` → `gemini-3.5-flash-lite`                                    | 2,048 tokens               |
+| `caption_regenerate` | quality  | `gemini-3.6-flash` → `gemini-3.5-flash-lite`                                    | 2,048 tokens               |
+| `caption_edit`       | fast     | `gemini-3.5-flash-lite` → `gemini-3.6-flash`                                    | 2,048 tokens               |
+| `image_standard`     | standard | `gemini-3.1-flash-image` → `gemini-3-pro-image` → `gemini-3.1-flash-lite-image` | 2K → 2K → 1K; 4,096 tokens |
+| `image_studio`       | studio   | `gemini-3-pro-image` → `gemini-3.1-flash-image` → `gemini-3.1-flash-lite-image` | 2K → 2K → 1K; 4,096 tokens |
+| `video_standard`     | standard | `veo-3.1-fast-generate-preview`                                                 | 720p                       |
+| `video_quality`      | quality  | `veo-3.1-generate-preview`                                                      | 1080p                      |
 
 The active video client uses Gemini API model IDs. Vertex `-001` model IDs are not valid substitutes on the Gemini API path, and generic Vertex proxy routes are intentionally denied by the server allowlist.
 
-The primary and standard image tiers request 2K output. The Lite emergency model is sent 1K because that is the only resolution it supports.
+The standard image route starts with `gemini-3.1-flash-image`; only the explicit Studio preference starts with `gemini-3-pro-image`. Both request 2K from Flash and Pro, then 1K from the Lite image fallback. Standard and quality video are separate one-model routes rather than a primary/fallback chain. `services/modelConfig.ts` consumes the canonical artifact, PocketBase enforces it, and `npm run model-policy:check` rejects drift.
 
 ## Project structure
 
@@ -119,10 +135,12 @@ The primary and standard image tiers request 2K output. The Lite emergency model
 
 ```bash
 npm run security:secrets
+npm run model-policy:check
+npm run format:check
 npm run typecheck
-npm test
+npm run test:stability
 npm run build
-npm audit --omit=dev
+npm run security:audit
 ```
 
 For a production rollout:
@@ -133,7 +151,9 @@ For a production rollout:
 4. Deploy the backend, then confirm `/api/app/health`, session login/logout, tenant isolation, and one authorized provider smoke request.
 5. Deploy the frontend/rewrite layer and repeat the same-origin session and generation checks.
 
-The committed Fly workflow waits for the full `CI` workflow and fails if direct backend readiness does not recover. Vercel Git auto-promotion is an external project setting: disable it or require the successful Fly readiness job before promoting the matching frontend revision. Independent auto-deploys can create a split release when Fly fails.
+The committed Fly workflow waits for the full `CI` workflow and fails if direct backend readiness does not recover. Vercel's committed configuration disables independent `main` deployments. Stage and promote through the commit-bound release scripts, which require a clean current-main checkout, match Fly health, stamp the client artifact with that SHA, and promote only the recorded prebuilt deployment.
+
+Follow [docs/production-backups-and-release.md](docs/production-backups-and-release.md) to provision the private R2 backup gate, prove a disposable restore, stage Vercel without assigning the production domain, and promote the exact verified artifact.
 
 Do not upgrade PocketBase beyond 0.22.37 as a routine dependency bump. Releases after the 0.22 compatibility line removed APIs used by the current hooks; upgrading requires a separately reviewed hook/migration port.
 
@@ -156,5 +176,5 @@ Do not upgrade PocketBase beyond 0.22.37 as a routine dependency bump. Releases 
 
 - Keep the browser open while Veo polls its asynchronous operation.
 - Check provider quota and regional availability.
-- Retry a smaller image or the configured fast Veo fallback.
+- Retry a smaller image, or use the standard 720p video tier when the quality 1080p tier is not required.
 - A 429 indicates quota/rate limiting, not proof that the entire integration is healthy.

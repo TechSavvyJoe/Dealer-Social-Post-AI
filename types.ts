@@ -11,6 +11,18 @@ export enum AppStep {
 }
 
 export type UserRole = "salesperson" | "dealer_admin" | "super_admin";
+export type ImageQualityTier = "standard" | "studio";
+/**
+ * Media the salesperson intends to deliver for each selected destination.
+ * A photo master is still created for video-only plans because Veo animates
+ * that protected, approval-ready frame.
+ */
+export type MediaOutputMode = "photo" | "video" | "both";
+/** Gemini image ratios that map to the app's supported social canvases. */
+export type ImageAspectRatio = "1:1" | "4:5" | "9:16" | "16:9" | "4:3";
+/** Exact export canvas selected as the primary generation target. */
+export type PrimaryImageFormatId =
+  "feed_portrait" | "feed_square" | "story_vertical" | "marketplace" | "gbp";
 
 export enum StyleOption {
   Luxury = "Luxury & Elegance",
@@ -52,20 +64,31 @@ export enum VideoStyle {
   Blueprint = "Blueprint",
 }
 
+/**
+ * The AI works from a normalized, mobile-safe image while the untouched File
+ * remains available for recovery and an explicit Save to Photos action.
+ */
+export interface ImageSelection {
+  workingImage: string;
+  originalSource: string | Blob;
+  originalFilename?: string;
+}
+
 export interface GeneratedPost {
   image: string; // base64 data URL
   text: string;
   /** Server record used for owner-scoped approval status polling. */
   postId?: string;
   /** `submission_failed` is client-only and keeps delivery locked safely. */
-  approvalStatus?:
-    "n_a" | "pending" | "approved" | "rejected" | "submission_failed";
+  approvalStatus?: "n_a" | "pending" | "approved" | "rejected" | "submission_failed";
   /**
    * A captured signature is not considered usable until the protected release
    * record has been saved. Failed persistence locks all delivery actions so a
    * post can never claim consent that the backend does not hold.
    */
   releaseStatus?: "not_required" | "saved" | "save_failed";
+  /** Manager/super-admin History view of another salesperson's immutable work. */
+  historyReadOnly?: boolean;
   /**
    * Required compliance disclosure footer, stored separately from `text` so
    * a salesperson can't silently delete it while editing the caption.
@@ -81,12 +104,49 @@ export interface GeneratedPost {
    * multi-format export and to label the caption pack.
    */
   platformIds?: string[];
+  /** Whether the selected destinations should receive photos, videos, or both. */
+  mediaOutputMode?: MediaOutputMode;
+  /** Native canvas targeted during AI image generation. */
+  primaryFormatId?: PrimaryImageFormatId;
+  /** Provider-validated aspect ratio used for the primary generated image. */
+  imageAspectRatio?: ImageAspectRatio;
   /**
    * Per-platform caption variants keyed by publish target id
    * (e.g. `instagram_feed`, `tiktok`). Absent when only the primary caption
    * was generated (0–1 platforms or pack step failed).
    */
   platformCaptions?: Record<string, string>;
+  /** User-visible provenance for the primary caption. */
+  captionSource?: "ai" | "basic_fallback" | "custom";
+  /** True when a safe local template was used instead of a provider result. */
+  isBasicFallback?: boolean;
+  /** Redacted generation diagnostics; never contains prompts or credentials. */
+  aiMeta?: {
+    captionSource: "ai" | "basic_fallback" | "custom";
+    selectedTier: "standard" | "studio";
+    model?: string;
+    fallbackCount: number;
+    lastSuccessfulGenerationAt?: string;
+    caption: {
+      task: string;
+      tier: "fast" | "quality" | "standard" | "studio";
+      provider: string;
+      model: string | null;
+      attemptId?: string;
+      fallbackCount: number;
+      lastSuccessAt: string | null;
+    };
+    image: {
+      task: string;
+      tier: "fast" | "quality" | "standard" | "studio";
+      provider: string;
+      model: string | null;
+      attemptId?: string;
+      fallbackCount: number;
+      lastSuccessAt: string | null;
+    };
+    modelPolicyVersion: string;
+  };
 }
 
 export interface DealershipSettings {
@@ -129,9 +189,13 @@ export interface Dealer {
 
   // ---- Social handles ----
   facebook_url?: string;
+  /** Exact Facebook Page mention used in salesperson-originated posts. */
+  facebook_page_tag?: string;
   instagram_handle?: string;
   tiktok_handle?: string;
   x_handle?: string;
+  /** Exact LinkedIn company mention; composer may require selecting its suggestion. */
+  linkedin_company_tag?: string;
   gbp_url?: string;
 
   // ---- Generation defaults ----
@@ -162,7 +226,8 @@ export interface User {
 export interface VideoRequestOptions {
   durationSeconds: number;
   soundtrack: "none" | "celebration" | "cinematic" | "anthemic" | "funk";
-  aspectPreference: "auto" | "16:9" | "9:16" | "1:1";
+  /** Veo-supported output ratios only; never label a landscape file as square. */
+  aspectPreference: "auto" | "16:9" | "9:16";
   resolution: "720p" | "1080p";
   pacing: "cinematic" | "snappy";
 }
@@ -175,4 +240,12 @@ export interface GenerationParams {
   creativeBrief?: string;
   /** Platforms selected in PostCustomizer ("Share to") for caption packs + export priority. */
   platformIds?: string[];
+  /** Post scenario restored after a failed generation attempt or same-photo remix. */
+  scenarioId?: string;
+  /** Requested destination deliverables; defaults to photo for legacy sessions. */
+  mediaOutputMode?: MediaOutputMode;
+  /** Exact export canvas selected from the destination mix. */
+  primaryFormatId?: PrimaryImageFormatId;
+  /** Native Gemini image ratio corresponding to `primaryFormatId`. */
+  imageAspectRatio?: ImageAspectRatio;
 }

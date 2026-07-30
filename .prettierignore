@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+pb_data/
+playwright-report/
+test-results/
+.vercel/
+pocketbase
+*.zip

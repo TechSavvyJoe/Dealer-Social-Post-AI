@@ -14,6 +14,8 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
   leftIcon?: React.ReactNode;
   /** Icon element to display on the right */
   rightIcon?: React.ReactNode;
+  /** Interactive control displayed on the right (for example reveal password). */
+  rightAction?: React.ReactNode;
   /** Full width input */
   fullWidth?: boolean;
 }
@@ -36,6 +38,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
       helperText,
       leftIcon,
       rightIcon,
+      rightAction,
       fullWidth = false,
       type = "text",
       id,
@@ -64,9 +67,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         .filter(Boolean)
         .join(" ") || undefined;
     const hasValue =
-      value !== undefined
-        ? String(value ?? "").length > 0
-        : uncontrolledHasValue;
+      value !== undefined ? String(value ?? "").length > 0 : uncontrolledHasValue;
     const showFloatingLabel = isFocused || hasValue;
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -117,7 +118,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
 
               // With icons padding
               leftIcon && "pl-11",
-              (rightIcon || error) && "pr-11",
+              (rightIcon || rightAction || error) && "pr-12",
 
               // With floating label
               label && (showFloatingLabel ? "pt-6 pb-2" : "pt-3 pb-3"),
@@ -134,11 +135,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             }}
             onChange={handleChange}
             placeholder={
-              label
-                ? showFloatingLabel
-                  ? placeholder
-                  : undefined
-                : placeholder
+              label ? (showFloatingLabel ? placeholder : undefined) : placeholder
             }
           />
 
@@ -159,18 +156,20 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           )}
 
           {/* Right icon or error icon */}
-          {(error || rightIcon) && (
+          {(error || rightIcon) && !rightAction && (
             <div className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 pointer-events-none">
               {error ? (
-                <AlertCircle
-                  className="h-5 w-5 text-error-500"
-                  aria-hidden="true"
-                />
+                <AlertCircle className="h-5 w-5 text-error-500" aria-hidden="true" />
               ) : (
                 <span className="[&>svg]:h-5 [&>svg]:w-5">{rightIcon}</span>
               )}
             </div>
           )}
+          {rightAction && !error ? (
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 text-surface-300">
+              {rightAction}
+            </div>
+          ) : null}
         </div>
 
         {/* Helper text or error message */}
@@ -250,9 +249,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         .filter(Boolean)
         .join(" ") || undefined;
     const hasValue =
-      value !== undefined
-        ? String(value ?? "").length > 0
-        : uncontrolledHasValue;
+      value !== undefined ? String(value ?? "").length > 0 : uncontrolledHasValue;
     const showFloatingLabel = isFocused || hasValue;
 
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -315,11 +312,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
             }}
             onChange={handleChange}
             placeholder={
-              label
-                ? showFloatingLabel
-                  ? placeholder
-                  : undefined
-                : placeholder
+              label ? (showFloatingLabel ? placeholder : undefined) : placeholder
             }
           />
 
