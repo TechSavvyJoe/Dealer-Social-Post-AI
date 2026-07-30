@@ -66,5 +66,8 @@ describe("Turnstile production release contract", () => {
     expect(runbook).toContain("turnstile-spin-v2");
     expect(runbook).toContain("Vercel production as `VITE_TURNSTILE_SITE_KEY`");
     expect(runbook).toContain("Every official Cloudflare test sitekey and secret");
+    expect(
+      runbook.match(/production backend allowlist must contain only `([^`]+)`/)?.[1],
+    ).toBe("dealer-social-post-ai.vercel.app,dealer-social-post-ai-production.fly.dev");
   });
 });

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly VERCEL_CLI_VERSION="58.4.0"
+readonly VERCEL_CLI_VERSION="58.4.4"
 readonly FLY_ORIGIN="https://dealer-social-post-ai-production.fly.dev"
 readonly PRODUCTION_VERCEL_ORIGIN="https://dealer-social-post-ai.vercel.app"
 readonly EXPECTED_VERCEL_ORG_ID="team_Tc8DG6XMPUCefkTa3u71mmlN"
@@ -66,11 +66,10 @@ acquire_release_lock() {
     node -e 'process.stdout.write(require("node:crypto").randomBytes(16).toString("hex"))'
   )"
 
-  LOCK_PATH="$release_lock_path" \
+  if ! LOCK_PATH="$release_lock_path" \
     LOCK_TOKEN="$release_lock_token" \
     OWNER_PID="$$" \
-    node <<'NODE' ||
-    fail "another staged release command owns the release lock; remove the lock manually only after proving no release command is running."
+    node <<'NODE'
 const fs = require("node:fs");
 const lockPath = process.env.LOCK_PATH;
 const token = process.env.LOCK_TOKEN;
@@ -105,6 +104,9 @@ try {
   fs.rmSync(candidate, { force: true });
 }
 NODE
+  then
+    fail "another staged release command owns the release lock; remove the lock manually only after proving no release command is running."
+  fi
   release_lock_acquired=true
 }
 
