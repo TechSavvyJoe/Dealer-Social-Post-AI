@@ -115,6 +115,37 @@ export const validateStageEvidence = (evidence) => {
   return evidence;
 };
 
+export const resolveVercelAliasPage = (payload, requestedAlias) => {
+  if (
+    !payload ||
+    !Array.isArray(payload.aliases) ||
+    !payload.pagination ||
+    typeof requestedAlias !== "string" ||
+    !requestedAlias.endsWith(".vercel.app")
+  ) {
+    fail("the Vercel alias inventory page is invalid.");
+  }
+
+  const matches = payload.aliases.filter(
+    (entry) => entry && entry.alias === requestedAlias,
+  );
+  if (matches.length > 1) {
+    fail("the Vercel alias inventory contains duplicate exact aliases.");
+  }
+
+  const deploymentId = matches[0]?.deploymentId ?? null;
+  if (deploymentId !== null && !isDeploymentId(deploymentId)) {
+    fail("the Vercel alias inventory contains an invalid deployment ID.");
+  }
+
+  const next = payload.pagination.next;
+  if (next !== null && (!Number.isSafeInteger(next) || next <= 0)) {
+    fail("the Vercel alias inventory contains an invalid pagination cursor.");
+  }
+
+  return { deploymentId, next };
+};
+
 const git = (...args) =>
   execFileSync("git", args, {
     cwd: root,
@@ -410,11 +441,17 @@ if (invokedAsScript) {
         readJson(DEFAULT_PROVIDER_CANARY_EVIDENCE_PATH, "provider canary evidence"),
         process.argv[3] || "",
       );
+    } else if (process.argv[2] === "--resolve-alias-page") {
+      const result = resolveVercelAliasPage(
+        readJson(resolve(process.argv[3] || ""), "Vercel alias inventory"),
+        process.argv[4] || "",
+      );
+      process.stdout.write(`${result.deploymentId || "-"}\n${result.next ?? "-"}\n`);
     } else if (process.argv.length === 2) {
       runHostedQa();
     } else {
       fail(
-        "usage: scripts/vercel-staged-qa.mjs [--verify-receipt release url id staged-at attempt | --verify-provider-canary release]",
+        "usage: scripts/vercel-staged-qa.mjs [--verify-receipt release url id staged-at attempt | --verify-provider-canary release | --resolve-alias-page file alias]",
       );
     }
   } catch (error) {

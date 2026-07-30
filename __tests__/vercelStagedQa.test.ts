@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   HOSTED_QA_PROJECTS,
   acquireReleaseLock,
+  resolveVercelAliasPage,
   validateDeploymentInspection,
   validateProviderCanaryEvidence,
   validateQaEvidence,
@@ -23,6 +24,65 @@ const validEvidence = {
 };
 
 describe("Vercel staged browser QA receipt", () => {
+  it("resolves the exact production alias from paginated Vercel inventory", () => {
+    const deploymentId = "dpl_Example123";
+    expect(
+      resolveVercelAliasPage(
+        {
+          aliases: [
+            {
+              alias: "dealer-social-post-ai.vercel.app",
+              deploymentId,
+              url: "dealer-social-post-example.vercel.app",
+            },
+          ],
+          pagination: { next: null },
+        },
+        "dealer-social-post-ai.vercel.app",
+      ),
+    ).toEqual({ deploymentId, next: null });
+
+    expect(
+      resolveVercelAliasPage(
+        { aliases: [], pagination: { next: 1785446110549 } },
+        "dealer-social-post-ai.vercel.app",
+      ),
+    ).toEqual({ deploymentId: null, next: 1785446110549 });
+
+    for (const invalid of [
+      { aliases: null, pagination: { next: null } },
+      {
+        aliases: [
+          {
+            alias: "dealer-social-post-ai.vercel.app",
+            deploymentId: "not-a-deployment",
+          },
+        ],
+        pagination: { next: null },
+      },
+      {
+        aliases: [
+          {
+            alias: "dealer-social-post-ai.vercel.app",
+            deploymentId,
+          },
+          {
+            alias: "dealer-social-post-ai.vercel.app",
+            deploymentId,
+          },
+        ],
+        pagination: { next: null },
+      },
+      { aliases: [], pagination: { next: "unsafe" } },
+      { aliases: [], pagination: { next: 0 } },
+      { aliases: [], pagination: { next: -0 } },
+    ]) {
+      expect(() =>
+        resolveVercelAliasPage(invalid, "dealer-social-post-ai.vercel.app"),
+      ).toThrow(/Vercel alias inventory/);
+    }
+  });
+
   it("requires the complete responsive Chromium and WebKit matrix", () => {
     expect(HOSTED_QA_PROJECTS).toHaveLength(16);
     expect(HOSTED_QA_PROJECTS).toEqual(

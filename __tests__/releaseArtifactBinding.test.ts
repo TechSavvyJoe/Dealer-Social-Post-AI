@@ -67,6 +67,10 @@ describe("release artifact binding", () => {
     expect(script).toContain("assert_frontend_artifact");
     expect(script).toContain("assert_promoted_deployment");
     expect(script).toContain("assert_current_promoted_deployment");
+    expect(script).toContain("inspect_alias_deployment_id");
+    expect(script).toContain("alias list --json --limit 100");
+    expect(script).toContain("--resolve-alias-page");
+    expect(script).toContain('seen_cursors="|"');
     expect(script).toContain("acquire_release_lock");
     expect(script).toContain("fs.linkSync(candidate, lockPath)");
     expect(script).toContain("assert_provider_canary_evidence");
