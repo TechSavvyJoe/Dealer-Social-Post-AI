@@ -67,6 +67,11 @@ describe("Turnstile production release contract", () => {
     expect(runbook).toContain("Vercel production as `VITE_TURNSTILE_SITE_KEY`");
     expect(runbook).toContain("Every official Cloudflare test sitekey and secret");
     expect(
+      runbook.match(/flyctl secrets import --app dealer-social-post-ai-production/g),
+    ).toHaveLength(3);
+    expect(runbook).not.toContain('"ADMIN_DEALER_CODE=$');
+    expect(runbook).not.toContain('"VERCEL_TO_FLY_PROXY_SECRET=$');
+    expect(
       runbook.match(/production backend allowlist must contain only `([^`]+)`/)?.[1],
     ).toBe("dealer-social-post-ai.vercel.app,dealer-social-post-ai-production.fly.dev");
   });

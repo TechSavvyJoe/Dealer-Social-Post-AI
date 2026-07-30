@@ -57,7 +57,8 @@ Create a random 32+ character proxy credential without printing it, then install
 ```bash
 set +x
 PROXY_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
-flyctl secrets set --app dealer-social-post-ai-production "VERCEL_TO_FLY_PROXY_SECRET=$PROXY_SECRET"
+printf 'VERCEL_TO_FLY_PROXY_SECRET=%s\n' "$PROXY_SECRET" |
+  flyctl secrets import --app dealer-social-post-ai-production
 printf '%s' "$PROXY_SECRET" | npx vercel@58.4.4 env add VERCEL_TO_FLY_PROXY_SECRET production --sensitive --force --yes
 unset PROXY_SECRET
 ```
@@ -78,7 +79,8 @@ The old frontend uppercases its admin input, so the backend-first phase needs a 
 ```bash
 set +x
 TEMP_ADMIN_CODE="$(openssl rand -hex 6 | tr 'a-f' 'A-F')"
-flyctl secrets set --app dealer-social-post-ai-production "ADMIN_DEALER_CODE=$TEMP_ADMIN_CODE"
+printf 'ADMIN_DEALER_CODE=%s\n' "$TEMP_ADMIN_CODE" |
+  flyctl secrets import --app dealer-social-post-ai-production
 flyctl ssh console --app dealer-social-post-ai-production --command \
   'sqlite3 /pb/pb_data/data.db "DELETE FROM sessions WHERE role = '\''super_admin'\'' OR is_impersonation = 1;"'
 # Store TEMP_ADMIN_CODE securely for the cutover proof; do not echo it.
@@ -145,10 +147,11 @@ printf '\n'
 
 gh variable set TURNSTILE_ENFORCEMENT_ENABLED --env production --body true
 gh variable set LEGACY_CLIENT_COMPATIBILITY_ENABLED --env production --body false
-flyctl secrets set --app dealer-social-post-ai-production \
-  TURNSTILE_ENFORCEMENT_ENABLED=true \
-  LEGACY_CLIENT_COMPATIBILITY_ENABLED=false \
-  "ADMIN_DEALER_CODE=$FINAL_ADMIN_CODE"
+{
+  printf 'TURNSTILE_ENFORCEMENT_ENABLED=true\n'
+  printf 'LEGACY_CLIENT_COMPATIBILITY_ENABLED=false\n'
+  printf 'ADMIN_DEALER_CODE=%s\n' "$FINAL_ADMIN_CODE"
+} | flyctl secrets import --app dealer-social-post-ai-production
 flyctl ssh console --app dealer-social-post-ai-production --command \
   'sqlite3 /pb/pb_data/data.db "DELETE FROM sessions WHERE role = '\''super_admin'\'' OR is_impersonation = 1 OR admin_secret_fingerprint != '\'''\'';"'
 ```
