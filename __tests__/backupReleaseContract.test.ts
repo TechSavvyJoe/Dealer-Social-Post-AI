@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -10,6 +10,7 @@ import {
 import {
   planToolOwnedPocketBaseBackupCleanup,
   planToolOwnedR2BackupCleanup,
+  uploadAndVerifyR2BackupPair,
 } from "../scripts/pocketbase-r2-backup.mjs";
 
 const releaseSha = "7".repeat(40);
@@ -266,16 +267,21 @@ describe("Fly backup source identity", () => {
     expect(source).toContain("await retainOnlyCurrentEmergencyBackup(token, name)");
   });
 
-  it("retains only the newest tool-owned R2 archives without touching manual names", () => {
+  it("retains only the newest complete tool-owned R2 pairs without touching manual names", () => {
     const prefix = "dealer-social-post-ai/pocketbase";
-    const toolOwned = Array.from({ length: 32 }, (_, index) => ({
-      key: `${prefix}/dspai_tool_20260717t${String(index).padStart(
+    const toolOwned = Array.from({ length: 32 }, (_, index) => {
+      const key = `${prefix}/dspai_tool_20260717t${String(index).padStart(
         9,
         "0",
-      )}z_abcdef123456.zip`,
-    }));
+      )}z_abcdef123456.zip`;
+      return [{ key }, { key: `${key}.manifest.json` }];
+    }).flat();
+    const newestOrphan = `${prefix}/dspai_tool_20260718t999999999z_abcdef123456.zip`;
+    const orphanManifest = `${prefix}/dspai_tool_20260718t888888888z_abcdef123456.zip.manifest.json`;
     const inventory = [
       ...toolOwned,
+      { key: newestOrphan },
+      { key: orphanManifest },
       { key: `${prefix}/manual-dashboard-backup.zip` },
       { key: `${prefix}/dspai_20260713t123456789z_legacy.zip` },
       { key: `another-prefix/dspai_tool_20260717t999999999z_abcdef123456.zip` },
@@ -291,6 +297,177 @@ describe("Fly backup source identity", () => {
     expect(orderedToolKeys).not.toContain(
       `${prefix}/dspai_20260713t123456789z_legacy.zip`,
     );
+    expect(orderedToolKeys).not.toContain(newestOrphan);
+    expect(orderedToolKeys).not.toContain(
+      orphanManifest.replace(/\.manifest\.json$/, ""),
+    );
+  });
+
+  it("removes both current-run R2 objects when manifest upload fails", async () => {
+    const key =
+      "dealer-social-post-ai/pocketbase/dspai_tool_20260717t123456789z_abcdef123456.zip";
+    const deleted: string[] = [];
+    const originalError = new Error("manifest upload unavailable");
+    const client = {
+      putFile: vi.fn().mockResolvedValue({ sha256: "digest", size: 123 }),
+      putJson: vi.fn().mockRejectedValue(originalError),
+      getJson: vi.fn(),
+      delete: vi.fn(async (objectKey: string) => {
+        deleted.push(objectKey);
+      }),
+    };
+
+    await expect(
+      uploadAndVerifyR2BackupPair(client, {
+        prefix: "dealer-social-post-ai/pocketbase",
+        key,
+        outputPath: "/tmp/backup.zip",
+        metadata: { source: "test" },
+        createManifest: ({ sha256, size }: { sha256: string; size: number }) => ({
+          key,
+          sha256,
+          size,
+        }),
+      }),
+    ).rejects.toBe(originalError);
+    expect(deleted).toEqual([`${key}.manifest.json`, key]);
+    expect(client.getJson).not.toHaveBeenCalled();
+  });
+
+  it("cleans an archive persisted by an ambiguously rejected R2 put", async () => {
+    const key =
+      "dealer-social-post-ai/pocketbase/dspai_tool_20260717t123456789z_abcdef123456.zip";
+    const persistedObjects = new Set<string>();
+    const deleted: string[] = [];
+    const originalError = new Error("upload response unavailable");
+    const client = {
+      putFile: vi.fn(async (objectKey: string) => {
+        persistedObjects.add(objectKey);
+        throw originalError;
+      }),
+      putJson: vi.fn(),
+      getJson: vi.fn(),
+      delete: vi.fn(async (objectKey: string) => {
+        deleted.push(objectKey);
+        if (objectKey.endsWith(".manifest.json")) {
+          throw new Error("manifest cleanup response unavailable");
+        }
+        persistedObjects.delete(objectKey);
+      }),
+    };
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    try {
+      await expect(
+        uploadAndVerifyR2BackupPair(client, {
+          prefix: "dealer-social-post-ai/pocketbase",
+          key,
+          outputPath: "/tmp/backup.zip",
+          metadata: { source: "test" },
+          createManifest: vi.fn(),
+        }),
+      ).rejects.toBe(originalError);
+      expect(deleted).toEqual([`${key}.manifest.json`, key]);
+      expect(persistedObjects).toEqual(new Set());
+      expect(client.putJson).not.toHaveBeenCalled();
+      expect(client.getJson).not.toHaveBeenCalled();
+      expect(stderr).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "R2 partial-upload cleanup could not remove every current-run object",
+        ),
+      );
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it("fails closed on manifest mismatch and still attempts both cleanup deletes", async () => {
+    const key =
+      "dealer-social-post-ai/pocketbase/dspai_tool_20260717t123456789z_abcdef123456.zip";
+    const deleted: string[] = [];
+    const client = {
+      putFile: vi.fn().mockResolvedValue({ sha256: "expected", size: 123 }),
+      putJson: vi.fn().mockResolvedValue(undefined),
+      getJson: vi.fn().mockResolvedValue({ key, sha256: "unexpected", size: 123 }),
+      delete: vi.fn(async (objectKey: string) => {
+        deleted.push(objectKey);
+        if (objectKey.endsWith(".manifest.json")) {
+          throw new Error("manifest delete unavailable");
+        }
+      }),
+    };
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    try {
+      await expect(
+        uploadAndVerifyR2BackupPair(client, {
+          prefix: "dealer-social-post-ai/pocketbase",
+          key,
+          outputPath: "/tmp/backup.zip",
+          metadata: { source: "test" },
+          createManifest: ({ sha256, size }: { sha256: string; size: number }) => ({
+            key,
+            sha256,
+            size,
+          }),
+        }),
+      ).rejects.toThrow("failed read-back validation");
+      expect(deleted).toEqual([`${key}.manifest.json`, key]);
+      expect(stderr).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "R2 partial-upload cleanup could not remove every current-run object",
+        ),
+      );
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it("keeps a verified current-run pair and returns its exact manifest", async () => {
+    const key =
+      "dealer-social-post-ai/pocketbase/dspai_tool_20260717t123456789z_abcdef123456.zip";
+    const manifest = { key, sha256: "expected", size: 123 };
+    const client = {
+      putFile: vi.fn().mockResolvedValue({ sha256: "expected", size: 123 }),
+      putJson: vi.fn().mockResolvedValue(undefined),
+      getJson: vi.fn().mockResolvedValue({ ...manifest }),
+      delete: vi.fn(),
+    };
+
+    await expect(
+      uploadAndVerifyR2BackupPair(client, {
+        prefix: "dealer-social-post-ai/pocketbase",
+        key,
+        outputPath: "/tmp/backup.zip",
+        metadata: { source: "test" },
+        createManifest: () => manifest,
+      }),
+    ).resolves.toEqual({
+      uploaded: { sha256: "expected", size: 123 },
+      manifest,
+    });
+    expect(client.delete).not.toHaveBeenCalled();
+  });
+
+  it("never uploads or deletes a current-run object outside the tool-owned prefix", async () => {
+    const client = {
+      putFile: vi.fn(),
+      putJson: vi.fn(),
+      getJson: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    await expect(
+      uploadAndVerifyR2BackupPair(client, {
+        prefix: "dealer-social-post-ai/pocketbase",
+        key: "manual-archives/production.zip",
+        outputPath: "/tmp/backup.zip",
+        metadata: { source: "test" },
+        createManifest: vi.fn(),
+      }),
+    ).rejects.toThrow("outside the tool-owned prefix");
+    expect(client.putFile).not.toHaveBeenCalled();
+    expect(client.delete).not.toHaveBeenCalled();
   });
 
   it("keeps pre-v2 revocation schema-safe and rollback above the auth security floor", () => {

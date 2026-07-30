@@ -23,8 +23,13 @@ describe("release artifact binding", () => {
     const script = read("scripts/vercel-staged-release.sh");
     const runbook = read("docs/production-backups-and-release.md");
     const packageJson = read("package.json");
+    const vercelCliVersion = "58.4.0";
 
     execFileSync("bash", ["-n", scriptPath]);
+    expect(script).toContain(`readonly VERCEL_CLI_VERSION="${vercelCliVersion}"`);
+    expect(script).not.toMatch(/58[.]1[.]0/);
+    expect(runbook).toContain(`npx vercel@${vercelCliVersion} env add`);
+    expect(runbook).not.toMatch(/58[.]1[.]0/);
     expect(script).toContain("git status --porcelain --untracked-files=normal");
     expect(script).toContain("git ls-remote --exit-code origin refs/heads/main");
     expect(script).toContain("assert_expected_vercel_link");

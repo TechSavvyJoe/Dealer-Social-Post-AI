@@ -184,6 +184,14 @@ describe("PostResult job-first flow", () => {
     ).toBeInTheDocument();
   });
 
+  it("describes the selected file's real readiness instead of promising publishability", async () => {
+    renderResult();
+
+    const studio = screen.getByTestId("mobile-publish-studio");
+    expect(studio).not.toHaveTextContent("Ready to publish");
+    await waitFor(() => expect(studio).toHaveTextContent("Ready to save and share"));
+  });
+
   it("supports roving keyboard navigation across platform caption tabs", async () => {
     renderResult({
       post: {
@@ -692,7 +700,7 @@ describe("PostResult job-first flow", () => {
     releaseDraft?.();
   });
 
-  it("reselects a completed video and sends that MP4 through Save and Share", async () => {
+  it("labels a reselected video truthfully and sends that MP4 through Save and Share", async () => {
     const user = userEvent.setup();
     const syntheticVideoUrl = "blob:synthetic-generated-video";
     const share = vi.fn((_data: ShareData) => Promise.resolve());
@@ -748,6 +756,9 @@ describe("PostResult job-first flow", () => {
     expect(
       await screen.findByLabelText("Generated social media video preview"),
     ).toHaveAttribute("src", syntheticVideoUrl);
+    const studio = screen.getByTestId("mobile-publish-studio");
+    expect(studio).toHaveTextContent("Video ready to review");
+    expect(studio).not.toHaveTextContent("Preparing platform file");
 
     const delivery = screen.getByLabelText("Post delivery actions");
     const saveVideo = within(delivery).getByRole("button", {
@@ -1041,7 +1052,6 @@ describe("PostResult job-first flow", () => {
   });
 
   it("never reuses a manually previewed video for a selected photo delivery", async () => {
-    const user = userEvent.setup();
     const share = vi.fn(async (_data?: ShareData): Promise<void> => undefined);
     Object.defineProperty(navigator, "share", {
       configurable: true,
@@ -1065,27 +1075,23 @@ describe("PostResult job-first flow", () => {
       },
     });
 
-    await user.click(
+    fireEvent.click(
       screen.getByRole("button", {
         name: "Select Instagram Reel video 9:16, 1080 by 1920 pixels",
       }),
     );
-    await user.click(
+    fireEvent.click(
       screen.getByRole("button", {
         name: "Create Instagram Reel video 9:16",
       }),
     );
-    await user.click(await screen.findByRole("button", { name: /Golden Delivery/i }));
-    await waitFor(() => expect(callbacks.onGenerateVideo).toHaveBeenCalledTimes(1));
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", {
-          name: "Show Golden Radiance video",
-        }),
-      ).toBeInTheDocument(),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: /Golden Delivery/i }));
+    const showGeneratedVideo = await screen.findByRole("button", {
+      name: "Show Golden Radiance video",
+    });
+    expect(callbacks.onGenerateVideo).toHaveBeenCalledTimes(1);
 
-    await user.click(
+    fireEvent.click(
       screen.getByRole("button", {
         name: "Select Instagram Feed image 4:5, 1080 by 1350 pixels",
       }),
@@ -1097,23 +1103,19 @@ describe("PostResult job-first flow", () => {
         }),
       ).toBeEnabled(),
     );
-    await user.click(
-      screen.getByRole("button", {
-        name: "Show Golden Radiance video",
-      }),
-    );
+    fireEvent.click(showGeneratedVideo);
     await waitFor(() =>
       expect(mockPrepareMediaForSave).toHaveBeenLastCalledWith(
         expect.objectContaining({ kind: "video" }),
       ),
     );
 
-    await user.click(screen.getByRole("button", { name: "Share selected 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share selected 1" }));
     const dialog = await screen.findByRole("dialog", { name: "Share exact output" });
     await within(dialog).findByText("Instagram Feed is ready");
-    await user.click(within(dialog).getByRole("button", { name: "Share now" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Share now" }));
 
-    expect(share).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
     const sharedFile = share.mock.calls[0]?.[0]?.files?.[0];
     expect(sharedFile).toBeInstanceOf(File);
     expect(sharedFile?.name).toMatch(/\.jpg$/);

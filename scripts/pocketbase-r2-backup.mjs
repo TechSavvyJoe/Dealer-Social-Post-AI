@@ -309,18 +309,76 @@ async function createAndDownloadPocketBaseBackup(outputPath) {
   }
 }
 
-export function planToolOwnedR2BackupCleanup(objects, prefix) {
+function isToolOwnedR2BackupKey(key, prefix) {
   const prefixPath = `${String(prefix || "").replace(/\/+$/g, "")}/`;
-  return (Array.isArray(objects) ? objects : [])
-    .map((object) => String(object?.key || ""))
-    .filter((key) => {
-      if (!key.startsWith(prefixPath)) return false;
-      const filename = key.slice(prefixPath.length);
-      return (
-        !filename.includes("/") && TOOL_OWNED_POCKETBASE_BACKUP_PATTERN.test(filename)
-      );
-    })
+  if (!key.startsWith(prefixPath)) return false;
+  const filename = key.slice(prefixPath.length);
+  return !filename.includes("/") && TOOL_OWNED_POCKETBASE_BACKUP_PATTERN.test(filename);
+}
+
+export function planToolOwnedR2BackupCleanup(objects, prefix) {
+  const objectKeys = new Set(
+    (Array.isArray(objects) ? objects : []).map((object) => String(object?.key || "")),
+  );
+  return [...objectKeys]
+    .filter((key) => objectKeys.has(`${key}.manifest.json`))
+    .filter((key) => isToolOwnedR2BackupKey(key, prefix))
     .sort((left, right) => right.localeCompare(left));
+}
+
+function manifestsMatch(actual, expected) {
+  if (!actual || typeof actual !== "object" || Array.isArray(actual)) return false;
+  const expectedEntries = Object.entries(expected);
+  return (
+    Object.keys(actual).length === expectedEntries.length &&
+    expectedEntries.every(([key, value]) => actual[key] === value)
+  );
+}
+
+async function deleteCurrentRunR2PairBestEffort(client, key) {
+  const failures = [];
+  for (const objectKey of [`${key}.manifest.json`, key]) {
+    try {
+      await client.delete(objectKey);
+    } catch (error) {
+      failures.push(
+        `${objectKey}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  if (failures.length > 0) {
+    process.stderr.write(
+      `R2 partial-upload cleanup could not remove every current-run object: ${failures.join(
+        "; ",
+      )}\n`,
+    );
+  }
+}
+
+export async function uploadAndVerifyR2BackupPair(
+  client,
+  { prefix, key, outputPath, metadata, createManifest },
+) {
+  if (!isToolOwnedR2BackupKey(key, prefix)) {
+    throw new Error("Refusing to upload an R2 backup outside the tool-owned prefix.");
+  }
+  try {
+    const uploaded = await client.putFile(key, outputPath, metadata);
+    const manifest = createManifest(uploaded);
+    const manifestKey = `${key}.manifest.json`;
+    await client.putJson(manifestKey, manifest);
+    const uploadedManifest = await client.getJson(manifestKey);
+    if (!manifestsMatch(uploadedManifest, manifest)) {
+      throw new Error("Uploaded R2 backup manifest failed read-back validation.");
+    }
+    return { uploaded, manifest };
+  } catch (error) {
+    // An object-store write can persist before its client promise rejects.
+    // Treat every failed upload as ambiguous and remove only this run's exact,
+    // already namespace-validated archive/manifest keys.
+    await deleteCurrentRunR2PairBestEffort(client, key);
+    throw error;
+  }
 }
 
 async function pruneOldBackups(client, prefix) {
@@ -353,25 +411,29 @@ async function backupToR2() {
     const client = createR2ClientFromEnv();
     const prefix = backupPrefix();
     const key = `${prefix}/${pocketBaseBackup.name}`;
-    const uploaded = await client.putFile(key, outputPath, {
-      sha256: await hashFile(outputPath),
-      source: "pocketbase-0.22.37",
-    });
-    const manifest = {
-      formatVersion: 2,
+    const { manifest } = await uploadAndVerifyR2BackupPair(client, {
+      prefix,
       key,
-      createdAt: new Date().toISOString(),
-      sha256: uploaded.sha256,
-      size: uploaded.size,
-      source: "PocketBase 0.22.37 full pb_data backup",
-      sourceOrigin,
-      sourceReleaseSha: sourceRelease.sourceReleaseSha,
-      sourceIdentity: sourceRelease.sourceIdentity,
-      sourceImageDigest: sourceRelease.sourceImageDigest,
-      targetReleaseSha,
-      toolingCommit,
-    };
-    await client.putJson(`${key}.manifest.json`, manifest);
+      outputPath,
+      metadata: {
+        sha256: await hashFile(outputPath),
+        source: "pocketbase-0.22.37",
+      },
+      createManifest: (uploaded) => ({
+        formatVersion: 2,
+        key,
+        createdAt: new Date().toISOString(),
+        sha256: uploaded.sha256,
+        size: uploaded.size,
+        source: "PocketBase 0.22.37 full pb_data backup",
+        sourceOrigin,
+        sourceReleaseSha: sourceRelease.sourceReleaseSha,
+        sourceIdentity: sourceRelease.sourceIdentity,
+        sourceImageDigest: sourceRelease.sourceImageDigest,
+        targetReleaseSha,
+        toolingCommit,
+      }),
+    });
     await client.putJson(`${prefix}/latest.json`, manifest);
     const retention = await pruneOldBackups(client, prefix);
     await deletePocketBaseBackup(pocketBaseBackup.name, pocketBaseBackup.token);

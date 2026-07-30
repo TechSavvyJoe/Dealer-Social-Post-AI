@@ -85,7 +85,8 @@ describe("MobilePublishStudio", () => {
       screen.getByRole("heading", { level: 1, name: "Instagram Reel" }),
     ).toBeVisible();
     expect(studio).toHaveTextContent("Instagram Reel");
-    expect(studio).toHaveTextContent("Posting as Jamie Rivera · 9:16");
+    expect(screen.getByLabelText("Posting as Jamie Rivera")).toBeVisible();
+    expect(studio).toHaveTextContent("Video · 9:16");
     expect(studio).toHaveTextContent("File ready. Caption is included when you share.");
     expect(screen.getByAltText("Focused output preview")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Focused caption" })).toHaveTextContent(
@@ -156,6 +157,27 @@ describe("MobilePublishStudio", () => {
     expect(handlers.onShowHistory).toHaveBeenCalledTimes(1);
     expect(handlers.onShowSettings).toHaveBeenCalledTimes(1);
     expect(handlers.onRequestLogout).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses disclosure-popover semantics without claiming full menu behavior", () => {
+    renderStudio();
+    const trigger = screen.getByRole("button", {
+      name: "More publishing options",
+    });
+
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(trigger);
+
+    const popover = screen.getByRole("group", { name: "Publishing options" });
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(trigger).toHaveAttribute("aria-controls", popover.id);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(
+      screen.queryByRole("group", { name: "Publishing options" }),
+    ).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 
   it("lets a salesperson review the full destination caption", () => {

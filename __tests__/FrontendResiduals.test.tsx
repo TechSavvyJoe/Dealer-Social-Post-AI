@@ -160,6 +160,30 @@ describe("final frontend residuals", () => {
     expect(onLogout).toHaveBeenCalledTimes(1);
   });
 
+  it("uses truthful neutral studio chrome and the signed-in posting identity", () => {
+    render(
+      <Header
+        dealer={{ id: "dealer-b", name: "Northstar Motors" }}
+        person={{
+          id: "person-b",
+          dealer: "dealer-b",
+          name: "Jamie Rivera",
+          role: "salesperson",
+          active: true,
+        }}
+        onLogout={vi.fn()}
+        onShowSettings={vi.fn()}
+        studioMode
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Publish studio" }),
+    ).toBeVisible();
+    expect(screen.queryByText("Ready to publish")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Posting as Jamie Rivera")).toBeVisible();
+  });
+
   it("defers every page-level shortcut while an aria-modal dialog is open", async () => {
     const handlers = {
       onPrimary: vi.fn(),

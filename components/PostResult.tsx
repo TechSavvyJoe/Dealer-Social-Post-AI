@@ -2045,17 +2045,32 @@ export const PostResult: React.FC<PostResultProps> = ({
 
   const handleCreateAnotherRequest = () => requestLeaveResult("startOver");
   const handleRemixRequest = () => requestLeaveResult("remix");
+  const activePublishOutput =
+    deliveryOutputs.find((output) => output.selected) ?? deliveryOutputs[0];
+  const selectedFileTitle = historyReadOnly
+    ? "Saved post"
+    : manualVideoSelected && videoUrl
+      ? "Video ready to review"
+      : !activePublishOutput
+        ? "Review your post"
+        : activePublishOutput.status === "ready" && activePublishOutput.actionsReady
+          ? "Ready to save and share"
+          : activePublishOutput.status === "failed"
+            ? "File needs attention"
+            : activePublishOutput.status === "pending"
+              ? "Create this video to continue"
+              : "Preparing platform file";
   const publishTitle = claimLocked
     ? "Caption claim needs attention"
     : releaseLocked
       ? "Photo release needs attention"
       : reviewRequired
-        ? approvalStatus === "approved"
-          ? "Approved and ready to publish"
-          : approvalStatus === "rejected"
-            ? "Manager requested changes"
+        ? approvalStatus === "rejected"
+          ? "Manager requested changes"
+          : approvalStatus === "approved"
+            ? selectedFileTitle
             : "Ready for manager review"
-        : "Ready to publish";
+        : selectedFileTitle;
 
   const confirmLeaveResult = () => {
     const mode = leaveConfirm;

@@ -56,7 +56,7 @@ Create a random 32+ character proxy credential without printing it, then install
 set +x
 PROXY_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
 flyctl secrets set --app dealer-social-post-ai-production "VERCEL_TO_FLY_PROXY_SECRET=$PROXY_SECRET"
-printf '%s' "$PROXY_SECRET" | npx vercel@58.1.0 env add VERCEL_TO_FLY_PROXY_SECRET production --sensitive --force --yes
+printf '%s' "$PROXY_SECRET" | npx vercel@58.4.0 env add VERCEL_TO_FLY_PROXY_SECRET production --sensitive --force --yes
 unset PROXY_SECRET
 ```
 

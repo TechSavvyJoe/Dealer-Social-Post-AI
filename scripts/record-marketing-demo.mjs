@@ -317,29 +317,31 @@ await moveAndClick(
 await moveAndClick(page.getByRole("button", { name: "Generate Post" }), 400, 700);
 await sleep(2100);
 
-await page.evaluate(async ({ image }) => {
-  const { useAppStore } = await import("/stores/appStore.ts");
-  const store = useAppStore.getState();
-  store.setGeneratedPost({
-    image,
-    text:
-      "A standout delivery deserves a standout moment. Congratulations to Taylor on the new ride! Thank you for choosing Northline Motors. #NewCarDay #NorthlineMotors",
-    postId: "demo-post-1",
-    releaseStatus: "saved",
-    approvalStatus: "n_a",
-    disclosures: "",
-    captionSource: "ai",
-  });
-  store.setGenerationParams({
-    style: "Modern & Bold",
-    tone: "Professional",
-    customerName: "Taylor Morgan",
-  });
-  store.setStep(4);
-}, { image: generatedImage });
+await page.evaluate(
+  async ({ image }) => {
+    const { useAppStore } = await import("/stores/appStore.ts");
+    const store = useAppStore.getState();
+    store.setGeneratedPost({
+      image,
+      text: "A standout delivery deserves a standout moment. Congratulations to Taylor on the new ride! Thank you for choosing Northline Motors. #NewCarDay #NorthlineMotors",
+      postId: "demo-post-1",
+      releaseStatus: "saved",
+      approvalStatus: "n_a",
+      disclosures: "",
+      captionSource: "ai",
+    });
+    store.setGenerationParams({
+      style: "Modern & Bold",
+      tone: "Professional",
+      customerName: "Taylor Morgan",
+    });
+    store.setStep(4);
+  },
+  { image: generatedImage },
+);
 
 await page
-  .getByRole("heading", { name: "Ready to publish" })
+  .getByRole("heading", { name: "Publish studio" })
   .waitFor({ timeout: 10_000 });
 await sleep(3200);
 

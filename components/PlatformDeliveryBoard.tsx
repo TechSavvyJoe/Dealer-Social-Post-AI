@@ -304,9 +304,9 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
                   {onToggleBatch && compact ? (
                     <label
                       className={cn(
-                        "absolute right-2.5 top-2.5 z-10 grid h-7 w-7 place-items-center rounded-md border border-surface-600/80 bg-surface-950/90 shadow-sm",
+                        "group absolute right-0 top-0 z-10 grid h-11 w-11 place-items-center rounded-md has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary-400/70",
                         batchEligible
-                          ? "cursor-pointer text-surface-100 hover:border-primary-400"
+                          ? "cursor-pointer text-surface-100"
                           : "cursor-not-allowed text-surface-500 opacity-60",
                       )}
                       title={
@@ -315,18 +315,25 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
                           : "Create this video before selecting it"
                       }
                     >
-                      <input
-                        type="checkbox"
-                        checked={Boolean(output.batchSelected)}
-                        disabled={!batchEligible}
-                        onChange={(event) => {
-                          if (batchEligible) {
-                            onToggleBatch(output.id, event.currentTarget.checked);
-                          }
-                        }}
-                        className="h-4 w-4 accent-[var(--brand-primary)]"
-                        aria-label={`Include ${name} in Share selected`}
-                      />
+                      <span
+                        className={cn(
+                          "grid h-7 w-7 place-items-center rounded-md border border-surface-600/80 bg-surface-950/90 shadow-sm",
+                          batchEligible && "group-hover:border-primary-400",
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={Boolean(output.batchSelected)}
+                          disabled={!batchEligible}
+                          onChange={(event) => {
+                            if (batchEligible) {
+                              onToggleBatch(output.id, event.currentTarget.checked);
+                            }
+                          }}
+                          className="h-4 w-4 accent-[var(--brand-primary)]"
+                          aria-label={`Include ${name} in Share selected`}
+                        />
+                      </span>
                       <span className="sr-only">
                         {batchEligible
                           ? "Include in guided sharing"

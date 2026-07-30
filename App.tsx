@@ -205,13 +205,13 @@ const AppContent: React.FC = () => {
             aria-label="Publishing workspace navigation"
           >
             <nav className="flex w-full flex-1 flex-col gap-2">
-              <div
+              <span
                 className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-primary-400/45 bg-primary-500/15 px-1 text-[10px] font-semibold text-primary-100 shadow-[0_8px_24px_rgba(0,0,0,0.18)]"
                 aria-current="page"
               >
                 <LayoutDashboard className="h-5 w-5" aria-hidden="true" />
                 Workspace
-              </div>
+              </span>
               <button
                 type="button"
                 onClick={() => setIsHistoryOpen(true)}

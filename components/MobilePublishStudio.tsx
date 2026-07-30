@@ -115,6 +115,7 @@ export const MobilePublishStudio: React.FC<MobilePublishStudioProps> = ({
   editCaptionDisabled,
 }) => {
   const captionId = useId();
+  const menuId = useId();
   const [captionExpanded, setCaptionExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -195,13 +196,34 @@ export const MobilePublishStudio: React.FC<MobilePublishStudioProps> = ({
           <h1 className="truncate text-base font-semibold tracking-tight text-surface-50">
             {activeOutput?.platformLabel || title}
           </h1>
-          <p className="truncate text-[11px] tabular-nums text-surface-400">
-            {activeOutput
-              ? postingAs
-                ? `Posting as ${postingAs} · ${activeOutput.ratio}`
-                : `${activeOutput.mediaKind === "image" ? "Photo" : "Video"} · ${activeOutput.ratio} · ${activeOutput.width}×${activeOutput.height}`
-              : "Choose a destination output"}
-          </p>
+          <div className="mt-0.5 flex min-w-0 items-center justify-center gap-1 text-[10px] text-surface-400">
+            {postingAs ? (
+              <span
+                className="inline-flex min-w-0 max-w-[9.5rem] items-center gap-1 rounded-full border border-primary-400/25 bg-primary-500/10 px-1.5 py-0.5 leading-none"
+                aria-label={`Posting as ${postingAs}`}
+              >
+                <span className="shrink-0 text-primary-200">Posting as</span>
+                <strong className="truncate font-semibold text-surface-100">
+                  {postingAs}
+                </strong>
+              </span>
+            ) : null}
+            {activeOutput ? (
+              <>
+                {postingAs ? <span aria-hidden="true">·</span> : null}
+                <span className="shrink-0 tabular-nums">
+                  {activeOutput.mediaKind === "image" ? "Photo" : "Video"} ·{" "}
+                  {activeOutput.ratio}
+                  <span className="hidden min-[390px]:inline">
+                    {" "}
+                    · {activeOutput.width}×{activeOutput.height}
+                  </span>
+                </span>
+              </>
+            ) : (
+              <span>Choose a destination output</span>
+            )}
+          </div>
         </div>
         {hasMenuActions ? (
           <div ref={menuRef} className="relative shrink-0">
@@ -212,11 +234,13 @@ export const MobilePublishStudio: React.FC<MobilePublishStudioProps> = ({
               className="grid h-11 w-11 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-surface-100 transition-colors hover:bg-white/[0.1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
               aria-label="More publishing options"
               aria-expanded={menuOpen}
+              aria-controls={menuOpen ? menuId : undefined}
             >
               <MoreHorizontal className="h-5 w-5" aria-hidden="true" />
             </button>
             {menuOpen ? (
               <div
+                id={menuId}
                 className="absolute right-0 top-full z-30 mt-2 w-48 overflow-hidden rounded-xl border border-white/15 bg-surface-950/98 p-1.5 text-left shadow-2xl shadow-black/50 backdrop-blur-xl"
                 role="group"
                 aria-label="Publishing options"

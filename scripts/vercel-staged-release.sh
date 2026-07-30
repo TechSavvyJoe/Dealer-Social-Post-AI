@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly VERCEL_CLI_VERSION="58.1.0"
+readonly VERCEL_CLI_VERSION="58.4.0"
 readonly FLY_ORIGIN="https://dealer-social-post-ai-production.fly.dev"
 readonly EXPECTED_VERCEL_ORG_ID="team_Tc8DG6XMPUCefkTa3u71mmlN"
 readonly EXPECTED_VERCEL_PROJECT_ID="prj_h5phWNMNtK4D9dqwbOHrrrRMqrRi"

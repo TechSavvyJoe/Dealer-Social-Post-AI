@@ -309,6 +309,8 @@ describe("PlatformDeliveryBoard", () => {
       "title",
       "Include Instagram Reel video 9:16 in guided sharing",
     );
+    expect(checkbox.closest("label")).toHaveClass("h-11", "w-11");
+    expect(checkbox.parentElement).toHaveClass("h-7", "w-7");
     expect(screen.queryByText("Include in Share selected")).not.toBeInTheDocument();
 
     fireEvent.click(checkbox);
