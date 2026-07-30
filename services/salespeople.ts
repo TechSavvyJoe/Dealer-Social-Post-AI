@@ -39,7 +39,7 @@ export interface PeoplePage {
   total?: number;
 }
 
-export const API_CONTRACT_VERSION = "2026-07-17.v2";
+export const API_CONTRACT_VERSION = "2026-07-29.v3";
 
 const normalizePerson = (person: Record<string, unknown>): RosterPerson => ({
   id: String(person.id || ""),

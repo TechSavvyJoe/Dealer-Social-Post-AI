@@ -760,6 +760,64 @@ describe("GeminiService model routing", () => {
     );
   });
 
+  it("retries a transient video-download proxy failure without starting another job", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        body: null,
+        text: async () => "temporary proxy failure",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        blob: async () =>
+          new Blob([makeMp4Bytes().buffer as ArrayBuffer], {
+            type: "application/octet-stream",
+          }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(global.URL, "createObjectURL").mockReturnValue(
+      "blob:retried-provider-video",
+    );
+
+    const download = fetchVideoThroughProxy(
+      "https://generativelanguage.googleapis.com/v1beta/files/retry-video:download",
+      0,
+    );
+
+    await expect(download).resolves.toBe("blob:retried-provider-video");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init).toMatchObject({
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+        headers: {
+          Accept: "video/mp4, application/octet-stream;q=0.9",
+        },
+      });
+    }
+  });
+
+  it("fails clearly without retrying when provider media has expired", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 410,
+      text: async () => "gone",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchVideoThroughProxy(
+        "https://generativelanguage.googleapis.com/v1beta/files/expired-video:download",
+        0,
+      ),
+    ).rejects.toThrow(/no longer available.*Generate the video again/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     "https://generativelanguage.googleapis.com.attacker.example/v1beta/files/video",
     "https://generativelanguage.googleapis.com/v1beta/files/video/extra",

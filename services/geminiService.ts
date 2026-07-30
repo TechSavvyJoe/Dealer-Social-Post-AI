@@ -341,7 +341,7 @@ const generateImageWithFallback = async (
       });
       try {
         const openAIImageSize =
-          imageAspectRatio === "9:16"
+          imageAspectRatio === "9:16" || imageAspectRatio === "4:5"
             ? "1024x1536"
             : imageAspectRatio === "4:3" || imageAspectRatio === "16:9"
               ? "1536x1024"
@@ -953,6 +953,16 @@ const looksLikeMp4 = (bytes: Uint8Array): boolean => {
   );
 };
 
+const VIDEO_DOWNLOAD_RETRY_DELAYS_MS = [400, 1_000] as const;
+const isRetryableVideoDownloadStatus = (status: number): boolean =>
+  status === 408 ||
+  status === 425 ||
+  status === 429 ||
+  status === 500 ||
+  status === 502 ||
+  status === 503 ||
+  status === 504;
+
 /** Read a small Blob slice across modern browsers and jsdom's legacy Blob. */
 const readBlobSlice = async (blob: Blob): Promise<Uint8Array> => {
   if (typeof blob.arrayBuffer === "function") {
@@ -1010,15 +1020,64 @@ export const fetchVideoThroughProxy = async (
     }
     const proxyPath = `v1beta/files/${fileMatch[1]}:download?alt=media`;
 
-    assertAuthEpoch(requestAuthEpoch);
-    const response = await fetch(`/api/proxy/${proxyPath}`, {
-      method: "GET",
-      credentials: "include",
-    });
+    let response: Response | null = null;
+    let lastTransportError: unknown = null;
+    for (
+      let attempt = 0;
+      attempt <= VIDEO_DOWNLOAD_RETRY_DELAYS_MS.length;
+      attempt += 1
+    ) {
+      assertAuthEpoch(requestAuthEpoch);
+      try {
+        response = await fetch(`/api/proxy/${proxyPath}`, {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+          headers: {
+            Accept: "video/mp4, application/octet-stream;q=0.9",
+          },
+        });
+        lastTransportError = null;
+      } catch (error) {
+        lastTransportError = error;
+        response = null;
+      }
+
+      const retryable =
+        (!response && lastTransportError != null) ||
+        (response != null && isRetryableVideoDownloadStatus(response.status));
+      if (!retryable || attempt >= VIDEO_DOWNLOAD_RETRY_DELAYS_MS.length) {
+        break;
+      }
+
+      // Video downloads are read-only and idempotent. A short bounded retry can
+      // recover from a transient proxy/Fly handoff without starting a second
+      // billable Veo job.
+      if (response) {
+        await response.body?.cancel().catch(() => undefined);
+      }
+      await sleep(VIDEO_DOWNLOAD_RETRY_DELAYS_MS[attempt]);
+      assertAuthEpoch(requestAuthEpoch);
+    }
+
+    if (!response) {
+      throw new Error(
+        `Video proxy could not be reached${
+          lastTransportError instanceof Error && lastTransportError.message
+            ? `: ${lastTransportError.message}`
+            : ""
+        }.`,
+      );
+    }
 
     if (!response.ok) {
       if (response.status === 401) notifySessionRejected(requestAuthEpoch);
       const errText = await response.text().catch(() => "");
+      if (response.status === 404 || response.status === 410) {
+        throw new Error(
+          "Video proxy reports that the generated video is no longer available. Generate the video again; the app will not substitute a still image.",
+        );
+      }
       throw new Error(
         `Video proxy returned ${response.status}${errText ? `: ${errText.slice(0, 160)}` : ""}.`,
       );

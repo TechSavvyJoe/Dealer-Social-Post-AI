@@ -184,6 +184,24 @@ legacy_manager_repaired_count="$(docker exec "$current_container" sqlite3 \
 legacy_admin_code_scrubbed="$(docker exec "$current_container" sqlite3 \
   /pb/pb_data/data.db \
   "SELECT COUNT(*) FROM dealers WHERE id = 'dirtydealer0001' AND COALESCE(admin_code, '') = '';")"
+posts_media_output_mode_field_count="$(docker exec "$current_container" sqlite3 \
+  /pb/pb_data/data.db \
+  "SELECT COUNT(*) FROM json_each((SELECT schema FROM _collections WHERE name = 'posts')) WHERE json_extract(value, '$.name') = 'media_output_mode' AND json_extract(value, '$.type') = 'select';")"
+posts_media_output_mode_values="$(docker exec "$current_container" sqlite3 \
+  /pb/pb_data/data.db \
+  "SELECT group_concat(value, ',') FROM (SELECT enum.value AS value FROM json_each((SELECT schema FROM _collections WHERE name = 'posts')) AS field, json_each(json_extract(field.value, '$.options.values')) AS enum WHERE json_extract(field.value, '$.name') = 'media_output_mode' ORDER BY enum.key);")"
+posts_primary_format_values="$(docker exec "$current_container" sqlite3 \
+  /pb/pb_data/data.db \
+  "SELECT group_concat(value, ',') FROM (SELECT enum.value AS value FROM json_each((SELECT schema FROM _collections WHERE name = 'posts')) AS field, json_each(json_extract(field.value, '$.options.values')) AS enum WHERE json_extract(field.value, '$.name') = 'primary_format_id' ORDER BY enum.key);")"
+posts_image_aspect_ratio_values="$(docker exec "$current_container" sqlite3 \
+  /pb/pb_data/data.db \
+  "SELECT group_concat(value, ',') FROM (SELECT enum.value AS value FROM json_each((SELECT schema FROM _collections WHERE name = 'posts')) AS field, json_each(json_extract(field.value, '$.options.values')) AS enum WHERE json_extract(field.value, '$.name') = 'image_aspect_ratio' ORDER BY enum.key);")"
+dealers_social_attribution_field_count="$(docker exec "$current_container" sqlite3 \
+  /pb/pb_data/data.db \
+  "SELECT COUNT(*) FROM json_each((SELECT schema FROM _collections WHERE name = 'dealers')) WHERE json_extract(value, '$.name') IN ('facebook_page_tag', 'linkedin_company_tag') AND json_extract(value, '$.type') = 'text' AND json_extract(value, '$.options.max') = 100;")"
+dealers_social_attribution_fields="$(docker exec "$current_container" sqlite3 \
+  /pb/pb_data/data.db \
+  "SELECT group_concat(name, ',') FROM (SELECT json_extract(value, '$.name') AS name FROM json_each((SELECT schema FROM _collections WHERE name = 'dealers')) WHERE json_extract(value, '$.name') IN ('facebook_page_tag', 'linkedin_company_tag') ORDER BY name);")"
 
 if [[ "$canary_count" != "1" ]]; then
   echo "Dirty-upgrade canary data was not preserved." >&2
@@ -229,6 +247,26 @@ if [[ "$legacy_admin_code_scrubbed" != "1" ]]; then
   echo "Dirty upgrade did not scrub the migrated legacy dealer credential." >&2
   exit 1
 fi
+if [[ "$posts_media_output_mode_field_count" != "1" ]]; then
+  echo "Dirty upgrade did not install the posts media_output_mode select field." >&2
+  exit 1
+fi
+if [[ "$posts_media_output_mode_values" != "photo,video,both" ]]; then
+  echo "Dirty upgrade installed unexpected media_output_mode values: ${posts_media_output_mode_values}" >&2
+  exit 1
+fi
+if [[ "$posts_primary_format_values" != "feed_portrait,feed_square,story_vertical,marketplace,gbp" ]]; then
+  echo "Dirty upgrade installed unexpected primary_format_id values: ${posts_primary_format_values}" >&2
+  exit 1
+fi
+if [[ "$posts_image_aspect_ratio_values" != "1:1,4:5,9:16,16:9,4:3" ]]; then
+  echo "Dirty upgrade installed unexpected image_aspect_ratio values: ${posts_image_aspect_ratio_values}" >&2
+  exit 1
+fi
+if [[ "$dealers_social_attribution_field_count" != "2" || "$dealers_social_attribution_fields" != "facebook_page_tag,linkedin_company_tag" ]]; then
+  echo "Dirty upgrade did not install the bounded dealership Page/company attribution fields." >&2
+  exit 1
+fi
 
 if ! curl --silent --fail "http://127.0.0.1:${current_port}/api/app/health" |
   grep --quiet '"status":"verified"'; then
@@ -236,4 +274,4 @@ if ! curl --silent --fail "http://127.0.0.1:${current_port}/api/app/health" |
   exit 1
 fi
 
-echo "Dirty-upgrade smoke passed: collections=${before_collections}->${after_collections} migrations=${before_migrations}->${after_migrations} canary=preserved pins=repaired-and-indexed legacy-manager=preserved"
+echo "Dirty-upgrade smoke passed: collections=${before_collections}->${after_collections} migrations=${before_migrations}->${after_migrations} canary=preserved pins=repaired-and-indexed legacy-manager=preserved output-profile=enforced social-attribution=enforced"

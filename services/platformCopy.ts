@@ -29,6 +29,10 @@ const PRIMARY_IMAGE_PROFILES: Record<
   PrimaryImageFormatId,
   Omit<PrimaryImageProfile, "primaryFormatId">
 > = {
+  feed_portrait: {
+    imageAspectRatio: "4:5",
+    label: "Feed portrait · 4:5",
+  },
   story_vertical: {
     imageAspectRatio: "9:16",
     label: "Story / Reel · 9:16",
@@ -61,7 +65,7 @@ export const getPrimaryImageProfile = (
  *
  * Vertical destinations lead because Stories/Reels/TikTok cannot recover
  * useful portrait composition from a square or landscape master. When no
- * vertical destination is selected, a social-feed square leads mixed sets;
+ * vertical destination is selected, a 4:5 portrait feed leads mixed sets;
  * GBP and Marketplace retain their native profile when selected alone.
  */
 export const resolvePrimaryImageProfile = (
@@ -72,6 +76,9 @@ export const resolvePrimaryImageProfile = (
   );
   if (formats.includes("story_vertical")) {
     return getPrimaryImageProfile("story_vertical");
+  }
+  if (formats.includes("feed_portrait")) {
+    return getPrimaryImageProfile("feed_portrait");
   }
   if (formats.includes("feed_square")) {
     return getPrimaryImageProfile("feed_square");
@@ -88,13 +95,14 @@ export const resolvePrimaryImageProfile = (
 const SHORT: Record<string, string> = {
   facebook_feed: "Facebook",
   instagram_feed: "IG Feed",
+  instagram_reel: "IG Reel",
   instagram_story: "IG Story",
   tiktok: "TikTok",
   gbp: "Google",
   x_twitter: "X",
   linkedin: "LinkedIn",
   marketplace: "Marketplace",
-  native_share: "More",
+  native_share: "Device share",
 };
 
 /** Curated subset for the generate screen — keep it phone-thumb friendly. */
@@ -120,6 +128,16 @@ const toPlatformOption = (t: PublishTarget): PlatformOption => ({
 export const getPlatformOptions = (): PlatformOption[] => {
   return PUBLISH_TARGETS.filter((t) =>
     (PRIMARY_PLATFORM_IDS as readonly string[]).includes(t.id),
+  ).map(toPlatformOption);
+};
+
+/**
+ * Secondary destinations stay collapsed in the editor, but are sourced from
+ * the same canonical publish registry as the share dialog and delivery board.
+ */
+export const getSecondaryPlatformOptions = (): PlatformOption[] => {
+  return PUBLISH_TARGETS.filter(
+    (target) => !(PRIMARY_PLATFORM_IDS as readonly string[]).includes(target.id),
   ).map(toPlatformOption);
 };
 

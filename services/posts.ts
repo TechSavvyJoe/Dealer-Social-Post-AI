@@ -11,7 +11,7 @@
 
 import { dataUrlToBlob } from "../utils/imageUtils";
 import { assertAuthEpoch, captureAuthEpoch } from "../utils/authBoundary";
-import type { ImageAspectRatio, PrimaryImageFormatId } from "../types";
+import type { ImageAspectRatio, MediaOutputMode, PrimaryImageFormatId } from "../types";
 import { readApiError } from "./apiErrors";
 
 export type ApprovalStatus = "n_a" | "pending" | "approved" | "rejected";
@@ -48,6 +48,7 @@ export interface LogPostInput {
   imageAttemptId?: string;
   /** Selected destinations and authoritative output canvas for History reopen. */
   platformIds?: string[];
+  mediaOutputMode?: MediaOutputMode;
   platformCaptions?: Record<string, string>;
   primaryFormatId?: PrimaryImageFormatId;
   imageAspectRatio?: ImageAspectRatio;
@@ -81,6 +82,7 @@ export interface PostRecord {
   disclosures?: string;
   /** Validated destination/output profile captured when this creative was made. */
   platform_ids?: string[];
+  media_output_mode?: MediaOutputMode;
   platform_captions?: Record<string, string>;
   primary_format_id?: PrimaryImageFormatId;
   image_aspect_ratio?: ImageAspectRatio;
@@ -169,6 +171,9 @@ export const logPost = async (
     }
     if (input.platformIds?.length) {
       form.append("platform_ids", JSON.stringify(input.platformIds));
+    }
+    if (input.mediaOutputMode) {
+      form.append("media_output_mode", input.mediaOutputMode);
     }
     if (input.platformCaptions && Object.keys(input.platformCaptions).length > 0) {
       form.append("platform_captions", JSON.stringify(input.platformCaptions));

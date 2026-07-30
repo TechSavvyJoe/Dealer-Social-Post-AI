@@ -1,4 +1,4 @@
-import type { GeneratedPost } from "../types";
+import type { GeneratedPost, GenerationParams } from "../types";
 import { clearAllCreatives } from "./creativeStorage";
 
 const STORAGE_KEY = "dealer-social-post-ai.session";
@@ -15,13 +15,11 @@ interface PersistedState {
   theme?: string;
   preferredStyle?: string;
   preferredTone?: string;
-  generationParams?: {
+  generationParams?: Omit<GenerationParams, "style" | "tone"> & {
+    // Storage is a JSON compatibility boundary; enum validation happens when
+    // a restored editor consumes these legacy string values.
     style: string;
     tone: string;
-    customerName: string;
-    customText?: string;
-    creativeBrief?: string;
-    platformIds?: string[];
   };
 }
 

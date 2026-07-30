@@ -29,7 +29,13 @@ migrate(
       required: false,
       options: {
         maxSelect: 1,
-        values: ["feed_square", "story_vertical", "marketplace", "gbp"],
+        values: [
+          "feed_portrait",
+          "feed_square",
+          "story_vertical",
+          "marketplace",
+          "gbp",
+        ],
       },
     });
     ensure("image_aspect_ratio", {
@@ -38,7 +44,7 @@ migrate(
       required: false,
       options: {
         maxSelect: 1,
-        values: ["1:1", "9:16", "16:9", "4:3"],
+        values: ["1:1", "4:5", "9:16", "16:9", "4:3"],
       },
     });
     dao.saveCollection(posts);

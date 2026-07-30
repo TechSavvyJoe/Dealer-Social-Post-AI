@@ -13,6 +13,10 @@ export type SaveMediaKind = "image" | "video";
 // returns, especially in mobile Safari. Four seconds was short enough for iOS
 // to surface a "Failed to load" download. Keep the URL alive for one minute.
 export const DOWNLOAD_URL_REVOKE_DELAY_MS = 60_000;
+// Some iOS releases leave the Web Share promise pending after "Save Video" or
+// "Save Image" succeeds. Do not leave the app permanently busy behind the
+// native sheet. The result still means "share sheet opened", never "saved".
+export const WEB_SHARE_SETTLE_TIMEOUT_MS = 30_000;
 
 export interface PreparedMediaSave {
   kind: SaveMediaKind;
@@ -20,11 +24,29 @@ export interface PreparedMediaSave {
   filename: string;
 }
 
+export interface ExpectedVideoMetadata {
+  width: number;
+  height: number;
+  durationSeconds: number;
+}
+
+export interface ValidatedVideoMetadata {
+  width: number;
+  height: number;
+  durationSeconds: number;
+}
+
 export type SaveMediaResult =
   | { method: "photos-share"; kind: SaveMediaKind }
   | { method: "download"; kind: SaveMediaKind }
   | { method: "cancelled"; kind: SaveMediaKind }
   | { method: "error"; kind: SaveMediaKind; message: string };
+
+export type WebShareAttempt =
+  | { kind: "completed" }
+  | { kind: "started" }
+  | { kind: "cancelled" }
+  | { kind: "unavailable"; error?: unknown };
 
 export const isMobilePhotoDevice = (): boolean => {
   if (typeof navigator === "undefined") return false;
@@ -58,6 +80,14 @@ const imageMimeFromFilename = (filename: string): string | null => {
   return extension ? `image/${extension}` : null;
 };
 
+const safeBasename = (value: string): string =>
+  value
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/^[.\s-]+|[.\s-]+$/g, "")
+    .slice(0, 120) || "dealer-social-post";
+
 const blobToFile = (blob: Blob, filename: string, kind: SaveMediaKind): File => {
   const type =
     kind === "video"
@@ -75,7 +105,35 @@ const sourceToBlob = async (sourceUrl: string | Blob): Promise<Blob> => {
   if (sourceUrl.startsWith("data:")) {
     return dataUrlToBlob(sourceUrl);
   }
-  const res = await fetch(sourceUrl);
+  let credentials: RequestCredentials = "omit";
+  try {
+    const base =
+      typeof window !== "undefined" && window.location?.href
+        ? window.location.href
+        : "http://localhost/";
+    const parsed = new URL(sourceUrl, base);
+    if (!["http:", "https:", "blob:"].includes(parsed.protocol)) {
+      throw new Error("Media URL uses an unsupported protocol.");
+    }
+    if (
+      parsed.protocol !== "blob:" &&
+      typeof window !== "undefined" &&
+      parsed.origin === window.location.origin
+    ) {
+      // Session-gated media endpoints need the PocketBase cookie. Do not send
+      // credentials to arbitrary cross-origin image hosts.
+      credentials = "include";
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("unsupported protocol")) {
+      throw error;
+    }
+    throw new Error("Media URL is invalid.");
+  }
+  const res = await fetch(sourceUrl, {
+    credentials,
+    cache: "no-store",
+  });
   if (!res.ok) {
     throw new Error(`Could not read media (${res.status}).`);
   }
@@ -121,6 +179,94 @@ const normalizeMp4Blob = async (blob: Blob): Promise<Blob> => {
     : blob.slice(0, blob.size, "video/mp4");
 };
 
+/**
+ * Let the browser decode the exact generated clip before an output is labeled
+ * ready. An MP4 header alone cannot prove its orientation, pixels, or length.
+ */
+export const validateVideoMetadata = (
+  source: string | Blob,
+  expected: ExpectedVideoMetadata,
+  timeoutMs = 15_000,
+): Promise<ValidatedVideoMetadata> => {
+  if (typeof document === "undefined" || typeof URL.createObjectURL !== "function") {
+    return Promise.reject(
+      new Error("Video details cannot be verified in this browser."),
+    );
+  }
+
+  const video = document.createElement("video");
+  const ownedObjectUrl = source instanceof Blob ? URL.createObjectURL(source) : null;
+  const sourceUrl = source instanceof Blob ? (ownedObjectUrl as string) : source;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (
+      result:
+        { ok: true; metadata: ValidatedVideoMetadata } | { ok: false; error: Error },
+    ) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      video.removeEventListener("error", handleError);
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+      if (ownedObjectUrl) URL.revokeObjectURL(ownedObjectUrl);
+      if (result.ok) resolve(result.metadata);
+      else reject(result.error);
+    };
+    const handleLoadedMetadata = () => {
+      const metadata = {
+        width: Number(video.videoWidth),
+        height: Number(video.videoHeight),
+        durationSeconds: Number(video.duration),
+      };
+      const durationToleranceSeconds = 0.75;
+      if (
+        metadata.width !== expected.width ||
+        metadata.height !== expected.height ||
+        !Number.isFinite(metadata.durationSeconds) ||
+        Math.abs(metadata.durationSeconds - expected.durationSeconds) >
+          durationToleranceSeconds
+      ) {
+        finish({
+          ok: false,
+          error: new Error(
+            `Video output did not match ${expected.width}×${expected.height} at ${expected.durationSeconds} seconds. Create it again before sharing.`,
+          ),
+        });
+        return;
+      }
+      finish({ ok: true, metadata });
+    };
+    const handleError = () =>
+      finish({
+        ok: false,
+        error: new Error(
+          "Video details could not be verified. Create it again before sharing.",
+        ),
+      });
+    const timer = setTimeout(
+      () =>
+        finish({
+          ok: false,
+          error: new Error(
+            "Video verification timed out. Check the connection and try again.",
+          ),
+        }),
+      Math.max(1, timeoutMs),
+    );
+
+    video.preload = "metadata";
+    video.muted = true;
+    video.addEventListener("loadedmetadata", handleLoadedMetadata);
+    video.addEventListener("error", handleError);
+    video.src = sourceUrl;
+    video.load();
+  });
+};
+
 export const downloadPreparedMediaFile = (
   file: File,
   filename: string = file.name,
@@ -128,16 +274,72 @@ export const downloadPreparedMediaFile = (
   if (typeof document === "undefined" || typeof URL.createObjectURL !== "function") {
     return false;
   }
-  const objectUrl = URL.createObjectURL(file);
+  let objectUrl: string | null = null;
   try {
+    objectUrl = URL.createObjectURL(file);
     triggerDownload(objectUrl, filename);
   } catch (error) {
-    URL.revokeObjectURL(objectUrl);
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
     console.warn("[mediaSave] download could not start", error);
     return false;
   }
-  setTimeout(() => URL.revokeObjectURL(objectUrl), DOWNLOAD_URL_REVOKE_DELAY_MS);
+  const downloadUrl = objectUrl;
+  setTimeout(() => URL.revokeObjectURL(downloadUrl), DOWNLOAD_URL_REVOKE_DELAY_MS);
   return true;
+};
+
+/**
+ * Invoke Web Share immediately, before any asynchronous boundary.
+ *
+ * WebKit has shipped versions where `navigator.share()` returns `undefined`
+ * when activation is missing, and versions where the promise never settles
+ * after saving to Photos. Treat the former as unavailable and bound the latter
+ * so the app cannot remain stuck in a busy state.
+ */
+export const invokeWebShareNow = (
+  shareData: ShareData,
+  timeoutMs: number = WEB_SHARE_SETTLE_TIMEOUT_MS,
+): Promise<WebShareAttempt> => {
+  if (typeof navigator === "undefined" || typeof navigator.share !== "function") {
+    return Promise.resolve({ kind: "unavailable" });
+  }
+
+  let shareResult: Promise<void> | undefined;
+  try {
+    shareResult = (
+      navigator.share as unknown as (data?: ShareData) => Promise<void> | undefined
+    )(shareData);
+  } catch (error) {
+    return Promise.resolve({ kind: "unavailable", error });
+  }
+
+  if (!shareResult || typeof shareResult.then !== "function") {
+    return Promise.resolve({
+      kind: "unavailable",
+      error: new Error("The browser did not start the share sheet."),
+    });
+  }
+
+  return new Promise<WebShareAttempt>((resolve) => {
+    let settled = false;
+    const finish = (result: WebShareAttempt) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish({ kind: "started" }), Math.max(1, timeoutMs));
+    void Promise.resolve(shareResult).then(
+      () => finish({ kind: "completed" }),
+      (error: unknown) => {
+        if ((error as DOMException)?.name === "AbortError") {
+          finish({ kind: "cancelled" });
+          return;
+        }
+        finish({ kind: "unavailable", error });
+      },
+    );
+  });
 };
 
 export const prepareMediaForSave = async (options: {
@@ -147,7 +349,7 @@ export const prepareMediaForSave = async (options: {
 }): Promise<PreparedMediaSave> => {
   const kind = options.kind;
   const requestedBasename = options.basename || "dealer-social-post";
-  const basename = requestedBasename.replace(/\.[a-z0-9]+$/i, "");
+  const basename = safeBasename(requestedBasename);
   const blobSourceName =
     options.sourceUrl instanceof File ? options.sourceUrl.name : undefined;
   const untypedHeifExtension =
@@ -202,28 +404,29 @@ export const savePreparedMediaToLibrary = async (
     typeof navigator !== "undefined" &&
     typeof navigator.share === "function"
   ) {
-    const shareData: ShareData = {
-      files: [file],
-      title: kind === "video" ? "Save video to Photos" : "Save photo to Photos",
-      text:
-        kind === "video"
-          ? "Save this video to your photo library"
-          : "Save this photo to your photo library",
-    };
+    // File-only payloads surface Photos and media apps more reliably in
+    // WebKit. Adding text can make a valid MP4 unshareable on iOS.
+    const shareData: ShareData = { files: [file] };
     try {
       const canShareFiles =
-        typeof navigator.canShare !== "function" ||
-        navigator.canShare({ files: [file] });
+        typeof navigator.canShare !== "function" || navigator.canShare(shareData);
       if (canShareFiles) {
-        const sharePromise = navigator.share(shareData);
-        await sharePromise;
-        return { method: "photos-share", kind };
+        // `invokeWebShareNow` calls navigator.share synchronously.
+        const attempt = await invokeWebShareNow(shareData);
+        if (attempt.kind === "completed" || attempt.kind === "started") {
+          return { method: "photos-share", kind };
+        }
+        if (attempt.kind === "cancelled") {
+          return { method: "cancelled", kind };
+        }
+        if (attempt.error) {
+          console.warn(
+            "[mediaSave] share failed; falling back to download",
+            attempt.error,
+          );
+        }
       }
     } catch (err) {
-      const name = (err as DOMException)?.name;
-      if (name === "AbortError") {
-        return { method: "cancelled", kind };
-      }
       console.warn("[mediaSave] share failed; falling back to download", err);
     }
   }

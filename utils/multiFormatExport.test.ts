@@ -53,7 +53,8 @@ describe("computeCoverRect", () => {
 describe("EXPORT_FORMATS", () => {
   it("lists story before feed for mobile-first dealership traffic", () => {
     expect(EXPORT_FORMATS[0].id).toBe("story_vertical");
-    expect(EXPORT_FORMATS[1].id).toBe("feed_square");
+    expect(EXPORT_FORMATS[1].id).toBe("feed_portrait");
+    expect(EXPORT_FORMATS.map(({ id }) => id)).toContain("social_landscape");
   });
 });
 
@@ -76,20 +77,7 @@ describe("renderFormatIfNeeded", () => {
     vi.stubGlobal("Image", DecodedImage);
   };
 
-  it("returns an already exact source without allocating an export canvas", async () => {
-    const format = EXPORT_FORMATS.find(({ id }) => id === "story_vertical")!;
-    installDecodedImage(format.width, format.height);
-    const canvasSpy = vi.spyOn(document, "createElement");
-    const source = "data:image/png;base64,already-exact";
-
-    await expect(renderFormatIfNeeded(source, format)).resolves.toBe(source);
-    expect(canvasSpy).not.toHaveBeenCalledWith("canvas");
-  });
-
-  it("renders legacy media whose decoded pixels do not match the profile", async () => {
-    const format = EXPORT_FORMATS.find(({ id }) => id === "story_vertical")!;
-    installDecodedImage(1080, 1080);
-
+  const installCanvasRenderer = () => {
     const gradient = { addColorStop: vi.fn() };
     const context = {
       createRadialGradient: vi.fn(() => gradient),
@@ -117,11 +105,42 @@ describe("renderFormatIfNeeded", () => {
     vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue(
       "data:image/jpeg;base64,rendered-exact",
     );
+    return context;
+  };
+
+  it("returns an already exact JPEG without allocating an export canvas", async () => {
+    const format = EXPORT_FORMATS.find(({ id }) => id === "story_vertical")!;
+    installDecodedImage(format.width, format.height);
+    const canvasSpy = vi.spyOn(document, "createElement");
+    const source = "data:image/jpeg;base64,already-exact";
+
+    await expect(renderFormatIfNeeded(source, format)).resolves.toBe(source);
+    expect(canvasSpy).not.toHaveBeenCalledWith("canvas");
+  });
+
+  it("renders legacy media whose decoded pixels do not match the profile", async () => {
+    const format = EXPORT_FORMATS.find(({ id }) => id === "story_vertical")!;
+    installDecodedImage(1080, 1080);
+    const context = installCanvasRenderer();
 
     await expect(
       renderFormatIfNeeded("data:image/jpeg;base64,legacy-square", format),
     ).resolves.toBe("data:image/jpeg;base64,rendered-exact");
     expect(context.drawImage).toHaveBeenCalled();
+    expect(HTMLCanvasElement.prototype.toDataURL).toHaveBeenCalledWith(
+      "image/jpeg",
+      0.94,
+    );
+  });
+
+  it("re-encodes an exact-size PNG to the promised JPEG contract", async () => {
+    const format = EXPORT_FORMATS.find(({ id }) => id === "story_vertical")!;
+    installDecodedImage(format.width, format.height);
+    installCanvasRenderer();
+
+    await expect(
+      renderFormatIfNeeded("data:image/png;base64,already-exact", format),
+    ).resolves.toBe("data:image/jpeg;base64,rendered-exact");
     expect(HTMLCanvasElement.prototype.toDataURL).toHaveBeenCalledWith(
       "image/jpeg",
       0.94,

@@ -38,6 +38,7 @@ import {
   type WeekHours,
 } from "../utils/hoursFormat";
 import { getLeaderboard } from "../services/posts";
+import { normalizeDealerSocialProfileValue } from "../utils/socialAttribution";
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
@@ -353,9 +354,15 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
 
   // Social
   const [facebookUrl, setFacebookUrl] = useState(dealer.facebook_url || "");
+  const [facebookPageTag, setFacebookPageTag] = useState(
+    dealer.facebook_page_tag || "",
+  );
   const [instagramHandle, setInstagramHandle] = useState(dealer.instagram_handle || "");
   const [tiktokHandle, setTiktokHandle] = useState(dealer.tiktok_handle || "");
   const [xHandle, setXHandle] = useState(dealer.x_handle || "");
+  const [linkedinCompanyTag, setLinkedinCompanyTag] = useState(
+    dealer.linkedin_company_tag || "",
+  );
   const [gbpUrl, setGbpUrl] = useState(dealer.gbp_url || "");
 
   // Generation defaults
@@ -396,9 +403,11 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
     hoursSerialized !== (dealer.hours || "") ||
     tagline !== (dealer.tagline || "") ||
     facebookUrl !== (dealer.facebook_url || "") ||
+    facebookPageTag !== (dealer.facebook_page_tag || "") ||
     instagramHandle !== (dealer.instagram_handle || "") ||
     tiktokHandle !== (dealer.tiktok_handle || "") ||
     xHandle !== (dealer.x_handle || "") ||
+    linkedinCompanyTag !== (dealer.linkedin_company_tag || "") ||
     gbpUrl !== (dealer.gbp_url || "") ||
     defaultHashtags !== (dealer.default_hashtags || "") ||
     defaultFooter !== (dealer.default_footer || "") ||
@@ -443,9 +452,20 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
         hours: hoursSerialized,
         tagline: tagline.trim(),
         facebook_url: facebookUrl.trim(),
-        instagram_handle: instagramHandle.trim().replace(/^@/, ""),
-        tiktok_handle: tiktokHandle.trim().replace(/^@/, ""),
-        x_handle: xHandle.trim().replace(/^@/, ""),
+        facebook_page_tag: normalizeDealerSocialProfileValue(
+          "facebook_page_tag",
+          facebookPageTag,
+        ),
+        instagram_handle: normalizeDealerSocialProfileValue(
+          "instagram_handle",
+          instagramHandle,
+        ),
+        tiktok_handle: normalizeDealerSocialProfileValue("tiktok_handle", tiktokHandle),
+        x_handle: normalizeDealerSocialProfileValue("x_handle", xHandle),
+        linkedin_company_tag: normalizeDealerSocialProfileValue(
+          "linkedin_company_tag",
+          linkedinCompanyTag,
+        ),
         gbp_url: gbpUrl.trim(),
         default_hashtags: defaultHashtags.trim(),
         default_footer: defaultFooter.trim(),
@@ -534,15 +554,26 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
       {/* ---- Social handles ---- */}
       <section className="space-y-2">
         <div className="text-sm font-semibold text-surface-50">Social presence</div>
-        <Input
-          label="Facebook page URL"
-          value={facebookUrl}
-          onChange={(e) => setFacebookUrl(e.target.value)}
-          placeholder="https://www.facebook.com/yourdealership"
-          fullWidth
-          className="bg-white/5 border-white/10 focus:border-primary-400"
-        />
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <Input
+            label="Facebook page URL"
+            value={facebookUrl}
+            onChange={(e) => setFacebookUrl(e.target.value)}
+            placeholder="https://www.facebook.com/yourdealership"
+            fullWidth
+            className="bg-white/5 border-white/10 focus:border-primary-400"
+          />
+          <Input
+            label="Facebook Page tag"
+            value={facebookPageTag}
+            onChange={(e) => setFacebookPageTag(e.target.value)}
+            placeholder="@Your Dealership"
+            helperText="Added to Facebook/Marketplace captions. Facebook may ask the salesperson to tap the Page suggestion once."
+            fullWidth
+            className="bg-white/5 border-white/10 focus:border-primary-400"
+          />
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <Input
             label="Instagram"
             value={instagramHandle}
@@ -564,6 +595,15 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             value={xHandle}
             onChange={(e) => setXHandle(e.target.value)}
             placeholder="@yourdealership"
+            fullWidth
+            className="bg-white/5 border-white/10 focus:border-primary-400"
+          />
+          <Input
+            label="LinkedIn company tag"
+            value={linkedinCompanyTag}
+            onChange={(e) => setLinkedinCompanyTag(e.target.value)}
+            placeholder="@your-company"
+            helperText="LinkedIn may ask the salesperson to choose the company suggestion."
             fullWidth
             className="bg-white/5 border-white/10 focus:border-primary-400"
           />

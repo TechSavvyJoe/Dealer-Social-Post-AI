@@ -334,11 +334,19 @@ test.describe("Dealer Social Post AI Flow", () => {
             text: "A standout delivery deserves a standout moment. Congratulations on the new ride!",
             postId: "qa-post-1",
             releaseStatus: "saved",
+            platformIds: ["facebook_feed", "linkedin"],
+            mediaOutputMode: "photo",
+            primaryFormatId: "feed_portrait",
+            imageAspectRatio: "4:5",
           },
           generationParams: {
             style: "Modern & Bold",
             tone: "Excited",
             customerName: "",
+            platformIds: ["facebook_feed", "linkedin"],
+            mediaOutputMode: "photo",
+            primaryFormatId: "feed_portrait",
+            imageAspectRatio: "4:5",
           },
         }),
       );
@@ -362,6 +370,32 @@ test.describe("Dealer Social Post AI Flow", () => {
         name: /^Save (?:image|video|to Photos|\d+×\d+)$/,
       }),
     ).toBeVisible();
+    const deliveryBoard = page.getByRole("region", { name: "Platform delivery" });
+    await expect(deliveryBoard).toBeVisible();
+    await expect(
+      deliveryBoard.getByRole("checkbox", {
+        name: /Include Facebook Feed image 4:5 in Share selected/i,
+      }),
+    ).toBeChecked();
+    await expect(
+      deliveryBoard.getByRole("checkbox", {
+        name: /Include LinkedIn Feed image 1:1 in Share selected/i,
+      }),
+    ).toBeChecked();
+    const clearAllDeliveries = deliveryBoard.getByRole("button", {
+      name: "Clear all",
+    });
+    const shareAllDeliveries = deliveryBoard.getByRole("button", {
+      name: "Share all 2",
+    });
+    await expect(shareAllDeliveries).toBeEnabled();
+    for (const control of [clearAllDeliveries, shareAllDeliveries]) {
+      expect(
+        await control.evaluate(
+          (element) => element.scrollWidth <= element.clientWidth + 1,
+        ),
+      ).toBe(true);
+    }
 
     await expectNoCriticalAccessibilityIssues(page);
     await expectNoSeriousAxeViolations(page);
@@ -401,6 +435,52 @@ test.describe("Dealer Social Post AI Flow", () => {
     await expect(shareDialog).toBeHidden();
     await expect(shareTrigger).toBeFocused();
     await expectNoHorizontalOverflow(page);
+
+    if (testInfo.project.name.endsWith("phone-390")) {
+      await shareAllDeliveries.click();
+      await expect(shareDialog).toBeVisible();
+      await expect(shareDialog.getByText("Share sequence")).toBeVisible();
+      await expect(shareDialog.getByText("1 of 2")).toBeVisible();
+      await expect(shareNow).toBeEnabled({ timeout: 10_000 });
+      await shareNow.click();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (window as unknown as { __shareCalls: ShareData[] }).__shareCalls.length,
+          ),
+        )
+        .toBe(2);
+      await shareDialog
+        .getByRole("button", { name: /Next selected: LinkedIn/i })
+        .click();
+      await expect(shareDialog).toBeVisible();
+      await expect(shareDialog.getByText("2 of 2")).toBeVisible();
+      await expect(shareNow).toBeEnabled({ timeout: 10_000 });
+      await shareNow.click();
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (window as unknown as { __shareCalls: ShareData[] }).__shareCalls.length,
+          ),
+        )
+        .toBe(3);
+      await shareDialog.getByRole("button", { name: "Finish sequence" }).click();
+      await expect(shareDialog).toBeHidden();
+      const completionToast = page.getByText(/Share sequence finished/i);
+      await expect(completionToast).toBeVisible();
+      const [toastBounds, deliveryBarBounds] = await Promise.all([
+        completionToast.boundingBox(),
+        deliveryBar.boundingBox(),
+      ]);
+      expect(toastBounds).not.toBeNull();
+      expect(deliveryBarBounds).not.toBeNull();
+      expect((toastBounds?.y || 0) + (toastBounds?.height || 0)).toBeLessThanOrEqual(
+        (deliveryBarBounds?.y || 0) + 1,
+      );
+      await expectNoHorizontalOverflow(page);
+    }
 
     if (testInfo.project.name.endsWith("phone-320")) {
       await page.evaluate(() => {

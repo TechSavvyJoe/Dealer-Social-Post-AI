@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CORE_PUBLISH_IDS,
+  fitPublishCaptionToBudget,
   orderPublishTargets,
   PUBLISH_TARGETS,
   preparePublishShare,
@@ -32,6 +33,32 @@ afterEach(() => {
 });
 
 describe("publishTargets handoff strategy", () => {
+  it("preserves a dealership mention when a long caption is fitted", () => {
+    const fitted = fitPublishCaptionToBudget(
+      {
+        text: `${"A polished dealership delivery. ".repeat(30)}\n\n@BobMaxeyFord`,
+      },
+      280,
+    );
+
+    expect(fitted).toHaveLength(280);
+    expect(fitted).toMatch(/\n\n@BobMaxeyFord$/);
+  });
+
+  it("preserves both dealership attribution and compliance disclosures", () => {
+    const fitted = fitPublishCaptionToBudget(
+      {
+        text: `${"Great financing options. ".repeat(30)}\n\n@BobMaxeyFord`,
+        disclosures: "Offer subject to approved credit.",
+      },
+      280,
+    );
+
+    expect(fitted.length).toBeLessThanOrEqual(280);
+    expect(fitted).toContain("\n\n@BobMaxeyFord\n\n— Disclosures —\n");
+    expect(fitted).toMatch(/Offer subject to approved credit\.$/);
+  });
+
   it("uses photos-then-app for Facebook so web re-login is not the happy path", () => {
     const fb = PUBLISH_TARGETS.find((t) => t.id === "facebook_feed");
     expect(fb?.handoff).toBe("photos-then-app");
@@ -89,6 +116,8 @@ describe("publishTargets handoff strategy", () => {
     expect(share.mock.calls[0]?.[0]).toMatchObject({
       files: [prepared.file],
     });
+    expect(share.mock.calls[0]?.[0]).not.toHaveProperty("text");
+    expect(share.mock.calls[0]?.[0]).not.toHaveProperty("title");
 
     await expect(resultPromise).resolves.toMatchObject({
       kind: "shared",
@@ -126,6 +155,125 @@ describe("publishTargets handoff strategy", () => {
     });
     expect(share).not.toHaveBeenCalled();
     expect(prepared.file).toBeInstanceOf(File);
+  });
+
+  it("shares a selected video file-only when WebKit rejects file plus text", async () => {
+    const share = vi.fn((_data: ShareData) => Promise.resolve());
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: share,
+    });
+    Object.defineProperty(navigator, "canShare", {
+      configurable: true,
+      value: (data: ShareData) => Boolean(data.files?.length) && !data.text,
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn(() => Promise.resolve()) },
+    });
+    const target = PUBLISH_TARGETS.find((candidate) => candidate.id === "native_share");
+    const file = new File(["video"], "delivery.mp4", { type: "video/mp4" });
+    const prepared: PreparedPublishShare = {
+      target: target!,
+      content: { text: "Delivery day", videoUrl: "blob:video" },
+      caption: "Delivery day",
+      file,
+      webUrl: null,
+    };
+
+    await expect(sharePrepared(prepared)).resolves.toMatchObject({
+      kind: "shared",
+      via: "web-share",
+    });
+    expect(share).toHaveBeenCalledWith({ files: [file] });
+  });
+
+  it("uses a media-only payload on iPhone even when canShare overclaims file plus text", async () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15",
+    );
+    const share = vi.fn((_data: ShareData) => Promise.resolve());
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: share,
+    });
+    Object.defineProperty(navigator, "canShare", {
+      configurable: true,
+      value: () => true,
+    });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn(() => Promise.resolve()) },
+    });
+    const target = PUBLISH_TARGETS.find((candidate) => candidate.id === "native_share");
+    const file = new File(["video"], "delivery.mp4", { type: "video/mp4" });
+
+    await sharePrepared({
+      target: target!,
+      content: { text: "Delivery day", videoUrl: "blob:video" },
+      caption: "Delivery day",
+      file,
+      webUrl: null,
+    });
+
+    expect(share).toHaveBeenCalledWith({ files: [file] });
+  });
+
+  it("does not report a WebKit undefined share result as success", async () => {
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: vi.fn(() => undefined),
+    });
+    Object.defineProperty(navigator, "canShare", {
+      configurable: true,
+      value: () => true,
+    });
+    const target = PUBLISH_TARGETS.find(
+      (candidate) => candidate.id === "instagram_feed",
+    );
+    const prepared: PreparedPublishShare = {
+      target: target!,
+      content: { text: "Delivery day", videoUrl: "blob:video" },
+      caption: "Delivery day",
+      file: new File(["video"], "delivery.mp4", { type: "video/mp4" }),
+      webUrl: null,
+    };
+
+    await expect(sharePrepared(prepared)).resolves.toMatchObject({
+      kind: "fallback",
+      via: "download-copy",
+    });
+  });
+
+  it("keeps Google Business video-enabled instead of silently switching to a still", () => {
+    const target = PUBLISH_TARGETS.find((candidate) => candidate.id === "gbp");
+    expect(target).toMatchObject({
+      supportsVideo: true,
+      handoff: "share-or-intent",
+    });
+  });
+
+  it("blocks sharing when selected video media is not prepared", async () => {
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: vi.fn(() => Promise.resolve()),
+    });
+    const target = PUBLISH_TARGETS.find(
+      (candidate) => candidate.id === "instagram_feed",
+    );
+
+    await expect(
+      sharePrepared({
+        target: target!,
+        content: { text: "Delivery day", videoUrl: "blob:missing" },
+        caption: "Delivery day",
+        file: null,
+        webUrl: null,
+      }),
+    ).resolves.toMatchObject({
+      kind: "error",
+      message: expect.stringMatching(/will not substitute a still image/i),
+    });
   });
 
   it.each([

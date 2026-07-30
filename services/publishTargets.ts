@@ -20,7 +20,11 @@ import {
 } from "../utils/multiFormatExport";
 import { dataUrlToBlob } from "../utils/imageUtils";
 import { fitCaptionToBudget } from "../utils/hashtags";
-import { downloadPreparedMediaFile, prepareMediaForSave } from "../utils/mediaSave";
+import {
+  downloadPreparedMediaFile,
+  invokeWebShareNow,
+  prepareMediaForSave,
+} from "../utils/mediaSave";
 
 export type PublishStatus =
   | {
@@ -50,6 +54,11 @@ export interface PublishContent {
   imageDataUrl?: string;
   /** Optional rendered video as a blob URL. */
   videoUrl?: string;
+  /**
+   * Already-prepared exact delivery file. Passing the canonical File avoids a
+   * second video fetch or canvas render before mobile sharing.
+   */
+  preparedFile?: File;
 }
 
 /**
@@ -102,13 +111,27 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
     label: "Instagram Feed",
     icon: "instagram",
     accent: "#E1306C",
-    format: "feed_square",
+    format: "feed_portrait",
     charBudget: 2200,
     supportsVideo: true,
     directApiConnected: false,
     handoff: "share-file",
     hint: "Photo via share sheet · paste caption in IG",
     appSchemeUrl: "instagram://app",
+    webIntentUrl: () => "https://www.instagram.com/",
+  },
+  {
+    id: "instagram_reel",
+    label: "Instagram Reel",
+    icon: "instagram",
+    accent: "#D62976",
+    format: "story_vertical",
+    charBudget: 2200,
+    supportsVideo: true,
+    directApiConnected: false,
+    handoff: "share-file",
+    hint: "9:16 video via share sheet · paste caption in Instagram",
+    appSchemeUrl: "instagram://camera",
     webIntentUrl: () => "https://www.instagram.com/",
   },
   {
@@ -130,7 +153,7 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
     label: "Facebook",
     icon: "facebook",
     accent: "#1877F2",
-    format: "feed_square",
+    format: "feed_portrait",
     charBudget: 63206,
     supportsVideo: true,
     directApiConnected: false,
@@ -161,10 +184,10 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
     accent: "#4285F4",
     format: "gbp",
     charBudget: 1500,
-    supportsVideo: false,
+    supportsVideo: true,
     directApiConnected: false,
     handoff: "share-or-intent",
-    hint: "4:3 image · caption copied · open GBP posts",
+    hint: "Exact photo or video · caption copied · open GBP posts",
     webIntentUrl: () => "https://business.google.com/posts/",
   },
   {
@@ -174,7 +197,7 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
     accent: "#1877F2",
     format: "marketplace",
     charBudget: 9999,
-    supportsVideo: false,
+    supportsVideo: true,
     directApiConnected: false,
     handoff: "photos-then-app",
     hint: "Copy · save photo · Facebook app → Marketplace → Sell",
@@ -188,7 +211,7 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
     accent: "#0A66C2",
     format: "feed_square",
     charBudget: 3000,
-    supportsVideo: false,
+    supportsVideo: true,
     directApiConnected: false,
     handoff: "share-or-intent",
     hint: "1:1 image · paste caption if needed",
@@ -200,7 +223,7 @@ export const PUBLISH_TARGETS: PublishTarget[] = [
     label: "X / Twitter",
     icon: "twitter",
     accent: "#1DA1F2",
-    format: "feed_square",
+    format: "social_landscape",
     charBudget: 280,
     supportsVideo: true,
     directApiConnected: false,
@@ -373,6 +396,47 @@ const pasteHintFor = (label: string): string =>
   `Caption is on your clipboard. In ${label}, create the post, then long-press → Paste (or ⌘V / Ctrl+V). Browsers cannot auto-fill Facebook/Instagram captions.`;
 
 /**
+ * Select the richest payload the current browser says it can share without
+ * dropping prepared media. WebKit frequently rejects file + text while
+ * accepting the exact same file on its own.
+ */
+const chooseSharePayload = (
+  file: File | null,
+  caption: string,
+  title: string,
+  includeText: boolean,
+): ShareData | null => {
+  const canShare = (data: ShareData): boolean => {
+    try {
+      return typeof navigator.canShare !== "function" || navigator.canShare(data);
+    } catch {
+      return false;
+    }
+  };
+
+  if (file) {
+    const combined: ShareData = {
+      files: [file],
+      ...(includeText ? { title, text: caption } : {}),
+    };
+    // Safari can report file + text as shareable while omitting media apps or
+    // rejecting the actual handoff. Apple gets the media-only payload and the
+    // already-copied caption remains the explicit paste path.
+    if (!isAppleTouchDevice() && canShare(combined)) return combined;
+
+    // Never turn a selected video/photo into a text-only share. A file-only
+    // sheet is the reliable iOS path; the caption remains an explicit Copy.
+    const fileOnly: ShareData = { files: [file] };
+    if (canShare(fileOnly)) return fileOnly;
+    return null;
+  }
+
+  if (!includeText) return null;
+  const textOnly: ShareData = { title, text: caption };
+  return canShare(textOnly) ? textOnly : null;
+};
+
+/**
  * Try the system share sheet with a media file.
  * On iOS, sharing *files only* (no text) surfaces more image apps (Photos, IG).
  * Caption is never auto-injected by Meta apps — clipboard is the paste path.
@@ -387,53 +451,39 @@ const tryWebShareFile = async (
     return "unavailable";
   }
 
-  const shareData: ShareData = {
-    title,
-  };
-  if (opts.includeText) {
-    shareData.text = caption;
-  }
-  if (file) {
-    try {
-      if (
-        typeof navigator.canShare === "function" &&
-        !navigator.canShare({ files: [file] })
-      ) {
-        // File share not supported — text-only if allowed
-        if (opts.includeText) {
-          await navigator.share({ title, text: caption });
-          return "shared";
-        }
-        return "unavailable";
-      }
-      shareData.files = [file];
-    } catch {
-      if (!opts.includeText) return "unavailable";
-    }
-  } else if (opts.includeText) {
-    shareData.text = caption;
-  } else {
-    return "unavailable";
-  }
+  const shareData = chooseSharePayload(file, caption, title, opts.includeText);
+  if (!shareData) return "unavailable";
 
-  try {
-    await navigator.share(shareData);
+  const attempt = await invokeWebShareNow(shareData);
+  if (attempt.kind === "completed" || attempt.kind === "started") {
     // Re-copy after share sheet closes — some iOS sessions leave clipboard stale
     // or the user still needs paste after attaching media in the destination app.
     await copyTextToClipboard(caption);
     return "shared";
-  } catch (err) {
-    const name = (err as DOMException)?.name;
-    if (name === "AbortError") return "cancelled";
-    return "unavailable";
   }
+  if (attempt.kind === "cancelled") return "cancelled";
+  return "unavailable";
 };
 
 const buildShareFile = async (
   target: PublishTarget,
   content: PublishContent,
 ): Promise<File | null> => {
-  if (target.supportsVideo && content.videoUrl) {
+  if (content.preparedFile) {
+    const isVideoFile = content.preparedFile.type.startsWith("video/");
+    if (isVideoFile && !target.supportsVideo) {
+      throw new Error(
+        `${target.label} is configured for a photo in this workflow. Choose a photo output instead of substituting the still image for your selected video.`,
+      );
+    }
+    return content.preparedFile;
+  }
+  if (content.videoUrl) {
+    if (!target.supportsVideo) {
+      throw new Error(
+        `${target.label} is configured for a photo in this workflow. Choose a photo output instead of substituting the still image for your selected video.`,
+      );
+    }
     // Use the same authenticated-fetch, MP4-signature, MIME, and extension
     // validation as direct Save. Never disguise a 401/JSON body as an .mp4 or
     // silently share the still image when the user selected a video.
@@ -477,35 +527,54 @@ export const fitPublishCaptionToBudget = (
   maxChars: number,
 ): string => {
   const legacyMarkerIndex = content.text.indexOf("— Disclosures —");
-  const body = (
+  const rawBody = (
     legacyMarkerIndex >= 0 ? content.text.slice(0, legacyMarkerIndex) : content.text
   ).trim();
+  const trailingMentionMatch = rawBody.match(/(?:^|\n{2,})(@[^\n]{1,100})$/u);
+  const dealershipMention = trailingMentionMatch?.[1]?.trim() || "";
+  const body = dealershipMention
+    ? rawBody.slice(0, trailingMentionMatch?.index ?? rawBody.length).trim()
+    : rawBody;
   const disclosure = (
     content.disclosures ||
     (legacyMarkerIndex >= 0 ? content.text.slice(legacyMarkerIndex) : "")
   ).trim();
-  if (!disclosure) return fitCaptionToBudget(body, maxChars);
 
-  const canonicalDisclosure = disclosure.startsWith("— Disclosures —")
-    ? disclosure
-    : `— Disclosures —\n${disclosure}`;
-  const separator = body ? "\n\n" : "";
-  const bodyBudget = maxChars - canonicalDisclosure.length - separator.length;
+  const canonicalDisclosure = disclosure
+    ? disclosure.startsWith("— Disclosures —")
+      ? disclosure
+      : `— Disclosures —\n${disclosure}`
+    : "";
+  const protectedSuffix = [dealershipMention, canonicalDisclosure]
+    .filter(Boolean)
+    .join("\n\n");
+  if (!protectedSuffix) return fitCaptionToBudget(body, maxChars);
+  if (!body) {
+    if (protectedSuffix.length > maxChars) {
+      throw new Error(
+        "The dealership mention or required compliance disclosures exceed this destination's character limit.",
+      );
+    }
+    return protectedSuffix;
+  }
+
+  const separator = "\n\n";
+  const bodyBudget = maxChars - protectedSuffix.length - separator.length;
   if (bodyBudget < 1) {
     throw new Error(
-      `Required compliance disclosures exceed this destination's ${maxChars}-character limit. Choose another destination or revise the advertised terms.`,
+      `The dealership mention or required compliance disclosures exceed this destination's ${maxChars}-character limit. Choose another destination or revise the advertised terms.`,
     );
   }
   const fittedBody = fitCaptionToBudget(body, bodyBudget);
   if (!fittedBody) {
     throw new Error(
-      "The caption cannot fit alongside its required compliance disclosures. Revise the advertised terms before sharing.",
+      "The caption cannot fit alongside its dealership mention and required compliance disclosures. Revise it before sharing.",
     );
   }
-  const combined = `${fittedBody}\n\n${canonicalDisclosure}`;
+  const combined = `${fittedBody}\n\n${protectedSuffix}`;
   if (combined.length > maxChars) {
     throw new Error(
-      "The caption cannot fit without truncating required compliance disclosures.",
+      "The caption cannot fit without truncating its dealership mention or required compliance disclosures.",
     );
   }
   return combined;
@@ -554,22 +623,20 @@ export const sharePrepared = async (
   const includeText =
     prepared.target.handoff === "share-any" ||
     prepared.target.handoff === "share-or-intent";
-  const shareData: ShareData = { title: prepared.target.label };
-  if (includeText) shareData.text = prepared.caption;
-  if (prepared.file) {
-    let canShareFile = false;
-    try {
-      canShareFile =
-        typeof navigator.canShare !== "function" ||
-        navigator.canShare({ files: [prepared.file] });
-    } catch {
-      // Safari may throw for an unsupported or oversized file. Keep the
-      // prepared File available to the explicit Save media fallback.
-      canShareFile = false;
-    }
-    if (canShareFile) shareData.files = [prepared.file];
+  if (prepared.content.videoUrl && !prepared.file) {
+    return {
+      kind: "error",
+      message:
+        "The selected video is not prepared. Retry media preparation; the app will not substitute a still image.",
+    };
   }
-  if (!shareData.files && !includeText) {
+  const shareData = chooseSharePayload(
+    prepared.file,
+    prepared.caption,
+    prepared.target.label,
+    includeText,
+  );
+  if (!shareData) {
     return {
       kind: "fallback",
       via: "download-copy",
@@ -581,9 +648,25 @@ export const sharePrepared = async (
 
   try {
     // Do not move any asynchronous preparation above this call.
-    const sharePromise = navigator.share(shareData);
+    const sharePromise = invokeWebShareNow(shareData);
     const clipboardPromise = copyTextToClipboard(prepared.caption);
-    await sharePromise;
+    const attempt = await sharePromise;
+    if (attempt.kind === "cancelled") {
+      return {
+        kind: "cancelled",
+        pasteRequired: true,
+        message: "Share cancelled. The prepared media is still ready.",
+      };
+    }
+    if (attempt.kind === "unavailable") {
+      return {
+        kind: "fallback",
+        via: "download-copy",
+        pasteRequired: true,
+        message:
+          "The share sheet could not open. Save the media or open the app below.",
+      };
+    }
     const copied = await clipboardPromise;
     return {
       kind: "shared",
@@ -593,14 +676,7 @@ export const sharePrepared = async (
         ? "Media sent to the share sheet. The caption is ready to paste in the destination app."
         : "Media sent to the share sheet. Use Copy caption below before finishing the post.",
     };
-  } catch (err) {
-    if ((err as DOMException)?.name === "AbortError") {
-      return {
-        kind: "cancelled",
-        pasteRequired: true,
-        message: "Share cancelled. The prepared media is still ready.",
-      };
-    }
+  } catch {
     return {
       kind: "fallback",
       via: "download-copy",

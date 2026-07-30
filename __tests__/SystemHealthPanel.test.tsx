@@ -8,7 +8,7 @@ const healthyPayload = {
   ts: "2026-07-17T22:00:00.000Z",
   version: "2.0",
   releaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  apiContractVersion: "2026-07-17.v2",
+  apiContractVersion: "2026-07-29.v3",
   modelPolicyVersion: "1",
   checks: {
     pocketbase: true,

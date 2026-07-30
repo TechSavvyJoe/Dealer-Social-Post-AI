@@ -193,11 +193,10 @@ const ToastContainer: React.FC<ToastContainerProps> = ({
 }) => {
   return (
     <div
-      className="pointer-events-none fixed z-[100]"
+      className="toast-viewport pointer-events-none fixed z-[100]"
       style={{
         width:
           "min(28rem, calc(100vw - max(1rem, var(--sal)) - max(1rem, var(--sar))))",
-        bottom: "max(1rem, var(--sab))",
         right: "max(1rem, var(--sar))",
       }}
     >
@@ -239,10 +238,10 @@ const ToastItem: React.FC<ToastItemProps> = ({
   };
 
   const typeStyles: Record<ToastType, string> = {
-    success: "border-success-500/30 bg-success-500/10",
-    error: "border-error-500/30 bg-error-500/10",
-    warning: "border-warning-500/30 bg-warning-500/10",
-    info: "border-info-500/30 bg-info-500/10",
+    success: "border-success-500/40",
+    error: "border-error-500/40",
+    warning: "border-warning-500/40",
+    info: "border-info-500/40",
   };
 
   return (
@@ -257,7 +256,7 @@ const ToastItem: React.FC<ToastItemProps> = ({
       onBlurCapture={() => onResume(toast.id)}
       className={cn(
         "flex items-center gap-3 px-4 py-3 rounded-xl",
-        "border backdrop-blur-lg glass pointer-events-auto",
+        "border bg-surface-950/95 backdrop-blur-lg pointer-events-auto [.theme-light_&]:bg-white/95",
         "w-full max-w-md shadow-elevation-3",
         typeStyles[toast.type],
       )}
@@ -268,11 +267,13 @@ const ToastItem: React.FC<ToastItemProps> = ({
       aria-atomic="true"
     >
       <div className="flex-shrink-0">{icons[toast.type]}</div>
-      <p className="flex-1 text-sm font-medium text-surface-50">{toast.message}</p>
+      <p className="flex-1 text-sm font-medium text-white [.theme-light_&]:text-slate-950">
+        {toast.message}
+      </p>
       <button
         type="button"
         onClick={() => onRemove(toast.id)}
-        className="-my-2 -mr-2 inline-flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-lg text-surface-400 transition-colors hover:bg-white/10 hover:text-surface-200"
+        className="-my-2 -mr-2 inline-flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-lg text-surface-400 transition-colors hover:bg-white/10 hover:text-surface-200 [.theme-light_&]:text-surface-700"
         aria-label="Close notification"
       >
         <X className="w-4 h-4" />

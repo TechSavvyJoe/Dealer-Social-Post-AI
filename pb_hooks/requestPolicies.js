@@ -278,8 +278,8 @@ const SERVER_SAFETY_SETTINGS = [
 // Language-neutral contract mirrored from config/gemini-model-policy.json.
 // `scripts/check-model-policy.mjs` and Vitest fail if this snapshot drifts.
 const GEMINI_MODEL_POLICY_SNAPSHOT = {
-  version: 3,
-  verifiedAt: "2026-07-23",
+  version: 4,
+  verifiedAt: "2026-07-29",
   models: {
     textQuality: "gemini-3.6-flash",
     textFast: "gemini-3.5-flash-lite",
@@ -351,7 +351,7 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
       resolution: "1080p",
     },
   },
-  allowedImageAspectRatios: ["1:1", "9:16", "16:9", "4:3"],
+  allowedImageAspectRatios: ["1:1", "4:5", "9:16", "16:9", "4:3"],
   allowedRequestFields: {
     generateContent: {
       topLevel: ["contents", "generationConfig"],

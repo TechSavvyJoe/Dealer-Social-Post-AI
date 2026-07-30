@@ -10,6 +10,7 @@ import {
   ClipboardPaste,
   ExternalLink,
   RefreshCw,
+  ArrowRight,
 } from "lucide-react";
 
 const FacebookGlyph: React.FC<{ className?: string }> = ({ className }) => (
@@ -62,11 +63,20 @@ import {
 import { triggerHapticFeedback } from "../utils/haptics";
 import { logEvent } from "../utils/telemetry";
 import { cn } from "../utils/classNames";
+import { captionIncludesDealershipMention } from "../utils/socialAttribution";
 
 export interface PlatformShareCaption {
   text: string;
   disclosures?: string;
   blockedReason?: string;
+}
+
+export interface ShareQueueProgress {
+  /** One-based position of the output currently being handed off. */
+  current: number;
+  total: number;
+  /** Human-readable destination/format label for the next selected output. */
+  nextLabel?: string;
 }
 
 interface ShareDialogProps {
@@ -75,6 +85,14 @@ interface ShareDialogProps {
   content: PublishContent;
   platformCaptions?: Record<string, string | PlatformShareCaption>;
   selectedPlatformIds?: string[];
+  /** Open directly on one exact delivery row and prepare it before Share now. */
+  focusedTargetId?: string;
+  /** Progress for the user-driven Share selected sequence. */
+  queueProgress?: ShareQueueProgress;
+  /** Advances only after the user explicitly finishes or skips this output. */
+  onQueueAdvance?: () => void;
+  /** Exact configured dealership mention expected in this destination's caption. */
+  dealershipMention?: string;
 }
 
 type PreparationState =
@@ -98,6 +116,7 @@ const ICON_MAP: Record<
 const CORE_SET = new Set<string>(CORE_PUBLISH_IDS);
 
 const META_APP_IDS = new Set(["facebook_feed", "marketplace"]);
+const FACEBOOK_TAG_TARGET_IDS = new Set(["facebook_feed", "marketplace"]);
 
 /**
  * Salesperson-first share: prefer native social apps (existing logins),
@@ -109,6 +128,10 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
   content,
   platformCaptions,
   selectedPlatformIds,
+  focusedTargetId,
+  queueProgress,
+  onQueueAdvance,
+  dealershipMention,
 }) => {
   const [busy, setBusy] = useState<string | null>(null);
   const [status, setStatus] = useState<{
@@ -126,17 +149,25 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
   const copyRequestRef = useRef(0);
   const onPhone = React.useMemo(() => isMobileShareDevice(), []);
 
-  const orderedTargets = React.useMemo(
+  const allOrderedTargets = React.useMemo(
     () => orderPublishTargets(selectedPlatformIds),
     [selectedPlatformIds],
   );
+  const orderedTargets = React.useMemo(() => {
+    if (!focusedTargetId) return allOrderedTargets;
+    const focused = allOrderedTargets.find((target) => target.id === focusedTargetId);
+    return focused ? [focused] : allOrderedTargets;
+  }, [allOrderedTargets, focusedTargetId]);
   const coreTargets = React.useMemo(
-    () => orderedTargets.filter((t) => CORE_SET.has(t.id)),
-    [orderedTargets],
+    () =>
+      focusedTargetId
+        ? orderedTargets
+        : orderedTargets.filter((t) => CORE_SET.has(t.id)),
+    [focusedTargetId, orderedTargets],
   );
   const moreTargets = React.useMemo(
-    () => orderedTargets.filter((t) => !CORE_SET.has(t.id)),
-    [orderedTargets],
+    () => (focusedTargetId ? [] : orderedTargets.filter((t) => !CORE_SET.has(t.id))),
+    [focusedTargetId, orderedTargets],
   );
 
   const contentForTarget = useCallback(
@@ -161,6 +192,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       content.disclosures,
       content.hashtags,
       content.imageDataUrl,
+      content.preparedFile,
       content.text,
       content.videoUrl,
       platformCaptions,
@@ -214,6 +246,21 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
   );
 
   useEffect(() => {
+    if (isOpen) return;
+    preparationGenerationRef.current += 1;
+    targetRequestRef.current = {};
+    copyRequestRef.current += 1;
+    // Release the prepared File/Blob as soon as the dialog closes. Retaining a
+    // full MP4 here can push an iPhone PWA over its memory limit.
+    setPreparation({});
+    setSelectedTargetId(null);
+    setBusy(null);
+    setStatus(null);
+    setOperationError(null);
+    setCopyState("idle");
+  }, [isOpen]);
+
+  useEffect(() => {
     if (!isOpen) return;
     const generation = preparationGenerationRef.current + 1;
     preparationGenerationRef.current = generation;
@@ -223,16 +270,22 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     setPreparation({});
     setOperationError(null);
     setStatus(null);
-    setSelectedTargetId(null);
+    const focusedTarget = focusedTargetId
+      ? orderedTargets.find((target) => target.id === focusedTargetId)
+      : undefined;
+    setSelectedTargetId(focusedTarget?.id || null);
     setCopyState("idle");
     copyRequestRef.current += 1;
+    if (focusedTarget) {
+      void prepareTarget(focusedTarget, generation);
+    }
 
     return () => {
       if (preparationGenerationRef.current === generation) {
         preparationGenerationRef.current += 1;
       }
     };
-  }, [isOpen]);
+  }, [focusedTargetId, isOpen]);
 
   const handlePick = useCallback(
     (target: PublishTarget) => {
@@ -325,6 +378,40 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
   const failedTargetCount = Object.values(preparation).filter(
     (item) => item.status === "error",
   ).length;
+  const normalizedQueueProgress = queueProgress
+    ? {
+        current: Math.min(
+          Math.max(1, Math.trunc(queueProgress.current) || 1),
+          Math.max(1, Math.trunc(queueProgress.total) || 1),
+        ),
+        total: Math.max(1, Math.trunc(queueProgress.total) || 1),
+        nextLabel: queueProgress.nextLabel?.trim(),
+      }
+    : null;
+  const isSuccessfulHandoff = status?.status.kind === "shared";
+  const queueActionLabel = normalizedQueueProgress
+    ? normalizedQueueProgress.current >= normalizedQueueProgress.total
+      ? "Finish sequence"
+      : isSuccessfulHandoff
+        ? `Next selected: ${normalizedQueueProgress.nextLabel || "next output"}`
+        : `Skip to: ${normalizedQueueProgress.nextLabel || "next output"}`
+    : null;
+  const canAdvanceQueue =
+    !!normalizedQueueProgress &&
+    !!onQueueAdvance &&
+    !!status &&
+    status.status.kind !== "error";
+  const focusedTagGuidance =
+    focusedTargetId &&
+    selectedPrepared &&
+    dealershipMention &&
+    captionIncludesDealershipMention(selectedPrepared.caption, dealershipMention)
+      ? FACEBOOK_TAG_TARGET_IDS.has(focusedTargetId)
+        ? "Dealership Page mention text is included in the caption. After you paste, Facebook may show a Page suggestion; tap the correct dealership Page to create a clickable mention."
+        : focusedTargetId === "linkedin"
+          ? "Dealership company mention text is included in the caption. After you paste, LinkedIn may show a company suggestion; tap the correct dealership company to create a clickable mention."
+          : null
+      : null;
 
   const handleCopySelected = useCallback(() => {
     if (!selectedPrepared || busy) return;
@@ -454,11 +541,47 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Share"
-      description="Choose a destination. We prepare the right media before you share."
+      title={focusedTargetId ? "Share exact output" : "Share"}
+      description={
+        focusedTargetId
+          ? "This platform-ready file is prepared first. Then a fresh Share now tap opens your device sheet."
+          : "Choose a destination. We prepare the right media before you share."
+      }
       size="lg"
     >
       <div className="space-y-4">
+        {focusedTargetId && normalizedQueueProgress ? (
+          <div
+            className="rounded-xl border border-primary-400/30 bg-primary-500/10 px-3 py-3"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span className="font-semibold text-primary-100 [.theme-light_&]:text-primary-800">
+                Share sequence
+              </span>
+              <span className="font-semibold tabular-nums text-primary-200 [.theme-light_&]:text-primary-700">
+                {normalizedQueueProgress.current} of {normalizedQueueProgress.total}
+              </span>
+            </div>
+            <div
+              className="mt-2 h-1.5 overflow-hidden rounded-full bg-primary-950/35 [.theme-light_&]:bg-primary-100"
+              role="progressbar"
+              aria-label="Selected output sequence"
+              aria-valuemin={1}
+              aria-valuemax={normalizedQueueProgress.total}
+              aria-valuenow={normalizedQueueProgress.current}
+            >
+              <div
+                className="h-full rounded-full bg-primary-400 transition-[width]"
+                style={{
+                  width: `${(normalizedQueueProgress.current / normalizedQueueProgress.total) * 100}%`,
+                }}
+              />
+            </div>
+          </div>
+        ) : null}
+
         <div className="flex items-start gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs leading-relaxed text-surface-300">
           <ClipboardPaste className="mt-0.5 h-4 w-4 shrink-0 text-primary-300" />
           <div className="space-y-1">
@@ -513,6 +636,11 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                       ? "Media is ready. Copy the caption below before finishing."
                       : "Share now opens the system sheet immediately."}
                 </p>
+                {focusedTagGuidance ? (
+                  <p className="mt-2 max-w-prose rounded-lg border border-primary-400/25 bg-primary-500/10 px-2.5 py-2 text-xs leading-relaxed text-primary-100 [.theme-light_&]:text-primary-900">
+                    {focusedTagGuidance}
+                  </p>
+                ) : null}
               </div>
               <div className="grid shrink-0 grid-cols-2 gap-2">
                 <Button
@@ -706,6 +834,20 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                     </button>
                   )}
                 </div>
+              ) : null}
+
+              {canAdvanceQueue && queueActionLabel ? (
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="md"
+                  fullWidth
+                  className="min-h-11 border-t border-white/10"
+                  rightIcon={<ArrowRight className="h-4 w-4" aria-hidden="true" />}
+                  onClick={onQueueAdvance}
+                >
+                  {queueActionLabel}
+                </Button>
               ) : null}
             </motion.div>
           )}

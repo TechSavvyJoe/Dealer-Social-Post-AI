@@ -12,11 +12,17 @@ export enum AppStep {
 
 export type UserRole = "salesperson" | "dealer_admin" | "super_admin";
 export type ImageQualityTier = "standard" | "studio";
+/**
+ * Media the salesperson intends to deliver for each selected destination.
+ * A photo master is still created for video-only plans because Veo animates
+ * that protected, approval-ready frame.
+ */
+export type MediaOutputMode = "photo" | "video" | "both";
 /** Gemini image ratios that map to the app's supported social canvases. */
-export type ImageAspectRatio = "1:1" | "9:16" | "16:9" | "4:3";
+export type ImageAspectRatio = "1:1" | "4:5" | "9:16" | "16:9" | "4:3";
 /** Exact export canvas selected as the primary generation target. */
 export type PrimaryImageFormatId =
-  "feed_square" | "story_vertical" | "marketplace" | "gbp";
+  "feed_portrait" | "feed_square" | "story_vertical" | "marketplace" | "gbp";
 
 export enum StyleOption {
   Luxury = "Luxury & Elegance",
@@ -98,6 +104,8 @@ export interface GeneratedPost {
    * multi-format export and to label the caption pack.
    */
   platformIds?: string[];
+  /** Whether the selected destinations should receive photos, videos, or both. */
+  mediaOutputMode?: MediaOutputMode;
   /** Native canvas targeted during AI image generation. */
   primaryFormatId?: PrimaryImageFormatId;
   /** Provider-validated aspect ratio used for the primary generated image. */
@@ -181,9 +189,13 @@ export interface Dealer {
 
   // ---- Social handles ----
   facebook_url?: string;
+  /** Exact Facebook Page mention used in salesperson-originated posts. */
+  facebook_page_tag?: string;
   instagram_handle?: string;
   tiktok_handle?: string;
   x_handle?: string;
+  /** Exact LinkedIn company mention; composer may require selecting its suggestion. */
+  linkedin_company_tag?: string;
   gbp_url?: string;
 
   // ---- Generation defaults ----
@@ -228,6 +240,10 @@ export interface GenerationParams {
   creativeBrief?: string;
   /** Platforms selected in PostCustomizer ("Share to") for caption packs + export priority. */
   platformIds?: string[];
+  /** Post scenario restored after a failed generation attempt or same-photo remix. */
+  scenarioId?: string;
+  /** Requested destination deliverables; defaults to photo for legacy sessions. */
+  mediaOutputMode?: MediaOutputMode;
   /** Exact export canvas selected from the destination mix. */
   primaryFormatId?: PrimaryImageFormatId;
   /** Native Gemini image ratio corresponding to `primaryFormatId`. */

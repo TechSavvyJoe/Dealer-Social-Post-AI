@@ -43,6 +43,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const shouldRestoreTriggerFocusRef = useRef(false);
   const currentDealer = useAppStore((s) => s.currentDealer);
 
   // Built-in catalog + dealer-defined custom scenarios from their record.
@@ -72,14 +73,13 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
       if (!allScenarios.length) return;
       const nextIndex = (index + allScenarios.length) % allScenarios.length;
       setActiveIndex(nextIndex);
-      requestAnimationFrame(() => optionRefs.current[nextIndex]?.focus());
     },
     [allScenarios.length],
   );
 
   const closeAndRestoreFocus = useCallback(() => {
+    shouldRestoreTriggerFocusRef.current = true;
     setOpen(false);
-    requestAnimationFrame(() => triggerRef.current?.focus());
   }, []);
 
   const selectScenario = useCallback(
@@ -106,6 +106,18 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
     document.addEventListener("pointerdown", handleOutsidePointer);
     return () => document.removeEventListener("pointerdown", handleOutsidePointer);
   }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      optionRefs.current[activeIndex]?.focus();
+      return;
+    }
+
+    if (shouldRestoreTriggerFocusRef.current) {
+      shouldRestoreTriggerFocusRef.current = false;
+      triggerRef.current?.focus();
+    }
+  }, [activeIndex, open]);
 
   const handleListboxKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     switch (event.key) {

@@ -471,7 +471,14 @@ test.describe("local media recovery and exact output canvases", () => {
       return decoded;
     });
 
-    expect(outputs).toHaveLength(4);
+    expect(outputs.map((output) => output.id)).toEqual([
+      "story_vertical",
+      "feed_portrait",
+      "feed_square",
+      "social_landscape",
+      "marketplace",
+      "gbp",
+    ]);
     for (const output of outputs) {
       expect(
         { width: output.width, height: output.height },

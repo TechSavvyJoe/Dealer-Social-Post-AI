@@ -27,6 +27,11 @@ type Policies = {
 type Helpers = {
   secureRandomString: (length: number, alphabet: string) => string;
   mintSessionToken: () => string;
+  dealerMutationData: (
+    body: Record<string, unknown>,
+    allowCode: boolean,
+    allowAdminCode: boolean,
+  ) => Record<string, unknown>;
   serializeDealer: (record: unknown) => Record<string, unknown>;
   serializePerson: (record: unknown) => Record<string, unknown>;
   serializePersonSummary: (record: unknown) => Record<string, unknown>;
@@ -93,7 +98,7 @@ const inlineImage = {
 
 function imageRequest(
   imageSize: "1K" | "2K" | "4K" = "2K",
-  aspectRatio?: "1:1" | "9:16" | "16:9" | "4:3",
+  aspectRatio?: "1:1" | "4:5" | "9:16" | "16:9" | "4:3",
 ) {
   return {
     contents: [
@@ -525,7 +530,7 @@ describe("PocketBase request policies", () => {
   });
 
   it("allows only the app's canonical image aspect ratios", () => {
-    for (const aspectRatio of ["1:1", "9:16", "16:9", "4:3"] as const) {
+    for (const aspectRatio of ["1:1", "4:5", "9:16", "16:9", "4:3"] as const) {
       const request = imageRequest("2K", aspectRatio);
       expect(policies.buildGeminiProxyRequest(proImagePath, request)).toEqual(
         withServerSafety(request),
@@ -729,6 +734,40 @@ describe("PocketBase auth helper invariants", () => {
 
     expect(serialized).not.toHaveProperty("code");
     expect(JSON.stringify(serialized)).not.toContain("sensitive-login-code");
+  });
+
+  it("round-trips only the allowlisted dealership social-attribution fields", () => {
+    const mutation = helpers.dealerMutationData(
+      {
+        facebook_page_tag: "Bob Maxey Ford of Howell",
+        linkedin_company_tag: "bob-maxey-ford",
+        attacker_field: "must not pass",
+      },
+      false,
+      false,
+    );
+    expect(mutation).toEqual({
+      facebook_page_tag: "Bob Maxey Ford of Howell",
+      linkedin_company_tag: "bob-maxey-ford",
+    });
+
+    const serialized = helpers.serializeDealer({
+      id: "dealer-record-id",
+      getString: (field: string) =>
+        ({
+          name: "Example Dealer",
+          facebook_page_tag: "Bob Maxey Ford of Howell",
+          linkedin_company_tag: "bob-maxey-ford",
+        })[field] || "",
+      getBool: () => false,
+    });
+    expect(serialized).toMatchObject({
+      facebook_page_tag: "Bob Maxey Ford of Howell",
+      linkedin_company_tag: "bob-maxey-ford",
+    });
+    expect(() =>
+      helpers.dealerMutationData({ facebook_page_tag: "x".repeat(101) }, false, false),
+    ).toThrow("String exceeds maximum length of 100");
   });
 
   it("redacts personal access codes from every ordinary person DTO", () => {

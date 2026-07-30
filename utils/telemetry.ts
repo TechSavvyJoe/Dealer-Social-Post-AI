@@ -16,7 +16,7 @@ const TRUNCATED_VALUE = "[TRUNCATED]";
 const UNSUPPORTED_VALUE = "[UNSUPPORTED]";
 const MAX_SANITIZE_DEPTH = 10;
 const TELEMETRY_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
-const API_CONTRACT_VERSION = "2026-07-17.v2";
+const API_CONTRACT_VERSION = "2026-07-29.v3";
 
 // VINs exclude I, O, and Q. Explicit non-VIN boundaries also catch values
 // beside underscores, where a regular `\b` boundary would miss them.

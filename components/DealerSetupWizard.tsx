@@ -27,6 +27,7 @@ import {
   serializeHours,
   type WeekHours,
 } from "../utils/hoursFormat";
+import { normalizeDealerSocialProfileValue } from "../utils/socialAttribution";
 
 interface DealerSetupWizardProps {
   dealer: Dealer;
@@ -90,9 +91,15 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
 
   // Social
   const [facebookUrl, setFacebookUrl] = useState(dealer.facebook_url || "");
+  const [facebookPageTag, setFacebookPageTag] = useState(
+    dealer.facebook_page_tag || "",
+  );
   const [instagramHandle, setInstagramHandle] = useState(dealer.instagram_handle || "");
   const [tiktokHandle, setTiktokHandle] = useState(dealer.tiktok_handle || "");
   const [xHandle, setXHandle] = useState(dealer.x_handle || "");
+  const [linkedinCompanyTag, setLinkedinCompanyTag] = useState(
+    dealer.linkedin_company_tag || "",
+  );
   const [gbpUrl, setGbpUrl] = useState(dealer.gbp_url || "");
 
   // Voice / banned / color (existing)
@@ -164,19 +171,38 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
         ...diff("tagline", tagline.trim(), dealer.tagline || ""),
         ...diff("facebook_url", facebookUrl.trim(), dealer.facebook_url || ""),
         ...diff(
+          "facebook_page_tag",
+          normalizeDealerSocialProfileValue("facebook_page_tag", facebookPageTag),
+          normalizeDealerSocialProfileValue(
+            "facebook_page_tag",
+            dealer.facebook_page_tag,
+          ),
+        ),
+        ...diff(
           "instagram_handle",
-          instagramHandle.trim().replace(/^@/, ""),
-          (dealer.instagram_handle || "").replace(/^@/, ""),
+          normalizeDealerSocialProfileValue("instagram_handle", instagramHandle),
+          normalizeDealerSocialProfileValue(
+            "instagram_handle",
+            dealer.instagram_handle,
+          ),
         ),
         ...diff(
           "tiktok_handle",
-          tiktokHandle.trim().replace(/^@/, ""),
-          (dealer.tiktok_handle || "").replace(/^@/, ""),
+          normalizeDealerSocialProfileValue("tiktok_handle", tiktokHandle),
+          normalizeDealerSocialProfileValue("tiktok_handle", dealer.tiktok_handle),
         ),
         ...diff(
           "x_handle",
-          xHandle.trim().replace(/^@/, ""),
-          (dealer.x_handle || "").replace(/^@/, ""),
+          normalizeDealerSocialProfileValue("x_handle", xHandle),
+          normalizeDealerSocialProfileValue("x_handle", dealer.x_handle),
+        ),
+        ...diff(
+          "linkedin_company_tag",
+          normalizeDealerSocialProfileValue("linkedin_company_tag", linkedinCompanyTag),
+          normalizeDealerSocialProfileValue(
+            "linkedin_company_tag",
+            dealer.linkedin_company_tag,
+          ),
         ),
         ...diff("gbp_url", gbpUrl.trim(), dealer.gbp_url || ""),
         ...diff(
@@ -351,7 +377,16 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 fullWidth
                 className="bg-white/5 border-white/10 focus:border-primary-400"
               />
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <Input
+                label="Facebook Page tag"
+                value={facebookPageTag}
+                onChange={(e) => setFacebookPageTag(e.target.value)}
+                placeholder="@Your Dealership"
+                helperText="Added to Facebook and Marketplace captions. Tap Facebook's Page suggestion if it appears."
+                fullWidth
+                className="bg-white/5 border-white/10 focus:border-primary-400"
+              />
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <Input
                   label="Instagram"
                   value={instagramHandle}
@@ -373,6 +408,15 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                   value={xHandle}
                   onChange={(e) => setXHandle(e.target.value)}
                   placeholder="@yourdealership"
+                  fullWidth
+                  className="bg-white/5 border-white/10 focus:border-primary-400"
+                />
+                <Input
+                  label="LinkedIn company tag"
+                  value={linkedinCompanyTag}
+                  onChange={(e) => setLinkedinCompanyTag(e.target.value)}
+                  placeholder="@your-company"
+                  helperText="LinkedIn may ask you to select the company suggestion once."
                   fullWidth
                   className="bg-white/5 border-white/10 focus:border-primary-400"
                 />

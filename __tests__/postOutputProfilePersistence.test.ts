@@ -67,14 +67,20 @@ describe("post output-profile persistence", () => {
       type: "select",
       options: {
         maxSelect: 1,
-        values: ["feed_square", "story_vertical", "marketplace", "gbp"],
+        values: [
+          "feed_portrait",
+          "feed_square",
+          "story_vertical",
+          "marketplace",
+          "gbp",
+        ],
       },
     });
     expect(fields[2]).toMatchObject({
       type: "select",
       options: {
         maxSelect: 1,
-        values: ["1:1", "9:16", "16:9", "4:3"],
+        values: ["1:1", "4:5", "9:16", "16:9", "4:3"],
       },
     });
 
@@ -101,6 +107,7 @@ describe("post output-profile persistence", () => {
             dealer: "dealer-1",
             generated_at: "2026-07-28T12:00:00.000Z",
             approval_status: "n_a",
+            media_output_mode: "both",
             platform_ids: ["instagram_story", "tiktok"],
             primary_format_id: "story_vertical",
             image_aspect_ratio: "9:16",
@@ -113,6 +120,7 @@ describe("post output-profile persistence", () => {
     const result = await logPost({
       caption: "Delivery day",
       imageDataUrl: "data:image/png;base64,AQID",
+      mediaOutputMode: "both",
       platformIds: ["instagram_story", "tiktok"],
       platformCaptions: {
         instagram_story: "Vertical delivery caption",
@@ -133,7 +141,9 @@ describe("post output-profile persistence", () => {
     });
     expect(form.get("primary_format_id")).toBe("story_vertical");
     expect(form.get("image_aspect_ratio")).toBe("9:16");
+    expect(form.get("media_output_mode")).toBe("both");
     expect(result).toMatchObject({
+      media_output_mode: "both",
       platform_ids: ["instagram_story", "tiktok"],
       primary_format_id: "story_vertical",
       image_aspect_ratio: "9:16",
@@ -142,18 +152,35 @@ describe("post output-profile persistence", () => {
 
   it("validates server allowlists and returns only no-store history metadata", () => {
     const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
+    const allowlistStart = hook.indexOf("const ALLOWED_POST_PLATFORM_IDS = [");
+    const allowlistEnd = hook.indexOf("];", allowlistStart) + 2;
+    const platformAllowlist = hook.slice(allowlistStart, allowlistEnd);
     const postStart = hook.indexOf('routerAdd("POST", "/api/app/posts"');
-    const postEnd = hook.indexOf(
-      'routerAdd("POST", "/api/app/posts/:id/video-generated"',
+    const draftStart = hook.indexOf(
+      'routerAdd("PATCH", "/api/app/posts/:id/draft"',
       postStart,
     );
-    const postRoute = hook.slice(postStart, postEnd);
+    const postRoute = hook.slice(postStart, draftStart);
+    const draftEnd = hook.indexOf(
+      'routerAdd("POST", "/api/app/posts/:id/video-generated"',
+      draftStart,
+    );
+    const draftRoute = hook.slice(draftStart, draftEnd);
     const listStart = hook.indexOf('routerAdd("GET", "/api/app/posts"');
-    const listEnd = hook.indexOf('routerAdd("PATCH", "/api/app/posts/:id"', listStart);
-    const listRoute = hook.slice(listStart, listEnd);
+    const approvalStart = hook.indexOf(
+      'routerAdd("PATCH", "/api/app/posts/:id"',
+      listStart,
+    );
+    const listRoute = hook.slice(listStart, approvalStart);
+    const approvalEnd = hook.indexOf(
+      'routerAdd("GET", "/api/app/salespeople"',
+      approvalStart,
+    );
+    const approvalRoute = hook.slice(approvalStart, approvalEnd);
 
     for (const platform of [
       "instagram_feed",
+      "instagram_reel",
       "instagram_story",
       "facebook_feed",
       "tiktok",
@@ -163,7 +190,10 @@ describe("post output-profile persistence", () => {
       "x_twitter",
       "native_share",
     ]) {
-      expect(postRoute).toContain(`"${platform}"`);
+      expect(platformAllowlist).toContain(`"${platform}"`);
+    }
+    for (const route of [postRoute, draftRoute, listRoute, approvalRoute]) {
+      expect(route).toContain("const allowedPlatformIds = ALLOWED_POST_PLATFORM_IDS");
     }
     expect(postRoute).toContain("allowedPrimaryFormatIds.indexOf(primaryFormatId)");
     expect(postRoute).toContain("allowedImageAspectRatios.indexOf(imageAspectRatio)");
@@ -171,6 +201,7 @@ describe("post output-profile persistence", () => {
       "expectedAspectByFormat[primaryFormatId] !== imageAspectRatio",
     );
     expect(postRoute).toContain("platform_ids: JSON.stringify(platformIds)");
+    expect(postRoute).toContain("media_output_mode: mediaOutputMode");
     expect(postRoute).toContain("platform_captions: parsedPlatformCaptions.serialized");
     expect(postRoute).toContain("helpers.resolvePostScenarioPolicy");
     expect(postRoute).toContain('error: "Invalid post scenario"');
@@ -179,11 +210,38 @@ describe("post output-profile persistence", () => {
     expect(listRoute).toContain("platform_ids: platformIds");
     expect(listRoute).toContain("platform_captions: parsedPlatformCaptions.ok");
     expect(listRoute).toContain("caption_source:");
-    expect(listRoute).toContain('primary_format_id: r.getString("primary_format_id")');
-    expect(listRoute).toContain(
-      'image_aspect_ratio: r.getString("image_aspect_ratio")',
-    );
+    expect(listRoute).toContain("media_output_mode:");
+    expect(listRoute).toContain("primary_format_id: primaryFormatId");
+    expect(listRoute).toContain("image_aspect_ratio: imageAspectRatio");
     expect(listRoute).toContain('"Cache-Control", "private, no-store"');
+  });
+
+  it("returns History output metadata only when format and ratio form an approved pair", () => {
+    const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
+    const listStart = hook.indexOf('routerAdd("GET", "/api/app/posts"');
+    const listEnd = hook.indexOf('routerAdd("PATCH", "/api/app/posts/:id"', listStart);
+    const listRoute = hook.slice(listStart, listEnd);
+
+    for (const [format, ratio] of [
+      ["feed_portrait", "4:5"],
+      ["feed_square", "1:1"],
+      ["story_vertical", "9:16"],
+      ["marketplace", "16:9"],
+      ["gbp", "4:3"],
+    ]) {
+      expect(listRoute).toContain(`${format}: "${ratio}"`);
+    }
+    expect(listRoute).toContain(
+      "expectedAspectByFormat[storedPrimaryFormatId] === storedImageAspectRatio",
+    );
+    expect(listRoute).toContain(
+      'const primaryFormatId = hasValidOutputProfile ? storedPrimaryFormatId : "";',
+    );
+    expect(listRoute).toContain(
+      'const imageAspectRatio = hasValidOutputProfile ? storedImageAspectRatio : "";',
+    );
+    expect(listRoute).toContain("primary_format_id: primaryFormatId");
+    expect(listRoute).toContain("image_aspect_ratio: imageAspectRatio");
   });
 
   it("restores the saved output profile when History reopens a creative", () => {
@@ -196,9 +254,158 @@ describe("post output-profile persistence", () => {
     expect(history).toContain("post.platform_ids");
     expect(history).toContain("post.platform_captions");
     expect(history).toContain("captionSource: post.caption_source");
+    expect(history).toContain("mediaOutputMode:");
     expect(history).toContain('post.caption_source === "basic_fallback"');
     expect(history).toContain("primaryFormatId: post.primary_format_id");
     expect(history).toContain("imageAspectRatio: post.image_aspect_ratio");
+  });
+
+  it("adds the forward media-mode field and expands exact portrait enums", () => {
+    const source = readFileSync(
+      resolve(
+        process.cwd(),
+        "pb_migrations/1750800600_persist_post_media_output_mode.js",
+      ),
+      "utf8",
+    );
+
+    expect(source).toContain('name: "media_output_mode"');
+    expect(source).toContain('values: ["photo", "video", "both"]');
+    expect(source).toContain('primaryValues.indexOf("feed_portrait")');
+    expect(source).toContain('aspectValues.indexOf("4:5")');
+    expect(source).toContain('field.name !== "media_output_mode"');
+  });
+
+  it("repairs already-applied dirty schemas with an idempotent later migration", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "pb_migrations/1750800700_reconcile_post_output_enums.js"),
+      "utf8",
+    );
+    type MigrationHandler = (db: unknown) => unknown;
+    let up: MigrationHandler | undefined;
+    const fields = [
+      {
+        name: "primary_format_id",
+        options: {
+          maxSelect: 1,
+          values: ["feed_square", "story_vertical", "marketplace", "gbp"],
+        },
+      },
+      {
+        name: "image_aspect_ratio",
+        options: { maxSelect: 1, values: ["1:1", "9:16", "16:9", "4:3"] },
+      },
+    ];
+    const posts = {
+      schema: {
+        getFieldByName: (name: string) =>
+          fields.find((field) => field.name === name) || null,
+      },
+    };
+    const saveCollection = vi.fn();
+    const dao = {
+      findCollectionByNameOrId: vi.fn(() => posts),
+      saveCollection,
+    };
+
+    runInNewContext(source, {
+      migrate: (apply: MigrationHandler) => {
+        up = apply;
+      },
+      Dao: function Dao() {
+        return dao;
+      },
+    });
+
+    up?.(dao);
+    up?.(dao);
+    expect(fields[0].options.values).toEqual([
+      "feed_portrait",
+      "feed_square",
+      "story_vertical",
+      "marketplace",
+      "gbp",
+    ]);
+    expect(fields[1].options.values).toEqual(["1:1", "4:5", "9:16", "16:9", "4:3"]);
+    expect(saveCollection).toHaveBeenCalledTimes(2);
+  });
+
+  it("adds and rolls back explicit dealership Page/company attribution fields", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "pb_migrations/1750800800_add_dealer_social_tags.js"),
+      "utf8",
+    );
+    type MigrationHandler = (db: unknown) => unknown;
+    let up: MigrationHandler | undefined;
+    let down: MigrationHandler | undefined;
+    const fields: Array<Record<string, unknown>> = [];
+    const schema = {
+      getFieldByName: (name: string) =>
+        fields.find((field) => field.name === name) || null,
+      addField: (field: Record<string, unknown>) => fields.push(field),
+      *[Symbol.iterator]() {
+        yield* fields;
+      },
+    };
+    const dealers: { schema: unknown } = { schema };
+    const saveCollection = vi.fn();
+    const dao = {
+      findCollectionByNameOrId: vi.fn(() => dealers),
+      saveCollection,
+    };
+
+    runInNewContext(source, {
+      migrate: (apply: MigrationHandler, rollback: MigrationHandler) => {
+        up = apply;
+        down = rollback;
+      },
+      Dao: function Dao() {
+        return dao;
+      },
+      SchemaField: class SchemaField {
+        constructor(definition: Record<string, unknown>) {
+          Object.assign(this, definition);
+        }
+      },
+    });
+
+    up?.(dao);
+    up?.(dao);
+    expect(fields).toEqual([
+      expect.objectContaining({
+        name: "facebook_page_tag",
+        type: "text",
+        required: false,
+        options: { max: 100 },
+      }),
+      expect.objectContaining({
+        name: "linkedin_company_tag",
+        type: "text",
+        required: false,
+        options: { max: 100 },
+      }),
+    ]);
+    expect(saveCollection).toHaveBeenCalledTimes(2);
+
+    down?.(dao);
+    expect(dealers.schema).toEqual([]);
+  });
+
+  it("requires the dirty-upgrade release drill to prove the exact post output schema", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "scripts/dirty-upgrade-smoke.sh"),
+      "utf8",
+    );
+
+    expect(source).toContain("posts_media_output_mode_field_count");
+    expect(source).toContain('"photo,video,both"');
+    expect(source).toContain(
+      '"feed_portrait,feed_square,story_vertical,marketplace,gbp"',
+    );
+    expect(source).toContain('"1:1,4:5,9:16,16:9,4:3"');
+    expect(source).toContain("dealers_social_attribution_field_count");
+    expect(source).toContain("facebook_page_tag,linkedin_company_tag");
+    expect(source).toContain("output-profile=enforced");
   });
 
   it("adds the forward release and platform-caption fields without editing the applied profile migration", () => {

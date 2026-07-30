@@ -67,6 +67,12 @@ interface VideoDirectorModalProps {
   onSelectStyle: (style: VideoStyle, options: VideoRequestOptions) => void;
   /** Inherit the safest supported video ratio from selected destinations. */
   defaultAspect?: "9:16" | "16:9";
+  /** Pin an exact platform-delivery render to its required native ratio. */
+  lockedAspect?: "9:16" | "16:9";
+  /** Human-readable destination shown while an exact output is pinned. */
+  deliveryLabel?: string;
+  /** Prevent duplicate paid video jobs while a render is already starting/running. */
+  isSubmitting?: boolean;
 }
 
 const StyleButton = memo(
@@ -76,6 +82,7 @@ const StyleButton = memo(
     icon,
     description,
     isRecommended,
+    disabled,
     onSelect,
   }: {
     style: VideoStyle;
@@ -83,17 +90,19 @@ const StyleButton = memo(
     icon: string;
     description: string;
     isRecommended?: boolean;
+    disabled?: boolean;
     onSelect: (style: VideoStyle) => void;
   }) => (
     <button
       type="button"
+      disabled={disabled}
       onClick={() => {
         triggerHapticFeedback();
         onSelect(style);
       }}
       className="group relative flex items-center p-3 sm:p-3 bg-surface-900/60 hover:bg-primary-500/15
                border border-surface-800 hover:border-primary-400 rounded-xl transition-all duration-150
-               active:scale-95 touch-manipulation w-full text-left gap-3"
+               active:scale-95 touch-manipulation w-full text-left gap-3 disabled:cursor-not-allowed disabled:opacity-50"
     >
       <div className="shrink-0">
         <Icon
@@ -103,14 +112,16 @@ const StyleButton = memo(
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="font-semibold text-white text-sm truncate">{label}</span>
+          <span className="font-semibold text-surface-50 text-sm truncate">
+            {label}
+          </span>
           {isRecommended && (
             <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/30 text-emerald-300 border border-emerald-400/40 uppercase tracking-wide font-bold">
               ★ Pro
             </span>
           )}
         </div>
-        <span className="block mt-0.5 text-[11px] text-white/60 truncate">
+        <span className="block mt-0.5 text-[11px] text-surface-400 truncate">
           {description}
         </span>
       </div>
@@ -119,7 +130,15 @@ const StyleButton = memo(
 );
 
 export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
-  ({ isOpen, onClose, onSelectStyle, defaultAspect = "9:16" }) => {
+  ({
+    isOpen,
+    onClose,
+    onSelectStyle,
+    defaultAspect = "9:16",
+    lockedAspect,
+    deliveryLabel,
+    isSubmitting = false,
+  }) => {
     const [showMore, setShowMore] = useState(false);
     // Default vertical + music for dealership Reels/TikTok (not silent landscape).
     const [aspectPreference, setAspectPreference] =
@@ -133,25 +152,31 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
 
     useEffect(() => {
       if (!isOpen) return;
-      setAspectPreference(defaultAspect);
-      setActivePreset(defaultAspect === "9:16" ? "vertical" : "horizontal");
-    }, [defaultAspect, isOpen]);
+      const nextAspect = lockedAspect || defaultAspect;
+      setAspectPreference(nextAspect);
+      setActivePreset(nextAspect === "9:16" ? "vertical" : "horizontal");
+      if (lockedAspect) {
+        setResolution("1080p");
+        setDuration(8);
+      }
+    }, [defaultAspect, isOpen, lockedAspect]);
 
     const buildOptions = useCallback((): VideoRequestOptions => {
       return {
-        durationSeconds: resolution === "1080p" ? 8 : duration,
+        durationSeconds: lockedAspect || resolution === "1080p" ? 8 : duration,
         soundtrack,
-        aspectPreference,
-        resolution,
+        aspectPreference: lockedAspect || aspectPreference,
+        resolution: lockedAspect ? "1080p" : resolution,
         pacing: "cinematic",
       };
-    }, [aspectPreference, duration, resolution, soundtrack]);
+    }, [aspectPreference, duration, lockedAspect, resolution, soundtrack]);
 
     const handleStyleSelect = useCallback(
       (style: VideoStyle) => {
+        if (isSubmitting) return;
         onSelectStyle(style, buildOptions());
       },
-      [buildOptions, onSelectStyle],
+      [buildOptions, isSubmitting, onSelectStyle],
     );
 
     const applyPreset = (presetId: string) => {
@@ -180,6 +205,20 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
             default; tap <strong className="text-surface-200">Tap for sound</strong>{" "}
             after render.
           </p>
+          {lockedAspect ? (
+            <div
+              className="rounded-xl border border-success-400/30 bg-success-500/10 px-3 py-2.5"
+              role="status"
+            >
+              <p className="text-sm font-semibold text-success-100 [.theme-light_&]:text-success-900">
+                Exact output pinned
+              </p>
+              <p className="mt-0.5 text-xs text-success-100/75 [.theme-light_&]:text-success-900">
+                {deliveryLabel || "Selected platform"} · {lockedAspect} · 1080p · 8
+                seconds
+              </p>
+            </div>
+          ) : null}
 
           {/* Platform format presets */}
           <div className="space-y-2">
@@ -193,10 +232,11 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
                   type="button"
                   aria-pressed={activePreset === p.id}
                   onClick={() => applyPreset(p.id)}
+                  disabled={Boolean(lockedAspect)}
                   className={cn(
-                    "rounded-xl border px-3 py-2.5 text-left transition-colors",
+                    "rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45",
                     activePreset === p.id
-                      ? "border-primary-400 bg-primary-500/20 text-white"
+                      ? "border-primary-400 bg-primary-500/20 text-white [.theme-light_&]:text-primary-950"
                       : "border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50",
                   )}
                 >
@@ -220,15 +260,16 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
                     type="button"
                     aria-label={`${label}. ${detail}`}
                     aria-pressed={resolution === value}
+                    disabled={Boolean(lockedAspect)}
                     onClick={() => {
                       triggerHapticFeedback();
                       setResolution(value);
                       if (value === "1080p") setDuration(8);
                     }}
                     className={cn(
-                      "min-h-14 rounded-lg border px-2.5 py-2 text-left transition-all",
+                      "min-h-14 rounded-lg border px-2.5 py-2 text-left transition-all disabled:cursor-not-allowed disabled:opacity-45",
                       resolution === value
-                        ? "border-primary-400 bg-primary-500/20 text-white"
+                        ? "border-primary-400 bg-primary-500/20 text-white [.theme-light_&]:text-primary-950"
                         : "border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50",
                     )}
                   >
@@ -258,15 +299,16 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
                     type="button"
                     title={description}
                     aria-pressed={aspectPreference === value}
+                    disabled={Boolean(lockedAspect)}
                     onClick={() => {
                       triggerHapticFeedback();
                       setAspectPreference(value);
                       setActivePreset("");
                     }}
                     className={cn(
-                      "min-h-10 flex-1 rounded-lg border px-2 py-2 text-sm font-medium transition-all sm:min-w-[4.5rem]",
+                      "min-h-10 flex-1 rounded-lg border px-2 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-45 sm:min-w-[4.5rem]",
                       aspectPreference === value
-                        ? "border-primary-400 bg-primary-500/20 text-white"
+                        ? "border-primary-400 bg-primary-500/20 text-white [.theme-light_&]:text-primary-950"
                         : "border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50",
                     )}
                   >
@@ -296,7 +338,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
                     className={cn(
                       "min-h-10 flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all",
                       soundtrack === value
-                        ? "border-primary-400 bg-primary-500/20 text-white"
+                        ? "border-primary-400 bg-primary-500/20 text-white [.theme-light_&]:text-primary-950"
                         : "border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50",
                     )}
                   >
@@ -311,7 +353,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
               {resolution === "1080p" ? (
                 <div
                   role="status"
-                  className="flex min-h-10 items-center justify-between rounded-lg border border-primary-400 bg-primary-500/20 px-3 py-2 text-sm text-white"
+                  className="flex min-h-11 items-center justify-between rounded-lg border border-primary-400 bg-primary-500/20 px-3 py-2 text-sm text-white [.theme-light_&]:text-primary-950"
                 >
                   <span className="font-semibold">8 seconds</span>
                   <span className="text-[10px] text-primary-100/80">
@@ -333,7 +375,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
                       className={cn(
                         "min-h-10 flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-all",
                         duration === value
-                          ? "border-primary-400 bg-primary-500/20 text-white"
+                          ? "border-primary-400 bg-primary-500/20 text-white [.theme-light_&]:text-primary-950"
                           : "border-surface-800 bg-surface-900/60 text-surface-300 hover:border-primary-400/50",
                       )}
                     >
@@ -359,6 +401,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
                 icon={icon}
                 description={description}
                 isRecommended
+                disabled={isSubmitting}
                 onSelect={handleStyleSelect}
               />
             ))}
@@ -373,7 +416,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
                 triggerHapticFeedback();
                 setShowMore(!showMore);
               }}
-              className="w-full px-2 py-3 flex items-center justify-between text-sm text-white/70 hover:text-white hover:bg-white/5 transition-colors touch-manipulation rounded-lg"
+              className="flex min-h-11 w-full items-center justify-between rounded-lg px-2 py-3 text-sm text-surface-300 transition-colors hover:bg-white/5 hover:text-surface-50 touch-manipulation"
             >
               <span>{showMore ? "Hide" : "Show"} extra styles</span>
               <Icon
@@ -405,6 +448,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
                         label={label}
                         icon={icon}
                         description={description}
+                        disabled={isSubmitting}
                         onSelect={handleStyleSelect}
                       />
                     ))}

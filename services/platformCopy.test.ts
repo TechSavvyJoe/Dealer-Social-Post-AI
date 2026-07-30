@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PLATFORM_IDS,
   getPlatformOptions,
+  getSecondaryPlatformOptions,
   orderExportFormatsByPreference,
   parsePlatformCaptionPack,
   platformsToCaptionPackBrief,
@@ -12,6 +13,7 @@ import {
   shouldGenerateCaptionPack,
 } from "./platformCopy";
 import { EXPORT_FORMATS } from "../utils/multiFormatExport";
+import { PUBLISH_TARGETS } from "./publishTargets";
 
 describe("platformCopy", () => {
   it("exposes primary platforms with story bias", () => {
@@ -19,6 +21,23 @@ describe("platformCopy", () => {
     expect(options.length).toBeGreaterThanOrEqual(4);
     expect(DEFAULT_PLATFORM_IDS).toContain("instagram_story");
     expect(DEFAULT_PLATFORM_IDS).toContain("instagram_feed");
+  });
+
+  it("derives secondary editor destinations from the canonical publish registry", () => {
+    const primaryIds = new Set(getPlatformOptions().map((option) => option.id));
+    const secondaryIds = getSecondaryPlatformOptions().map((option) => option.id);
+    const registrySecondaryIds = PUBLISH_TARGETS.filter(
+      (target) => !primaryIds.has(target.id),
+    ).map((target) => target.id);
+
+    expect(secondaryIds).toEqual(registrySecondaryIds);
+    expect(secondaryIds).toEqual([
+      "instagram_reel",
+      "marketplace",
+      "linkedin",
+      "x_twitter",
+      "native_share",
+    ]);
   });
 
   it("builds a store-specific multi-platform brief", () => {
@@ -34,7 +53,7 @@ describe("platformCopy", () => {
   it("prefers story_vertical when any vertical platform is selected", () => {
     const formats = preferredExportFormatIds(["tiktok", "facebook_feed"]);
     expect(formats[0]).toBe("story_vertical");
-    expect(formats).toContain("feed_square");
+    expect(formats).toContain("feed_portrait");
   });
 
   it.each([
@@ -45,8 +64,8 @@ describe("platformCopy", () => {
     },
     {
       platforms: ["facebook_feed", "gbp"],
-      format: "feed_square",
-      aspect: "1:1",
+      format: "feed_portrait",
+      aspect: "4:5",
     },
     { platforms: ["gbp"], format: "gbp", aspect: "4:3" },
     { platforms: ["marketplace"], format: "marketplace", aspect: "16:9" },

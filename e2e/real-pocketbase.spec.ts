@@ -9,7 +9,7 @@ import {
 
 const realPocketBaseEnabled = process.env.E2E_REAL_POCKETBASE === "true";
 const adminCode = process.env.E2E_ADMIN_CODE || "";
-const apiContractVersion = "2026-07-17.v2";
+const apiContractVersion = "2026-07-29.v3";
 
 type JsonObject = Record<string, unknown>;
 
@@ -229,7 +229,7 @@ test.describe("real PocketBase release flow", () => {
           task: "caption",
           errorCode: "SYNTHETIC_PROVIDER_FAILURE",
           releaseSha: `ci-runtime-canary-${browserName}`,
-          apiContractVersion: "2026-07-17.v2",
+          apiContractVersion,
           dealerCode: "MustNeverPersist1",
           token: "MustNeverPersist2",
         },
@@ -584,9 +584,10 @@ test.describe("real PocketBase release flow", () => {
         style: "Modern",
         tone: "Excited",
         caption: "Synthetic attribution canary. No provider call required.",
-        platform_ids: JSON.stringify(["instagram_story", "tiktok"]),
-        primary_format_id: "story_vertical",
-        image_aspect_ratio: "9:16",
+        platform_ids: JSON.stringify(["instagram_feed", "facebook_feed"]),
+        media_output_mode: "both",
+        primary_format_id: "feed_portrait",
+        image_aspect_ratio: "4:5",
       },
     });
     expect(createPostResponse.status()).toBe(200);
@@ -595,9 +596,66 @@ test.describe("real PocketBase release flow", () => {
     const createdPostId = String(createdPost.id);
     expect(createdPostId).toMatch(/^[a-z0-9]{15}$/);
     expect(createdPost).toMatchObject({
-      platform_ids: ["instagram_story", "tiktok"],
+      platform_ids: ["instagram_feed", "facebook_feed"],
+      media_output_mode: "both",
+      primary_format_id: "feed_portrait",
+      image_aspect_ratio: "4:5",
+    });
+
+    // Older clients omit media_output_mode. Preserve one compatibility release
+    // by treating that omission as a photo request while still validating the
+    // selected format pair.
+    const legacyPhotoResponse = await salespersonPage.request.post("/api/app/posts", {
+      headers: { Cookie: salespersonCookie },
+      multipart: {
+        caption: "Synthetic legacy photo canary.",
+        platform_ids: JSON.stringify(["instagram_story"]),
+        primary_format_id: "story_vertical",
+        image_aspect_ratio: "9:16",
+      },
+    });
+    expect(legacyPhotoResponse.status()).toBe(200);
+    const legacyPhotoPost = (await legacyPhotoResponse.json()) as JsonObject;
+    const legacyPhotoPostId = String(legacyPhotoPost.id);
+    expect(legacyPhotoPostId).toMatch(/^[a-z0-9]{15}$/);
+    expect(legacyPhotoPost).toMatchObject({
+      media_output_mode: "photo",
       primary_format_id: "story_vertical",
       image_aspect_ratio: "9:16",
+    });
+
+    const invalidMediaModeResponse = await salespersonPage.request.post(
+      "/api/app/posts",
+      {
+        headers: { Cookie: salespersonCookie },
+        multipart: {
+          caption: "Synthetic invalid media-mode canary.",
+          media_output_mode: "audio",
+          primary_format_id: "feed_square",
+          image_aspect_ratio: "1:1",
+        },
+      },
+    );
+    expect(invalidMediaModeResponse.status()).toBe(400);
+    expect(await invalidMediaModeResponse.json()).toMatchObject({
+      error: "Invalid media output mode",
+    });
+
+    const mismatchedOutputProfileResponse = await salespersonPage.request.post(
+      "/api/app/posts",
+      {
+        headers: { Cookie: salespersonCookie },
+        multipart: {
+          caption: "Synthetic mismatched output-profile canary.",
+          media_output_mode: "photo",
+          primary_format_id: "feed_portrait",
+          image_aspect_ratio: "9:16",
+        },
+      },
+    );
+    expect(mismatchedOutputProfileResponse.status()).toBe(400);
+    expect(await mismatchedOutputProfileResponse.json()).toMatchObject({
+      error: "Output format and aspect ratio do not match",
     });
 
     const salespersonHistoryResponse = await salespersonPage.request.get(
@@ -617,7 +675,17 @@ test.describe("real PocketBase release flow", () => {
       dealer: dealerId,
       salesperson_id: salespersonId,
       salesperson_name: salespersonName,
-      platform_ids: ["instagram_story", "tiktok"],
+      platform_ids: ["instagram_feed", "facebook_feed"],
+      media_output_mode: "both",
+      primary_format_id: "feed_portrait",
+      image_aspect_ratio: "4:5",
+    });
+    expect(
+      salespersonHistory.items.find((item) => item.id === legacyPhotoPostId),
+    ).toMatchObject({
+      dealer: dealerId,
+      salesperson_id: salespersonId,
+      media_output_mode: "photo",
       primary_format_id: "story_vertical",
       image_aspect_ratio: "9:16",
     });
@@ -640,9 +708,10 @@ test.describe("real PocketBase release flow", () => {
       dealer: dealerId,
       salesperson_id: salespersonId,
       salesperson_name: salespersonName,
-      platform_ids: ["instagram_story", "tiktok"],
-      primary_format_id: "story_vertical",
-      image_aspect_ratio: "9:16",
+      platform_ids: ["instagram_feed", "facebook_feed"],
+      media_output_mode: "both",
+      primary_format_id: "feed_portrait",
+      image_aspect_ratio: "4:5",
     });
     expect(authoritativePost?.salesperson_id).not.toBe(managerId);
     expect(authoritativePost?.salesperson_name).not.toBe(spoofedSalespersonName);

@@ -25,9 +25,17 @@ import {
   RefreshCw,
   ShieldCheck,
   Trash2,
+  Image as ImageIcon,
+  Film,
   type LucideIcon,
 } from "lucide-react";
-import { StyleOption, ToneOption } from "../types";
+import {
+  StyleOption,
+  ToneOption,
+  type GenerationParams,
+  type MediaOutputMode,
+  type PrimaryImageFormatId,
+} from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Button } from "./ui/Button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/Card";
@@ -45,7 +53,6 @@ import {
   PostScenario,
   POST_SCENARIOS,
   scenarioToCreativeBrief,
-  findScenario,
   getScenariosForDealer,
 } from "../services/postScenarios";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
@@ -54,12 +61,12 @@ import {
   DEFAULT_PLATFORM_IDS,
   getPrimaryImageProfile,
   getPlatformOptions,
+  getSecondaryPlatformOptions,
   platformsToCreativeBrief,
   resolvePrimaryImageProfile,
   type PrimaryImageProfile,
   type PlatformId,
 } from "../services/platformCopy";
-import type { PrimaryImageFormatId } from "../types";
 import { brandHashtagFromName, formatHashtag } from "../utils/hashtags";
 
 interface PostCustomizerProps {
@@ -80,6 +87,7 @@ interface PostCustomizerProps {
     },
     platformIds?: PlatformId[],
     outputProfile?: PrimaryImageProfile,
+    mediaOutputMode?: MediaOutputMode,
   ) => Promise<void> | void;
   onBack: () => void;
   dealershipName: string;
@@ -88,6 +96,11 @@ interface PostCustomizerProps {
   onStyleToneChange: (style: StyleOption, tone: ToneOption) => void;
   isDesktopLayout: boolean;
   isGenerating?: boolean;
+  /**
+   * Previous exact delivery choices, supplied only when retrying or remixing
+   * the current capture. A brand-new capture intentionally omits this value.
+   */
+  initialGenerationParams?: GenerationParams | null;
 }
 
 const normalizeReleaseCustomer = (value: string | undefined): string =>
@@ -178,10 +191,23 @@ const OUTPUT_FORMAT_CHOICES: Array<{
   size: string;
 }> = [
   { id: "story_vertical", label: "Story / Reel", size: "1080×1920" },
+  { id: "feed_portrait", label: "Feed portrait", size: "1080×1350" },
   { id: "feed_square", label: "Feed", size: "1080×1080" },
   { id: "marketplace", label: "Marketplace", size: "1200×628" },
   { id: "gbp", label: "Google", size: "1200×900" },
 ];
+
+const isMediaOutputMode = (value: unknown): value is MediaOutputMode =>
+  value === "photo" || value === "video" || value === "both";
+
+const isStyleOption = (value: unknown): value is StyleOption =>
+  Object.values(StyleOption).includes(value as StyleOption);
+
+const isToneOption = (value: unknown): value is ToneOption =>
+  Object.values(ToneOption).includes(value as ToneOption);
+
+const isPrimaryImageFormatId = (value: unknown): value is PrimaryImageFormatId =>
+  OUTPUT_FORMAT_CHOICES.some((format) => format.id === value);
 
 export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   imageSrc,
@@ -193,15 +219,67 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   onStyleToneChange,
   isDesktopLayout,
   isGenerating = false,
+  initialGenerationParams,
 }) => {
-  const [customerName, setCustomerName] = useState("");
-  const [style, setStyle] = useState<StyleOption>(defaultStyle);
-  const [selectedPlatforms, setSelectedPlatforms] = useState<PlatformId[]>(() => [
-    ...DEFAULT_PLATFORM_IDS,
-  ]);
+  const currentDealer = useAppStore((s) => s.currentDealer);
+  const currentPerson = useAppStore((s) => s.currentPerson);
+  const restoredCustomerName =
+    typeof initialGenerationParams?.customerName === "string"
+      ? initialGenerationParams.customerName
+      : "";
+  const restoredCustomText =
+    typeof initialGenerationParams?.customText === "string"
+      ? initialGenerationParams.customText
+      : "";
+  const [customerName, setCustomerName] = useState(restoredCustomerName);
+  const [style, setStyle] = useState<StyleOption>(() =>
+    isStyleOption(initialGenerationParams?.style)
+      ? initialGenerationParams.style
+      : defaultStyle,
+  );
+  const primaryPlatformOptions = useMemo(() => getPlatformOptions(), []);
+  const secondaryPlatformOptions = useMemo(() => getSecondaryPlatformOptions(), []);
+  const platformOptions = useMemo(
+    () => [...primaryPlatformOptions, ...secondaryPlatformOptions],
+    [primaryPlatformOptions, secondaryPlatformOptions],
+  );
+  const supportedPlatformIds = useMemo(
+    () => new Set(platformOptions.map((platform) => platform.id)),
+    [platformOptions],
+  );
+  const initialPlatforms = useMemo(() => {
+    const restored = Array.from(
+      new Set(
+        (initialGenerationParams?.platformIds || []).filter((platformId) =>
+          supportedPlatformIds.has(platformId),
+        ),
+      ),
+    );
+    return restored.length > 0 ? restored : [...DEFAULT_PLATFORM_IDS];
+  }, [initialGenerationParams?.platformIds, supportedPlatformIds]);
+  const [selectedPlatforms, setSelectedPlatforms] =
+    useState<PlatformId[]>(initialPlatforms);
+  const [showMorePlatforms, setShowMorePlatforms] = useState(() => {
+    const restored = new Set(initialGenerationParams?.platformIds || []);
+    return secondaryPlatformOptions.some((platform) => restored.has(platform.id));
+  });
+  const selectedSecondaryCount = useMemo(
+    () =>
+      secondaryPlatformOptions.filter((platform) =>
+        selectedPlatforms.includes(platform.id),
+      ).length,
+    [secondaryPlatformOptions, selectedPlatforms],
+  );
+  const [mediaOutputMode, setMediaOutputMode] = useState<MediaOutputMode>(() =>
+    isMediaOutputMode(initialGenerationParams?.mediaOutputMode)
+      ? initialGenerationParams.mediaOutputMode
+      : "photo",
+  );
   const [primaryFormatOverride, setPrimaryFormatOverride] =
-    useState<PrimaryImageFormatId | null>(null);
-  const platformOptions = useMemo(() => getPlatformOptions(), []);
+    useState<PrimaryImageFormatId | null>(() => {
+      const restoredFormat = initialGenerationParams?.primaryFormatId;
+      return isPrimaryImageFormatId(restoredFormat) ? restoredFormat : null;
+    });
   const suggestedImageProfile = useMemo(
     () => resolvePrimaryImageProfile(selectedPlatforms),
     [selectedPlatforms],
@@ -213,9 +291,15 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         : suggestedImageProfile,
     [primaryFormatOverride, suggestedImageProfile],
   );
-  const [tone, setTone] = useState<ToneOption>(defaultTone);
-  const [customMessage, setCustomMessage] = useState("");
-  const [captionSource, setCaptionSource] = useState<CaptionSource>("ai");
+  const [tone, setTone] = useState<ToneOption>(() =>
+    isToneOption(initialGenerationParams?.tone)
+      ? initialGenerationParams.tone
+      : defaultTone,
+  );
+  const [customMessage, setCustomMessage] = useState(restoredCustomText);
+  const [captionSource, setCaptionSource] = useState<CaptionSource>(() =>
+    restoredCustomText.trim() ? "custom" : "ai",
+  );
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -227,12 +311,18 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   // it before the customer photo is sent to an AI provider, then links that
   // same protected record to the created post.
   const [capturedRelease, setCapturedRelease] = useState<CapturedRelease | null>(null);
-  const currentDealer = useAppStore((s) => s.currentDealer);
-  const currentPerson = useAppStore((s) => s.currentPerson);
 
   // Post scenario — drives prompt context + default style/tone. "customer_delivery"
   // is the implicit default; an undefined value also resolves to that.
-  const [scenarioId, setScenarioId] = useState<string>(POST_SCENARIOS[0].id);
+  const [scenarioId, setScenarioId] = useState<string>(() => {
+    const restoredScenarioId = initialGenerationParams?.scenarioId;
+    return restoredScenarioId &&
+      getScenariosForDealer(currentDealer?.custom_scenarios).some(
+        (scenario) => scenario.id === restoredScenarioId,
+      )
+      ? restoredScenarioId
+      : POST_SCENARIOS[0].id;
+  });
   // Scenario lookup now considers the dealer's custom_scenarios JSON too.
   const activeScenario = useMemo(() => {
     const all = getScenariosForDealer(currentDealer?.custom_scenarios);
@@ -257,20 +347,37 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
   const dealerDefaultStyle = currentDealer?.default_style as StyleOption | undefined;
 
-  // Sync with defaults. Order of precedence:
-  //   1. Dealer-set default_style (if it's in the enabled set)
-  //   2. User-level preferred style (if it's in the enabled set)
-  //   3. First enabled style
+  // Sync with defaults. A safe retry/remix seed wins when it is still allowed;
+  // otherwise use the dealer default, user preference, then first enabled style.
   useEffect(() => {
-    let nextStyle: StyleOption = defaultStyle;
-    if (dealerDefaultStyle && allowedStyles.includes(dealerDefaultStyle)) {
+    const restoredStyle = initialGenerationParams?.style;
+    let nextStyle: StyleOption =
+      isStyleOption(restoredStyle) && allowedStyles.includes(restoredStyle)
+        ? restoredStyle
+        : defaultStyle;
+    if (
+      !(isStyleOption(restoredStyle) && allowedStyles.includes(restoredStyle)) &&
+      dealerDefaultStyle &&
+      allowedStyles.includes(dealerDefaultStyle)
+    ) {
       nextStyle = dealerDefaultStyle;
     } else if (!allowedStyles.includes(nextStyle)) {
       nextStyle = allowedStyles[0];
     }
     setStyle(nextStyle);
-    setTone(defaultTone);
-  }, [defaultStyle, defaultTone, dealerDefaultStyle, allowedStyles]);
+    setTone(
+      isToneOption(initialGenerationParams?.tone)
+        ? initialGenerationParams.tone
+        : defaultTone,
+    );
+  }, [
+    defaultStyle,
+    defaultTone,
+    dealerDefaultStyle,
+    allowedStyles,
+    initialGenerationParams?.style,
+    initialGenerationParams?.tone,
+  ]);
 
   // When the salesperson picks a new scenario, retune style + tone to the
   // scenario's smart defaults — but respect the dealer's enabled_styles list
@@ -466,6 +573,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         },
         selectedPlatforms,
         primaryImageProfile,
+        mediaOutputMode,
       );
     } finally {
       setIsSubmitting(false);
@@ -483,6 +591,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     activeScenario.requiresCustomer,
     selectedPlatforms,
     primaryImageProfile,
+    mediaOutputMode,
     dealershipName,
     onGenerate,
   ]);
@@ -695,7 +804,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         setCapturedRelease(null);
                         setReleaseModalOpen(true);
                       }}
-                      className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[11px] font-semibold text-success-100 transition-colors hover:bg-success-500/20"
+                      className="inline-flex min-h-11 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[11px] font-semibold text-success-100 transition-colors hover:bg-success-500/20 [.theme-light_&]:text-success-900"
                     >
                       <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
                       Replace
@@ -848,7 +957,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 </span>
               </div>
               <div className="mobile-h-scroll -mx-1 px-1 pb-1 sm:flex-wrap sm:overflow-visible">
-                {platformOptions.map((p) => {
+                {primaryPlatformOptions.map((p) => {
                   const on = selectedPlatforms.includes(p.id);
                   return (
                     <button
@@ -859,11 +968,19 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       className={cn(
                         "min-h-11 shrink-0 snap-start rounded-full border px-3.5 py-2 text-left transition-colors",
                         on
-                          ? "border-primary-400 bg-primary-500/25 text-primary-50"
+                          ? "border-primary-400 bg-primary-500/25 text-primary-50 [.theme-light_&]:text-primary-950"
                           : "border-white/10 bg-white/5 text-surface-300 hover:border-primary-400/40",
                       )}
                     >
-                      <span className="block text-sm font-semibold">
+                      <span className="flex items-center gap-1.5 text-sm font-semibold">
+                        {on ? (
+                          <span
+                            className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-primary-300 text-primary-950"
+                            aria-hidden="true"
+                          >
+                            <Check className="h-3 w-3" strokeWidth={3} />
+                          </span>
+                        ) : null}
                         {p.shortLabel}
                       </span>
                       <span className="block text-[10px] leading-tight opacity-80">
@@ -873,6 +990,152 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   );
                 })}
               </div>
+              <div className="overflow-hidden rounded-xl border border-white/10 bg-surface-950/25">
+                <button
+                  type="button"
+                  aria-expanded={showMorePlatforms}
+                  aria-controls="secondary-platform-options"
+                  aria-label={`More platforms, ${selectedSecondaryCount} selected`}
+                  onClick={() => {
+                    triggerHapticFeedback();
+                    setShowMorePlatforms((current) => !current);
+                  }}
+                  className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-white/5"
+                >
+                  <span>
+                    <span className="block text-xs font-semibold text-surface-200">
+                      More platforms
+                    </span>
+                    <span className="block text-[10px] text-surface-400">
+                      Reels, Marketplace, LinkedIn, X, and device share
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    {selectedSecondaryCount > 0 ? (
+                      <span className="rounded-full border border-primary-400/25 bg-primary-500/15 px-2 py-0.5 text-[10px] font-semibold text-primary-200 [.theme-light_&]:text-primary-900">
+                        {selectedSecondaryCount} selected
+                      </span>
+                    ) : null}
+                    <ChevronDown
+                      className={cn(
+                        "h-4 w-4 text-surface-400 transition-transform",
+                        showMorePlatforms && "rotate-180",
+                      )}
+                      aria-hidden="true"
+                    />
+                  </span>
+                </button>
+                <AnimatePresence initial={false}>
+                  {showMorePlatforms ? (
+                    <motion.div
+                      id="secondary-platform-options"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.18 }}
+                      className="overflow-hidden border-t border-white/10"
+                    >
+                      <div className="grid grid-cols-2 gap-2 p-2.5 sm:grid-cols-3 xl:grid-cols-5">
+                        {secondaryPlatformOptions.map((platform) => {
+                          const selected = selectedPlatforms.includes(platform.id);
+                          return (
+                            <button
+                              key={platform.id}
+                              type="button"
+                              aria-pressed={selected}
+                              onClick={() => togglePlatform(platform.id)}
+                              className={cn(
+                                "min-h-16 rounded-xl border px-2.5 py-2 text-left transition-colors",
+                                selected
+                                  ? "border-primary-400 bg-primary-500/20 text-primary-50 [.theme-light_&]:text-primary-950"
+                                  : "border-white/10 bg-white/[0.035] text-surface-300 hover:border-primary-400/35 hover:bg-white/[0.06]",
+                              )}
+                            >
+                              <span className="flex items-center gap-1.5 text-xs font-semibold">
+                                {selected ? (
+                                  <span
+                                    className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-primary-300 text-primary-950"
+                                    aria-hidden="true"
+                                  >
+                                    <Check className="h-3 w-3" strokeWidth={3} />
+                                  </span>
+                                ) : null}
+                                {platform.shortLabel}
+                              </span>
+                              <span className="mt-1 line-clamp-2 block text-[9px] leading-snug opacity-75">
+                                {platform.hint}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              </div>
+              <fieldset className="rounded-xl border border-white/10 bg-surface-950/30 p-1.5">
+                <legend className="sr-only">
+                  Media to create for each destination
+                </legend>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(
+                    [
+                      {
+                        value: "photo",
+                        label: "Photo",
+                        Icon: ImageIcon,
+                        hint: "Exact images",
+                      },
+                      {
+                        value: "video",
+                        label: "Video",
+                        Icon: Film,
+                        hint: "Motion posts",
+                      },
+                      {
+                        value: "both",
+                        label: "Both",
+                        Icon: Sparkles,
+                        hint: "Full campaign",
+                      },
+                    ] as const
+                  ).map(({ value, label, Icon, hint }) => {
+                    const selected = mediaOutputMode === value;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => {
+                          triggerHapticFeedback();
+                          setMediaOutputMode(value);
+                        }}
+                        className={cn(
+                          "min-h-12 rounded-lg border px-2 py-2 text-left transition-colors",
+                          selected
+                            ? "border-primary-300 bg-primary-500/30 text-primary-50 [.theme-light_&]:text-primary-950"
+                            : "border-transparent bg-white/[0.035] text-surface-300 hover:border-primary-400/35",
+                        )}
+                      >
+                        <span className="flex items-center gap-1.5 text-xs font-semibold">
+                          <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                          {label}
+                        </span>
+                        <span className="mt-0.5 block text-[9px] leading-tight opacity-70">
+                          {hint}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="px-1 pt-1.5 text-[10px] leading-relaxed text-surface-400">
+                  {mediaOutputMode === "photo"
+                    ? "Creates one exact, unstretched image file for every selected destination."
+                    : mediaOutputMode === "video"
+                      ? "Creates the protected photo master first, then guides you through the supported video ratios."
+                      : "Creates the exact photo set and a video-ready delivery plan without hiding extra paid renders."}
+                </p>
+              </fieldset>
               <fieldset className="space-y-2 rounded-xl border border-primary-400/20 bg-primary-500/10 p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -880,7 +1143,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       Main image size
                     </legend>
                     <p className="mt-0.5 text-xs text-surface-300">
-                      This exact canvas is used for preview, save, and history.
+                      This is the first composition. Every destination still gets its
+                      own exact file in the delivery board.
                     </p>
                   </div>
                   <button
@@ -893,14 +1157,14 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                     className={cn(
                       "min-h-9 shrink-0 rounded-lg border px-2.5 text-[10px] font-semibold uppercase tracking-wide transition-colors",
                       primaryFormatOverride === null
-                        ? "border-primary-300 bg-primary-500/30 text-primary-50"
+                        ? "border-primary-300 bg-primary-500/30 text-primary-50 [.theme-light_&]:text-primary-950"
                         : "border-white/10 bg-white/5 text-surface-300 hover:border-primary-400/40",
                     )}
                   >
                     Auto
                   </button>
                 </div>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                   {OUTPUT_FORMAT_CHOICES.map((format) => {
                     const selected = primaryImageProfile.primaryFormatId === format.id;
                     return (
@@ -915,7 +1179,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         className={cn(
                           "min-h-12 rounded-lg border px-2 py-1.5 text-left transition-colors",
                           selected
-                            ? "border-primary-300 bg-primary-500/30 text-primary-50 shadow-sm"
+                            ? "border-primary-300 bg-primary-500/30 text-primary-50 shadow-sm [.theme-light_&]:text-primary-950"
                             : "border-white/10 bg-surface-950/25 text-surface-300 hover:border-primary-400/40",
                         )}
                       >
@@ -934,8 +1198,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   aria-live="polite"
                 >
                   {primaryFormatOverride
-                    ? `${primaryImageProfile.label} selected. Other destination sizes remain available in Export sizes.`
-                    : `${suggestedImageProfile.label} recommended from your selected destinations. Choose a size above to override it.`}
+                    ? `${primaryImageProfile.label} selected as the starting composition. Destination files remain independent.`
+                    : `${suggestedImageProfile.label} recommended from your destinations. Choose a starting composition above only when needed.`}
                 </p>
               </fieldset>
             </div>
@@ -1142,6 +1406,13 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 rightIcon={!isBusy && <ChevronRight />}
                 onClick={handleGenerate}
                 disabled={isBusy}
+                aria-label={`Generate Post — ${
+                  mediaOutputMode === "photo"
+                    ? "create photo outputs"
+                    : mediaOutputMode === "video"
+                      ? "create video plan"
+                      : "create photo and video set"
+                }`}
                 fullWidth
                 className="relative overflow-hidden h-14 text-base"
                 style={{
@@ -1163,7 +1434,13 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   />
                 )}
                 <span className="relative z-10 flex items-center gap-2">
-                  {isBusy ? "Creating your post..." : "Generate Post"}
+                  {isBusy
+                    ? "Creating platform outputs..."
+                    : mediaOutputMode === "photo"
+                      ? "Create photo outputs"
+                      : mediaOutputMode === "video"
+                        ? "Create video plan"
+                        : "Create photo + video set"}
                   {!isBusy && (
                     <kbd className="hidden sm:inline-flex items-center gap-1 px-1.5 py-1 rounded bg-white/15 border border-white/20 text-white/80">
                       <Command className="w-3 h-3" />

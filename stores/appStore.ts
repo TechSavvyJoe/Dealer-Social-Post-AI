@@ -254,7 +254,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setStep: (step) => {
-    set({ step });
+    const startsNewCapture = step === AppStep.CAPTURE;
+    set(
+      startsNewCapture
+        ? {
+            step,
+            generationParams: null,
+          }
+        : { step },
+    );
     const { currentDealer, generatedPost, selectedImage } = get();
     if (currentDealer) {
       saveSession({
@@ -262,7 +270,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         dealerId: currentDealer.id,
         generatedPost: generatedPost || undefined,
         selectedImage: selectedImage || undefined,
-        generationParams: get().generationParams || undefined,
+        generationParams: startsNewCapture
+          ? undefined
+          : get().generationParams || undefined,
       });
     }
   },
@@ -475,6 +485,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       generatedPost: null,
       selectedImage: null,
+      generationParams: null,
       error: null,
       step: nextStep,
     });

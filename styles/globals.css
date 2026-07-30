@@ -129,7 +129,7 @@
     --color-surface-elevated: 241 245 249;
     --color-surface-overlay: 255 255 255;
     --color-surface-raised: 255 255 255;
-    
+
     --color-text-primary: 15 23 42;
     --color-text-secondary: 51 65 85;
     --color-text-tertiary: 100 116 139;
@@ -577,6 +577,17 @@
 }
 
 @layer components {
+  .toast-viewport {
+    bottom: max(1rem, var(--sab));
+  }
+
+  @media (max-width: 767px) {
+    .toast-viewport {
+      /* Keep notifications above the result screen's sticky Copy/Share/Save bar. */
+      bottom: calc(max(0.75rem, var(--sab)) + 5.5rem);
+    }
+  }
+
   /* Glass morphism effect */
   .glass {
     @apply bg-white/5 backdrop-blur-xl border border-white/10;

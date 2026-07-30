@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { AuthenticatedClient } from "../scripts/production-provider-canary.mjs";
+import {
+  AuthenticatedClient,
+  probeImageEvidence,
+  probeVideoEvidence,
+  validateVideoProbeMetadata,
+} from "../scripts/production-provider-canary.mjs";
 
 const scriptPath = resolve(process.cwd(), "scripts/production-provider-canary.mjs");
 
@@ -37,6 +42,123 @@ describe("production provider canary", () => {
       "imageBase64",
     ]) {
       expect(evidenceShape).not.toContain(sensitiveField);
+    }
+  });
+
+  it("gates release on both exact playable video tiers", () => {
+    const source = readFileSync(scriptPath, "utf8");
+    expect(source).toContain('"video_standard",\n        EXACT_STANDARD_VIDEO');
+    expect(source).toContain('"video_quality",\n        EXACT_QUALITY_VIDEO');
+    expect(source).toContain("const headers = generationHeaders(policy, taskName)");
+    expect(source).toContain("durationSeconds: 6");
+    expect(source).toContain("durationSeconds: 8");
+    expect(source).toContain('resolution: "720p"');
+    expect(source).toContain('resolution: "1080p"');
+    expect(source).toContain('"VIDEO_VALIDATOR_UNAVAILABLE"');
+    expect(source).toContain('video.codec_name !== "h264"');
+    expect(source).toContain('audio.codec_name !== "aac"');
+    expect(source).toContain("Number(video.width) !== expected.width");
+    expect(source).toContain("Number(video.height) !== expected.height");
+    expect(source).toContain("videoPacketCount < 1");
+    expect(source).toContain("audioPacketCount < 1");
+    expect(source).toContain("schemaVersion: 3");
+    expect(source).toContain("evidence.checks.standardVideo");
+    expect(source).toContain("evidence.checks.qualityVideo");
+  });
+
+  it("requires a playable H.264 video stream and a readable AAC audio stream", () => {
+    const expected = { width: 1920, height: 1080, durationSeconds: 8 };
+    const validMetadata = {
+      format: { format_name: "mov,mp4,m4a,3gp,3g2,mj2", duration: "8.04" },
+      streams: [
+        {
+          codec_type: "video",
+          codec_name: "h264",
+          pix_fmt: "yuv420p",
+          width: 1920,
+          height: 1080,
+          duration: "8.04",
+          nb_read_packets: "240",
+        },
+        {
+          codec_type: "audio",
+          codec_name: "aac",
+          nb_read_packets: "376",
+        },
+      ],
+    };
+
+    expect(validateVideoProbeMetadata(validMetadata, expected)).toMatchObject({
+      width: 1920,
+      height: 1080,
+      videoCodec: "h264",
+      audioCodec: "aac",
+      videoPacketCount: 240,
+      audioPacketCount: 376,
+    });
+    expect(() =>
+      validateVideoProbeMetadata(
+        {
+          ...validMetadata,
+          streams: validMetadata.streams.filter(
+            (stream) => stream.codec_type !== "audio",
+          ),
+        },
+        expected,
+      ),
+    ).toThrow(/exact playable MP4 delivery contract/);
+    expect(() =>
+      validateVideoProbeMetadata(
+        {
+          ...validMetadata,
+          streams: validMetadata.streams.map((stream) =>
+            stream.codec_type === "audio"
+              ? { ...stream, nb_read_packets: "0" }
+              : stream,
+          ),
+        },
+        expected,
+      ),
+    ).toThrow(/exact playable MP4 delivery contract/);
+  });
+
+  it("records real image pixels and rejects the wrong provider aspect ratio", () => {
+    const syntheticPng = (width: number, height: number) => {
+      const bytes = Buffer.alloc(24);
+      Buffer.from("89504e470d0a1a0a", "hex").copy(bytes, 0);
+      Buffer.from("IHDR", "ascii").copy(bytes, 12);
+      bytes.writeUInt32BE(width, 16);
+      bytes.writeUInt32BE(height, 20);
+      return bytes.toString("base64");
+    };
+
+    expect(probeImageEvidence(syntheticPng(800, 1000), "image/png", "4:5")).toEqual({
+      width: 800,
+      height: 1000,
+    });
+    expect(() =>
+      probeImageEvidence(syntheticPng(1000, 1000), "image/png", "4:5"),
+    ).toThrow(/requested 4:5 aspect ratio/);
+  });
+
+  it("blocks with an explicit prerequisite when ffprobe is unavailable", async () => {
+    const previous = process.env.RELEASE_CANARY_FFPROBE;
+    process.env.RELEASE_CANARY_FFPROBE =
+      "/definitely-missing/dealer-social-canary-ffprobe";
+    try {
+      await expect(
+        probeVideoEvidence("/unused/synthetic-output.mp4", {
+          width: 1920,
+          height: 1080,
+          durationSeconds: 8,
+        }),
+      ).rejects.toMatchObject({ code: "VIDEO_VALIDATOR_UNAVAILABLE" });
+    } finally {
+      if (previous === undefined) {
+        delete process.env.RELEASE_CANARY_FFPROBE;
+      } else {
+        process.env.RELEASE_CANARY_FFPROBE = previous;
+      }
     }
   });
 

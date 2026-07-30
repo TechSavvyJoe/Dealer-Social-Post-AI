@@ -16,6 +16,18 @@
 // ---------------------------------------------------------------------------
 var cachedAccessToken = null;
 var tokenExpiry = 0;
+const ALLOWED_POST_PLATFORM_IDS = [
+  "instagram_feed",
+  "instagram_reel",
+  "instagram_story",
+  "facebook_feed",
+  "tiktok",
+  "gbp",
+  "marketplace",
+  "linkedin",
+  "x_twitter",
+  "native_share",
+];
 
 // Rate limiting - using simple object instead of Map for PocketBase JSVM compatibility
 const proxyHandler = (c) => {
@@ -1264,7 +1276,7 @@ routerAdd("GET", "/api/app/health", (c) => {
     ts: new Date().toISOString(),
     version: "2.0",
     releaseSha: releaseSha,
-    apiContractVersion: "2026-07-17.v2",
+    apiContractVersion: helpers.API_CONTRACT_VERSION,
     modelPolicyVersion: String(modelPolicy.version),
     backup: {
       configured: backupEnabled,
@@ -2423,24 +2435,16 @@ routerAdd("POST", "/api/app/posts", (c) => {
       return c.json(400, { error: "Invalid post scenario" });
     }
     const releaseRequired = scenarioPolicy.releaseRequired;
-    const allowedPlatformIds = [
-      "instagram_feed",
-      "instagram_story",
-      "facebook_feed",
-      "tiktok",
-      "gbp",
-      "marketplace",
-      "linkedin",
-      "x_twitter",
-      "native_share",
-    ];
+    const allowedPlatformIds = ALLOWED_POST_PLATFORM_IDS;
     const allowedPrimaryFormatIds = [
+      "feed_portrait",
       "feed_square",
       "story_vertical",
       "marketplace",
       "gbp",
     ];
-    const allowedImageAspectRatios = ["1:1", "9:16", "16:9", "4:3"];
+    const allowedImageAspectRatios = ["1:1", "4:5", "9:16", "16:9", "4:3"];
+    const allowedMediaOutputModes = ["photo", "video", "both"];
 
     // Preserve the exact destination mix and generated master canvas so a
     // History reopen uses the same sizing workflow. Multipart values arrive
@@ -2492,6 +2496,7 @@ routerAdd("POST", "/api/app/posts", (c) => {
       return c.json(400, { error: "Invalid image aspect ratio" });
     }
     const expectedAspectByFormat = {
+      feed_portrait: "4:5",
       feed_square: "1:1",
       story_vertical: "9:16",
       marketplace: "16:9",
@@ -2502,6 +2507,12 @@ routerAdd("POST", "/api/app/posts", (c) => {
       (primaryFormatId && expectedAspectByFormat[primaryFormatId] !== imageAspectRatio)
     ) {
       return c.json(400, { error: "Output format and aspect ratio do not match" });
+    }
+    const mediaOutputMode =
+      helpers.assertString((body.media_output_mode || "photo").toString(), 10) ||
+      "photo";
+    if (allowedMediaOutputModes.indexOf(mediaOutputMode) === -1) {
+      return c.json(400, { error: "Invalid media output mode" });
     }
     const parsedPlatformCaptions = helpers.parsePostPlatformCaptions(
       body.platform_captions,
@@ -2755,6 +2766,7 @@ routerAdd("POST", "/api/app/posts", (c) => {
       caption: storeCaption,
       disclosures: storeDisclosures,
       platform_ids: JSON.stringify(platformIds),
+      media_output_mode: mediaOutputMode,
       platform_captions: parsedPlatformCaptions.serialized,
       primary_format_id: primaryFormatId,
       image_aspect_ratio: imageAspectRatio,
@@ -2817,6 +2829,7 @@ routerAdd("POST", "/api/app/posts", (c) => {
         : !!record.get("release_required"),
       release_status: record.getString("release_status"),
       platform_ids: platformIds,
+      media_output_mode: mediaOutputMode,
       platform_captions: parsedPlatformCaptions.value,
       primary_format_id: primaryFormatId,
       image_aspect_ratio: imageAspectRatio,
@@ -2882,17 +2895,7 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
       12000,
     );
     if (!caption) return c.json(400, { error: "Draft caption is required" });
-    const allowedPlatformIds = [
-      "instagram_feed",
-      "instagram_story",
-      "facebook_feed",
-      "tiktok",
-      "gbp",
-      "marketplace",
-      "linkedin",
-      "x_twitter",
-      "native_share",
-    ];
+    const allowedPlatformIds = ALLOWED_POST_PLATFORM_IDS;
     let selectedPlatformIds = [];
     try {
       const storedPlatformIds = JSON.parse(record.getString("platform_ids") || "[]");
@@ -3286,17 +3289,14 @@ routerAdd("GET", "/api/app/posts", (c) => {
     const hasMore = records.length > limit;
     const page = hasMore ? records.slice(0, limit) : records;
 
-    const allowedPlatformIds = [
-      "instagram_feed",
-      "instagram_story",
-      "facebook_feed",
-      "tiktok",
-      "gbp",
-      "marketplace",
-      "linkedin",
-      "x_twitter",
-      "native_share",
-    ];
+    const allowedPlatformIds = ALLOWED_POST_PLATFORM_IDS;
+    const expectedAspectByFormat = {
+      feed_portrait: "4:5",
+      feed_square: "1:1",
+      story_vertical: "9:16",
+      marketplace: "16:9",
+      gbp: "4:3",
+    };
     const items = page.map((r) => {
       let platformIds = [];
       try {
@@ -3315,6 +3315,13 @@ routerAdd("GET", "/api/app/posts", (c) => {
         allowedPlatformIds,
         platformIds,
       );
+      const storedPrimaryFormatId = r.getString("primary_format_id");
+      const storedImageAspectRatio = r.getString("image_aspect_ratio");
+      const hasValidOutputProfile =
+        !!storedPrimaryFormatId &&
+        expectedAspectByFormat[storedPrimaryFormatId] === storedImageAspectRatio;
+      const primaryFormatId = hasValidOutputProfile ? storedPrimaryFormatId : "";
+      const imageAspectRatio = hasValidOutputProfile ? storedImageAspectRatio : "";
       return {
         id: r.id,
         dealer: r.getString("dealer"),
@@ -3346,11 +3353,15 @@ routerAdd("GET", "/api/app/posts", (c) => {
             : null,
         disclosures: r.getString("disclosures"),
         platform_ids: platformIds,
+        media_output_mode:
+          ["photo", "video", "both"].indexOf(r.getString("media_output_mode")) !== -1
+            ? r.getString("media_output_mode")
+            : "photo",
         platform_captions: parsedPlatformCaptions.ok
           ? parsedPlatformCaptions.value
           : {},
-        primary_format_id: r.getString("primary_format_id"),
-        image_aspect_ratio: r.getString("image_aspect_ratio"),
+        primary_format_id: primaryFormatId,
+        image_aspect_ratio: imageAspectRatio,
         scheduled_for: r.getString("scheduled_for"),
         creative_image_url: r.getString("creative_image")
           ? `/api/app/posts/${r.id}/creative-image`
@@ -3428,17 +3439,7 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
       // Re-evaluate the stored, immutable review copy against the current
       // dealer policy. This protects legacy queue entries and catches phrases
       // blocked after submission; rejection remains available to clear them.
-      const allowedPlatformIds = [
-        "instagram_feed",
-        "instagram_story",
-        "facebook_feed",
-        "tiktok",
-        "gbp",
-        "marketplace",
-        "linkedin",
-        "x_twitter",
-        "native_share",
-      ];
+      const allowedPlatformIds = ALLOWED_POST_PLATFORM_IDS;
       let selectedPlatformIds = [];
       try {
         const parsed = JSON.parse(record.getString("platform_ids") || "[]");
@@ -4252,9 +4253,11 @@ routerAdd("GET", "/api/app/dealers", (c) => {
       hours: r.getString("hours"),
       tagline: r.getString("tagline"),
       facebook_url: r.getString("facebook_url"),
+      facebook_page_tag: r.getString("facebook_page_tag"),
       instagram_handle: r.getString("instagram_handle"),
       tiktok_handle: r.getString("tiktok_handle"),
       x_handle: r.getString("x_handle"),
+      linkedin_company_tag: r.getString("linkedin_company_tag"),
       gbp_url: r.getString("gbp_url"),
       default_hashtags: r.getString("default_hashtags"),
       default_footer: r.getString("default_footer"),

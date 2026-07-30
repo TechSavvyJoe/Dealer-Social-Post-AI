@@ -207,6 +207,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
             post.platform_ids && post.platform_ids.length > 0
               ? post.platform_ids
               : undefined,
+          mediaOutputMode: post.media_output_mode || "photo",
           platformCaptions: post.platform_captions,
           primaryFormatId: post.primary_format_id || undefined,
           imageAspectRatio: post.image_aspect_ratio || undefined,

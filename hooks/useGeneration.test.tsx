@@ -65,6 +65,7 @@ vi.mock("../utils/telemetry", () => ({
 vi.mock("../utils/multiFormatExport", () => ({
   EXPORT_FORMATS: [
     { id: "story_vertical", width: 1080, height: 1920 },
+    { id: "feed_portrait", width: 1080, height: 1350 },
     { id: "feed_square", width: 1080, height: 1080 },
     { id: "marketplace", width: 1200, height: 628 },
     { id: "gbp", width: 1200, height: 900 },
@@ -223,6 +224,47 @@ describe("useGeneration model-tier and provenance wiring", () => {
     expect(mocks.setGeneratedPost.mock.calls.at(-1)?.[0]).toMatchObject({
       primaryFormatId: "gbp",
       imageAspectRatio: "4:3",
+    });
+
+    cleanup();
+  });
+
+  it("persists an explicit output format and media plan for retry and remix", async () => {
+    const { result, cleanup } = renderGeneration();
+
+    await act(async () => {
+      await result.current.handleGenerate(
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Alex",
+        undefined,
+        undefined,
+        { scenarioId: "preowned_spotlight" },
+        ["facebook_feed", "gbp"],
+        {
+          primaryFormatId: "marketplace",
+          imageAspectRatio: "16:9",
+          label: "Marketplace · 16:9 master",
+        },
+        "both",
+      );
+    });
+
+    expect(mocks.generateSocialPost.mock.calls[0].at(-1)).toBe("16:9");
+    expect(mocks.setGenerationParams).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platformIds: ["facebook_feed", "gbp"],
+        scenarioId: "preowned_spotlight",
+        mediaOutputMode: "both",
+        primaryFormatId: "marketplace",
+        imageAspectRatio: "16:9",
+      }),
+    );
+    expect(mocks.setGeneratedPost.mock.calls.at(-1)?.[0]).toMatchObject({
+      platformIds: ["facebook_feed", "gbp"],
+      mediaOutputMode: "both",
+      primaryFormatId: "marketplace",
+      imageAspectRatio: "16:9",
     });
 
     cleanup();

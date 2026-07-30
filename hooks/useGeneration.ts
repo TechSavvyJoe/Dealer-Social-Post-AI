@@ -11,6 +11,7 @@ import {
   AppStep,
   GeneratedPost,
   ImageQualityTier,
+  MediaOutputMode,
 } from "../types";
 import { useToast } from "../components/ui/Toast";
 import { normalizeError, recoveryHint } from "../utils/errorHandler";
@@ -210,6 +211,7 @@ export const useGeneration = () => {
       customText?: string;
       creativeBrief?: string;
       platformIds?: PlatformId[];
+      mediaOutputMode: MediaOutputMode;
       primaryFormatId: PrimaryImageProfile["primaryFormatId"];
       imageAspectRatio: PrimaryImageProfile["imageAspectRatio"];
       meta?: GenerationMeta;
@@ -270,6 +272,8 @@ export const useGeneration = () => {
         customText: variables.customText,
         creativeBrief: variables.creativeBrief,
         platformIds: variables.platformIds,
+        scenarioId: variables.meta?.scenarioId,
+        mediaOutputMode: variables.mediaOutputMode,
         primaryFormatId: variables.primaryFormatId,
         imageAspectRatio: variables.imageAspectRatio,
       });
@@ -360,6 +364,7 @@ export const useGeneration = () => {
         disclosures: preparedCaption.disclosures,
         disclosureCategories: preparedCaption.disclosureCategories,
         platformIds: platformIds.length > 0 ? platformIds : undefined,
+        mediaOutputMode: variables.mediaOutputMode,
         primaryFormatId: variables.primaryFormatId,
         imageAspectRatio: variables.imageAspectRatio,
       };
@@ -459,6 +464,7 @@ export const useGeneration = () => {
               captionAttemptId: finalPost.aiMeta?.caption.attemptId,
               imageAttemptId: finalPost.aiMeta?.image.attemptId,
               platformIds: finalPost.platformIds,
+              mediaOutputMode: finalPost.mediaOutputMode,
               platformCaptions: finalPost.platformCaptions,
               primaryFormatId: finalPost.primaryFormatId,
               imageAspectRatio: finalPost.imageAspectRatio,
@@ -558,6 +564,7 @@ export const useGeneration = () => {
       meta?: GenerationMeta,
       platformIds?: PlatformId[],
       outputProfile?: PrimaryImageProfile,
+      mediaOutputMode: MediaOutputMode = "photo",
     ) => {
       const resolvedProfile = outputProfile ?? resolvePrimaryImageProfile(platformIds);
       await generateMutation.mutateAsync({
@@ -567,6 +574,7 @@ export const useGeneration = () => {
         customText,
         creativeBrief,
         platformIds,
+        mediaOutputMode,
         primaryFormatId: resolvedProfile.primaryFormatId,
         imageAspectRatio: resolvedProfile.imageAspectRatio,
         meta,

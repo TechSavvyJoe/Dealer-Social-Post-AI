@@ -2,8 +2,10 @@
  * Multi-format export for dealership social creatives.
  *
  * Same designed post → platform canvas sizes:
- *  - 1:1     1080×1080  Facebook / Instagram Feed
+ *  - 4:5     1080×1350  Instagram / Facebook portrait feed
+ *  - 1:1     1080×1080  Square feed compatibility
  *  - 9:16    1080×1920  IG Story, Reels, TikTok, Shorts
+ *  - 16:9    1200×675   X / LinkedIn landscape compatibility
  *  - 1.91:1  1200×628   Facebook Marketplace / OG
  *  - 4:3     1200×900   Google Business Profile
  *
@@ -13,7 +15,13 @@
  * ctx.filter blur is flaky with data-URL sources).
  */
 
-export type ExportFormatId = "feed_square" | "story_vertical" | "marketplace" | "gbp";
+export type ExportFormatId =
+  | "feed_portrait"
+  | "feed_square"
+  | "story_vertical"
+  | "social_landscape"
+  | "marketplace"
+  | "gbp";
 
 export interface ExportFormat {
   id: ExportFormatId;
@@ -35,12 +43,28 @@ export const EXPORT_FORMATS: ExportFormat[] = [
     description: "IG Story, Reels, TikTok, YouTube Shorts",
   },
   {
+    id: "feed_portrait",
+    label: "Feed portrait (4:5)",
+    filename: "post-feed-4x5.jpg",
+    width: 1080,
+    height: 1350,
+    description: "Instagram Feed, Facebook Feed",
+  },
+  {
     id: "feed_square",
     label: "Feed (1:1)",
     filename: "post-feed-1x1.jpg",
     width: 1080,
     height: 1080,
     description: "Instagram Feed, Facebook Feed",
+  },
+  {
+    id: "social_landscape",
+    label: "Social landscape (16:9)",
+    filename: "post-social-16x9.jpg",
+    width: 1200,
+    height: 675,
+    description: "X, LinkedIn, landscape social posts",
   },
   {
     id: "marketplace",
@@ -246,8 +270,9 @@ export const renderFormat = async (
 ): Promise<string> => renderLoadedFormat(await loadImage(sourceDataUrl), format);
 
 /**
- * Preserve a source that is already at the selected profile's exact pixel size.
- * Legacy and mismatched media still use the normal premium contain render.
+ * Preserve only an exact JPEG source. Platform output profiles promise a JPEG
+ * file, so exact-size PNG/WebP/HEIC sources still need a deterministic encode.
+ * Legacy and mismatched media use the normal premium contain render.
  */
 export const renderFormatIfNeeded = async (
   sourceDataUrl: string,
@@ -255,14 +280,17 @@ export const renderFormatIfNeeded = async (
 ): Promise<string> => {
   const img = await loadImage(sourceDataUrl);
   const source = decodedPixelDimensions(img);
-  if (imageMatchesExportFormat(source.width, source.height, format)) {
+  if (
+    imageMatchesExportFormat(source.width, source.height, format) &&
+    /^data:image\/jpe?g(?:;|,)/i.test(sourceDataUrl)
+  ) {
     return sourceDataUrl;
   }
   return renderLoadedFormat(img, format);
 };
 
 /**
- * Renders all four formats in parallel and returns them keyed by id.
+ * Renders every configured format in parallel and returns them keyed by id.
  */
 export const renderAllFormats = async (
   sourceDataUrl: string,
@@ -300,7 +328,7 @@ const triggerDownload = (dataUrl: string, filename: string): void => {
 /**
  * Downloads formats. Browsers throttle multiple downloads from a single user
  * gesture, so we space them out 250ms apart.
- * @param formatIds optional subset; defaults to all four export sizes
+ * @param formatIds optional subset; defaults to every configured export size
  */
 export const downloadAllFormats = async (
   sourceDataUrl: string,

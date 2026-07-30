@@ -1314,7 +1314,7 @@ describe("trusted request metadata", () => {
     expect(
       helpers.legacyClientCompatibilityEnabled(
         requestContext({
-          headers: { "X-Dealer-Client-Contract": "2026-07-17.v2" },
+          headers: { "X-Dealer-Client-Contract": "2026-07-29.v3" },
         }),
       ),
     ).toBe(false);

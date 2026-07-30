@@ -8,10 +8,21 @@
  * cookie, prompts, provider response bodies, generated
  * text, image bytes, video bytes, operation names, or provider file URIs.
  */
+import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const policyPath = resolve(root, "config/gemini-model-policy.json");
@@ -23,6 +34,21 @@ const DEFAULT_EVIDENCE_PATH = resolve(
 const CONFIRMATION = "caption-image-video-synthetic-only";
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 const PRODUCTION_FLY_ORIGIN = "https://dealer-social-post-ai-production.fly.dev";
+const EXACT_STANDARD_VIDEO = Object.freeze({
+  aspectRatio: "9:16",
+  width: 720,
+  height: 1280,
+  durationSeconds: 6,
+  resolution: "720p",
+});
+const EXACT_QUALITY_VIDEO = Object.freeze({
+  aspectRatio: "16:9",
+  width: 1920,
+  height: 1080,
+  durationSeconds: 8,
+  resolution: "1080p",
+});
+const execFileAsync = promisify(execFile);
 
 class CanaryError extends Error {
   constructor(code, message, details = {}) {
@@ -105,6 +131,122 @@ function isRecognizedImage(data, mimeType) {
   return false;
 }
 
+function jpegDimensions(buffer) {
+  let offset = 2;
+  const startOfFrameMarkers = new Set([
+    0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf,
+  ]);
+  while (offset + 8 < buffer.length) {
+    if (buffer[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+    while (buffer[offset] === 0xff) offset += 1;
+    const marker = buffer[offset];
+    offset += 1;
+    if (marker === 0xd8 || marker === 0xd9) continue;
+    if (offset + 2 > buffer.length) break;
+    const segmentLength = buffer.readUInt16BE(offset);
+    if (segmentLength < 2 || offset + segmentLength > buffer.length) break;
+    if (startOfFrameMarkers.has(marker) && segmentLength >= 7) {
+      return {
+        width: buffer.readUInt16BE(offset + 5),
+        height: buffer.readUInt16BE(offset + 3),
+      };
+    }
+    offset += segmentLength;
+  }
+  return null;
+}
+
+function webpDimensions(buffer) {
+  if (buffer.length < 30) return null;
+  const chunk = buffer.subarray(12, 16).toString("ascii");
+  if (chunk === "VP8X") {
+    return {
+      width: 1 + buffer.readUIntLE(24, 3),
+      height: 1 + buffer.readUIntLE(27, 3),
+    };
+  }
+  if (chunk === "VP8L" && buffer[20] === 0x2f && buffer.length >= 25) {
+    const b0 = buffer[21];
+    const b1 = buffer[22];
+    const b2 = buffer[23];
+    const b3 = buffer[24];
+    return {
+      width: 1 + (b0 | ((b1 & 0x3f) << 8)),
+      height: 1 + ((b1 >> 6) | (b2 << 2) | ((b3 & 0x0f) << 10)),
+    };
+  }
+  if (
+    chunk === "VP8 " &&
+    buffer.length >= 30 &&
+    buffer[23] === 0x9d &&
+    buffer[24] === 0x01 &&
+    buffer[25] === 0x2a
+  ) {
+    return {
+      width: buffer.readUInt16LE(26) & 0x3fff,
+      height: buffer.readUInt16LE(28) & 0x3fff,
+    };
+  }
+  return null;
+}
+
+export function probeImageEvidence(data, mimeType, expectedAspectRatio) {
+  const normalizedMimeType = String(mimeType || "").toLowerCase();
+  if (!isRecognizedImage(data, normalizedMimeType)) {
+    throw new CanaryError(
+      "IMAGE_OUTPUT_INVALID",
+      "Image provider output was not a supported image.",
+    );
+  }
+  const buffer = Buffer.from(data, "base64");
+  let dimensions = null;
+  if (normalizedMimeType === "image/png" && buffer.length >= 24) {
+    dimensions = {
+      width: buffer.readUInt32BE(16),
+      height: buffer.readUInt32BE(20),
+    };
+  } else if (normalizedMimeType === "image/jpeg") {
+    dimensions = jpegDimensions(buffer);
+  } else if (normalizedMimeType === "image/webp") {
+    dimensions = webpDimensions(buffer);
+  }
+
+  const ratioParts = /^(\d+):(\d+)$/.exec(expectedAspectRatio);
+  if (
+    !dimensions ||
+    !Number.isInteger(dimensions.width) ||
+    !Number.isInteger(dimensions.height) ||
+    dimensions.width < 1 ||
+    dimensions.height < 1 ||
+    !ratioParts
+  ) {
+    throw new CanaryError(
+      "IMAGE_OUTPUT_INVALID",
+      "Image provider output did not expose valid pixel dimensions.",
+    );
+  }
+  const expectedWidthRatio = Number(ratioParts[1]);
+  const expectedHeightRatio = Number(ratioParts[2]);
+  const ratioError =
+    Math.abs(
+      dimensions.width * expectedHeightRatio - dimensions.height * expectedWidthRatio,
+    ) /
+    Math.max(
+      dimensions.width * expectedHeightRatio,
+      dimensions.height * expectedWidthRatio,
+    );
+  if (ratioError > 0.005) {
+    throw new CanaryError(
+      "IMAGE_OUTPUT_INVALID",
+      `Generated image did not satisfy the requested ${expectedAspectRatio} aspect ratio.`,
+    );
+  }
+  return dimensions;
+}
+
 function providerVideoUri(value, depth = 0) {
   if (!value || typeof value !== "object" || depth > 12) return "";
   for (const [key, child] of Object.entries(value)) {
@@ -170,7 +312,12 @@ async function loadPolicy() {
 
 async function contractCheck() {
   const policy = await loadPolicy();
-  const requiredTasks = ["caption", "image_standard", "video_standard"];
+  const requiredTasks = [
+    "caption",
+    "image_standard",
+    "video_standard",
+    "video_quality",
+  ];
   for (const task of requiredTasks) {
     if (!policy.tasks?.[task]?.models?.[0]) {
       throw new CanaryError(
@@ -195,6 +342,12 @@ async function contractCheck() {
     throw new CanaryError(
       "POLICY_INVALID",
       "Video canary must use the canonical 720p standard tier.",
+    );
+  }
+  if (policy.tasks.video_quality.resolution !== EXACT_QUALITY_VIDEO.resolution) {
+    throw new CanaryError(
+      "POLICY_INVALID",
+      "Exact delivery video canary must use the canonical 1080p quality tier.",
     );
   }
   const image = await readFile(syntheticImagePath);
@@ -376,7 +529,7 @@ async function runImage(client, policy, imageBase64) {
         ],
         generationConfig: {
           responseModalities: ["TEXT", "IMAGE"],
-          imageConfig: { imageSize },
+          imageConfig: { imageSize, aspectRatio: "4:5" },
           maxOutputTokens: task.maxOutputTokens,
         },
       }),
@@ -389,19 +542,115 @@ async function runImage(client, policy, imageBase64) {
       (part) => typeof part?.data === "string" && typeof part?.mimeType === "string",
     );
   const byteCount = image?.data ? decodedBase64Bytes(image.data) : 0;
-  if (
-    byteCount < 1024 ||
-    !isRecognizedImage(image.data, image.mimeType.toLowerCase())
-  ) {
+  if (byteCount < 1024) {
     throw new CanaryError(
       "IMAGE_OUTPUT_INVALID",
       "Image provider output was not a meaningful supported image.",
     );
   }
-  return { model, mimeType: image.mimeType.toLowerCase(), byteCount, imageSize };
+  const dimensions = probeImageEvidence(image.data, image.mimeType, "4:5");
+  return {
+    model,
+    mimeType: image.mimeType.toLowerCase(),
+    byteCount,
+    imageSize,
+    aspectRatio: "4:5",
+    ...dimensions,
+  };
 }
 
-async function readVideoEvidence(response) {
+export function validateVideoProbeMetadata(metadata, expected) {
+  const streams = Array.isArray(metadata.streams) ? metadata.streams : [];
+  const video = streams.find((stream) => stream?.codec_type === "video");
+  const audio = streams.find((stream) => stream?.codec_type === "audio");
+  const formatNames = String(metadata.format?.format_name || "").split(",");
+  const durationSeconds = Number(video?.duration || metadata.format?.duration);
+  const videoPacketCount = Number(video?.nb_read_packets);
+  const audioPacketCount = Number(audio?.nb_read_packets);
+  const durationToleranceSeconds = 0.75;
+
+  if (
+    !video ||
+    !audio ||
+    !formatNames.includes("mp4") ||
+    video.codec_name !== "h264" ||
+    audio.codec_name !== "aac" ||
+    !["yuv420p", "yuvj420p"].includes(video.pix_fmt) ||
+    Number(video.width) !== expected.width ||
+    Number(video.height) !== expected.height ||
+    !Number.isFinite(durationSeconds) ||
+    Math.abs(durationSeconds - expected.durationSeconds) > durationToleranceSeconds ||
+    !Number.isFinite(videoPacketCount) ||
+    videoPacketCount < 1 ||
+    !Number.isFinite(audioPacketCount) ||
+    audioPacketCount < 1
+  ) {
+    throw new CanaryError(
+      "VIDEO_OUTPUT_INVALID",
+      "Generated video did not satisfy the exact playable MP4 delivery contract.",
+    );
+  }
+
+  return {
+    width: Number(video.width),
+    height: Number(video.height),
+    durationSeconds: Number(durationSeconds.toFixed(3)),
+    videoCodec: video.codec_name,
+    audioCodec: audio.codec_name,
+    pixelFormat: video.pix_fmt,
+    videoPacketCount,
+    audioPacketCount,
+  };
+}
+
+export async function probeVideoEvidence(path, expected) {
+  const ffprobe = (process.env.RELEASE_CANARY_FFPROBE || "ffprobe").trim();
+  let stdout;
+  try {
+    ({ stdout } = await execFileAsync(
+      ffprobe,
+      [
+        "-v",
+        "error",
+        "-count_packets",
+        "-show_entries",
+        "format=format_name,duration:stream=codec_type,codec_name,pix_fmt,width,height,duration,nb_read_packets",
+        "-of",
+        "json",
+        path,
+      ],
+      {
+        encoding: "utf8",
+        timeout: 60_000,
+        maxBuffer: 1024 * 1024,
+      },
+    ));
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") {
+      throw new CanaryError(
+        "VIDEO_VALIDATOR_UNAVAILABLE",
+        "ffprobe is required for the authenticated release canary. Install FFmpeg or set RELEASE_CANARY_FFPROBE to its executable.",
+      );
+    }
+    throw new CanaryError(
+      "VIDEO_OUTPUT_INVALID",
+      "ffprobe could not read the generated video to completion.",
+    );
+  }
+
+  let metadata;
+  try {
+    metadata = JSON.parse(stdout);
+  } catch {
+    throw new CanaryError(
+      "VIDEO_OUTPUT_INVALID",
+      "ffprobe returned invalid video metadata.",
+    );
+  }
+  return validateVideoProbeMetadata(metadata, expected);
+}
+
+async function readVideoEvidence(response, expected) {
   if (!response.ok) {
     throw new CanaryError(
       "VIDEO_DOWNLOAD_FAILED",
@@ -426,41 +675,56 @@ async function readVideoEvidence(response) {
     );
   }
 
-  const reader = response.body.getReader();
-  let byteCount = 0;
-  let head = Buffer.alloc(0);
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    byteCount += value.byteLength;
-    if (byteCount > MAX_VIDEO_BYTES) {
-      await reader.cancel();
+  const temporaryDirectory = await mkdtemp(
+    resolve(tmpdir(), "dealer-social-video-canary-"),
+  );
+  const videoPath = resolve(temporaryDirectory, "synthetic-output.mp4");
+  let handle = null;
+  try {
+    handle = await open(videoPath, "wx", 0o600);
+    const reader = response.body.getReader();
+    let byteCount = 0;
+    let head = Buffer.alloc(0);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      byteCount += value.byteLength;
+      if (byteCount > MAX_VIDEO_BYTES) {
+        await reader.cancel();
+        throw new CanaryError(
+          "VIDEO_OUTPUT_INVALID",
+          "Video provider output exceeded the release-canary size limit.",
+        );
+      }
+      await handle.writeFile(value);
+      if (head.length < 32) {
+        head = Buffer.concat([head, Buffer.from(value)]).subarray(0, 32);
+      }
+    }
+    await handle.close();
+    handle = null;
+    if (
+      byteCount < 4096 ||
+      head.length < 12 ||
+      head.subarray(4, 8).toString("ascii") !== "ftyp"
+    ) {
       throw new CanaryError(
         "VIDEO_OUTPUT_INVALID",
-        "Video provider output exceeded the release-canary size limit.",
+        "Video provider output was not a meaningful MP4.",
       );
     }
-    if (head.length < 32) {
-      head = Buffer.concat([head, Buffer.from(value)]).subarray(0, 32);
-    }
+    const probe = await probeVideoEvidence(videoPath, expected);
+    return { mimeType, byteCount, container: "mp4", ...probe };
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+    await rm(temporaryDirectory, { recursive: true, force: true }).catch(() => {});
   }
-  if (
-    byteCount < 4096 ||
-    head.length < 12 ||
-    head.subarray(4, 8).toString("ascii") !== "ftyp"
-  ) {
-    throw new CanaryError(
-      "VIDEO_OUTPUT_INVALID",
-      "Video provider output was not a meaningful MP4.",
-    );
-  }
-  return { mimeType, byteCount, container: "mp4" };
 }
 
-async function runVideo(client, policy, imageBase64) {
-  const task = policy.tasks.video_standard;
+async function runVideo(client, policy, imageBase64, taskName, expected) {
+  const task = policy.tasks[taskName];
   const model = task.models[0];
-  const headers = generationHeaders(policy, "video_standard");
+  const headers = generationHeaders(policy, taskName);
   const response = await client.request(
     `/api/proxy/v1beta/models/${model}:predictLongRunning`,
     {
@@ -478,9 +742,9 @@ async function runVideo(client, policy, imageBase64) {
           },
         ],
         parameters: {
-          aspectRatio: "16:9",
+          aspectRatio: expected.aspectRatio,
           personGeneration: "allow_adult",
-          durationSeconds: 4,
+          durationSeconds: expected.durationSeconds,
           resolution: task.resolution,
         },
       }),
@@ -547,8 +811,16 @@ async function runVideo(client, policy, imageBase64) {
       signal: AbortSignal.timeout(310_000),
     },
   );
-  const mediaEvidence = await readVideoEvidence(media);
-  return { model, resolution: task.resolution, pollCount, ...mediaEvidence };
+  const mediaEvidence = await readVideoEvidence(media, expected);
+  return {
+    model,
+    tier: task.tier,
+    requestedAspectRatio: expected.aspectRatio,
+    requestedDurationSeconds: expected.durationSeconds,
+    resolution: task.resolution,
+    pollCount,
+    ...mediaEvidence,
+  };
 }
 
 async function writeEvidence(path, evidence) {
@@ -599,7 +871,7 @@ async function run() {
   const startedAt = new Date().toISOString();
   const client = new AuthenticatedClient(origin);
   const evidence = {
-    schemaVersion: 1,
+    schemaVersion: 3,
     canary: "production-provider-proxy",
     syntheticAsset: "public/icon-512.png",
     targetOrigin: origin,
@@ -686,12 +958,35 @@ async function run() {
     };
     console.log("Standard-image provider canary passed.");
 
-    console.log("Running standard-video provider canary (this can take minutes)...");
+    console.log(
+      "Running exact 720p/6-second standard-video provider canary (this can take minutes)...",
+    );
     evidence.checks.standardVideo = {
       passed: true,
-      ...(await runVideo(client, policy, imageBase64)),
+      ...(await runVideo(
+        client,
+        policy,
+        imageBase64,
+        "video_standard",
+        EXACT_STANDARD_VIDEO,
+      )),
     };
-    console.log("Standard-video provider canary passed.");
+    console.log("Exact standard-video provider canary passed.");
+
+    console.log(
+      "Running exact 1080p/8-second quality-video provider canary (this can take minutes)...",
+    );
+    evidence.checks.qualityVideo = {
+      passed: true,
+      ...(await runVideo(
+        client,
+        policy,
+        imageBase64,
+        "video_quality",
+        EXACT_QUALITY_VIDEO,
+      )),
+    };
+    console.log("Exact quality-video provider canary passed.");
 
     evidence.outcome = "passed";
   } catch (error) {

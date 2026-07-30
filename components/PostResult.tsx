@@ -40,6 +40,10 @@ import { LayoutGrid } from "lucide-react";
 import { PlatformLimitMeter } from "./PlatformLimitMeter";
 import { CaptionStudio } from "./CaptionStudio";
 import { ShareDialog, type PlatformShareCaption } from "./ShareDialog";
+import {
+  PlatformDeliveryBoard,
+  type PlatformDeliveryOutput,
+} from "./PlatformDeliveryBoard";
 import { CaptionAlternativesModal } from "./CaptionAlternativesModal";
 import { ProgressiveImage } from "./ui/ProgressiveImage";
 import { useToast } from "./ui/Toast";
@@ -66,12 +70,23 @@ import {
   prepareMediaForSave,
   savePreparedMediaToLibrary,
   saveResultToastMessage,
+  validateVideoMetadata,
   type PreparedMediaSave,
 } from "../utils/mediaSave";
 import { useAppStore } from "../stores/appStore";
 import { archiveDealerMedia } from "../utils/creativeStorage";
 import { EXPORT_FORMATS, renderFormatIfNeeded } from "../utils/multiFormatExport";
 import { logError } from "../utils/telemetry";
+import {
+  derivePlatformDeliveryPlan,
+  type PlannedPlatformDelivery,
+} from "../services/platformOutputs";
+import type { PublishContent } from "../services/publishTargets";
+import {
+  appendDealershipMention,
+  dealershipMentionFor,
+} from "../utils/socialAttribution";
+import { retainNewestVideoJobs } from "../utils/videoJobRetention";
 
 // Lazy load modals for performance
 const LazyImagePreviewModal = React.lazy(() =>
@@ -247,6 +262,7 @@ export const PostResult: React.FC<PostResultProps> = ({
   const shouldReduceMotion = useReducedMotion();
   const enabledFunStyles = useAppStore((s) => s.currentDealer?.enabled_fun_styles);
   const dealerId = useAppStore((s) => s.currentDealer?.id || "");
+  const currentDealer = useAppStore((s) => s.currentDealer);
   const hasOriginalCapture = useAppStore((s) => Boolean(s.selectedImage));
 
   const [isImageEditing, setIsImageEditing] = useState(false);
@@ -271,9 +287,17 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [historyIndex, setHistoryIndex] = useState(0);
 
   const [isVideoDirectorOpen, setIsVideoDirectorOpen] = useState(false);
+  const [videoDirectorDeliveryId, setVideoDirectorDeliveryId] = useState<string | null>(
+    null,
+  );
   const [isFunModeDirectorOpen, setIsFunModeDirectorOpen] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  /** Legacy free-form video selection stays separate from an exact delivery row. */
+  const [manualVideoSelected, setManualVideoSelected] = useState(false);
   const [isVideoLoading, setIsVideoLoading] = useState(false);
+  /** Synchronous guard: React state alone cannot stop two taps in one frame. */
+  const videoGenerationActiveRef = useRef(false);
+  const videoJobSequenceRef = useRef(0);
   const [videoLoadingMessage, setVideoLoadingMessage] = useState("");
   /** Browser is buffering / decoding the blob after generation finishes. */
   const [isVideoBuffering, setIsVideoBuffering] = useState(false);
@@ -295,6 +319,8 @@ export const PostResult: React.FC<PostResultProps> = ({
       resolution: VideoRequestOptions["resolution"];
       pacing: VideoRequestOptions["pacing"];
       createdAt: string;
+      /** Exact source creative revision used to generate this clip. */
+      sourceCreativeKey: string;
       url?: string;
       error?: string;
     }>
@@ -303,6 +329,16 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isMultiFormatOpen, setIsMultiFormatOpen] = useState(false);
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const [focusedShareDeliveryId, setFocusedShareDeliveryId] = useState<string | null>(
+    null,
+  );
+  const [focusedShareContent, setFocusedShareContent] = useState<PublishContent | null>(
+    null,
+  );
+  const [batchDeliveryIds, setBatchDeliveryIds] = useState<Set<string>>(new Set());
+  const [shareQueue, setShareQueue] = useState<string[]>([]);
+  const [shareQueueIndex, setShareQueueIndex] = useState(0);
+  const shareQueueOpenedRef = useRef<string | null>(null);
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [isScheduling, setIsScheduling] = useState(false);
   const [captionAlts, setCaptionAlts] = useState<string[]>([]);
@@ -324,7 +360,14 @@ export const PostResult: React.FC<PostResultProps> = ({
   /** Prior image versions after regen/fun/edit (local compare stack, max 5). */
   const [imageVersions, setImageVersions] = useState<string[]>([]);
   const [preparedSave, setPreparedSave] = useState<PreparedMediaSave | null>(null);
+  /** Prevent a prepared file from ever being used under a different delivery row. */
+  const [preparedSaveForKey, setPreparedSaveForKey] = useState<string | null>(null);
+  const [mediaPreparationError, setMediaPreparationError] = useState<string | null>(
+    null,
+  );
+  const [mediaPreparationNonce, setMediaPreparationNonce] = useState(0);
   const [formattedPreviewUrl, setFormattedPreviewUrl] = useState<string | null>(null);
+  const [selectedDeliveryId, setSelectedDeliveryId] = useState<string | null>(null);
   const [isPreparingSave, setIsPreparingSave] = useState(false);
   const [draftSyncStatus, setDraftSyncStatus] = useState<
     "idle" | "saving" | "saved" | "error"
@@ -350,6 +393,23 @@ export const PostResult: React.FC<PostResultProps> = ({
     post.aiMeta?.image.attemptId ||
     post.aiMeta?.lastSuccessfulGenerationAt ||
     "local-result";
+  const videoCreativeRevisionRef = useRef({
+    image: post.image,
+    resultIdentity,
+    revision: 0,
+  });
+  if (
+    videoCreativeRevisionRef.current.image !== post.image ||
+    videoCreativeRevisionRef.current.resultIdentity !== resultIdentity
+  ) {
+    const previous = videoCreativeRevisionRef.current;
+    videoCreativeRevisionRef.current = {
+      image: post.image,
+      resultIdentity,
+      revision: previous.resultIdentity === resultIdentity ? previous.revision + 1 : 0,
+    };
+  }
+  const currentVideoCreativeKey = `${resultIdentity}:${videoCreativeRevisionRef.current.revision}`;
   const previousResultIdentityRef = useRef(resultIdentity);
   const previousPostTextRef = useRef(post.text);
   // Caption state follows a new result/caption pack, but image-only
@@ -413,6 +473,145 @@ export const PostResult: React.FC<PostResultProps> = ({
       resolvePrimaryImageProfile(post.platformIds).primaryFormatId;
     return EXPORT_FORMATS.find((format) => format.id === formatId);
   }, [post.platformIds, post.primaryFormatId]);
+  const deliveryPlan = useMemo(() => {
+    const requestedMode =
+      videoJobs.length > 0 && post.mediaOutputMode !== "video"
+        ? "both"
+        : (post.mediaOutputMode ?? "photo");
+    const fallbackPlatform =
+      primarySaveFormat?.id === "feed_portrait"
+        ? "instagram_feed"
+        : primarySaveFormat?.id === "gbp"
+          ? "gbp"
+          : primarySaveFormat?.id === "marketplace"
+            ? "marketplace"
+            : "instagram_story";
+    return derivePlatformDeliveryPlan(
+      post.platformIds?.length ? post.platformIds : [fallbackPlatform],
+      requestedMode,
+      post.postId ? `dealer-social-${post.postId}` : "dealer-social-post",
+    );
+  }, [
+    post.mediaOutputMode,
+    post.platformIds,
+    post.postId,
+    primarySaveFormat?.id,
+    videoJobs.length,
+  ]);
+  const deliveriesById = useMemo(
+    () =>
+      new Map<string, PlannedPlatformDelivery>(
+        deliveryPlan.deliveries.map((delivery) => [delivery.id, delivery]),
+      ),
+    [deliveryPlan.deliveries],
+  );
+  const deliveryPlanSignature = deliveryPlan.deliveries
+    .map((delivery) => delivery.id)
+    .join("|");
+  useEffect(() => {
+    setBatchDeliveryIds(
+      new Set(
+        deliveryPlan.deliveries
+          .filter((delivery) => delivery.mediaKind === "photo")
+          .map((delivery) => delivery.id),
+      ),
+    );
+    setShareQueue([]);
+    setShareQueueIndex(0);
+    shareQueueOpenedRef.current = null;
+  }, [deliveryPlanSignature, resultIdentity]);
+  const selectedDelivery = selectedDeliveryId
+    ? deliveriesById.get(selectedDeliveryId)
+    : undefined;
+  const latestVideoJobBySpec = useMemo(() => {
+    const bySpec = new Map<string, (typeof videoJobs)[number]>();
+    for (const job of videoJobs) {
+      if (job.sourceCreativeKey !== currentVideoCreativeKey) continue;
+      if (job.aspectPreference === "9:16" || job.aspectPreference === "16:9") {
+        bySpec.set(`${job.aspectPreference}:${job.resolution}:${job.duration}`, job);
+      }
+    }
+    return bySpec;
+  }, [currentVideoCreativeKey, videoJobs]);
+  const videoJobForDelivery = useCallback(
+    (delivery: PlannedPlatformDelivery) => {
+      if (
+        delivery.mediaKind !== "video" ||
+        delivery.profile.preparation.kind !== "veo"
+      ) {
+        return undefined;
+      }
+      const preparation = delivery.profile.preparation;
+      return latestVideoJobBySpec.get(
+        `${preparation.nativeAspectRatio}:${preparation.resolution}:${preparation.durationSeconds}`,
+      );
+    },
+    [latestVideoJobBySpec],
+  );
+  const selectedVideoJob =
+    selectedDelivery?.mediaKind === "video"
+      ? videoJobForDelivery(selectedDelivery)
+      : undefined;
+  const preparationKeyForDelivery = useCallback(
+    (delivery: PlannedPlatformDelivery) => {
+      const job =
+        delivery.mediaKind === "video" ? videoJobForDelivery(delivery) : undefined;
+      return `delivery:${delivery.id}:${job?.id || "asset"}`;
+    },
+    [videoJobForDelivery],
+  );
+  const batchEligibleDeliveryIds = useMemo(
+    () =>
+      new Set<string>(
+        deliveryPlan.deliveries
+          .filter((delivery) => {
+            if (delivery.mediaKind === "photo") return true;
+            const job = videoJobForDelivery(delivery);
+            return job?.status === "completed" && Boolean(job.url);
+          })
+          .map((delivery) => delivery.id),
+      ),
+    [deliveryPlan.deliveries, videoJobForDelivery],
+  );
+  useEffect(() => {
+    setBatchDeliveryIds((current) => {
+      const next = new Set(
+        [...current].filter((deliveryId) => batchEligibleDeliveryIds.has(deliveryId)),
+      );
+      if (
+        next.size === current.size &&
+        [...next].every((deliveryId) => current.has(deliveryId))
+      ) {
+        return current;
+      }
+      return next;
+    });
+  }, [batchEligibleDeliveryIds]);
+  const selectedPreparationKey = manualVideoSelected
+    ? `manual-video:${videoUrl || "pending"}`
+    : selectedDelivery
+      ? preparationKeyForDelivery(selectedDelivery)
+      : `primary:${resultIdentity}`;
+  const activePreparedSave =
+    preparedSaveForKey === selectedPreparationKey ? preparedSave : null;
+  const activeImageFormat = useMemo(() => {
+    if (selectedDelivery?.mediaKind === "photo") {
+      return EXPORT_FORMATS.find(
+        (format) => format.id === selectedDelivery.profile.legacyExportFormatId,
+      );
+    }
+    return primarySaveFormat;
+  }, [primarySaveFormat, selectedDelivery]);
+
+  useEffect(() => {
+    if (
+      selectedDeliveryId &&
+      deliveryPlan.deliveries.some((delivery) => delivery.id === selectedDeliveryId)
+    ) {
+      return;
+    }
+    setSelectedDeliveryId(deliveryPlan.deliveries[0]?.id || null);
+  }, [deliveryPlan.deliveries, selectedDeliveryId]);
 
   useEffect(() => {
     setIsToolsOpen(isDesktopLayout);
@@ -444,6 +643,8 @@ export const PostResult: React.FC<PostResultProps> = ({
   // byte equivalent to what the manager saw. Delivery unlocks on approval,
   // while edits require starting a new review submission.
   const creativeLockedForReview = reviewRequired;
+  const videoReviewLockMessage =
+    "This reviewed creative must stay unchanged. Start a new post to create a video.";
   const historyReadOnly = Boolean(post.historyReadOnly);
   const editableDraft = !reviewRequired && !historyReadOnly;
   const originalRequiredMessage =
@@ -727,6 +928,40 @@ export const PostResult: React.FC<PostResultProps> = ({
     setVideoMuted(true);
   }, []);
 
+  useEffect(() => {
+    if (!videoUrl) return;
+    const activeJob = [...videoJobs].reverse().find((job) => job.url === videoUrl);
+    if (
+      !activeJob ||
+      activeJob.sourceCreativeKey !== currentVideoCreativeKey ||
+      (activeJob.aspectPreference !== "9:16" && activeJob.aspectPreference !== "16:9")
+    ) {
+      setManualVideoSelected(false);
+      adoptVideoUrl(null);
+      return;
+    }
+    if (manualVideoSelected) return;
+    const matchingDelivery = deliveryPlan.deliveries.find(
+      (delivery) =>
+        delivery.mediaKind === "video" &&
+        delivery.profile.preparation.kind === "veo" &&
+        delivery.profile.preparation.nativeAspectRatio === activeJob.aspectPreference &&
+        delivery.profile.preparation.resolution === activeJob.resolution &&
+        delivery.profile.preparation.durationSeconds === activeJob.duration,
+    );
+    if (matchingDelivery && matchingDelivery.id !== selectedDeliveryId) {
+      setSelectedDeliveryId(matchingDelivery.id);
+    }
+  }, [
+    adoptVideoUrl,
+    currentVideoCreativeKey,
+    deliveryPlan.deliveries,
+    manualVideoSelected,
+    selectedDeliveryId,
+    videoJobs,
+    videoUrl,
+  ]);
+
   // Unmount-only bulk cleanup. Selecting a different asset never destroys it.
   useEffect(() => {
     return () => {
@@ -760,28 +995,79 @@ export const PostResult: React.FC<PostResultProps> = ({
   useEffect(() => {
     let active = true;
     setPreparedSave(null);
+    setPreparedSaveForKey(null);
+    setMediaPreparationError(null);
+    const preparationKey = selectedPreparationKey;
+
+    const selectedVideoUrl =
+      !manualVideoSelected &&
+      selectedDelivery?.mediaKind === "video" &&
+      selectedVideoJob?.status === "completed"
+        ? selectedVideoJob.url
+        : undefined;
+    if (
+      !manualVideoSelected &&
+      selectedDelivery?.mediaKind === "video" &&
+      !selectedVideoUrl
+    ) {
+      setIsPreparingSave(false);
+      return () => {
+        active = false;
+      };
+    }
+
     setIsPreparingSave(true);
     void (async () => {
-      const isVideo = Boolean(videoUrl);
+      const isVideo = manualVideoSelected
+        ? Boolean(videoUrl)
+        : selectedDelivery
+          ? selectedDelivery.mediaKind === "video"
+          : Boolean(videoUrl);
       const sourceUrl =
-        !isVideo && primarySaveFormat
-          ? await renderFormatIfNeeded(post.image, primarySaveFormat)
-          : videoUrl || post.image;
+        !isVideo && activeImageFormat
+          ? await renderFormatIfNeeded(post.image, activeImageFormat)
+          : selectedVideoUrl || videoUrl || post.image;
+      if (
+        isVideo &&
+        !manualVideoSelected &&
+        selectedDelivery?.mediaKind === "video" &&
+        selectedDelivery.profile.preparation.kind === "veo" &&
+        selectedVideoUrl
+      ) {
+        await validateVideoMetadata(selectedVideoUrl, {
+          width: selectedDelivery.profile.output.width,
+          height: selectedDelivery.profile.output.height,
+          durationSeconds: selectedDelivery.profile.preparation.durationSeconds,
+        });
+      }
+      const basename = isVideo
+        ? (!manualVideoSelected && selectedDelivery?.mediaKind === "video"
+            ? selectedDelivery.filename.replace(/\.[^.]+$/, "")
+            : undefined) || "dealer-social-video"
+        : selectedDelivery?.filename.replace(/\.[^.]+$/, "") ||
+          activeImageFormat?.filename.replace(/\.[^.]+$/, "") ||
+          "dealer-social-post";
       return prepareMediaForSave({
         sourceUrl,
         kind: isVideo ? "video" : "image",
-        basename: isVideo
-          ? "dealer-social-video"
-          : primarySaveFormat
-            ? primarySaveFormat.filename.replace(/\.[^.]+$/, "")
-            : "dealer-social-post",
+        basename,
       });
     })()
       .then((prepared) => {
-        if (active) setPreparedSave(prepared);
+        if (active) {
+          setPreparedSave(prepared);
+          setPreparedSaveForKey(preparationKey);
+        }
       })
-      .catch(() => {
-        if (active) setPreparedSave(null);
+      .catch((err) => {
+        if (!active) return;
+        setPreparedSave(null);
+        setPreparedSaveForKey(null);
+        setMediaPreparationError(
+          err instanceof Error
+            ? err.message
+            : "The exact platform file could not be prepared.",
+        );
       })
       .finally(() => {
         if (active) setIsPreparingSave(false);
@@ -789,46 +1075,64 @@ export const PostResult: React.FC<PostResultProps> = ({
     return () => {
       active = false;
     };
-  }, [post.image, primarySaveFormat, videoUrl]);
+  }, [
+    activeImageFormat,
+    manualVideoSelected,
+    post.image,
+    mediaPreparationNonce,
+    selectedDelivery,
+    selectedPreparationKey,
+    selectedVideoJob,
+    videoUrl,
+  ]);
 
   useEffect(() => {
     if (
-      !preparedSave ||
-      preparedSave.kind !== "image" ||
+      !activePreparedSave ||
+      activePreparedSave.kind !== "image" ||
       videoUrl ||
       typeof URL.createObjectURL !== "function"
     ) {
       setFormattedPreviewUrl(null);
       return;
     }
-    const url = URL.createObjectURL(preparedSave.file);
+    const url = URL.createObjectURL(activePreparedSave.file);
     setFormattedPreviewUrl(url);
     return () => URL.revokeObjectURL(url);
-  }, [preparedSave, videoUrl]);
+  }, [activePreparedSave, videoUrl]);
 
   const displayImageUrl = formattedPreviewUrl || post.image;
 
-  const saveKind = videoUrl ? "video" : "image";
+  const saveKind =
+    manualVideoSelected && videoUrl
+      ? "video"
+      : selectedDelivery?.mediaKind === "video"
+        ? "video"
+        : "image";
   const saveToPhotos = isMobilePhotoDevice();
   const saveButtonLabel = saveToPhotos
-    ? primarySaveFormat && saveKind === "image"
-      ? `Save ${primarySaveFormat.width}×${primarySaveFormat.height}`
+    ? activeImageFormat && saveKind === "image"
+      ? `Save ${activeImageFormat.width}×${activeImageFormat.height}`
       : "Save to Photos"
     : saveKind === "video"
       ? "Save video"
-      : primarySaveFormat
-        ? `Save ${primarySaveFormat.width}×${primarySaveFormat.height}`
+      : activeImageFormat
+        ? `Save ${activeImageFormat.width}×${activeImageFormat.height}`
         : "Save image";
   const saveAriaLabel = (locked: boolean) =>
     locked ? `Save ${saveKind} (${deliveryLockLabel.toLowerCase()})` : saveButtonLabel;
 
-  const handleSave = async () => {
+  const handleSave = async (deliveryId?: string) => {
     triggerHapticFeedback();
     if (deliveryLocked) {
       toast.warning(deliveryGateMessage);
       return;
     }
-    if (!preparedSave) {
+    if (deliveryId && deliveryId !== selectedDeliveryId) {
+      toast.warning("Select this output and wait until its exact file is ready.");
+      return;
+    }
+    if (!activePreparedSave) {
       toast.warning(
         isPreparingSave
           ? "Media is still preparing. Try Save again in a moment."
@@ -839,8 +1143,10 @@ export const PostResult: React.FC<PostResultProps> = ({
 
     // WebKit consumes transient activation at the first asynchronous boundary.
     // The prepared File is ready already, so invoke navigator.share (inside this
-    // helper) immediately from the click before a History PATCH can await.
-    const mediaSavePromise = savePreparedMediaToLibrary(preparedSave);
+    // helper) immediately from this click before starting this click's History
+    // flush. A background autosave that began earlier may still be in flight,
+    // but it is never awaited on the fresh user-activation path.
+    const mediaSavePromise = savePreparedMediaToLibrary(activePreparedSave);
     const draftSavePromise = flushPendingDraft();
     const result = await mediaSavePromise;
     const draftSaved = await draftSavePromise;
@@ -906,16 +1212,17 @@ export const PostResult: React.FC<PostResultProps> = ({
   // variants and salesperson edits may advertise different terms.
   const activeDisclosures = captionAnalysis.disclosures.trim();
   const activeDisclosureCategories = captionAnalysis.disclosureCategories;
-  const appendDisclosures = (caption: string): string => {
+  const appendDisclosureText = (caption: string, disclosures: string): string => {
     const cap = caption.trim();
-    if (!activeDisclosures) return cap;
+    const disclosureText = disclosures.trim();
+    if (!disclosureText) return cap;
     return `${cap}\n\n${
-      activeDisclosures.startsWith("— Disclosures —")
-        ? activeDisclosures
-        : `— Disclosures —\n${activeDisclosures}`
+      disclosureText.startsWith("— Disclosures —")
+        ? disclosureText
+        : `— Disclosures —\n${disclosureText}`
     }`;
   };
-  const captionWithDisclosures = appendDisclosures(editedText);
+  const captionWithDisclosures = appendDisclosureText(editedText, activeDisclosures);
 
   // Persist textarea edits into the active pack slot so Share uses salesperson edits.
   useEffect(() => {
@@ -936,7 +1243,8 @@ export const PostResult: React.FC<PostResultProps> = ({
       // Active platform: use live editor text (includes in-progress edits)
       const base = id === activeCaptionPlatform ? editedText.trim() : cap?.trim();
       if (!base) continue;
-      const prepared = analyzeCaptionForDelivery(base, bannedPhrases);
+      const attributed = appendDealershipMention(base, id, currentDealer);
+      const prepared = analyzeCaptionForDelivery(attributed, bannedPhrases);
       out[id] = {
         text: prepared.caption,
         disclosures: prepared.disclosures || undefined,
@@ -946,8 +1254,11 @@ export const PostResult: React.FC<PostResultProps> = ({
             : undefined,
       };
     }
+    if (out.instagram_feed && !out.instagram_reel) {
+      out.instagram_reel = out.instagram_feed;
+    }
     return Object.keys(out).length > 0 ? out : undefined;
-  }, [activeCaptionPlatform, bannedPhrases, editedText, effectivePack]);
+  }, [activeCaptionPlatform, bannedPhrases, currentDealer, editedText, effectivePack]);
 
   const selectCaptionPlatform = useCallback(
     (platformId: string | null) => {
@@ -1022,7 +1333,20 @@ export const PostResult: React.FC<PostResultProps> = ({
       );
     }
     let success = false;
-    const textToCopy = captionWithDisclosures;
+    const copyDestinationId =
+      activeCaptionPlatform || selectedDelivery?.destinationId || post.platformIds?.[0];
+    const attributedCaption = copyDestinationId
+      ? appendDealershipMention(editedText, copyDestinationId, currentDealer)
+      : editedText;
+    const preparedCopy = analyzeCaptionForDelivery(attributedCaption, bannedPhrases);
+    if (preparedCopy.compliance.prohibited.length > 0) {
+      toast.warning(prohibitedClaimsMessage(preparedCopy.compliance.prohibited));
+      return;
+    }
+    const textToCopy = appendDisclosureText(
+      preparedCopy.caption,
+      preparedCopy.disclosures,
+    );
     if (navigator.clipboard) {
       try {
         await navigator.clipboard.writeText(textToCopy);
@@ -1054,14 +1378,33 @@ export const PostResult: React.FC<PostResultProps> = ({
       toast.warning(deliveryGateMessage);
       return;
     }
+    if (!manualVideoSelected && selectedDelivery) {
+      await handleShareDelivery(selectedDelivery.id);
+      return;
+    }
+    if (!manualVideoSelected || !videoUrl || !activePreparedSave) {
+      toast.warning(
+        selectedDelivery?.mediaKind === "video"
+          ? "Create this exact video output before sharing it."
+          : "Select a platform output and wait until its exact file is ready.",
+      );
+      return;
+    }
     const draftSaved = await flushPendingDraft();
     if (!draftSaved) {
       toast.warning(
-        "Sharing is available, but the latest History update did not save. Retry when you are back online.",
+        "Sharing is available, but the latest History update did not save.",
       );
     }
-    // The dialog copies the exact per-platform caption (including required
-    // disclosures) and tracks whether the browser actually allowed it.
+    // A free-form legacy render is shareable through the device sheet, but it
+    // is never mislabeled as an exact Facebook/Instagram/Google deliverable.
+    setFocusedShareDeliveryId("native_share:manual");
+    setFocusedShareContent({
+      text: editedText,
+      disclosures: activeDisclosures || undefined,
+      videoUrl,
+      preparedFile: activePreparedSave.file,
+    });
     setIsShareDialogOpen(true);
   };
 
@@ -1126,6 +1469,11 @@ export const PostResult: React.FC<PostResultProps> = ({
     options: VideoRequestOptions,
     existingJobId?: string,
   ) => {
+    if (videoGenerationActiveRef.current) {
+      toast.warning("A video is already rendering. Wait for it to finish first.");
+      return;
+    }
+    videoGenerationActiveRef.current = true;
     setIsVideoLoading(true);
 
     const messages = [
@@ -1154,10 +1502,15 @@ export const PostResult: React.FC<PostResultProps> = ({
       setVideoLoadingMessage(`${messages[messageIndex]} (${formatElapsed()})`);
     }, 1000);
 
-    const jobId = existingJobId || `video-${Date.now()}`;
+    videoJobSequenceRef.current += 1;
+    const randomJobId =
+      typeof globalThis.crypto?.randomUUID === "function"
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now()}-${videoJobSequenceRef.current}`;
+    const jobId = existingJobId || `video-${randomJobId}`;
     if (!existingJobId) {
       setVideoJobs((prev) =>
-        [
+        retainNewestVideoJobs([
           ...prev,
           {
             id: jobId,
@@ -1169,8 +1522,9 @@ export const PostResult: React.FC<PostResultProps> = ({
             resolution: options.resolution,
             pacing: options.pacing,
             createdAt: new Date().toISOString(),
+            sourceCreativeKey: currentVideoCreativeKey,
           },
-        ].slice(-5),
+        ]),
       );
     }
 
@@ -1257,6 +1611,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     } catch (err) {
       // Failure is already recorded in job state; no additional action needed here.
     } finally {
+      videoGenerationActiveRef.current = false;
       setIsVideoLoading(false);
       clearInterval(intervalId);
     }
@@ -1266,7 +1621,9 @@ export const PostResult: React.FC<PostResultProps> = ({
     style: VideoStyle,
     options: VideoRequestOptions,
   ) => {
+    setManualVideoSelected(!videoDirectorDeliveryId);
     setIsVideoDirectorOpen(false);
+    setVideoDirectorDeliveryId(null);
     await startVideoJob(style, options);
   };
 
@@ -1280,13 +1637,18 @@ export const PostResult: React.FC<PostResultProps> = ({
       resolution: job.resolution,
       pacing: job.pacing,
     };
-    await startVideoJob(job.style, options, jobId);
+    await startVideoJob(
+      job.style,
+      options,
+      job.sourceCreativeKey === currentVideoCreativeKey ? jobId : undefined,
+    );
   };
 
   const handleRemoveVideoJob = (jobId: string) => {
     const removed = videoJobs.find((job) => job.id === jobId);
     if (removed?.url && activeVideoBlobRef.current === removed.url) {
       adoptVideoUrl(null);
+      setManualVideoSelected(false);
     }
     if (removed?.url?.startsWith("blob:")) {
       ownedVideoBlobUrlsRef.current.delete(removed.url);
@@ -1294,6 +1656,339 @@ export const PostResult: React.FC<PostResultProps> = ({
     }
     setVideoJobs((prev) => prev.filter((job) => job.id !== jobId));
   };
+
+  const handleSelectDelivery = (deliveryId: string) => {
+    const delivery = deliveriesById.get(deliveryId);
+    if (!delivery) return;
+    triggerHapticFeedback();
+    setPreparedSave(null);
+    setPreparedSaveForKey(null);
+    setIsPreparingSave(delivery.mediaKind === "photo");
+    setSelectedDeliveryId(deliveryId);
+    setMediaPreparationError(null);
+    setManualVideoSelected(false);
+    if (delivery.mediaKind === "photo") {
+      adoptVideoUrl(null);
+      return;
+    }
+    const job = videoJobForDelivery(delivery);
+    adoptVideoUrl(job?.status === "completed" && job.url ? job.url : null);
+  };
+
+  const handleShareDelivery = async (deliveryId: string) => {
+    if (deliveryLocked) {
+      toast.warning(deliveryGateMessage);
+      return;
+    }
+    const delivery = deliveriesById.get(deliveryId);
+    const expectedPreparationKey = delivery
+      ? preparationKeyForDelivery(delivery)
+      : null;
+    if (
+      !delivery ||
+      deliveryId !== selectedDeliveryId ||
+      manualVideoSelected ||
+      preparedSaveForKey !== expectedPreparationKey ||
+      !activePreparedSave
+    ) {
+      toast.warning("Select this output and wait until its exact file is ready.");
+      return;
+    }
+
+    const captionVariant = sharePlatformCaptions?.[delivery.destinationId];
+    if (
+      captionVariant &&
+      typeof captionVariant !== "string" &&
+      captionVariant.blockedReason
+    ) {
+      toast.warning(captionVariant.blockedReason);
+      return;
+    }
+    const baseCaption =
+      typeof captionVariant === "string"
+        ? captionVariant
+        : captionVariant?.text || editedText;
+    const caption = appendDealershipMention(
+      baseCaption,
+      delivery.destinationId,
+      currentDealer,
+    );
+    const disclosures =
+      typeof captionVariant === "string"
+        ? undefined
+        : captionVariant?.disclosures || activeDisclosures || undefined;
+    const job =
+      delivery.mediaKind === "video" ? videoJobForDelivery(delivery) : undefined;
+    if (delivery.mediaKind === "video" && (!job?.url || job.status !== "completed")) {
+      toast.warning("Create this exact video output before sharing it.");
+      return;
+    }
+
+    const draftSaved = await flushPendingDraft();
+    if (!draftSaved) {
+      toast.warning(
+        "Sharing is available, but the latest History update did not save.",
+      );
+    }
+
+    setFocusedShareDeliveryId(delivery.id);
+    setFocusedShareContent({
+      text: caption,
+      disclosures,
+      preparedFile: activePreparedSave.file,
+      ...(delivery.mediaKind === "video"
+        ? { videoUrl: job?.url }
+        : { imageDataUrl: formattedPreviewUrl || post.image }),
+    });
+    setIsShareDialogOpen(true);
+  };
+
+  const handleToggleBatchDelivery = (deliveryId: string, selected: boolean) => {
+    if (
+      !deliveriesById.has(deliveryId) ||
+      (selected && !batchEligibleDeliveryIds.has(deliveryId))
+    ) {
+      return;
+    }
+    setBatchDeliveryIds((current) => {
+      const next = new Set(current);
+      if (selected) next.add(deliveryId);
+      else next.delete(deliveryId);
+      return next;
+    });
+  };
+
+  const handleToggleAllBatchDeliveries = (selected: boolean) => {
+    setBatchDeliveryIds(
+      selected ? new Set<string>(batchEligibleDeliveryIds) : new Set(),
+    );
+  };
+
+  const handleStartShareBatch = () => {
+    if (deliveryLocked) {
+      toast.warning(deliveryGateMessage);
+      return;
+    }
+
+    const selectedDeliveries = deliveryPlan.deliveries.filter((delivery) =>
+      batchDeliveryIds.has(delivery.id),
+    );
+    if (selectedDeliveries.length === 0) {
+      toast.warning("Choose at least one platform file to share.");
+      return;
+    }
+
+    const unavailableDelivery = selectedDeliveries.find(
+      (delivery) => !batchEligibleDeliveryIds.has(delivery.id),
+    );
+    if (unavailableDelivery) {
+      setBatchDeliveryIds((current) => {
+        const next = new Set(current);
+        next.delete(unavailableDelivery.id);
+        return next;
+      });
+      toast.warning(
+        `${unavailableDelivery.profile.destinationLabel} was removed from this share sequence because its exact file is not ready.`,
+      );
+      return;
+    }
+
+    const blockedCaption = selectedDeliveries.find((delivery) => {
+      const variant = sharePlatformCaptions?.[delivery.destinationId];
+      return variant && typeof variant !== "string" && Boolean(variant.blockedReason);
+    });
+    if (blockedCaption) {
+      const variant = sharePlatformCaptions?.[blockedCaption.destinationId];
+      toast.warning(
+        typeof variant !== "string" && variant?.blockedReason
+          ? variant.blockedReason
+          : "A selected destination caption needs attention before sharing.",
+      );
+      handleSelectDelivery(blockedCaption.id);
+      return;
+    }
+
+    const queue = selectedDeliveries.map((delivery) => delivery.id);
+    shareQueueOpenedRef.current = null;
+    setShareQueue(queue);
+    setShareQueueIndex(0);
+    setIsShareDialogOpen(false);
+    setFocusedShareDeliveryId(null);
+    setFocusedShareContent(null);
+    const firstDelivery = deliveriesById.get(queue[0]);
+    const firstPreparationKey = firstDelivery
+      ? preparationKeyForDelivery(firstDelivery)
+      : null;
+    if (
+      selectedDeliveryId !== queue[0] ||
+      manualVideoSelected ||
+      preparedSaveForKey !== firstPreparationKey
+    ) {
+      handleSelectDelivery(queue[0]);
+    } else if (!activePreparedSave) {
+      setMediaPreparationError(null);
+      setMediaPreparationNonce((value) => value + 1);
+    }
+  };
+
+  const handleCancelShareQueue = () => {
+    setIsShareDialogOpen(false);
+    setFocusedShareDeliveryId(null);
+    setFocusedShareContent(null);
+    setShareQueue([]);
+    setShareQueueIndex(0);
+    shareQueueOpenedRef.current = null;
+  };
+
+  const handleAdvanceShareQueue = () => {
+    const nextIndex = shareQueueIndex + 1;
+    setIsShareDialogOpen(false);
+    setFocusedShareDeliveryId(null);
+    setFocusedShareContent(null);
+
+    if (nextIndex >= shareQueue.length) {
+      setShareQueue([]);
+      setShareQueueIndex(0);
+      shareQueueOpenedRef.current = null;
+      toast.success(
+        "Share sequence finished — verify each post in its destination app.",
+      );
+      return;
+    }
+
+    const nextDeliveryId = shareQueue[nextIndex];
+    setShareQueueIndex(nextIndex);
+    handleSelectDelivery(nextDeliveryId);
+  };
+
+  const handleRetryDelivery = async (deliveryId: string) => {
+    const delivery = deliveriesById.get(deliveryId);
+    if (!delivery) return;
+    if (delivery.mediaKind === "photo") {
+      handleSelectDelivery(deliveryId);
+      setMediaPreparationNonce((value) => value + 1);
+      return;
+    }
+    if (creativeLockedForReview) {
+      toast.warning(videoReviewLockMessage);
+      return;
+    }
+    if (videoGenerationActiveRef.current || isVideoLoading) {
+      toast.warning("A video is already rendering. Wait for it to finish first.");
+      return;
+    }
+    const job = videoJobForDelivery(delivery);
+    if (job?.status === "failed") {
+      await handleRetryVideo(job.id);
+      return;
+    }
+    if (delivery.profile.preparation.kind !== "veo") return;
+    setSelectedDeliveryId(deliveryId);
+    setVideoDirectorDeliveryId(deliveryId);
+    setIsVideoDirectorOpen(true);
+  };
+
+  const queuedDeliveryId = shareQueue[shareQueueIndex];
+  const queuedDelivery = queuedDeliveryId
+    ? deliveriesById.get(queuedDeliveryId)
+    : undefined;
+  useEffect(() => {
+    if (
+      !queuedDeliveryId ||
+      isShareDialogOpen ||
+      selectedDeliveryId !== queuedDeliveryId ||
+      isPreparingSave ||
+      !activePreparedSave
+    ) {
+      return;
+    }
+    const openKey = `${shareQueueIndex}:${queuedDeliveryId}`;
+    if (shareQueueOpenedRef.current === openKey) return;
+    shareQueueOpenedRef.current = openKey;
+    void handleShareDelivery(queuedDeliveryId);
+  }, [
+    activePreparedSave,
+    isPreparingSave,
+    isShareDialogOpen,
+    queuedDeliveryId,
+    selectedDeliveryId,
+    shareQueueIndex,
+  ]);
+
+  const deliveryOutputs = useMemo<PlatformDeliveryOutput[]>(
+    () =>
+      deliveryPlan.deliveries.map((delivery) => {
+        const selected = delivery.id === selectedDeliveryId;
+        const videoJob =
+          delivery.mediaKind === "video" ? videoJobForDelivery(delivery) : undefined;
+        let status: PlatformDeliveryOutput["status"] = selected
+          ? activePreparedSave
+            ? "ready"
+            : "generating"
+          : "available";
+
+        if (delivery.mediaKind === "video") {
+          status = !videoJob
+            ? "pending"
+            : videoJob.status === "completed"
+              ? selected
+                ? activePreparedSave
+                  ? "ready"
+                  : "generating"
+                : "available"
+              : videoJob.status === "failed"
+                ? "failed"
+                : "generating";
+        }
+        if (selected && !manualVideoSelected && isPreparingSave) {
+          status = "generating";
+        }
+        if (selected && !manualVideoSelected && mediaPreparationError) {
+          status = "failed";
+        }
+
+        return {
+          id: delivery.id,
+          platformLabel: delivery.profile.destinationLabel,
+          mediaKind: delivery.mediaKind === "photo" ? "image" : "video",
+          ratio: delivery.profile.output.aspectRatio,
+          width: delivery.profile.output.width,
+          height: delivery.profile.output.height,
+          status,
+          thumbnail:
+            delivery.mediaKind === "video" && videoJob?.url ? videoJob.url : post.image,
+          poster: delivery.mediaKind === "video" ? post.image : undefined,
+          selected,
+          batchSelected: batchDeliveryIds.has(delivery.id),
+          batchEligible: batchEligibleDeliveryIds.has(delivery.id),
+          actionsReady:
+            selected &&
+            !manualVideoSelected &&
+            status === "ready" &&
+            Boolean(activePreparedSave) &&
+            !isPreparingSave,
+          recoveryDisabled: delivery.mediaKind === "video" && creativeLockedForReview,
+          recoveryDisabledReason:
+            delivery.mediaKind === "video" && creativeLockedForReview
+              ? videoReviewLockMessage
+              : undefined,
+        };
+      }),
+    [
+      deliveryPlan.deliveries,
+      isPreparingSave,
+      manualVideoSelected,
+      mediaPreparationError,
+      post.image,
+      activePreparedSave,
+      batchDeliveryIds,
+      batchEligibleDeliveryIds,
+      creativeLockedForReview,
+      selectedDeliveryId,
+      videoReviewLockMessage,
+      videoJobForDelivery,
+    ],
+  );
 
   const hasWorkAtRisk =
     !hasSavedMedia ||
@@ -1348,15 +2043,58 @@ export const PostResult: React.FC<PostResultProps> = ({
       />
       <ShareDialog
         isOpen={isShareDialogOpen && !deliveryLocked}
-        onClose={() => setIsShareDialogOpen(false)}
-        content={{
-          text: editedText,
-          disclosures: activeDisclosures || undefined,
-          imageDataUrl: post.image,
-          videoUrl: videoUrl || undefined,
-        }}
+        onClose={
+          shareQueue.length > 0
+            ? handleCancelShareQueue
+            : () => {
+                setIsShareDialogOpen(false);
+                setFocusedShareDeliveryId(null);
+                setFocusedShareContent(null);
+              }
+        }
+        content={
+          focusedShareContent || {
+            text: editedText,
+            disclosures: activeDisclosures || undefined,
+            imageDataUrl: post.image,
+            videoUrl: videoUrl || undefined,
+          }
+        }
         platformCaptions={sharePlatformCaptions}
-        selectedPlatformIds={post.platformIds}
+        selectedPlatformIds={
+          focusedShareDeliveryId
+            ? [
+                deliveriesById.get(focusedShareDeliveryId)?.destinationId ||
+                  "native_share",
+              ]
+            : post.platformIds
+        }
+        focusedTargetId={
+          focusedShareDeliveryId
+            ? deliveriesById.get(focusedShareDeliveryId)?.destinationId
+            : undefined
+        }
+        dealershipMention={
+          focusedShareDeliveryId
+            ? dealershipMentionFor(
+                deliveriesById.get(focusedShareDeliveryId)?.destinationId || "",
+                currentDealer,
+              )
+            : undefined
+        }
+        queueProgress={
+          shareQueue.length > 0
+            ? {
+                current: shareQueueIndex + 1,
+                total: shareQueue.length,
+                nextLabel: shareQueue[shareQueueIndex + 1]
+                  ? deliveriesById.get(shareQueue[shareQueueIndex + 1])?.profile
+                      .destinationLabel
+                  : undefined,
+              }
+            : undefined
+        }
+        onQueueAdvance={shareQueue.length > 0 ? handleAdvanceShareQueue : undefined}
       />
       <Modal
         isOpen={leaveConfirm !== null}
@@ -1410,9 +2148,30 @@ export const PostResult: React.FC<PostResultProps> = ({
       <Suspense fallback={null}>
         <LazyVideoDirectorModal
           isOpen={isVideoDirectorOpen && !creativeLockedForReview}
-          onClose={() => setIsVideoDirectorOpen(false)}
+          onClose={() => {
+            setIsVideoDirectorOpen(false);
+            setVideoDirectorDeliveryId(null);
+          }}
           onSelectStyle={handleGenerateVideo}
-          defaultAspect={post.imageAspectRatio === "9:16" ? "9:16" : "16:9"}
+          defaultAspect={
+            post.imageAspectRatio === "9:16" || post.imageAspectRatio === "4:5"
+              ? "9:16"
+              : "16:9"
+          }
+          lockedAspect={(() => {
+            const delivery = videoDirectorDeliveryId
+              ? deliveriesById.get(videoDirectorDeliveryId)
+              : undefined;
+            return delivery?.profile.preparation.kind === "veo"
+              ? delivery.profile.preparation.nativeAspectRatio
+              : undefined;
+          })()}
+          deliveryLabel={
+            videoDirectorDeliveryId
+              ? deliveriesById.get(videoDirectorDeliveryId)?.profile.destinationLabel
+              : undefined
+          }
+          isSubmitting={isVideoLoading}
         />
         <ScheduleDialog
           isOpen={isScheduleOpen && !historyReadOnly}
@@ -1677,6 +2436,110 @@ export const PostResult: React.FC<PostResultProps> = ({
             <span>{error}</span>
           </motion.div>
         )}
+        <PlatformDeliveryBoard
+          className="w-full"
+          outputs={deliveryOutputs}
+          onSelect={handleSelectDelivery}
+          onSave={handleSave}
+          onShare={handleShareDelivery}
+          onRetry={handleRetryDelivery}
+          onToggleBatch={handleToggleBatchDelivery}
+          onToggleAll={handleToggleAllBatchDeliveries}
+          onShareBatch={handleStartShareBatch}
+          actionsDisabled={deliveryLocked}
+          recoveryDisabled={isVideoLoading}
+          batchActionDisabled={
+            deliveryLocked || isVideoLoading || shareQueue.length > 0
+          }
+          description={
+            post.mediaOutputMode === "both"
+              ? "Photo and video versions are separated by destination. Select a row, wait for Ready, then save or share that exact file."
+              : "Select a destination output, wait for Ready, then save or share its exact file."
+          }
+        />
+        {shareQueue.length > 0 && !isShareDialogOpen ? (
+          <div
+            className={cn(
+              "w-full rounded-xl border px-4 py-3",
+              mediaPreparationError
+                ? "border-error-500/35 bg-error-500/10"
+                : "border-primary-400/30 bg-primary-500/10",
+            )}
+            role={mediaPreparationError ? "alert" : "status"}
+            aria-live="polite"
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-surface-50">
+                  {mediaPreparationError
+                    ? `Could not prepare ${queuedDelivery?.profile.destinationLabel || "this output"}`
+                    : `Preparing ${queuedDelivery?.profile.destinationLabel || "selected output"} · ${shareQueueIndex + 1} of ${shareQueue.length}`}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-surface-300">
+                  {mediaPreparationError ||
+                    "You can cancel the sequence while the exact file is prepared."}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {mediaPreparationError && queuedDelivery ? (
+                  <>
+                    <button
+                      type="button"
+                      className="min-h-11 rounded-lg border border-primary-400/40 bg-primary-500/15 px-3 text-xs font-semibold text-surface-50"
+                      onClick={() => {
+                        setMediaPreparationError(null);
+                        shareQueueOpenedRef.current = null;
+                        if (queuedDelivery.mediaKind === "video") {
+                          handleCancelShareQueue();
+                          void handleRetryDelivery(queuedDelivery.id);
+                        } else {
+                          handleSelectDelivery(queuedDelivery.id);
+                          setMediaPreparationNonce((value) => value + 1);
+                        }
+                      }}
+                    >
+                      {queuedDelivery.mediaKind === "video"
+                        ? "Create again"
+                        : "Retry file"}
+                    </button>
+                    <button
+                      type="button"
+                      className="min-h-11 rounded-lg border border-surface-600 px-3 text-xs font-semibold text-surface-200"
+                      onClick={handleAdvanceShareQueue}
+                    >
+                      Skip this output
+                    </button>
+                  </>
+                ) : null}
+                <button
+                  type="button"
+                  className="min-h-11 rounded-lg border border-surface-600 px-3 text-xs font-semibold text-surface-200"
+                  onClick={handleCancelShareQueue}
+                >
+                  Cancel sequence
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {(deliveryPlan.unsupported.length > 0 || deliveryPlan.unknown.length > 0) && (
+          <div
+            className="w-full rounded-xl border border-warning-500/25 bg-warning-500/10 px-4 py-3 text-sm text-warning-100"
+            role="status"
+          >
+            <p className="font-semibold">Some saved destinations need attention</p>
+            <ul className="mt-1 list-disc space-y-1 pl-5 text-xs leading-relaxed">
+              {deliveryPlan.unsupported.map((profile) => (
+                <li key={profile.profileId}>{profile.reason}</li>
+              ))}
+              {deliveryPlan.unknown.map((item) => (
+                <li key={item.platformId}>
+                  {item.platformId}: {item.reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div
           className={`grid w-full ${
             isDesktopLayout
@@ -1733,13 +2596,14 @@ export const PostResult: React.FC<PostResultProps> = ({
                 <Badge variant={videoUrl ? "info" : "neutral"} uppercase={false}>
                   {videoUrl
                     ? "Video"
-                    : primarySaveFormat
-                      ? `Saves as ${primarySaveFormat.width}×${primarySaveFormat.height}`
+                    : activeImageFormat
+                      ? `Saves as ${activeImageFormat.width}×${activeImageFormat.height}`
                       : "Image"}
                 </Badge>
-                {!videoUrl && preparedSave ? (
+                {!videoUrl && activePreparedSave ? (
                   <Badge variant="neutral" uppercase={false}>
-                    {preparedSave.filename.split(".").pop()?.toUpperCase() || "JPG"}
+                    {activePreparedSave.filename.split(".").pop()?.toUpperCase() ||
+                      "JPG"}
                   </Badge>
                 ) : null}
               </div>
@@ -1824,6 +2688,12 @@ export const PostResult: React.FC<PostResultProps> = ({
                       type="button"
                       onClick={() => {
                         triggerHapticFeedback();
+                        setManualVideoSelected(false);
+                        setSelectedDeliveryId(
+                          deliveryPlan.deliveries.find(
+                            (delivery) => delivery.mediaKind === "photo",
+                          )?.id || null,
+                        );
                         adoptVideoUrl(null);
                       }}
                       className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/[0.05] px-3 py-2 text-sm font-semibold text-surface-100 transition-colors hover:bg-white/[0.09]"
@@ -1857,6 +2727,12 @@ export const PostResult: React.FC<PostResultProps> = ({
                           type="button"
                           className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 font-semibold text-surface-100"
                           onClick={() => {
+                            setManualVideoSelected(false);
+                            setSelectedDeliveryId(
+                              deliveryPlan.deliveries.find(
+                                (delivery) => delivery.mediaKind === "photo",
+                              )?.id || null,
+                            );
                             adoptVideoUrl(null);
                             setVideoPlayError(null);
                           }}
@@ -1875,10 +2751,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                   }}
                   className="mx-auto block w-full overflow-hidden rounded-xl bg-black focus:outline-none focus:ring-4 focus:ring-primary-500/50 transition-all hover:ring-2 hover:ring-primary-400/30"
                   style={
-                    primarySaveFormat
+                    activeImageFormat
                       ? {
-                          aspectRatio: `${primarySaveFormat.width} / ${primarySaveFormat.height}`,
-                          maxWidth: `min(100%, calc(70dvh * ${primarySaveFormat.width} / ${primarySaveFormat.height}))`,
+                          aspectRatio: `${activeImageFormat.width} / ${activeImageFormat.height}`,
+                          maxWidth: `min(100%, calc(70dvh * ${activeImageFormat.width} / ${activeImageFormat.height}))`,
                         }
                       : undefined
                   }
@@ -1905,7 +2781,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                   <Badge variant="neutral" uppercase={false}>
                     {1 +
                       imageVersions.length +
-                      videoJobs.filter((job) => job.url).length}{" "}
+                      videoJobs.filter(
+                        (job) =>
+                          job.url && job.sourceCreativeKey === currentVideoCreativeKey,
+                      ).length}{" "}
                     items
                   </Badge>
                 </div>
@@ -1917,6 +2796,12 @@ export const PostResult: React.FC<PostResultProps> = ({
                     type="button"
                     onClick={() => {
                       triggerHapticFeedback();
+                      setManualVideoSelected(false);
+                      setSelectedDeliveryId(
+                        deliveryPlan.deliveries.find(
+                          (delivery) => delivery.mediaKind === "photo",
+                        )?.id || null,
+                      );
                       adoptVideoUrl(null);
                     }}
                     className={cn(
@@ -1965,13 +2850,18 @@ export const PostResult: React.FC<PostResultProps> = ({
                     </button>
                   ))}
                   {videoJobs
-                    .filter((job) => Boolean(job.url))
+                    .filter(
+                      (job) =>
+                        Boolean(job.url) &&
+                        job.sourceCreativeKey === currentVideoCreativeKey,
+                    )
                     .map((job) => (
                       <button
                         key={`tray-${job.id}`}
                         type="button"
                         onClick={() => {
                           triggerHapticFeedback();
+                          setManualVideoSelected(true);
                           adoptVideoUrl(job.url || null);
                         }}
                         className={cn(
@@ -2015,7 +2905,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                     }
                     busy={isVideoLoading}
                     label={isVideoLoading ? "Render" : videoUrl ? "New video" : "Video"}
-                    onClick={() => setIsVideoDirectorOpen(true)}
+                    onClick={() => {
+                      setVideoDirectorDeliveryId(null);
+                      setIsVideoDirectorOpen(true);
+                    }}
                   />
                   <ActionTile
                     icon={Sparkles}
@@ -2063,7 +2956,11 @@ export const PostResult: React.FC<PostResultProps> = ({
                         ? `Share post (${deliveryLockLabel.toLowerCase()})`
                         : "Share post"
                     }
-                    disabled={deliveryLocked}
+                    disabled={
+                      deliveryLocked ||
+                      (!manualVideoSelected && !activePreparedSave) ||
+                      isPreparingSave
+                    }
                     label="Share"
                     onClick={handleOpenShare}
                   />
@@ -2072,7 +2969,12 @@ export const PostResult: React.FC<PostResultProps> = ({
                     iconClassName="text-success-300"
                     tooltip="Save media"
                     ariaLabel={saveAriaLabel(deliveryLocked)}
-                    disabled={imageBusy || deliveryLocked || isPreparingSave}
+                    disabled={
+                      imageBusy ||
+                      deliveryLocked ||
+                      isPreparingSave ||
+                      !activePreparedSave
+                    }
                     busy={imageBusy || isPreparingSave}
                     label={isPreparingSave ? "Preparing" : "Save"}
                     onClick={() => void handleSave()}
@@ -2346,7 +3248,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                           {job.url && (
                             <button
                               type="button"
-                              onClick={() => adoptVideoUrl(job.url || null)}
+                              onClick={() => {
+                                setManualVideoSelected(true);
+                                adoptVideoUrl(job.url || null);
+                              }}
                               aria-label={`Preview ${job.style} video`}
                               className="text-[10px] font-semibold uppercase tracking-wide text-primary-200 hover:text-surface-50 transition-colors"
                             >
@@ -2716,7 +3621,14 @@ export const PostResult: React.FC<PostResultProps> = ({
             <Button
               variant="tinted"
               onClick={handleOpenShare}
-              disabled={deliveryLocked}
+              disabled={
+                deliveryLocked ||
+                isPreparingSave ||
+                !activePreparedSave ||
+                (!manualVideoSelected &&
+                  selectedDelivery?.mediaKind === "video" &&
+                  selectedVideoJob?.status !== "completed")
+              }
               aria-label={
                 deliveryLocked
                   ? `Share post (${deliveryLockLabel.toLowerCase()})`
@@ -2732,7 +3644,9 @@ export const PostResult: React.FC<PostResultProps> = ({
             <Button
               variant="tinted"
               onClick={() => void handleSave()}
-              disabled={deliveryLocked || imageBusy || isPreparingSave}
+              disabled={
+                deliveryLocked || imageBusy || isPreparingSave || !activePreparedSave
+              }
               aria-label={saveAriaLabel(deliveryLocked)}
               leftIcon={
                 isPreparingSave ? (

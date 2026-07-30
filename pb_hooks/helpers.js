@@ -14,7 +14,7 @@
 
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
 const PROVIDER_RESOURCE_TTL_SECONDS = 48 * 60 * 60; // provider jobs/files are short-lived
-const API_CONTRACT_VERSION = "2026-07-17.v2";
+const API_CONTRACT_VERSION = "2026-07-29.v3";
 
 // ---------------------------------------------------------------------------
 // Cookie parsing
@@ -1988,9 +1988,11 @@ const DEALER_TEXT_FIELD_LIMITS = {
   hours: 500,
   tagline: 200,
   facebook_url: 500,
+  facebook_page_tag: 100,
   instagram_handle: 100,
   tiktok_handle: 100,
   x_handle: 100,
+  linkedin_company_tag: 100,
   gbp_url: 500,
   default_hashtags: 1500,
   default_footer: 500,
@@ -1999,6 +2001,58 @@ const DEALER_TEXT_FIELD_LIMITS = {
   enabled_fun_styles: 2000,
   custom_scenarios: 32000,
 };
+
+const DEALER_SOCIAL_USERNAME_RULES = {
+  instagram_handle: {
+    label: "Instagram handle",
+    maxLength: 30,
+    pattern: /^[A-Za-z0-9._]+$/,
+  },
+  tiktok_handle: {
+    label: "TikTok handle",
+    maxLength: 24,
+    pattern: /^[A-Za-z0-9._]+$/,
+  },
+  x_handle: {
+    label: "X handle",
+    maxLength: 15,
+    pattern: /^[A-Za-z0-9_]+$/,
+  },
+};
+
+/**
+ * Persist social identities in one canonical form: no leading @, profile URL,
+ * control character, or platform-invalid username. The client accepts pasted
+ * profile links and extracts their identity before calling this boundary.
+ */
+function normalizeDealerSocialField(field, rawValue) {
+  let value = (rawValue || "").toString().trim().replace(/^@+/, "");
+  if (!value) return "";
+
+  if (/^https?:\/\//i.test(value)) {
+    throw new Error("Social profiles must be saved as a Page name or handle");
+  }
+
+  if (field === "facebook_page_tag" || field === "linkedin_company_tag") {
+    value = value
+      .replace(/[\u0000-\u001f\u007f]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!value) return "";
+    return assertString(value, DEALER_TEXT_FIELD_LIMITS[field]);
+  }
+
+  const rule = DEALER_SOCIAL_USERNAME_RULES[field];
+  if (!rule) return value;
+  if (value.length > rule.maxLength || !rule.pattern.test(value)) {
+    throw new Error(
+      rule.label +
+        " may use only letters, numbers" +
+        (field === "x_handle" ? ", and underscores" : ", periods, and underscores"),
+    );
+  }
+  return value;
+}
 
 /**
  * Build the allowlisted mutable dealers fields for the custom multipart
@@ -2013,6 +2067,15 @@ function dealerMutationData(body, allowCode, allowAdminCode) {
     if (body[field] === undefined) continue;
     let value = (body[field] || "").toString();
     if (field === "name") value = value.trim();
+    if (
+      field === "facebook_page_tag" ||
+      field === "instagram_handle" ||
+      field === "tiktok_handle" ||
+      field === "x_handle" ||
+      field === "linkedin_company_tag"
+    ) {
+      value = normalizeDealerSocialField(field, value);
+    }
     data[field] = assertString(value, DEALER_TEXT_FIELD_LIMITS[field]);
   }
 
@@ -2128,6 +2191,10 @@ function safeDealerMutationError(err) {
     "requires_approval must be true or false",
     "Access code must be exactly 4 digits",
     "Access code is already in use",
+    "Social profiles must be saved as a Page name or handle",
+    "Instagram handle may use only letters, numbers, periods, and underscores",
+    "TikTok handle may use only letters, numbers, periods, and underscores",
+    "X handle may use only letters, numbers, and underscores",
   ];
   for (let i = 0; i < known.length; i++) {
     if (message.indexOf(known[i]) !== -1) return known[i];
@@ -2342,9 +2409,11 @@ function serializeDealer(record) {
     hours: record.getString("hours"),
     tagline: record.getString("tagline"),
     facebook_url: record.getString("facebook_url"),
+    facebook_page_tag: record.getString("facebook_page_tag"),
     instagram_handle: record.getString("instagram_handle"),
     tiktok_handle: record.getString("tiktok_handle"),
     x_handle: record.getString("x_handle"),
+    linkedin_company_tag: record.getString("linkedin_company_tag"),
     gbp_url: record.getString("gbp_url"),
     default_hashtags: record.getString("default_hashtags"),
     default_footer: record.getString("default_footer"),
@@ -2568,6 +2637,7 @@ module.exports = {
   // Validation
   assertString,
   assertEnum,
+  normalizeDealerSocialField,
   dealerMutationData,
   restrictDealerLogoSchema,
   dealerLogoFile,
