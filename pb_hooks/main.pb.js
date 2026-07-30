@@ -16,18 +16,6 @@
 // ---------------------------------------------------------------------------
 var cachedAccessToken = null;
 var tokenExpiry = 0;
-const ALLOWED_POST_PLATFORM_IDS = [
-  "instagram_feed",
-  "instagram_reel",
-  "instagram_story",
-  "facebook_feed",
-  "tiktok",
-  "gbp",
-  "marketplace",
-  "linkedin",
-  "x_twitter",
-  "native_share",
-];
 
 // Rate limiting - using simple object instead of Map for PocketBase JSVM compatibility
 const proxyHandler = (c) => {
@@ -2435,7 +2423,7 @@ routerAdd("POST", "/api/app/posts", (c) => {
       return c.json(400, { error: "Invalid post scenario" });
     }
     const releaseRequired = scenarioPolicy.releaseRequired;
-    const allowedPlatformIds = ALLOWED_POST_PLATFORM_IDS;
+    const allowedPlatformIds = helpers.allowedPostPlatformIds();
     const allowedPrimaryFormatIds = [
       "feed_portrait",
       "feed_square",
@@ -2895,7 +2883,7 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
       12000,
     );
     if (!caption) return c.json(400, { error: "Draft caption is required" });
-    const allowedPlatformIds = ALLOWED_POST_PLATFORM_IDS;
+    const allowedPlatformIds = helpers.allowedPostPlatformIds();
     let selectedPlatformIds = [];
     try {
       const storedPlatformIds = JSON.parse(record.getString("platform_ids") || "[]");
@@ -3289,7 +3277,7 @@ routerAdd("GET", "/api/app/posts", (c) => {
     const hasMore = records.length > limit;
     const page = hasMore ? records.slice(0, limit) : records;
 
-    const allowedPlatformIds = ALLOWED_POST_PLATFORM_IDS;
+    const allowedPlatformIds = helpers.allowedPostPlatformIds();
     const expectedAspectByFormat = {
       feed_portrait: "4:5",
       feed_square: "1:1",
@@ -3439,7 +3427,7 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
       // Re-evaluate the stored, immutable review copy against the current
       // dealer policy. This protects legacy queue entries and catches phrases
       // blocked after submission; rejection remains available to clear them.
-      const allowedPlatformIds = ALLOWED_POST_PLATFORM_IDS;
+      const allowedPlatformIds = helpers.allowedPostPlatformIds();
       let selectedPlatformIds = [];
       try {
         const parsed = JSON.parse(record.getString("platform_ids") || "[]");

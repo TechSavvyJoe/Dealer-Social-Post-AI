@@ -2486,6 +2486,26 @@ function normalizeReleaseVin(value) {
 }
 
 /**
+ * PocketBase serializes each route callback into an isolated JSVM program.
+ * Keep this allowlist behind a required helper instead of relying on a
+ * main.pb.js module-scope binding that disappears at the callback boundary.
+ */
+function allowedPostPlatformIds() {
+  return [
+    "instagram_feed",
+    "instagram_reel",
+    "instagram_story",
+    "facebook_feed",
+    "tiktok",
+    "gbp",
+    "marketplace",
+    "linkedin",
+    "x_twitter",
+    "native_share",
+  ];
+}
+
+/**
  * Parse a platform-caption map under the same destination allowlist used for
  * post sizing. Captions may only exist for selected destinations and remain
  * within the persisted field's aggregate and per-caption bounds.
@@ -2656,6 +2676,7 @@ module.exports = {
   resolvePostScenarioPolicy,
   normalizeReleaseIdentity,
   normalizeReleaseVin,
+  allowedPostPlatformIds,
   parsePostPlatformCaptions,
   safeProviderTransportDiagnostic,
   // Provider resource ownership

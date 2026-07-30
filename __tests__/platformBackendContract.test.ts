@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { PUBLISH_TARGETS } from "../services/publishTargets";
 
 type Helpers = {
+  allowedPostPlatformIds: () => string[];
   normalizeDealerSocialField: (field: string, value: unknown) => string;
   dealerMutationData: (
     body: Record<string, unknown>,
@@ -21,15 +22,7 @@ const loadPocketBaseHelpers = (): Helpers => {
 
 describe("platform contracts at the PocketBase boundary", () => {
   it("keeps every frontend publishing destination in the backend allowlist", () => {
-    const source = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
-    const declaration = source.match(
-      /const ALLOWED_POST_PLATFORM_IDS = \[([\s\S]*?)\];/,
-    );
-    expect(declaration?.[1]).toBeTruthy();
-    const backendIds = Array.from(
-      declaration?.[1].matchAll(/"([^"]+)"/g) ?? [],
-      (match) => match[1],
-    );
+    const backendIds = loadPocketBaseHelpers().allowedPostPlatformIds();
 
     expect(backendIds).toEqual(PUBLISH_TARGETS.map((target) => target.id));
   });

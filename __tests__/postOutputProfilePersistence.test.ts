@@ -152,9 +152,10 @@ describe("post output-profile persistence", () => {
 
   it("validates server allowlists and returns only no-store history metadata", () => {
     const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
-    const allowlistStart = hook.indexOf("const ALLOWED_POST_PLATFORM_IDS = [");
-    const allowlistEnd = hook.indexOf("];", allowlistStart) + 2;
-    const platformAllowlist = hook.slice(allowlistStart, allowlistEnd);
+    const helpers = readFileSync(resolve(process.cwd(), "pb_hooks/helpers.js"), "utf8");
+    const allowlistStart = helpers.indexOf("function allowedPostPlatformIds()");
+    const allowlistEnd = helpers.indexOf("\n}", allowlistStart) + 2;
+    const platformAllowlist = helpers.slice(allowlistStart, allowlistEnd);
     const postStart = hook.indexOf('routerAdd("POST", "/api/app/posts"');
     const draftStart = hook.indexOf(
       'routerAdd("PATCH", "/api/app/posts/:id/draft"',
@@ -193,7 +194,9 @@ describe("post output-profile persistence", () => {
       expect(platformAllowlist).toContain(`"${platform}"`);
     }
     for (const route of [postRoute, draftRoute, listRoute, approvalRoute]) {
-      expect(route).toContain("const allowedPlatformIds = ALLOWED_POST_PLATFORM_IDS");
+      expect(route).toContain(
+        "const allowedPlatformIds = helpers.allowedPostPlatformIds()",
+      );
     }
     expect(postRoute).toContain("allowedPrimaryFormatIds.indexOf(primaryFormatId)");
     expect(postRoute).toContain("allowedImageAspectRatios.indexOf(imageAspectRatio)");

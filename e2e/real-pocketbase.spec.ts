@@ -228,7 +228,11 @@ test.describe("real PocketBase release flow", () => {
         payload: {
           task: "caption",
           errorCode: "SYNTHETIC_PROVIDER_FAILURE",
-          releaseSha: `ci-runtime-canary-${browserName}`,
+          // Playwright retries deliberately repeat this full persistence
+          // canary. Give each attempt a unique safe identifier so the
+          // one-minute telemetry coalescer does not turn a valid retry into a
+          // 202 "already stored" response.
+          releaseSha: `ci-runtime-canary-${browserName}-r${testInfo.retry}`,
           apiContractVersion,
           dealerCode: "MustNeverPersist1",
           token: "MustNeverPersist2",
