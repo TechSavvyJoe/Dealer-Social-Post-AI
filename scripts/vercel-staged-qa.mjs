@@ -22,7 +22,7 @@ import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const VERCEL_CLI_VERSION = "58.4.0";
+const VERCEL_CLI_VERSION = "58.4.4";
 const EXPECTED_VERCEL_ORG_ID = "team_Tc8DG6XMPUCefkTa3u71mmlN";
 const EXPECTED_VERCEL_PROJECT_ID = "prj_h5phWNMNtK4D9dqwbOHrrrRMqrRi";
 const EXPECTED_VERCEL_PROJECT_NAME = "dealer-social-post-ai";

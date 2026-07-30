@@ -1,6 +1,14 @@
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
@@ -21,12 +29,14 @@ describe("release artifact binding", () => {
   it("stages and promotes only a clean, current, evidence-bound Vercel artifact", () => {
     const scriptPath = resolve(process.cwd(), "scripts/vercel-staged-release.sh");
     const script = read("scripts/vercel-staged-release.sh");
+    const qaScript = read("scripts/vercel-staged-qa.mjs");
     const runbook = read("docs/production-backups-and-release.md");
     const packageJson = read("package.json");
-    const vercelCliVersion = "58.4.0";
+    const vercelCliVersion = "58.4.4";
 
     execFileSync("bash", ["-n", scriptPath]);
     expect(script).toContain(`readonly VERCEL_CLI_VERSION="${vercelCliVersion}"`);
+    expect(qaScript).toContain(`const VERCEL_CLI_VERSION = "${vercelCliVersion}"`);
     expect(script).not.toMatch(/58[.]1[.]0/);
     expect(runbook).toContain(`npx vercel@${vercelCliVersion} env add`);
     expect(runbook).not.toMatch(/58[.]1[.]0/);
@@ -75,6 +85,61 @@ describe("release artifact binding", () => {
     expect(packageJson).toContain('"release:vercel:stage"');
     expect(packageJson).toContain('"release:vercel:qa"');
     expect(packageJson).toContain('"release:vercel:promote"');
+  });
+
+  it("fails closed when the shell release lock is already owned", () => {
+    const directory = mkdtempSync(join(tmpdir(), "dealer-release-shell-lock-"));
+    const scriptsDirectory = join(directory, "scripts");
+    const evidenceDirectory = join(directory, ".release-evidence");
+    const scriptPath = join(scriptsDirectory, "vercel-staged-release.sh");
+    const lockPath = join(evidenceDirectory, "vercel-release.lock");
+
+    try {
+      mkdirSync(scriptsDirectory, { recursive: true });
+      mkdirSync(evidenceDirectory, { recursive: true, mode: 0o700 });
+      writeFileSync(scriptPath, read("scripts/vercel-staged-release.sh"), {
+        mode: 0o700,
+      });
+      writeFileSync(
+        lockPath,
+        `${JSON.stringify({
+          schemaVersion: 1,
+          pid: 999_999,
+          token: "external-owner",
+          createdAt: "2026-07-30T00:00:00.000Z",
+        })}\n`,
+        { mode: 0o600 },
+      );
+      execFileSync("git", ["init", "--quiet"], { cwd: directory });
+
+      const result = spawnSync("bash", [scriptPath, "invalid"], {
+        cwd: directory,
+        encoding: "utf8",
+        env: process.env,
+      });
+      const output = `${result.stdout || ""}\n${result.stderr || ""}`;
+
+      expect(result.status).not.toBe(0);
+      expect(output).toContain("another staged release command owns");
+      expect(output).not.toContain("SyntaxError");
+      expect(readFileSync(lockPath, "utf8")).toContain("external-owner");
+
+      rmSync(lockPath);
+      const uncontended = spawnSync("bash", [scriptPath, "invalid"], {
+        cwd: directory,
+        encoding: "utf8",
+        env: process.env,
+      });
+      const uncontendedOutput = `${uncontended.stdout || ""}\n${
+        uncontended.stderr || ""
+      }`;
+      expect(uncontended.status).not.toBe(0);
+      expect(uncontendedOutput).toContain("usage:");
+      expect(uncontendedOutput).not.toContain("SyntaxError");
+      expect(existsSync(lockPath)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("keeps durable release receipts away from Playwright output", () => {

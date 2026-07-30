@@ -50,7 +50,7 @@ The CI restore canary uploads the bundled synthetic `public/icon-192.png` as a d
 
 ## Turnstile and trusted Vercel proxy
 
-Create a managed Cloudflare Turnstile widget for `localhost`, `127.0.0.1`, the production Vercel hostname, and `dealer-social-post-ai-production.fly.dev`. The widget action is `turnstile-spin-v2`. Store `TURNSTILE_SECRET` only as a Fly secret. Configure the public site key in both protected GitHub environments and Vercel production as `VITE_TURNSTILE_SITE_KEY`; configure the same public key on Fly as `TURNSTILE_SITE_KEY` through the deployment workflow. Every official Cloudflare test sitekey and secret—including always-pass, always-fail, invisible, and forced-interaction variants—is CI/local-only and rejected by Fly deployment and readiness.
+Create a managed Cloudflare Turnstile widget for the production Vercel hostname and `dealer-social-post-ai-production.fly.dev`. Cloudflare can add `localhost` and `127.0.0.1` to the widget for local development, but the production backend allowlist must contain only `dealer-social-post-ai.vercel.app,dealer-social-post-ai-production.fly.dev`; Fly strips local hosts defensively. The widget action is `turnstile-spin-v2`. Store `TURNSTILE_SECRET` only as a Fly secret. Configure the public site key in both protected GitHub environments and Vercel production as `VITE_TURNSTILE_SITE_KEY`; configure the same public key on Fly as `TURNSTILE_SITE_KEY` through the deployment workflow. Every official Cloudflare test sitekey and secret—including always-pass, always-fail, invisible, and forced-interaction variants—is CI/local-only and rejected by Fly deployment and readiness.
 
 Create a random 32+ character proxy credential without printing it, then install the identical value on Fly and Vercel. It is not a `VITE_` variable and is injected only into Vercel's server-side `/api` transform in `vercel.ts`.
 
@@ -58,14 +58,14 @@ Create a random 32+ character proxy credential without printing it, then install
 set +x
 PROXY_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
 flyctl secrets set --app dealer-social-post-ai-production "VERCEL_TO_FLY_PROXY_SECRET=$PROXY_SECRET"
-printf '%s' "$PROXY_SECRET" | npx vercel@58.4.0 env add VERCEL_TO_FLY_PROXY_SECRET production --sensitive --force --yes
+printf '%s' "$PROXY_SECRET" | npx vercel@58.4.4 env add VERCEL_TO_FLY_PROXY_SECRET production --sensitive --force --yes
 unset PROXY_SECRET
 ```
 
 Before the backend-first release, set these GitHub `production` environment variables:
 
 - `VITE_TURNSTILE_SITE_KEY` to the real public site key.
-- `TURNSTILE_ALLOWED_HOSTNAMES` to the exact comma-separated widget hosts.
+- `TURNSTILE_ALLOWED_HOSTNAMES` to `dealer-social-post-ai.vercel.app,dealer-social-post-ai-production.fly.dev` (production hosts only).
 - `TURNSTILE_ENFORCEMENT_ENABLED=false` for the compatibility phase.
 - `LEGACY_CLIENT_COMPATIBILITY_ENABLED=true` for exactly one backend-first release.
 
