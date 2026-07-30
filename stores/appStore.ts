@@ -188,7 +188,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: null,
   isRestoringSession: true,
   authEpoch: 0,
-  theme: "system",
+  // New installs open in the dealership-studio theme shown throughout the
+  // product. Explicitly saved light/system preferences still restore below.
+  theme: "dark",
   preferredStyle: StyleOption.Modern,
   preferredTone: ToneOption.Excited,
   compactMode: false,

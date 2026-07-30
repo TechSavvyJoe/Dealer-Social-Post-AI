@@ -152,6 +152,43 @@
     --surface-950: 248 250 252;
   }
 
+  /*
+   * The publish result is a purpose-built media control room. Keeping this
+   * workspace dark preserves accurate photo/video contrast and matches the
+   * focused review surface on desktop and mobile even when the rest of the
+   * application is using the sunlight theme.
+   */
+  .publish-studio-theme {
+    --color-surface-base: 7 12 22;
+    --color-surface-elevated: 12 20 34;
+    --color-surface-overlay: 17 27 44;
+    --color-surface-raised: 26 38 58;
+
+    --color-text-primary: 248 250 252;
+    --color-text-secondary: 203 213 225;
+    --color-text-tertiary: 148 163 184;
+
+    --color-border: 42 56 78;
+    --color-border-strong: 67 84 110;
+    --color-border-light: 30 41 59;
+
+    --surface-50: 248 250 252;
+    --surface-100: 241 245 249;
+    --surface-200: 226 232 240;
+    --surface-300: 203 213 225;
+    --surface-400: 148 163 184;
+    --surface-500: 100 116 139;
+    --surface-600: 71 85 105;
+    --surface-700: 51 65 85;
+    --surface-800: 30 41 59;
+    --surface-900: 15 23 42;
+    --surface-950: 2 6 23;
+
+    background:
+      linear-gradient(180deg, rgba(37, 99, 235, 0.045), transparent 18rem),
+      rgb(var(--color-surface-base));
+  }
+
   /* Smooth scroll behavior with advanced typography */
   html {
     scroll-behavior: smooth;

@@ -289,6 +289,32 @@ describe("PlatformDeliveryBoard", () => {
     expect(onToggleBatch).toHaveBeenCalledWith("facebook-feed", true);
   });
 
+  it("keeps compact batch selection accessible without a full-width control row", () => {
+    const handlers = callbacks();
+    const onToggleBatch = vi.fn();
+    render(
+      <PlatformDeliveryBoard
+        outputs={[{ ...outputs[0], batchSelected: true }]}
+        {...handlers}
+        onToggleBatch={onToggleBatch}
+        compact
+      />,
+    );
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Include Instagram Reel video 9:16 in Share selected",
+    });
+    expect(checkbox).toBeChecked();
+    expect(checkbox.closest("label")).toHaveAttribute(
+      "title",
+      "Include Instagram Reel video 9:16 in guided sharing",
+    );
+    expect(screen.queryByText("Include in Share selected")).not.toBeInTheDocument();
+
+    fireEvent.click(checkbox);
+    expect(onToggleBatch).toHaveBeenCalledWith("instagram-reel", false);
+  });
+
   it("keeps an uncreated video out of Share selected until it is ready", () => {
     const handlers = callbacks();
     const onToggleBatch = vi.fn();

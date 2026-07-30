@@ -353,14 +353,20 @@ test.describe("Dealer Social Post AI Flow", () => {
     });
     await page.reload();
 
-    await expect(page.getByRole("heading", { name: "Ready to publish" })).toBeVisible();
-    const mediaPreview = page.getByRole("region", { name: "Media preview" });
     const isDesktop = testInfo.project.name.endsWith("desktop-1440");
+    await expect(
+      page.getByRole("heading", {
+        name: isDesktop ? "Publish studio" : "Facebook Feed",
+      }),
+    ).toBeVisible();
+    const mediaPreview = page.getByRole("region", { name: "Media preview" });
     const deliveryBar = page.getByLabel("Post delivery actions");
     const shareAndSaveActions = isDesktop ? mediaPreview : deliveryBar;
-    await expect(
-      deliveryBar.getByRole("button", { name: "Copy caption" }),
-    ).toBeVisible();
+    if (!isDesktop) {
+      await expect(
+        deliveryBar.getByRole("button", { name: "Copy caption" }),
+      ).toBeVisible();
+    }
     const shareTrigger = shareAndSaveActions.getByRole("button", {
       name: "Share post",
     });
@@ -402,16 +408,9 @@ test.describe("Dealer Social Post AI Flow", () => {
     await expectNoHorizontalOverflow(page);
 
     const creativeTools = page.getByRole("button", { name: /creative tools/i });
-    await expect(creativeTools).toHaveAttribute(
-      "aria-expanded",
-      isDesktop ? "true" : "false",
-    );
-    if (isDesktop) {
-      await expect(page.getByTestId("creative-tools-panel")).toBeVisible();
-    } else {
-      await expect(page.getByTestId("creative-tools-panel")).toBeHidden();
-      await expect(page.getByRole("button", { name: "Regenerate image" })).toBeHidden();
-    }
+    await expect(creativeTools).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByTestId("creative-tools-panel")).toBeHidden();
+    await expect(page.getByRole("button", { name: "Regenerate image" })).toBeHidden();
 
     await shareTrigger.focus();
     await page.keyboard.press("Enter");

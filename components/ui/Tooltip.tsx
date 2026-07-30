@@ -35,16 +35,17 @@ export const Tooltip: React.FC<TooltipProps> = ({ label, children, side = "top" 
       onBlur={() => setOpen(false)}
     >
       {children}
-      <div
-        className={cn(
-          "pointer-events-none absolute z-40 whitespace-nowrap rounded-md bg-slate-950/90 px-2 py-1 text-xs font-medium text-white shadow-lg transition-opacity",
-          open ? "opacity-100" : "opacity-0",
-          positionClasses[side],
-        )}
-        role="tooltip"
-      >
-        {label}
-      </div>
+      {open ? (
+        <div
+          className={cn(
+            "pointer-events-none absolute z-40 max-w-[min(18rem,calc(100vw-2rem))] whitespace-normal rounded-md bg-slate-950/90 px-2 py-1 text-center text-xs font-medium text-white shadow-lg",
+            positionClasses[side],
+          )}
+          role="tooltip"
+        >
+          {label}
+        </div>
+      ) : null}
     </div>
   );
 };

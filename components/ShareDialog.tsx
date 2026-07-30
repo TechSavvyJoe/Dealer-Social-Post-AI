@@ -557,15 +557,13 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
             aria-live="polite"
           >
             <div className="flex items-center justify-between gap-3 text-xs">
-              <span className="font-semibold text-primary-100 [.theme-light_&]:text-primary-800">
-                Share sequence
-              </span>
-              <span className="font-semibold tabular-nums text-primary-200 [.theme-light_&]:text-primary-700">
+              <span className="font-semibold text-primary-100">Share sequence</span>
+              <span className="font-semibold tabular-nums text-primary-200">
                 {normalizedQueueProgress.current} of {normalizedQueueProgress.total}
               </span>
             </div>
             <div
-              className="mt-2 h-1.5 overflow-hidden rounded-full bg-primary-950/35 [.theme-light_&]:bg-primary-100"
+              className="mt-2 h-1.5 overflow-hidden rounded-full bg-primary-950/35"
               role="progressbar"
               aria-label="Selected output sequence"
               aria-valuemin={1}
@@ -637,7 +635,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                       : "Share now opens the system sheet immediately."}
                 </p>
                 {focusedTagGuidance ? (
-                  <p className="mt-2 max-w-prose rounded-lg border border-primary-400/25 bg-primary-500/10 px-2.5 py-2 text-xs leading-relaxed text-primary-100 [.theme-light_&]:text-primary-900">
+                  <p className="mt-2 max-w-prose rounded-lg border border-primary-400/25 bg-primary-500/10 px-2.5 py-2 text-xs leading-relaxed text-primary-100">
                     {focusedTagGuidance}
                   </p>
                 ) : null}

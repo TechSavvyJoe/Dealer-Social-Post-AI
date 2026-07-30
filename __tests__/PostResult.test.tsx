@@ -195,6 +195,7 @@ describe("PostResult job-first flow", () => {
           instagram_feed: "Instagram caption",
         },
       },
+      isDesktopLayout: true,
     });
 
     const primaryTab = screen.getByRole("tab", { name: "Primary" });
@@ -235,6 +236,7 @@ describe("PostResult job-first flow", () => {
     const user = userEvent.setup();
     renderResult();
 
+    await user.click(screen.getByRole("button", { name: "More publishing options" }));
     await user.click(screen.getByRole("button", { name: /Remix this photo/i }));
     expect(callbacks.onRemix).not.toHaveBeenCalled();
     // Dialog may still be mid-enter animation (opacity 0); presence is enough.
@@ -348,6 +350,7 @@ describe("PostResult job-first flow", () => {
         },
         mediaOutputMode: "photo",
       },
+      isDesktopLayout: true,
     });
 
     await user.click(
@@ -403,10 +406,12 @@ describe("PostResult job-first flow", () => {
       },
     });
 
-    expect(screen.getByText("View-only history")).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Full caption text" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "New caption" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Three caption ideas" })).toBeDisabled();
+    expect(
+      screen.getByText(
+        "View-only history. You can still copy or share this saved post.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit with AI" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Schedule" })).toBeDisabled();
 
     const delivery = screen.getByLabelText("Post delivery actions");
@@ -424,8 +429,7 @@ describe("PostResult job-first flow", () => {
     useAppStore.setState({ selectedImage: null });
     renderResult();
 
-    expect(screen.getByRole("button", { name: "New caption" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Three caption ideas" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Edit with AI" })).toBeDisabled();
   });
 
   it("fails closed when a captured photo release was not stored", () => {
@@ -457,7 +461,10 @@ describe("PostResult job-first flow", () => {
   });
 
   it("rescans direct caption edits and blocks prohibited delivery claims", () => {
-    renderResult({ bannedPhrases: "lowest price guaranteed" });
+    renderResult({
+      bannedPhrases: "lowest price guaranteed",
+      isDesktopLayout: true,
+    });
     const delivery = screen.getByLabelText("Post delivery actions");
 
     const caption = screen.getByRole("textbox", {
@@ -475,13 +482,13 @@ describe("PostResult job-first flow", () => {
       }),
     ).toBeDisabled();
     expect(
-      within(delivery).getByRole("button", {
-        name: "Share post (claim blocked)",
+      screen.getByRole("button", {
+        name: /^Share .* image/,
       }),
     ).toBeDisabled();
     expect(
-      within(delivery).getByRole("button", {
-        name: "Save image (claim blocked)",
+      screen.getByRole("button", {
+        name: /^Save .* image/,
       }),
     ).toBeDisabled();
 
@@ -500,7 +507,7 @@ describe("PostResult job-first flow", () => {
     callbacks.onEditText.mockResolvedValueOnce(
       "A warmer delivery-day caption with a personal thank-you.",
     );
-    renderResult();
+    renderResult({ isDesktopLayout: true });
 
     const caption = screen.getByRole("textbox", {
       name: "Full caption text",
@@ -565,7 +572,7 @@ describe("PostResult job-first flow", () => {
               }
               return replacement;
             }}
-            isDesktopLayout={false}
+            isDesktopLayout
           />
         </ToastProvider>
       );
@@ -611,6 +618,7 @@ describe("PostResult job-first flow", () => {
           facebook_feed: "Original Facebook caption.",
         },
       },
+      isDesktopLayout: true,
     });
 
     fireEvent.change(screen.getByRole("textbox", { name: "Full caption text" }), {
@@ -647,11 +655,12 @@ describe("PostResult job-first flow", () => {
         postId: "post-1",
         approvalStatus: "n_a",
       },
+      isDesktopLayout: true,
     });
-    const saveButtons = await screen.findAllByRole("button", {
-      name: "Save 1080×1920",
+    const saveButton = await screen.findByRole("button", {
+      name: "Save Instagram Story image 9:16",
     });
-    await waitFor(() => expect(saveButtons[0]).toBeEnabled());
+    await waitFor(() => expect(saveButton).toBeEnabled());
 
     // Let the initial canonical-caption reconciliation finish, then measure
     // only the work started by this Save click.
@@ -673,7 +682,7 @@ describe("PostResult job-first flow", () => {
       target: { value: "Edited caption that should be saved to History." },
     });
 
-    fireEvent.click(saveButtons[0]);
+    fireEvent.click(saveButton);
 
     await waitFor(() =>
       expect(mockSavePreparedMediaToLibrary).toHaveBeenCalledTimes(1),
@@ -829,6 +838,11 @@ describe("PostResult job-first flow", () => {
 
     await user.click(
       screen.getByRole("button", {
+        name: "Select Instagram Reel video 9:16, 1080 by 1920 pixels",
+      }),
+    );
+    await user.click(
+      screen.getByRole("button", {
         name: "Create Instagram Reel video 9:16",
       }),
     );
@@ -865,6 +879,11 @@ describe("PostResult job-first flow", () => {
 
     await user.click(
       screen.getByRole("button", {
+        name: "Select Instagram Reel video 9:16, 1080 by 1920 pixels",
+      }),
+    );
+    await user.click(
+      screen.getByRole("button", {
         name: "Create Instagram Reel video 9:16",
       }),
     );
@@ -872,8 +891,8 @@ describe("PostResult job-first flow", () => {
     await waitFor(() => expect(callbacks.onGenerateVideo).toHaveBeenCalledTimes(1));
     await waitFor(() =>
       expect(
-        screen.getByRole("button", {
-          name: "Save Instagram Reel video 9:16",
+        screen.getByRole("checkbox", {
+          name: "Include Instagram Reel video 9:16 in Share selected",
         }),
       ).toBeEnabled(),
     );
@@ -901,8 +920,8 @@ describe("PostResult job-first flow", () => {
       ).toBeEnabled(),
     );
     expect(
-      screen.getByRole("button", {
-        name: "Save Instagram Reel video 9:16",
+      screen.getByRole("checkbox", {
+        name: "Include Instagram Reel video 9:16 in Share selected",
       }),
     ).toBeDisabled();
     expect(
@@ -918,6 +937,7 @@ describe("PostResult job-first flow", () => {
   });
 
   it("keeps approved photo preparation available while explaining why video is locked", async () => {
+    const user = userEvent.setup();
     mockGetPostApprovalStatus.mockResolvedValue({
       id: "post-review-video",
       approval_status: "approved",
@@ -935,12 +955,18 @@ describe("PostResult job-first flow", () => {
       },
     });
 
+    const delivery = screen.getByLabelText("Post delivery actions");
     await waitFor(() =>
       expect(
-        screen.getByRole("button", {
-          name: "Save Instagram Feed image 4:5",
+        within(delivery).getByRole("button", {
+          name: "Save 1080×1350",
         }),
       ).toBeEnabled(),
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: "Select Instagram Reel video 9:16, 1080 by 1920 pixels",
+      }),
     );
     const createVideo = screen.getByRole("button", {
       name: "Create Instagram Reel video 9:16",
@@ -1041,6 +1067,11 @@ describe("PostResult job-first flow", () => {
 
     await user.click(
       screen.getByRole("button", {
+        name: "Select Instagram Reel video 9:16, 1080 by 1920 pixels",
+      }),
+    );
+    await user.click(
+      screen.getByRole("button", {
         name: "Create Instagram Reel video 9:16",
       }),
     );
@@ -1061,8 +1092,8 @@ describe("PostResult job-first flow", () => {
     );
     await waitFor(() =>
       expect(
-        screen.getByRole("button", {
-          name: "Save Instagram Feed image 4:5",
+        within(screen.getByLabelText("Post delivery actions")).getByRole("button", {
+          name: "Save 1080×1350",
         }),
       ).toBeEnabled(),
     );
@@ -1174,7 +1205,7 @@ describe("PostResult job-first flow", () => {
         within(delivery).getByRole("button", { name: "Save 1080×1920" }),
       ).toBeEnabled(),
     );
-    expect(screen.getByRole("textbox", { name: "Full caption text" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Edit with AI" })).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: /creative tools/i }));
     expect(screen.getByRole("button", { name: "Regenerate image" })).toBeDisabled();

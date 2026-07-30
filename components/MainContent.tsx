@@ -98,6 +98,9 @@ interface MainContentProps {
   onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
   /** One-shot caption generator for the alternatives modal. */
   onGenerateCaptionVariant?: () => Promise<string>;
+  onShowSettings?: () => void;
+  onShowHistory?: () => void;
+  onRequestLogout?: () => void;
 }
 
 export const MainContent: React.FC<MainContentProps> = ({
@@ -127,6 +130,9 @@ export const MainContent: React.FC<MainContentProps> = ({
   onFunMode,
   onGenerateVideo,
   onGenerateCaptionVariant,
+  onShowSettings,
+  onShowHistory,
+  onRequestLogout,
 }) => {
   const persistedGenerationParams = useAppStore((state) => state.generationParams);
   const [customizerSeed, setCustomizerSeed] = React.useState<GenerationParams | null>(
@@ -350,6 +356,9 @@ export const MainContent: React.FC<MainContentProps> = ({
               onFunMode={onFunMode}
               onGenerateVideo={onGenerateVideo}
               onGenerateCaptionVariant={onGenerateCaptionVariant}
+              onShowSettings={onShowSettings}
+              onShowHistory={onShowHistory}
+              onRequestLogout={onRequestLogout}
               error={error}
               isDesktopLayout={isDesktopLayout}
               requiresApproval={Boolean(currentDealer?.requires_approval)}
