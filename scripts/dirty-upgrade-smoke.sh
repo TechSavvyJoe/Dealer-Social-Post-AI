@@ -34,18 +34,27 @@ fi
 # an audited pre-migration base so this release gate remains useful after the
 # original hardening PR is merged. The exact SHA is validated against both the
 # old and new migration paths before it can replace the caller-supplied base.
+# Validate the immutable fixture identity and content directly. This intentional
+# historical state must not depend on how CI fetched the surrounding graph.
 people_repair_migration="pb_migrations/1750500000_auth_people_integrity.js"
 people_roles_migration="pb_migrations/1750400000_people_roles_impersonation.js"
 people_repair_baseline="173b48e77b61bd3b84fa0bfb0b0ce6091f25c66d"
+people_repair_baseline_parent="723b3c87bbaa7fc3f51a3508378c60d70c31e69c"
+people_roles_baseline_blob="1b9e2e566d614b72c12a49716b6660a34d268fa7"
 if ! git cat-file -e "${people_repair_baseline}^{commit}" 2>/dev/null ||
   ! git cat-file -e "${people_repair_baseline}:${people_roles_migration}" 2>/dev/null ||
   git cat-file -e "${people_repair_baseline}:${people_repair_migration}" 2>/dev/null; then
   echo "The audited pre-repair people migration baseline is unavailable or invalid." >&2
   exit 2
 fi
+if [[ "$(git cat-file commit "$people_repair_baseline" | sed -n 's/^parent //p')" != "$people_repair_baseline_parent" ]] ||
+  [[ "$(git rev-parse "${people_repair_baseline}:${people_roles_migration}")" != "$people_roles_baseline_blob" ]]; then
+  echo "The audited pre-repair people migration baseline identity is invalid." >&2
+  exit 2
+fi
 if git cat-file -e "${base_sha}:${people_repair_migration}" 2>/dev/null; then
-  if ! git merge-base --is-ancestor "$people_repair_baseline" "$base_sha"; then
-    echo "The supplied base does not descend from the audited people migration baseline." >&2
+  if ! git cat-file -e "${base_sha}:${people_roles_migration}" 2>/dev/null; then
+    echo "The supplied post-repair base is missing the prerequisite people migration." >&2
     exit 2
   fi
   base_sha="$people_repair_baseline"

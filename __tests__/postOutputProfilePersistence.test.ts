@@ -416,11 +416,22 @@ describe("post output-profile persistence", () => {
       'people_repair_baseline="173b48e77b61bd3b84fa0bfb0b0ce6091f25c66d"',
     );
     expect(source).toContain(
-      'git cat-file -e "${base_sha}:${people_repair_migration}"',
+      'people_repair_baseline_parent="723b3c87bbaa7fc3f51a3508378c60d70c31e69c"',
     );
     expect(source).toContain(
-      'git merge-base --is-ancestor "$people_repair_baseline" "$base_sha"',
+      'people_roles_baseline_blob="1b9e2e566d614b72c12a49716b6660a34d268fa7"',
     );
+    expect(source).toContain(
+      'git cat-file -e "${base_sha}:${people_repair_migration}"',
+    );
+    expect(source).toContain('git cat-file -e "${base_sha}:${people_roles_migration}"');
+    expect(source).toContain(
+      "git cat-file commit \"$people_repair_baseline\" | sed -n 's/^parent //p'",
+    );
+    expect(source).toContain(
+      'git rev-parse "${people_repair_baseline}:${people_roles_migration}"',
+    );
+    expect(source).not.toContain("git merge-base --is-ancestor");
     expect(source).toContain('base_sha="$people_repair_baseline"');
   });
 
