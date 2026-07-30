@@ -78,8 +78,9 @@ The old frontend uppercases its admin input, so the backend-first phase needs a 
 
 ```bash
 set +x
+ADMIN_SECRET_NAME=ADMIN_DEALER_CODE
 TEMP_ADMIN_CODE="$(openssl rand -hex 6 | tr 'a-f' 'A-F')"
-printf 'ADMIN_DEALER_CODE=%s\n' "$TEMP_ADMIN_CODE" |
+printf '%s=%s\n' "$ADMIN_SECRET_NAME" "$TEMP_ADMIN_CODE" |
   flyctl secrets import --app dealer-social-post-ai-production
 flyctl ssh console --app dealer-social-post-ai-production --command \
   'sqlite3 /pb/pb_data/data.db "DELETE FROM sessions WHERE role = '\''super_admin'\'' OR is_impersonation = 1;"'
@@ -140,6 +141,7 @@ Keep a pre-rotation admin session cookie in a permission-restricted temporary co
 
 ```bash
 set +x
+ADMIN_SECRET_NAME=ADMIN_DEALER_CODE
 read -r -s -p "Final mixed-case 12-character admin code: " FINAL_ADMIN_CODE
 printf '\n'
 [[ "$FINAL_ADMIN_CODE" =~ ^[A-Za-z0-9]{12}$ ]]
@@ -150,7 +152,7 @@ gh variable set LEGACY_CLIENT_COMPATIBILITY_ENABLED --env production --body fals
 {
   printf 'TURNSTILE_ENFORCEMENT_ENABLED=true\n'
   printf 'LEGACY_CLIENT_COMPATIBILITY_ENABLED=false\n'
-  printf 'ADMIN_DEALER_CODE=%s\n' "$FINAL_ADMIN_CODE"
+  printf '%s=%s\n' "$ADMIN_SECRET_NAME" "$FINAL_ADMIN_CODE"
 } | flyctl secrets import --app dealer-social-post-ai-production
 flyctl ssh console --app dealer-social-post-ai-production --command \
   'sqlite3 /pb/pb_data/data.db "DELETE FROM sessions WHERE role = '\''super_admin'\'' OR is_impersonation = 1 OR admin_secret_fingerprint != '\'''\'';"'
