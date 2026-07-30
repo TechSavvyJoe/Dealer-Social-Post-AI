@@ -1205,6 +1205,7 @@ routerAdd("GET", "/api/app/health", (c) => {
     turnstile_enforcement_enabled: false,
     turnstile_secret_set: false,
     turnstile_site_key_set: false,
+    turnstile_hostnames_configured: false,
     trusted_proxy_configured: false,
     legacy_client_compatibility_enabled: false,
     off_box_backup_configured: false,
@@ -1475,6 +1476,8 @@ routerAdd("GET", "/api/app/health", (c) => {
   checks.turnstile_site_key_set =
     /^[A-Za-z0-9_-]{20,}$/.test(turnstileSiteKey) &&
     (!flyRuntime || !helpers.isTurnstileTestSiteKey(turnstileSiteKey));
+  checks.turnstile_hostnames_configured =
+    helpers.configuredTurnstileHostnames().length > 0;
   checks.trusted_proxy_configured =
     ($os.getenv("VERCEL_TO_FLY_PROXY_SECRET") || "").toString().length >= 32;
   checks.legacy_client_compatibility_enabled =
@@ -1493,9 +1496,12 @@ routerAdd("GET", "/api/app/health", (c) => {
     (flyRuntime &&
       (!checks.trusted_proxy_configured ||
         !checks.turnstile_secret_set ||
-        !checks.turnstile_site_key_set)) ||
+        !checks.turnstile_site_key_set ||
+        !checks.turnstile_hostnames_configured)) ||
     (checks.turnstile_enforcement_enabled &&
-      (!checks.turnstile_secret_set || !checks.turnstile_site_key_set)) ||
+      (!checks.turnstile_secret_set ||
+        !checks.turnstile_site_key_set ||
+        !checks.turnstile_hostnames_configured)) ||
     (flyRuntime && !checks.off_box_restore_ready)
   ) {
     result.ok = false;

@@ -32,6 +32,7 @@ interface HealthPayload {
     turnstile_enforcement_enabled: boolean;
     turnstile_secret_set: boolean;
     turnstile_site_key_set: boolean;
+    turnstile_hostnames_configured: boolean;
     trusted_proxy_configured: boolean;
     legacy_client_compatibility_enabled: boolean;
     off_box_backup_configured: boolean;
@@ -91,6 +92,7 @@ const healthCheckKeys: Array<keyof HealthPayload["checks"]> = [
   "turnstile_enforcement_enabled",
   "turnstile_secret_set",
   "turnstile_site_key_set",
+  "turnstile_hostnames_configured",
   "trusted_proxy_configured",
   "legacy_client_compatibility_enabled",
   "off_box_backup_configured",
@@ -213,6 +215,13 @@ const checkRows: Array<{
     icon: ShieldCheck,
     critical: false,
     hint: "Public widget key compiled into the exact frontend artifact and recorded at runtime.",
+  },
+  {
+    key: "turnstile_hostnames_configured",
+    label: "Turnstile hostname policy",
+    icon: ShieldCheck,
+    critical: true,
+    hint: "Production accepts challenge tokens only from the configured Vercel and Fly hostnames.",
   },
   {
     key: "legacy_client_compatibility_enabled",

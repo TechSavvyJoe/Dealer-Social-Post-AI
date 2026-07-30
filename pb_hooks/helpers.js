@@ -1746,6 +1746,15 @@ function configuredTurnstileHostnames() {
   for (let i = 0; i < values.length; i++) {
     const hostname = values[i].toString().trim().toLowerCase();
     if (!hostname || seen[hostname]) continue;
+    if (
+      flyRuntime &&
+      (hostname === "localhost" ||
+        hostname === "127.0.0.1" ||
+        hostname === "::1" ||
+        hostname === "[::1]")
+    ) {
+      continue;
+    }
     seen[hostname] = true;
     result.push(hostname);
   }
@@ -1775,6 +1784,15 @@ function verifyTurnstileToken(token, remoteIp) {
       return { ok: false, unavailable: true };
     }
   } catch (_e) {}
+
+  let flyRuntime = false;
+  try {
+    flyRuntime = !!($os.getenv("FLY_APP_NAME") || "").toString().trim();
+  } catch (_e) {}
+  const allowedHostnames = configuredTurnstileHostnames();
+  if (flyRuntime && !allowedHostnames.length) {
+    return { ok: false, unavailable: true };
+  }
 
   let response;
   try {
@@ -1819,10 +1837,7 @@ function verifyTurnstileToken(token, remoteIp) {
     usingTestSecret &&
     ((result.metadata && result.metadata.result_with_testing_key === true) ||
       hostname === "dummy-key-pass");
-  if (
-    !validatedTestResponse &&
-    configuredTurnstileHostnames().indexOf(hostname) === -1
-  ) {
+  if (!validatedTestResponse && allowedHostnames.indexOf(hostname) === -1) {
     return { ok: false, unavailable: false };
   }
   if (action !== TURNSTILE_ACTION && !validatedTestResponse) {

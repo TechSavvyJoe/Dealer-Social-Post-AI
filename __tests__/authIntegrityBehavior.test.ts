@@ -1340,6 +1340,61 @@ describe("Turnstile and route authority contracts", () => {
       },
     };
     expect(helpers.configuredTurnstileHostnames()).toEqual([]);
+    const sendWithoutFlyHostnames = vi.fn(() => ({
+      statusCode: 200,
+      json: {
+        success: true,
+        hostname: "localhost",
+        action: "turnstile-spin-v2",
+      },
+    }));
+    runtime.$http = {
+      send: sendWithoutFlyHostnames,
+    };
+    expect(helpers.verifyTurnstileToken("local-token", "127.0.0.1")).toEqual({
+      ok: false,
+      unavailable: true,
+    });
+    expect(sendWithoutFlyHostnames).not.toHaveBeenCalled();
+
+    runtime.$os = {
+      getenv: (name: string) => {
+        if (name === "FLY_APP_NAME") return "dealer-social-post-ai-production";
+        if (name === "TURNSTILE_SECRET") return "production-secret";
+        if (name === "TURNSTILE_ALLOWED_HOSTNAMES") {
+          return [
+            "localhost",
+            "127.0.0.1",
+            "::1",
+            "[::1]",
+            "dealer-social-post-ai.vercel.app",
+            "dealer-social-post-ai-production.fly.dev",
+          ].join(",");
+        }
+        return "";
+      },
+    };
+    const successfulFlyVerification = vi.fn(() => ({
+      statusCode: 200,
+      json: {
+        success: true,
+        hostname: "dealer-social-post-ai.vercel.app",
+        action: "turnstile-spin-v2",
+      },
+    }));
+    runtime.$http = {
+      send: successfulFlyVerification,
+    };
+    expect(helpers.configuredTurnstileHostnames()).toEqual([
+      "dealer-social-post-ai.vercel.app",
+      "dealer-social-post-ai-production.fly.dev",
+    ]);
+    expect(helpers.verifyTurnstileToken("production-token", "203.0.113.20")).toEqual({
+      ok: true,
+      unavailable: false,
+    });
+    expect(successfulFlyVerification).toHaveBeenCalledTimes(1);
+
     runtime.$http = {
       send: vi.fn(() => ({
         statusCode: 200,
@@ -1354,23 +1409,6 @@ describe("Turnstile and route authority contracts", () => {
       ok: false,
       unavailable: false,
     });
-
-    runtime.$os = {
-      getenv: (name: string) => {
-        if (name === "FLY_APP_NAME") return "dealer-social-post-ai-production";
-        if (name === "TURNSTILE_ALLOWED_HOSTNAMES") {
-          return [
-            "dealer-social-post-ai.vercel.app",
-            "dealer-social-post-ai-production.fly.dev",
-          ].join(",");
-        }
-        return "";
-      },
-    };
-    expect(helpers.configuredTurnstileHostnames()).toEqual([
-      "dealer-social-post-ai.vercel.app",
-      "dealer-social-post-ai-production.fly.dev",
-    ]);
   });
 
   it("requires Cloudflare success, an allowed hostname, and the canonical action", () => {
