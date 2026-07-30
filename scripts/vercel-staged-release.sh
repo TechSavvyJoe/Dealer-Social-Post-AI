@@ -137,6 +137,25 @@ if (
 NODE
 }
 
+deployment_url_from_json() {
+  local deploy_output_file="$1"
+
+  node - "$deploy_output_file" <<'NODE'
+const fs = require("node:fs");
+const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const candidate = [
+  payload?.url,
+  payload?.deploymentUrl,
+  payload?.deployment?.url,
+].find((value) => typeof value === "string" && value.trim());
+if (!candidate) process.exit(1);
+const normalized = /^https:\/\//i.test(candidate.trim())
+  ? candidate.trim()
+  : `https://${candidate.trim()}`;
+process.stdout.write(normalized);
+NODE
+}
+
 validate_deployment_id() {
   [[ "$1" =~ ^dpl_[A-Za-z0-9]+$ ]]
 }
@@ -721,6 +740,7 @@ assert_current_promoted_deployment() {
 stage_release() {
   local release_sha="${2:-${RELEASE_SHA:-}}"
   local attempt_id deployment_url deployment_id
+  local deploy_output_file="$work_dir/vercel-deploy.json"
   local env_inventory_file="$work_dir/vercel-production-env.json"
 
   validate_sha "$release_sha"
@@ -747,10 +767,10 @@ stage_release() {
   grep -Rqs --include='*.js' --fixed-strings "$release_sha" .vercel/output/static ||
     fail "the prebuilt frontend does not contain its selected release SHA."
 
-  deployment_url="$(
-    npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy \
-      --prebuilt --prod --skip-domain --yes | tail -n 1 | tr -d '\r'
-  )"
+  npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy \
+    --prebuilt --prod --skip-domain --yes --json > "$deploy_output_file"
+  deployment_url="$(deployment_url_from_json "$deploy_output_file")" ||
+    fail "Vercel returned invalid staged deployment JSON."
   validate_deployment_url "$deployment_url" ||
     fail "Vercel did not return a canonical staged deployment URL."
   deployment_id="$(inspect_deployment_id "$deployment_url")" ||
