@@ -50,12 +50,62 @@ describe("release artifact binding", () => {
     expect(script).toContain("deploy \\");
     expect(script).toContain("--prebuilt --prod --skip-domain --yes");
     expect(script).toContain('promote "$deployment_url" --yes');
-    expect(script.match(/assert_release_health/g)?.length).toBeGreaterThanOrEqual(5);
-    expect(script).toContain("test-results/vercel-staged-release.json");
+    expect(script.match(/assert_release_health/g)?.length).toBeGreaterThanOrEqual(6);
+    expect(script).toContain(".release-evidence/vercel-staged-release.json");
+    expect(script).toContain(".release-evidence/vercel-staged-qa.json");
+    expect(script).toContain("assert_qa_evidence");
+    expect(script).toContain("assert_frontend_artifact");
+    expect(script).toContain("assert_promoted_deployment");
+    expect(script).toContain("assert_current_promoted_deployment");
+    expect(script).toContain("acquire_release_lock");
+    expect(script).toContain("fs.linkSync(candidate, lockPath)");
+    expect(script).toContain("assert_provider_canary_evidence");
+    expect(
+      script.match(/assert_provider_canary_evidence/g)?.length,
+    ).toBeGreaterThanOrEqual(3);
+    expect(script).toContain("begin_stage_attempt");
+    expect(script).toContain("promotionAttemptedAt");
+    expect(script).toContain("deploymentId");
+    expect(script).not.toContain("VERCEL_RELEASE_EVIDENCE_PATH");
+    expect(script).not.toContain("VERCEL_RELEASE_QA_EVIDENCE_PATH");
+    expect(script).not.toContain("test-results/vercel-staged-release.json");
     expect(runbook).toContain('npm run release:vercel:stage -- "$RELEASE_SHA"');
+    expect(runbook).toContain("npm run release:vercel:qa");
     expect(runbook).toContain("npm run release:vercel:promote");
     expect(packageJson).toContain('"release:vercel:stage"');
+    expect(packageJson).toContain('"release:vercel:qa"');
     expect(packageJson).toContain('"release:vercel:promote"');
+  });
+
+  it("keeps durable release receipts away from Playwright output", () => {
+    const gitignore = read(".gitignore");
+    const canary = read("scripts/production-provider-canary.mjs");
+    const qa = read("scripts/vercel-staged-qa.mjs");
+    const stagedSpec = read("e2e/staged-release.spec.ts");
+
+    expect(gitignore).toContain(".release-evidence/");
+    expect(canary).toContain(".release-evidence/production-provider-canary.json");
+    expect(canary).toContain("Atomically invalidate any older pass");
+    expect(qa).toContain(".release-evidence/vercel-staged-release.json");
+    expect(qa).toContain(".release-evidence/vercel-staged-qa.json");
+    expect(qa).toContain("PROVIDER_CANARY_MAX_AGE_MS");
+    expect(qa).toContain("rmSync(qaPath, { force: true })");
+    expect(qa).toContain("E2E_STAGED_RELEASE");
+    expect(qa).toContain("--fail-on-flaky-tests");
+    expect(qa).toContain('"--retries=0"');
+    expect(qa).toContain("acquireReleaseLock");
+    expect(qa).toContain("linkSync(candidate, lockPath)");
+    expect(qa).toContain("validateProviderCanaryEvidence");
+    expect(qa).not.toContain("...process.env");
+    expect(stagedSpec).toContain("unsafeRequests");
+    expect(stagedSpec).toContain('await context.route("**/*"');
+    expect(stagedSpec).toContain('await route.abort("blockedbyclient")');
+    expect(stagedSpec).toContain("expect(unsafeRequests).toEqual([])");
+    expect(stagedSpec).not.toContain('name: "Digit 9"');
+    expect(stagedSpec).not.toContain('page.route("**/api/app/session"');
+    expect(stagedSpec).not.toContain(
+      'getByRole("button", { name: /continue to system admin/i }).click()',
+    );
   });
 
   it("keeps the stamped SHA in persisted client telemetry", () => {

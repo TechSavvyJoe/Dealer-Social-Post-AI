@@ -3,15 +3,37 @@ set -euo pipefail
 
 readonly VERCEL_CLI_VERSION="58.4.0"
 readonly FLY_ORIGIN="https://dealer-social-post-ai-production.fly.dev"
+readonly PRODUCTION_VERCEL_ORIGIN="https://dealer-social-post-ai.vercel.app"
 readonly EXPECTED_VERCEL_ORG_ID="team_Tc8DG6XMPUCefkTa3u71mmlN"
 readonly EXPECTED_VERCEL_PROJECT_ID="prj_h5phWNMNtK4D9dqwbOHrrrRMqrRi"
-readonly DEFAULT_EVIDENCE_PATH="test-results/vercel-staged-release.json"
+readonly EXPECTED_VERCEL_PROJECT_NAME="dealer-social-post-ai"
+readonly EVIDENCE_DIRECTORY=".release-evidence"
+readonly DEFAULT_EVIDENCE_PATH=".release-evidence/vercel-staged-release.json"
+readonly DEFAULT_QA_EVIDENCE_PATH=".release-evidence/vercel-staged-qa.json"
+readonly PROVIDER_CANARY_EVIDENCE_PATH=".release-evidence/production-provider-canary.json"
 
 command_name="${1:-}"
-evidence_path="${VERCEL_RELEASE_EVIDENCE_PATH:-$DEFAULT_EVIDENCE_PATH}"
+evidence_path="$DEFAULT_EVIDENCE_PATH"
+qa_evidence_path="$DEFAULT_QA_EVIDENCE_PATH"
 work_dir=""
+release_lock_path=""
+release_lock_token=""
+release_lock_acquired=false
 
 cleanup() {
+  if [[ "$release_lock_acquired" = true && -n "$release_lock_path" ]]; then
+    node - "$release_lock_path" "$release_lock_token" "$$" <<'NODE' || true
+const fs = require("node:fs");
+const [lockPath, token, pid] = process.argv.slice(2);
+try {
+  if (fs.lstatSync(lockPath).isSymbolicLink()) process.exit(0);
+  const owner = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+  if (owner.token === token && String(owner.pid) === pid) {
+    fs.rmSync(lockPath);
+  }
+} catch {}
+NODE
+  fi
   if [[ -n "$work_dir" ]]; then
     rm -rf "$work_dir"
   fi
@@ -30,6 +52,60 @@ require_tools() {
   done
   [[ "$(node --version)" = "v22.23.1" ]] ||
     fail "Node 22.23.1 is required; run this command through the pinned project runtime."
+}
+
+acquire_release_lock() {
+  [[ ! -L "$EVIDENCE_DIRECTORY" ]] ||
+    fail "the release evidence directory must not be a symbolic link."
+  mkdir -p "$EVIDENCE_DIRECTORY"
+  [[ -d "$EVIDENCE_DIRECTORY" && ! -L "$EVIDENCE_DIRECTORY" ]] ||
+    fail "the release evidence path is not a private directory."
+  chmod 700 "$EVIDENCE_DIRECTORY"
+  release_lock_path="$git_root/$EVIDENCE_DIRECTORY/vercel-release.lock"
+  release_lock_token="$(
+    node -e 'process.stdout.write(require("node:crypto").randomBytes(16).toString("hex"))'
+  )"
+
+  LOCK_PATH="$release_lock_path" \
+    LOCK_TOKEN="$release_lock_token" \
+    OWNER_PID="$$" \
+    node <<'NODE' ||
+    fail "another staged release command owns the release lock; remove the lock manually only after proving no release command is running."
+const fs = require("node:fs");
+const lockPath = process.env.LOCK_PATH;
+const token = process.env.LOCK_TOKEN;
+const pid = Number(process.env.OWNER_PID);
+const candidate = `${lockPath}.candidate-${pid}-${token}`;
+const owner = {
+  schemaVersion: 1,
+  pid,
+  token,
+  createdAt: new Date().toISOString(),
+};
+
+try {
+  fs.writeFileSync(candidate, `${JSON.stringify(owner)}\n`, {
+    mode: 0o600,
+    flag: "wx",
+  });
+  try {
+    // The candidate already contains its owner before this atomic link makes
+    // it visible as the shared lock. There is never a PID-less lock window.
+    fs.linkSync(candidate, lockPath);
+    fs.chmodSync(lockPath, 0o600);
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+    const kind = fs.lstatSync(lockPath).isSymbolicLink()
+      ? "an unsafe symbolic link"
+      : "an existing owner record";
+    console.error(`Release lock already exists as ${kind}.`);
+    process.exitCode = 2;
+  }
+} finally {
+  fs.rmSync(candidate, { force: true });
+}
+NODE
+  release_lock_acquired=true
 }
 
 validate_sha() {
@@ -59,6 +135,10 @@ if (
 NODE
 }
 
+validate_deployment_id() {
+  [[ "$1" =~ ^dpl_[A-Za-z0-9]+$ ]]
+}
+
 assert_expected_vercel_link() {
   node - \
     ".vercel/project.json" \
@@ -75,6 +155,36 @@ if (link.orgId !== expectedOrgId || link.projectId !== expectedProjectId) {
   console.error("The repository is linked to a different Vercel project or team.");
   process.exit(1);
 }
+NODE
+}
+
+inspect_deployment_id() {
+  local deployment_url="$1"
+  local inspection_file
+
+  inspection_file="$(mktemp "$work_dir/vercel-inspect.XXXXXX")"
+  npx --yes "vercel@${VERCEL_CLI_VERSION}" inspect "$deployment_url" --json \
+    > "$inspection_file" ||
+    return 1
+  node - \
+    "$inspection_file" \
+    "$deployment_url" \
+    "$EXPECTED_VERCEL_PROJECT_NAME" <<'NODE'
+const fs = require("node:fs");
+const [file, requestedUrl, expectedProjectName] = process.argv.slice(2);
+const deployment = JSON.parse(fs.readFileSync(file, "utf8"));
+const requestedHostname = new URL(requestedUrl).hostname;
+const aliases = Array.isArray(deployment.aliases) ? deployment.aliases : [];
+if (
+  !/^dpl_[A-Za-z0-9]+$/.test(deployment.id || "") ||
+  deployment.name !== expectedProjectName ||
+  deployment.readyState !== "READY" ||
+  deployment.target !== "production" ||
+  (deployment.url !== requestedHostname && !aliases.includes(requestedHostname))
+) {
+  process.exit(1);
+}
+process.stdout.write(deployment.id);
 NODE
 }
 
@@ -168,6 +278,142 @@ if (!files.some((file) => fs.readFileSync(file, "utf8").includes(siteKey))) {
 NODE
 }
 
+assert_frontend_artifact() {
+  local origin="$1"
+  local release_sha="$2"
+  local label="$3"
+
+  node --input-type=module - "$origin" "$release_sha" "$label" <<'NODE'
+const [originValue, expectedSha, label] = process.argv.slice(2);
+const origin = new URL(originValue);
+const fetchExact = async (path) => {
+  const requestedUrl = new URL(path, origin);
+  const response = await fetch(requestedUrl, {
+    headers: { "cache-control": "no-cache" },
+    redirect: "manual",
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok || new URL(response.url).origin !== origin.origin) {
+    throw new Error(`${label} returned ${response.status} for ${path}.`);
+  }
+  return response;
+};
+const fetchText = async (path) => {
+  const response = await fetchExact(path);
+  return { response, text: await response.text() };
+};
+const fetchBytes = async (path) => {
+  const response = await fetchExact(path);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length < 100) {
+    throw new Error(`${label} returned an unexpectedly small asset for ${path}.`);
+  }
+  return { response, bytes };
+};
+
+const { response: rootResponse, text: html } = await fetchText("/");
+const csp = rootResponse.headers.get("content-security-policy") || "";
+const requiredCspDirectives = [
+  "default-src 'self'",
+  "script-src 'self' https://challenges.cloudflare.com",
+  "frame-src https://challenges.cloudflare.com",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+];
+if (
+  !requiredCspDirectives.every((directive) => csp.split("; ").includes(directive)) ||
+  rootResponse.headers.get("strict-transport-security") !==
+    "max-age=63072000; includeSubDomains; preload" ||
+  rootResponse.headers.get("x-content-type-options") !== "nosniff" ||
+  rootResponse.headers.get("x-frame-options") !== "DENY" ||
+  rootResponse.headers.get("referrer-policy") !== "strict-origin-when-cross-origin" ||
+  !(
+    rootResponse.headers
+      .get("permissions-policy")
+      ?.includes("camera=(self), microphone=(self)") &&
+    rootResponse.headers.get("permissions-policy")?.includes("payment=(), usb=()")
+  )
+) {
+  throw new Error(`${label} is missing required frontend security headers.`);
+}
+if (
+  !html.includes("<title>Dealer Social Post AI</title>") ||
+  !html.includes('rel="manifest"') ||
+  !html.includes("viewport-fit=cover")
+) {
+  throw new Error(`${label} is missing the production application shell.`);
+}
+const scripts = Array.from(
+  html.matchAll(/<script[^>]+src="([^"]+[.]js)"/g),
+  (match) => match[1],
+);
+if (scripts.length === 0) {
+  throw new Error(`${label} did not reference a frontend JavaScript bundle.`);
+}
+let releaseFound = false;
+for (const script of scripts) {
+  const { response, text } = await fetchText(script);
+  if (
+    !response.headers.get("content-type")?.includes("javascript") ||
+    !response.headers.get("cache-control")?.includes("immutable")
+  ) {
+    throw new Error(`${label} returned unsafe caching or content type for ${script}.`);
+  }
+  if (text.includes(expectedSha)) releaseFound = true;
+}
+if (!releaseFound) {
+  throw new Error(`${label} frontend bundle is not bound to the expected release.`);
+}
+
+const { response: manifestResponse, text: manifestText } =
+  await fetchText("/manifest.webmanifest");
+if (!manifestResponse.headers.get("content-type")?.includes("manifest+json")) {
+  throw new Error(`${label} returned an invalid web app manifest content type.`);
+}
+const manifest = JSON.parse(manifestText);
+if (
+  manifest.name !== "Dealer Social Post AI" ||
+  manifest.display !== "standalone" ||
+  !Array.isArray(manifest.icons) ||
+  !manifest.icons.some((icon) => icon?.src === "/icon-192.png") ||
+  !manifest.icons.some((icon) => icon?.src === "/icon-512.png")
+) {
+  throw new Error(`${label} web app manifest is incomplete.`);
+}
+for (const icon of ["/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"]) {
+  const { response, bytes } = await fetchBytes(icon);
+  if (
+    !response.headers.get("content-type")?.startsWith("image/png") ||
+    !bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))
+  ) {
+    throw new Error(`${label} returned an invalid PNG app icon for ${icon}.`);
+  }
+}
+const { response: markResponse, bytes: markBytes } =
+  await fetchBytes("/brand-mark.svg");
+if (
+  !markResponse.headers.get("content-type")?.startsWith("image/svg+xml") ||
+  !markBytes.toString("utf8", 0, 200).includes("<svg")
+) {
+  throw new Error(`${label} returned an invalid SVG brand mark.`);
+}
+
+const { response: workerResponse, text: worker } = await fetchText("/sw.js");
+const workerCache = workerResponse.headers.get("cache-control") || "";
+if (
+  workerCache !== "no-cache, no-store, must-revalidate" ||
+  !workerResponse.headers.get("content-type")?.includes("javascript") ||
+  !worker.includes(`dsp-${expectedSha}`) ||
+  !worker.includes('url.pathname.startsWith("/api/")') ||
+  !worker.includes('event.data.type === "SKIP_WAITING"')
+) {
+  throw new Error(`${label} service worker is not bound to the expected release.`);
+}
+NODE
+}
+
 assert_clean_current_release() {
   local release_sha="$1"
   local head_sha remote_main
@@ -219,22 +465,73 @@ if (payload.ok !== true) process.exit(1);
 NODE
 }
 
-write_stage_evidence() {
+begin_stage_attempt() {
   local release_sha="$1"
-  local deployment_url="$2"
-  mkdir -p "$(dirname "$evidence_path")"
-  RELEASE_SHA="$release_sha" DEPLOYMENT_URL="$deployment_url" EVIDENCE_PATH="$evidence_path" \
+  local attempt_id="$2"
+
+  RELEASE_SHA="$release_sha" \
+    ATTEMPT_ID="$attempt_id" \
+    EVIDENCE_PATH="$evidence_path" \
+    QA_EVIDENCE_PATH="$qa_evidence_path" \
     node <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
+const target = path.resolve(process.env.EVIDENCE_PATH);
+const qaTarget = path.resolve(process.env.QA_EVIDENCE_PATH);
+const directory = path.dirname(target);
+const temporary = `${target}.tmp-${process.pid}`;
 const evidence = {
-  schemaVersion: 1,
+  schemaVersion: 3,
+  attemptId: process.env.ATTEMPT_ID,
+  status: "staging",
   releaseSha: process.env.RELEASE_SHA,
-  deploymentUrl: process.env.DEPLOYMENT_URL,
-  stagedAt: new Date().toISOString(),
+  attemptStartedAt: new Date().toISOString(),
+  deploymentUrl: null,
+  deploymentId: null,
+  stagedAt: null,
+  promotionAttemptedAt: null,
   promotedAt: null,
 };
+fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+if (path.basename(directory) === ".release-evidence") {
+  fs.chmodSync(directory, 0o700);
+}
+fs.rmSync(qaTarget, { force: true });
+fs.writeFileSync(temporary, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
+fs.renameSync(temporary, target);
+NODE
+}
+
+write_stage_evidence() {
+  local release_sha="$1"
+  local attempt_id="$2"
+  local deployment_url="$3"
+  local deployment_id="$4"
+
+  RELEASE_SHA="$release_sha" \
+    ATTEMPT_ID="$attempt_id" \
+    DEPLOYMENT_URL="$deployment_url" \
+    DEPLOYMENT_ID="$deployment_id" \
+    EVIDENCE_PATH="$evidence_path" \
+    node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
 const target = path.resolve(process.env.EVIDENCE_PATH);
+if (fs.lstatSync(target).isSymbolicLink()) process.exit(1);
+const evidence = JSON.parse(fs.readFileSync(target, "utf8"));
+if (
+  evidence.schemaVersion !== 3 ||
+  evidence.status !== "staging" ||
+  evidence.releaseSha !== process.env.RELEASE_SHA ||
+  evidence.attemptId !== process.env.ATTEMPT_ID ||
+  evidence.promotedAt !== null
+) {
+  process.exit(1);
+}
+evidence.status = "staged";
+evidence.deploymentUrl = process.env.DEPLOYMENT_URL;
+evidence.deploymentId = process.env.DEPLOYMENT_ID;
+evidence.stagedAt = new Date().toISOString();
 const temporary = `${target}.tmp-${process.pid}`;
 fs.writeFileSync(temporary, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
 fs.renameSync(temporary, target);
@@ -245,39 +542,146 @@ read_stage_evidence() {
   [[ -f "$evidence_path" ]] || fail "staged release evidence is missing: $evidence_path"
   node - "$evidence_path" <<'NODE'
 const fs = require("node:fs");
+if (fs.lstatSync(process.argv[2]).isSymbolicLink()) process.exit(1);
 const evidence = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 if (
-  evidence.schemaVersion !== 1 ||
+  evidence.schemaVersion !== 3 ||
+  !/^[0-9a-f]{32}$/.test(evidence.attemptId || "") ||
+  !["staged", "promoting"].includes(evidence.status) ||
   !/^[0-9a-f]{40}$/.test(evidence.releaseSha || "") ||
   typeof evidence.deploymentUrl !== "string" ||
+  !/^dpl_[A-Za-z0-9]+$/.test(evidence.deploymentId || "") ||
+  !Number.isFinite(Date.parse(evidence.stagedAt || "")) ||
   evidence.promotedAt !== null
 ) {
   process.exit(1);
 }
-process.stdout.write(`${evidence.releaseSha}\n${evidence.deploymentUrl}\n`);
+process.stdout.write(
+  [
+    evidence.releaseSha,
+    evidence.deploymentUrl,
+    evidence.deploymentId,
+    evidence.stagedAt,
+    evidence.attemptId,
+    evidence.status,
+  ].join("\n") + "\n",
+);
 NODE
 }
 
-mark_promoted() {
-  EVIDENCE_PATH="$evidence_path" node <<'NODE'
+assert_qa_evidence() {
+  local release_sha="$1"
+  local deployment_url="$2"
+  local deployment_id="$3"
+  local staged_at="$4"
+  local attempt_id="$5"
+
+  [[ -f "$qa_evidence_path" ]] ||
+    fail "staged browser QA evidence is missing: $qa_evidence_path"
+  node scripts/vercel-staged-qa.mjs \
+    --verify-receipt \
+    "$release_sha" \
+    "$deployment_url" \
+    "$deployment_id" \
+    "$staged_at" \
+    "$attempt_id"
+}
+
+assert_provider_canary_evidence() {
+  local release_sha="$1"
+
+  [[ -f "$PROVIDER_CANARY_EVIDENCE_PATH" ]] ||
+    fail "production provider canary evidence is missing: $PROVIDER_CANARY_EVIDENCE_PATH"
+  node scripts/vercel-staged-qa.mjs \
+    --verify-provider-canary \
+    "$release_sha"
+}
+
+update_promotion_state() {
+  local next_status="$1"
+  local release_sha="$2"
+  local deployment_url="$3"
+  local deployment_id="$4"
+  local attempt_id="$5"
+
+  NEXT_STATUS="$next_status" \
+    RELEASE_SHA="$release_sha" \
+    DEPLOYMENT_URL="$deployment_url" \
+    DEPLOYMENT_ID="$deployment_id" \
+    ATTEMPT_ID="$attempt_id" \
+    EVIDENCE_PATH="$evidence_path" \
+    node <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const target = path.resolve(process.env.EVIDENCE_PATH);
+if (fs.lstatSync(target).isSymbolicLink()) process.exit(1);
 const evidence = JSON.parse(fs.readFileSync(target, "utf8"));
-evidence.promotedAt = new Date().toISOString();
+if (
+  evidence.schemaVersion !== 3 ||
+  evidence.releaseSha !== process.env.RELEASE_SHA ||
+  evidence.deploymentUrl !== process.env.DEPLOYMENT_URL ||
+  evidence.deploymentId !== process.env.DEPLOYMENT_ID ||
+  evidence.attemptId !== process.env.ATTEMPT_ID ||
+  evidence.promotedAt !== null
+) {
+  process.exit(1);
+}
+if (process.env.NEXT_STATUS === "promoting") {
+  if (!["staged", "promoting"].includes(evidence.status)) process.exit(1);
+  evidence.status = "promoting";
+  evidence.promotionAttemptedAt ||= new Date().toISOString();
+} else if (process.env.NEXT_STATUS === "promoted") {
+  if (evidence.status !== "promoting") process.exit(1);
+  evidence.status = "promoted";
+  evidence.promotedAt = new Date().toISOString();
+} else {
+  process.exit(1);
+}
 const temporary = `${target}.tmp-${process.pid}`;
 fs.writeFileSync(temporary, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
 fs.renameSync(temporary, target);
 NODE
 }
 
+assert_promoted_deployment() {
+  local expected_deployment_id="$1"
+  local current_id=""
+  local delay
+  local delays=(0 2 3 5 8 13 15 15 15 15)
+
+  for delay in "${delays[@]}"; do
+    if ((delay > 0)); then
+      sleep "$delay"
+    fi
+    current_id="$(inspect_deployment_id "$PRODUCTION_VERCEL_ORIGIN" 2>/dev/null || true)"
+    if [[ "$current_id" = "$expected_deployment_id" ]]; then
+      return 0
+    fi
+  done
+  fail "the production domain was not assigned to the exact staged deployment."
+}
+
+assert_current_promoted_deployment() {
+  local expected_deployment_id="$1"
+  local current_id=""
+
+  current_id="$(inspect_deployment_id "$PRODUCTION_VERCEL_ORIGIN")" ||
+    fail "the production domain could not be inspected after verification."
+  [[ "$current_id" = "$expected_deployment_id" ]] ||
+    fail "the production domain changed during final verification."
+}
+
 stage_release() {
   local release_sha="${2:-${RELEASE_SHA:-}}"
-  local deployment_url
+  local attempt_id deployment_url deployment_id
   local env_inventory_file="$work_dir/vercel-production-env.json"
 
   validate_sha "$release_sha"
   assert_clean_current_release "$release_sha"
+  assert_provider_canary_evidence "$release_sha" ||
+    fail "the provider canary receipt is invalid or belongs to another release."
+  attempt_id="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(16).toString("hex"))')"
+  begin_stage_attempt "$release_sha" "$attempt_id"
   assert_release_health "$FLY_ORIGIN" "$release_sha" "fly-before-stage"
   assert_expected_vercel_link
 
@@ -302,32 +706,76 @@ stage_release() {
   )"
   validate_deployment_url "$deployment_url" ||
     fail "Vercel did not return a canonical staged deployment URL."
+  deployment_id="$(inspect_deployment_id "$deployment_url")" ||
+    fail "Vercel did not return a ready immutable deployment ID."
+  validate_deployment_id "$deployment_id" ||
+    fail "Vercel returned an invalid immutable deployment ID."
   assert_release_health "$deployment_url" "$release_sha" "vercel-staged"
   assert_trusted_proxy_route "$deployment_url" "vercel-staged"
-  write_stage_evidence "$release_sha" "$deployment_url"
+  assert_frontend_artifact "$deployment_url" "$release_sha" "vercel-staged"
+  write_stage_evidence "$release_sha" "$attempt_id" "$deployment_url" "$deployment_id"
 
   echo "Staged release verified: $deployment_url"
   echo "Evidence: $evidence_path"
 }
 
 promote_release() {
-  local evidence release_sha deployment_url
+  local evidence release_sha deployment_url deployment_id staged_at attempt_id status
+  local inspected_deployment_id
 
   [[ "${VERCEL_RELEASE_QA_CONFIRM:-}" = "staged-browser-qa-passed" ]] ||
     fail "set VERCEL_RELEASE_QA_CONFIRM=staged-browser-qa-passed only after staged browser QA."
   evidence="$(read_stage_evidence)" || fail "staged release evidence is invalid."
   release_sha="$(printf '%s\n' "$evidence" | sed -n '1p')"
   deployment_url="$(printf '%s\n' "$evidence" | sed -n '2p')"
+  deployment_id="$(printf '%s\n' "$evidence" | sed -n '3p')"
+  staged_at="$(printf '%s\n' "$evidence" | sed -n '4p')"
+  attempt_id="$(printf '%s\n' "$evidence" | sed -n '5p')"
+  status="$(printf '%s\n' "$evidence" | sed -n '6p')"
   validate_sha "$release_sha"
   validate_deployment_url "$deployment_url" || fail "staged deployment URL is invalid."
+  validate_deployment_id "$deployment_id" || fail "staged deployment ID is invalid."
+  [[ "$attempt_id" =~ ^[0-9a-f]{32}$ ]] || fail "staged attempt ID is invalid."
+  [[ "$status" = "staged" || "$status" = "promoting" ]] ||
+    fail "staged release is not eligible for promotion."
+  assert_provider_canary_evidence "$release_sha" ||
+    fail "the provider canary receipt is invalid or belongs to another release."
+  assert_qa_evidence \
+    "$release_sha" \
+    "$deployment_url" \
+    "$deployment_id" \
+    "$staged_at" \
+    "$attempt_id" ||
+    fail "staged browser QA evidence is invalid or belongs to another deployment."
   assert_clean_current_release "$release_sha"
   assert_expected_vercel_link
+  inspected_deployment_id="$(inspect_deployment_id "$deployment_url")" ||
+    fail "the staged deployment could not be inspected immediately before promotion."
+  [[ "$inspected_deployment_id" = "$deployment_id" ]] ||
+    fail "the staged deployment ID no longer matches its receipt."
   assert_release_health "$FLY_ORIGIN" "$release_sha" "fly-before-promotion"
   assert_release_health "$deployment_url" "$release_sha" "vercel-before-promotion"
   assert_trusted_proxy_route "$deployment_url" "vercel-before-promotion"
+  assert_frontend_artifact "$deployment_url" "$release_sha" "vercel-before-promotion"
 
+  update_promotion_state \
+    "promoting" \
+    "$release_sha" \
+    "$deployment_url" \
+    "$deployment_id" \
+    "$attempt_id"
   npx --yes "vercel@${VERCEL_CLI_VERSION}" promote "$deployment_url" --yes
-  mark_promoted
+  assert_promoted_deployment "$deployment_id"
+  assert_release_health "$PRODUCTION_VERCEL_ORIGIN" "$release_sha" "vercel-production"
+  assert_trusted_proxy_route "$PRODUCTION_VERCEL_ORIGIN" "vercel-production"
+  assert_frontend_artifact "$PRODUCTION_VERCEL_ORIGIN" "$release_sha" "vercel-production"
+  assert_current_promoted_deployment "$deployment_id"
+  update_promotion_state \
+    "promoted" \
+    "$release_sha" \
+    "$deployment_url" \
+    "$deployment_id" \
+    "$attempt_id"
   echo "Promoted exact staged release: $deployment_url"
 }
 
@@ -335,6 +783,7 @@ require_tools
 git_root="$(git rev-parse --show-toplevel)"
 cd "$git_root"
 work_dir="$(mktemp -d)"
+acquire_release_lock
 
 case "$command_name" in
   stage) stage_release "$@" ;;
