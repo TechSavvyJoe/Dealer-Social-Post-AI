@@ -195,4 +195,38 @@ describe("risk-triggered sign-in UX", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/not recognized/i)).toBeNull();
   });
+
+  it("keeps an invalid system-admin code inline and clears it on mode change", async () => {
+    const onLogin = vi.fn().mockResolvedValue({
+      ok: false,
+      code: "INVALID_CODE",
+    });
+    render(
+      <ToastProvider>
+        <LoginScreen onLogin={onLogin} />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "System admin" }));
+    const adminCode = await screen.findByLabelText("System admin code");
+    fireEvent.change(adminCode, { target: { value: "Abcdef123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to system admin" }));
+
+    expect(
+      await screen.findByText("Code not recognized. Check the code and try again."),
+    ).toHaveAttribute("role", "alert");
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    await waitFor(() =>
+      expect(screen.getByLabelText("System admin code")).toHaveAttribute(
+        "aria-invalid",
+        "true",
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "My code" }));
+    expect(screen.queryByText(/code not recognized/i)).toBeNull();
+    expect(
+      screen.getByRole("status", { name: "0 of 4 digits entered" }),
+    ).toBeInTheDocument();
+  });
 });

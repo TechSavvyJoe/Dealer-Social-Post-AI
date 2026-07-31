@@ -177,7 +177,7 @@ describe("frontend accessibility repairs", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps error toasts until acknowledged and pauses timed toasts", () => {
+  it("deduplicates persistent errors and pauses timed toasts", () => {
     vi.useFakeTimers();
     const Harness = () => {
       const toast = useToast();
@@ -199,7 +199,11 @@ describe("frontend accessibility repairs", () => {
       </ToastProvider>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Show error" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show error" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show error" }));
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
     const errorToast = screen.getByRole("alert");
+    expect(errorToast).toHaveTextContent("Notification repeated 3 times.");
     act(() => vi.advanceTimersByTime(60_000));
     expect(errorToast).toBeVisible();
 
@@ -207,10 +211,16 @@ describe("frontend accessibility repairs", () => {
     const successToast = screen.getByRole("status");
     act(() => vi.advanceTimersByTime(1_000));
     fireEvent.mouseEnter(successToast);
+    fireEvent.click(screen.getByRole("button", { name: "Show success" }));
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Notification repeated 2 times.",
+    );
     act(() => vi.advanceTimersByTime(10_000));
-    expect(successToast).toBeVisible();
-    fireEvent.mouseLeave(successToast);
-    act(() => vi.advanceTimersByTime(4_100));
+    expect(screen.getByRole("status")).toBeVisible();
+    fireEvent.mouseLeave(screen.getByRole("status"));
+    act(() => vi.advanceTimersByTime(4_900));
+    expect(screen.getByRole("status")).toBeVisible();
+    act(() => vi.advanceTimersByTime(200));
     expect(screen.queryByText("Saved")).not.toBeInTheDocument();
   });
 

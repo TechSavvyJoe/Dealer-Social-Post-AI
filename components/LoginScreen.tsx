@@ -53,6 +53,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [challengeNonce, setChallengeNonce] = useState(0);
   const [lockoutUntil, setLockoutUntil] = useState(0);
   const [clockNow, setClockNow] = useState(() => Date.now());
+  const [personalCodeError, setPersonalCodeError] = useState("");
+  const [adminCodeError, setAdminCodeError] = useState("");
   const adminInputRef = useRef<HTMLInputElement>(null);
   const isMountedRef = useRef(true);
   const shouldReduceMotion = useReducedMotion();
@@ -122,8 +124,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             }
             case "INVALID_CODE":
               setPendingAttempt(null);
-              toast.error("Code not recognized. Check the code and try again.");
-              if (mode === "personal") setDealerCode("");
+              if (mode === "personal") {
+                setDealerCode("");
+                setPersonalCodeError(
+                  "Code not recognized. Check the code and try again.",
+                );
+              } else {
+                setAdminCodeError("Code not recognized. Check the code and try again.");
+              }
               break;
             default:
               if (turnstileToken) {
@@ -170,6 +178,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     async (key: DialpadKey) => {
       triggerHapticFeedback();
       if (isLoading || isSuccess) return;
+      setPersonalCodeError("");
 
       if (key === "clear") {
         setDealerCode("");
@@ -195,12 +204,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     triggerHapticFeedback();
     setEntryMode(mode);
     setPendingAttempt(null);
+    setPersonalCodeError("");
+    setAdminCodeError("");
   }, []);
 
   const returnToCodeEntry = useCallback(() => {
     if (!pendingAttempt) return;
     setEntryMode(pendingAttempt.mode);
     setPendingAttempt(null);
+    setPersonalCodeError("");
+    setAdminCodeError("");
   }, [pendingAttempt]);
 
   useEffect(() => {
@@ -243,10 +256,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       } else if (/^[a-zA-Z]$/.test(event.key)) {
         event.preventDefault();
         setEntryMode("system");
+        setAdminCodeError("");
         setAdminCode((current) => `${current}${event.key}`.slice(0, ADMIN_CODE_LENGTH));
       } else if (/^\d$/.test(event.key)) {
         event.preventDefault();
         if (entryMode === "system") {
+          setAdminCodeError("");
           setAdminCode((current) =>
             `${current}${event.key}`.slice(0, ADMIN_CODE_LENGTH),
           );
@@ -530,10 +545,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       ))}
                     </div>
 
-                    <p className="shrink-0 text-center text-sm text-surface-400">
-                      {dealerCode.length > 0
-                        ? `${PERSON_CODE_LENGTH - dealerCode.length} left`
-                        : "4 digits · from your manager"}
+                    <p
+                      className={cn(
+                        "shrink-0 text-center text-sm",
+                        personalCodeError ? "text-error-300" : "text-surface-400",
+                      )}
+                      role={personalCodeError ? "alert" : undefined}
+                    >
+                      {personalCodeError ||
+                        (dealerCode.length > 0
+                          ? `${PERSON_CODE_LENGTH - dealerCode.length} left`
+                          : "4 digits · from your manager")}
                     </p>
 
                     <div className="min-h-0 w-full">
@@ -568,15 +590,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                         label="System admin code"
                         value={adminCode}
                         type={showAdminCode ? "text" : "password"}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          setAdminCodeError("");
                           setAdminCode(
                             event.target.value
                               .replace(/[^a-zA-Z0-9]/g, "")
                               .slice(0, ADMIN_CODE_LENGTH),
-                          )
-                        }
+                          );
+                        }}
                         onKeyDown={(event) => {
-                          if (event.key === "Escape") setAdminCode("");
+                          if (event.key === "Escape") {
+                            setAdminCode("");
+                            setAdminCodeError("");
+                          }
                         }}
                         leftIcon={<KeyRound />}
                         rightAction={
@@ -604,9 +630,22 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                         inputMode="text"
                         enterKeyHint="go"
                         maxLength={ADMIN_CODE_LENGTH}
+                        aria-invalid={adminCodeError ? true : undefined}
+                        aria-describedby={
+                          adminCodeError ? "system-admin-code-error" : undefined
+                        }
                         helperText={`Exact case · ${adminCode.length}/${ADMIN_CODE_LENGTH} characters`}
                         fullWidth
                       />
+                      {adminCodeError ? (
+                        <p
+                          id="system-admin-code-error"
+                          className="mt-2 px-1 text-sm text-error-300"
+                          role="alert"
+                        >
+                          {adminCodeError}
+                        </p>
+                      ) : null}
 
                       <Button
                         type="submit"
