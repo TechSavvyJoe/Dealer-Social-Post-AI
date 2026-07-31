@@ -138,12 +138,28 @@ test.describe("Dealer Social Post AI Flow", () => {
   }, testInfo) => {
     // Keep this smoke test independent of PocketBase in CI: stub session APIs
     // so Vite can run alone and the login failure path is deterministic.
+    let loginAttempts = 0;
     await page.route("**/api/app/session", async (route) => {
       if (route.request().method() === "POST") {
+        loginAttempts += 1;
+        const challengeRequired = loginAttempts === 4;
         await route.fulfill({
-          status: 401,
+          status: challengeRequired ? 403 : 401,
           contentType: "application/json",
-          body: JSON.stringify({ error: "Invalid dealer code" }),
+          body: JSON.stringify(
+            challengeRequired
+              ? {
+                  error: "CHALLENGE_REQUIRED",
+                  code: "CHALLENGE_REQUIRED",
+                  message: "Complete the security check to continue.",
+                  action: "turnstile-spin-v2",
+                }
+              : {
+                  error: "INVALID_CODE",
+                  code: "INVALID_CODE",
+                  message: "Invalid access code.",
+                },
+          ),
         });
         return;
       }
@@ -160,6 +176,22 @@ test.describe("Dealer Social Post AI Flow", () => {
         body: JSON.stringify({ success: true }),
       });
     });
+    await page.route(
+      "https://challenges.cloudflare.com/turnstile/v0/api.js**",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/javascript",
+          body: [
+            "window.turnstile={",
+            "render:function(){return 'staged-login-widget';},",
+            "remove:function(){},",
+            "reset:function(){}",
+            "};",
+          ].join(""),
+        });
+      },
+    );
 
     await page.goto("/");
 
@@ -203,14 +235,33 @@ test.describe("Dealer Social Post AI Flow", () => {
     await page.keyboard.press("Tab");
     await expect(page.locator(":focus")).toBeVisible();
 
-    // Personal access codes are 4 digits; dialpad buttons use names like "Digit 9".
-    for (let i = 0; i < 4; i++) {
-      await page.getByRole("button", { name: "Digit 9" }).click();
+    const enterCodeContainingZero = async () => {
+      await expect(
+        page.getByRole("status", { name: "0 of 4 digits entered" }),
+      ).toBeVisible();
+      for (const digit of ["9", "0", "9", "0"]) {
+        await page.getByRole("button", { name: `Digit ${digit}` }).click();
+      }
+    };
+
+    // Repeated invalid feedback must stay inline and actionable. Persistent
+    // overlays previously stacked over Digit 0 and prevented the fourth request
+    // that should trigger the managed security challenge.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await enterCodeContainingZero();
+      await expect(
+        page.getByText("Code not recognized. Check the code and try again."),
+      ).toBeVisible({ timeout: 10_000 });
+      await expect(
+        page.getByRole("status", { name: "0 of 4 digits entered" }),
+      ).toBeVisible();
     }
 
-    await expect(
-      page.getByText("Code not recognized. Check the code and try again."),
-    ).toBeVisible({ timeout: 10_000 });
+    await enterCodeContainingZero();
+    await expect(page.getByRole("heading", { name: "Security check" })).toBeVisible({
+      timeout: 10_000,
+    });
+    expect(loginAttempts).toBe(4);
 
     const worker = await page.request.get("/sw.js");
     expect(worker.ok()).toBe(true);

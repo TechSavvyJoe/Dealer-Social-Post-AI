@@ -53,6 +53,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [challengeNonce, setChallengeNonce] = useState(0);
   const [lockoutUntil, setLockoutUntil] = useState(0);
   const [clockNow, setClockNow] = useState(() => Date.now());
+  const [personalCodeError, setPersonalCodeError] = useState("");
   const adminInputRef = useRef<HTMLInputElement>(null);
   const isMountedRef = useRef(true);
   const shouldReduceMotion = useReducedMotion();
@@ -122,8 +123,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             }
             case "INVALID_CODE":
               setPendingAttempt(null);
-              toast.error("Code not recognized. Check the code and try again.");
-              if (mode === "personal") setDealerCode("");
+              if (mode === "personal") {
+                setDealerCode("");
+                setPersonalCodeError(
+                  "Code not recognized. Check the code and try again.",
+                );
+              } else {
+                toast.error("Code not recognized. Check the code and try again.");
+              }
               break;
             default:
               if (turnstileToken) {
@@ -170,6 +177,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     async (key: DialpadKey) => {
       triggerHapticFeedback();
       if (isLoading || isSuccess) return;
+      setPersonalCodeError("");
 
       if (key === "clear") {
         setDealerCode("");
@@ -195,12 +203,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     triggerHapticFeedback();
     setEntryMode(mode);
     setPendingAttempt(null);
+    setPersonalCodeError("");
   }, []);
 
   const returnToCodeEntry = useCallback(() => {
     if (!pendingAttempt) return;
     setEntryMode(pendingAttempt.mode);
     setPendingAttempt(null);
+    setPersonalCodeError("");
   }, [pendingAttempt]);
 
   useEffect(() => {
@@ -530,10 +540,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       ))}
                     </div>
 
-                    <p className="shrink-0 text-center text-sm text-surface-400">
-                      {dealerCode.length > 0
-                        ? `${PERSON_CODE_LENGTH - dealerCode.length} left`
-                        : "4 digits · from your manager"}
+                    <p
+                      className={cn(
+                        "shrink-0 text-center text-sm",
+                        personalCodeError ? "text-error-300" : "text-surface-400",
+                      )}
+                      role={personalCodeError ? "alert" : undefined}
+                    >
+                      {personalCodeError ||
+                        (dealerCode.length > 0
+                          ? `${PERSON_CODE_LENGTH - dealerCode.length} left`
+                          : "4 digits · from your manager")}
                     </p>
 
                     <div className="min-h-0 w-full">

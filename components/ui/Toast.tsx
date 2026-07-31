@@ -18,6 +18,7 @@ interface Toast {
   type: ToastType;
   message: string;
   duration?: number;
+  revision: number;
 }
 
 interface ToastContextValue {
@@ -43,7 +44,7 @@ interface ToastProviderProps {
 }
 
 interface ToastTimer {
-  handle: ReturnType<typeof setTimeout>;
+  handle: ReturnType<typeof setTimeout> | null;
   remaining: number;
   startedAt: number;
   paused: boolean;
@@ -63,33 +64,66 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
   // unmount — otherwise they fire setState after the provider is gone.
   const timersRef = React.useRef<Map<string, ToastTimer>>(new Map());
   const pauseDepthRef = React.useRef<Map<string, number>>(new Map());
+  const toastIdsByKeyRef = React.useRef<Map<string, string>>(new Map());
+  const toastKeysByIdRef = React.useRef<Map<string, string>>(new Map());
+  const toastRevisionsRef = React.useRef<Map<string, number>>(new Map());
 
   const removeToast = useCallback((id: string) => {
     const timer = timersRef.current.get(id);
-    if (timer) {
+    if (timer?.handle) {
       clearTimeout(timer.handle);
-      timersRef.current.delete(id);
     }
+    timersRef.current.delete(id);
     pauseDepthRef.current.delete(id);
+    toastRevisionsRef.current.delete(id);
+    const key = toastKeysByIdRef.current.get(id);
+    if (key) {
+      toastKeysByIdRef.current.delete(id);
+      if (toastIdsByKeyRef.current.get(key) === id) {
+        toastIdsByKeyRef.current.delete(key);
+      }
+    }
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   }, []);
 
   const showToast = useCallback(
     (type: ToastType, message: string, duration?: number) => {
       const resolvedDuration = duration ?? DEFAULT_TOAST_DURATIONS[type];
-      const id = Math.random().toString(36).substring(2, 9);
-      const newToast: Toast = { id, type, message, duration: resolvedDuration };
+      const key = `${type}\u0000${message}`;
+      const existingId = toastIdsByKeyRef.current.get(key);
+      const id = existingId || Math.random().toString(36).substring(2, 9);
+      const revision = (toastRevisionsRef.current.get(id) || 0) + 1;
+      const newToast: Toast = {
+        id,
+        type,
+        message,
+        duration: resolvedDuration,
+        revision,
+      };
 
-      setToasts((prev) => [...prev, newToast]);
+      const existingTimer = timersRef.current.get(id);
+      const remainsPaused =
+        (pauseDepthRef.current.get(id) || 0) > 0 || existingTimer?.paused === true;
+      if (existingTimer?.handle) {
+        clearTimeout(existingTimer.handle);
+      }
+      timersRef.current.delete(id);
+      if (!existingId) pauseDepthRef.current.delete(id);
+      toastIdsByKeyRef.current.set(key, id);
+      toastKeysByIdRef.current.set(id, key);
+      toastRevisionsRef.current.set(id, revision);
+      setToasts((prev) => [...prev.filter((toast) => toast.id !== id), newToast]);
       triggerHapticFeedback();
 
       if (resolvedDuration > 0) {
-        const handle = setTimeout(() => removeToast(id), resolvedDuration);
+        const handle = remainsPaused
+          ? null
+          : setTimeout(() => removeToast(id), resolvedDuration);
         timersRef.current.set(id, {
           handle,
           remaining: resolvedDuration,
           startedAt: Date.now(),
-          paused: false,
+          paused: remainsPaused,
         });
       }
     },
@@ -102,9 +136,10 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
     if (pauseDepth > 1) return;
     const timer = timersRef.current.get(id);
     if (!timer || timer.paused) return;
-    clearTimeout(timer.handle);
+    if (timer.handle) clearTimeout(timer.handle);
     timersRef.current.set(id, {
       ...timer,
+      handle: null,
       remaining: Math.max(0, timer.remaining - (Date.now() - timer.startedAt)),
       paused: true,
     });
@@ -124,7 +159,7 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
         removeToast(id);
         return;
       }
-      clearTimeout(timer.handle);
+      if (timer.handle) clearTimeout(timer.handle);
       const handle = setTimeout(() => removeToast(id), timer.remaining);
       timersRef.current.set(id, {
         handle,
@@ -140,8 +175,13 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
   React.useEffect(() => {
     const timers = timersRef.current;
     return () => {
-      timers.forEach((timer) => clearTimeout(timer.handle));
+      timers.forEach((timer) => {
+        if (timer.handle) clearTimeout(timer.handle);
+      });
       timers.clear();
+      toastIdsByKeyRef.current.clear();
+      toastKeysByIdRef.current.clear();
+      toastRevisionsRef.current.clear();
     };
   }, []);
 
@@ -269,6 +309,12 @@ const ToastItem: React.FC<ToastItemProps> = ({
       <div className="flex-shrink-0">{icons[toast.type]}</div>
       <p className="flex-1 text-sm font-medium text-white [.theme-light_&]:text-slate-950">
         {toast.message}
+        {toast.revision > 1 ? (
+          <span className="sr-only">
+            {" "}
+            Notification repeated {toast.revision} times.
+          </span>
+        ) : null}
       </p>
       <button
         type="button"
