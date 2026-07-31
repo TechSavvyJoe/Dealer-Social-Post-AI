@@ -54,6 +54,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [lockoutUntil, setLockoutUntil] = useState(0);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [personalCodeError, setPersonalCodeError] = useState("");
+  const [adminCodeError, setAdminCodeError] = useState("");
   const adminInputRef = useRef<HTMLInputElement>(null);
   const isMountedRef = useRef(true);
   const shouldReduceMotion = useReducedMotion();
@@ -129,7 +130,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   "Code not recognized. Check the code and try again.",
                 );
               } else {
-                toast.error("Code not recognized. Check the code and try again.");
+                setAdminCodeError("Code not recognized. Check the code and try again.");
               }
               break;
             default:
@@ -204,6 +205,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     setEntryMode(mode);
     setPendingAttempt(null);
     setPersonalCodeError("");
+    setAdminCodeError("");
   }, []);
 
   const returnToCodeEntry = useCallback(() => {
@@ -211,6 +213,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     setEntryMode(pendingAttempt.mode);
     setPendingAttempt(null);
     setPersonalCodeError("");
+    setAdminCodeError("");
   }, [pendingAttempt]);
 
   useEffect(() => {
@@ -253,10 +256,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       } else if (/^[a-zA-Z]$/.test(event.key)) {
         event.preventDefault();
         setEntryMode("system");
+        setAdminCodeError("");
         setAdminCode((current) => `${current}${event.key}`.slice(0, ADMIN_CODE_LENGTH));
       } else if (/^\d$/.test(event.key)) {
         event.preventDefault();
         if (entryMode === "system") {
+          setAdminCodeError("");
           setAdminCode((current) =>
             `${current}${event.key}`.slice(0, ADMIN_CODE_LENGTH),
           );
@@ -585,15 +590,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                         label="System admin code"
                         value={adminCode}
                         type={showAdminCode ? "text" : "password"}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          setAdminCodeError("");
                           setAdminCode(
                             event.target.value
                               .replace(/[^a-zA-Z0-9]/g, "")
                               .slice(0, ADMIN_CODE_LENGTH),
-                          )
-                        }
+                          );
+                        }}
                         onKeyDown={(event) => {
-                          if (event.key === "Escape") setAdminCode("");
+                          if (event.key === "Escape") {
+                            setAdminCode("");
+                            setAdminCodeError("");
+                          }
                         }}
                         leftIcon={<KeyRound />}
                         rightAction={
@@ -621,9 +630,22 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                         inputMode="text"
                         enterKeyHint="go"
                         maxLength={ADMIN_CODE_LENGTH}
+                        aria-invalid={adminCodeError ? true : undefined}
+                        aria-describedby={
+                          adminCodeError ? "system-admin-code-error" : undefined
+                        }
                         helperText={`Exact case · ${adminCode.length}/${ADMIN_CODE_LENGTH} characters`}
                         fullWidth
                       />
+                      {adminCodeError ? (
+                        <p
+                          id="system-admin-code-error"
+                          className="mt-2 px-1 text-sm text-error-300"
+                          role="alert"
+                        >
+                          {adminCodeError}
+                        </p>
+                      ) : null}
 
                       <Button
                         type="submit"
