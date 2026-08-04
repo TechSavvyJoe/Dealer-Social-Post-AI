@@ -84,8 +84,7 @@ export const AdminDashboard: React.FC = () => {
   const [peopleCursor, setPeopleCursor] = useState<string | undefined>();
   const [cursorHistory, setCursorHistory] = useState<string[]>([]);
   const [oneTimeCredential, setOneTimeCredential] = useState<{
-    id: string;
-    name: string;
+    person: Person;
     pin: string;
   } | null>(null);
   const [savingPerson, setSavingPerson] = useState(false);
@@ -287,13 +286,12 @@ export const AdminDashboard: React.FC = () => {
         dealer: selectedDealerId,
       });
       setOneTimeCredential({
-        id: created.person.id,
-        name: created.person.name,
+        person: created.person,
         pin: created.pin,
       });
       toast.success(
         peopleRole === "manager"
-          ? `Manager added to ${selectedDealer.name}.`
+          ? `Manager added to ${selectedDealer.name}. Set up their username and password.`
           : `Salesperson added to ${selectedDealer.name}.`,
       );
       setPersonForm({ name: "" });
@@ -350,19 +348,25 @@ export const AdminDashboard: React.FC = () => {
       setEditingPerson((current) =>
         current?.id === updated.id ? { ...current, ...updated } : current,
       );
-      if (!updated.pinNeedsDistribution) {
-        setOneTimeCredential((current) =>
-          current?.id === updated.id ? null : current,
-        );
-      }
+      setOneTimeCredential((current) => {
+        if (current?.person.id !== updated.id) return current;
+        if (!updated.pinNeedsDistribution) return null;
+        // The PIN itself is intentionally one-time and remains only in this
+        // handoff state. Keep its accompanying non-secret person summary fresh
+        // after manager-login setup so reopening the editor cannot regress to
+        // a stale "Not set" view.
+        return {
+          ...current,
+          person: { ...current.person, ...updated },
+        };
+      });
     },
     [queryClient],
   );
 
   const handleCredentialIssued = React.useCallback((credential: CredentialResult) => {
     setOneTimeCredential({
-      id: credential.person.id,
-      name: credential.person.name,
+      person: credential.person,
       pin: credential.pin,
     });
   }, []);
@@ -799,7 +803,9 @@ export const AdminDashboard: React.FC = () => {
                   : `Add salesperson · ${selectedDealer.name}`}
               </h3>
               <p className="mt-1 text-xs text-surface-400">
-                The server creates a unique 4-digit code and shows it once.
+                {tab === "admins"
+                  ? "A 4-digit fallback code is created first; then you’ll set the manager’s username and password."
+                  : "The server creates a unique 4-digit code and shows it once."}
               </p>
               <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
                 <div className="flex-1">
@@ -845,12 +851,12 @@ export const AdminDashboard: React.FC = () => {
           {oneTimeCredential ? (
             <div className="rounded-2xl border border-warning-400/25 bg-warning-500/[0.08] p-4">
               <p className="text-sm font-semibold text-warning-100">
-                Share {oneTimeCredential.name}&apos;s code privately
+                Share {oneTimeCredential.person.name}&apos;s code privately
               </p>
               <p className="mt-1 text-xs text-warning-100/70">
                 This one-time response is not stored in the roster.
               </p>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
                 <code className="flex-1 rounded-xl border border-white/10 bg-surface-950/80 px-4 py-3 text-center text-xl tracking-[0.4em] text-surface-50">
                   {oneTimeCredential.pin}
                 </code>
@@ -868,7 +874,7 @@ export const AdminDashboard: React.FC = () => {
                 <Button
                   variant="primary"
                   onClick={() => {
-                    void acknowledgePinDistribution(oneTimeCredential.id)
+                    void acknowledgePinDistribution(oneTimeCredential.person.id)
                       .then(() => {
                         setOneTimeCredential(null);
                         void refetchPeople();
@@ -885,6 +891,14 @@ export const AdminDashboard: React.FC = () => {
                 >
                   Mark as shared
                 </Button>
+                {oneTimeCredential.person.role === "manager" ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => setEditingPerson(oneTimeCredential.person)}
+                  >
+                    Set up manager login
+                  </Button>
+                ) : null}
               </div>
             </div>
           ) : null}
@@ -940,6 +954,20 @@ export const AdminDashboard: React.FC = () => {
                           ? "Code set"
                           : "No code"}
                     </span>
+                    {person.role === "manager" ? (
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                          person.hasManagerLogin
+                            ? "bg-primary-500/10 text-primary-200 ring-1 ring-primary-400/25"
+                            : "bg-surface-800 text-surface-400 ring-1 ring-white/10",
+                        )}
+                      >
+                        {person.hasManagerLogin
+                          ? `@${person.managerUsername}`
+                          : "Manager login not set"}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -1040,6 +1068,7 @@ export const AdminDashboard: React.FC = () => {
         storeName={editingPerson ? dealerNameFor(editingPerson) : undefined}
         allowRoleEdit
         allowPinReveal
+        allowManagerLoginEdit
         onClose={() => setEditingPerson(null)}
         onCommitted={handlePersonCommitted}
         onCredentialIssued={handleCredentialIssued}

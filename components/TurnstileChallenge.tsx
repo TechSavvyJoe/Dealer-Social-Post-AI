@@ -10,7 +10,7 @@ interface TurnstileChallengeProps {
   onToken: (token: string) => void;
   onExpired?: () => void;
   onError?: () => void;
-  /** Returns to the still-populated code entry so the user can correct it. */
+  /** Returns to the still-populated sign-in form so the user can correct it. */
   onBack?: () => void;
 }
 
@@ -142,7 +142,7 @@ export const TurnstileChallenge: React.FC<TurnstileChallengeProps> = ({
         <div>
           <h2 className="font-semibold text-surface-100">Security check</h2>
           <p className="mt-1 text-sm leading-relaxed text-surface-400">
-            Complete this quick check, then we’ll verify the same access code.
+            Complete this quick check, then we’ll verify the same sign-in details.
           </p>
         </div>
       </div>
@@ -180,7 +180,7 @@ export const TurnstileChallenge: React.FC<TurnstileChallengeProps> = ({
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold text-surface-300 transition-colors hover:bg-white/5 hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            Edit access code
+            Edit sign-in details
           </button>
         ) : null}
         {loadError || isExpired ? (

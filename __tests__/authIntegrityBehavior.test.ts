@@ -1315,7 +1315,7 @@ describe("trusted request metadata", () => {
     expect(
       helpers.legacyClientCompatibilityEnabled(
         requestContext({
-          headers: { "X-Dealer-Client-Contract": "2026-07-29.v3" },
+          headers: { "X-Dealer-Client-Contract": "2026-07-31.v4" },
         }),
       ),
     ).toBe(false);
@@ -1521,11 +1521,12 @@ describe("Turnstile and route authority contracts", () => {
     expect(end).toBeGreaterThan(start);
     for (const code of [
       "INVALID_CODE",
+      "INVALID_CREDENTIALS",
       "CHALLENGE_REQUIRED",
       "LOCKED",
       "UNAVAILABLE",
     ]) {
-      expect(route).toContain(`code: "${code}"`);
+      expect(route).toContain(`"${code}"`);
     }
     expect(route.indexOf("helpers.verifyTurnstileToken")).toBeLessThan(
       route.indexOf("dealerCode === adminEnv"),
@@ -1619,16 +1620,21 @@ describe("Turnstile and route authority contracts", () => {
     expect(createRoute.indexOf("txDao.saveRecord(record)")).toBeLessThan(
       createRoute.lastIndexOf("pin: pin"),
     );
-    const rotateStart = hook.indexOf(
-      'routerAdd("POST", "/api/app/salespeople/:id/rotate-pin"',
+    const managerLoginStart = hook.indexOf(
+      'routerAdd("PUT", "/api/app/salespeople/:id/manager-login"',
       patchStart,
     );
-    const legacyPatchRoute = hook.slice(patchStart, rotateStart);
-    expect(legacyPatchRoute).toContain("helpers.runAuditedTransaction(eventKind");
+    const legacyPatchRoute = hook.slice(patchStart, managerLoginStart);
+    expect(legacyPatchRoute).toContain(
+      "const outcome = helpers.runAuditedTransaction(",
+    );
+    expect(legacyPatchRoute).toContain("return result ? result.eventKind");
+    expect(legacyPatchRoute).toContain('txDao.findRecordById("salespeople", personId)');
+    expect(legacyPatchRoute).toContain("txDao.saveRecord(txPerson)");
     expect(legacyPatchRoute).toContain("helpers.revokePersonSessionsWithDao");
-    expect(
-      legacyPatchRoute.indexOf("helpers.runAuditedTransaction(eventKind"),
-    ).toBeLessThan(legacyPatchRoute.indexOf("pin: nextPin"));
+    expect(legacyPatchRoute.indexOf("helpers.runAuditedTransaction(")).toBeLessThan(
+      legacyPatchRoute.indexOf("pin: outcome.pin"),
+    );
 
     for (const path of ["rotate-pin", "reveal-pin"]) {
       const routeStart = hook.indexOf(

@@ -29,6 +29,7 @@ const person: Person = {
   active: true,
   hasPin: true,
   pinNeedsDistribution: false,
+  hasManagerLogin: false,
 };
 
 beforeEach(() => {

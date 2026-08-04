@@ -89,11 +89,19 @@ The public readiness response is intentionally aggregate. Detailed provider/conf
 
 ## Authentication and provider requests
 
-1. The browser sends a dealer credential to `POST /api/app/session`.
+1. The browser sends a personal PIN, manager username/password, or isolated
+   system-admin credential to `POST /api/app/session`.
 2. The server validates it and sets an opaque `dealer_session` cookie with `HttpOnly`, `Secure`, and `SameSite=Strict` attributes.
 3. The browser includes that cookie on `/api/app/*` and `/api/proxy/*` requests.
 4. PocketBase resolves the server-side session, applies role/rate-limit policy, and attaches the appropriate provider credential.
-5. The database stores only the session token's SHA-256 verifier, never the bearer token itself.
+5. The database stores only the session token's SHA-256 verifier, never the bearer token itself. Manager passwords use PocketBase's one-way verifier in a locked internal auth collection; the browser never receives a PocketBase auth token.
+
+Dealer managers use only the app's dealer-scoped manager workspace. They do not
+receive PocketBase dashboard or deployment-provider access. The system
+administrator configures or replaces manager usernames/passwords from the
+**Admins** hub; every credential change revokes the manager's active sessions.
+See [DEALER_CODE_SETUP.md](DEALER_CODE_SETUP.md) for the exact provisioning and
+handoff contract.
 
 Do not call Google directly from browser code or expose a provider key through a `VITE_*` variable.
 

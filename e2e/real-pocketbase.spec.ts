@@ -9,7 +9,7 @@ import {
 
 const realPocketBaseEnabled = process.env.E2E_REAL_POCKETBASE === "true";
 const adminCode = process.env.E2E_ADMIN_CODE || "";
-const apiContractVersion = "2026-07-29.v3";
+const apiContractVersion = "2026-07-31.v4";
 
 type JsonObject = Record<string, unknown>;
 
@@ -297,6 +297,10 @@ test.describe("real PocketBase release flow", () => {
     const dealerName = `E2E Northline ${suffix}`;
     const managerName = `E2E Manager ${suffix}`;
     const salespersonName = `E2E Sales ${suffix}`;
+    const managerUsername = `mgr.${Date.now().toString(36)}.${browserName.slice(0, 3)}`;
+    // Deliberate leading/trailing spaces prove the browser and proxy preserve
+    // the exact password instead of normalizing a credential in transit.
+    const managerPassword = ` E2E manager access ${suffix}! `;
 
     await page.getByRole("button", { name: "Add Dealer" }).click();
     await page.getByLabel("Dealer name *").fill(dealerName);
@@ -343,6 +347,60 @@ test.describe("real PocketBase release flow", () => {
     await expect(
       page.locator("code").filter({ hasText: managerCredential.pin }),
     ).toBeVisible();
+
+    // Configure the dealer-scoped manager account through the actual audited
+    // super-admin UI. The password is write-only and never appears in the
+    // response, roster, or future session payload.
+    await page.getByRole("button", { name: "Set up manager login" }).click();
+    const managerAccountDialog = page.getByRole("dialog", {
+      name: "Account settings",
+    });
+    await managerAccountDialog
+      .getByLabel("Manager username")
+      .fill(managerUsername.toUpperCase());
+    await managerAccountDialog
+      .getByLabel("Password", { exact: true })
+      .fill(managerPassword);
+    await managerAccountDialog.getByLabel("Confirm password").fill(managerPassword);
+    const configureManagerLoginPromise = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/api/app/salespeople/${managerId}/manager-login`) &&
+        response.request().method() === "PUT",
+    );
+    await managerAccountDialog
+      .getByRole("button", { name: "Enable manager login" })
+      .click();
+    const configureManagerLoginResponse = await configureManagerLoginPromise;
+    expect(configureManagerLoginResponse.status()).toBe(200);
+    expect(
+      (await responseHeaders(configureManagerLoginResponse))["cache-control"],
+    ).toContain("no-store");
+    const configuredManagerText = await configureManagerLoginResponse.text();
+    const configuredManager = JSON.parse(configuredManagerText) as JsonObject;
+    expect(configuredManager).toMatchObject({
+      hasManagerLogin: true,
+      managerUsername,
+    });
+    expect(configuredManagerText).not.toContain(managerPassword);
+    expect(configuredManagerText).not.toContain('"password"');
+    expect(configuredManagerText).not.toContain('"tokenKey"');
+    await expect(
+      managerAccountDialog.getByLabel("New password", { exact: true }),
+    ).toHaveValue("");
+    await expect(managerAccountDialog.getByLabel("Confirm password")).toHaveValue("");
+    await managerAccountDialog.getByRole("button", { name: "Close dialog" }).click();
+
+    // The locked PocketBase auth collection must not mint a reusable PB auth
+    // token directly. Only the app session route may exchange this password.
+    const directPocketBaseAuth = await page.request.post(
+      "/api/collections/manager_accounts/auth-with-password",
+      {
+        data: { identity: managerUsername, password: managerPassword },
+      },
+    );
+    expect(directPocketBaseAuth.status()).not.toBe(200);
+    expect(await directPocketBaseAuth.text()).not.toContain('"token"');
+
     const acknowledgeManagerPromise = page.waitForResponse(
       (response) =>
         response.url().endsWith(`/api/app/salespeople/${managerId}/acknowledge-pin`) &&
@@ -430,20 +488,29 @@ test.describe("real PocketBase release flow", () => {
     await page.getByPlaceholder("Search salespeople…").fill("");
     await page.getByLabel("Dealership view").selectOption(dealerId);
 
-    // A manager can authenticate with the one-time handoff and receives an
-    // authoritative, PIN-free identity in both API and manager UI.
+    // A manager can authenticate with the dealer-scoped username/password and
+    // receives an authoritative, credential-free identity in API and manager UI.
     const managerContext = await browser.newContext({
       baseURL: new URL(page.url()).origin,
       viewport: testInfo.project.use.viewport,
     });
     const managerPage = await managerContext.newPage();
     await managerPage.goto("/");
+    await managerPage
+      .getByRole("button", { name: "Manager username and password" })
+      .click();
+    await managerPage
+      .getByRole("textbox", { name: "Username" })
+      .fill(managerUsername.toUpperCase());
+    await managerPage.getByLabel("Password", { exact: true }).fill(managerPassword);
     const managerLoginPromise = managerPage.waitForResponse(
       (response) =>
         response.url().endsWith("/api/app/session") &&
         response.request().method() === "POST",
     );
-    await enterPersonalCode(managerPage, managerCredential.pin);
+    await managerPage
+      .getByRole("button", { name: "Continue to manager workspace" })
+      .click();
     const managerLoginResponse = await managerLoginPromise;
     expect(managerLoginResponse.status()).toBe(200);
     const managerSession = (await managerLoginResponse.json()) as JsonObject;
@@ -456,6 +523,20 @@ test.describe("real PocketBase release flow", () => {
     await installLoopbackSessionCookie(managerContext, managerPage, managerCookie);
     await expect(managerPage.getByText("Manager dashboard")).toBeVisible({
       timeout: 15_000,
+    });
+
+    // A dealership manager cannot create, reset, or disable their own
+    // password account; that authority stays with the isolated system admin.
+    const managerConfigureDenied = await managerPage.request.put(
+      `/api/app/salespeople/${managerId}/manager-login`,
+      {
+        headers: { Cookie: managerCookie },
+        data: { username: managerUsername, password: managerPassword },
+      },
+    );
+    expect(managerConfigureDenied.status()).toBe(403);
+    expect(await managerConfigureDenied.json()).toMatchObject({
+      code: "MANAGER_LOGIN_FORBIDDEN",
     });
 
     // Persist a meaningful settings edit through the manager-owned UI, then
@@ -727,7 +808,8 @@ test.describe("real PocketBase release flow", () => {
     expect(salespersonLogoutResponse.status()).toBe(200);
     await salespersonContext.close();
 
-    // Rotating the manager PIN must immediately revoke the old session and code.
+    // Rotating the manager PIN must revoke every manager session—including one
+    // authenticated by password—while leaving the password account available.
     const rotateResponse = await page.request.post(
       `/api/app/salespeople/${managerId}/rotate-pin`,
       { headers: { Cookie: adminCookie }, data: {} },
@@ -771,6 +853,98 @@ test.describe("real PocketBase release flow", () => {
       headers: { Cookie: rotatedManagerCookie },
     });
     await managerContext.close();
+
+    if (browserName === "chromium") {
+      // Password replacement is atomic, exact, and revokes the old bearer. A
+      // later disable also revokes its bearer while deliberately retaining the
+      // manager's temporary PIN fallback for this compatibility release.
+      const lifecycleContext = await browser.newContext({
+        baseURL: new URL(page.url()).origin,
+        viewport: testInfo.project.use.viewport,
+      });
+      const lifecyclePage = await lifecycleContext.newPage();
+      const passwordReloginResponse = await lifecyclePage.request.post(
+        "/api/app/session",
+        {
+          data: {
+            authType: "manager_password",
+            username: managerUsername,
+            password: managerPassword,
+          },
+        },
+      );
+      expect(passwordReloginResponse.status()).toBe(200);
+      const preReplacePasswordCookie = await responseSessionCookie(
+        passwordReloginResponse,
+      );
+      const replacementPassword = ` Replacement manager access ${suffix}! `;
+      const replaceManagerLoginResponse = await page.request.put(
+        `/api/app/salespeople/${managerId}/manager-login`,
+        {
+          headers: { Cookie: adminCookie },
+          data: {
+            username: managerUsername,
+            password: replacementPassword,
+          },
+        },
+      );
+      expect(replaceManagerLoginResponse.status()).toBe(200);
+      expect(await replaceManagerLoginResponse.json()).toMatchObject({
+        hasManagerLogin: true,
+        managerUsername,
+      });
+
+      const replacedBearerResponse = await lifecyclePage.request.get(
+        "/api/app/session",
+        { headers: { Cookie: preReplacePasswordCookie } },
+      );
+      expect(replacedBearerResponse.status()).toBe(401);
+      const oldPasswordResponse = await lifecyclePage.request.post("/api/app/session", {
+        data: {
+          authType: "manager_password",
+          username: managerUsername,
+          password: managerPassword,
+        },
+      });
+      expect(oldPasswordResponse.status()).toBe(401);
+      expect(await oldPasswordResponse.json()).toMatchObject({
+        code: "INVALID_CREDENTIALS",
+      });
+      const replacementLoginResponse = await lifecyclePage.request.post(
+        "/api/app/session",
+        {
+          data: {
+            authType: "manager_password",
+            username: managerUsername,
+            password: replacementPassword,
+          },
+        },
+      );
+      expect(replacementLoginResponse.status()).toBe(200);
+      const replacementManagerCookie = await responseSessionCookie(
+        replacementLoginResponse,
+      );
+
+      const disableManagerLoginResponse = await page.request.delete(
+        `/api/app/salespeople/${managerId}/manager-login`,
+        { headers: { Cookie: adminCookie } },
+      );
+      expect(disableManagerLoginResponse.status()).toBe(200);
+      expect(await disableManagerLoginResponse.json()).toMatchObject({
+        hasManagerLogin: false,
+      });
+      const disabledBearerResponse = await lifecyclePage.request.get(
+        "/api/app/session",
+        { headers: { Cookie: replacementManagerCookie } },
+      );
+      expect(disabledBearerResponse.status()).toBe(401);
+      const pinAfterDisableResponse = await lifecyclePage.request.post(
+        "/api/app/session",
+        { data: { dealerCode: rotatedCredential.pin } },
+      );
+      expect(pinAfterDisableResponse.status()).toBe(200);
+      await lifecycleContext.close();
+    }
 
     // Start and exit a real salesperson impersonation. On loopback, install the
     // newly minted cookie before the exit action for the same Secure-cookie reason.

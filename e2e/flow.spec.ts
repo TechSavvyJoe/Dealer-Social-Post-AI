@@ -334,6 +334,115 @@ test.describe("Dealer Social Post AI Flow", () => {
     await expectNoHorizontalOverflow(page);
   });
 
+  test("keeps manager sign-in reachable and isolated from background PIN keys", async ({
+    page,
+  }) => {
+    const submittedCredentials: Array<Record<string, unknown>> = [];
+    await page.route("**/api/app/session", async (route) => {
+      if (route.request().method() === "POST") {
+        const body = route.request().postDataJSON() as Record<string, unknown>;
+        submittedCredentials.push(body);
+        const managerAttempt = body.authType === "manager_password";
+        await route.fulfill({
+          status: 401,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: managerAttempt ? "INVALID_CREDENTIALS" : "INVALID_CODE",
+            code: managerAttempt ? "INVALID_CREDENTIALS" : "INVALID_CODE",
+            message: "Invalid sign-in credentials.",
+          }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "No active session" }),
+      });
+    });
+    await page.route("**/api/telemetry", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true }),
+      });
+    });
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Manager username and password" }).click();
+
+    const managerHeading = page.getByRole("heading", {
+      name: "Dealership manager",
+    });
+    const username = page.getByRole("textbox", { name: "Username" });
+    const password = page.getByLabel("Password", { exact: true });
+    const submit = page.getByRole("button", {
+      name: "Continue to manager workspace",
+    });
+    const managerForm = submit.locator("xpath=ancestor::form");
+
+    await expect(managerForm).toBeVisible();
+    const expectReachable = async (locator: typeof managerHeading, label: string) => {
+      await locator.scrollIntoViewIfNeeded();
+      await expect(locator, `${label} must be reachable`).toBeVisible();
+      const geometry = await locator.evaluate((element) => {
+        const container = element.closest("form");
+        if (!container) return null;
+        const bounds = element.getBoundingClientRect();
+        const frame = container.getBoundingClientRect();
+        return {
+          left: bounds.left,
+          right: bounds.right,
+          top: bounds.top,
+          bottom: bounds.bottom,
+          frameLeft: frame.left,
+          frameRight: frame.right,
+          frameTop: frame.top,
+          frameBottom: frame.bottom,
+        };
+      });
+      expect(
+        geometry,
+        `${label} must belong to the manager scroll container`,
+      ).not.toBeNull();
+      expect(geometry!.left).toBeGreaterThanOrEqual(geometry!.frameLeft - 1);
+      expect(geometry!.right).toBeLessThanOrEqual(geometry!.frameRight + 1);
+      expect(geometry!.top).toBeGreaterThanOrEqual(geometry!.frameTop - 1);
+      expect(geometry!.bottom).toBeLessThanOrEqual(geometry!.frameBottom + 1);
+    };
+
+    await expectReachable(managerHeading, "Manager heading");
+    await expectReachable(username, "Manager username");
+    await expectReachable(password, "Manager password");
+    await expectReachable(submit, "Manager submit action");
+    expect(
+      await managerForm.evaluate((form) => form.scrollWidth <= form.clientWidth + 1),
+    ).toBe(true);
+    await expectNoHorizontalOverflow(page);
+
+    // The page-level digit shortcut belongs exclusively to personal-code mode.
+    // When neither manager input is focused, background digits must not mutate
+    // the hidden PIN state or trigger a personal-code credential exchange.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    for (const digit of ["1", "2", "3", "4"]) {
+      await page.keyboard.press(digit);
+    }
+    await expect.poll(() => submittedCredentials.length).toBe(0);
+
+    await username.fill("manager.one");
+    await password.fill("test-manager-password-2026!");
+    await submit.click();
+    await expect.poll(() => submittedCredentials.length).toBe(1);
+    expect(submittedCredentials[0]).toEqual({
+      authType: "manager_password",
+      username: "manager.one",
+      password: "test-manager-password-2026!",
+    });
+    expect(submittedCredentials[0]).not.toHaveProperty("dealerCode");
+    await expectNoHorizontalOverflow(page);
+  });
+
   test("keeps the responsive result workspace job-first", async ({
     page,
   }, testInfo) => {

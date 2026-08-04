@@ -19,6 +19,8 @@ export interface PersonSummary {
 export interface RosterPerson extends PersonSummary {
   hasPin: boolean;
   pinNeedsDistribution: boolean;
+  hasManagerLogin: boolean;
+  managerUsername?: string;
   dealerName?: string;
   createdAt?: string;
 }
@@ -39,7 +41,7 @@ export interface PeoplePage {
   total?: number;
 }
 
-export const API_CONTRACT_VERSION = "2026-07-29.v3";
+export const API_CONTRACT_VERSION = "2026-07-31.v4";
 
 const normalizePerson = (person: Record<string, unknown>): RosterPerson => ({
   id: String(person.id || ""),
@@ -51,6 +53,13 @@ const normalizePerson = (person: Record<string, unknown>): RosterPerson => ({
   pinNeedsDistribution: Boolean(
     person.pinNeedsDistribution ?? person.pin_needs_distribution,
   ),
+  hasManagerLogin: Boolean(person.hasManagerLogin ?? person.has_manager_login),
+  managerUsername:
+    typeof person.managerUsername === "string"
+      ? person.managerUsername
+      : typeof person.manager_username === "string"
+        ? person.manager_username
+        : undefined,
   dealerName:
     typeof person.dealerName === "string"
       ? person.dealerName
@@ -220,6 +229,31 @@ export const acknowledgePinDistribution = async (id: string): Promise<RosterPers
   const body = await json<Record<string, unknown>>(
     `/api/app/salespeople/${encodeURIComponent(id)}/acknowledge-pin`,
     { method: "POST", body: JSON.stringify({}) },
+  );
+  return normalizePerson(body);
+};
+
+export const configureManagerLogin = async (
+  id: string,
+  input: { username: string; password: string },
+): Promise<RosterPerson> => {
+  const body = await json<
+    Record<string, unknown> & { person?: Record<string, unknown> }
+  >(`/api/app/salespeople/${encodeURIComponent(id)}/manager-login`, {
+    method: "PUT",
+    body: JSON.stringify({
+      username: input.username,
+      // Passwords are exact. Do not trim or normalize this value.
+      password: input.password,
+    }),
+  });
+  return normalizePerson(body.person || body);
+};
+
+export const disableManagerLogin = async (id: string): Promise<RosterPerson> => {
+  const body = await json<Record<string, unknown>>(
+    `/api/app/salespeople/${encodeURIComponent(id)}/manager-login`,
+    { method: "DELETE" },
   );
   return normalizePerson(body);
 };

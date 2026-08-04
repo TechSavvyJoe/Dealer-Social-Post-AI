@@ -121,7 +121,9 @@ describe("session restore navigation", () => {
       ),
     );
 
-    await expect(useAppStore.getState().login("2222")).resolves.toEqual({
+    await expect(
+      useAppStore.getState().login({ authType: "code", dealerCode: "2222" }),
+    ).resolves.toEqual({
       ok: true,
     });
 

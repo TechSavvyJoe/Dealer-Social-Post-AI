@@ -40,6 +40,10 @@ vi.mock("../components/PersonEditModal", () => ({
     if (!isOpen || !person) return null;
     return (
       <div role="dialog" aria-label="Mock account settings">
+        <span>
+          Manager login state:{" "}
+          {person.hasManagerLogin ? person.managerUsername : "not set"}
+        </span>
         <button
           type="button"
           onClick={() => {
@@ -60,6 +64,21 @@ vi.mock("../components/PersonEditModal", () => ({
         >
           Simulate distribution acknowledgement
         </button>
+        {person.role === "manager" ? (
+          <button
+            type="button"
+            onClick={() => {
+              onCommitted?.({
+                ...person,
+                hasManagerLogin: true,
+                managerUsername: "taylor.manager",
+              });
+              onClose();
+            }}
+          >
+            Simulate manager login setup
+          </button>
+        ) : null}
       </div>
     );
   },
@@ -78,6 +97,14 @@ const person: Person = {
   active: true,
   hasPin: true,
   pinNeedsDistribution: false,
+  hasManagerLogin: false,
+};
+
+const manager: Person = {
+  ...person,
+  id: "manager-1",
+  name: "Morgan Taylor",
+  role: "manager",
 };
 
 beforeEach(() => {
@@ -179,6 +206,37 @@ describe("super-admin credential handoff", () => {
 
     await waitFor(() => expect(screen.queryByText("4826")).not.toBeInTheDocument());
     expect(screen.getByText("Code set")).toBeInTheDocument();
+    queryClient.clear();
+  });
+
+  it("preserves the one-time PIN while refreshing its manager-login handoff state", async () => {
+    mocks.listPeoplePage.mockResolvedValue({ items: [manager], total: 1 });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <AdminDashboard />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Admins" }));
+    expect(await screen.findByText("Morgan Taylor")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Simulate code rotation" }));
+
+    expect(await screen.findByText("4826")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Set up manager login" }));
+    expect(screen.getByText("Manager login state: not set")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Simulate manager login setup" }),
+    );
+
+    expect(screen.getByText("4826")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Set up manager login" }));
+    expect(screen.getByText("Manager login state: taylor.manager")).toBeInTheDocument();
     queryClient.clear();
   });
 });

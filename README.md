@@ -62,7 +62,7 @@ The source of truth is [config/gemini-model-policy.json](config/gemini-model-pol
 
 - **Frontend:** React 19, Vite 8, Tailwind CSS, Zustand, and TanStack Query
 - **Backend:** PocketBase custom hooks in `pb_hooks/`, pinned to the latest compatible 0.22 maintenance release (`0.22.37`)
-- **Authentication:** `POST /api/app/session` exchanges a dealer credential for an opaque `HttpOnly`, `Secure`, `SameSite=Strict` cookie
+- **Authentication:** `POST /api/app/session` exchanges a personal PIN, dealer-scoped manager username/password, or isolated system-admin secret for an opaque `HttpOnly`, `Secure`, `SameSite=Strict` app cookie; it never exposes a PocketBase auth token
 - **Provider access:** authenticated browser requests use same-origin `/api/proxy/*` routes; Google credentials remain on the server, and asynchronous operation/file IDs are durably bound to the dealer session that created them
 - **Storage:** PocketBase/SQLite with forward-only migrations in `pb_migrations/`
 - **Private recovery:** small workflow metadata stays in localStorage while large camera/generated assets use dealer-scoped IndexedDB and are cleared on reset, logout, expiry, or authentication rejection

@@ -1597,7 +1597,8 @@ cronAdd("prune-client-error-events", "17 7 * * *", function () {
 // ============================================================================
 // Session Endpoints — DB-backed opaque tokens (2026-05-28 rewrite)
 //
-// POST /api/app/session   { dealerCode }  → sets HttpOnly cookie, returns dealer
+// POST /api/app/session   { dealerCode } OR { authType, username, password }
+//                         → sets HttpOnly cookie, returns dealer
 // GET  /api/app/session                   → resolves cookie → returns dealer
 // DELETE /api/app/session                 → revokes session + clears cookie
 //
@@ -1662,7 +1663,7 @@ routerAdd("POST", "/api/app/session", (c) => {
       LOGIN_FAIL_THRESHOLD,
       LOGIN_FAIL_WINDOW_SECONDS,
     );
-    const rejectInvalidCode = function (detail, credentialPresent) {
+    const rejectInvalidCredential = function (detail, credentialPresent) {
       const failureStored = helpers.finalizeLoginAttempt(
         attemptReservationId,
         "login_fail",
@@ -1680,10 +1681,13 @@ routerAdd("POST", "/api/app/session", (c) => {
       );
       if (updated.unavailable) return unavailableResponse();
       if (updated.locked) return lockedResponse(updated);
+      const invalidCode = managerLoginRequested
+        ? "INVALID_CREDENTIALS"
+        : "INVALID_CODE";
       return c.json(401, {
-        error: "INVALID_CODE",
-        code: "INVALID_CODE",
-        message: "Invalid access code.",
+        error: invalidCode,
+        code: invalidCode,
+        message: "Invalid sign-in credentials.",
       });
     };
     if (failureState.unavailable) return unavailableResponse();
@@ -1694,6 +1698,21 @@ routerAdd("POST", "/api/app/session", (c) => {
       body.dealerCode === undefined || body.dealerCode === null
         ? ""
         : body.dealerCode.toString();
+    const managerUsername = helpers.normalizeManagerUsername(body.username);
+    // Passwords are exact credentials. Never trim, normalize, case-fold, log,
+    // or persist the submitted value outside PocketBase's password verifier.
+    const managerPassword =
+      body.password === undefined || body.password === null
+        ? ""
+        : body.password.toString();
+    const requestedAuthType = (body.authType || "").toString();
+    const managerLoginRequested =
+      requestedAuthType === "manager_password" ||
+      body.username !== undefined ||
+      body.password !== undefined;
+    const credentialPresent = managerLoginRequested
+      ? managerUsername.length > 0 || managerPassword.length > 0
+      : dealerCode.length > 0;
 
     // Keep Fly backward-compatible while the exact staged Vercel artifact is
     // awaiting promotion. Enforcement is enabled only after the new client is
@@ -1720,7 +1739,7 @@ routerAdd("POST", "/api/app/session", (c) => {
       }
       if (!challenge.ok) {
         helpers.logAuthEvent("turnstile_fail", {
-          credentialPresent: dealerCode.length > 0,
+          credentialPresent: credentialPresent,
           ip: ip,
           userAgent: ua,
           detail: "challenge rejected",
@@ -1739,7 +1758,7 @@ routerAdd("POST", "/api/app/session", (c) => {
     const reservation = helpers.reserveLoginAttempt({
       ip: ip,
       userAgent: ua,
-      credentialPresent: dealerCode.length > 0,
+      credentialPresent: credentialPresent,
       threshold: LOGIN_FAIL_THRESHOLD,
       windowSeconds: LOGIN_FAIL_WINDOW_SECONDS,
       challengeAfter: turnstileEnforcementEnabled
@@ -1758,19 +1777,38 @@ routerAdd("POST", "/api/app/session", (c) => {
     }
     attemptReservationId = reservation.attemptId;
 
-    if (!/^[A-Za-z0-9]{4,12}$/.test(dealerCode)) {
-      return rejectInvalidCode("malformed code", dealerCode.length > 0);
+    if (
+      (requestedAuthType && requestedAuthType !== "manager_password") ||
+      (managerLoginRequested &&
+        (body.dealerCode !== undefined || requestedAuthType !== "manager_password"))
+    ) {
+      return rejectInvalidCredential("ambiguous credential payload", credentialPresent);
+    }
+    if (
+      managerLoginRequested &&
+      (!helpers.isValidManagerUsername(managerUsername) ||
+        !helpers.isManagerLoginPasswordShape(managerPassword))
+    ) {
+      return rejectInvalidCredential(
+        "malformed manager credentials",
+        credentialPresent,
+      );
+    }
+    if (!managerLoginRequested && !/^[A-Za-z0-9]{4,12}$/.test(dealerCode)) {
+      return rejectInvalidCredential("malformed code", dealerCode.length > 0);
     }
 
     let role = "salesperson";
     let record;
     let personRecord = null;
     let verifiedPersonPinFingerprint = "";
+    let managerAccount = null;
+    let verifiedManagerAuthFingerprint = "";
     // SECURITY: never fall back to a hardcoded admin code. If ADMIN_DEALER_CODE
     // is unset, super-admin login is simply unavailable.
     const adminEnv = helpers.configuredAdminSecret();
 
-    if (adminEnv && dealerCode === adminEnv) {
+    if (!managerLoginRequested && adminEnv && dealerCode === adminEnv) {
       role = "super_admin";
       record = helpers.findSystemDealer();
 
@@ -1789,6 +1827,50 @@ routerAdd("POST", "/api/app/session", (c) => {
         } catch (insertErr) {
           console.log("[session] system dealer insert raced, re-querying:", insertErr);
           record = helpers.findSystemDealer();
+        }
+      }
+    } else if (managerLoginRequested) {
+      const managerLookup = helpers.findActiveManagerLogin(managerUsername);
+      if (managerLookup.status === "unavailable") {
+        cancelReservedAttempt();
+        return unavailableResponse();
+      }
+      let passwordVerificationAccount = managerLookup.account;
+      if (!passwordVerificationAccount) {
+        const verificationLookup = helpers.findManagerPasswordVerificationAccount();
+        if (verificationLookup.status === "unavailable") {
+          cancelReservedAttempt();
+          return unavailableResponse();
+        }
+        passwordVerificationAccount = verificationLookup.account;
+      }
+      if (passwordVerificationAccount) {
+        let passwordAccepted = false;
+        try {
+          passwordAccepted =
+            !!passwordVerificationAccount.validatePassword(managerPassword);
+        } catch (_e) {
+          cancelReservedAttempt();
+          return unavailableResponse();
+        }
+        // A valid password for the dummy verification target never becomes an
+        // identity match. Only the account resolved from this exact username
+        // can mint the dealer-scoped app session.
+        if (managerLookup.status === "found" && passwordAccepted) {
+          personRecord = managerLookup.person;
+          managerAccount = managerLookup.account;
+          role = "dealer_admin";
+          try {
+            verifiedPersonPinFingerprint = helpers.personPinFingerprint(personRecord);
+            verifiedManagerAuthFingerprint =
+              helpers.managerAuthFingerprint(managerAccount);
+            record = $app
+              .dao()
+              .findRecordById("dealers", personRecord.getString("dealer"));
+          } catch (_e) {
+            cancelReservedAttempt();
+            return unavailableResponse();
+          }
         }
       }
     } else {
@@ -1826,7 +1908,7 @@ routerAdd("POST", "/api/app/session", (c) => {
     }
 
     if (!record) {
-      return rejectInvalidCode("credential not recognized", true);
+      return rejectInvalidCredential("credential not recognized", credentialPresent);
     }
 
     // Mint the opaque session token + persist row. Cookie carries ONLY the token.
@@ -1837,6 +1919,10 @@ routerAdd("POST", "/api/app/session", (c) => {
       if (personRecord) {
         sessionOpts.personId = personRecord.id;
         sessionOpts.expectedPersonPinFingerprint = verifiedPersonPinFingerprint;
+      }
+      if (managerAccount) {
+        sessionOpts.managerAccountId = managerAccount.id;
+        sessionOpts.expectedManagerAuthFingerprint = verifiedManagerAuthFingerprint;
       }
       const session = helpers.createSession(record.id, role, ip, ua, sessionOpts);
       token = session.token;
@@ -1857,7 +1943,9 @@ routerAdd("POST", "/api/app/session", (c) => {
         dealerId: record.id,
         credentialPresent: true,
         detail:
-          "role=" +
+          "auth=" +
+          (managerAccount ? "manager_password" : "code") +
+          " role=" +
           role +
           (personRecord ? " person=" + personRecord.id : "") +
           (sessionId ? " session=" + sessionId : ""),
@@ -3759,16 +3847,7 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
   }
 
   try {
-    const record = $app.dao().findRecordById("salespeople", c.pathParam("id"));
-    const existingRole = record.getString("role") || "salesperson";
-    if (
-      (context.role !== "super_admin" &&
-        record.getString("dealer") !== context.dealer.id) ||
-      (context.role !== "super_admin" && existingRole === "manager")
-    ) {
-      return c.json(403, { error: "Person edit is not allowed" });
-    }
-
+    const personId = c.pathParam("id");
     const body = $apis.requestInfo(c).data || {};
     const legacyCompatibility = helpers.legacyClientCompatibilityEnabled(c);
     if (body.pin !== undefined && !legacyCompatibility) {
@@ -3778,70 +3857,121 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
         message: "Use the access-code rotation action.",
       });
     }
-
-    const wasActive = record.getBool
-      ? record.getBool("active")
-      : !!record.get("active");
-    let nextActive = wasActive;
-    let nextRole = existingRole;
-    let nextPin = record.getString("pin");
-    let pinChanged = false;
-    if (body.pin !== undefined) {
-      nextPin = helpers.assertPersonPinAvailable(body.pin.toString().trim(), record.id);
-      pinChanged = nextPin !== record.getString("pin");
-      if (pinChanged) {
-        record.set("pin", nextPin);
-        record.set("pin_needs_distribution", true);
-      }
-    }
+    const hasPinUpdate = body.pin !== undefined;
+    const requestedPin = hasPinUpdate ? body.pin.toString().trim() : "";
+    const hasNameUpdate = body.name !== undefined;
+    let requestedName = "";
     if (body.name !== undefined) {
-      const name = body.name.toString().trim();
-      if (!name) return c.json(400, { error: "Name is required" });
-      record.set("name", helpers.assertString(name, 120));
+      requestedName = body.name.toString().trim();
+      if (!requestedName) return c.json(400, { error: "Name is required" });
+      requestedName = helpers.assertString(requestedName, 120);
     }
-    if (typeof body.active === "boolean") {
-      nextActive = body.active;
-      if (!wasActive && nextActive) {
-        helpers.assertPersonPinAvailable(record.getString("pin"), record.id);
-      }
-      record.set("active", nextActive);
-    }
+    const hasActiveUpdate = typeof body.active === "boolean";
+    const requestedActive = hasActiveUpdate ? body.active : false;
+    const hasRoleUpdate = body.role !== undefined;
+    let requestedRole = "";
     if (body.role !== undefined) {
       if (context.role !== "super_admin") {
         return c.json(403, { error: "Only system admin can change roles" });
       }
-      nextRole = body.role.toString().trim();
-      if (nextRole !== "manager" && nextRole !== "salesperson") {
+      requestedRole = body.role.toString().trim();
+      if (requestedRole !== "manager" && requestedRole !== "salesperson") {
         return c.json(400, { error: "role must be manager or salesperson" });
       }
-      record.set("role", nextRole);
     }
-    const activeChanged = nextActive !== wasActive;
-    const roleChanged = nextRole !== existingRole;
-    let revoked = 0;
-    const eventKind = pinChanged
-      ? "person_pin_rotated"
-      : roleChanged
-        ? "person_role_changed"
-        : activeChanged
-          ? nextActive
-            ? "person_reactivated"
-            : "person_deactivated"
-          : "";
-    if (eventKind) {
-      const auditOptions = {
-        dealerId: record.getString("dealer"),
-        credentialPresent: pinChanged,
-        ip: helpers.clientIP(c),
-        userAgent: helpers.userAgent(c),
-        detail: "",
-      };
-      helpers.runAuditedTransaction(eventKind, auditOptions, function (txDao) {
-        revoked = helpers.revokePersonSessionsWithDao(txDao, record.id);
-        txDao.saveRecord(record);
+
+    const auditOptions = {
+      dealerId: "",
+      credentialPresent: hasPinUpdate,
+      ip: helpers.clientIP(c),
+      userAgent: helpers.userAgent(c),
+      detail: "",
+    };
+    const outcome = helpers.runAuditedTransaction(
+      function (result) {
+        return result ? result.eventKind : "";
+      },
+      auditOptions,
+      function (txDao) {
+        // Every existing-person write starts from the current transactional
+        // row. PocketBase 0.22 saves every schema column, so saving an object
+        // loaded before the transaction could resurrect an old PIN, role, or
+        // active flag after a concurrent security change.
+        const txPerson = txDao.findRecordById("salespeople", personId);
+        const existingRole = txPerson.getString("role") || "salesperson";
+        if (
+          (context.role !== "super_admin" &&
+            txPerson.getString("dealer") !== context.dealer.id) ||
+          (context.role !== "super_admin" && existingRole === "manager")
+        ) {
+          throw new Error("PERSON_EDIT_FORBIDDEN");
+        }
+
+        const wasActive = txPerson.getBool
+          ? txPerson.getBool("active")
+          : !!txPerson.get("active");
+        let nextActive = wasActive;
+        let nextRole = existingRole;
+        let nextPin = txPerson.getString("pin");
+        let pinChanged = false;
+        if (hasPinUpdate) {
+          nextPin = helpers.assertPersonPinAvailableWithDao(
+            txDao,
+            requestedPin,
+            txPerson.id,
+          );
+          pinChanged = nextPin !== txPerson.getString("pin");
+          if (pinChanged) {
+            txPerson.set("pin", nextPin);
+            txPerson.set("pin_needs_distribution", true);
+          }
+        }
+        if (hasNameUpdate) txPerson.set("name", requestedName);
+        if (hasActiveUpdate) {
+          nextActive = requestedActive;
+          if (!wasActive && nextActive) {
+            helpers.assertPersonPinAvailableWithDao(
+              txDao,
+              txPerson.getString("pin"),
+              txPerson.id,
+            );
+          }
+          txPerson.set("active", nextActive);
+        }
+        if (hasRoleUpdate) {
+          nextRole = requestedRole;
+          txPerson.set("role", nextRole);
+        }
+
+        const activeChanged = nextActive !== wasActive;
+        const roleChanged = nextRole !== existingRole;
+        const eventKind = pinChanged
+          ? "person_pin_rotated"
+          : roleChanged
+            ? "person_role_changed"
+            : activeChanged
+              ? nextActive
+                ? "person_reactivated"
+                : "person_deactivated"
+              : "";
+        let revoked = 0;
+        if (eventKind) {
+          revoked = helpers.revokePersonSessionsWithDao(txDao, txPerson.id);
+        }
+        if (roleChanged && nextRole !== "manager") {
+          const managerAccount = helpers.findManagerAccountByPersonWithDao(
+            txDao,
+            txPerson.id,
+          );
+          if (managerAccount) txDao.deleteRecord(managerAccount);
+          txPerson.set("manager_username", "");
+        }
+        txDao.saveRecord(txPerson);
+        auditOptions.dealerId = txPerson.getString("dealer");
+        auditOptions.credentialPresent = pinChanged;
         auditOptions.detail =
           "person=" +
-          record.id +
+          txPerson.id +
           " sessions_revoked=" +
           revoked +
           " role_changed=" +
@@ -3849,18 +3979,27 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
           " active_changed=" +
           activeChanged +
           (pinChanged ? " action=legacy_patch" : "");
-      });
-    } else {
-      $app.dao().saveRecord(record);
-    }
-    const person = helpers.serializePerson(record);
-    if (pinChanged) {
+        return {
+          person: txPerson,
+          eventKind: eventKind,
+          pinChanged: pinChanged,
+          pin: nextPin,
+        };
+      },
+    );
+    const person = helpers.serializePerson(outcome.person);
+    if (outcome.pinChanged) {
       c.response().header().set("Cache-Control", "private, no-store");
-      return c.json(200, { ...person, person: person, pin: nextPin });
+      return c.json(200, { ...person, person: person, pin: outcome.pin });
     }
     return c.json(200, person);
   } catch (err) {
     console.error("[/api/app/salespeople/:id] update error", err);
+    if (
+      (err && err.message ? err.message : "").toString() === "PERSON_EDIT_FORBIDDEN"
+    ) {
+      return c.json(403, { error: "Person edit is not allowed" });
+    }
     const safeMessage = helpers.safeDealerMutationError(err);
     return c.json(400, {
       error: "PERSON_UPDATE_FAILED",
@@ -3869,6 +4008,196 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
         safeMessage === "Failed to save dealer"
           ? "Failed to update person."
           : safeMessage,
+    });
+  }
+});
+
+routerAdd("PUT", "/api/app/salespeople/:id/manager-login", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  c.response().header().set("Cache-Control", "private, no-store");
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  if (context.role !== "super_admin") {
+    return c.json(403, {
+      error: "MANAGER_LOGIN_FORBIDDEN",
+      code: "MANAGER_LOGIN_FORBIDDEN",
+      message: "Only system admin can configure manager sign-in.",
+    });
+  }
+
+  try {
+    const personId = c.pathParam("id");
+    const body = $apis.requestInfo(c).data || {};
+    const username = helpers.normalizeManagerUsername(body.username);
+    const password =
+      body.password === undefined || body.password === null
+        ? ""
+        : body.password.toString();
+    if (!helpers.isValidManagerUsername(username)) {
+      return c.json(400, {
+        error: "INVALID_MANAGER_USERNAME",
+        code: "INVALID_MANAGER_USERNAME",
+        message:
+          "Username must be 3 to 32 characters, start with a letter, and use only letters, numbers, periods, dashes, or underscores.",
+      });
+    }
+    if (!helpers.isStrongManagerPassword(password)) {
+      return c.json(400, {
+        error: "INVALID_MANAGER_PASSWORD",
+        code: "INVALID_MANAGER_PASSWORD",
+        message: "Password must be between 15 and 128 characters.",
+      });
+    }
+
+    let revoked = 0;
+    let action = "created";
+    let committedPerson = null;
+    const auditOptions = {
+      dealerId: "",
+      credentialPresent: true,
+      ip: helpers.clientIP(c),
+      userAgent: helpers.userAgent(c),
+      detail: "",
+    };
+    helpers.runAuditedTransaction(
+      "manager_login_configured",
+      auditOptions,
+      function (txDao) {
+        // Re-read the target inside the same transaction as the credential
+        // write. A stale record loaded before a concurrent role/deactivation
+        // change could otherwise overwrite the newer authoritative state.
+        const txPerson = txDao.findRecordById("salespeople", personId);
+        if (txPerson.getString("role") !== "manager") {
+          throw new Error("MANAGER_REQUIRED");
+        }
+        if (!txPerson.getBool("active")) {
+          throw new Error("MANAGER_INACTIVE");
+        }
+        const normalized = helpers.assertManagerUsernameAvailableWithDao(
+          txDao,
+          username,
+          txPerson.id,
+        );
+        let account = helpers.findManagerAccountByPersonWithDao(txDao, txPerson.id);
+        if (!account) {
+          const accounts = txDao.findCollectionByNameOrId("manager_accounts");
+          account = new Record(accounts);
+          account.set("person", txPerson.id);
+        } else {
+          action = "replaced";
+        }
+        account.setUsername(normalized);
+        account.setPassword(password);
+        txDao.saveRecord(account);
+        revoked = helpers.revokePersonSessionsWithDao(txDao, txPerson.id);
+        txPerson.set("manager_username", normalized);
+        txDao.saveRecord(txPerson);
+        committedPerson = txPerson;
+        auditOptions.dealerId = txPerson.getString("dealer");
+        auditOptions.detail =
+          "person=" +
+          txPerson.id +
+          " action=" +
+          action +
+          " sessions_revoked=" +
+          revoked;
+      },
+    );
+
+    if (!committedPerson) throw new Error("MANAGER_LOGIN_COMMIT_MISSING");
+    const person = helpers.serializePerson(committedPerson);
+    return c.json(200, {
+      ...person,
+      person: person,
+    });
+  } catch (err) {
+    console.error("[/api/app/salespeople/:id/manager-login] error", err);
+    const message = (err && err.message ? err.message : "").toString();
+    if (message === "MANAGER_REQUIRED" || message === "MANAGER_INACTIVE") {
+      return c.json(409, {
+        error: message,
+        code: message,
+        message:
+          message === "MANAGER_INACTIVE"
+            ? "Reactivate this manager before configuring sign-in."
+            : "Username and password sign-in is available only for managers.",
+      });
+    }
+    const usernameConflict =
+      message.indexOf("username") !== -1 ||
+      message.indexOf("Username") !== -1 ||
+      message.indexOf("unique") !== -1;
+    return c.json(usernameConflict ? 409 : 400, {
+      error: usernameConflict
+        ? "MANAGER_USERNAME_UNAVAILABLE"
+        : "MANAGER_LOGIN_CONFIGURE_FAILED",
+      code: usernameConflict
+        ? "MANAGER_USERNAME_UNAVAILABLE"
+        : "MANAGER_LOGIN_CONFIGURE_FAILED",
+      message: usernameConflict
+        ? "That manager username is already in use."
+        : "Manager sign-in could not be configured.",
+    });
+  }
+});
+
+routerAdd("DELETE", "/api/app/salespeople/:id/manager-login", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  c.response().header().set("Cache-Control", "private, no-store");
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  if (context.role !== "super_admin") {
+    return c.json(403, {
+      error: "MANAGER_LOGIN_FORBIDDEN",
+      code: "MANAGER_LOGIN_FORBIDDEN",
+      message: "Only system admin can disable manager sign-in.",
+    });
+  }
+
+  try {
+    const personId = c.pathParam("id");
+    let revoked = 0;
+    let committedPerson = null;
+    const auditOptions = {
+      dealerId: "",
+      ip: helpers.clientIP(c),
+      userAgent: helpers.userAgent(c),
+      detail: "",
+    };
+    helpers.runAuditedTransaction(
+      "manager_login_disabled",
+      auditOptions,
+      function (txDao) {
+        const txPerson = txDao.findRecordById("salespeople", personId);
+        if (txPerson.getString("role") !== "manager") {
+          throw new Error("MANAGER_REQUIRED");
+        }
+        const account = helpers.findManagerAccountByPersonWithDao(txDao, txPerson.id);
+        revoked = helpers.revokePersonSessionsWithDao(txDao, txPerson.id);
+        if (account) txDao.deleteRecord(account);
+        txPerson.set("manager_username", "");
+        txDao.saveRecord(txPerson);
+        committedPerson = txPerson;
+        auditOptions.dealerId = txPerson.getString("dealer");
+        auditOptions.detail = "person=" + txPerson.id + " sessions_revoked=" + revoked;
+      },
+    );
+    if (!committedPerson) throw new Error("MANAGER_LOGIN_COMMIT_MISSING");
+    return c.json(200, helpers.serializePerson(committedPerson));
+  } catch (err) {
+    console.error("[/api/app/salespeople/:id/manager-login DELETE] error", err);
+    const message = (err && err.message ? err.message : "").toString();
+    if (message === "MANAGER_REQUIRED") {
+      return c.json(409, {
+        error: "MANAGER_REQUIRED",
+        code: "MANAGER_REQUIRED",
+        message: "This person is not a manager.",
+      });
+    }
+    return c.json(400, {
+      error: "MANAGER_LOGIN_DISABLE_FAILED",
+      code: "MANAGER_LOGIN_DISABLE_FAILED",
+      message: "Manager sign-in could not be disabled.",
     });
   }
 });
@@ -3883,38 +4212,49 @@ routerAdd("POST", "/api/app/salespeople/:id/rotate-pin", (c) => {
   }
 
   try {
-    const record = $app.dao().findRecordById("salespeople", c.pathParam("id"));
-    if (
-      context.role !== "super_admin" &&
-      (record.getString("dealer") !== context.dealer.id ||
-        (record.getString("role") || "salesperson") !== "salesperson")
-    ) {
+    const personId = c.pathParam("id");
+    let pin = "";
+    let committedPerson = null;
+    const auditOptions = {
+      dealerId: "",
+      credentialPresent: true,
+      ip: helpers.clientIP(c),
+      userAgent: helpers.userAgent(c),
+      detail: "",
+    };
+    helpers.runAuditedTransaction("person_pin_rotated", auditOptions, function (txDao) {
+      const txPerson = txDao.findRecordById("salespeople", personId);
+      if (
+        context.role !== "super_admin" &&
+        (txPerson.getString("dealer") !== context.dealer.id ||
+          (txPerson.getString("role") || "salesperson") !== "salesperson")
+      ) {
+        throw new Error("PIN_ROTATE_FORBIDDEN");
+      }
+      pin = helpers.generateUniquePersonPinWithDao(txDao);
+      const revoked = helpers.revokePersonSessionsWithDao(txDao, txPerson.id);
+      txPerson.set("pin", pin);
+      txPerson.set("pin_needs_distribution", true);
+      txDao.saveRecord(txPerson);
+      committedPerson = txPerson;
+      auditOptions.dealerId = txPerson.getString("dealer");
+      auditOptions.detail =
+        "person=" + txPerson.id + " action=rotate sessions_revoked=" + revoked;
+    });
+    if (!committedPerson || !pin) throw new Error("PIN_ROTATE_COMMIT_MISSING");
+    return c.json(200, {
+      person: helpers.serializePerson(committedPerson),
+      pin: pin,
+    });
+  } catch (err) {
+    console.error("[/api/app/salespeople/:id/rotate-pin] error", err);
+    if ((err && err.message ? err.message : "").toString() === "PIN_ROTATE_FORBIDDEN") {
       return c.json(403, {
         error: "PIN_ROTATE_FORBIDDEN",
         code: "PIN_ROTATE_FORBIDDEN",
         message: "Access-code rotation is not allowed for this person.",
       });
     }
-
-    let pin = helpers.generateUniquePersonPin();
-    while (pin === record.getString("pin")) pin = helpers.generateUniquePersonPin();
-    const auditOptions = {
-      dealerId: record.getString("dealer"),
-      credentialPresent: true,
-      ip: helpers.clientIP(c),
-      userAgent: helpers.userAgent(c),
-      detail: "person=" + record.id + " action=rotate",
-    };
-    helpers.runAuditedTransaction("person_pin_rotated", auditOptions, function (txDao) {
-      const revoked = helpers.revokePersonSessionsWithDao(txDao, record.id);
-      record.set("pin", pin);
-      record.set("pin_needs_distribution", true);
-      txDao.saveRecord(record);
-      auditOptions.detail += " sessions_revoked=" + revoked;
-    });
-    return c.json(200, { person: helpers.serializePerson(record), pin: pin });
-  } catch (err) {
-    console.error("[/api/app/salespeople/:id/rotate-pin] error", err);
     return c.json(400, {
       error: "PIN_ROTATE_FAILED",
       code: "PIN_ROTATE_FAILED",
@@ -3980,31 +4320,42 @@ routerAdd("POST", "/api/app/salespeople/:id/acknowledge-pin", (c) => {
   }
 
   try {
-    const record = $app.dao().findRecordById("salespeople", c.pathParam("id"));
-    if (
-      context.role !== "super_admin" &&
-      (record.getString("dealer") !== context.dealer.id ||
-        (record.getString("role") || "salesperson") !== "salesperson")
-    ) {
-      return c.json(403, { error: "Acknowledgement is not allowed" });
-    }
+    const personId = c.pathParam("id");
+    let committedPerson = null;
     const auditOptions = {
-      dealerId: record.getString("dealer"),
+      dealerId: "",
       ip: helpers.clientIP(c),
       userAgent: helpers.userAgent(c),
-      detail: "person=" + record.id,
+      detail: "",
     };
     helpers.runAuditedTransaction(
       "person_pin_acknowledged",
       auditOptions,
       function (txDao) {
-        record.set("pin_needs_distribution", false);
-        txDao.saveRecord(record);
+        const txPerson = txDao.findRecordById("salespeople", personId);
+        if (
+          context.role !== "super_admin" &&
+          (txPerson.getString("dealer") !== context.dealer.id ||
+            (txPerson.getString("role") || "salesperson") !== "salesperson")
+        ) {
+          throw new Error("PIN_ACKNOWLEDGE_FORBIDDEN");
+        }
+        txPerson.set("pin_needs_distribution", false);
+        txDao.saveRecord(txPerson);
+        committedPerson = txPerson;
+        auditOptions.dealerId = txPerson.getString("dealer");
+        auditOptions.detail = "person=" + txPerson.id;
       },
     );
-    return c.json(200, helpers.serializePerson(record));
+    if (!committedPerson) throw new Error("PIN_ACKNOWLEDGE_COMMIT_MISSING");
+    return c.json(200, helpers.serializePerson(committedPerson));
   } catch (err) {
     console.error("[/api/app/salespeople/:id/acknowledge-pin] error", err);
+    if (
+      (err && err.message ? err.message : "").toString() === "PIN_ACKNOWLEDGE_FORBIDDEN"
+    ) {
+      return c.json(403, { error: "Acknowledgement is not allowed" });
+    }
     return c.json(404, { error: "Person not found" });
   }
 });
@@ -4018,30 +4369,38 @@ routerAdd("DELETE", "/api/app/salespeople/:id", (c) => {
   }
 
   try {
-    const record = $app.dao().findRecordById("salespeople", c.pathParam("id"));
-    if (
-      context.role !== "super_admin" &&
-      (record.getString("dealer") !== context.dealer.id ||
-        (record.getString("role") || "salesperson") === "manager")
-    ) {
-      return c.json(403, { error: "Person deactivation is not allowed" });
-    }
+    const personId = c.pathParam("id");
     let revoked = 0;
     const auditOptions = {
-      dealerId: record.getString("dealer"),
+      dealerId: "",
       ip: helpers.clientIP(c),
       userAgent: helpers.userAgent(c),
       detail: "",
     };
     helpers.runAuditedTransaction("person_deactivated", auditOptions, function (txDao) {
-      revoked = helpers.revokePersonSessionsWithDao(txDao, record.id);
-      record.set("active", false);
-      txDao.saveRecord(record);
-      auditOptions.detail = "person=" + record.id + " sessions_revoked=" + revoked;
+      const txPerson = txDao.findRecordById("salespeople", personId);
+      if (
+        context.role !== "super_admin" &&
+        (txPerson.getString("dealer") !== context.dealer.id ||
+          (txPerson.getString("role") || "salesperson") === "manager")
+      ) {
+        throw new Error("PERSON_DEACTIVATE_FORBIDDEN");
+      }
+      revoked = helpers.revokePersonSessionsWithDao(txDao, txPerson.id);
+      txPerson.set("active", false);
+      txDao.saveRecord(txPerson);
+      auditOptions.dealerId = txPerson.getString("dealer");
+      auditOptions.detail = "person=" + txPerson.id + " sessions_revoked=" + revoked;
     });
     return c.json(200, { success: true });
   } catch (err) {
     console.error("[/api/app/salespeople/:id] deactivate error", err);
+    if (
+      (err && err.message ? err.message : "").toString() ===
+      "PERSON_DEACTIVATE_FORBIDDEN"
+    ) {
+      return c.json(403, { error: "Person deactivation is not allowed" });
+    }
     return c.json(400, { error: "Failed to deactivate person" });
   }
 });

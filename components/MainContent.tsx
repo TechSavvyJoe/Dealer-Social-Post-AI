@@ -16,7 +16,7 @@ import { LoadingOverlay } from "./LoadingOverlay";
 import { PageTransition } from "./ui/PageTransition";
 import { Button } from "./ui/Button";
 import { Shimmer } from "./ui/Shimmer";
-import type { LoginResult } from "../stores/appStore";
+import type { LoginResult, SessionLoginRequest } from "../stores/appStore";
 import { useAppStore } from "../stores/appStore";
 import type { PrimaryImageProfile, PlatformId } from "../services/platformCopy";
 
@@ -56,7 +56,10 @@ interface MainContentProps {
   progressMessage: string;
 
   // Handlers
-  onLogin: (dealerCode: string, turnstileToken?: string) => Promise<LoginResult>;
+  onLogin: (
+    credentials: SessionLoginRequest,
+    turnstileToken?: string,
+  ) => Promise<LoginResult>;
   onImageSelected: (selection: ImageSelection) => void;
   onReset: () => void;
   /** Same-photo remix — keep capture, re-open CUSTOMIZE. */

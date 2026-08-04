@@ -39,6 +39,10 @@ export interface LoginResult {
   retryAfterSeconds?: number;
 }
 
+export type SessionLoginRequest =
+  | { authType: "code"; dealerCode: string }
+  | { authType: "manager_password"; username: string; password: string };
+
 interface AppState {
   // Core State
   step: AppStep;
@@ -79,7 +83,10 @@ interface AppState {
   ) => void;
 
   // Complex Actions
-  login: (dealerCode: string, turnstileToken?: string) => Promise<LoginResult>;
+  login: (
+    credentials: SessionLoginRequest,
+    turnstileToken?: string,
+  ) => Promise<LoginResult>;
   logout: () => Promise<void>;
   reset: () => void;
   /**
@@ -349,13 +356,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
-  login: async (dealerCode: string, turnstileToken?: string) => {
+  login: async (credentials: SessionLoginRequest, turnstileToken?: string) => {
     try {
+      const loginBody =
+        credentials.authType === "manager_password"
+          ? {
+              authType: "manager_password",
+              username: credentials.username.trim().toLowerCase(),
+              // Passwords are exact credentials; preserve case, whitespace,
+              // punctuation, and password-manager supplied values.
+              password: credentials.password,
+            }
+          : { dealerCode: credentials.dealerCode };
       const res = await fetchSession({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          dealerCode,
+          ...loginBody,
           ...(turnstileToken ? { turnstileToken } : {}),
         }),
       });
@@ -398,11 +415,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         err instanceof ApiError ? err.retryAfterSeconds : undefined;
       logError("app.login.failed", {
         errorCode: code,
-        codeLength: dealerCode.length,
+        authType: credentials.authType,
       });
       const userMessage =
-        code === "INVALID_CODE"
-          ? "That access code was not recognized. Check it and try again."
+        code === "INVALID_CODE" || code === "INVALID_CREDENTIALS"
+          ? credentials.authType === "manager_password"
+            ? "Username or password not recognized. Check both and try again."
+            : "That access code was not recognized. Check it and try again."
           : code === "CHALLENGE_REQUIRED"
             ? "Complete the security check to continue."
             : code === "LOCKED"

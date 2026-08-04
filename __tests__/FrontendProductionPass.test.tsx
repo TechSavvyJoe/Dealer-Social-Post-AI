@@ -132,7 +132,10 @@ describe("frontend production pass", () => {
 
     await user.click(screen.getByRole("button", { name: /Continue to system admin/i }));
     await waitFor(() =>
-      expect(onLogin).toHaveBeenCalledWith("Admin9xQ2Z7p", undefined),
+      expect(onLogin).toHaveBeenCalledWith(
+        { authType: "code", dealerCode: "Admin9xQ2Z7p" },
+        undefined,
+      ),
     );
     expect(
       await screen.findByRole("heading", { name: "Access confirmed" }),

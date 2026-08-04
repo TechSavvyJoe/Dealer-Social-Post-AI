@@ -17,6 +17,8 @@ interface ModalProps {
   className?: string;
   size?: "sm" | "md" | "lg" | "xl" | "full";
   showCloseButton?: boolean;
+  /** Prevent dismissal while an authoritative mutation is committing. */
+  disableClose?: boolean;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -29,6 +31,7 @@ export const Modal: React.FC<ModalProps> = ({
   className,
   size = "md",
   showCloseButton = true,
+  disableClose = false,
 }) => {
   const contentRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
@@ -54,6 +57,13 @@ export const Modal: React.FC<ModalProps> = ({
     const raf = requestAnimationFrame(() => {
       const root = contentRef.current;
       if (!root) return;
+      const active = document.activeElement;
+      // A fast keyboard/pointer interaction can move focus into the dialog
+      // before this frame runs. Never steal that intentional focus back to the
+      // first control (especially after inline validation focuses a field).
+      if (active instanceof HTMLElement && root.contains(active) && active !== root) {
+        return;
+      }
       const first = root.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
       (first ?? root).focus();
     });
@@ -69,7 +79,7 @@ export const Modal: React.FC<ModalProps> = ({
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        if (!disableClose) onClose();
         return;
       }
       if (e.key !== "Tab") return;
@@ -96,7 +106,7 @@ export const Modal: React.FC<ModalProps> = ({
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [isOpen, onClose]);
+  }, [disableClose, isOpen, onClose]);
 
   const sizeClasses = {
     sm: "max-w-sm",
@@ -117,7 +127,7 @@ export const Modal: React.FC<ModalProps> = ({
             exit={{ opacity: 0 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.2 }}
             className="absolute inset-0 bg-surface-950/80 backdrop-blur-sm"
-            onClick={onClose}
+            onClick={disableClose ? undefined : onClose}
             aria-hidden="true"
           />
 
@@ -129,6 +139,7 @@ export const Modal: React.FC<ModalProps> = ({
             aria-labelledby={title ? titleId : undefined}
             aria-label={title ? undefined : "Dialog"}
             aria-describedby={description ? descriptionId : undefined}
+            aria-busy={disableClose || undefined}
             tabIndex={-1}
             initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -179,8 +190,9 @@ export const Modal: React.FC<ModalProps> = ({
                   <button
                     type="button"
                     onClick={onClose}
+                    disabled={disableClose}
                     aria-label="Close dialog"
-                    className="min-h-11 min-w-11 shrink-0 -mr-1 rounded-full p-2 text-surface-400 transition-colors hover:bg-white/5 hover:text-surface-50 sm:-mr-2"
+                    className="min-h-11 min-w-11 shrink-0 -mr-1 rounded-full p-2 text-surface-400 transition-colors hover:bg-white/5 hover:text-surface-50 disabled:cursor-wait disabled:opacity-45 sm:-mr-2"
                   >
                     <X className="w-5 h-5" />
                   </button>

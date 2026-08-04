@@ -4,6 +4,12 @@
 **Status:** Approved for implementation planning  
 **Product:** Dealer Social Post AI
 
+> **Superseded authentication detail (2026-07-31):** the hub, roles, personal
+> PINs, and impersonation decisions remain authoritative. The manager-login
+> non-goal and 4-digit-only manager decision are superseded by
+> `2026-07-31-manager-password-login.md`. Manager PINs remain a temporary
+> compatibility fallback.
+
 ## Problem
 
 System admins manage multiple dealerships but cannot:
@@ -33,16 +39,16 @@ Setup and multi-store navigation feel cumbersome for the platform owner.
 
 ## Decisions (locked)
 
-| Topic | Choice |
-|---|---|
-| Architecture | **A** — one people roster + roles |
-| Floor login | Personal 4-digit codes only (no shared dealer code) |
-| Manager login | Each manager has unique 4-digit code |
-| Admins | Named managers, multiple per store |
-| Hub IA | Tabs: Dealers / Admins / Users + dealer filter |
-| Impersonation | Real session swap + exit back to super admin |
-| Hours | Day toggles + time selects → stored text string |
-| Code length | Exactly **4 digits** for all person pins |
+| Topic         | Choice                                              |
+| ------------- | --------------------------------------------------- |
+| Architecture  | **A** — one people roster + roles                   |
+| Floor login   | Personal 4-digit codes only (no shared dealer code) |
+| Manager login | Each manager has unique 4-digit code                |
+| Admins        | Named managers, multiple per store                  |
+| Hub IA        | Tabs: Dealers / Admins / Users + dealer filter      |
+| Impersonation | Real session swap + exit back to super admin        |
+| Hours         | Day toggles + time selects → stored text string     |
+| Code length   | Exactly **4 digits** for all person pins            |
 
 ## Data model
 
@@ -50,15 +56,15 @@ Setup and multi-store navigation feel cumbersome for the platform owner.
 
 Keep the existing collection name **`salespeople`** for minimal migration friction, or rename to `people` in a forward-only migration if clean rename is cheap. Spec uses logical name **people**.
 
-| Field | Type | Notes |
-|---|---|---|
-| `id` | text | PB id |
-| `dealer` | relation | Required |
-| `name` | text | Display name, max 120 |
-| `role` | text | `manager` \| `salesperson` (default `salesperson`) |
-| `pin` | text | Exactly 4 digits; **globally unique** among active people |
-| `active` | bool | Soft delete via `active=false` |
-| `created_at` | text/datetime | ISO |
+| Field        | Type          | Notes                                                     |
+| ------------ | ------------- | --------------------------------------------------------- |
+| `id`         | text          | PB id                                                     |
+| `dealer`     | relation      | Required                                                  |
+| `name`       | text          | Display name, max 120                                     |
+| `role`       | text          | `manager` \| `salesperson` (default `salesperson`)        |
+| `pin`        | text          | Exactly 4 digits; **globally unique** among active people |
+| `active`     | bool          | Soft delete via `active=false`                            |
+| `created_at` | text/datetime | ISO                                                       |
 
 Unique index: `pin` where active (or app-level uniqueness check on create/update covering all pins).
 
@@ -73,23 +79,23 @@ Unique index: `pin` where active (or app-level uniqueness check on create/update
 
 Extend session rows (or equivalent metadata) to support impersonation:
 
-| Field | Notes |
-|---|---|
-| `dealer` | Target dealership |
-| `role` | `super_admin` \| `dealer_admin` \| `salesperson` |
-| `person` | Optional FK to people id when not super_admin |
+| Field                  | Notes                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------ |
+| `dealer`               | Target dealership                                                              |
+| `role`                 | `super_admin` \| `dealer_admin` \| `salesperson`                               |
+| `person`               | Optional FK to people id when not super_admin                                  |
 | `impersonator_session` | Optional: opaque session id/token hash of the super-admin session being paused |
-| `is_impersonation` | bool |
+| `is_impersonation`     | bool                                                                           |
 
 Exact column names may match existing PB session schema; add only missing fields via migration.
 
 ### Role mapping
 
-| Person role | Session role | Landing UI |
-|---|---|---|
-| `manager` | `dealer_admin` | DealerAdminDashboard |
-| `salesperson` | `salesperson` | Capture / post flow |
-| (env admin code) | `super_admin` | Admin hub |
+| Person role      | Session role   | Landing UI           |
+| ---------------- | -------------- | -------------------- |
+| `manager`        | `dealer_admin` | DealerAdminDashboard |
+| `salesperson`    | `salesperson`  | Capture / post flow  |
+| (env admin code) | `super_admin`  | Admin hub            |
 
 ## Authentication
 
@@ -191,19 +197,19 @@ Shared component used in:
 
 ## Frontend / backend touchpoints (implementation map)
 
-| Area | Files (indicative) |
-|---|---|
-| Login resolve | `pb_hooks/main.pb.js`, `pb_hooks/helpers.js`, `pb_hooks/requestPolicies.js` |
-| People APIs | `main.pb.js` salespeople routes → role + pin uniqueness + dealer filter for super_admin |
-| Impersonate routes | `main.pb.js` + session helpers |
-| Super admin UI | `components/AdminDashboard.tsx` restructure |
-| Manager team UI | `components/DealerAdminDashboard.tsx` (salespeople only) |
-| Hours | new `components/HoursPicker.tsx`; wire into settings + wizard |
-| Dialpad | `components/LoginScreen.tsx` — 4-digit primary UX |
-| Types/services | `types.ts`, `services/salespeople.ts`, `services/database.ts` |
-| Session store | `stores/appStore.ts` — person id, impersonation flag |
-| Migrations | `pb_migrations/*` role field, pin length, session impersonation fields |
-| Tests | backend hook tests, AdminDashboard / hours / login unit tests |
+| Area               | Files (indicative)                                                                      |
+| ------------------ | --------------------------------------------------------------------------------------- |
+| Login resolve      | `pb_hooks/main.pb.js`, `pb_hooks/helpers.js`, `pb_hooks/requestPolicies.js`             |
+| People APIs        | `main.pb.js` salespeople routes → role + pin uniqueness + dealer filter for super_admin |
+| Impersonate routes | `main.pb.js` + session helpers                                                          |
+| Super admin UI     | `components/AdminDashboard.tsx` restructure                                             |
+| Manager team UI    | `components/DealerAdminDashboard.tsx` (salespeople only)                                |
+| Hours              | new `components/HoursPicker.tsx`; wire into settings + wizard                           |
+| Dialpad            | `components/LoginScreen.tsx` — 4-digit primary UX                                       |
+| Types/services     | `types.ts`, `services/salespeople.ts`, `services/database.ts`                           |
+| Session store      | `stores/appStore.ts` — person id, impersonation flag                                    |
+| Migrations         | `pb_migrations/*` role field, pin length, session impersonation fields                  |
+| Tests              | backend hook tests, AdminDashboard / hours / login unit tests                           |
 
 ## Migration plan
 

@@ -50,7 +50,10 @@ describe("risk-triggered sign-in UX", () => {
     expect(
       await screen.findByRole("heading", { name: "Security check" }),
     ).toBeInTheDocument();
-    expect(onLogin).toHaveBeenCalledWith("1234", undefined);
+    expect(onLogin).toHaveBeenCalledWith(
+      { authType: "code", dealerCode: "1234" },
+      undefined,
+    );
     await waitFor(() => expect(window.turnstile?.render).toHaveBeenCalled());
   });
 
@@ -100,7 +103,7 @@ describe("risk-triggered sign-in UX", () => {
     expect(screen.getAllByText(/security check expired/i).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Retry security check" })).toBeEnabled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit access code" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit sign-in details" }));
     expect(screen.queryByRole("heading", { name: "Security check" })).toBeNull();
     expect(
       screen.getByRole("status", { name: "4 of 4 digits entered" }),
@@ -144,11 +147,17 @@ describe("risk-triggered sign-in UX", () => {
 
     act(() => callbacks[0]?.callback("consumed-invalid-token"));
     await waitFor(() => expect(renderChallenge).toHaveBeenCalledTimes(2));
-    expect(onLogin).toHaveBeenLastCalledWith("1234", "consumed-invalid-token");
+    expect(onLogin).toHaveBeenLastCalledWith(
+      { authType: "code", dealerCode: "1234" },
+      "consumed-invalid-token",
+    );
 
     act(() => callbacks[1]?.callback("consumed-unavailable-token"));
     await waitFor(() => expect(renderChallenge).toHaveBeenCalledTimes(3));
-    expect(onLogin).toHaveBeenLastCalledWith("1234", "consumed-unavailable-token");
+    expect(onLogin).toHaveBeenLastCalledWith(
+      { authType: "code", dealerCode: "1234" },
+      "consumed-unavailable-token",
+    );
     expect(screen.getByRole("heading", { name: "Security check" })).toBeInTheDocument();
     expect(await screen.findByText("Verifier temporarily unavailable.")).toBeVisible();
   });
@@ -194,6 +203,128 @@ describe("risk-triggered sign-in UX", () => {
       await screen.findByText("The secure sign-in service is unavailable. Try again."),
     ).toBeInTheDocument();
     expect(screen.queryByText(/not recognized/i)).toBeNull();
+  });
+
+  it("submits an exact password through the dealer-scoped manager login", async () => {
+    const onLogin = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <ToastProvider>
+        <LoginScreen onLogin={onLogin} />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Manager username and password" }),
+    );
+    const username = await screen.findByLabelText("Username");
+    const password = screen.getByLabelText("Password");
+    expect(username).toHaveAttribute("autocomplete", "username");
+    expect(password).toHaveAttribute("autocomplete", "current-password");
+
+    const exactPassword = "Mixed Case $ passphrase 2026";
+    fireEvent.change(username, { target: { value: "Manager.One" } });
+    fireEvent.change(password, { target: { value: exactPassword } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue to manager workspace" }),
+    );
+
+    await waitFor(() =>
+      expect(onLogin).toHaveBeenCalledWith(
+        {
+          authType: "manager_password",
+          username: "manager.one",
+          password: exactPassword,
+        },
+        undefined,
+      ),
+    );
+  });
+
+  it("never routes background digit shortcuts through the hidden personal-code path in manager mode", async () => {
+    const onLogin = vi.fn().mockResolvedValue({ ok: false, code: "INVALID_CODE" });
+    render(
+      <ToastProvider>
+        <LoginScreen onLogin={onLogin} />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Manager username and password" }),
+    );
+    await screen.findByLabelText("Username");
+    for (const digit of ["1", "2", "3", "4"]) {
+      fireEvent.keyDown(window, { key: digit });
+    }
+
+    expect(onLogin).not.toHaveBeenCalled();
+  });
+
+  it("associates local manager validation with and focuses the invalid field", async () => {
+    const onLogin = vi.fn();
+    render(
+      <ToastProvider>
+        <LoginScreen onLogin={onLogin} />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Manager username and password" }),
+    );
+    const username = await screen.findByLabelText("Username");
+    const password = screen.getByLabelText("Password");
+    const submit = screen.getByRole("button", {
+      name: "Continue to manager workspace",
+    });
+
+    fireEvent.change(username, { target: { value: "1-invalid" } });
+    fireEvent.change(password, { target: { value: "valid manager password 2026" } });
+    fireEvent.click(submit);
+
+    expect(username).toHaveFocus();
+    expect(username).toHaveAttribute("aria-invalid", "true");
+    expect(username).toHaveAttribute("aria-describedby", "manager-login-error");
+
+    fireEvent.change(username, { target: { value: "manager.one" } });
+    fireEvent.change(password, { target: { value: "too short" } });
+    fireEvent.click(submit);
+
+    expect(password).toHaveFocus();
+    expect(password).toHaveAttribute("aria-invalid", "true");
+    expect(password).toHaveAttribute("aria-describedby", "manager-login-error");
+    expect(onLogin).not.toHaveBeenCalled();
+  });
+
+  it("uses generic manager feedback, preserves username, and clears the password", async () => {
+    const onLogin = vi.fn().mockResolvedValue({
+      ok: false,
+      code: "INVALID_CREDENTIALS",
+    });
+    render(
+      <ToastProvider>
+        <LoginScreen onLogin={onLogin} />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Manager username and password" }),
+    );
+    const username = await screen.findByLabelText("Username");
+    const password = screen.getByLabelText("Password");
+    fireEvent.change(username, { target: { value: "manager.one" } });
+    fireEvent.change(password, {
+      target: { value: "Correct length but not the password" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue to manager workspace" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Username or password not recognized. Check both and try again.",
+      ),
+    ).toHaveAttribute("role", "alert");
+    expect(screen.getByLabelText("Username")).toHaveValue("manager.one");
+    expect(screen.getByLabelText("Password")).toHaveValue("");
   });
 
   it("keeps an invalid system-admin code inline and clears it on mode change", async () => {

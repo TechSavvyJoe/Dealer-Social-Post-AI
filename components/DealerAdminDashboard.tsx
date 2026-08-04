@@ -1299,6 +1299,7 @@ export const DealerTeamCard: React.FC = () => {
                           role: "salesperson",
                           hasPin: Boolean(p.hasPin),
                           pinNeedsDistribution: Boolean(p.pinNeedsDistribution),
+                          hasManagerLogin: false,
                         })
                       }
                       className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md bg-white/5 text-surface-300 hover:bg-white/10"

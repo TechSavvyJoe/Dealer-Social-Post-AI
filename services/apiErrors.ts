@@ -1,5 +1,9 @@
 export type SessionErrorCode =
-  "INVALID_CODE" | "CHALLENGE_REQUIRED" | "LOCKED" | "UNAVAILABLE";
+  | "INVALID_CODE"
+  | "INVALID_CREDENTIALS"
+  | "CHALLENGE_REQUIRED"
+  | "LOCKED"
+  | "UNAVAILABLE";
 
 export interface ApiErrorPayload {
   code?: string;
@@ -11,6 +15,7 @@ export interface ApiErrorPayload {
 
 const SESSION_CODES = new Set<SessionErrorCode>([
   "INVALID_CODE",
+  "INVALID_CREDENTIALS",
   "CHALLENGE_REQUIRED",
   "LOCKED",
   "UNAVAILABLE",

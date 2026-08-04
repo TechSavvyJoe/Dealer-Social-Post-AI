@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useAppStore } from "../stores/appStore";
+import { useAppStore, type SessionLoginRequest } from "../stores/appStore";
 import { useShallow } from "zustand/react/shallow";
 import { useLayoutMode } from "./useLayoutMode";
 import { useGemini } from "./useGemini";
@@ -122,10 +122,13 @@ export const useAppController = () => {
   ]);
 
   // Handlers
-  const handleLogin = async (dealerCode: string, turnstileToken?: string) => {
+  const handleLogin = async (
+    credentials: SessionLoginRequest,
+    turnstileToken?: string,
+  ) => {
     // The store distinguishes an invalid credential from an unavailable
     // backend. Do not overwrite that authoritative, user-actionable message.
-    return login(dealerCode, turnstileToken);
+    return login(credentials, turnstileToken);
   };
 
   const handleStyleToneChange = useCallback(

@@ -10,6 +10,7 @@ import {
   Loader2,
   ShieldAlert,
   ShieldCheck,
+  UserRound,
   WandSparkles,
 } from "lucide-react";
 import { Logo } from "./Logo";
@@ -20,7 +21,7 @@ import { Button } from "./ui/Button";
 import { useToast } from "./ui/Toast";
 import { cn } from "../utils/classNames";
 import { TurnstileChallenge } from "./TurnstileChallenge";
-import type { LoginResult } from "../stores/appStore";
+import type { LoginResult, SessionLoginRequest } from "../stores/appStore";
 
 /** Personal manager / user access codes are exactly 4 digits. */
 const PERSON_CODE_LENGTH = 4;
@@ -28,10 +29,14 @@ const PERSON_CODE_LENGTH = 4;
 const ADMIN_CODE_LENGTH = 12;
 
 interface LoginScreenProps {
-  onLogin: (dealerCode: string, turnstileToken?: string) => Promise<LoginResult>;
+  onLogin: (
+    credentials: SessionLoginRequest,
+    turnstileToken?: string,
+  ) => Promise<LoginResult>;
 }
 
-type EntryMode = "personal" | "system";
+type EntryMode = "personal" | "manager" | "system";
+type ManagerErrorTarget = "username" | "password" | "credentials" | null;
 
 const STUDIO_STEPS = [
   { label: "Capture", detail: "Start with the vehicle", icon: Camera },
@@ -43,19 +48,24 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [entryMode, setEntryMode] = useState<EntryMode>("personal");
   const [dealerCode, setDealerCode] = useState("");
   const [adminCode, setAdminCode] = useState("");
+  const [managerUsername, setManagerUsername] = useState("");
+  const [managerPassword, setManagerPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [showAdminCode, setShowAdminCode] = useState(false);
-  const [pendingAttempt, setPendingAttempt] = useState<{
-    code: string;
-    mode: EntryMode;
-  } | null>(null);
+  const [showManagerPassword, setShowManagerPassword] = useState(false);
+  const [pendingAttempt, setPendingAttempt] = useState<EntryMode | null>(null);
   const [challengeNonce, setChallengeNonce] = useState(0);
   const [lockoutUntil, setLockoutUntil] = useState(0);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [personalCodeError, setPersonalCodeError] = useState("");
   const [adminCodeError, setAdminCodeError] = useState("");
+  const [managerLoginError, setManagerLoginError] = useState("");
+  const [managerErrorTarget, setManagerErrorTarget] =
+    useState<ManagerErrorTarget>(null);
   const adminInputRef = useRef<HTMLInputElement>(null);
+  const managerUsernameRef = useRef<HTMLInputElement>(null);
+  const managerPasswordRef = useRef<HTMLInputElement>(null);
   const isMountedRef = useRef(true);
   const shouldReduceMotion = useReducedMotion();
   const toast = useToast();
@@ -70,34 +80,24 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     };
   }, []);
 
-  const submitCode = useCallback(
-    async (codeToSubmit: string, mode: EntryMode, turnstileToken?: string) => {
-      const normalizedCode =
-        mode === "personal" ? codeToSubmit.trim() : codeToSubmit.trim();
-      const requiredLength =
-        mode === "personal" ? PERSON_CODE_LENGTH : ADMIN_CODE_LENGTH;
-      if (
-        isLoading ||
-        isSuccess ||
-        lockoutUntil > Date.now() ||
-        normalizedCode.length !== requiredLength
-      ) {
-        if (normalizedCode.length > 0 && normalizedCode.length !== requiredLength) {
-          toast.info(
-            mode === "personal"
-              ? "Enter your 4-digit access code."
-              : "Enter the complete 12-character system admin code.",
-          );
-        }
+  const submitCredentials = useCallback(
+    async (
+      credentials: SessionLoginRequest,
+      mode: EntryMode,
+      turnstileToken?: string,
+    ) => {
+      if (isLoading || isSuccess || lockoutUntil > Date.now()) {
         return;
       }
 
       setIsLoading(true);
       try {
-        const result = await onLogin(normalizedCode, turnstileToken);
+        const result = await onLogin(credentials, turnstileToken);
         if (!isMountedRef.current) return;
         if (result.ok) {
           setPendingAttempt(null);
+          setManagerPassword("");
+          setAdminCode("");
           setIsSuccess(true);
           toast.success("Access confirmed.");
           await new Promise((resolve) =>
@@ -106,7 +106,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         } else {
           switch (result.code) {
             case "CHALLENGE_REQUIRED":
-              setPendingAttempt({ code: normalizedCode, mode });
+              setPendingAttempt(mode);
               if (turnstileToken) {
                 // Tokens are single-use. Guarantee a fresh widget even when
                 // React batches the loading state around a fast rejection.
@@ -117,18 +117,28 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             case "LOCKED": {
               const retryAfter = Math.max(1, result.retryAfterSeconds || 900);
               setPendingAttempt(null);
+              setManagerPassword("");
+              setAdminCode("");
               setClockNow(Date.now());
               setLockoutUntil(Date.now() + retryAfter * 1000);
               toast.error("Sign-in is temporarily locked.");
               break;
             }
             case "INVALID_CODE":
+            case "INVALID_CREDENTIALS":
               setPendingAttempt(null);
               if (mode === "personal") {
                 setDealerCode("");
                 setPersonalCodeError(
                   "Code not recognized. Check the code and try again.",
                 );
+              } else if (mode === "manager") {
+                setManagerPassword("");
+                setManagerLoginError(
+                  "Username or password not recognized. Check both and try again.",
+                );
+                setManagerErrorTarget("credentials");
+                requestAnimationFrame(() => managerPasswordRef.current?.focus());
               } else {
                 setAdminCodeError("Code not recognized. Check the code and try again.");
               }
@@ -157,6 +167,66 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       }
     },
     [isLoading, isSuccess, lockoutUntil, onLogin, shouldReduceMotion, toast],
+  );
+
+  const submitCode = useCallback(
+    async (
+      codeToSubmit: string,
+      mode: "personal" | "system",
+      turnstileToken?: string,
+    ) => {
+      const normalizedCode = codeToSubmit.trim();
+      const requiredLength =
+        mode === "personal" ? PERSON_CODE_LENGTH : ADMIN_CODE_LENGTH;
+      if (normalizedCode.length !== requiredLength) {
+        if (normalizedCode.length > 0) {
+          toast.info(
+            mode === "personal"
+              ? "Enter your 4-digit access code."
+              : "Enter the complete 12-character system admin code.",
+          );
+        }
+        return;
+      }
+      await submitCredentials(
+        { authType: "code", dealerCode: normalizedCode },
+        mode,
+        turnstileToken,
+      );
+    },
+    [submitCredentials, toast],
+  );
+
+  const submitManagerLogin = useCallback(
+    async (turnstileToken?: string) => {
+      const normalizedUsername = managerUsername.trim().toLowerCase();
+      if (!/^[a-z][a-z0-9._-]{2,31}$/.test(normalizedUsername)) {
+        setManagerLoginError(
+          "Enter the manager username provided by your system administrator.",
+        );
+        setManagerErrorTarget("username");
+        managerUsernameRef.current?.focus();
+        return;
+      }
+      if (managerPassword.length < 15 || managerPassword.length > 128) {
+        setManagerLoginError("Enter the complete manager password.");
+        setManagerErrorTarget("password");
+        managerPasswordRef.current?.focus();
+        return;
+      }
+      setManagerLoginError("");
+      setManagerErrorTarget(null);
+      await submitCredentials(
+        {
+          authType: "manager_password",
+          username: normalizedUsername,
+          password: managerPassword,
+        },
+        "manager",
+        turnstileToken,
+      );
+    },
+    [managerPassword, managerUsername, submitCredentials],
   );
 
   const lockoutSeconds = Math.max(0, Math.ceil((lockoutUntil - clockNow) / 1000));
@@ -202,23 +272,38 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
   const selectMode = useCallback((mode: EntryMode) => {
     triggerHapticFeedback();
+    if (mode !== "manager") {
+      setManagerPassword("");
+      setShowManagerPassword(false);
+    }
+    if (mode !== "system") {
+      setAdminCode("");
+      setShowAdminCode(false);
+    }
     setEntryMode(mode);
     setPendingAttempt(null);
     setPersonalCodeError("");
     setAdminCodeError("");
+    setManagerLoginError("");
+    setManagerErrorTarget(null);
   }, []);
 
   const returnToCodeEntry = useCallback(() => {
     if (!pendingAttempt) return;
-    setEntryMode(pendingAttempt.mode);
+    setEntryMode(pendingAttempt);
     setPendingAttempt(null);
     setPersonalCodeError("");
     setAdminCodeError("");
+    setManagerLoginError("");
+    setManagerErrorTarget(null);
   }, [pendingAttempt]);
 
   useEffect(() => {
-    if (entryMode !== "system" || isLoading || isSuccess) return;
-    const frame = requestAnimationFrame(() => adminInputRef.current?.focus());
+    if (isLoading || isSuccess) return;
+    const frame = requestAnimationFrame(() => {
+      if (entryMode === "system") adminInputRef.current?.focus();
+      if (entryMode === "manager") managerUsernameRef.current?.focus();
+    });
     return () => cancelAnimationFrame(frame);
   }, [entryMode, isLoading, isSuccess]);
 
@@ -245,20 +330,21 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
       if (event.key === "Enter") {
         event.preventDefault();
-        const activeCode = entryMode === "system" ? adminCode : dealerCode;
-        void submitCode(activeCode, entryMode);
+        if (entryMode === "manager") {
+          void submitManagerLogin();
+        } else {
+          const activeCode = entryMode === "system" ? adminCode : dealerCode;
+          void submitCode(activeCode, entryMode);
+        }
       } else if (event.key === "Backspace" && entryMode === "personal") {
         event.preventDefault();
         void handleDialpadKeyPress("backspace");
       } else if (event.key === "Escape") {
         event.preventDefault();
-        entryMode === "system" ? setAdminCode("") : setDealerCode("");
-      } else if (/^[a-zA-Z]$/.test(event.key)) {
-        event.preventDefault();
-        setEntryMode("system");
-        setAdminCodeError("");
-        setAdminCode((current) => `${current}${event.key}`.slice(0, ADMIN_CODE_LENGTH));
-      } else if (/^\d$/.test(event.key)) {
+        if (entryMode === "system") setAdminCode("");
+        if (entryMode === "manager") setManagerPassword("");
+        if (entryMode === "personal") setDealerCode("");
+      } else if (entryMode !== "manager" && /^\d$/.test(event.key)) {
         event.preventDefault();
         if (entryMode === "system") {
           setAdminCodeError("");
@@ -283,6 +369,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     pendingAttempt,
     returnToCodeEntry,
     submitCode,
+    submitManagerLogin,
   ]);
 
   const motionTransition = shouldReduceMotion
@@ -444,13 +531,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     <p className="mt-1 text-sm leading-snug text-surface-300 sm:mt-1.5 sm:text-base sm:leading-relaxed">
                       {entryMode === "personal"
                         ? "Tap your 4-digit code. We sign you in automatically."
-                        : "Enter the exact 12-character system admin code."}
+                        : entryMode === "manager"
+                          ? "Use your dealership manager username and password."
+                          : "Enter the exact 12-character system admin code."}
                     </p>
                   </div>
                 </div>
 
                 <div
-                  className="grid shrink-0 grid-cols-2 gap-1 rounded-2xl border border-white/[0.08] bg-black/25 p-1.5"
+                  className="grid shrink-0 grid-cols-3 gap-1 rounded-2xl border border-white/[0.08] bg-black/25 p-1.5"
                   role="group"
                   aria-label="Access type"
                 >
@@ -469,16 +558,31 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   </button>
                   <button
                     type="button"
+                    onClick={() => selectMode("manager")}
+                    aria-pressed={entryMode === "manager"}
+                    aria-label="Manager username and password"
+                    className={cn(
+                      "min-h-11 rounded-xl px-2 text-xs font-semibold transition-colors sm:min-h-12 sm:px-3 sm:text-sm",
+                      entryMode === "manager"
+                        ? "bg-primary-600 text-white shadow-md"
+                        : "text-surface-300 hover:text-surface-100",
+                    )}
+                  >
+                    Manager
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => selectMode("system")}
                     aria-pressed={entryMode === "system"}
+                    aria-label="System admin"
                     className={cn(
-                      "min-h-11 rounded-xl px-3 text-sm font-semibold transition-colors sm:min-h-12",
+                      "min-h-11 rounded-xl px-2 text-xs font-semibold transition-colors sm:min-h-12 sm:px-3 sm:text-sm",
                       entryMode === "system"
                         ? "bg-primary-600 text-white shadow-md"
                         : "text-surface-300 hover:text-surface-100",
                     )}
                   >
-                    System admin
+                    System
                   </button>
                 </div>
 
@@ -509,9 +613,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 ) : pendingAttempt ? (
                   <TurnstileChallenge
                     key={`turnstile-${challengeNonce}`}
-                    onToken={(token) =>
-                      void submitCode(pendingAttempt.code, pendingAttempt.mode, token)
-                    }
+                    onToken={(token) => {
+                      if (pendingAttempt === "manager") {
+                        void submitManagerLogin(token);
+                      } else {
+                        const code =
+                          pendingAttempt === "system" ? adminCode : dealerCode;
+                        void submitCode(code, pendingAttempt, token);
+                      }
+                    }}
                     onExpired={() =>
                       toast.info("Security check expired. Complete it again.")
                     }
@@ -562,9 +672,147 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       <Dialpad onKeyPress={handleDialpadKeyPress} />
                     </div>
                   </div>
+                ) : entryMode === "manager" ? (
+                  <form
+                    className="flex min-h-0 flex-col justify-start overflow-y-auto overscroll-contain lg:justify-center"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void submitManagerLogin();
+                    }}
+                  >
+                    <div className="rounded-2xl border border-white/[0.08] bg-[#101722] p-4 sm:p-5">
+                      <div className="mb-4 flex items-start gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300">
+                          <KeyRound className="h-5 w-5" aria-hidden="true" />
+                        </div>
+                        <div>
+                          <h2 className="text-base font-semibold text-surface-100">
+                            Dealership manager
+                          </h2>
+                          <p className="mt-1 text-sm leading-relaxed text-surface-400">
+                            Your account opens only your dealership’s manager workspace.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <Input
+                          ref={managerUsernameRef}
+                          label="Username"
+                          name="username"
+                          value={managerUsername}
+                          onChange={(event) => {
+                            setManagerLoginError("");
+                            setManagerErrorTarget(null);
+                            setManagerUsername(event.target.value.slice(0, 32));
+                          }}
+                          leftIcon={<UserRound />}
+                          autoComplete="username"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          inputMode="text"
+                          enterKeyHint="next"
+                          maxLength={32}
+                          aria-invalid={
+                            managerLoginError &&
+                            (managerErrorTarget === "username" ||
+                              managerErrorTarget === "credentials")
+                              ? true
+                              : undefined
+                          }
+                          aria-describedby={
+                            managerLoginError &&
+                            (managerErrorTarget === "username" ||
+                              managerErrorTarget === "credentials")
+                              ? "manager-login-error"
+                              : undefined
+                          }
+                          fullWidth
+                        />
+                        <Input
+                          ref={managerPasswordRef}
+                          label="Password"
+                          name="password"
+                          value={managerPassword}
+                          type={showManagerPassword ? "text" : "password"}
+                          onChange={(event) => {
+                            setManagerLoginError("");
+                            setManagerErrorTarget(null);
+                            setManagerPassword(event.target.value.slice(0, 128));
+                          }}
+                          leftIcon={<KeyRound />}
+                          rightAction={
+                            <button
+                              type="button"
+                              className="flex h-11 w-11 items-center justify-center rounded-lg text-surface-400 transition hover:bg-white/[0.06] hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                              onClick={() => setShowManagerPassword((value) => !value)}
+                              aria-label={
+                                showManagerPassword
+                                  ? "Hide manager password"
+                                  : "Show manager password"
+                              }
+                            >
+                              {showManagerPassword ? (
+                                <EyeOff className="h-4 w-4" aria-hidden="true" />
+                              ) : (
+                                <Eye className="h-4 w-4" aria-hidden="true" />
+                              )}
+                            </button>
+                          }
+                          autoComplete="current-password"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          enterKeyHint="go"
+                          maxLength={128}
+                          aria-invalid={
+                            managerLoginError &&
+                            (managerErrorTarget === "password" ||
+                              managerErrorTarget === "credentials")
+                              ? true
+                              : undefined
+                          }
+                          aria-describedby={
+                            managerLoginError &&
+                            (managerErrorTarget === "password" ||
+                              managerErrorTarget === "credentials")
+                              ? "manager-login-error"
+                              : undefined
+                          }
+                          fullWidth
+                        />
+                      </div>
+
+                      {managerLoginError ? (
+                        <p
+                          id="manager-login-error"
+                          className="mt-2 px-1 text-sm text-error-300"
+                          role="alert"
+                        >
+                          {managerLoginError}
+                        </p>
+                      ) : (
+                        <p className="mt-2 px-1 text-xs text-surface-500">
+                          Contact your system administrator if you need access reset.
+                        </p>
+                      )}
+
+                      <Button
+                        type="submit"
+                        variant="primary"
+                        size="lg"
+                        fullWidth
+                        className="mt-4 min-h-12 sm:min-h-14"
+                        rightIcon={<ArrowRight className="h-4 w-4" />}
+                      >
+                        Continue to manager workspace
+                      </Button>
+                    </div>
+                  </form>
                 ) : (
                   <form
-                    className="flex min-h-0 flex-col justify-center overflow-y-auto overscroll-contain"
+                    className="flex min-h-0 flex-col justify-start overflow-y-auto overscroll-contain lg:justify-center"
                     onSubmit={(event) => {
                       event.preventDefault();
                       void submitCode(adminCode, "system");

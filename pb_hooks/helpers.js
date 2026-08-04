@@ -14,7 +14,7 @@
 
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
 const PROVIDER_RESOURCE_TTL_SECONDS = 48 * 60 * 60; // provider jobs/files are short-lived
-const API_CONTRACT_VERSION = "2026-07-29.v3";
+const API_CONTRACT_VERSION = "2026-07-31.v4";
 
 // ---------------------------------------------------------------------------
 // Cookie parsing
@@ -205,6 +205,29 @@ function personPinFingerprint(person) {
   throw new Error("Secure person credential fingerprinting is unavailable");
 }
 
+/** One-way session binding for PocketBase-managed manager credentials. */
+function managerAuthFingerprint(account) {
+  if (!account) return "";
+  let tokenKey = "";
+  try {
+    tokenKey = account.tokenKey
+      ? account.tokenKey().toString()
+      : account.getString("tokenKey");
+  } catch (_e) {
+    return "";
+  }
+  if (!account.id || !tokenKey) return "";
+  try {
+    const fingerprint = $security.sha256(
+      "dealer-social-post-ai:manager-auth:v1:" + account.id + ":" + tokenKey,
+    );
+    if (/^[a-f0-9]{64}$/i.test(fingerprint || "")) {
+      return fingerprint.toLowerCase();
+    }
+  } catch (_e) {}
+  throw new Error("Secure manager credential fingerprinting is unavailable");
+}
+
 function findSystemDealer() {
   try {
     return $app.dao().findFirstRecordByFilter("dealers", "is_system = true", {});
@@ -352,6 +375,37 @@ function sessionContext(c) {
 
   const isImpersonating = recordBool(session, "is_impersonation");
   const sourceId = session.getString("impersonator_session");
+  const managerAccountId = session.getString("manager_account");
+  const storedManagerFingerprint = session.getString("manager_auth_fingerprint");
+
+  if (isImpersonating) {
+    if (managerAccountId || storedManagerFingerprint) return reject();
+  } else if (managerAccountId || storedManagerFingerprint) {
+    if (
+      role !== "dealer_admin" ||
+      person.getString("role") !== "manager" ||
+      !managerAccountId ||
+      !storedManagerFingerprint
+    ) {
+      return reject();
+    }
+    let account = null;
+    try {
+      account = $app.dao().findRecordById("manager_accounts", managerAccountId);
+    } catch (err) {
+      if (isNotFoundError(err)) return reject();
+      throwSessionValidationUnavailable(err);
+    }
+    if (
+      account.getString("person") !== person.id ||
+      normalizeManagerUsername(account.getString("username")) !==
+        normalizeManagerUsername(person.getString("manager_username")) ||
+      managerAuthFingerprint(account) !== storedManagerFingerprint
+    ) {
+      return reject();
+    }
+  }
+
   let source = null;
   if (isImpersonating) {
     if (!sourceId || sourceId === session.id) return reject();
@@ -447,7 +501,7 @@ function hashSessionToken(token) {
  * @param {string} role
  * @param {string} ip
  * @param {string} userAgent
- * @param {{ personId?: string, isImpersonation?: boolean, impersonatorSessionId?: string, expectedPersonPinFingerprint?: string }} [opts]
+ * @param {{ personId?: string, isImpersonation?: boolean, impersonatorSessionId?: string, expectedPersonPinFingerprint?: string, managerAccountId?: string, expectedManagerAuthFingerprint?: string }} [opts]
  */
 function createSessionWithDao(dao, dealerId, role, ip, userAgent, opts) {
   const sessions = dao.findCollectionByNameOrId("sessions");
@@ -462,6 +516,8 @@ function createSessionWithDao(dao, dealerId, role, ip, userAgent, opts) {
   }
 
   let person = null;
+  let managerAccount = null;
+  let managerFingerprint = "";
   let adminFingerprint = "";
   if (role === "super_admin") {
     if (options.personId || options.isImpersonation || options.impersonatorSessionId) {
@@ -493,6 +549,9 @@ function createSessionWithDao(dao, dealerId, role, ip, userAgent, opts) {
       throw new Error("Session person authority is invalid");
     }
     if (options.isImpersonation) {
+      if (options.managerAccountId || options.expectedManagerAuthFingerprint) {
+        throw new Error("Impersonation cannot carry direct manager credentials");
+      }
       if (!options.impersonatorSessionId) {
         throw new Error("Impersonation source is required");
       }
@@ -522,6 +581,34 @@ function createSessionWithDao(dao, dealerId, role, ip, userAgent, opts) {
         // mint a session that survives the rotation.
         throw new Error("Session person credential changed during sign-in");
       }
+
+      if (options.managerAccountId || options.expectedManagerAuthFingerprint) {
+        if (
+          role !== "dealer_admin" ||
+          person.getString("role") !== "manager" ||
+          !options.managerAccountId ||
+          !options.expectedManagerAuthFingerprint
+        ) {
+          throw new Error("Manager credential provenance is invalid");
+        }
+        try {
+          managerAccount = dao.findRecordById(
+            "manager_accounts",
+            options.managerAccountId.toString(),
+          );
+        } catch (_e) {
+          throw new Error("Manager credential record is invalid");
+        }
+        managerFingerprint = managerAuthFingerprint(managerAccount);
+        if (
+          managerAccount.getString("person") !== person.id ||
+          normalizeManagerUsername(managerAccount.getString("username")) !==
+            normalizeManagerUsername(person.getString("manager_username")) ||
+          managerFingerprint !== options.expectedManagerAuthFingerprint.toString()
+        ) {
+          throw new Error("Manager credential changed during sign-in");
+        }
+      }
     }
   }
 
@@ -545,6 +632,10 @@ function createSessionWithDao(dao, dealerId, role, ip, userAgent, opts) {
   };
   if (person) payload.person = person.id;
   if (person) payload.person_pin_fingerprint = personPinFingerprint(person);
+  if (managerAccount) payload.manager_account = managerAccount.id;
+  if (managerFingerprint) {
+    payload.manager_auth_fingerprint = managerFingerprint;
+  }
   if (adminFingerprint) {
     payload.admin_secret_fingerprint = adminFingerprint;
   }
@@ -621,23 +712,149 @@ function normalizePersonPin(value) {
   return (value || "").toString().trim();
 }
 
+function normalizeManagerUsername(value) {
+  return (value || "").toString().trim().toLowerCase();
+}
+
+function isValidManagerUsername(value) {
+  return /^[a-z][a-z0-9._-]{2,31}$/.test(normalizeManagerUsername(value));
+}
+
+/** Login accepts only bounded input; setup applies the stronger composition rule. */
+function isManagerLoginPasswordShape(value) {
+  return typeof value === "string" && value.length >= 15 && value.length <= 128;
+}
+
+function isStrongManagerPassword(value) {
+  return isManagerLoginPasswordShape(value);
+}
+
+/**
+ * Resolve the active manager and its locked auth record without exposing
+ * whether the username exists. Callers still validate the exact password.
+ */
+function findActiveManagerLogin(username) {
+  const normalized = normalizeManagerUsername(username);
+  if (!isValidManagerUsername(normalized)) {
+    return { status: "not_found", person: null, account: null };
+  }
+  try {
+    const people = $app
+      .dao()
+      .findRecordsByFilter(
+        "salespeople",
+        "manager_username = {:username} && role = 'manager' && active = true",
+        "id",
+        2,
+        0,
+        { username: normalized },
+      );
+    if (!people || typeof people.length !== "number") {
+      return { status: "unavailable", person: null, account: null };
+    }
+    if (people.length !== 1) {
+      return { status: "not_found", person: null, account: null };
+    }
+    const accounts = $app
+      .dao()
+      .findRecordsByFilter("manager_accounts", "person = {:person}", "id", 2, 0, {
+        person: people[0].id,
+      });
+    if (!accounts || typeof accounts.length !== "number") {
+      return { status: "unavailable", person: null, account: null };
+    }
+    if (
+      accounts.length !== 1 ||
+      normalizeManagerUsername(accounts[0].getString("username")) !== normalized
+    ) {
+      return { status: "not_found", person: null, account: null };
+    }
+    return { status: "found", person: people[0], account: accounts[0] };
+  } catch (_e) {
+    return { status: "unavailable", person: null, account: null };
+  }
+}
+
+/**
+ * Return an existing password verifier for cost-equivalent negative checks.
+ * Once at least one manager account exists, an unknown valid username still
+ * performs PocketBase's normal password verification work before the generic
+ * rejection. The result is never treated as an identity match.
+ */
+function findManagerPasswordVerificationAccount() {
+  try {
+    const accounts = $app
+      .dao()
+      .findRecordsByFilter("manager_accounts", "id != ''", "id", 1, 0, {});
+    if (!accounts || typeof accounts.length !== "number") {
+      return { status: "unavailable", account: null };
+    }
+    return accounts.length
+      ? { status: "found", account: accounts[0] }
+      : { status: "empty", account: null };
+  } catch (_e) {
+    return { status: "unavailable", account: null };
+  }
+}
+
+function findManagerAccountByPersonWithDao(dao, personId) {
+  if (!dao || !personId) return null;
+  const records = dao.findRecordsByFilter(
+    "manager_accounts",
+    "person = {:person}",
+    "id",
+    2,
+    0,
+    { person: personId.toString() },
+  );
+  if (!records || typeof records.length !== "number") {
+    throw new Error("Manager credential lookup returned an invalid result");
+  }
+  if (records.length > 1) {
+    throw new Error("Manager has duplicate credential records");
+  }
+  return records.length ? records[0] : null;
+}
+
+function assertManagerUsernameAvailableWithDao(dao, username, personId) {
+  const normalized = normalizeManagerUsername(username);
+  if (!isValidManagerUsername(normalized)) {
+    throw new Error("Username must be 3 to 32 characters and start with a letter.");
+  }
+  const matches = dao.findRecordsByFilter(
+    "salespeople",
+    "manager_username = {:username}",
+    "id",
+    2,
+    0,
+    { username: normalized },
+  );
+  for (let i = 0; i < matches.length; i++) {
+    if (matches[i].id !== personId) {
+      throw new Error("That manager username is already in use.");
+    }
+  }
+  const existingAccount = findManagerAccountByPersonWithDao(dao, personId);
+  const uniqueInAuthCollection = existingAccount
+    ? dao.isRecordValueUnique(
+        "manager_accounts",
+        "username",
+        normalized,
+        existingAccount.id,
+      )
+    : dao.isRecordValueUnique("manager_accounts", "username", normalized);
+  if (!uniqueInAuthCollection) {
+    throw new Error("That manager username is already in use.");
+  }
+  return normalized;
+}
+
 /**
  * Find an active person by personal 4-digit pin without conflating an empty
  * result with a failed database lookup. `findFirstRecordByFilter` throws for
  * both cases in PocketBase 0.22, so use a bounded list query whose empty array
  * is an authoritative not-found result.
  */
-function hashPersonPin(personId, pin) {
-  if (!personId || !isValidPersonPin(pin)) return "";
-  try {
-    return $security
-      .sha256("dealer-social-post-ai:person-pin:v1:" + personId + ":" + pin)
-      .toLowerCase();
-  } catch (_e) {
-    return "";
-  }
-}
-
 function findActivePersonByPin(pin) {
   const normalized = normalizePersonPin(pin);
   if (!isValidPersonPin(normalized)) {
@@ -661,34 +878,6 @@ function findActivePersonByPin(pin) {
       return { status: "found", person: records[0] };
     }
 
-    // Fallback check for hashed PINs — paginate to cover all active records
-    var pageSize = 500;
-    var offset = 0;
-    var batch;
-    do {
-      batch = $app
-        .dao()
-        .findRecordsByFilter(
-          "salespeople",
-          "active = true",
-          "created",
-          pageSize,
-          offset,
-          {},
-        );
-      for (var i = 0; i < batch.length; i++) {
-        var rec = batch[i];
-        var hashedPin = "";
-        try {
-          hashedPin = rec.getString("pin_hash");
-        } catch (_e) {}
-        if (hashedPin && hashedPin === hashPersonPin(rec.id, normalized)) {
-          return { status: "found", person: rec };
-        }
-      }
-      offset += pageSize;
-    } while (batch.length >= pageSize);
-
     return { status: "not_found", person: null };
   } catch (_e) {
     return { status: "unavailable", person: null };
@@ -700,25 +889,27 @@ function findActivePersonByPin(pin) {
  * records keep their credential reserved so reactivation cannot fail or cause
  * an identity collision later.
  */
-function assertPersonPinAvailable(pin, excludePersonId) {
+function assertPersonPinAvailableWithDao(dao, pin, excludePersonId) {
   const normalized = normalizePersonPin(pin);
   if (!isValidPersonPin(normalized)) {
     throw new Error("Access code must be exactly 4 digits");
   }
-  let match = null;
-  try {
-    let filter = "pin = {:pin}";
-    const params = { pin: normalized };
-    if (excludePersonId) {
-      filter += " && id != {:excludeId}";
-      params.excludeId = excludePersonId;
-    }
-    match = $app.dao().findFirstRecordByFilter("salespeople", filter, params);
-  } catch (_e) {
-    match = null;
+  let filter = "pin = {:pin}";
+  const params = { pin: normalized };
+  if (excludePersonId) {
+    filter += " && id != {:excludeId}";
+    params.excludeId = excludePersonId;
   }
-  if (match) throw new Error("Access code is already in use");
+  const matches = dao.findRecordsByFilter("salespeople", filter, "id", 2, 0, params);
+  if (!matches || typeof matches.length !== "number") {
+    throw new Error("Access-code availability could not be verified");
+  }
+  if (matches.length) throw new Error("Access code is already in use");
   return normalized;
+}
+
+function assertPersonPinAvailable(pin, excludePersonId) {
+  return assertPersonPinAvailableWithDao($app.dao(), pin, excludePersonId);
 }
 
 function personRoleToSessionRole(personRole) {
@@ -743,31 +934,43 @@ function serializePersonSummary(record) {
 function serializePerson(record) {
   if (!record) return null;
   const pin = record.getString("pin");
+  const managerUsername =
+    record.getString("role") === "manager"
+      ? normalizeManagerUsername(record.getString("manager_username"))
+      : "";
   return {
     ...serializePersonSummary(record),
     created_at: record.getString("created_at"),
     hasPin: isValidPersonPin(pin),
     pinNeedsDistribution: recordBool(record, "pin_needs_distribution"),
+    hasManagerLogin: isValidManagerUsername(managerUsername),
+    managerUsername: isValidManagerUsername(managerUsername)
+      ? managerUsername
+      : undefined,
   };
 }
 
 /**
  * Mint a unique 4-digit pin for a new person. Retries on collision.
  */
-function generateUniquePersonPin() {
+function generateUniquePersonPinWithDao(dao) {
   const seed = secureRandomString(4, "0123456789");
   const start = parseInt(seed, 10);
   for (let offset = 0; offset < 10000; offset++) {
     const value = (start + offset) % 10000;
     const pin = String(10000 + value).slice(1);
     try {
-      assertPersonPinAvailable(pin, "");
+      assertPersonPinAvailableWithDao(dao, pin, "");
       return pin;
     } catch (_e) {
       /* try again */
     }
   }
   throw new Error("The four-digit access-code space is exhausted");
+}
+
+function generateUniquePersonPin() {
+  return generateUniquePersonPinWithDao($app.dao());
 }
 
 /**
@@ -1498,7 +1701,9 @@ function logCoalescedAuthEvent(kind, opts, windowSeconds, globalMaxPerWindow) {
 
 /**
  * Run one privileged state transition and its audit row in the same SQLite
- * transaction. A failed audit insert rolls the mutation back.
+ * transaction. A failed audit insert rolls the mutation back. `kind` may be a
+ * resolver so callers can choose the event from the committed transition; an
+ * empty resolved kind records no audit row for a true no-op.
  */
 function runAuditedTransaction(kind, opts, mutation) {
   if (typeof mutation !== "function") {
@@ -1507,7 +1712,8 @@ function runAuditedTransaction(kind, opts, mutation) {
   let result;
   $app.dao().runInTransaction(function (txDao) {
     result = mutation(txDao);
-    saveAuthEvent(txDao, kind, opts || {});
+    const resolvedKind = typeof kind === "function" ? kind(result) : kind;
+    if (resolvedKind) saveAuthEvent(txDao, resolvedKind, opts || {});
   });
   return result;
 }
@@ -2621,6 +2827,7 @@ module.exports = {
   configuredAdminSecret,
   adminSecretFingerprint,
   personPinFingerprint,
+  managerAuthFingerprint,
   // Token lifecycle
   secureRandomString,
   mintSessionToken,
@@ -2683,13 +2890,23 @@ module.exports = {
   safePhotoReleaseError,
   isValidPersonPin,
   normalizePersonPin,
+  normalizeManagerUsername,
+  isValidManagerUsername,
+  isManagerLoginPasswordShape,
+  isStrongManagerPassword,
   findActivePersonByPin,
+  findActiveManagerLogin,
+  findManagerPasswordVerificationAccount,
+  findManagerAccountByPersonWithDao,
+  assertManagerUsernameAvailableWithDao,
+  assertPersonPinAvailableWithDao,
   assertPersonPinAvailable,
   personRoleToSessionRole,
   serializePerson,
   serializePersonSummary,
   isAuthoritativePostPerson,
   generateUniquePersonPin,
+  generateUniquePersonPinWithDao,
   resolvePostScenarioPolicy,
   normalizeReleaseIdentity,
   normalizeReleaseVin,
