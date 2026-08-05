@@ -70,7 +70,7 @@ Before the backend-first release, set these GitHub `production` environment vari
 - `TURNSTILE_ENFORCEMENT_ENABLED=false` for the compatibility phase.
 - `LEGACY_CLIENT_COMPATIBILITY_ENABLED=true` for exactly one backend-first release.
 
-Store `FLY_API_TOKEN` in that environment. Install `TURNSTILE_SECRET`, `ADMIN_DEALER_CODE`, `GEMINI_API_KEY`, and `VERCEL_TO_FLY_PROXY_SECRET` as Fly secrets. The deploy workflow checks that all four secret names exist; backend readiness proves the proxy credential has a safe length and refuses every published Turnstile test credential even while enforcement is temporarily disabled.
+Store `FLY_API_TOKEN` in that environment. Install `TURNSTILE_SECRET`, `ADMIN_DEALER_CODE`, `GEMINI_API_KEY`, `VERCEL_TO_FLY_PROXY_SECRET`, `CUSTOMER_HUB_URL`, `CUSTOMER_HUB_SECRET`, `CUSTOMER_HUB_DESTINATION_ID`, and `CUSTOMER_HUB_DEALER_ID` as Fly secrets. The deploy workflow checks that all eight secret names exist; backend readiness proves the proxy credential has a safe length, verifies that the private Customer Hub destination is configured, and refuses every published Turnstile test credential even while enforcement is temporarily disabled.
 
 ## Two-phase administrator credential
 
@@ -89,7 +89,7 @@ flyctl ssh console --app dealer-social-post-ai-production --command \
 
 ## Required gates and staged promotion
 
-1. Select one commit SHA. Require secret scan, model-policy and Vercel-config drift checks, scoped format check, three consecutive Vitest passes, typecheck, build, full dependency audit, Chromium/WebKit browser tests, dirty-upgrade smoke, deterministic provider-boundary canaries, and the local backup/restore canary.
+1. Select one commit SHA. Require secret scan, model-policy and Vercel-config drift checks, scoped format check, three consecutive Vitest passes, typecheck, build, full dependency audit, Chromium/WebKit browser tests, dirty-upgrade smoke, deterministic provider-boundary canaries, the private website-handoff contract canary, and the local backup/restore canary.
 2. Open the time-limited Fly image bootstrap only for the first v2 release. Let the successful current-`main` CI run trigger the coordinated Fly workflow. Stale `workflow_run` SHAs are rejected twice. The workflow builds and labels one candidate image, pushes it to Fly's private registry, pins its digest, restores the production backup into that exact digest, and deploys the same digest without rebuilding. Readiness confirms every started machine reports that digest, repository, and SHA.
 3. Provision a dedicated active synthetic salesperson in a non-customer canary dealership and retain its PIN only in the release secret store. Confirm direct Fly health reports the candidate `releaseSha`, `backup.status: "verified"`, trusted proxy readiness, API/model-policy versions, and `ok: true`. Run the authenticated caption, standard-image, standard-video (vertical 720p, 6-second), and quality-video (landscape 1080p, 8-second) canaries below. They are pinned to the exact production Fly origin, use only `public/icon-512.png`, revoke the least-privilege session, and write redacted evidence without captions, provider payloads, media, operation names, file URIs, or credentials. The image check decodes the provider result and requires actual 4:5 pixels. The release workstation must have `ffprobe` from FFmpeg available (or set `RELEASE_CANARY_FFPROBE` to its executable); both video checks block promotion unless they verify the exact dimensions and duration, H.264 video, a present AAC audio stream, compatible pixel format, and readable video and audio packets.
 
@@ -110,8 +110,33 @@ flyctl ssh console --app dealer-social-post-ai-production --command \
 
    Review and archive the redacted JSON evidence with the release record. Starting a canary atomically replaces any older pass with a non-authorizing `running` receipt. Both staging and promotion refuse a missing, failed, mismatched, or more-than-six-hours-old receipt, and require every authentication, health, caption, standard-image, standard-video, quality-video, and session-revocation check to pass for the exact Fly SHA. A failed canary exits nonzero and records only a stable failure code, safe message, and HTTP status when applicable. Never run it with customer media or place the PIN on the command line. Rotate the dedicated PIN after any suspected exposure; never substitute the system-admin secret.
 
-4. Build the same SHA for Vercel. Main-branch production-domain auto-assignment is disabled in `vercel.ts`; branch previews remain available. The staging command refuses a dirty worktree, a stale `main`, a local `HEAD` that differs from Fly health, or any frontend output that does not contain the exact release SHA used by client telemetry.
-5. Stage the production-configured artifact without assigning the production domain. The script captures the canonical deployment URL and immutable Vercel deployment ID in a permission-restricted, gitignored `.release-evidence/vercel-staged-release.json` receipt. This directory is separate from Playwright's disposable `test-results` output. Staging invalidates any earlier browser-QA receipt and rechecks same-origin health, proxy readiness, security headers, PWA assets, service-worker release binding, and the frontend bundle's exact SHA:
+4. Run the authenticated private website-handoff canary against that exact Fly SHA. Use only the checked-in synthetic delivery image and the dedicated `Release Canary` salesperson in the approval-free Customer Hub-enabled canary dealership. The canary first saves a website-only post and proves it stays `not_requested` across a worker boundary. Only its explicit final Send may enqueue the edited draft. It then proves the missing/stale revision blocks, exact replay idempotency, changed-replay block, clean zero-attempt private delivery, public image `404`, absent public marker, and session revocation.
+
+   ```bash
+   set +x
+   read -r -s -p "Dedicated Release Canary salesperson PIN: " RELEASE_CANARY_PERSON_PIN
+   printf '\n'
+   export RELEASE_CANARY_PERSON_PIN
+   export RELEASE_CANARY_BASE_URL=https://dealer-social-post-ai-production.fly.dev
+   export RELEASE_CANARY_EXPECTED_SHA="$(git rev-parse HEAD)"
+   export WEBSITE_HANDOFF_CANARY_CONFIRM=website-private-draft-synthetic-only
+   npm run release:website-handoff-canary
+   unset WEBSITE_HANDOFF_CANARY_CONFIRM
+   ```
+
+   The command records a private `reviewUrl` and synthetic marker in `.release-evidence/production-website-handoff-canary.json`; it never publishes the draft. Open that exact `reviewUrl` while signed in to Customer Hub Studio, confirm the marker belongs to this release canary, archive it, and permanently purge that exact synthetic draft. Keep the Dealer Social synthetic post private as release audit evidence. After the Studio purge succeeds, explicitly complete the cleanup receipt:
+
+   ```bash
+   export WEBSITE_HANDOFF_CANARY_CLEANUP_CONFIRM=private-synthetic-draft-purged
+   npm run release:website-handoff-canary:confirm-cleanup
+   unset WEBSITE_HANDOFF_CANARY_CLEANUP_CONFIRM RELEASE_CANARY_PERSON_PIN \
+     RELEASE_CANARY_BASE_URL RELEASE_CANARY_EXPECTED_SHA
+   ```
+
+   Starting the canary replaces any older pass with a non-authorizing receipt. Both Vercel staging and promotion require the canonical receipt for the exact Fly SHA, completed no more than six hours earlier, with every private-delivery check passed and owner cleanup recorded as `required: false` and `status: "complete"`. A passed canary awaiting Studio cleanup cannot authorize a release. Never use customer media, publish the synthetic draft, or substitute an administrator credential.
+
+5. Build the same SHA for Vercel. Main-branch production-domain auto-assignment is disabled in `vercel.ts`; branch previews remain available. The staging command refuses a dirty worktree, a stale `main`, a local `HEAD` that differs from Fly health, or any frontend output that does not contain the exact release SHA used by client telemetry.
+6. Stage the production-configured artifact without assigning the production domain. The script captures the canonical deployment URL and immutable Vercel deployment ID in a permission-restricted, gitignored `.release-evidence/vercel-staged-release.json` receipt. This directory is separate from Playwright's disposable `test-results` output. Staging invalidates any earlier browser-QA receipt and rechecks same-origin health, proxy readiness, security headers, PWA assets, service-worker release binding, and the frontend bundle's exact SHA:
 
    ```bash
    RELEASE_SHA="$(git rev-parse HEAD)"
@@ -119,9 +144,9 @@ flyctl ssh console --app dealer-social-post-ai-production --command \
    unset RELEASE_SHA
    ```
 
-   The provider canary, staging, hosted QA, and promotion share one atomic owner-bearing lock so they cannot overlap. An interrupted process deliberately leaves that lock in place instead of guessing that it is stale; remove `.release-evidence/vercel-release.lock` only after directly confirming that no release command is still running.
+   The provider canary, private website-handoff canary, owner cleanup confirmation, staging, hosted QA, and promotion share one atomic owner-bearing lock so they cannot overlap. An interrupted process deliberately leaves that lock in place instead of guessing that it is stale; remove `.release-evidence/vercel-release.lock` only after directly confirming that no release command is still running.
 
-6. Run the hosted-artifact browser gate against the exact staged URL. The gate is deliberately non-mutating: it never submits an invalid code, creates production data, or depends on source-only TypeScript modules that are absent from a production Vite build. It verifies the exact frontend SHA, same-origin health and proxy readiness, security headers, PWA metadata/icons/service worker, case-preserving masked admin entry, serious accessibility issues, horizontal overflow, Dynamic Island safe areas, and the complete Chromium/WebKit viewport matrix. The full stubbed UI, sharing, login-recovery, and real-PocketBase workflows already ran in CI before Fly deployment.
+7. Run the hosted-artifact browser gate against the exact staged URL. The gate is deliberately non-mutating: it never submits an invalid code, creates production data, or depends on source-only TypeScript modules that are absent from a production Vite build. It verifies the exact frontend SHA, same-origin health and proxy readiness, security headers, PWA metadata/icons/service worker, case-preserving masked admin entry, serious accessibility issues, horizontal overflow, Dynamic Island safe areas, and the complete Chromium/WebKit viewport matrix. The full stubbed UI, sharing, login-recovery, and real-PocketBase workflows already ran in CI before Fly deployment.
 
    ```bash
    npm run release:vercel:qa

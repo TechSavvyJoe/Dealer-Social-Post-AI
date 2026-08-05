@@ -1,10 +1,19 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PostResult } from "../components/PostResult";
+import { ApiError } from "../services/apiErrors";
 import { LoadingOverlay } from "../components/LoadingOverlay";
 import { ToastProvider } from "../components/ui/Toast";
+import type { WebsitePublication } from "../services/websitePublishing";
 import { VideoStyle } from "../types";
 import { useAppStore } from "../stores/appStore";
 
@@ -17,6 +26,10 @@ const {
   mockSavePreparedMediaToLibrary,
   mockValidateVideoMetadata,
   mockUpdatePostDraft,
+  mockEnqueueWebsitePublication,
+  mockGetWebsitePublication,
+  mockListWebsiteDestinations,
+  mockRetryWebsitePublication,
 } = vi.hoisted(() => ({
   mockGetPostApprovalStatus: vi.fn(),
   mockMarkPostVideoGenerated: vi.fn(),
@@ -30,7 +43,24 @@ const {
       kind: "image",
     }),
   ),
-  mockUpdatePostDraft: vi.fn(async () => ({ id: "post-1", updated: true as const })),
+  mockUpdatePostDraft: vi.fn(async () => ({
+    id: "post-1",
+    updated: true as const,
+    post_revision: "2026-08-05 09:42:00.000Z",
+  })),
+  mockEnqueueWebsitePublication: vi.fn(async () => ({
+    status: "queued" as const,
+    attempts: 0,
+  })),
+  mockGetWebsitePublication: vi.fn(async (): Promise<WebsitePublication> => ({
+    status: "not_requested" as const,
+    attempts: 0,
+  })),
+  mockListWebsiteDestinations: vi.fn(async () => []),
+  mockRetryWebsitePublication: vi.fn(async () => ({
+    status: "queued" as const,
+    attempts: 0,
+  })),
   mockValidateVideoMetadata: vi.fn(async () => ({
     width: 1080,
     height: 1920,
@@ -63,6 +93,16 @@ vi.mock("../services/posts", () => ({
   markPostVideoGenerated: mockMarkPostVideoGenerated,
   updatePostDraft: mockUpdatePostDraft,
 }));
+vi.mock("../services/websitePublishing", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/websitePublishing")>();
+  return {
+    ...actual,
+    enqueueWebsitePublication: mockEnqueueWebsitePublication,
+    getWebsitePublication: mockGetWebsitePublication,
+    listWebsiteDestinations: mockListWebsiteDestinations,
+    retryWebsitePublication: mockRetryWebsitePublication,
+  };
+});
 vi.mock("../components/ui/ProgressiveImage", () => ({
   ProgressiveImage: ({
     src,
@@ -134,7 +174,18 @@ describe("PostResult job-first flow", () => {
       id: "post-review-1",
       has_video: true,
     });
-    mockUpdatePostDraft.mockResolvedValue({ id: "post-1", updated: true });
+    mockUpdatePostDraft.mockResolvedValue({
+      id: "post-1",
+      updated: true,
+      post_revision: "2026-08-05 09:42:00.000Z",
+    });
+    mockEnqueueWebsitePublication.mockResolvedValue({ status: "queued", attempts: 0 });
+    mockGetWebsitePublication.mockResolvedValue({
+      status: "not_requested",
+      attempts: 0,
+    });
+    mockListWebsiteDestinations.mockResolvedValue([]);
+    mockRetryWebsitePublication.mockResolvedValue({ status: "queued", attempts: 0 });
     mockSavePreparedMediaToLibrary.mockResolvedValue({
       method: "download",
       kind: "image",
@@ -145,6 +196,7 @@ describe("PostResult job-first flow", () => {
     });
     useAppStore.setState({
       currentDealer: null,
+      generatedPost: null,
       selectedImage: "data:image/png;base64,b3JpZ2luYWw=",
     });
   });
@@ -153,6 +205,7 @@ describe("PostResult job-first flow", () => {
     renderResult();
 
     const delivery = screen.getByLabelText("Post delivery actions");
+    expect(delivery.parentElement?.parentElement).toBe(document.body);
     expect(
       within(delivery).getByRole("button", { name: "Copy caption" }),
     ).toBeInTheDocument();
@@ -190,6 +243,303 @@ describe("PostResult job-first flow", () => {
     const studio = screen.getByTestId("mobile-publish-studio");
     expect(studio).not.toHaveTextContent("Ready to publish");
     await waitFor(() => expect(studio).toHaveTextContent("Ready to save and share"));
+  });
+
+  it("keeps Website-only editable and sends exactly one final private draft without TikTok", async () => {
+    mockGetWebsitePublication
+      .mockResolvedValueOnce({ status: "not_requested", attempts: 0 })
+      .mockResolvedValue({ status: "queued", attempts: 0 });
+    const finalDraft = {
+      enabled: true as const,
+      kind: "customer_story" as const,
+      category: "deliveries" as const,
+      title: "Welcome, Jane S.",
+      body: "The final edited website wording.",
+      altText: "Customer delivery creative.",
+      customerDisplayName: "Jane S.",
+      schemaVersion: 1 as const,
+    };
+    const prepareFinal = vi.fn(async () => finalDraft);
+    renderResult({
+      post: {
+        image: "data:image/png;base64,aGVsbG8=",
+        text: "The final edited caption.",
+        postId: "website-only-1",
+        platformIds: [],
+        websiteDraft: {
+          ...finalDraft,
+          body: "Initial wording that must not be sent.",
+        },
+        websitePublication: { status: "not_requested" },
+      },
+      onPrepareFinalWebsiteDraft: prepareFinal,
+    });
+
+    expect(screen.queryByText("TikTok")).not.toBeInTheDocument();
+    expect(screen.queryByText("Choose a destination output")).not.toBeInTheDocument();
+    expect(screen.getByText("Private website draft")).toBeVisible();
+    expect(screen.getByText(/Website selected — review before sending/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: /Edit with AI/i })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Send website draft" }));
+    await waitFor(() => expect(prepareFinal).toHaveBeenCalledTimes(1));
+    expect(prepareFinal).toHaveBeenCalledWith({
+      caption: expect.stringContaining("The final edited caption."),
+      image: "data:image/png;base64,aGVsbG8=",
+      currentDraft: expect.objectContaining({
+        body: "Initial wording that must not be sent.",
+      }),
+    });
+    await waitFor(() =>
+      expect(mockEnqueueWebsitePublication).toHaveBeenCalledWith(
+        "website-only-1",
+        finalDraft,
+        "2026-08-05 09:42:00.000Z",
+      ),
+    );
+    expect(mockEnqueueWebsitePublication).toHaveBeenCalledTimes(1);
+    expect(useAppStore.getState().generatedPost).toMatchObject({
+      postId: "website-only-1",
+      websiteDraft: finalDraft,
+      websitePublication: { status: "queued" },
+    });
+    expect(
+      await screen.findByRole("button", { name: "Queued website draft" }),
+    ).toBeDisabled();
+  });
+
+  it("reconciles a stale not-requested restore with the durable sent state", async () => {
+    const draft = {
+      enabled: true as const,
+      kind: "site_update" as const,
+      category: "community" as const,
+      title: "Community update",
+      body: "A private community update prepared for review.",
+      altText: "A synthetic community update image.",
+      schemaVersion: 1 as const,
+    };
+    const frozenDraft = {
+      ...draft,
+      title: "Frozen website update",
+      body: "The authoritative copy already sent from another browser session.",
+    };
+    mockGetWebsitePublication.mockResolvedValue({
+      status: "draft_ready",
+      reviewUrl: "https://joegallant.me/studio/updates#draft-reload",
+      websiteDraft: frozenDraft,
+    });
+
+    renderResult({
+      post: {
+        image: "data:image/png;base64,aGVsbG8=",
+        text: "Saved final caption.",
+        postId: "website-reload-1",
+        platformIds: [],
+        websiteDraft: draft,
+        websitePublication: { status: "not_requested" },
+      },
+    });
+
+    await waitFor(() =>
+      expect(mockGetWebsitePublication).toHaveBeenCalledWith(
+        "website-reload-1",
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(await screen.findByText("Private website draft ready")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Send website draft" })).toBeNull();
+    expect(useAppStore.getState().generatedPost).toMatchObject({
+      postId: "website-reload-1",
+      websiteDraft: frozenDraft,
+      websitePublication: { status: "draft_ready" },
+    });
+    expect(mockEnqueueWebsitePublication).not.toHaveBeenCalled();
+  });
+
+  it("recovers a lost final-send response without offering a duplicate Send", async () => {
+    const draft = {
+      enabled: true as const,
+      kind: "site_update" as const,
+      category: "community" as const,
+      title: "Initial synthetic update",
+      body: "Initial copy that must be replaced before the private handoff.",
+      altText: "Synthetic website release image.",
+      schemaVersion: 1 as const,
+    };
+    const finalDraft = {
+      ...draft,
+      title: "Final synthetic update",
+      body: "Final synthetic copy for a private website draft.",
+    };
+    mockGetWebsitePublication
+      .mockResolvedValueOnce({ status: "not_requested" })
+      .mockResolvedValue({
+        status: "queued",
+        attempts: 0,
+        websiteDraft: finalDraft,
+      });
+    mockEnqueueWebsitePublication.mockRejectedValueOnce(
+      new TypeError("Network response was lost"),
+    );
+
+    renderResult({
+      post: {
+        image: "data:image/png;base64,aGVsbG8=",
+        text: "Final synthetic caption.",
+        postId: "website-lost-response-1",
+        platformIds: [],
+        websiteDraft: draft,
+        websitePublication: { status: "not_requested" },
+      },
+      onPrepareFinalWebsiteDraft: vi.fn(async () => finalDraft),
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Send website draft" }));
+
+    expect(
+      await screen.findByText(/website handoff was already recorded/i),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Send website draft" })).toBeNull();
+    expect(useAppStore.getState().generatedPost).toMatchObject({
+      postId: "website-lost-response-1",
+      websiteDraft: finalDraft,
+      websitePublication: { status: "queued" },
+    });
+    expect(mockEnqueueWebsitePublication).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores the winning draft when another window sends different copy", async () => {
+    const initialDraft = {
+      enabled: true as const,
+      kind: "site_update" as const,
+      category: "community" as const,
+      title: "Initial community update",
+      body: "Initial private copy before either window sends.",
+      altText: "Initial private community image.",
+      schemaVersion: 1 as const,
+    };
+    const losingDraft = {
+      ...initialDraft,
+      title: "Copy from this window",
+      body: "This losing copy must never be labeled as the sent draft.",
+    };
+    const winningDraft = {
+      ...initialDraft,
+      title: "Copy from the other window",
+      body: "This is the authoritative copy already frozen by the server.",
+    };
+    mockGetWebsitePublication
+      .mockResolvedValueOnce({ status: "not_requested", websiteDraft: initialDraft })
+      .mockResolvedValue({
+        status: "queued",
+        attempts: 0,
+        websiteDraft: winningDraft,
+      });
+    mockEnqueueWebsitePublication.mockRejectedValueOnce(
+      new ApiError("This website draft was already sent.", {
+        code: "WEBSITE_DRAFT_ALREADY_SENT",
+        status: 409,
+      }),
+    );
+
+    renderResult({
+      post: {
+        image: "data:image/png;base64,aGVsbG8=",
+        text: "Final caption from this window.",
+        postId: "website-other-window-1",
+        platformIds: [],
+        websiteDraft: initialDraft,
+        websitePublication: { status: "not_requested" },
+      },
+      onPrepareFinalWebsiteDraft: vi.fn(async () => losingDraft),
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Send website draft" }));
+
+    expect(
+      await screen.findByText(/another window already sent the final website draft/i),
+    ).toBeVisible();
+    expect(useAppStore.getState().generatedPost).toMatchObject({
+      postId: "website-other-window-1",
+      websiteDraft: winningDraft,
+      websitePublication: { status: "queued" },
+    });
+    expect(useAppStore.getState().generatedPost?.websiteDraft).not.toEqual(losingDraft);
+  });
+
+  it("locks edits during final AI preparation and refuses a changed creative", async () => {
+    const draft = {
+      enabled: true as const,
+      kind: "site_update" as const,
+      category: "community" as const,
+      title: "Synthetic update",
+      body: "Synthetic final body prepared only for private review.",
+      altText: "Synthetic website QA image.",
+      schemaVersion: 1 as const,
+    };
+    let resolvePreparation: ((value: typeof draft) => void) | undefined;
+    const prepareFinal = vi.fn(
+      () =>
+        new Promise<typeof draft>((resolve) => {
+          resolvePreparation = resolve;
+        }),
+    );
+    mockGetWebsitePublication.mockResolvedValue({ status: "not_requested" });
+    const sourcePost = {
+      image: "data:image/png;base64,aGVsbG8=",
+      text: "Synthetic caption before handoff.",
+      postId: "website-concurrency-1",
+      platformIds: [] as string[],
+      websiteDraft: draft,
+      websitePublication: { status: "not_requested" as const },
+    };
+
+    renderResult({ post: sourcePost, onPrepareFinalWebsiteDraft: prepareFinal });
+    fireEvent.click(await screen.findByRole("button", { name: "Send website draft" }));
+    await waitFor(() => expect(prepareFinal).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: /Edit with AI/i })).toBeDisabled();
+
+    useAppStore.getState().setGeneratedPost({
+      ...sourcePost,
+      image: "data:image/png;base64,Y2hhbmdlZA==",
+    });
+    await act(async () => {
+      resolvePreparation?.(draft);
+    });
+
+    expect(
+      await screen.findByText(
+        /creative changed while the website draft was being prepared/i,
+      ),
+    ).toBeVisible();
+    expect(mockEnqueueWebsitePublication).not.toHaveBeenCalled();
+  });
+
+  it("disables mobile website retry when the original post never saved", () => {
+    renderResult({
+      post: {
+        image: "data:image/png;base64,aGVsbG8=",
+        text: "Synthetic caption.",
+        platformIds: [],
+        websiteDraft: {
+          enabled: true,
+          kind: "site_update",
+          category: "community",
+          title: "Synthetic update",
+          body: "Synthetic private website draft body.",
+          altText: "Synthetic website image.",
+          schemaVersion: 1,
+        },
+        websitePublication: { status: "failed", lastError: "queue_unavailable" },
+      },
+    });
+
+    expect(screen.getByText("Website draft was not saved")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Not saved website draft" }),
+    ).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Not saved website draft" }));
+    expect(mockRetryWebsitePublication).not.toHaveBeenCalled();
   });
 
   it("supports roving keyboard navigation across platform caption tabs", async () => {
@@ -683,7 +1033,12 @@ describe("PostResult job-first flow", () => {
       () =>
         new Promise((resolve) => {
           order.push("history-save");
-          releaseDraft = () => resolve({ id: "post-1", updated: true });
+          releaseDraft = () =>
+            resolve({
+              id: "post-1",
+              updated: true,
+              post_revision: "2026-08-05 09:43:00.000Z",
+            });
         }),
     );
     fireEvent.change(screen.getByRole("textbox", { name: "Full caption text" }), {
@@ -857,9 +1212,9 @@ describe("PostResult job-first flow", () => {
         name: "Create Instagram Reel video 9:16",
       }),
     );
-    expect(screen.getByText("Exact output pinned").parentElement).toHaveTextContent(
-      "Instagram Reel · 9:16 · 1080p · 8 seconds",
-    );
+    expect(
+      (await screen.findByText("Exact output pinned")).parentElement,
+    ).toHaveTextContent("Instagram Reel · 9:16 · 1080p · 8 seconds");
 
     await user.click(screen.getByRole("button", { name: /Golden Delivery/i }));
     expect(callbacks.onGenerateVideo).toHaveBeenCalledWith(

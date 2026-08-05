@@ -174,7 +174,7 @@ export const logPost = async (
     if (input.imageAttemptId) {
       form.append("image_attempt_id", input.imageAttemptId);
     }
-    if (input.platformIds?.length) {
+    if (Array.isArray(input.platformIds)) {
       form.append("platform_ids", JSON.stringify(input.platformIds));
     }
     if (input.mediaOutputMode) {
@@ -274,7 +274,7 @@ export const markPostVideoGenerated = async (
 export const updatePostDraft = async (
   postId: string,
   input: UpdatePostDraftInput,
-): Promise<{ id: string; updated: true }> => {
+): Promise<{ id: string; updated: true; post_revision: string }> => {
   const requestAuthEpoch = captureAuthEpoch();
   const form = new FormData();
   form.append("caption", input.caption.trim());
@@ -296,7 +296,14 @@ export const updatePostDraft = async (
   if (!res.ok) {
     throw await readApiError(res, { requestAuthEpoch });
   }
-  const updated = (await res.json()) as { id: string; updated: true };
+  const updated = (await res.json()) as {
+    id: string;
+    updated: true;
+    post_revision: string;
+  };
+  if (!updated.post_revision) {
+    throw new Error("Saved draft response did not include its server revision");
+  }
   assertAuthEpoch(requestAuthEpoch);
   return updated;
 };

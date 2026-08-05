@@ -62,6 +62,42 @@ type WebsiteModule = {
     draftId: string,
     existingRemoteDraftId: string,
   ): boolean;
+  claimPublicationForPost(
+    postId: string,
+    requestedDraft: unknown,
+    expectedPostRevision: string,
+    expectedDealerId: string,
+  ): {
+    post: unknown;
+    publication: unknown;
+    idempotentReplay: boolean;
+    postRevision: string;
+  };
+  publicationEventIdForPostRevision(
+    postId: string,
+    postRevision: string,
+    sourceSnapshotHash: string,
+    securityApi: { sha256(value: string): string },
+  ): string;
+  publicationEventRevisionMatches(
+    eventId: string,
+    postId: string,
+    postRevision: string,
+    securityApi: { sha256(value: string): string },
+  ): boolean | null;
+  publicationSourceSnapshotHash(
+    post: unknown,
+    draft: Record<string, unknown>,
+    media: Record<string, string>,
+    securityApi: { sha256(value: string): string },
+  ): string;
+  verifyPublicationSourceSnapshot(
+    publication: unknown,
+    post: unknown,
+    draft: Record<string, unknown>,
+    media: Record<string, string>,
+    securityApi: { sha256(value: string): string },
+  ): void;
 };
 
 function loadWebsiteModule(): WebsiteModule {
@@ -315,6 +351,335 @@ describe("Customer Hub website publication contract", () => {
       expectedSignature,
     );
     expect(signed.signature).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("binds the immutable event identity to the exact saved revision and media", () => {
+    const crypto = {
+      sha256(value: string) {
+        return createHash("sha256").update(value, "utf8").digest("hex");
+      },
+    };
+    const post = postRecord({
+      dealer: "dealer_joe",
+      scenario_id: "customer_delivery",
+      customer_name: "",
+      disclosures: "",
+    });
+    const draft = {
+      schemaVersion: 1,
+      enabled: true,
+      kind: "customer_story",
+      category: "deliveries",
+      title: "A happy delivery",
+      body: "A customer is ready to enjoy the vehicle they chose.",
+      altText: "Customer standing beside a newly delivered vehicle",
+    };
+    const media = {
+      mimeType: "image/jpeg",
+      filename: "website-post-post_123.jpg",
+      base64: "/9j/synthetic-one/2Q==",
+    };
+    const snapshotHash = website.publicationSourceSnapshotHash(
+      post,
+      draft,
+      media,
+      crypto,
+    );
+    const eventId = website.publicationEventIdForPostRevision(
+      post.id,
+      "2026-08-05 09:42:00.000Z",
+      snapshotHash,
+      crypto,
+    );
+
+    expect(eventId).toMatch(/^wp_s_[a-f0-9]{32}_[a-f0-9]{40}$/);
+    expect(eventId).toHaveLength(78);
+    expect(
+      website.publicationEventRevisionMatches(
+        eventId,
+        post.id,
+        "2026-08-05 09:42:00.000Z",
+        crypto,
+      ),
+    ).toBe(true);
+    expect(
+      website.publicationEventRevisionMatches(
+        eventId,
+        post.id,
+        "2026-08-05 09:43:00.000Z",
+        crypto,
+      ),
+    ).toBe(false);
+    expect(() =>
+      website.verifyPublicationSourceSnapshot(
+        postRecord({ event_id: eventId }),
+        post,
+        draft,
+        media,
+        crypto,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      website.verifyPublicationSourceSnapshot(
+        postRecord({ event_id: eventId }),
+        post,
+        draft,
+        { ...media, base64: "/9j/synthetic-two/2Q==" },
+        crypto,
+      ),
+    ).toThrow("payload_revision_conflict");
+  });
+
+  it("serializes competing final handoffs so one exact revision wins", () => {
+    class MutableRecord {
+      id = "";
+      collectionName: string;
+      values: Record<string, unknown>;
+
+      constructor(collection: { name: string }, values: Record<string, unknown> = {}) {
+        this.collectionName = collection.name;
+        this.values = { ...values };
+      }
+
+      getString(field: string) {
+        return (this.values[field] ?? "").toString();
+      }
+
+      getBool(field: string) {
+        return Boolean(this.values[field]);
+      }
+
+      getInt(field: string) {
+        return Number(this.values[field]) || 0;
+      }
+
+      set(field: string, value: unknown) {
+        this.values[field] = value;
+      }
+
+      baseFilesPath() {
+        return `posts/${this.id}`;
+      }
+    }
+
+    const crypto = {
+      sha256(value: string) {
+        return createHash("sha256").update(value, "utf8").digest("hex");
+      },
+      randomStringWithAlphabet(length: number) {
+        return "r".repeat(length);
+      },
+    };
+    const environment: Record<string, string> = {
+      CUSTOMER_HUB_URL: "https://joegallant.example",
+      CUSTOMER_HUB_SECRET: "s".repeat(48),
+      CUSTOMER_HUB_DESTINATION_ID: "joe_customer_hub",
+      CUSTOMER_HUB_DEALER_ID: "dealer_joe",
+    };
+    const installHarness = () => {
+      const post = new MutableRecord(
+        { name: "posts" },
+        {
+          dealer: "dealer_joe",
+          scenario_id: "customer_delivery",
+          customer_name: "",
+          disclosures: "",
+          approval_status: "n_a",
+          release_required: false,
+          creative_image: "final.jpg",
+          website_draft: "",
+          updated: "2026-08-05 09:42:00.000Z",
+        },
+      );
+      post.id = "post_123";
+      const dealer = new MutableRecord({ name: "dealers" }, { custom_scenarios: "[]" });
+      dealer.id = "dealer_joe";
+      const publications: MutableRecord[] = [];
+      const transactions: string[][] = [];
+      let activeOperations: string[] = [];
+
+      const txDao = {
+        db() {
+          return {
+            newQuery(sql: string) {
+              return {
+                bind() {
+                  return this;
+                },
+                execute() {
+                  if (sql.includes("UPDATE posts SET updated = updated")) {
+                    activeOperations.push("write-fence");
+                    return { rowsAffected: () => 1 };
+                  }
+                  throw new Error(`Unexpected query: ${sql}`);
+                },
+              };
+            },
+          };
+        },
+        findRecordById(collection: string, id: string) {
+          if (collection === "posts" && id === post.id) {
+            activeOperations.push("read-post");
+            return post;
+          }
+          if (collection === "dealers" && id === dealer.id) return dealer;
+          throw new Error("Record not found");
+        },
+        findRecordsByFilter(
+          collection: string,
+          _filter: string,
+          _sort: string,
+          _limit: number,
+          _offset: number,
+          params: Record<string, string>,
+        ) {
+          if (collection !== "website_publications") return [];
+          activeOperations.push("read-publication");
+          return publications.filter(
+            (publication) =>
+              publication.getString("post") === params.post &&
+              (!params.destination ||
+                publication.getString("destination_id") === params.destination),
+          );
+        },
+        findCollectionByNameOrId(name: string) {
+          return { name };
+        },
+        saveRecord(record: MutableRecord) {
+          if (record.collectionName === "posts") {
+            record.set("updated", "2026-08-05 09:42:01.000Z");
+            return;
+          }
+          if (!record.id) record.id = `publication_${publications.length + 1}`;
+          record.set("updated", "2026-08-05 09:42:01.000Z");
+          if (!publications.includes(record)) publications.push(record);
+        },
+      };
+      const rootDao = {
+        runInTransaction(callback: (dao: typeof txDao) => void) {
+          activeOperations = [];
+          transactions.push(activeOperations);
+          callback(txDao);
+        },
+      };
+      let readerUsed = false;
+      vi.stubGlobal("Record", MutableRecord);
+      vi.stubGlobal("$security", crypto);
+      vi.stubGlobal("$os", {
+        getenv: (name: string) => environment[name] ?? "",
+        tempDir: () => "/tmp",
+        writeFile: () => undefined,
+        truncate: () => undefined,
+        readFile: () => new Uint8Array(3),
+        remove: () => undefined,
+      });
+      vi.stubGlobal("$app", {
+        dao: () => rootDao,
+        newFilesystem: () => ({
+          exists: () => true,
+          getFile: () => {
+            readerUsed = false;
+            return {
+              size: () => 3,
+              contentType: () => "image/jpeg",
+              read: (buffer: Uint8Array) => {
+                if (readerUsed) return 0;
+                readerUsed = true;
+                buffer[0] = 1;
+                buffer[1] = 2;
+                buffer[2] = 3;
+                return 3;
+              },
+              close: () => undefined,
+            };
+          },
+          close: () => undefined,
+        }),
+      });
+      return { post, publications, transactions };
+    };
+
+    const draftA = JSON.stringify({
+      schemaVersion: 1,
+      enabled: true,
+      kind: "customer_story",
+      category: "deliveries",
+      title: "First winning draft",
+      body: "The first exact website draft wins the serialized handoff.",
+      altText: "Synthetic customer delivery test image",
+    });
+    const draftB = JSON.stringify({
+      schemaVersion: 1,
+      enabled: true,
+      kind: "customer_story",
+      category: "deliveries",
+      title: "Competing draft",
+      body: "A different concurrent website draft must not also succeed.",
+      altText: "Different synthetic customer delivery test image",
+    });
+    const originalRevision = "2026-08-05 09:42:00.000Z";
+    const state = installHarness();
+
+    const winner = website.claimPublicationForPost(
+      "post_123",
+      draftA,
+      originalRevision,
+      "dealer_joe",
+    );
+    expect(winner.idempotentReplay).toBe(false);
+    expect(state.publications).toHaveLength(1);
+    expect(JSON.parse(state.post.getString("website_draft"))).toMatchObject({
+      title: "First winning draft",
+    });
+    expect(state.publications[0].getString("event_id")).toMatch(
+      /^wp_s_[a-f0-9]{32}_[a-f0-9]{40}$/,
+    );
+
+    expect(() =>
+      website.claimPublicationForPost(
+        "post_123",
+        draftB,
+        originalRevision,
+        "dealer_joe",
+      ),
+    ).toThrow("website_draft_already_sent");
+    expect(state.publications).toHaveLength(1);
+    expect(JSON.parse(state.post.getString("website_draft"))).toMatchObject({
+      title: "First winning draft",
+    });
+
+    const retry = website.claimPublicationForPost(
+      "post_123",
+      draftA,
+      originalRevision,
+      "dealer_joe",
+    );
+    expect(retry.idempotentReplay).toBe(true);
+    expect(retry.publication).toBe(winner.publication);
+    expect(state.publications).toHaveLength(1);
+    expect(() =>
+      website.claimPublicationForPost(
+        "post_123",
+        draftA,
+        "2026-08-05 09:42:00.500Z",
+        "dealer_joe",
+      ),
+    ).toThrow("website_draft_already_sent");
+    expect(
+      state.transactions.every((operations) => operations[0] === "write-fence"),
+    ).toBe(true);
+
+    const stale = installHarness();
+    expect(() =>
+      website.claimPublicationForPost(
+        "post_123",
+        draftA,
+        "2026-08-05 09:41:59.000Z",
+        "dealer_joe",
+      ),
+    ).toThrow("website_post_revision_conflict");
+    expect(stale.publications).toHaveLength(0);
+    expect(stale.post.getString("website_draft")).toBe("");
   });
 
   it("accepts published or withdrawn only as authenticated replay outcomes", () => {
@@ -588,8 +953,63 @@ describe("Customer Hub website publication contract", () => {
     expect(hook).toContain('"/api/app/posts/:id/website-publication/retry"');
     expect(hook).toContain("websiteDraftMatchesScenario");
     expect(hook).toContain('code: "WEBSITE_MAPPING_CONFLICT"');
+    const createRoute = hook.slice(
+      hook.indexOf('routerAdd("POST", "/api/app/posts"'),
+      hook.indexOf('routerAdd("PATCH", "/api/app/posts/:id/draft"'),
+    );
+    expect(createRoute).not.toContain("createPublicationForPost(record)");
+    const explicitHandoffRoute = hook.slice(
+      hook.indexOf('routerAdd("POST", "/api/app/posts/:id/website-publication"'),
+      hook.indexOf('routerAdd("POST", "/api/app/posts/:id/website-publication/retry"'),
+    );
+    expect(explicitHandoffRoute).toContain("body.website_draft");
+    expect(explicitHandoffRoute).toContain("body.expected_post_revision");
+    expect(explicitHandoffRoute).toContain("claimPublicationForPost(");
+    expect(explicitHandoffRoute).toContain("summary.websiteDraft = storedDraft.value");
+    expect(explicitHandoffRoute).toContain("WEBSITE_POST_REVISION_CONFLICT");
+    expect(explicitHandoffRoute).toContain("WEBSITE_DRAFT_ALREADY_SENT");
+    const publicationStatusRoute = hook.slice(
+      hook.indexOf('routerAdd("GET", "/api/app/posts/:id/website-publication"'),
+      hook.indexOf('routerAdd("POST", "/api/app/posts/:id/website-publication"'),
+    );
+    expect(publicationStatusRoute).toContain(
+      "summary.websiteDraft = storedDraft.value",
+    );
+    const publicationRetryRoute = hook.slice(
+      hook.indexOf('routerAdd("POST", "/api/app/posts/:id/website-publication/retry"'),
+      hook.indexOf('cronAdd("deliver-private-website-drafts"'),
+    );
+    expect(publicationRetryRoute).toContain("summary.websiteDraft = storedDraft.value");
+    expect(publicationRetryRoute).toContain(
+      'c.response().header().set("Cache-Control", "private, no-store")',
+    );
+    const editableDraftRoute = hook.slice(
+      hook.indexOf('routerAdd("PATCH", "/api/app/posts/:id/draft"'),
+      hook.indexOf('routerAdd("POST", "/api/app/posts/:id/video-generated"'),
+    );
+    expect(editableDraftRoute).toContain("runInTransaction");
+    expect(editableDraftRoute).toContain(
+      "UPDATE posts SET updated = updated WHERE id = {:post}",
+    );
+    expect(editableDraftRoute).toContain("findPublicationForPostWithDaoStrict");
+    expect(editableDraftRoute).toContain("post_revision:");
+    expect(hook).toContain('const storedPlatformIdsRaw = r.getString("platform_ids")');
+    expect(hook).toContain(
+      "platform_ids: storedPlatformIdsRaw.trim() ? platformIds : undefined",
+    );
     expect(hook).toContain('cronAdd("deliver-private-website-drafts", "* * * * *"');
     expect(worker).toContain("payload_sent_at");
+    expect(worker).toContain('status: "not_requested"');
+    expect(worker).toContain("claimPublicationForPost");
+    expect(worker).toContain("acquirePostWriteFence(txDao, postId)");
+    expect(worker).toContain("publicationSourceSnapshotHash");
+    expect(worker).toContain("verifyPublicationSourceSnapshot");
+    expect(worker).toContain(
+      'if (!publication) throw new Error("website_request_not_sent")',
+    );
+    expect(worker).not.toContain(
+      "if (!publication) return createPublicationForPost(post)",
+    );
     expect(worker).toContain("payload_revision_conflict");
     expect(worker).toContain('publication.set("payload_hash", bodyHash)');
     expect(worker).toContain("status = 'delivering'");

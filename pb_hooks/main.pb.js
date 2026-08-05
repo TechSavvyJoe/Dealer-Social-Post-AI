@@ -2525,8 +2525,6 @@ routerAdd("POST", "/api/app/posts", (c) => {
   let generationClaimOwner = "";
   let generationClaimCount = 0;
   let createdPostRecord = null;
-  let websitePublicationRecord = null;
-  let websiteDestinationEnabled = false;
 
   try {
     const posts = $app.dao().findCollectionByNameOrId("posts");
@@ -2545,8 +2543,6 @@ routerAdd("POST", "/api/app/posts", (c) => {
     }
     const websiteDraft = parsedWebsiteDraft.value;
     if (websiteDraft && websiteDraft.enabled) {
-      const destination = websitePublications.destinationConfiguration(dealer.id);
-      websiteDestinationEnabled = destination.enabled;
       if (
         websiteDraft.customerDisplayName &&
         !(body.customer_name || "").toString().trim()
@@ -2962,16 +2958,6 @@ routerAdd("POST", "/api/app/posts", (c) => {
       return c.json(400, { error: "Review image is required" });
     }
 
-    if (websiteDraft && websiteDraft.enabled && websiteDestinationEnabled) {
-      try {
-        websitePublicationRecord = websitePublications.createPublicationForPost(record);
-      } catch (_websiteQueueError) {
-        // The social post and exact website copy remain saved. History exposes
-        // a retryable website failure even if a config change races this save.
-        console.error("[posts] private website draft queue is unavailable");
-      }
-    }
-
     if (generationClaimToken) {
       helpers.finalizeGenerationEventClaims(
         generationClaimToken,
@@ -2999,10 +2985,7 @@ routerAdd("POST", "/api/app/posts", (c) => {
       primary_format_id: primaryFormatId,
       image_aspect_ratio: imageAspectRatio,
       website_draft: websiteDraft && websiteDraft.enabled ? websiteDraft : null,
-      website_publication: websitePublications.publicationSummaryForPost(
-        record,
-        websitePublicationRecord,
-      ),
+      website_publication: websitePublications.publicationSummaryForPost(record, null),
     });
   } catch (err) {
     if (generationClaimToken) {
@@ -3118,9 +3101,6 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
       const header = c.formFile("creative_image");
       if (header) creativeFile = $filesystem.fileFromMultipart(header);
     } catch (_e) {}
-
-    const form = new RecordUpsertForm($app, record);
-    form.setFullManageAccess(true);
     const draftData = {
       caption: caption,
       disclosures: disclosures,
@@ -3128,13 +3108,75 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
     if (parsedPlatformCaptions) {
       draftData.platform_captions = parsedPlatformCaptions.serialized;
     }
-    form.loadData(draftData);
-    if (creativeFile) form.addFiles("creative_image", creativeFile);
-    form.submit();
+    const loadedRevision = record.getString("updated");
+    let savedRecord = null;
+    $app.dao().runInTransaction(function (txDao) {
+      // This write fence is deliberately first. It serializes a draft save
+      // against the final website handoff before either operation rechecks the
+      // publication row, so media cannot change after the outbox wins.
+      const fence = txDao
+        .db()
+        .newQuery("UPDATE posts SET updated = updated WHERE id = {:post}")
+        .bind({ post: record.id })
+        .execute();
+      if (!fence || fence.rowsAffected() !== 1) {
+        throw new Error("source_post_missing");
+      }
+      const current = txDao.findRecordById("posts", record.id);
+      if (
+        current.getString("dealer") !== context.dealer.id ||
+        current.getString("owner_session_hash") !==
+          record.getString("owner_session_hash") ||
+        current.getString("owner_person_id") !== record.getString("owner_person_id")
+      ) {
+        throw new Error("post_draft_authority_changed");
+      }
+      if (current.getString("approval_status") !== "n_a") {
+        throw new Error("post_draft_immutable");
+      }
+      if (current.getString("updated") !== loadedRevision) {
+        throw new Error("post_draft_revision_conflict");
+      }
+      if (
+        websitePublications.findPublicationForPostWithDaoStrict(txDao, current.id, "")
+      ) {
+        throw new Error("website_draft_already_sent");
+      }
+      const form = new RecordUpsertForm($app, current);
+      form.setFullManageAccess(true);
+      form.setDao(txDao);
+      form.loadData(draftData);
+      if (creativeFile) form.addFiles("creative_image", creativeFile);
+      form.submit();
+      savedRecord = txDao.findRecordById("posts", current.id);
+    });
 
     c.response().header().set("Cache-Control", "private, no-store");
-    return c.json(200, { id: record.id, updated: true });
+    return c.json(200, {
+      id: record.id,
+      updated: true,
+      post_revision: savedRecord ? savedRecord.getString("updated") : "",
+    });
   } catch (err) {
+    const code = (err && err.message ? err.message : "").toString();
+    if (code === "website_draft_already_sent") {
+      return c.json(409, {
+        error:
+          "Website delivery copies are immutable; create another post to revise it",
+        code: "WEBSITE_DRAFT_ALREADY_SENT",
+      });
+    }
+    if (code === "post_draft_revision_conflict") {
+      return c.json(409, {
+        error: "This draft changed in another window. Reload it before saving again.",
+        code: "POST_DRAFT_REVISION_CONFLICT",
+      });
+    }
+    if (code === "post_draft_immutable") {
+      return c.json(409, {
+        error: "Approval review copies are immutable; create another post to revise it",
+      });
+    }
     console.error("[/api/app/posts/:id/draft] update error", err);
     return c.json(400, { error: "Failed to update saved draft" });
   }
@@ -3292,10 +3334,14 @@ routerAdd("GET", "/api/app/posts/:id/website-publication", (c) => {
     const websitePublications = require(__hooks + "/websitePublications.js");
     const publication = websitePublications.findPublicationForPost(post.id, "");
     c.response().header().set("Cache-Control", "private, no-store");
-    return c.json(
-      200,
-      websitePublications.publicationSummaryForPost(post, publication),
+    const summary = websitePublications.publicationSummaryForPost(post, publication);
+    const storedDraft = websitePublications.parseWebsiteDraft(
+      post.getString("website_draft"),
     );
+    if (storedDraft.ok && storedDraft.value && storedDraft.value.enabled) {
+      summary.websiteDraft = storedDraft.value;
+    }
+    return c.json(200, summary);
   } catch (_e) {
     return c.json(404, { error: "Post not found" });
   }
@@ -3327,18 +3373,91 @@ routerAdd("POST", "/api/app/posts/:id/website-publication", (c) => {
           "The private website-draft destination is not configured for this dealership.",
       });
     }
+    const body = $apis.requestInfo(c).data || {};
+    const expectedPostRevision = (body.expected_post_revision || "").toString().trim();
+    if (!expectedPostRevision) {
+      return c.json(409, {
+        error: "Save the latest caption and image before sending this website draft.",
+        code: "WEBSITE_POST_REVISION_REQUIRED",
+      });
+    }
     const parsedDraft = websitePublications.parseWebsiteDraft(
-      post.getString("website_draft"),
+      body.website_draft === undefined
+        ? post.getString("website_draft")
+        : body.website_draft,
     );
     if (!parsedDraft.ok || !parsedDraft.value || !parsedDraft.value.enabled) {
       return c.json(409, { error: "This post has no selected website draft" });
     }
-    const publication = websitePublications.createPublicationForPost(post);
-    return c.json(
-      200,
-      websitePublications.publicationSummaryForPost(post, publication),
+    if (
+      !websitePublications.websiteDraftMatchesScenario(
+        post.getString("scenario_id"),
+        context.dealer.getString("custom_scenarios"),
+        parsedDraft.value,
+      )
+    ) {
+      return c.json(409, {
+        error: "Website draft does not match the selected post type",
+        code: "WEBSITE_MAPPING_CONFLICT",
+      });
+    }
+    const claim = websitePublications.claimPublicationForPost(
+      post.id,
+      parsedDraft.serialized,
+      expectedPostRevision,
+      context.dealer.id,
     );
+    c.response().header().set("Cache-Control", "private, no-store");
+    const summary = websitePublications.publicationSummaryForPost(
+      claim.post,
+      claim.publication,
+    );
+    const storedDraft = websitePublications.parseWebsiteDraft(
+      claim.post.getString("website_draft"),
+    );
+    if (storedDraft.ok && storedDraft.value && storedDraft.value.enabled) {
+      summary.websiteDraft = storedDraft.value;
+    }
+    summary.post_revision = claim.postRevision;
+    summary.idempotent_replay = claim.idempotentReplay;
+    return c.json(200, summary);
   } catch (err) {
+    const code = (err && err.message ? err.message : "").toString();
+    if (code === "website_post_revision_required") {
+      return c.json(409, {
+        error: "Save the latest caption and image before sending this website draft.",
+        code: "WEBSITE_POST_REVISION_REQUIRED",
+      });
+    }
+    if (code === "website_post_revision_conflict") {
+      return c.json(409, {
+        error:
+          "The caption or image changed after the last save. Review and send again.",
+        code: "WEBSITE_POST_REVISION_CONFLICT",
+      });
+    }
+    if (code === "website_draft_already_sent") {
+      return c.json(409, {
+        error: "This website draft was already sent. Create another post to revise it.",
+        code: "WEBSITE_DRAFT_ALREADY_SENT",
+      });
+    }
+    if (code === "website_mapping_conflict") {
+      return c.json(409, {
+        error: "Website draft does not match the selected post type",
+        code: "WEBSITE_MAPPING_CONFLICT",
+      });
+    }
+    if (
+      code === "creative_media_missing" ||
+      code === "creative_media_empty" ||
+      code === "creative_media_type_unsupported"
+    ) {
+      return c.json(409, {
+        error: "Save a final website image before sending this draft.",
+        code: "WEBSITE_CREATIVE_REQUIRED",
+      });
+    }
     console.error("[/api/app/posts/:id/website-publication] enqueue failed");
     return c.json(503, { error: "Website draft could not be queued" });
   }
@@ -3371,17 +3490,23 @@ routerAdd("POST", "/api/app/posts/:id/website-publication/retry", (c) => {
       });
     }
     const publication = websitePublications.retryPublication(post);
-    return c.json(
-      200,
-      websitePublications.publicationSummaryForPost(post, publication),
+    const summary = websitePublications.publicationSummaryForPost(post, publication);
+    const storedDraft = websitePublications.parseWebsiteDraft(
+      post.getString("website_draft"),
     );
+    if (storedDraft.ok && storedDraft.value && storedDraft.value.enabled) {
+      summary.websiteDraft = storedDraft.value;
+    }
+    c.response().header().set("Cache-Control", "private, no-store");
+    return c.json(200, summary);
   } catch (err) {
     const code = (err && err.message ? err.message : "").toString();
     if (
       code === "website_draft_already_ready" ||
       code === "approval_rejected" ||
       code === "website_mapping_conflict" ||
-      code === "website_request_withdrawn"
+      code === "website_request_withdrawn" ||
+      code === "website_request_not_sent"
     ) {
       return c.json(409, { error: code });
     }
@@ -3618,8 +3743,9 @@ routerAdd("GET", "/api/app/posts", (c) => {
     );
     const items = page.map((r) => {
       let platformIds = [];
+      const storedPlatformIdsRaw = r.getString("platform_ids");
       try {
-        const parsed = JSON.parse(r.getString("platform_ids") || "[]");
+        const parsed = JSON.parse(storedPlatformIdsRaw || "[]");
         if (Array.isArray(parsed)) {
           platformIds = parsed.filter(
             (id, index) =>
@@ -3674,7 +3800,9 @@ routerAdd("GET", "/api/app/posts", (c) => {
             ? r.getString("caption_source")
             : null,
         disclosures: r.getString("disclosures"),
-        platform_ids: platformIds,
+        // Blank is a legacy unknown selection; explicit stored `[]` is the
+        // intentional Website-only choice and must survive History restore.
+        platform_ids: storedPlatformIdsRaw.trim() ? platformIds : undefined,
         media_output_mode:
           ["photo", "video", "both"].indexOf(r.getString("media_output_mode")) !== -1
             ? r.getString("media_output_mode")

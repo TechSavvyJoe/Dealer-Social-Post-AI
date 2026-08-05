@@ -97,6 +97,14 @@ describe("MobilePublishStudio", () => {
     ).toBeInTheDocument();
   });
 
+  it("caps the media preview to a viewport-aware mobile height", () => {
+    renderStudio();
+
+    const preview = screen.getByRole("region", { name: "Media preview" });
+    expect(preview).toHaveClass("h-[clamp(10rem,38svh,20rem)]", "min-h-0");
+    expect(preview).not.toHaveClass("min-h-[18rem]");
+  });
+
   it("selects exact outputs and manages the guided sharing set", () => {
     const handlers = renderStudio();
 
@@ -125,6 +133,45 @@ describe("MobilePublishStudio", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
     expect(handlers.onToggleAll).toHaveBeenCalledWith(false);
+  });
+
+  it("keeps destination selection and batch inclusion in separate touch targets", () => {
+    const handlers = renderStudio();
+    const selectOutput = screen.getByRole("button", {
+      name: "Select Facebook Feed image 4:5, 1080 by 1350 pixels",
+    });
+    const includeOutput = screen.getByRole("checkbox", {
+      name: "Include Facebook Feed image 4:5 in Share selected",
+    });
+    const includeTarget = includeOutput.closest("label");
+    const outputCard = selectOutput.parentElement;
+
+    expect(outputCard).toHaveClass("grid", "h-11", "grid-cols-[minmax(0,1fr)_2.75rem]");
+    expect(selectOutput).toHaveClass("h-full", "min-w-0");
+    expect(includeTarget).toHaveClass("h-11", "w-11", "border-l");
+    expect(includeTarget).not.toHaveClass("absolute");
+
+    fireEvent.click(includeOutput);
+    expect(handlers.onToggleBatch).toHaveBeenCalledWith("facebook-feed", false);
+    expect(handlers.onSelect).not.toHaveBeenCalled();
+
+    fireEvent.click(selectOutput);
+    expect(handlers.onSelect).toHaveBeenCalledWith("facebook-feed");
+    expect(handlers.onToggleBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets destination selection use the full card when batch inclusion is unavailable", () => {
+    renderStudio({ onToggleBatch: undefined });
+
+    const selectOutput = screen.getByRole("button", {
+      name: "Select Facebook Feed image 4:5, 1080 by 1350 pixels",
+    });
+    expect(selectOutput).toHaveClass("col-span-2");
+    expect(
+      screen.queryByRole("checkbox", {
+        name: "Include Facebook Feed image 4:5 in Share selected",
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it("routes navigation and caption actions without bypassing parent gates", () => {

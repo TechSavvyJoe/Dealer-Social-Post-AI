@@ -6,6 +6,7 @@ import React, {
   useRef,
   Suspense,
 } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
   RefreshCw,
@@ -77,6 +78,7 @@ import {
   type PreparedMediaSave,
 } from "../utils/mediaSave";
 import { useAppStore } from "../stores/appStore";
+import { ApiError } from "../services/apiErrors";
 import { archiveDealerMedia } from "../utils/creativeStorage";
 import { EXPORT_FORMATS, renderFormatIfNeeded } from "../utils/multiFormatExport";
 import { logError } from "../utils/telemetry";
@@ -91,11 +93,15 @@ import {
 } from "../utils/socialAttribution";
 import { retainNewestVideoJobs } from "../utils/videoJobRetention";
 import {
+  buildFinalWebsiteDraftFallback,
+  enqueueWebsitePublication,
   getWebsitePublication,
+  listWebsiteDestinations,
   retryWebsitePublication,
   safeWebsiteReviewUrl,
   websitePublicationNeedsStatusRefresh,
   websitePublicationPollDelay,
+  type WebsiteDraft,
   type WebsitePublication,
 } from "../services/websitePublishing";
 
@@ -133,12 +139,19 @@ const TILE_ICON_ACCENT = "text-primary-300";
 
 const websitePublicationCopy = (
   publication: WebsitePublication | undefined,
+  hasSavedPost = true,
 ): {
   title: string;
   detail: string;
   tone: "neutral" | "info" | "warning" | "success" | "error";
 } => {
   switch (publication?.status) {
+    case "not_requested":
+      return {
+        title: "Website selected — review before sending",
+        detail: "Finish the image and caption, then send one final private draft.",
+        tone: "neutral",
+      };
     case "waiting_approval":
       return {
         title: "Website draft waiting for approval",
@@ -182,11 +195,17 @@ const websitePublicationCopy = (
         tone: "success",
       };
     case "failed":
+      if (!hasSavedPost) {
+        return {
+          title: "Website draft was not saved",
+          detail:
+            "The original post did not finish saving, so nothing can be retried. Start a new post when the connection is ready.",
+          tone: "error",
+        };
+      }
       return {
         title: "Website draft delivery needs attention",
-        detail:
-          publication.lastError ||
-          "The private draft was not delivered. Your social post is still saved and can be retried safely.",
+        detail: friendlyWebsiteDeliveryError(publication.lastError),
         tone: "error",
       };
     case "withdrawn":
@@ -202,6 +221,23 @@ const websitePublicationCopy = (
           "AI prepared private website copy. Nothing is public until Customer Hub publishes it.",
         tone: "neutral",
       };
+  }
+};
+
+const friendlyWebsiteDeliveryError = (code?: string): string => {
+  switch ((code || "").trim()) {
+    case "destination_rejected_payload":
+    case "destination_image_rejected":
+      return "Customer Hub could not accept the image. The private draft was not published; retry after reviewing the final creative.";
+    case "queue_unavailable":
+    case "destination_unavailable":
+      return "The private website connection is temporarily unavailable. Your finished post remains saved.";
+    case "approval_pending":
+      return "Manager approval is still required before Customer Hub delivery can begin.";
+    case "release_pending":
+      return "The photo release must finish saving before this customer draft can be delivered.";
+    default:
+      return "The private draft was not delivered. Your finished post remains saved and can be retried safely.";
   }
 };
 
@@ -287,6 +323,12 @@ interface PostResultProps {
     originalText?: string,
     platformId?: string,
   ) => Promise<string>;
+  /** Build metadata from the exact final image/caption before Hub handoff. */
+  onPrepareFinalWebsiteDraft?: (input: {
+    caption: string;
+    image: string;
+    currentDraft: WebsiteDraft;
+  }) => Promise<WebsiteDraft>;
   onFunMode: (styleName?: string) => Promise<void>;
   onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
   /** One-shot caption generator for the 3-variant alternatives modal. */
@@ -345,6 +387,7 @@ export const PostResult: React.FC<PostResultProps> = ({
   onEditImage,
   onRegenerateText,
   onEditText,
+  onPrepareFinalWebsiteDraft,
   onFunMode,
   onGenerateVideo,
   onGenerateCaptionVariant,
@@ -457,9 +500,21 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [approvalCheckError, setApprovalCheckError] = useState<string | null>(null);
   const [websitePublication, setWebsitePublication] = useState<
     WebsitePublication | undefined
-  >(post.websitePublication);
+  >(
+    post.websitePublication ??
+      (post.websiteDraft?.enabled ? { status: "not_requested" } : undefined),
+  );
+  const [websiteDraft, setWebsiteDraft] = useState<WebsiteDraft | undefined>(
+    post.websiteDraft,
+  );
   const [websiteCheckError, setWebsiteCheckError] = useState<string | null>(null);
   const [websiteRetrying, setWebsiteRetrying] = useState(false);
+  const [websiteSending, setWebsiteSending] = useState(false);
+  /** Stops duplicate final sends before React can commit the disabled state. */
+  const websiteSendingRef = useRef(false);
+  /** One authoritative status read per restored/saved post, including not_requested. */
+  const websiteStatusHydratedPostRef = useRef<string | null>(null);
+  const [websiteDestinationRevision, setWebsiteDestinationRevision] = useState(0);
   /** Local edits to per-platform pack captions (share + tab switch must honor these). */
   const [packOverrides, setPackOverrides] = useState<Record<string, string>>({});
   /** Prior image versions after regen/fun/edit (local compare stack, max 5). */
@@ -492,6 +547,21 @@ export const PostResult: React.FC<PostResultProps> = ({
     image: post.image,
     platformCaptions: JSON.stringify(post.platformCaptions || {}),
   });
+  /** Server revision returned by the latest exact draft save. */
+  const lastPostRevisionRef = useRef<string | null>(null);
+  /** Live creative identity used to reject a send if anything changes during AI prep. */
+  const latestWebsiteCreativeRef = useRef({
+    postId: post.postId,
+    image: post.image,
+    caption: post.text,
+  });
+  const currentPostPropRef = useRef(post);
+  currentPostPropRef.current = post;
+  latestWebsiteCreativeRef.current = {
+    postId: post.postId,
+    image: post.image,
+    caption: activeCaptionPlatform ? primaryCaption : editedText,
+  };
   const prevImageRef = useRef(post.image);
   const resultIdentity =
     post.postId ||
@@ -591,8 +661,13 @@ export const PostResult: React.FC<PostResultProps> = ({
           : primarySaveFormat?.id === "marketplace"
             ? "marketplace"
             : "instagram_story";
+    const requestedPlatforms = Array.isArray(post.platformIds)
+      ? post.platformIds
+      : websiteDraft?.enabled
+        ? []
+        : [fallbackPlatform];
     return derivePlatformDeliveryPlan(
-      post.platformIds?.length ? post.platformIds : [fallbackPlatform],
+      requestedPlatforms,
       requestedMode,
       post.postId ? `dealer-social-${post.postId}` : "dealer-social-post",
     );
@@ -602,6 +677,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     post.postId,
     primarySaveFormat?.id,
     videoJobs.length,
+    websiteDraft?.enabled,
   ]);
   const deliveriesById = useMemo(
     () =>
@@ -609,6 +685,9 @@ export const PostResult: React.FC<PostResultProps> = ({
         deliveryPlan.deliveries.map((delivery) => [delivery.id, delivery]),
       ),
     [deliveryPlan.deliveries],
+  );
+  const websiteOnly = Boolean(
+    websiteDraft?.enabled && deliveryPlan.deliveries.length === 0,
   );
   const deliveryPlanSignature = deliveryPlan.deliveries
     .map((delivery) => delivery.id)
@@ -744,12 +823,38 @@ export const PostResult: React.FC<PostResultProps> = ({
   const releaseLocked = post.releaseStatus === "save_failed";
   const claimLocked = captionSetAnalysis.prohibited.length > 0;
   const deliveryLocked = approvalLocked || releaseLocked || claimLocked;
+  const persistWebsiteState = useCallback(
+    (
+      nextDraft: WebsiteDraft | undefined,
+      nextPublication: WebsitePublication,
+      creativePatch: Partial<GeneratedPost> = {},
+    ) => {
+      setWebsiteDraft(nextDraft);
+      setWebsitePublication(nextPublication);
+      const sourcePost = currentPostPropRef.current;
+      if (!sourcePost.postId) return;
+      const store = useAppStore.getState();
+      const current = store.generatedPost;
+      if (current && current.postId !== sourcePost.postId) return;
+      const base = current || sourcePost;
+      store.setGeneratedPost({
+        ...base,
+        ...creativePatch,
+        websiteDraft: nextDraft ?? base.websiteDraft,
+        websitePublication: nextPublication,
+      });
+    },
+    [],
+  );
   // Once a creative has entered the review workflow it must remain byte-for-
   // byte equivalent to what the manager saw. Delivery unlocks on approval,
   // while edits require starting a new review submission.
   const creativeLockedForReview = reviewRequired;
+  const websiteHandoffStarted = Boolean(
+    websitePublication && websitePublication.status !== "not_requested",
+  );
   const contentEditingLocked =
-    creativeLockedForReview || Boolean(post.websiteDraft?.enabled);
+    creativeLockedForReview || websiteHandoffStarted || websiteSending;
   const videoReviewLockMessage =
     "This reviewed creative must stay unchanged. Start a new post to create a video.";
   const historyReadOnly = Boolean(post.historyReadOnly);
@@ -767,7 +872,8 @@ export const PostResult: React.FC<PostResultProps> = ({
 
     const operation = draftSyncChainRef.current.then(async () => {
       try {
-        await updatePostDraft(post.postId as string, draft);
+        const updated = await updatePostDraft(post.postId as string, draft);
+        lastPostRevisionRef.current = updated.post_revision;
         lastSyncedDraftRef.current = {
           caption: draft.caption,
           disclosures: draft.disclosures,
@@ -883,8 +989,14 @@ export const PostResult: React.FC<PostResultProps> = ({
     : releaseLocked
       ? "Release not saved"
       : "Approval pending";
-  const websiteStatusCopy = websitePublicationCopy(websitePublication);
-  const websiteReviewUrl = safeWebsiteReviewUrl(websitePublication?.reviewUrl);
+  const websiteStatusCopy = websitePublicationCopy(
+    websitePublication,
+    Boolean(post.postId),
+  );
+  const websiteReviewUrl = useMemo(
+    () => safeWebsiteReviewUrl(websitePublication?.reviewUrl),
+    [websiteDestinationRevision, websitePublication?.reviewUrl],
+  );
 
   useEffect(() => {
     setApprovalStatus(
@@ -949,12 +1061,59 @@ export const PostResult: React.FC<PostResultProps> = ({
   }, [approvalStatus, post.postId, reviewRequired, toast]);
 
   useEffect(() => {
-    setWebsitePublication(post.websitePublication);
+    setWebsitePublication(
+      post.websitePublication ??
+        (post.websiteDraft?.enabled ? { status: "not_requested" } : undefined),
+    );
+    setWebsiteDraft(post.websiteDraft);
     setWebsiteCheckError(null);
-  }, [post.postId, post.websitePublication]);
+  }, [post.postId, post.websiteDraft, post.websitePublication]);
+
+  // safeWebsiteReviewUrl remains exact-origin bound. A direct session restore
+  // can land on RESULT before PostCustomizer has loaded destination config, so
+  // prime the allowlist here as well.
+  useEffect(() => {
+    if (!websiteDraft?.enabled) return;
+    void listWebsiteDestinations()
+      .then(() => setWebsiteDestinationRevision((revision) => revision + 1))
+      .catch(() => undefined);
+  }, [websiteDraft?.enabled]);
+
+  // Local/session state is only a fast restore hint. Read the durable state
+  // once even when it says not_requested so a reload or lost POST response can
+  // never make an already-sent draft look editable again.
+  useEffect(() => {
+    if (!websiteDraft?.enabled || !post.postId) return;
+    const hydrationKey = `${dealerId}:${post.postId}`;
+    if (websiteStatusHydratedPostRef.current === hydrationKey) return;
+    websiteStatusHydratedPostRef.current = hydrationKey;
+    const controller = new AbortController();
+    let active = true;
+
+    void getWebsitePublication(post.postId, controller.signal)
+      .then((next) => {
+        if (!active) return;
+        persistWebsiteState(next.websiteDraft ?? websiteDraft, next);
+        setWebsiteCheckError(null);
+      })
+      .catch((err) => {
+        if (!active || (err instanceof DOMException && err.name === "AbortError")) {
+          return;
+        }
+        setWebsiteCheckError(
+          "Website status could not be verified yet. No new handoff has been started.",
+        );
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [dealerId, persistWebsiteState, post.postId, websiteDraft]);
 
   useEffect(() => {
-    if (!post.websiteDraft?.enabled || !post.postId) return;
+    if (!websiteDraft?.enabled || !post.postId) return;
+    if (!websitePublication || websitePublication.status === "not_requested") return;
     if (
       websitePublication &&
       !websitePublicationNeedsStatusRefresh(websitePublication.status)
@@ -976,7 +1135,7 @@ export const PostResult: React.FC<PostResultProps> = ({
           controller.signal,
         );
         if (!active) return;
-        setWebsitePublication(next);
+        persistWebsiteState(next.websiteDraft ?? websiteDraft, next);
         setWebsiteCheckError(null);
         if (websitePublicationNeedsStatusRefresh(next.status)) {
           timeoutId = setTimeout(refresh, websitePublicationPollDelay(next.status));
@@ -998,7 +1157,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       controller.abort();
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [post.postId, post.websiteDraft?.enabled, websitePublication?.status]);
+  }, [persistWebsiteState, post.postId, websiteDraft, websitePublication?.status]);
 
   const handleRetryWebsite = useCallback(async () => {
     if (!post.postId || websiteRetrying) return;
@@ -1006,7 +1165,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     setWebsiteRetrying(true);
     try {
       const next = await retryWebsitePublication(post.postId);
-      setWebsitePublication(next);
+      persistWebsiteState(next.websiteDraft ?? websiteDraft, next);
       setWebsiteCheckError(null);
       toast.success(
         retryingStatusCheck
@@ -1020,7 +1179,176 @@ export const PostResult: React.FC<PostResultProps> = ({
     } finally {
       setWebsiteRetrying(false);
     }
-  }, [post.postId, toast, websitePublication?.status, websiteRetrying]);
+  }, [
+    persistWebsiteState,
+    post.postId,
+    toast,
+    websiteDraft,
+    websitePublication?.status,
+    websiteRetrying,
+  ]);
+
+  const handleSendWebsiteDraft = useCallback(async () => {
+    if (!post.postId || !websiteDraft?.enabled || websiteSendingRef.current) return;
+    if (deliveryLocked) {
+      toast.warning(deliveryGateMessage);
+      return;
+    }
+    if (imageBusy || textBusy) {
+      toast.warning("Wait for the current image or caption update to finish first.");
+      return;
+    }
+    const finalCaption = activeCaptionPlatform ? primaryCaption : editedText;
+    const finalCaptionAnalysis = analyzeCaptionForDelivery(finalCaption, bannedPhrases);
+    if (finalCaptionAnalysis.compliance.prohibited.length > 0) {
+      toast.warning(
+        prohibitedClaimsMessage(finalCaptionAnalysis.compliance.prohibited),
+      );
+      return;
+    }
+
+    const capturedCreative = {
+      postId: post.postId,
+      image: post.image,
+      caption: finalCaptionAnalysis.caption,
+    };
+    const savedPrimaryCaption = activeCaptionPlatform
+      ? analyzeCaptionForDelivery(primaryCaption, bannedPhrases).caption
+      : capturedCreative.caption;
+    const savedPlatformCaptions = activeCaptionPlatform
+      ? {
+          ...(effectivePack || {}),
+          [activeCaptionPlatform]: capturedCreative.caption,
+        }
+      : effectivePack;
+    const creativePatch: Partial<GeneratedPost> = {
+      image: capturedCreative.image,
+      text: savedPrimaryCaption,
+      disclosures: captionSetAnalysis.disclosures,
+      ...(savedPlatformCaptions ? { platformCaptions: savedPlatformCaptions } : {}),
+    };
+
+    websiteSendingRef.current = true;
+    setWebsiteSending(true);
+    try {
+      // Always write the exact visible creative once at the send boundary,
+      // even when autosave was already idle. The returned server revision is
+      // the compare-and-set token used by the enqueue route.
+      pendingDraftSyncRef.current = {
+        caption: savedPrimaryCaption,
+        disclosures: captionSetAnalysis.disclosures,
+        imageDataUrl: capturedCreative.image,
+        platformCaptions: savedPlatformCaptions,
+      };
+      setDraftSyncStatus("saving");
+      lastPostRevisionRef.current = null;
+      const draftSaved = await flushPendingDraft();
+      const expectedPostRevision = lastPostRevisionRef.current;
+      if (!draftSaved || !expectedPostRevision) {
+        throw new Error(
+          "The latest edit did not save. Retry the My Work save before sending.",
+        );
+      }
+      const finalDraft = onPrepareFinalWebsiteDraft
+        ? await onPrepareFinalWebsiteDraft({
+            caption: finalCaptionAnalysis.caption,
+            image: capturedCreative.image,
+            currentDraft: websiteDraft,
+          })
+        : buildFinalWebsiteDraftFallback({
+            currentDraft: websiteDraft,
+            dealerName: currentDealer?.name || "the dealership",
+            caption: finalCaptionAnalysis.caption,
+          });
+      const liveCreative = latestWebsiteCreativeRef.current;
+      const liveCaption = analyzeCaptionForDelivery(
+        liveCreative.caption,
+        bannedPhrases,
+      ).caption;
+      const storedCreative = useAppStore.getState().generatedPost;
+      const changedCreativePart =
+        liveCreative.postId !== capturedCreative.postId
+          ? "post"
+          : liveCreative.image !== capturedCreative.image
+            ? "live image"
+            : liveCaption !== capturedCreative.caption
+              ? "live caption"
+              : storedCreative?.postId === capturedCreative.postId &&
+                  storedCreative.image !== capturedCreative.image
+                ? "saved image"
+                : null;
+      if (changedCreativePart) {
+        throw new Error(
+          "The creative changed while the website draft was being prepared. Review it and send again.",
+        );
+      }
+      const next = await enqueueWebsitePublication(
+        post.postId,
+        finalDraft,
+        expectedPostRevision,
+      );
+      persistWebsiteState(next.websiteDraft ?? finalDraft, next, creativePatch);
+      setWebsiteCheckError(null);
+      toast.success(
+        next.status === "waiting_approval"
+          ? "Final private website draft sent for manager approval."
+          : "Final private draft sent to Customer Hub.",
+      );
+    } catch (err) {
+      // If the POST response was lost—or another tab completed the exact
+      // handoff—restore the durable status before offering another Send.
+      let restored = false;
+      try {
+        const authoritative = await getWebsitePublication(post.postId);
+        if (authoritative.status !== "not_requested") {
+          // The status response carries the winning frozen draft. Never bind
+          // this tab's submitted copy to a handoff another tab won.
+          persistWebsiteState(
+            authoritative.websiteDraft ?? websiteDraft,
+            authoritative,
+          );
+          setWebsiteCheckError(null);
+          toast.warning(
+            err instanceof ApiError && err.code === "WEBSITE_DRAFT_ALREADY_SENT"
+              ? "Another window already sent the final website draft. The sent copy and status were restored."
+              : "The website handoff was already recorded. Its final copy and status were restored.",
+          );
+          restored = true;
+        }
+      } catch {
+        // Preserve the original, more useful send error below.
+      }
+      if (!restored) {
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "The final website draft could not be sent.",
+        );
+      }
+    } finally {
+      websiteSendingRef.current = false;
+      setWebsiteSending(false);
+    }
+  }, [
+    activeCaptionPlatform,
+    bannedPhrases,
+    currentDealer?.name,
+    captionSetAnalysis.disclosures,
+    deliveryGateMessage,
+    deliveryLocked,
+    editedText,
+    effectivePack,
+    flushPendingDraft,
+    imageBusy,
+    onPrepareFinalWebsiteDraft,
+    post.image,
+    post.postId,
+    persistWebsiteState,
+    primaryCaption,
+    textBusy,
+    toast,
+    websiteDraft,
+  ]);
 
   useEffect(() => {
     if (previousPostTextRef.current === post.text) return;
@@ -1599,6 +1927,14 @@ export const PostResult: React.FC<PostResultProps> = ({
       "Almost there...",
     ],
   ) => {
+    if (contentEditingLocked) {
+      toast.warning(
+        websiteSending
+          ? "Wait for the final website handoff to finish."
+          : "This creative is locked and cannot be changed.",
+      );
+      return;
+    }
     setIsImageLoading(true);
     setImageLoadingMessage(messages[0] || "Updating Image...");
     setImageLoadingProgress(8);
@@ -1625,6 +1961,14 @@ export const PostResult: React.FC<PostResultProps> = ({
   };
 
   const handleTextAction = async (action: () => Promise<void>) => {
+    if (contentEditingLocked) {
+      toast.warning(
+        websiteSending
+          ? "Wait for the final website handoff to finish."
+          : "This caption is locked and cannot be changed.",
+      );
+      return;
+    }
     setIsTextLoading(true);
     try {
       await action();
@@ -2202,11 +2546,13 @@ export const PostResult: React.FC<PostResultProps> = ({
 
   const requestLeaveResult = (mode: "startOver" | "remix") => {
     triggerHapticFeedback();
-    if (imageBusy || textBusy) {
+    if (imageBusy || textBusy || websiteSending) {
       toast.warning(
-        mode === "remix"
-          ? "Wait for the current update to finish before remixing this photo."
-          : "Wait for the current update to finish before starting another post.",
+        websiteSending
+          ? "Wait for the final website handoff to finish before leaving this post."
+          : mode === "remix"
+            ? "Wait for the current update to finish before remixing this photo."
+            : "Wait for the current update to finish before starting another post.",
       );
       return;
     }
@@ -2227,7 +2573,11 @@ export const PostResult: React.FC<PostResultProps> = ({
     : manualVideoSelected && videoUrl
       ? "Video ready to review"
       : !activePublishOutput
-        ? "Review your post"
+        ? websiteDraft?.enabled
+          ? websitePublication?.status === "not_requested"
+            ? "Finish and send to website"
+            : "Website draft status"
+          : "Review your post"
         : activePublishOutput.status === "ready" && activePublishOutput.actionsReady
           ? "Ready to save and share"
           : activePublishOutput.status === "failed"
@@ -2246,6 +2596,47 @@ export const PostResult: React.FC<PostResultProps> = ({
             ? selectedFileTitle
             : "Ready for manager review"
         : selectedFileTitle;
+  const websiteMobileActionLabel =
+    !post.postId && websiteDraft?.enabled
+      ? "Not saved"
+      : websitePublication?.status === "not_requested"
+        ? websiteSending
+          ? "Sending…"
+          : "Send"
+        : websitePublication?.status === "failed"
+          ? websiteRetrying
+            ? "Retrying…"
+            : "Retry"
+          : websiteReviewUrl
+            ? "Review"
+            : websitePublication?.status === "queued" ||
+                websitePublication?.status === "delivering" ||
+                websitePublication?.status === "retrying"
+              ? "Queued"
+              : "Website";
+  const websiteMobileActionDisabled =
+    !post.postId ||
+    websiteSending ||
+    websiteRetrying ||
+    deliveryLocked ||
+    imageBusy ||
+    textBusy ||
+    (websitePublication?.status !== "not_requested" &&
+      websitePublication?.status !== "failed" &&
+      !websiteReviewUrl);
+  const handleWebsiteMobileAction = () => {
+    if (websitePublication?.status === "not_requested") {
+      void handleSendWebsiteDraft();
+      return;
+    }
+    if (websitePublication?.status === "failed") {
+      void handleRetryWebsite();
+      return;
+    }
+    if (websiteReviewUrl && typeof window !== "undefined") {
+      window.open(websiteReviewUrl, "_blank", "noopener,noreferrer");
+    }
+  };
 
   const confirmLeaveResult = () => {
     const mode = leaveConfirm;
@@ -2261,6 +2652,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       (job) => job.url && job.sourceCreativeKey === currentVideoCreativeKey,
     );
     const mediaCount = 1 + imageVersions.length + completedVideos.length;
+    if (!desktop && mediaCount <= 1) return null;
 
     return (
       <section
@@ -2761,8 +3153,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       <motion.section
         className={cn(
           "mx-auto w-full max-w-screen-2xl flex-1 space-y-4 px-0 py-3 sm:space-y-5 sm:px-2 sm:py-5 md:px-4 md:py-6",
-          // Room for the fixed mobile delivery bar + home-indicator inset.
-          !isDesktopLayout && "pb-[calc(5.75rem+env(safe-area-inset-bottom))]",
+          !isDesktopLayout && "pb-20",
         )}
         initial={shouldReduceMotion ? false : { opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -2774,7 +3165,12 @@ export const PostResult: React.FC<PostResultProps> = ({
                 paddingTop: "0.75rem",
                 paddingBottom: "1rem",
               }
-            : undefined
+            : {
+                // The portaled footer is 60px plus the iPhone home-indicator
+                // inset. Reserve that inset as well so the final control can
+                // always scroll completely above the fixed bar.
+                paddingBottom: "calc(5rem + env(safe-area-inset-bottom))",
+              }
         }
       >
         {isDesktopLayout ? <h2 className="sr-only">{publishTitle}</h2> : null}
@@ -3022,10 +3418,10 @@ export const PostResult: React.FC<PostResultProps> = ({
             </div>
           </motion.div>
         )}
-        {post.websiteDraft?.enabled ? (
+        {websiteDraft?.enabled ? (
           <motion.div
             className={cn(
-              "mx-auto flex w-full max-w-3xl flex-col gap-3 rounded-2xl border px-4 py-4 shadow-lg shadow-black/10 sm:flex-row sm:items-center",
+              "relative mx-auto flex min-h-14 w-full max-w-3xl items-center gap-2 rounded-xl border px-2.5 py-2 shadow-lg shadow-black/10 sm:px-3",
               websiteStatusCopy.tone === "success"
                 ? "border-success-500/30 bg-success-500/10 text-success-100"
                 : websiteStatusCopy.tone === "warning"
@@ -3047,54 +3443,93 @@ export const PostResult: React.FC<PostResultProps> = ({
                 : "status"
             }
           >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-current/20 bg-black/10">
-              <Globe2 className="h-5 w-5" aria-hidden="true" />
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-current/20 bg-black/10">
+              <Globe2 className="h-4 w-4" aria-hidden="true" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="font-semibold">{websiteStatusCopy.title}</p>
-                <Badge variant={websiteStatusCopy.tone} uppercase={false}>
+              <div className="flex min-w-0 items-center gap-1.5">
+                <p className="truncate text-sm font-semibold">
+                  {websiteStatusCopy.title}
+                </p>
+                <Badge
+                  className="hidden shrink-0 min-[390px]:inline-flex"
+                  variant={websiteStatusCopy.tone}
+                  uppercase={false}
+                >
                   Private draft
                 </Badge>
               </div>
-              <p className="mt-1 text-sm leading-relaxed opacity-80">
+              <p className="truncate text-[11px] leading-snug opacity-75 sm:text-xs">
                 {websiteStatusCopy.detail}
               </p>
-              {post.websiteDraft.privacyFlags?.length ? (
-                <p className="mt-2 text-xs font-medium opacity-85">
-                  AI review reminders:{" "}
-                  {post.websiteDraft.privacyFlags
-                    .map((flag) => websitePrivacyFlagCopy[flag])
-                    .filter(Boolean)
-                    .join("; ")}
-                  .
-                </p>
-              ) : null}
-              {websiteCheckError ? (
-                <p className="mt-2 text-xs font-medium opacity-75">
-                  {websiteCheckError}
-                </p>
-              ) : null}
             </div>
-            <div className="flex shrink-0 flex-wrap gap-2">
-              {websiteReviewUrl ? (
+            {websiteDraft.privacyFlags?.length || websiteCheckError ? (
+              <details className="group shrink-0">
+                <summary
+                  className="grid h-11 w-11 cursor-pointer list-none place-items-center rounded-lg border border-current/20 bg-black/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 [&::-webkit-details-marker]:hidden"
+                  aria-label="Website privacy review details"
+                >
+                  <AlertCircle className="h-4 w-4" aria-hidden="true" />
+                </summary>
+                <div className="absolute right-0 top-full z-40 mt-2 w-[min(18rem,calc(100vw-2rem))] rounded-xl border border-white/15 bg-surface-950 p-3 text-left text-xs leading-relaxed text-surface-200 shadow-2xl shadow-black/50">
+                  {websiteDraft.privacyFlags?.length ? (
+                    <p>
+                      Review the entire image for:{" "}
+                      {websiteDraft.privacyFlags
+                        .map((flag) => websitePrivacyFlagCopy[flag])
+                        .filter(Boolean)
+                        .join("; ")}
+                      .
+                    </p>
+                  ) : null}
+                  {websiteCheckError ? (
+                    <p className="mt-2 text-warning-200">{websiteCheckError}</p>
+                  ) : null}
+                </div>
+              </details>
+            ) : null}
+            <div className="flex shrink-0 items-center gap-1.5">
+              {isDesktopLayout &&
+              websitePublication?.status === "not_requested" &&
+              post.postId ? (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="min-h-11 px-3"
+                  disabled={websiteSending || deliveryLocked || imageBusy || textBusy}
+                  leftIcon={
+                    websiteSending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Globe2 className="h-3.5 w-3.5" />
+                    )
+                  }
+                  onClick={() => void handleSendWebsiteDraft()}
+                >
+                  {websiteSending ? "Sending…" : "Send"}
+                </Button>
+              ) : null}
+              {websiteReviewUrl && (isDesktopLayout || !websiteOnly) ? (
                 <a
                   href={websiteReviewUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex min-h-9 items-center justify-center gap-2 rounded-xl border-2 border-surface-700 px-4 py-2 text-sm font-semibold text-surface-100 transition-colors hover:border-surface-600 hover:bg-surface-800/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
+                  className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-current/25 bg-black/10 px-3 py-2 text-xs font-semibold transition-colors hover:bg-black/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
                 >
                   <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                  Review draft
+                  Review
                 </a>
               ) : null}
               {(websitePublication?.status === "failed" ||
                 (websitePublication?.status === "draft_ready" &&
                   websitePublication.lastError)) &&
-              post.postId ? (
+              post.postId &&
+              (isDesktopLayout || !websiteOnly) &&
+              (isDesktopLayout || !websiteReviewUrl) ? (
                 <Button
                   variant="outline"
                   size="sm"
+                  className="min-h-11"
                   disabled={websiteRetrying}
                   leftIcon={
                     websiteRetrying ? (
@@ -3137,19 +3572,30 @@ export const PostResult: React.FC<PostResultProps> = ({
             captionNote={
               historyReadOnly
                 ? "View-only history. You can still copy or share this saved post."
-                : selectedDelivery &&
-                    dealershipMentionFor(selectedDelivery.destinationId, currentDealer)
-                  ? "Dealership tag and required disclosures are included when you share."
-                  : activeDisclosures
-                    ? "Required disclosures are included when you copy or share."
-                    : "The exact destination caption is included when you share."
+                : websiteOnly
+                  ? "Keep editing. Customer Hub receives nothing until you press Send."
+                  : selectedDelivery &&
+                      dealershipMentionFor(
+                        selectedDelivery.destinationId,
+                        currentDealer,
+                      )
+                    ? "Dealership tag and required disclosures are included when you share."
+                    : activeDisclosures
+                      ? "Required disclosures are included when you copy or share."
+                      : "The exact destination caption is included when you share."
             }
             copied={copied}
             onSelect={handleSelectMobileDelivery}
             onRetry={handleRetryDelivery}
-            onToggleBatch={handleToggleBatchDelivery}
-            onToggleAll={handleToggleAllBatchDeliveries}
-            onShareBatch={handleStartShareBatch}
+            onToggleBatch={
+              deliveryOutputs.length > 0 ? handleToggleBatchDelivery : undefined
+            }
+            onToggleAll={
+              deliveryOutputs.length > 0 ? handleToggleAllBatchDeliveries : undefined
+            }
+            onShareBatch={
+              deliveryOutputs.length > 0 ? handleStartShareBatch : undefined
+            }
             onCopyCaption={handleCopy}
             onEditCaption={() => setIsTextEditing(true)}
             onBack={handleCreateAnotherRequest}
@@ -3166,6 +3612,13 @@ export const PostResult: React.FC<PostResultProps> = ({
             editCaptionDisabled={
               textBusy || contentEditingLocked || historyReadOnly || !hasOriginalCapture
             }
+            emptyStatusLabel={websiteOnly ? "Editing" : undefined}
+            emptyStatusDetail={
+              websiteOnly
+                ? "Finish the image and caption, then send the private draft."
+                : undefined
+            }
+            emptyMetadata={websiteOnly ? "Private website draft" : undefined}
           />
         ) : null}
         <div
@@ -4008,8 +4461,8 @@ export const PostResult: React.FC<PostResultProps> = ({
                       {historyReadOnly
                         ? "This teammate's saved copy is view-only. You can still copy, share, or export it."
                         : contentEditingLocked
-                          ? post.websiteDraft?.enabled
-                            ? "Website copy is locked to the exact private draft prepared for Customer Hub."
+                          ? websiteHandoffStarted
+                            ? "Website copy is locked to the exact final draft sent to Customer Hub."
                             : "Review copy is locked to the exact creative submitted to the manager."
                           : "Ready to copy and post. Tap New caption if you want a different version."}
                     </p>
@@ -4293,85 +4746,118 @@ export const PostResult: React.FC<PostResultProps> = ({
 
       {/* Mobile/narrow: sticky bottom delivery bar (Save · Share · Copy).
           Creative tools stay collapsed above; desktop keeps in-panel CTAs. */}
-      {!isDesktopLayout ? (
-        <div
-          className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-surface-950/95 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur-md"
-          style={{
-            paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))",
-            paddingLeft: "env(safe-area-inset-left)",
-            paddingRight: "env(safe-area-inset-right)",
-          }}
-        >
-          <div
-            className="mx-auto grid max-w-lg grid-cols-3 gap-2 px-3 pt-2"
-            aria-label="Post delivery actions"
-          >
-            <Button
-              variant="primary"
-              onClick={() => void handleSave()}
-              disabled={
-                deliveryLocked || imageBusy || isPreparingSave || !activePreparedSave
-              }
-              aria-label={saveAriaLabel(deliveryLocked)}
-              leftIcon={
-                isPreparingSave ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+      {!isDesktopLayout && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-surface-950/95 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur-md"
+              style={{
+                paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))",
+                paddingLeft: "env(safe-area-inset-left)",
+                paddingRight: "env(safe-area-inset-right)",
+              }}
+            >
+              <div
+                className="mx-auto grid max-w-lg grid-cols-3 gap-2 px-3 pt-2"
+                aria-label="Post delivery actions"
+              >
+                <Button
+                  variant="primary"
+                  onClick={() => void handleSave()}
+                  disabled={
+                    deliveryLocked ||
+                    imageBusy ||
+                    isPreparingSave ||
+                    !activePreparedSave
+                  }
+                  aria-label={saveAriaLabel(deliveryLocked)}
+                  leftIcon={
+                    isPreparingSave ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )
+                  }
+                  fullWidth
+                  className="min-w-0 px-2"
+                  disableHaptics
+                >
+                  {isPreparingSave ? "Ready…" : "Save"}
+                </Button>
+                {websiteOnly ? (
+                  <Button
+                    variant="outline"
+                    onClick={handleWebsiteMobileAction}
+                    disabled={websiteMobileActionDisabled}
+                    aria-label={`${websiteMobileActionLabel} website draft`}
+                    leftIcon={
+                      websiteSending || websiteRetrying ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : websiteReviewUrl ? (
+                        <ExternalLink className="h-4 w-4" />
+                      ) : (
+                        <Globe2 className="h-4 w-4" />
+                      )
+                    }
+                    fullWidth
+                    className="min-w-0 px-2"
+                    disableHaptics
+                  >
+                    {websiteMobileActionLabel}
+                  </Button>
                 ) : (
-                  <Download className="h-4 w-4" />
-                )
-              }
-              fullWidth
-              className="min-w-0 px-2"
-              disableHaptics
-            >
-              {isPreparingSave ? "Ready…" : "Save"}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleOpenShare}
-              disabled={
-                deliveryLocked ||
-                isPreparingSave ||
-                !activePreparedSave ||
-                (!manualVideoSelected &&
-                  selectedDelivery?.mediaKind === "video" &&
-                  selectedVideoJob?.status !== "completed")
-              }
-              aria-label={
-                deliveryLocked
-                  ? `Share post (${deliveryLockLabel.toLowerCase()})`
-                  : "Share post"
-              }
-              leftIcon={<Share2 className="h-4 w-4" />}
-              fullWidth
-              className="min-w-0 px-2"
-              disableHaptics
-            >
-              Share
-            </Button>
-            <Button
-              variant="tinted"
-              onClick={handleCopy}
-              disabled={deliveryLocked}
-              aria-label={
-                deliveryLocked
-                  ? `Copy caption (${deliveryLockLabel.toLowerCase()})`
-                  : "Copy caption"
-              }
-              leftIcon={
-                copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />
-              }
-              fullWidth
-              className="min-w-0 px-2"
-              disableHaptics
-            >
-              <span aria-live="polite">
-                {deliveryLocked ? deliveryLockLabel : copied ? "Copied" : "Copy"}
-              </span>
-            </Button>
-          </div>
-        </div>
-      ) : null}
+                  <Button
+                    variant="outline"
+                    onClick={handleOpenShare}
+                    disabled={
+                      deliveryLocked ||
+                      isPreparingSave ||
+                      !activePreparedSave ||
+                      (!manualVideoSelected &&
+                        selectedDelivery?.mediaKind === "video" &&
+                        selectedVideoJob?.status !== "completed")
+                    }
+                    aria-label={
+                      deliveryLocked
+                        ? `Share post (${deliveryLockLabel.toLowerCase()})`
+                        : "Share post"
+                    }
+                    leftIcon={<Share2 className="h-4 w-4" />}
+                    fullWidth
+                    className="min-w-0 px-2"
+                    disableHaptics
+                  >
+                    Share
+                  </Button>
+                )}
+                <Button
+                  variant="tinted"
+                  onClick={handleCopy}
+                  disabled={deliveryLocked}
+                  aria-label={
+                    deliveryLocked
+                      ? `Copy caption (${deliveryLockLabel.toLowerCase()})`
+                      : "Copy caption"
+                  }
+                  leftIcon={
+                    copied ? (
+                      <Check className="h-4 w-4" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )
+                  }
+                  fullWidth
+                  className="min-w-0 px-2"
+                  disableHaptics
+                >
+                  <span aria-live="polite">
+                    {deliveryLocked ? deliveryLockLabel : copied ? "Copied" : "Copy"}
+                  </span>
+                </Button>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 };

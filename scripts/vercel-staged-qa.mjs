@@ -38,9 +38,15 @@ const DEFAULT_PROVIDER_CANARY_EVIDENCE_PATH = resolve(
   root,
   ".release-evidence/production-provider-canary.json",
 );
+const DEFAULT_WEBSITE_HANDOFF_CANARY_EVIDENCE_PATH = resolve(
+  root,
+  ".release-evidence/production-website-handoff-canary.json",
+);
 const RELEASE_LOCK_PATH = resolve(root, ".release-evidence/vercel-release.lock");
 const PRODUCTION_FLY_ORIGIN = "https://dealer-social-post-ai-production.fly.dev";
+const CUSTOMER_HUB_ORIGIN = "https://joegallant.me";
 const PROVIDER_CANARY_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const WEBSITE_HANDOFF_CANARY_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 export const HOSTED_QA_PROJECTS = Object.freeze([
   "chromium-phone-fold-280",
@@ -237,6 +243,61 @@ export const validateProviderCanaryEvidence = (evidence, releaseSha) => {
     !requiredChecks.every((name) => evidence.checks?.[name]?.passed === true)
   ) {
     fail("the provider canary receipt does not prove the exact Fly release.");
+  }
+  return evidence;
+};
+
+export const validateWebsiteHandoffCanaryEvidence = (evidence, releaseSha) => {
+  const startedAt = Date.parse(evidence?.startedAt || "");
+  const completedAt = Date.parse(evidence?.completedAt || "");
+  const cleanupCompletedAt = Date.parse(evidence?.cleanup?.completedAt || "");
+  const checks = evidence?.checks || {};
+  if (
+    evidence?.schemaVersion !== 1 ||
+    evidence.canary !== "production-website-private-draft" ||
+    evidence.syntheticAsset !== "docs/marketing/demo/synthetic-delivery-photo.jpg" ||
+    evidence.targetOrigin !== PRODUCTION_FLY_ORIGIN ||
+    evidence.customerHubOrigin !== CUSTOMER_HUB_ORIGIN ||
+    evidence.expectedReleaseSha !== releaseSha ||
+    evidence.outcome !== "passed" ||
+    !Number.isFinite(startedAt) ||
+    !Number.isFinite(completedAt) ||
+    completedAt < startedAt ||
+    completedAt > Date.now() + 300_000 ||
+    Date.now() - completedAt > WEBSITE_HANDOFF_CANARY_MAX_AGE_MS ||
+    checks.authentication?.passed !== true ||
+    checks.authentication?.role !== "salesperson" ||
+    checks.health?.passed !== true ||
+    checks.health?.releaseSha !== releaseSha ||
+    checks.health?.backupStatus !== "verified" ||
+    checks.destination?.passed !== true ||
+    checks.destination?.id !== "joe_customer_hub" ||
+    checks.destination?.mode !== "private_draft" ||
+    checks.initialPrivateDraft?.passed !== true ||
+    checks.initialPrivateDraft?.websiteOnly !== true ||
+    checks.initialPrivateDraft?.status !== "not_requested" ||
+    checks.noPrematureDelivery?.passed !== true ||
+    checks.revisionGuard?.passed !== true ||
+    checks.revisionGuard?.missingBlocked !== true ||
+    checks.revisionGuard?.staleBlocked !== true ||
+    checks.revisionGuard?.exactReplayIdempotent !== true ||
+    checks.revisionGuard?.changedReplayBlocked !== true ||
+    checks.privateDelivery?.passed !== true ||
+    checks.privateDelivery?.status !== "draft_ready" ||
+    checks.privateDelivery?.attempts !== 0 ||
+    checks.publicBoundary?.passed !== true ||
+    checks.publicBoundary?.imageStatus !== 404 ||
+    checks.publicBoundary?.markerAbsent !== true ||
+    checks.sessionRevocation?.passed !== true ||
+    evidence.cleanup?.required !== false ||
+    evidence.cleanup?.status !== "complete" ||
+    !Number.isFinite(cleanupCompletedAt) ||
+    cleanupCompletedAt < completedAt ||
+    cleanupCompletedAt > Date.now() + 300_000
+  ) {
+    fail(
+      "the website handoff canary receipt does not prove the exact private delivery and cleanup.",
+    );
   }
   return evidence;
 };
@@ -441,6 +502,14 @@ if (invokedAsScript) {
         readJson(DEFAULT_PROVIDER_CANARY_EVIDENCE_PATH, "provider canary evidence"),
         process.argv[3] || "",
       );
+    } else if (process.argv[2] === "--verify-website-handoff-canary") {
+      validateWebsiteHandoffCanaryEvidence(
+        readJson(
+          DEFAULT_WEBSITE_HANDOFF_CANARY_EVIDENCE_PATH,
+          "website handoff canary evidence",
+        ),
+        process.argv[3] || "",
+      );
     } else if (process.argv[2] === "--resolve-alias-page") {
       const result = resolveVercelAliasPage(
         readJson(resolve(process.argv[3] || ""), "Vercel alias inventory"),
@@ -451,7 +520,7 @@ if (invokedAsScript) {
       runHostedQa();
     } else {
       fail(
-        "usage: scripts/vercel-staged-qa.mjs [--verify-receipt release url id staged-at attempt | --verify-provider-canary release | --resolve-alias-page file alias]",
+        "usage: scripts/vercel-staged-qa.mjs [--verify-receipt release url id staged-at attempt | --verify-provider-canary release | --verify-website-handoff-canary release | --resolve-alias-page file alias]",
       );
     }
   } catch (error) {

@@ -9,6 +9,7 @@ import {
   platformsToCreativeBrief,
   platformCopyGuidance,
   preferredExportFormatIds,
+  resolveHistoryPlatformIds,
   resolvePrimaryImageProfile,
   shouldGenerateCaptionPack,
 } from "./platformCopy";
@@ -69,7 +70,7 @@ describe("platformCopy", () => {
     },
     { platforms: ["gbp"], format: "gbp", aspect: "4:3" },
     { platforms: ["marketplace"], format: "marketplace", aspect: "16:9" },
-    { platforms: [], format: "story_vertical", aspect: "9:16" },
+    { platforms: [], format: "feed_square", aspect: "1:1" },
   ])(
     "maps $platforms to the $format native generation profile",
     ({ platforms, format, aspect }) => {
@@ -79,6 +80,31 @@ describe("platformCopy", () => {
       });
     },
   );
+
+  it("uses a Website-native square profile when no social destination is selected", () => {
+    expect(resolvePrimaryImageProfile([])).toEqual({
+      primaryFormatId: "feed_square",
+      imageAspectRatio: "1:1",
+      label: "Social Feed · 1:1",
+    });
+  });
+
+  it("preserves explicit Website-only history while restoring legacy social outputs", () => {
+    expect(
+      resolveHistoryPlatformIds([], {
+        tiktok: "A stale caption must not override an explicit empty selection.",
+      }),
+    ).toEqual([]);
+
+    expect(
+      resolveHistoryPlatformIds(undefined, {
+        facebook_feed: "Facebook copy",
+        instagram_feed: "Instagram copy",
+      }),
+    ).toEqual(["facebook_feed", "instagram_feed"]);
+
+    expect(resolveHistoryPlatformIds(undefined)).toEqual(DEFAULT_PLATFORM_IDS);
+  });
 
   it("builds a caption pack brief with JSON keys for selected platforms", () => {
     const brief = platformsToCaptionPackBrief(

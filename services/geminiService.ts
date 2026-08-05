@@ -48,6 +48,8 @@ import { generateImageViaOpenAI, shouldFallbackToOpenAI } from "./openaiAdapter"
 import { requestCache } from "../utils/requestCache";
 import { logEvent as logTelemetry } from "../utils/telemetry";
 import { cleanSocialCaption, ensureUsableCaption } from "../utils/captionQuality";
+import { z } from "zod";
+import { isSafeOnImageHeadline } from "./promptsV2";
 
 /**
  * Tries each model in the fallback chain for a given task. The action
@@ -392,6 +394,229 @@ const generateImageWithFallback = async (
   }
 };
 
+const ImageTextViolationSchema = z.enum([
+  "too_many_words",
+  "too_many_characters",
+  "full_sentence",
+  "hashtag",
+  "url_or_phone",
+  "multiple_marketing_blocks",
+  "unreadable_or_uncertain",
+]);
+
+const GeneratedImageTextReviewSchema = z
+  .object({
+    compliant: z.boolean(),
+    uncertain: z.boolean(),
+    detectedMarketingText: z.array(z.string().max(120)).max(8),
+    marketingWordCount: z.number().int().min(0).max(1_000),
+    marketingCharacterCount: z.number().int().min(0).max(10_000),
+    hasFullSentence: z.boolean(),
+    hasHashtag: z.boolean(),
+    hasUrlOrPhone: z.boolean(),
+    violations: z.array(ImageTextViolationSchema).max(8),
+  })
+  .strict();
+
+export interface GeneratedImageTextReview {
+  compliant: boolean;
+  uncertain: boolean;
+  detectedMarketingText: string[];
+  marketingWordCount: number;
+  marketingCharacterCount: number;
+  hasFullSentence: boolean;
+  hasHashtag: boolean;
+  hasUrlOrPhone: boolean;
+  violations: Array<z.infer<typeof ImageTextViolationSchema>>;
+}
+
+const generatedImageTextReviewPrompt = (
+  dealershipName: string,
+): string => `You are a strict visual quality-control inspector for an automotive dealership image.
+
+Inspect the image pixels and return only the requested JSON object.
+
+Marketing overlay policy:
+- AI-added headline/support copy may contain at most 4 total words and 40 total characters across the whole image.
+- Reject full sentences, hashtags, URLs, phone numbers, or multiple promotional text blocks.
+- The exact dealership legal name (${dealershipName}) and a supplied dealership logo are brand identity. Exclude those from the marketing word/character counts.
+- Exclude text naturally photographed in the scene, such as vehicle badges, building signs, clothing, documents, and license plates. Count only designed promotional overlay copy.
+- If text is unreadable, ambiguous, or you cannot confidently distinguish promotional overlay from scene text, set uncertain=true and compliant=false.
+
+detectedMarketingText must contain only the promotional overlay strings you counted. violations must use only the allowed enum values. Never include explanations or image details outside the JSON.`;
+
+/**
+ * Second-pass vision check for text painted into generated image pixels.
+ * Provider credentials remain in the authenticated PocketBase proxy; this
+ * browser helper receives only the strict, non-sensitive review result.
+ */
+export const reviewGeneratedImageText = async (
+  imageBase64Url: string,
+  dealershipName: string,
+  requestAuthEpoch: number = captureAuthEpoch(),
+): Promise<GeneratedImageTextReview> => {
+  const normalisedImage = await normaliseDataUrl(imageBase64Url);
+  assertAuthEpoch(requestAuthEpoch);
+  const { mimeType, data } = parseDataUrl(normalisedImage);
+  const imagePart = { inlineData: { mimeType, data } };
+  const task = "caption_regenerate" as const;
+  const taskConfig = TASKS[task];
+  const attemptId = createGenerationAttemptId();
+
+  const generated = await withFallbackChain(task, attemptId, async (modelId) => {
+    assertAuthEpoch(requestAuthEpoch);
+    const response = await getGeminiClient().models.generateContent({
+      model: modelId,
+      task,
+      attemptId,
+      contents: {
+        parts: [imagePart, { text: generatedImageTextReviewPrompt(dealershipName) }],
+      },
+      // The server allowlist intentionally accepts only the task policy's
+      // exact text-generation config. Strictness comes from the JSON-only
+      // prompt plus the Zod boundary below, not extra browser-supplied knobs.
+      generationConfig: taskConfig.params,
+      requestAuthEpoch,
+    } as any);
+    assertAuthEpoch(requestAuthEpoch);
+    const rawText = typeof response.text === "function" ? response.text() : "";
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(rawText);
+    } catch {
+      throw new Error("Image text review returned malformed JSON.");
+    }
+    const parsed = GeneratedImageTextReviewSchema.safeParse(parsedJson);
+    if (!parsed.success) {
+      throw new Error("Image text review returned an invalid structured result.");
+    }
+    return parsed.data;
+  });
+
+  const review = generated.value;
+  const detectedMarketingText = review.detectedMarketingText
+    .map((value) => value.trim().replace(/\s+/g, " "))
+    .filter(Boolean);
+  const joinedMarketingText = detectedMarketingText.join(" ");
+  const derivedWordCount = joinedMarketingText
+    ? joinedMarketingText.split(/\s+/).length
+    : 0;
+  const derivedCharacterCount = joinedMarketingText.length;
+  const marketingWordCount = Math.max(review.marketingWordCount, derivedWordCount);
+  const marketingCharacterCount = Math.max(
+    review.marketingCharacterCount,
+    derivedCharacterCount,
+  );
+  const deterministicHeadlineSafe =
+    !joinedMarketingText || isSafeOnImageHeadline(joinedMarketingText);
+
+  return {
+    ...review,
+    detectedMarketingText,
+    marketingWordCount,
+    marketingCharacterCount,
+    compliant:
+      review.compliant &&
+      !review.uncertain &&
+      marketingWordCount <= 4 &&
+      marketingCharacterCount <= 40 &&
+      !review.hasFullSentence &&
+      !review.hasHashtag &&
+      !review.hasUrlOrPhone &&
+      deterministicHeadlineSafe,
+  };
+};
+
+const TEXT_FREE_CORRECTION_PROMPT = `This is a corrective photo edit of the attached generated image.
+
+Remove every AI-added marketing headline, caption, slogan, hashtag, URL, phone number, and word badge. Do not add replacement words or any new text.
+Preserve the exact people, faces, bodies, vehicle, background, crop, lighting, and colors. Keep a supplied dealership logo unchanged; the exact legal dealership name may remain only when it is part of that logo.
+Return only the corrected image with zero promotional overlay text.`;
+
+interface ImageTextComplianceInput {
+  candidate: ModelRun<string>;
+  dealershipName: string;
+  logoImagePart: unknown | null;
+  imageTier: ImageGenerationTier;
+  imageAspectRatio?: ImageAspectRatio;
+  requestAuthEpoch: number;
+}
+
+/** One bounded text-free correction, followed by a second fail-closed review. */
+const enforceGeneratedImageTextCompliance = async ({
+  candidate,
+  dealershipName,
+  logoImagePart,
+  imageTier,
+  imageAspectRatio,
+  requestAuthEpoch,
+}: ImageTextComplianceInput): Promise<ModelRun<string>> => {
+  let firstReview: GeneratedImageTextReview | null = null;
+  try {
+    firstReview = await reviewGeneratedImageText(
+      candidate.value,
+      dealershipName,
+      requestAuthEpoch,
+    );
+  } catch (error) {
+    logTelemetry("image.text_compliance.review_failed", {
+      stage: "initial",
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+  if (firstReview?.compliant) return candidate;
+
+  logTelemetry("image.text_compliance.retry", {
+    uncertain: firstReview?.uncertain ?? true,
+    wordCount: firstReview?.marketingWordCount ?? null,
+    characterCount: firstReview?.marketingCharacterCount ?? null,
+    violations: firstReview?.violations ?? ["unreadable_or_uncertain"],
+  });
+
+  const normalisedCandidate = await normaliseDataUrl(candidate.value);
+  assertAuthEpoch(requestAuthEpoch);
+  const { mimeType, data } = parseDataUrl(normalisedCandidate);
+  const correctionParts: unknown[] = [
+    { inlineData: { mimeType, data } },
+    { text: TEXT_FREE_CORRECTION_PROMPT },
+  ];
+  if (logoImagePart) correctionParts.push(logoImagePart);
+  const corrected = await generateImageWithFallback(
+    imageTaskForTier(imageTier),
+    correctionParts,
+    // An OpenAI text-to-image fallback cannot see the correction source and
+    // could fabricate replacement people/vehicles. Fail closed instead.
+    undefined,
+    imageAspectRatio,
+    requestAuthEpoch,
+  );
+
+  let correctedReview: GeneratedImageTextReview;
+  try {
+    correctedReview = await reviewGeneratedImageText(
+      corrected.value,
+      dealershipName,
+      requestAuthEpoch,
+    );
+  } catch (error) {
+    logTelemetry("image.text_compliance.review_failed", {
+      stage: "corrected",
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    throw new Error("Corrected image text could not be verified safely.");
+  }
+  if (!correctedReview.compliant) {
+    logTelemetry("image.text_compliance.rejected", {
+      uncertain: correctedReview.uncertain,
+      wordCount: correctedReview.marketingWordCount,
+      characterCount: correctedReview.marketingCharacterCount,
+      violations: correctedReview.violations,
+    });
+    throw new Error("Generated image text exceeded the safe headline limit.");
+  }
+  return corrected;
+};
+
 /**
  * Gemini 3 image models default to 1K. Prefer production-quality 2K for the
  * premium/standard tiers; Lite only supports 1K.
@@ -449,14 +674,22 @@ export const generateFunSocialPostImage = async (
     imageParts.push(logoImagePart);
   }
 
+  const generated = await generateImageWithFallback(
+    imageTaskForTier(imageTier),
+    imageParts,
+    funPrompt,
+    imageAspectRatio,
+    requestAuthEpoch,
+  );
   return (
-    await generateImageWithFallback(
-      imageTaskForTier(imageTier),
-      imageParts,
-      funPrompt,
+    await enforceGeneratedImageTextCompliance({
+      candidate: generated,
+      dealershipName,
+      logoImagePart,
+      imageTier,
       imageAspectRatio,
       requestAuthEpoch,
-    )
+    })
   ).value;
 };
 
@@ -488,14 +721,22 @@ export const editSocialPostImage = async (
     imageParts.push(logoImagePart);
   }
 
+  const generated = await generateImageWithFallback(
+    imageTaskForTier(imageTier),
+    imageParts,
+    editInstruction,
+    imageAspectRatio,
+    requestAuthEpoch,
+  );
   return (
-    await generateImageWithFallback(
-      imageTaskForTier(imageTier),
-      imageParts,
-      editInstruction,
+    await enforceGeneratedImageTextCompliance({
+      candidate: generated,
+      dealershipName,
+      logoImagePart,
+      imageTier,
       imageAspectRatio,
       requestAuthEpoch,
-    )
+    })
   ).value;
 };
 
@@ -731,12 +972,7 @@ export const generateWebsiteDraftMetadata = async (
       task,
       attemptId,
       contents: { parts: [imagePart, { text: prompt }] },
-      generationConfig: {
-        ...taskConfig.params,
-        temperature: 0.2,
-        maxOutputTokens: Math.min(taskConfig.params.maxOutputTokens || 1024, 1024),
-        responseMimeType: "application/json",
-      },
+      generationConfig: taskConfig.params,
       requestAuthEpoch,
     } as any);
     assertAuthEpoch(requestAuthEpoch);
@@ -919,13 +1155,21 @@ export const generateSocialPost = async (
   // just because the retoucher model blocked/recited the image.
   const imagePromise = (async () => {
     try {
-      return await generateImageWithFallback(
+      const generated = await generateImageWithFallback(
         imageTaskForTier(imageTier),
         imageParts,
         imagePrompt,
         imageAspectRatio,
         requestAuthEpoch,
       );
+      return await enforceGeneratedImageTextCompliance({
+        candidate: generated,
+        dealershipName,
+        logoImagePart,
+        imageTier,
+        imageAspectRatio,
+        requestAuthEpoch,
+      });
     } catch (err) {
       console.warn(
         "[generateSocialPost] AI image failed; shipping original photo with caption",

@@ -40,9 +40,14 @@ import type { CaptionGenerationResult } from "../services/modelConfig";
 import { MODEL_POLICY_VERSION } from "../services/modelConfig";
 import { EXPORT_FORMATS, renderFormat } from "../utils/multiFormatExport";
 import {
+  buildFinalWebsiteDraftFallback,
+  buildFinalWebsiteDraftPrompt,
   buildFallbackWebsiteDraft,
   buildWebsiteDraftPrompt,
+  parseFinalWebsiteDraftResponse,
   parseWebsiteDraftResponse,
+  type FinalWebsiteDraftSource,
+  type WebsiteDraft,
   type WebsiteDraftSource,
 } from "../services/websitePublishing";
 
@@ -375,7 +380,8 @@ export const useGeneration = () => {
         isBasicFallback: result.captionSource === "basic_fallback",
         disclosures: preparedCaption.disclosures,
         disclosureCategories: preparedCaption.disclosureCategories,
-        platformIds: platformIds.length > 0 ? platformIds : undefined,
+        // Empty is authoritative: it represents a Website-only post.
+        platformIds,
         mediaOutputMode: variables.mediaOutputMode,
         primaryFormatId: variables.primaryFormatId,
         imageAspectRatio: variables.imageAspectRatio,
@@ -592,9 +598,7 @@ export const useGeneration = () => {
             post.website_publication ||
             (finalPost.websiteDraft
               ? {
-                  status: currentDealer.requires_approval
-                    ? "waiting_approval"
-                    : "queued",
+                  status: "not_requested",
                 }
               : undefined);
         } else if (finalPost.websiteDraft) {
@@ -1202,6 +1206,64 @@ export const useGeneration = () => {
     [editTextMutation],
   );
 
+  const handlePrepareFinalWebsiteDraft = useCallback(
+    async (input: {
+      caption: string;
+      image: string;
+      currentDraft: WebsiteDraft;
+    }): Promise<WebsiteDraft> => {
+      const state = useAppStore.getState();
+      const operationAuthEpoch = state.authEpoch;
+      const dealer = state.currentDealer;
+      if (!dealer) throw new Error("The dealership workspace is unavailable.");
+      assertOperationAuthEpoch(operationAuthEpoch);
+      const source: FinalWebsiteDraftSource = {
+        currentDraft: input.currentDraft,
+        dealerName: dealer.name,
+        caption: input.caption,
+        customerName: state.generationParams?.customerName,
+      };
+      const fallback = buildFinalWebsiteDraftFallback(source);
+      try {
+        const { generateWebsiteDraftMetadata } = await loadGeminiService();
+        assertOperationAuthEpoch(operationAuthEpoch);
+        logEvent("ai.website.final.start", {
+          kind: fallback.kind,
+          category: fallback.category,
+        });
+        const raw = await generateWebsiteDraftMetadata(
+          input.image,
+          buildFinalWebsiteDraftPrompt(source),
+        );
+        assertOperationAuthEpoch(operationAuthEpoch);
+        const prepared = parseFinalWebsiteDraftResponse(raw, source);
+        logEvent("ai.website.final.success", {
+          source: prepared.source,
+          kind: prepared.draft.kind,
+        });
+        if (prepared.source === "deterministic_fallback") {
+          toastWarning(
+            "AI could not refresh the website title and image description, so safe review placeholders were used. Check them in Customer Hub before publishing.",
+          );
+        }
+        return prepared.draft;
+      } catch (err) {
+        // Never turn an auth/workspace change into a usable fallback that the
+        // caller could send under a newer session.
+        if (operationAuthEpoch !== useAppStore.getState().authEpoch) throw err;
+        logError("ai.website.final.failure", {
+          message: err instanceof Error ? err.message : String(err),
+          kind: fallback.kind,
+        });
+        toastWarning(
+          "AI could not refresh the website title and image description, so safe review placeholders were used. Check them in Customer Hub before publishing.",
+        );
+        return fallback;
+      }
+    },
+    [loadGeminiService, toastWarning],
+  );
+
   const generateVideoMutation = useMutation({
     mutationFn: async ({
       style,
@@ -1268,6 +1330,7 @@ export const useGeneration = () => {
     handleEditImage,
     handleRegenerateText,
     handleEditText,
+    handlePrepareFinalWebsiteDraft,
     handleGenerateVideo,
     generateCaptionVariant,
   };

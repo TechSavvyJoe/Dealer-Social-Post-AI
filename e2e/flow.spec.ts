@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 async function expectNoSeriousAxeViolations(page: import("@playwright/test").Page) {
@@ -64,6 +64,36 @@ async function expectNoHorizontalOverflow(page: import("@playwright/test").Page)
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1);
+}
+
+async function expectControlsInsideViewport(page: Page, controls: Locator) {
+  const geometry = await controls.evaluateAll((elements) =>
+    elements.map((element) => {
+      const bounds = element.getBoundingClientRect();
+      return {
+        width: bounds.width,
+        height: bounds.height,
+        top: bounds.top,
+        right: bounds.right,
+        bottom: bounds.bottom,
+        left: bounds.left,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      };
+    }),
+  );
+  expect(geometry.length).toBeGreaterThan(0);
+  expect(
+    geometry.filter(
+      (bounds) =>
+        bounds.width < 44 ||
+        bounds.height < 44 ||
+        bounds.top < -1 ||
+        bounds.left < -1 ||
+        bounds.right > bounds.viewportWidth + 1 ||
+        bounds.bottom > bounds.viewportHeight + 1,
+    ),
+  ).toEqual([]);
 }
 
 test.describe("Dealer Social Post AI Flow", () => {
@@ -482,7 +512,11 @@ test.describe("Dealer Social Post AI Flow", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ id: "qa-post-1", updated: true }),
+        body: JSON.stringify({
+          id: "qa-post-1",
+          updated: true,
+          post_revision: "2026-08-05 09:43:00.000Z",
+        }),
       });
     });
 
@@ -727,5 +761,324 @@ test.describe("Dealer Social Post AI Flow", () => {
       path: testInfo.outputPath("result-mobile.png"),
       fullPage: true,
     });
+  });
+
+  test("keeps Website-only private and viewport-bound until the final Send", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      ![
+        "chromium-phone-320",
+        "chromium-phone-390",
+        "webkit-phone-320",
+        "webkit-phone-390",
+      ].includes(testInfo.project.name),
+      "The two narrow Chromium and WebKit phones cover the Website-only publishing boundary.",
+    );
+    await page.emulateMedia({ reducedMotion: "reduce" });
+
+    let websitePostCount = 0;
+    let websiteRequestBody: Record<string, unknown> | null = null;
+    const readyPublication = {
+      status: "draft_ready",
+      attempts: 1,
+      reviewUrl:
+        "https://joegallant.me/studio/updates#draft-00000000-0000-4000-8000-000000000001",
+      lastError: "destination_unavailable",
+      updatedAt: "2026-08-05T13:00:00.000Z",
+    };
+
+    await page.route("**/api/app/session", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          role: "salesperson",
+          dealer: {
+            id: "qa-website-dealer",
+            name: "Synthetic QA Motors",
+            requires_approval: false,
+          },
+          person: {
+            id: "qa-website-person",
+            dealer: "qa-website-dealer",
+            name: "Synthetic QA",
+            role: "salesperson",
+            active: true,
+          },
+        }),
+      });
+    });
+    await page.route("**/api/app/website-destinations", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [
+            {
+              id: "joe_customer_hub",
+              label: "Website",
+              siteUrl: "https://joegallant.me",
+              enabled: true,
+              mode: "private_draft",
+            },
+          ],
+        }),
+      });
+    });
+    await page.route("**/api/app/posts/qa-website-1/draft", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "qa-website-1",
+          updated: true,
+          post_revision: "2026-08-05 09:43:00.000Z",
+        }),
+      });
+    });
+    await page.route(
+      "**/api/app/posts/qa-website-1/website-publication",
+      async (route) => {
+        if (route.request().method() === "POST") {
+          websitePostCount += 1;
+          websiteRequestBody = route.request().postDataJSON() as Record<
+            string,
+            unknown
+          >;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(
+            route.request().method() === "POST" || websitePostCount > 0
+              ? readyPublication
+              : { status: "not_requested", attempts: 0 },
+          ),
+        });
+      },
+    );
+    await page.route("**/api/proxy/**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      title: "Synthetic delivery update",
+                      body: "Final synthetic website copy prepared only after review.",
+                      altText: "Synthetic vehicle delivery graphic for QA.",
+                      category: "deliveries",
+                      privacyFlags: ["review_visual_privacy"],
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      });
+    });
+    await page.route("**/api/telemetry", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true }),
+      });
+    });
+
+    await page.goto("/");
+    await expect(
+      page.getByRole("heading", { name: "Capture the handoff." }),
+    ).toBeVisible();
+    await page.evaluate(async () => {
+      const image = `data:image/svg+xml;base64,${btoa(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080"><rect width="1080" height="1080" fill="#07111f"/><path d="M140 640h800l-92-210H310z" fill="#e8eef8"/><circle cx="350" cy="680" r="88" fill="#2563eb"/><circle cx="760" cy="680" r="88" fill="#2563eb"/><text x="540" y="860" text-anchor="middle" font-family="Arial" font-size="54" fill="white">SYNTHETIC QA</text></svg>',
+      )}`;
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("dealer-social-post-ai", 2);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains("creative-assets")) {
+            db.createObjectStore("creative-assets", { keyPath: "key" });
+          }
+          if (!db.objectStoreNames.contains("media-archive")) {
+            const archive = db.createObjectStore("media-archive", { keyPath: "id" });
+            archive.createIndex("dealerId", "dealerId", { unique: false });
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction("creative-assets", "readwrite");
+        transaction.objectStore("creative-assets").put({
+          key: "qa-website-dealer:generated",
+          value: image,
+          updatedAt: Date.now(),
+          mediaEpoch: 0,
+        });
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+      database.close();
+      localStorage.setItem(
+        "dealer-social-post-ai.session",
+        JSON.stringify({
+          dealerId: "qa-website-dealer",
+          step: 4,
+          loginTimestamp: Date.now(),
+          generatedPost: {
+            text: "Final synthetic caption after salesperson review.",
+            postId: "qa-website-1",
+            releaseStatus: "saved",
+            platformIds: [],
+            mediaOutputMode: "photo",
+            primaryFormatId: "feed_square",
+            imageAspectRatio: "1:1",
+            websiteDraft: {
+              enabled: true,
+              kind: "customer_story",
+              category: "deliveries",
+              title: "Earlier synthetic title",
+              body: "Earlier copy must never be sent automatically.",
+              altText: "Synthetic QA creative.",
+              customerDisplayName: "Customer",
+              privacyFlags: ["review_visual_privacy"],
+              schemaVersion: 1,
+            },
+            websitePublication: { status: "not_requested" },
+          },
+          generationParams: {
+            style: "Modern & Bold",
+            tone: "Excited",
+            customerName: "",
+            scenarioId: "customer_delivery",
+            platformIds: [],
+            websiteEnabled: true,
+            mediaOutputMode: "photo",
+            primaryFormatId: "feed_square",
+            imageAspectRatio: "1:1",
+          },
+        }),
+      );
+    });
+    await page.reload();
+
+    await expect(
+      page.getByRole("heading", { name: "Finish and send to website" }),
+    ).toBeVisible();
+    await expect(page.getByText("Private website draft")).toBeVisible();
+    await expect(page.getByText("TikTok")).toHaveCount(0);
+    await expect(
+      page.getByRole("list", { name: "Mobile platform outputs" }),
+    ).toHaveCount(0);
+    expect(websitePostCount).toBe(0);
+
+    const statusCard = page.getByRole("status").filter({
+      hasText: "Website selected — review before sending",
+    });
+    await expect(statusCard).toBeVisible();
+    const initialCardGeometry = await statusCard.evaluate((element) => ({
+      height: element.getBoundingClientRect().height,
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(initialCardGeometry.height).toBeLessThanOrEqual(64);
+    expect(initialCardGeometry.scrollWidth).toBeLessThanOrEqual(
+      initialCardGeometry.clientWidth + 1,
+    );
+
+    const footer = page.getByLabel("Post delivery actions");
+    const footerFrame = await footer.evaluate((element) => {
+      const shell = element.parentElement as HTMLElement;
+      const bounds = shell.getBoundingClientRect();
+      return {
+        parentIsBody: shell.parentElement === document.body,
+        bottom: bounds.bottom,
+        viewportHeight: window.innerHeight,
+      };
+    });
+    expect(footerFrame.parentIsBody).toBe(true);
+    expect(footerFrame.bottom).toBe(footerFrame.viewportHeight);
+    await expectControlsInsideViewport(page, footer.getByRole("button"));
+
+    const previewHeight = await page
+      .getByRole("region", { name: "Media preview" })
+      .evaluate((element) => element.getBoundingClientRect().height);
+    expect(previewHeight).toBeLessThanOrEqual(
+      testInfo.project.name.endsWith("phone-320") ? 161 : 321,
+    );
+
+    const privacyToggle = statusCard.locator(
+      'summary[aria-label="Website privacy review details"]',
+    );
+    await privacyToggle.click();
+    const privacyPanel = statusCard.locator("details > div");
+    await expect(privacyPanel).toBeVisible();
+    const privacyGeometry = await privacyPanel.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return { left: bounds.left, right: bounds.right, width: window.innerWidth };
+    });
+    expect(privacyGeometry.left).toBeGreaterThanOrEqual(0);
+    expect(privacyGeometry.right).toBeLessThanOrEqual(privacyGeometry.width + 1);
+    await privacyToggle.click();
+
+    await page.locator("#main-content").evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    const finalContentGeometry = await page.evaluate(() => {
+      const candidates = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          'main a[href], main button:not([disabled]), main input:not([disabled]), main textarea:not([disabled]), main select:not([disabled]), main [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => {
+        const style = getComputedStyle(element);
+        const bounds = element.getBoundingClientRect();
+        return (
+          style.display !== "none" && style.visibility !== "hidden" && bounds.height > 0
+        );
+      });
+      const lastControl = candidates.at(-1);
+      const footerShell = document
+        .querySelector<HTMLElement>('[aria-label="Post delivery actions"]')
+        ?.parentElement?.getBoundingClientRect();
+      const lastBounds = lastControl?.getBoundingClientRect();
+      return {
+        lastBottom: lastBounds?.bottom ?? Number.POSITIVE_INFINITY,
+        footerTop: footerShell?.top ?? Number.NEGATIVE_INFINITY,
+      };
+    });
+    expect(finalContentGeometry.lastBottom).toBeLessThanOrEqual(
+      finalContentGeometry.footerTop + 1,
+    );
+
+    await footer.getByRole("button", { name: "Send website draft" }).click();
+    await expect.poll(() => websitePostCount).toBe(1);
+    expect(websiteRequestBody).toEqual({
+      expected_post_revision: "2026-08-05 09:43:00.000Z",
+      website_draft: expect.objectContaining({
+        body: "Final synthetic website copy prepared only after review.",
+        kind: "customer_story",
+        category: "deliveries",
+      }),
+    });
+    await expect(
+      page.getByRole("alert").filter({
+        hasText: "Private draft ready — status check needs attention",
+      }),
+    ).toBeVisible();
+    await expect(
+      footer.getByRole("button", { name: "Review website draft" }),
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Review" })).toHaveCount(0);
+    await page.waitForTimeout(100);
+    expect(websitePostCount).toBe(1);
+    await expectNoHorizontalOverflow(page);
   });
 });
