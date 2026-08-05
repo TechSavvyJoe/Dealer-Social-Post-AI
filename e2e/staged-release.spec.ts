@@ -281,6 +281,10 @@ test.describe("Hosted staged release", () => {
       await myCodeButton.focus();
       await expect(myCodeButton).toBeFocused();
       await page.keyboard.press("Tab");
+      await expect(
+        page.getByRole("button", { name: /manager username and password/i }),
+      ).toBeFocused();
+      await page.keyboard.press("Tab");
       await expect(page.getByRole("button", { name: /system admin/i })).toBeFocused();
       await page.keyboard.press("Enter");
 
