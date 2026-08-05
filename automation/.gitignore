@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.output/
+.outputai/
+.temporal/
+.cache/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+config/credentials.key
+config/credentials.yml.enc
+config/credentials.*.key
+config/credentials.*.yml.enc

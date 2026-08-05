@@ -1,0 +1,33 @@
+{
+  "name": "dealer-social-post-ai-automation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/worker.js",
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json && output-copy-assets",
+    "check": "tsc --noEmit -p tsconfig.json && vitest run --config vitest.config.ts",
+    "test": "vitest run --config vitest.config.ts",
+    "output:worker:check": "node node_modules/@outputai/core/src/worker/check.js \"$PWD\"",
+    "output:worker:start": "node node_modules/@outputai/core/src/worker/index.js \"$PWD\"",
+    "dispatcher:start": "node dist/dispatcher.js",
+    "output:dev": "output dev"
+  },
+  "dependencies": {
+    "@outputai/output": "0.10.0",
+    "@temporalio/client": "1.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.5.2",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": ">=24.3.0"
+  },
+  "outputai": {
+    "hookFiles": [
+      "node_modules/@outputai/credentials/dist/hooks.js"
+    ]
+  }
+}

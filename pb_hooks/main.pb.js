@@ -5010,6 +5010,147 @@ routerAdd("GET", "/api/app/dealers", (c) => {
   }
 });
 
+// ---- Vehicle Walkaround Studio ------------------------------------------
+// Heavy media I/O remains in the separately deployed worker/storage broker.
+// These routes own tenant authority, state transitions, and durable handoffs.
+routerAdd("POST", "/api/app/walkarounds", (c) => {
+  return require(__hooks + "/walkarounds.js").createProject(
+    c,
+    require(__hooks + "/helpers.js"),
+  );
+});
+routerAdd("POST", "/api/app/walkarounds/:id/uploads", (c) => {
+  return require(__hooks + "/walkarounds.js").createUpload(
+    c,
+    require(__hooks + "/helpers.js"),
+  );
+});
+routerAdd("POST", "/api/app/walkarounds/:id/uploads/:assetId/finalize", (c) => {
+  return require(__hooks + "/walkarounds.js").finalizeUpload(
+    c,
+    require(__hooks + "/helpers.js"),
+  );
+});
+routerAdd("POST", "/api/app/walkarounds/:id/release", (c) => {
+  return require(__hooks + "/walkarounds.js").saveRelease(
+    c,
+    require(__hooks + "/helpers.js"),
+  );
+});
+routerAdd("POST", "/api/app/walkarounds/:id/process", (c) => {
+  return require(__hooks + "/walkarounds.js").processProject(
+    c,
+    require(__hooks + "/helpers.js"),
+  );
+});
+routerAdd("GET", "/api/app/walkarounds/youtube/status", (c) => {
+  return require(__hooks + "/walkarounds.js").youtubeStatus(
+    c,
+    require(__hooks + "/helpers.js"),
+  );
+});
+routerAdd("POST", "/api/app/walkarounds/youtube/connect", (c) => {
+  return require(__hooks + "/walkarounds.js").youtubeConnect(
+    c,
+    require(__hooks + "/helpers.js"),
+  );
+});
+routerAdd("POST", "/api/app/walkarounds/youtube/complete", (c) => {
+  return require(__hooks + "/walkarounds.js").youtubeComplete(
+    c,
+    require(__hooks + "/helpers.js"),
+  );
+});
+routerAdd("DELETE", "/api/app/walkarounds/youtube/disconnect", (c) => {
+  return require(__hooks + "/walkarounds.js").youtubeDisconnect(
+    c,
+    require(__hooks + "/helpers.js"),
+  );
+});
+routerAdd("GET", "/api/app/walkarounds/:id", (c) => {
+  return require(__hooks + "/walkarounds.js").getProject(
+    c,
+    require(__hooks + "/helpers.js"),
+  );
+});
+routerAdd("GET", "/api/app/walkarounds/:id/assets/:kind/preview", (c) => {
+  return require(__hooks + "/walkarounds.js").previewAsset(
+    c,
+    require(__hooks + "/helpers.js"),
+  );
+});
+routerAdd("PATCH", "/api/app/walkarounds/:id/review", (c) => {
+  return require(__hooks + "/walkarounds.js").reviewProject(
+    c,
+    require(__hooks + "/helpers.js"),
+  );
+});
+routerAdd("POST", "/api/app/walkarounds/:id/re-edit", (c) => {
+  return require(__hooks + "/walkarounds.js").reEditProject(
+    c,
+    require(__hooks + "/helpers.js"),
+  );
+});
+routerAdd("POST", "/api/app/walkarounds/:id/approve", (c) => {
+  return require(__hooks + "/walkarounds.js").approveProject(
+    c,
+    require(__hooks + "/helpers.js"),
+  );
+});
+routerAdd("POST", "/api/app/walkarounds/:id/publish", (c) => {
+  return require(__hooks + "/walkarounds.js").publishProject(
+    c,
+    require(__hooks + "/helpers.js"),
+  );
+});
+routerAdd("DELETE", "/api/app/walkarounds/:id", (c) => {
+  return require(__hooks + "/walkarounds.js").deleteProject(
+    c,
+    require(__hooks + "/helpers.js"),
+  );
+});
+routerAdd("GET", "/api/internal/walkarounds/:id/production-context", (c) => {
+  return require(__hooks + "/walkarounds.js").internalContext(c, "production");
+});
+routerAdd("POST", "/api/internal/walkarounds/:id/production-events", (c) => {
+  return require(__hooks + "/walkarounds.js").productionEvent(c);
+});
+routerAdd("POST", "/api/internal/walkaround-tasks/claim", (c) => {
+  return require(__hooks + "/walkarounds.js").claimTask(c);
+});
+routerAdd("POST", "/api/internal/walkaround-tasks/:taskId/ack", (c) => {
+  return require(__hooks + "/walkarounds.js").ackTask(c);
+});
+routerAdd("POST", "/api/internal/walkaround-tasks/:taskId/nack", (c) => {
+  return require(__hooks + "/walkarounds.js").nackTask(c);
+});
+routerAdd("POST", "/api/internal/walkaround-tasks/:taskId/renew", (c) => {
+  return require(__hooks + "/walkarounds.js").renewTask(c);
+});
+routerAdd("GET", "/api/internal/walkarounds/:id/publication-context", (c) => {
+  return require(__hooks + "/walkarounds.js").internalContext(c, "publication");
+});
+routerAdd("POST", "/api/internal/walkarounds/:id/publication-events", (c) => {
+  return require(__hooks + "/walkarounds.js").publicationEvent(c);
+});
+routerAdd("POST", "/api/internal/walkarounds/:id/assets/:assetId/signed-read", (c) => {
+  return require(__hooks + "/walkarounds.js").signedRead(c);
+});
+routerAdd("POST", "/api/internal/walkarounds/:id/youtube/upload-session", (c) => {
+  return require(__hooks + "/walkarounds.js").youtubeUploadSession(c);
+});
+routerAdd("POST", "/api/internal/walkarounds/:id/youtube/upload-next", (c) => {
+  return require(__hooks + "/walkarounds.js").youtubeUploadNext(c);
+});
+routerAdd("GET", "/api/internal/walkarounds/:id/youtube/videos/:videoId", (c) => {
+  return require(__hooks + "/walkarounds.js").youtubeVideoStatus(c);
+});
+routerAdd(
+  "POST",
+  "/api/internal/walkarounds/:id/youtube/videos/:videoId/visibility",
+  (c) => require(__hooks + "/walkarounds.js").youtubeVisibility(c),
+);
+
 // Daily background garbage collection of expired sessions and old audit logs (3:00 AM UTC)
 cronAdd("session_gc_and_auth_cleanup", "0 3 * * *", () => {
   const helpers = require(__hooks + "/helpers.js");
@@ -5017,5 +5158,13 @@ cronAdd("session_gc_and_auth_cleanup", "0 3 * * *", () => {
     helpers.purgeExpiredSessionsAndOldEvents();
   } catch (e) {
     console.error("[cron:session_gc] failed:", e);
+  }
+});
+
+cronAdd("walkaround_abandoned_upload_cleanup", "30 3 * * *", () => {
+  try {
+    require(__hooks + "/walkarounds.js").cleanupAbandonedUploads();
+  } catch (_e) {
+    console.error("[cron:walkaround_cleanup] failed");
   }
 });

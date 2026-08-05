@@ -1,5 +1,6 @@
 import React, { Suspense } from "react";
 import { motion } from "framer-motion";
+import { Camera, Video } from "lucide-react";
 import {
   AppStep,
   GeneratedPost,
@@ -20,6 +21,11 @@ import type { LoginResult, SessionLoginRequest } from "../stores/appStore";
 import { useAppStore } from "../stores/appStore";
 import type { PrimaryImageProfile, PlatformId } from "../services/platformCopy";
 import type { WebsiteDraft } from "../services/websitePublishing";
+import { isWalkaroundStudioEnabled } from "../services/walkarounds";
+
+const WALKAROUND_STUDIO_ENABLED = isWalkaroundStudioEnabled(
+  import.meta.env.VITE_WALKAROUND_STUDIO_ENABLED,
+);
 
 // Lazy load components
 const LazyLoginScreen = React.lazy(() =>
@@ -35,6 +41,9 @@ const LazyDealerAdminDashboard = React.lazy(() =>
 );
 const LazyImageInput = React.lazy(() =>
   import("./CameraCapture").then((mod) => ({ default: mod.ImageInput })),
+);
+const LazyWalkaroundStudio = React.lazy(() =>
+  import("./WalkaroundStudio").then((mod) => ({ default: mod.WalkaroundStudio })),
 );
 const LazyPostCustomizer = React.lazy(() =>
   import("./PostCustomizer").then((mod) => ({ default: mod.PostCustomizer })),
@@ -147,9 +156,13 @@ export const MainContent: React.FC<MainContentProps> = ({
   onRequestLogout,
 }) => {
   const persistedGenerationParams = useAppStore((state) => state.generationParams);
+  const currentRole = useAppStore((state) => state.role);
   const [customizerSeed, setCustomizerSeed] = React.useState<GenerationParams | null>(
     () => (displayedStep === AppStep.CUSTOMIZE ? persistedGenerationParams : null),
   );
+  const [captureWorkspace, setCaptureWorkspace] = React.useState<
+    "photo" | "walkaround"
+  >("photo");
 
   // Returning to Capture starts a genuinely new post. Keep the persisted
   // values available for reload/remix recovery, but do not leak them into the
@@ -309,9 +322,60 @@ export const MainContent: React.FC<MainContentProps> = ({
         );
       case AppStep.CAPTURE:
         return (
-          <Suspense fallback={suspenseFallback("Preparing camera")}>
-            <LazyImageInput onImageSelected={onImageSelected} onClose={onReset} />
-          </Suspense>
+          <div className="mx-auto w-full max-w-5xl space-y-4">
+            {WALKAROUND_STUDIO_ENABLED && (
+              <div
+                className="mx-auto grid w-full max-w-xl grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-surface-900/70 p-2"
+                aria-label="Creation mode"
+              >
+                <button
+                  type="button"
+                  aria-pressed={captureWorkspace === "photo"}
+                  onClick={() => setCaptureWorkspace("photo")}
+                  className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors ${
+                    captureWorkspace === "photo"
+                      ? "bg-primary-500 text-white shadow-lg"
+                      : "text-surface-300 hover:bg-white/5 hover:text-surface-100"
+                  }`}
+                >
+                  <Camera className="h-5 w-5" aria-hidden="true" />
+                  Photo post
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={captureWorkspace === "walkaround"}
+                  onClick={() => setCaptureWorkspace("walkaround")}
+                  className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors ${
+                    captureWorkspace === "walkaround"
+                      ? "bg-primary-500 text-white shadow-lg"
+                      : "text-surface-300 hover:bg-white/5 hover:text-surface-100"
+                  }`}
+                >
+                  <Video className="h-5 w-5" aria-hidden="true" />
+                  Vehicle walkaround
+                </button>
+              </div>
+            )}
+            <Suspense
+              fallback={suspenseFallback(
+                captureWorkspace === "photo" ? "Preparing camera" : "Loading studio",
+              )}
+            >
+              {captureWorkspace === "photo" || !WALKAROUND_STUDIO_ENABLED ? (
+                <LazyImageInput onImageSelected={onImageSelected} onClose={onReset} />
+              ) : currentDealer ? (
+                <LazyWalkaroundStudio
+                  dealerId={currentDealer.id}
+                  dealerName={currentDealer.name}
+                  requiresApproval={Boolean(currentDealer.requires_approval)}
+                  canManageYouTube={
+                    currentRole === "dealer_admin" || currentRole === "super_admin"
+                  }
+                  onBack={() => setCaptureWorkspace("photo")}
+                />
+              ) : null}
+            </Suspense>
+          </div>
         );
       case AppStep.CUSTOMIZE:
         const customizerProps = {

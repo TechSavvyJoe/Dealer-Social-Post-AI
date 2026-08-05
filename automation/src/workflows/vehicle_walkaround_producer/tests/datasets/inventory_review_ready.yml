@@ -1,0 +1,7 @@
+name: inventory_review_ready
+input:
+  projectId: walkaround_demo_inventory_001
+  workflowId: walkaround_demo_inventory_001_producer_r1
+  expectedRevision: 4
+ground_truth:
+  notes: Valid output must stop at review_ready and provide one master plus one teaser.
