@@ -115,6 +115,10 @@ jobs:
             --env POCKETBASE_BACKUP_LAST_VERIFIED_AT="$restore_verified_at" \
             --env POCKETBASE_BACKUP_VERIFIED_RELEASE_SHA="$release_sha" \
             --env RELEASE_SHA="$release_sha" \
+            --env CUSTOMER_HUB_URL=https://customer-hub.example \
+            --env CUSTOMER_HUB_SECRET=ci-customer-hub-secret-at-least-32-characters \
+            --env CUSTOMER_HUB_DESTINATION_ID=joe_customer_hub \
+            --env CUSTOMER_HUB_DEALER_ID=ci_customer_hub_dealer \
             --publish 127.0.0.1:8090:8090 \
             dealer-social-post-ai:ci)"
 
@@ -163,6 +167,7 @@ jobs:
             http://127.0.0.1:8090/api/app/health)" = "200"
           grep --fixed-strings '"checks"' /tmp/admin-health.json
           grep --fixed-strings '"off_box_restore_ready":true' /tmp/admin-health.json
+          grep --fixed-strings '"website_integration_configured":true' /tmp/admin-health.json
 
           E2E_BASE_URL=http://127.0.0.1:8090 \
           E2E_REAL_POCKETBASE=true \

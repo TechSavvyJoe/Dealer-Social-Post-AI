@@ -37,6 +37,7 @@ interface HealthPayload {
     legacy_client_compatibility_enabled: boolean;
     off_box_backup_configured: boolean;
     off_box_restore_ready: boolean;
+    website_integration_configured: boolean;
   };
   counts?: {
     dealers: number;
@@ -97,6 +98,7 @@ const healthCheckKeys: Array<keyof HealthPayload["checks"]> = [
   "legacy_client_compatibility_enabled",
   "off_box_backup_configured",
   "off_box_restore_ready",
+  "website_integration_configured",
 ];
 
 const backupStatuses: HealthPayload["backup"]["status"][] = [
@@ -236,6 +238,13 @@ const checkRows: Array<{
     icon: Database,
     critical: true,
     hint: "A recent R2 restore drill must match the exact running release.",
+  },
+  {
+    key: "website_integration_configured",
+    label: "Customer Hub connection",
+    icon: Server,
+    critical: true,
+    hint: "The private signed draft destination and dealership guard must be fully configured.",
   },
 ];
 

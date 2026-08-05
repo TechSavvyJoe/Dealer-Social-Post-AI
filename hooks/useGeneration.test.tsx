@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   editSocialPostImage: vi.fn(),
   generateSocialPostText: vi.fn(),
   generateSocialPostTextDetailed: vi.fn(),
+  generateWebsiteDraftMetadata: vi.fn(),
   editSocialPostText: vi.fn(),
   editSocialPostTextDetailed: vi.fn(),
   generatePostVideo: vi.fn(),
@@ -164,6 +165,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       editSocialPostImage: mocks.editSocialPostImage,
       generateSocialPostText: mocks.generateSocialPostText,
       generateSocialPostTextDetailed: mocks.generateSocialPostTextDetailed,
+      generateWebsiteDraftMetadata: mocks.generateWebsiteDraftMetadata,
       editSocialPostText: mocks.editSocialPostText,
       editSocialPostTextDetailed: mocks.editSocialPostTextDetailed,
       generatePostVideo: mocks.generatePostVideo,
@@ -300,6 +302,54 @@ describe("useGeneration model-tier and provenance wiring", () => {
     expect(mocks.logPost).toHaveBeenCalledWith(
       expect.objectContaining({
         disclosures: expect.stringContaining("Lease offer with approved credit"),
+      }),
+      1,
+    );
+
+    cleanup();
+  });
+
+  it("prepares the private website draft from the exact finished creative", async () => {
+    mocks.generateWebsiteDraftMetadata.mockResolvedValue(
+      JSON.stringify({
+        title: "Welcome, Alex",
+        body: "Alex is ready for the road ahead with a vehicle chosen just for them.",
+        altText: "Finished customer delivery creative for Example Motors.",
+        category: "deliveries",
+        privacyFlags: ["faces_visible"],
+      }),
+    );
+    const { result, cleanup } = renderGeneration();
+
+    await act(async () => {
+      await result.current.handleGenerate(
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Alex Morgan",
+        undefined,
+        undefined,
+        {
+          scenarioId: "customer_delivery",
+          websiteEnabled: true,
+          websiteVehicleDescription: "2025 Ford Explorer ST",
+        },
+      );
+    });
+
+    expect(mocks.generateWebsiteDraftMetadata).toHaveBeenCalledWith(
+      generatedResult.image,
+      expect.stringContaining("Website content kind (fixed): customer_story"),
+    );
+    expect(mocks.logPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        websiteDraft: expect.objectContaining({
+          enabled: true,
+          kind: "customer_story",
+          category: "deliveries",
+          customerDisplayName: "Alex M.",
+          vehicleDescription: "2025 Ford Explorer ST",
+          schemaVersion: 1,
+        }),
       }),
       1,
     );

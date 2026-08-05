@@ -39,6 +39,12 @@ import type { Dealer } from "../types";
 import type { CaptionGenerationResult } from "../services/modelConfig";
 import { MODEL_POLICY_VERSION } from "../services/modelConfig";
 import { EXPORT_FORMATS, renderFormat } from "../utils/multiFormatExport";
+import {
+  buildFallbackWebsiteDraft,
+  buildWebsiteDraftPrompt,
+  parseWebsiteDraftResponse,
+  type WebsiteDraftSource,
+} from "../services/websitePublishing";
 
 const brandKitFromDealer = (dealer?: Dealer | null): DealerBrandKit | null => {
   if (!dealer) return null;
@@ -127,6 +133,10 @@ export interface GenerationMeta {
   hasRelease?: boolean;
   /** Signed-but-unsaved release captured before generation. Saved linked to the post on success so we never create orphan release records. */
   capturedRelease?: CapturedRelease;
+  /** Prepare a private Customer Hub draft after AI generation. */
+  websiteEnabled?: boolean;
+  /** Grounded year/make/model/trim from VIN decode; never the VIN. */
+  websiteVehicleDescription?: string;
 }
 
 export const useGeneration = () => {
@@ -276,6 +286,8 @@ export const useGeneration = () => {
         mediaOutputMode: variables.mediaOutputMode,
         primaryFormatId: variables.primaryFormatId,
         imageAspectRatio: variables.imageAspectRatio,
+        websiteEnabled: variables.meta?.websiteEnabled,
+        websiteVehicleDescription: variables.meta?.websiteVehicleDescription,
       });
 
       progressIntervalRef.current = setInterval(() => {
@@ -369,11 +381,24 @@ export const useGeneration = () => {
         imageAspectRatio: variables.imageAspectRatio,
       };
 
-      // Optional multi-platform caption pack. Never blocks the primary post:
-      // 0–1 platforms keep primary text only; pack failures are non-fatal.
-      if (shouldGenerateCaptionPack(platformIds) && selectedImage && currentDealer) {
+      // Destination copy can run together after the approved primary
+      // caption/image exists. Both paths own safe fallbacks and never block the
+      // main post. Website preparation remains a private draft only.
+      const shouldPrepareCaptionPack =
+        shouldGenerateCaptionPack(platformIds) &&
+        Boolean(selectedImage && currentDealer);
+      const shouldPrepareWebsite = Boolean(
+        variables.meta?.websiteEnabled && currentDealer && finalPost.image,
+      );
+      if (shouldPrepareCaptionPack || shouldPrepareWebsite) {
+        setProgressMessage("Finishing destination copy...");
+      }
+
+      const captionPackTask = async (): Promise<Record<string, string> | undefined> => {
+        if (!shouldPrepareCaptionPack || !selectedImage || !currentDealer) {
+          return undefined;
+        }
         try {
-          setProgressMessage("Tailoring captions per platform...");
           const packBrief = platformsToCaptionPackBrief(
             platformIds,
             currentDealer.name,
@@ -396,7 +421,6 @@ export const useGeneration = () => {
           });
           assertOperationAuthEpoch(variables.authEpoch);
           const parsed = parsePlatformCaptionPack(rawPack, platformIds);
-          // Compliance-scan each variant; drop any that fail hard.
           const cleaned: Record<string, string> = {};
           for (const [id, caption] of Object.entries(parsed)) {
             try {
@@ -410,22 +434,74 @@ export const useGeneration = () => {
               // Skip prohibited variants; primary caption remains usable.
             }
           }
-          if (Object.keys(cleaned).length > 0) {
-            finalPost.platformCaptions = cleaned;
-            const disclosureUnion = analyzeCaptionSetForDelivery(
-              [finalPost.text, ...Object.values(cleaned)],
-              currentDealer.banned_phrases,
-            );
-            finalPost.disclosures = disclosureUnion.disclosures;
-            finalPost.disclosureCategories = disclosureUnion.disclosureCategories;
-          }
+          return Object.keys(cleaned).length > 0 ? cleaned : undefined;
         } catch (err) {
           logError("caption.pack_failed", {
             message: err instanceof Error ? err.message : String(err),
             platforms: platformIds,
           });
+          return undefined;
         }
+      };
+
+      const websiteDraftTask = async () => {
+        if (!shouldPrepareWebsite || !currentDealer) {
+          return undefined;
+        }
+        const source: WebsiteDraftSource = {
+          scenarioId: variables.meta?.scenarioId,
+          customScenariosJson: currentDealer.custom_scenarios,
+          dealerName: currentDealer.name,
+          caption: preparedCaption.caption,
+          customerDisplayName: variables.customerName,
+          vehicleDescription: variables.meta?.websiteVehicleDescription,
+        };
+        const fallback = buildFallbackWebsiteDraft(source);
+        try {
+          assertOperationAuthEpoch(variables.authEpoch);
+          const { generateWebsiteDraftMetadata } = await loadGeminiService();
+          assertOperationAuthEpoch(variables.authEpoch);
+          // This call intentionally runs beside the queued caption-pack call.
+          // The proxy/model layer owns retries; malformed JSON is handled by
+          // the strict parser below.
+          logEvent("ai.website.draft.start", {
+            kind: fallback.kind,
+            category: fallback.category,
+          });
+          const raw = await generateWebsiteDraftMetadata(
+            finalPost.image,
+            buildWebsiteDraftPrompt(source),
+          );
+          assertOperationAuthEpoch(variables.authEpoch);
+          const prepared = parseWebsiteDraftResponse(raw, source);
+          logEvent("ai.website.draft.success", {
+            source: prepared.source,
+            kind: prepared.draft.kind,
+          });
+          return prepared.draft;
+        } catch (err) {
+          logError("ai.website.draft.failure", {
+            message: err instanceof Error ? err.message : String(err),
+            kind: fallback.kind,
+          });
+          return fallback;
+        }
+      };
+
+      const [platformCaptions, websiteDraft] = await Promise.all([
+        captionPackTask(),
+        websiteDraftTask(),
+      ]);
+      if (platformCaptions) {
+        finalPost.platformCaptions = platformCaptions;
+        const disclosureUnion = analyzeCaptionSetForDelivery(
+          [finalPost.text, ...Object.values(platformCaptions)],
+          currentDealer?.banned_phrases,
+        );
+        finalPost.disclosures = disclosureUnion.disclosures;
+        finalPost.disclosureCategories = disclosureUnion.disclosureCategories;
       }
+      if (websiteDraft) finalPost.websiteDraft = websiteDraft;
       if (variables.authEpoch !== useAppStore.getState().authEpoch) return;
 
       // Log post + (if a release was captured) link the already-persisted
@@ -468,6 +544,7 @@ export const useGeneration = () => {
               platformCaptions: finalPost.platformCaptions,
               primaryFormatId: finalPost.primaryFormatId,
               imageAspectRatio: finalPost.imageAspectRatio,
+              websiteDraft: finalPost.websiteDraft,
             },
             variables.authEpoch,
           );
@@ -508,7 +585,24 @@ export const useGeneration = () => {
         if (variables.authEpoch !== useAppStore.getState().authEpoch) return;
         const post = persisted.post;
         finalPost.releaseStatus = persisted.releaseStatus;
-        if (post) finalPost.postId = post.id;
+        if (post) {
+          finalPost.postId = post.id;
+          if (post.website_draft) finalPost.websiteDraft = post.website_draft;
+          finalPost.websitePublication =
+            post.website_publication ||
+            (finalPost.websiteDraft
+              ? {
+                  status: currentDealer.requires_approval
+                    ? "waiting_approval"
+                    : "queued",
+                }
+              : undefined);
+        } else if (finalPost.websiteDraft) {
+          finalPost.websitePublication = {
+            status: "failed",
+            lastError: "The website draft could not be saved with this post.",
+          };
+        }
 
         if (persisted.releaseStatus === "save_failed") {
           toastError(

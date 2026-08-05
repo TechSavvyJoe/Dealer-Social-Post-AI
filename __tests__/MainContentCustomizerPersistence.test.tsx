@@ -40,7 +40,11 @@ vi.mock("../components/PostCustomizer", () => ({
             "Alex",
             "Alex found the perfect SUV.",
             "Retry-safe creative brief.",
-            { scenarioId: "preowned_spotlight" },
+            {
+              scenarioId: "preowned_spotlight",
+              websiteEnabled: true,
+              websiteVehicleDescription: "2025 Ford Explorer ST",
+            },
             ["gbp"],
             {
               primaryFormatId: "gbp",
@@ -82,6 +86,8 @@ const persistedParams: GenerationParams = {
   mediaOutputMode: "both",
   primaryFormatId: "marketplace",
   imageAspectRatio: "16:9",
+  websiteEnabled: true,
+  websiteVehicleDescription: "2025 Ford Explorer ST",
 };
 
 const makeProps = (overrides: Record<string, unknown> = {}) => ({
@@ -154,6 +160,16 @@ describe("MainContent customizer delivery-plan persistence", () => {
       mediaOutputMode: "video",
       primaryFormatId: "gbp",
       imageAspectRatio: "4:3",
+      websiteDraft: {
+        enabled: true,
+        kind: "site_update",
+        category: "inventory",
+        title: "New arrival",
+        body: "A fresh arrival is ready for review.",
+        altText: "Vehicle arrival creative from Example Motors.",
+        vehicleDescription: "2025 Ford Explorer ST",
+        schemaVersion: 1,
+      },
     };
     const props = makeProps({
       displayedStep: AppStep.RESULT,
@@ -174,6 +190,8 @@ describe("MainContent customizer delivery-plan persistence", () => {
       mediaOutputMode: "video",
       primaryFormatId: "gbp",
       imageAspectRatio: "4:3",
+      websiteEnabled: true,
+      websiteVehicleDescription: "2025 Ford Explorer ST",
     });
   });
 
@@ -191,7 +209,11 @@ describe("MainContent customizer delivery-plan persistence", () => {
       "Alex",
       "Alex found the perfect SUV.",
       "Retry-safe creative brief.",
-      { scenarioId: "preowned_spotlight" },
+      {
+        scenarioId: "preowned_spotlight",
+        websiteEnabled: true,
+        websiteVehicleDescription: "2025 Ford Explorer ST",
+      },
       ["gbp"],
       expect.objectContaining({
         primaryFormatId: "gbp",
@@ -231,6 +253,8 @@ describe("MainContent customizer delivery-plan persistence", () => {
       mediaOutputMode: "both",
       primaryFormatId: "gbp",
       imageAspectRatio: "4:3",
+      websiteEnabled: true,
+      websiteVehicleDescription: "2025 Ford Explorer ST",
     });
   });
 });

@@ -704,6 +704,50 @@ export const generateSocialPostText = async (
   ...args: Parameters<typeof generateSocialPostTextDetailed>
 ): Promise<string> => (await generateSocialPostTextDetailed(...args)).text;
 
+/**
+ * Raw structured-copy helper for the private Customer Hub draft. This uses the
+ * existing caption model chain and authenticated server proxy, but deliberately
+ * skips social-caption cleanup because the caller validates a strict JSON
+ * object and owns a deterministic fallback.
+ */
+export const generateWebsiteDraftMetadata = async (
+  imageBase64Url: string,
+  prompt: string,
+): Promise<string> => {
+  const requestAuthEpoch = captureAuthEpoch();
+  const normalisedImage = await normaliseDataUrl(imageBase64Url);
+  assertAuthEpoch(requestAuthEpoch);
+  const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
+  const imagePart = { inlineData: { mimeType, data: base64Data } };
+  const task = "caption_regenerate" as const;
+  const attemptId = createGenerationAttemptId();
+  const taskConfig = TASKS[task];
+
+  const generated = await withFallbackChain(task, attemptId, async (modelId) => {
+    assertAuthEpoch(requestAuthEpoch);
+    const client = getGeminiClient();
+    const response = await client.models.generateContent({
+      model: modelId,
+      task,
+      attemptId,
+      contents: { parts: [imagePart, { text: prompt }] },
+      generationConfig: {
+        ...taskConfig.params,
+        temperature: 0.2,
+        maxOutputTokens: Math.min(taskConfig.params.maxOutputTokens || 1024, 1024),
+        responseMimeType: "application/json",
+      },
+      requestAuthEpoch,
+    } as any);
+    assertAuthEpoch(requestAuthEpoch);
+    const rawText = typeof response.text === "function" ? response.text() : "";
+    if (!rawText.trim()) throw new Error("Website draft AI returned no metadata.");
+    return rawText.trim();
+  });
+
+  return generated.value;
+};
+
 export const editSocialPostTextDetailed = async (
   originalText: string,
   editPromptString: string,
