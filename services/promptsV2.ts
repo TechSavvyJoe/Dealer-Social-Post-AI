@@ -19,6 +19,176 @@ import { StyleOption, ToneOption, VideoStyle, VideoRequestOptions } from "../typ
 const xmlBlock = (tag: string, content: string): string =>
   `<${tag}>\n${content.trim()}\n</${tag}>`;
 
+const MAX_ON_IMAGE_HEADLINE_WORDS = 4;
+const MAX_ON_IMAGE_HEADLINE_CHARACTERS = 40;
+const URL_PATTERN = /(?:https?:\/\/|www\.|(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/\S*)?)/i;
+const PHONE_PATTERN = /(?:\+?\d[\d\s().-]{6,}\d)/;
+const SENTENCE_PUNCTUATION_PATTERN = /[.!?;:]/;
+const FINITE_SENTENCE_VERB_PATTERN =
+  /\b(?:am|is|are|was|were|has|have|had|bought|purchased|drove|drives|loves|loved|chose|chooses|got|gets|found|finds|will|would|can|could|should|i['’]m|we['’]re|you['’]re|he['’]s|she['’]s|they['’]re|it['’]s)\b/i;
+
+const normalizeHeadline = (value: string): string => value.trim().replace(/\s+/g, " ");
+
+/**
+ * Literal image text is intentionally much stricter than caption text. A
+ * caption is useful model context, but putting it all on the photo produces
+ * unreadable creative and can accidentally render contact details or links.
+ */
+export const isSafeOnImageHeadline = (value: string): boolean => {
+  const normalized = normalizeHeadline(value);
+  if (!normalized || normalized.length > MAX_ON_IMAGE_HEADLINE_CHARACTERS) {
+    return false;
+  }
+  if (value.includes("\n") || value.includes("\r")) return false;
+  if (normalized.split(/\s+/).length > MAX_ON_IMAGE_HEADLINE_WORDS) return false;
+  if (normalized.includes("#")) return false;
+  if (URL_PATTERN.test(normalized) || PHONE_PATTERN.test(normalized)) return false;
+  if (SENTENCE_PUNCTUATION_PATTERN.test(normalized)) return false;
+  if (FINITE_SENTENCE_VERB_PATTERN.test(normalized)) return false;
+
+  // Keep literal headlines typographic rather than instruction-like. This
+  // still permits common vehicle names such as F-150 and phrases with &.
+  return /^[\p{L}\p{N}][\p{L}\p{N} &'’+\-/]*$/u.test(normalized);
+};
+
+export const ON_IMAGE_TEXT_RULES = `HEADLINE COPY CONTRACT:
+- Headline copy must be 1-4 words and no more than 40 characters.
+- Never render a long caption, custom message, creative brief, or edit request verbatim. Summarize its intent into a new short headline.
+- Never render hashtags, URLs, phone numbers, or full sentences anywhere in headline/support copy.
+- Exact wording is allowed only when a dedicated approved_exact_headline block is present. Do not copy any other request words onto the image.
+- The dealership's exact legal name and supplied logo are brand identity, not headline copy, and are exempt from the headline word limit.`;
+
+export const buildOnImageHeadlineInstruction = (customMessage?: string): string => {
+  const normalized = normalizeHeadline(customMessage || "");
+
+  if (normalized && isSafeOnImageHeadline(normalized)) {
+    return `The user supplied an approved short headline.
+Render only this headline exactly as written:
+<approved_exact_headline>${normalized}</approved_exact_headline>
+Do not add caption text, hashtags, contact details, or a second marketing sentence.`;
+  }
+
+  if (normalized) {
+    return `The user supplied long-form or unsafe custom copy. It is not literal image copy and is deliberately omitted from this image prompt.
+Do not quote it, split it across lines, partially reproduce it, or render any hashtags/contact details from it.
+Create a new 1-4 word headline (40 characters maximum) from the photo and creative direction.`;
+  }
+
+  return `Create a new 1-4 word headline (40 characters maximum) from the photo and creative direction.
+Do not add caption text, hashtags, URLs, phone numbers, or a full sentence.`;
+};
+
+interface ImageEditTextGuard {
+  request: string;
+  approvedHeadline?: string;
+}
+
+interface RequestedTextCandidate {
+  text: string;
+  start: number;
+  end: number;
+}
+
+const findRequestedTextCandidate = (
+  request: string,
+): RequestedTextCandidate | undefined => {
+  const quoted = /["“]([^"”]+)["”]/g.exec(request);
+  const quotedLooksLikeImageCopy =
+    /\b(?:headline|text|title|caption|copy|wording|message|phrase|words?)\b(?:\s+(?:on|in)\s+(?:the\s+)?(?:image|photo|graphic))?\s*(?:to|as|say(?:ing)?|read(?:ing|s)?|with|:|-)\s*["“]/i.test(
+      request,
+    ) ||
+    /\b(?:add|write|put)\s*["“]/i.test(request) ||
+    /\b(?:make|have)\s+(?:it|the\s+(?:image|photo|graphic))\s+(?:say|read)\s*["“]/i.test(
+      request,
+    );
+  if (quoted?.index !== undefined && quotedLooksLikeImageCopy) {
+    return {
+      text: quoted[1],
+      start: quoted.index,
+      end: quoted.index + quoted[0].length,
+    };
+  }
+
+  const makeItSayDirective =
+    /\b(?:make|have)\s+(?:it|the\s+(?:image|photo|graphic))\s+(?:say|read)\s*(?::|-)?\s*(.+)$/i.exec(
+      request,
+    );
+  if (makeItSayDirective?.index !== undefined) {
+    const text = makeItSayDirective[1].trim();
+    const start = request.indexOf(makeItSayDirective[1], makeItSayDirective.index);
+    return { text, start, end: start + makeItSayDirective[1].length };
+  }
+
+  const afterTextDirective =
+    /\b(?:headline|text|title|caption|copy|wording|message|phrase|words?)\b(?:\s+(?:on|in)\s+(?:the\s+)?(?:image|photo|graphic))?\s*(?:to|as|say(?:ing)?|read(?:ing|s)?|with|:|-)\s*(.+)$/i.exec(
+      request,
+    );
+  if (afterTextDirective?.index !== undefined) {
+    const text = afterTextDirective[1].trim();
+    const start = request.indexOf(afterTextDirective[1], afterTextDirective.index);
+    return { text, start, end: start + afterTextDirective[1].length };
+  }
+
+  const addTextDirective =
+    /\b(?:add|write|put|place|use)\b[\s\S]*?\b(?:headline|text|title|caption|copy|wording|message|phrase|words?)\b\s*(?::|-|as|saying|reading)?\s+(.+)$/i.exec(
+      request,
+    );
+  if (addTextDirective?.index !== undefined) {
+    const text = addTextDirective[1].trim();
+    const start = request.indexOf(addTextDirective[1], addTextDirective.index);
+    return { text, start, end: start + addTextDirective[1].length };
+  }
+
+  // Some edit controls send only the desired replacement headline. Do not
+  // confuse short visual-edit commands ("make image brighter") with copy.
+  const containsEditVerb =
+    /\b(?:add|change|replace|update|edit|make|move|resize|remove|delete|increase|decrease|brighten|darken|crop|recolor|shift|place|put|use)\b/i.test(
+      request,
+    );
+  if (isSafeOnImageHeadline(request) && !containsEditVerb) {
+    return { text: request, start: 0, end: request.length };
+  }
+
+  // A direct caption/custom-copy payload may arrive without an edit verb.
+  // Withhold it in full just like generated-image custom copy.
+  if (
+    !containsEditVerb &&
+    (request.split(/\s+/).length > MAX_ON_IMAGE_HEADLINE_WORDS ||
+      request.includes("#") ||
+      URL_PATTERN.test(request) ||
+      PHONE_PATTERN.test(request) ||
+      SENTENCE_PUNCTUATION_PATTERN.test(request))
+  ) {
+    return { text: request, start: 0, end: request.length };
+  }
+
+  return undefined;
+};
+
+/**
+ * Removes text payloads from edit instructions before they reach the image
+ * model. Safe short replacements are reintroduced in a dedicated approval
+ * block; unsafe long copy is replaced with a semantic instruction only.
+ */
+export const guardImageEditRequest = (userEditRequest: string): ImageEditTextGuard => {
+  const request = userEditRequest.trim();
+  const candidate = findRequestedTextCandidate(request);
+  if (!candidate) return { request };
+
+  const approvedHeadline = normalizeHeadline(candidate.text);
+  const approved = isSafeOnImageHeadline(approvedHeadline);
+  const replacement = approved
+    ? "the approved exact headline below"
+    : "a newly summarized compliant headline; do not copy the supplied wording";
+  const guardedRequest = normalizeHeadline(
+    `${request.slice(0, candidate.start)}${replacement}${request.slice(candidate.end)}`,
+  );
+
+  return approved
+    ? { request: guardedRequest, approvedHeadline }
+    : { request: guardedRequest };
+};
+
 const safeZoneRules = `Place all text/logos in "safe zones" — open background, sky, pavement, blank walls.
 Maintain a 12% margin (minimum 32px) between any text/logo and the bounding box of any person.
 Do not cross people, hands, faces, license plates, dealer signage, or vehicle nameplates with text.
@@ -218,6 +388,7 @@ This is professional photo editing and design on the source image — NOT generi
   sections.push(xmlBlock("subject_preservation", subjectPreservation));
   sections.push(xmlBlock("safe_zones", safeZoneRules));
   sections.push(xmlBlock("campaign_quality", campaignQualityBar));
+  sections.push(xmlBlock("on_image_text_contract", ON_IMAGE_TEXT_RULES));
 
   sections.push(
     xmlBlock(
@@ -241,14 +412,9 @@ Finish: looks like a finished campaign asset ready for Instagram/Facebook/TikTok
     );
   }
 
-  if (customMessage?.trim()) {
-    sections.push(
-      xmlBlock(
-        "headline_text",
-        `Render this exact text on the image. Do not alter spelling, capitalization, or punctuation:\n"${customMessage.trim()}"`,
-      ),
-    );
-  }
+  sections.push(
+    xmlBlock("headline_direction", buildOnImageHeadlineInstruction(customMessage)),
+  );
 
   sections.push(
     xmlBlock(
@@ -299,19 +465,30 @@ export const editImagePromptV2 = (
   dealershipName: string,
   hasLogo: boolean,
 ): string => {
-  return [
+  const guardedEdit = guardImageEditRequest(userEditRequest);
+  const sections = [
     `You are editing an existing generated social-media post image. Apply ONLY the change the user requested, keeping everything else identical.`,
     xmlBlock("subject_preservation", subjectPreservation),
     xmlBlock("safe_zones", safeZoneRules),
-    xmlBlock("user_edit_request", userEditRequest.trim()),
+    xmlBlock("on_image_text_contract", ON_IMAGE_TEXT_RULES),
+    xmlBlock("user_edit_request", guardedEdit.request),
+  ];
+
+  if (guardedEdit.approvedHeadline) {
+    sections.push(xmlBlock("approved_exact_headline", guardedEdit.approvedHeadline));
+  }
+
+  sections.push(
     xmlBlock(
       "rules",
       `Touch only the elements the user named. Do not "improve" other elements.
 If the request would move text into a person's exclusion zone, decline and place it in the nearest safe zone instead.
 ${hasLogo ? "The dealership logo must remain visible." : `The dealership name "${dealershipName}" must remain visible as text watermark.`}
-Spelling on any text must remain exact.`,
+Do not render words from the user_edit_request block as image copy. Only the dedicated approved_exact_headline block may be reproduced exactly; otherwise create a new compliant short headline.`,
     ),
-  ].join("\n\n");
+  );
+
+  return sections.join("\n\n");
 };
 
 // ----------------------------------------------------------------------------

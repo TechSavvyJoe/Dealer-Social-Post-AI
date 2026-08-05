@@ -10,6 +10,7 @@ import {
   validateProviderCanaryEvidence,
   validateQaEvidence,
   validateStageEvidence,
+  validateWebsiteHandoffCanaryEvidence,
 } from "../scripts/vercel-staged-qa.mjs";
 
 const validEvidence = {
@@ -234,6 +235,94 @@ describe("Vercel staged browser QA receipt", () => {
       expect(() =>
         validateProviderCanaryEvidence(invalid, validEvidence.releaseSha),
       ).toThrow("provider canary receipt does not prove the exact Fly release");
+    }
+  });
+
+  it("requires a cleaned-up private website handoff canary for the exact release", () => {
+    const now = Date.now();
+    const validCanary = {
+      schemaVersion: 1,
+      canary: "production-website-private-draft",
+      syntheticAsset: "docs/marketing/demo/synthetic-delivery-photo.jpg",
+      targetOrigin: "https://dealer-social-post-ai-production.fly.dev",
+      customerHubOrigin: "https://joegallant.me",
+      expectedReleaseSha: validEvidence.releaseSha,
+      startedAt: new Date(now - 10 * 60 * 1000).toISOString(),
+      completedAt: new Date(now - 5 * 60 * 1000).toISOString(),
+      outcome: "passed",
+      checks: {
+        authentication: { passed: true, role: "salesperson" },
+        health: {
+          passed: true,
+          releaseSha: validEvidence.releaseSha,
+          backupStatus: "verified",
+        },
+        destination: {
+          passed: true,
+          id: "joe_customer_hub",
+          mode: "private_draft",
+        },
+        initialPrivateDraft: {
+          passed: true,
+          websiteOnly: true,
+          status: "not_requested",
+        },
+        noPrematureDelivery: { passed: true },
+        revisionGuard: {
+          passed: true,
+          missingBlocked: true,
+          staleBlocked: true,
+          exactReplayIdempotent: true,
+          changedReplayBlocked: true,
+        },
+        privateDelivery: { passed: true, status: "draft_ready", attempts: 0 },
+        publicBoundary: { passed: true, imageStatus: 404, markerAbsent: true },
+        sessionRevocation: { passed: true },
+      },
+      cleanup: {
+        required: false,
+        status: "complete",
+        completedAt: new Date(now - 4 * 60 * 1000).toISOString(),
+      },
+    };
+
+    expect(
+      validateWebsiteHandoffCanaryEvidence(validCanary, validEvidence.releaseSha),
+    ).toEqual(validCanary);
+
+    for (const invalid of [
+      { ...validCanary, expectedReleaseSha: "d".repeat(40) },
+      { ...validCanary, outcome: "failed" },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          revisionGuard: {
+            ...validCanary.checks.revisionGuard,
+            staleBlocked: false,
+          },
+        },
+      },
+      {
+        ...validCanary,
+        checks: {
+          ...validCanary.checks,
+          publicBoundary: {
+            ...validCanary.checks.publicBoundary,
+            imageStatus: 200,
+          },
+        },
+      },
+      {
+        ...validCanary,
+        cleanup: { required: true, status: "owner_action_required" },
+      },
+    ]) {
+      expect(() =>
+        validateWebsiteHandoffCanaryEvidence(invalid, validEvidence.releaseSha),
+      ).toThrow(
+        "website handoff canary receipt does not prove the exact private delivery and cleanup",
+      );
     }
   });
 

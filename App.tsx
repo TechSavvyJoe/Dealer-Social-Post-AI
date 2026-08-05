@@ -71,6 +71,7 @@ const AppContent: React.FC = () => {
     handleEditImage,
     handleRegenerateText,
     handleEditText,
+    handlePrepareFinalWebsiteDraft,
     handleGenerateVideo,
     generateCaptionVariant,
   } = useAppController();
@@ -272,6 +273,7 @@ const AppContent: React.FC = () => {
               onEditImage={handleEditImage}
               onRegenerateText={handleRegenerateText}
               onEditText={handleEditText}
+              onPrepareFinalWebsiteDraft={handlePrepareFinalWebsiteDraft}
               onFunMode={handleFunMode}
               onGenerateVideo={handleGenerateVideo}
               onGenerateCaptionVariant={generateCaptionVariant}

@@ -392,17 +392,19 @@ function publicationSummaryForPost(post, record) {
   const parsed = parseWebsiteDraft(recordString(post, "website_draft"));
   if (parsed.ok && parsed.value && parsed.value.enabled) {
     return {
-      status: "failed",
+      // Website selection prepares editable private copy only. Delivery does
+      // not begin until the salesperson explicitly sends the final revision.
+      status: "not_requested",
       attempts: 0,
       reviewUrl: "",
-      lastError: "queue_unavailable",
+      lastError: "",
       updatedAt: recordString(post, "updated"),
     };
   }
   return publicationSummary(null);
 }
 
-function findPublicationForPost(postId, destinationId) {
+function findPublicationForPostWithDaoStrict(dao, postId, destinationId) {
   if (!postId) return null;
   const params = { post: postId };
   let filter = "post = {:post}";
@@ -410,21 +412,27 @@ function findPublicationForPost(postId, destinationId) {
     filter += " && destination_id = {:destination}";
     params.destination = destinationId;
   }
+  const rows = dao.findRecordsByFilter(
+    "website_publications",
+    filter,
+    "-source_revision,-created",
+    1,
+    0,
+    params,
+  );
+  return rows.length ? rows[0] : null;
+}
+
+function findPublicationForPostWithDao(dao, postId, destinationId) {
   try {
-    const rows = $app
-      .dao()
-      .findRecordsByFilter(
-        "website_publications",
-        filter,
-        "-source_revision,-created",
-        1,
-        0,
-        params,
-      );
-    return rows.length ? rows[0] : null;
+    return findPublicationForPostWithDaoStrict(dao, postId, destinationId);
   } catch (_e) {
     return null;
   }
+}
+
+function findPublicationForPost(postId, destinationId) {
+  return findPublicationForPostWithDao($app.dao(), postId, destinationId);
 }
 
 function publicationSummariesForDealer(dealerId) {
@@ -449,7 +457,7 @@ function publicationSummariesForDealer(dealerId) {
   return result;
 }
 
-function hasValidLinkedRelease(post) {
+function hasValidLinkedReleaseWithDao(dao, post) {
   if (!recordBool(post, "release_required")) return true;
   if (
     !recordBool(post, "has_release") ||
@@ -458,16 +466,14 @@ function hasValidLinkedRelease(post) {
     return false;
   }
   try {
-    const rows = $app
-      .dao()
-      .findRecordsByFilter(
-        "photo_releases",
-        "post_id = {:post} && dealer = {:dealer} && signature_png != '' && signed_at != ''",
-        "-signed_at",
-        1,
-        0,
-        { post: post.id, dealer: recordString(post, "dealer") },
-      );
+    const rows = dao.findRecordsByFilter(
+      "photo_releases",
+      "post_id = {:post} && dealer = {:dealer} && signature_png != '' && signed_at != ''",
+      "-signed_at",
+      1,
+      0,
+      { post: post.id, dealer: recordString(post, "dealer") },
+    );
     if (rows.length !== 1) return false;
     const signature = recordString(rows[0], "signature_png");
     if (!signature) return false;
@@ -482,7 +488,11 @@ function hasValidLinkedRelease(post) {
   }
 }
 
-function resolveWebsiteMappingForPost(post) {
+function hasValidLinkedRelease(post) {
+  return hasValidLinkedReleaseWithDao($app.dao(), post);
+}
+
+function resolveWebsiteMappingForPostWithDao(dao, post) {
   const scenarioId = recordString(post, "scenario_id") || "customer_delivery";
   if (Object.prototype.hasOwnProperty.call(BUILT_IN_WEBSITE_MAPPINGS, scenarioId)) {
     return resolveWebsiteMapping(scenarioId, "");
@@ -491,19 +501,27 @@ function resolveWebsiteMappingForPost(post) {
   const dealerId = recordString(post, "dealer");
   if (!dealerId) return null;
   try {
-    const dealer = $app.dao().findRecordById("dealers", dealerId);
+    const dealer = dao.findRecordById("dealers", dealerId);
     return resolveWebsiteMapping(scenarioId, recordString(dealer, "custom_scenarios"));
   } catch (_e) {
     return null;
   }
 }
 
-function postReadiness(post) {
+function resolveWebsiteMappingForPost(post) {
+  const scenarioId = recordString(post, "scenario_id") || "customer_delivery";
+  if (Object.prototype.hasOwnProperty.call(BUILT_IN_WEBSITE_MAPPINGS, scenarioId)) {
+    return resolveWebsiteMapping(scenarioId, "");
+  }
+  return resolveWebsiteMappingForPostWithDao($app.dao(), post);
+}
+
+function postReadinessWithDao(dao, post) {
   const parsedDraft = parseWebsiteDraft(recordString(post, "website_draft"));
   if (!parsedDraft.ok || !parsedDraft.value || !parsedDraft.value.enabled) {
     return { ready: false, terminal: true, code: "website_request_withdrawn" };
   }
-  const mapping = resolveWebsiteMappingForPost(post);
+  const mapping = resolveWebsiteMappingForPostWithDao(dao, post);
   if (
     !mapping ||
     parsedDraft.value.kind !== mapping.kind ||
@@ -518,13 +536,17 @@ function postReadiness(post) {
   if (approval !== "approved" && approval !== "n_a") {
     return { ready: false, terminal: false, code: "approval_pending" };
   }
-  if (!hasValidLinkedRelease(post)) {
+  if (!hasValidLinkedReleaseWithDao(dao, post)) {
     return { ready: false, terminal: false, code: "release_pending" };
   }
   if (!recordString(post, "creative_image")) {
     return { ready: false, terminal: false, code: "creative_pending" };
   }
   return { ready: true, terminal: false, code: "ready" };
+}
+
+function postReadiness(post) {
+  return postReadinessWithDao($app.dao(), post);
 }
 
 function savePublicationState(record, values) {
@@ -545,30 +567,76 @@ function payloadSentAtForFirstQueue(publication, now) {
   return recordString(publication, "payload_sent_at");
 }
 
-function createPublicationForPost(post) {
+function publicationRevisionDigest(postId, postRevision, securityApi) {
+  const id = (postId || "").toString();
+  const revision = assertBoundedString(postRevision, 80, { required: true });
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(id) || !revision) {
+    throw new Error("website_post_revision_invalid");
+  }
+  const crypto = securityApi || $security;
+  const digest = (crypto.sha256(id + "\n" + revision) || "").toString().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(digest)) {
+    throw new Error("website_post_revision_invalid");
+  }
+  return digest;
+}
+
+function publicationEventIdForPostRevision(
+  postId,
+  postRevision,
+  sourceSnapshotHash,
+  securityApi,
+) {
+  const snapshotHash = (sourceSnapshotHash || "").toString().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(snapshotHash)) {
+    throw new Error("website_source_snapshot_invalid");
+  }
+  const revisionDigest = publicationRevisionDigest(postId, postRevision, securityApi);
+  // The durable event identity binds both the exact client-observed post
+  // revision (128 bits) and the canonical final copy/media snapshot (160
+  // bits). It remains below the collection's 80-character event-id limit.
+  return "wp_s_" + revisionDigest.slice(0, 32) + "_" + snapshotHash.slice(0, 40);
+}
+
+function publicationEventRevisionMatches(eventId, postId, postRevision, securityApi) {
+  const match = (eventId || "")
+    .toString()
+    .toLowerCase()
+    .match(/^wp_s_([a-f0-9]{32})_[a-f0-9]{40}$/);
+  // Rows created before source-snapshot binding retain their original exact-
+  // draft retry behavior. All new handoffs use the revision-bound identity.
+  if (!match) return null;
+  return (
+    match[1] ===
+    publicationRevisionDigest(postId, postRevision, securityApi).slice(0, 32)
+  );
+}
+
+function createPublicationForPostWithDao(dao, post, config, eventId) {
   const parsedDraft = parseWebsiteDraft(recordString(post, "website_draft"));
   if (!parsedDraft.ok || !parsedDraft.value || !parsedDraft.value.enabled) return null;
-  const config = destinationConfiguration(recordString(post, "dealer"));
-  if (!config.enabled) throw new Error("destination_unavailable");
-  const existing = findPublicationForPost(post.id, config.id);
+  const destination = config || destinationConfiguration(recordString(post, "dealer"));
+  if (!destination.enabled) throw new Error("destination_unavailable");
+  const existing = findPublicationForPostWithDaoStrict(dao, post.id, destination.id);
   if (existing) return existing;
 
-  const readiness = postReadiness(post);
+  const readiness = postReadinessWithDao(dao, post);
   const now = new Date().toISOString();
   const status = readiness.terminal
     ? "withdrawn"
     : readiness.ready
       ? "queued"
       : "waiting_approval";
-  const collection = $app.dao().findCollectionByNameOrId("website_publications");
-  const eventId =
-    "wp_" +
-    $security.randomStringWithAlphabet(40, "abcdefghijklmnopqrstuvwxyz0123456789");
+  const collection = dao.findCollectionByNameOrId("website_publications");
+  const publicationEventId = (eventId || "").toString().toLowerCase();
+  if (!/^wp_s_[a-f0-9]{32}_[a-f0-9]{40}$/.test(publicationEventId)) {
+    throw new Error("website_source_snapshot_invalid");
+  }
   const record = new Record(collection, {
     post: post.id,
     dealer: recordString(post, "dealer"),
-    destination_id: config.id,
-    event_id: eventId,
+    destination_id: destination.id,
+    event_id: publicationEventId,
     source_revision: 1,
     // Frozen logical-payload time: retries rebuild byte-identical JSON.
     payload_sent_at: now,
@@ -582,14 +650,155 @@ function createPublicationForPost(post) {
     review_url: "",
     last_error: status === "waiting_approval" ? readiness.code : "",
   });
-  try {
-    $app.dao().saveRecord(record);
-    return record;
-  } catch (err) {
-    const raced = findPublicationForPost(post.id, config.id);
-    if (raced) return raced;
-    throw err;
+  dao.saveRecord(record);
+  return record;
+}
+
+function transactionAffectedExactlyOne(result) {
+  return !!(
+    result &&
+    typeof result.rowsAffected === "function" &&
+    Number(result.rowsAffected()) === 1
+  );
+}
+
+function acquirePostWriteFence(dao, postId) {
+  const result = dao
+    .db()
+    .newQuery("UPDATE posts SET updated = updated WHERE id = {:post}")
+    .bind({ post: postId })
+    .execute();
+  if (!transactionAffectedExactlyOne(result)) {
+    throw new Error("source_post_missing");
   }
+}
+
+/**
+ * Atomically freeze the final website copy and media revision and create its
+ * single outbox row. The write fence is deliberately the first transaction
+ * statement: SQLite serializes competing sends before either request reads
+ * the current post/publication pair.
+ */
+function claimPublicationForPost(
+  postId,
+  requestedDraft,
+  expectedPostRevision,
+  expectedDealerId,
+) {
+  const parsedDraft = parseWebsiteDraft(requestedDraft);
+  if (!parsedDraft.ok || !parsedDraft.value || !parsedDraft.value.enabled) {
+    throw new Error("website_request_withdrawn");
+  }
+  const expectedRevision = assertBoundedString(expectedPostRevision, 80, {
+    required: true,
+  });
+  if (!expectedRevision) throw new Error("website_post_revision_required");
+
+  let outcome = null;
+  $app.dao().runInTransaction(function (txDao) {
+    acquirePostWriteFence(txDao, postId);
+    const post = txDao.findRecordById("posts", postId);
+    const dealerId = recordString(post, "dealer");
+    if (expectedDealerId && dealerId !== expectedDealerId) {
+      throw new Error("website_dealer_conflict");
+    }
+    const config = destinationConfiguration(dealerId);
+    if (!config.enabled) throw new Error("destination_unavailable");
+
+    const existing = findPublicationForPostWithDaoStrict(txDao, post.id, config.id);
+    const storedDraft = parseWebsiteDraft(recordString(post, "website_draft"));
+    if (existing) {
+      if (!storedDraft.ok || storedDraft.serialized !== parsedDraft.serialized) {
+        throw new Error("website_draft_already_sent");
+      }
+      const revisionMatches = publicationEventRevisionMatches(
+        recordString(existing, "event_id"),
+        post.id,
+        expectedRevision,
+        $security,
+      );
+      if (revisionMatches === false) {
+        throw new Error("website_draft_already_sent");
+      }
+      // New rows also bind the exact canonical source/media bytes. Re-read and
+      // verify them before reporting an idempotent success. Legacy rows do not
+      // have a snapshot marker and preserve their prior exact-draft behavior.
+      if (
+        /^wp_s_[a-f0-9]{32}_[a-f0-9]{40}$/.test(
+          recordString(existing, "event_id").toLowerCase(),
+        )
+      ) {
+        const media = readPostCreative(post);
+        verifyPublicationSourceSnapshot(
+          existing,
+          post,
+          parsedDraft.value,
+          media,
+          $security,
+          txDao,
+        );
+      }
+      outcome = {
+        post: post,
+        publication: existing,
+        idempotentReplay: true,
+        postRevision: recordString(post, "updated"),
+      };
+      return;
+    }
+
+    if (recordString(post, "updated") !== expectedRevision) {
+      throw new Error("website_post_revision_conflict");
+    }
+    const dealer = txDao.findRecordById("dealers", dealerId);
+    if (
+      !websiteDraftMatchesScenario(
+        recordString(post, "scenario_id"),
+        recordString(dealer, "custom_scenarios"),
+        parsedDraft.value,
+      )
+    ) {
+      throw new Error("website_mapping_conflict");
+    }
+
+    post.set("website_draft", parsedDraft.serialized);
+    txDao.saveRecord(post);
+    const frozenPost = txDao.findRecordById("posts", post.id);
+
+    // Reading the creative and canonicalizing destination content inside the
+    // same transaction freezes exactly what the sender reviewed. The compact
+    // source hash is stored in the event id and revalidated before delivery.
+    const media = readPostCreative(frozenPost);
+    const sourceSnapshotHash = publicationSourceSnapshotHash(
+      frozenPost,
+      parsedDraft.value,
+      media,
+      $security,
+      txDao,
+    );
+    const eventId = publicationEventIdForPostRevision(
+      frozenPost.id,
+      expectedRevision,
+      sourceSnapshotHash,
+      $security,
+    );
+    const publication = createPublicationForPostWithDao(
+      txDao,
+      frozenPost,
+      config,
+      eventId,
+    );
+    if (!publication) throw new Error("website_request_withdrawn");
+    outcome = {
+      post: frozenPost,
+      publication: publication,
+      idempotentReplay: false,
+      postRevision: recordString(frozenPost, "updated"),
+    };
+  });
+
+  if (!outcome) throw new Error("website_publication_claim_failed");
+  return outcome;
 }
 
 function reconcilePublicationForPost(postId) {
@@ -810,8 +1019,10 @@ function containsProtectedNonFirstNameToken(text, protectedName) {
   return false;
 }
 
-function buildOutboundContent(post, draft, media) {
-  const mapping = resolveWebsiteMappingForPost(post);
+function buildOutboundContent(post, draft, media, dao) {
+  const mapping = dao
+    ? resolveWebsiteMappingForPostWithDao(dao, post)
+    : resolveWebsiteMappingForPost(post);
   if (!mapping || draft.kind !== mapping.kind || draft.category !== mapping.category) {
     throw new Error("website_mapping_conflict");
   }
@@ -892,6 +1103,37 @@ function buildOutboundContent(post, draft, media) {
   }
   content.media = media;
   return content;
+}
+
+function publicationSourceSnapshotHash(post, draft, media, securityApi, dao) {
+  const crypto = securityApi || $security;
+  const sourceSnapshot = JSON.stringify({
+    sourcePostId: post.id,
+    sourceDealerId: recordString(post, "dealer"),
+    content: buildOutboundContent(post, draft, media, dao),
+  });
+  const digest = (crypto.sha256(sourceSnapshot) || "").toString().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(digest)) {
+    throw new Error("website_source_snapshot_invalid");
+  }
+  return digest;
+}
+
+function verifyPublicationSourceSnapshot(
+  publication,
+  post,
+  draft,
+  media,
+  securityApi,
+  dao,
+) {
+  const eventId = recordString(publication, "event_id").toLowerCase();
+  const match = eventId.match(/^wp_s_[a-f0-9]{32}_([a-f0-9]{40})$/);
+  if (!match) return;
+  const actual = publicationSourceSnapshotHash(post, draft, media, securityApi, dao);
+  if (match[1] !== actual.slice(0, 40)) {
+    throw new Error("payload_revision_conflict");
+  }
 }
 
 const BASE64_ALPHABET =
@@ -1279,6 +1521,17 @@ function deliverClaimedPublication(publication) {
   let signed = null;
   try {
     const media = readPostCreative(post);
+    const parsedDraft = parseWebsiteDraft(recordString(post, "website_draft"));
+    if (!parsedDraft.ok || !parsedDraft.value || !parsedDraft.value.enabled) {
+      throw new Error("website_request_withdrawn");
+    }
+    verifyPublicationSourceSnapshot(
+      publication,
+      post,
+      parsedDraft.value,
+      media,
+      $security,
+    );
     rawBody = JSON.stringify(buildLogicalPayload(publication, post, media));
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const nonce = $security.randomStringWithAlphabet(
@@ -1529,7 +1782,9 @@ function processDuePublications(limit) {
 
 function retryPublication(post) {
   const publication = findPublicationForPost(post.id, "");
-  if (!publication) return createPublicationForPost(post);
+  // Retry is never an alternate enqueue path. A first handoff must carry the
+  // exact post revision through claimPublicationForPost.
+  if (!publication) throw new Error("website_request_not_sent");
   const currentStatus = recordString(publication, "status");
   if (currentStatus === "draft_ready") {
     if (recordString(publication, "last_error")) {
@@ -1576,8 +1831,14 @@ module.exports = {
   publicationSummaryForPost,
   publicationSummariesForDealer,
   findPublicationForPost,
+  findPublicationForPostWithDao,
+  findPublicationForPostWithDaoStrict,
   postReadiness,
-  createPublicationForPost,
+  claimPublicationForPost,
+  publicationEventIdForPostRevision,
+  publicationEventRevisionMatches,
+  publicationSourceSnapshotHash,
+  verifyPublicationSourceSnapshot,
   reconcilePublicationForPost,
   processDuePublications,
   retryPublication,

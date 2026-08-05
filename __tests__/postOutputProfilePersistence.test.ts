@@ -210,7 +210,9 @@ describe("post output-profile persistence", () => {
     expect(postRoute).toContain('error: "Invalid post scenario"');
     expect(postRoute).toContain('"Cache-Control", "private, no-store"');
 
-    expect(listRoute).toContain("platform_ids: platformIds");
+    expect(listRoute).toContain(
+      "platform_ids: storedPlatformIdsRaw.trim() ? platformIds : undefined",
+    );
     expect(listRoute).toContain("platform_captions: parsedPlatformCaptions.ok");
     expect(listRoute).toContain("caption_source:");
     expect(listRoute).toContain("media_output_mode:");

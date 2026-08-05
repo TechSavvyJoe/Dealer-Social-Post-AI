@@ -19,6 +19,7 @@ import { Shimmer } from "./ui/Shimmer";
 import type { LoginResult, SessionLoginRequest } from "../stores/appStore";
 import { useAppStore } from "../stores/appStore";
 import type { PrimaryImageProfile, PlatformId } from "../services/platformCopy";
+import type { WebsiteDraft } from "../services/websitePublishing";
 
 // Lazy load components
 const LazyLoginScreen = React.lazy(() =>
@@ -99,6 +100,11 @@ interface MainContentProps {
     originalText?: string,
     platformId?: string,
   ) => Promise<string>;
+  onPrepareFinalWebsiteDraft?: (input: {
+    caption: string;
+    image: string;
+    currentDraft: WebsiteDraft;
+  }) => Promise<WebsiteDraft>;
   onFunMode: (styleName?: string) => Promise<void>;
   onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
   /** One-shot caption generator for the alternatives modal. */
@@ -132,6 +138,7 @@ export const MainContent: React.FC<MainContentProps> = ({
   onEditImage,
   onRegenerateText,
   onEditText,
+  onPrepareFinalWebsiteDraft,
   onFunMode,
   onGenerateVideo,
   onGenerateCaptionVariant,
@@ -368,6 +375,7 @@ export const MainContent: React.FC<MainContentProps> = ({
               onEditImage={onEditImage}
               onRegenerateText={onRegenerateText}
               onEditText={onEditText}
+              onPrepareFinalWebsiteDraft={onPrepareFinalWebsiteDraft}
               onFunMode={onFunMode}
               onGenerateVideo={onGenerateVideo}
               onGenerateCaptionVariant={onGenerateCaptionVariant}

@@ -24,6 +24,9 @@ interface MobilePublishStudioProps {
   caption: string;
   postingAs?: string;
   captionNote?: string;
+  emptyStatusLabel?: string;
+  emptyStatusDetail?: string;
+  emptyMetadata?: string;
   copied?: boolean;
   onSelect: (id: string) => void;
   onRetry: (id: string) => void | Promise<void>;
@@ -94,6 +97,9 @@ export const MobilePublishStudio: React.FC<MobilePublishStudioProps> = ({
   caption,
   postingAs,
   captionNote,
+  emptyStatusLabel,
+  emptyStatusDetail,
+  emptyMetadata,
   copied = false,
   onSelect,
   onRetry,
@@ -221,7 +227,7 @@ export const MobilePublishStudio: React.FC<MobilePublishStudioProps> = ({
                 </span>
               </>
             ) : (
-              <span>Choose a destination output</span>
+              <span>{emptyMetadata || "Choose a destination output"}</span>
             )}
           </div>
         </div>
@@ -311,45 +317,18 @@ export const MobilePublishStudio: React.FC<MobilePublishStudioProps> = ({
                 <li
                   key={output.id}
                   className={cn(
-                    "relative h-11 w-[9.25rem] shrink-0 snap-center overflow-hidden rounded-lg border",
+                    "grid h-11 w-[9.25rem] shrink-0 snap-center grid-cols-[minmax(0,1fr)_2.75rem] overflow-hidden rounded-lg border",
                     selected
                       ? "border-primary-400/75 bg-primary-500/15 shadow-[0_0_0_1px_rgba(96,165,250,0.15),0_12px_28px_rgba(0,0,0,0.24)]"
                       : "border-white/10 bg-white/[0.045]",
                   )}
                 >
-                  {onToggleBatch ? (
-                    <label
-                      className={cn(
-                        "absolute right-0 top-0 z-10 grid h-11 w-11 place-items-center",
-                        batchEligible
-                          ? "cursor-pointer"
-                          : "cursor-not-allowed opacity-45",
-                      )}
-                      title={
-                        batchEligible
-                          ? `Include ${outputName(output)} in guided sharing`
-                          : "Create this video before adding it to guided sharing"
-                      }
-                    >
-                      <span className="grid h-5 w-5 place-items-center rounded-full border border-white/20 bg-surface-950/90">
-                        <input
-                          type="checkbox"
-                          className="h-3.5 w-3.5 accent-[var(--brand-primary)]"
-                          checked={Boolean(output.batchSelected)}
-                          disabled={!batchEligible}
-                          onChange={(event) => {
-                            if (batchEligible) {
-                              onToggleBatch(output.id, event.currentTarget.checked);
-                            }
-                          }}
-                          aria-label={`Include ${outputName(output)} in Share selected`}
-                        />
-                      </span>
-                    </label>
-                  ) : null}
                   <button
                     type="button"
-                    className="flex h-full w-full items-center gap-1.5 px-2 pr-7 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-400"
+                    className={cn(
+                      "flex h-full min-w-0 items-center gap-1.5 px-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-400",
+                      !onToggleBatch && "col-span-2",
+                    )}
                     onClick={() => onSelect(output.id)}
                     aria-pressed={selected}
                     aria-label={`Select ${outputName(output)}, ${output.width} by ${output.height} pixels`}
@@ -377,6 +356,36 @@ export const MobilePublishStudio: React.FC<MobilePublishStudioProps> = ({
                       </span>
                     </span>
                   </button>
+                  {onToggleBatch ? (
+                    <label
+                      className={cn(
+                        "grid h-11 w-11 place-items-center border-l border-white/10",
+                        batchEligible
+                          ? "cursor-pointer"
+                          : "cursor-not-allowed opacity-45",
+                      )}
+                      title={
+                        batchEligible
+                          ? `Include ${outputName(output)} in guided sharing`
+                          : "Create this video before adding it to guided sharing"
+                      }
+                    >
+                      <span className="grid h-5 w-5 place-items-center rounded-full border border-white/20 bg-surface-950/90">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 accent-[var(--brand-primary)]"
+                          checked={Boolean(output.batchSelected)}
+                          disabled={!batchEligible}
+                          onChange={(event) => {
+                            if (batchEligible) {
+                              onToggleBatch(output.id, event.currentTarget.checked);
+                            }
+                          }}
+                          aria-label={`Include ${outputName(output)} in Share selected`}
+                        />
+                      </span>
+                    </label>
+                  ) : null}
                 </li>
               );
             })}
@@ -389,7 +398,7 @@ export const MobilePublishStudio: React.FC<MobilePublishStudioProps> = ({
 
       <div className="space-y-2 p-2">
         <div
-          className="relative grid min-h-[18rem] place-items-center overflow-hidden rounded-[1.15rem] border border-white/10 bg-black shadow-[0_18px_45px_rgba(0,0,0,0.4)] [@media(max-height:700px)]:h-56 [@media(max-height:700px)]:min-h-0 [@media(max-height:600px)]:!h-40"
+          className="relative grid h-[clamp(10rem,38svh,20rem)] min-h-0 place-items-center overflow-hidden rounded-[1.15rem] border border-white/10 bg-black shadow-[0_18px_45px_rgba(0,0,0,0.4)] [@media(max-height:700px)]:h-56 [@media(max-height:600px)]:!h-40"
           role="region"
           aria-label="Media preview"
         >
@@ -419,7 +428,7 @@ export const MobilePublishStudio: React.FC<MobilePublishStudioProps> = ({
                   type="button"
                   disabled={editCaptionDisabled ?? captionActionsDisabled}
                   onClick={onEditCaption}
-                  className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-primary-400/30 bg-primary-500/10 px-2.5 text-[11px] font-semibold text-primary-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:cursor-not-allowed disabled:opacity-45"
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-primary-400/30 bg-primary-500/10 px-2.5 text-[11px] font-semibold text-primary-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
                   Edit with AI
@@ -429,7 +438,7 @@ export const MobilePublishStudio: React.FC<MobilePublishStudioProps> = ({
                 type="button"
                 disabled={copyCaptionDisabled ?? captionActionsDisabled}
                 onClick={() => void onCopyCaption()}
-                className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.05] px-2.5 text-[11px] font-semibold text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.05] px-2.5 text-[11px] font-semibold text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:cursor-not-allowed disabled:opacity-45"
                 aria-label="Copy caption"
               >
                 {copied ? (
@@ -458,7 +467,7 @@ export const MobilePublishStudio: React.FC<MobilePublishStudioProps> = ({
                   captionExpanded ? "Collapse full caption" : "Show full caption"
                 }
                 onClick={() => setCaptionExpanded((expanded) => !expanded)}
-                className="min-h-9 shrink-0 rounded-lg px-1.5 text-[11px] font-semibold text-primary-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                className="min-h-11 shrink-0 rounded-lg px-1.5 text-[11px] font-semibold text-primary-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
               >
                 {captionExpanded ? "Less" : "More"}
               </button>
@@ -483,9 +492,12 @@ export const MobilePublishStudio: React.FC<MobilePublishStudioProps> = ({
             aria-hidden="true"
           />
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold">{status.label}</p>
+            <p className="text-xs font-semibold">
+              {activeOutput ? status.label : emptyStatusLabel || status.label}
+            </p>
             <p className="truncate text-[10px] opacity-75">
-              {activeOutput?.recoveryDisabledReason || status.detail}
+              {activeOutput?.recoveryDisabledReason ||
+                (activeOutput ? status.detail : emptyStatusDetail || status.detail)}
             </p>
           </div>
           {canRetry && activeOutput ? (

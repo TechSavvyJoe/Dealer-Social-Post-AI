@@ -7,6 +7,9 @@ import {
   editImagePromptV2,
   generateFunPromptV2,
   generateVideoPromptV2,
+  ON_IMAGE_TEXT_RULES,
+  buildOnImageHeadlineInstruction,
+  guardImageEditRequest,
 } from "./promptsV2";
 
 export const generateImagePrompt = (
@@ -117,7 +120,7 @@ Translate this into visual storytelling decisions (color palette, typography, su
 
     **Step 2: INTELLIGENT TEXT OVERLAY (Restricted to Safe Zones)**
 After enhancing the photo, you will add text elements based on the provided instructions.
-*   **ABSOLUTE SPELLING & CONTENT ACCURACY:** The text you add to the image must be spelled *perfectly* and use the *exact* wording provided in the text instructions. DO NOT add, omit, or change any words. Any spelling error is a task failure.
+*   **BOUNDED HEADLINE COPY:** Follow the On-Image Text Contract below. Only an explicitly approved safe short headline may be reproduced exactly; long caption/custom copy must be summarized and never copied verbatim.
 *   **DYNAMIC COMPOSITION:** Within the Safe Zones, create a dynamic, visually engaging composition based on your Creative Mandate. Use varied angles and creative positioning. If you cannot find a valid Safe Zone that respects the exclusion margins, create a banner or ribbon that sits fully outside of all person bounding boxes.
 *   **3D & REALISM:** When appropriate for the style, render the main text as a bold, chunky, 3D object that casts realistic shadows and reflects the scene's lighting.
 ${watermarkInstruction}
@@ -156,20 +159,16 @@ If your output contains ANY person, vehicle, or location that differs from the i
 *   Confirm that all text, logos, and decorations remain inside the image boundaries, respect the required margins, and look intentional.
 *   If a violation is discovered, adjust the layout and repeat Steps 2-4 before delivering the final image.`;
 
-  let textInstruction = "";
-  if (customMessage && customMessage.trim()) {
-    textInstruction = `
-        **Custom Text Overlay:**
-        *   The user has provided a custom message that MUST be used for the text overlay.
-        *   **EXACT TEXT TO USE:** "${customMessage.trim()}"
-        *   **Your task:** Intelligently and creatively display this exact text on the image. You have creative freedom to split it into a main headline and a smaller sub-text for better design, or use it as a single block if that looks better. The most important words should be emphasized. Do not add any text that isn't in the provided message, except for the dealership watermark/logo if applicable. Ensure every word from the user's message is included.`;
-  } else {
-    textInstruction = `
-        - Craft a headline (1-3 words) that celebrates the moment. Avoid defaulting to the single word "Congratulations" unless the creative brief explicitly requires it.
-        - Add a supporting sub-text that warmly references '${dealershipName}' (keep it under 8 words).
-        - Use hierarchy, scale, and spacing so the headline feels hero-level while the sub-text feels supportive.
-        - Ensure both lines respect every exclusion zone and margin rule above.`;
-  }
+  const textInstruction = `
+        **ON-IMAGE TEXT CONTRACT:**
+        ${ON_IMAGE_TEXT_RULES}
+
+        **HEADLINE DIRECTION:**
+        ${buildOnImageHeadlineInstruction(customMessage)}
+
+        - Use hierarchy, scale, and spacing so the headline feels hero-level.
+        - Keep dealership identity separate from headline copy.
+        - Ensure every text element respects every exclusion zone and margin rule above.`;
 
   let styleInstruction = "";
   switch (style) {
@@ -1184,6 +1183,11 @@ export const editImagePrompt = (
     ? `A dealership logo has been provided as a second image. It is a CRITICAL REQUIREMENT to ensure this logo is present and tastefully placed in a corner of the final edited image. Do not distort it. If the logo was missing from the original image, you MUST add it now. **FAILURE TO INCLUDE THE PROVIDED LOGO IMAGE IS A TASK FAILURE.**`
     : `The dealership name is '${dealershipName}'. If a text watermark with this name was on the original image, ensure it remains or is tastefully reapplied.`;
 
+  const guardedEdit = guardImageEditRequest(editPrompt);
+  const approvedHeadlineInstruction = guardedEdit.approvedHeadline
+    ? `**APPROVED EXACT HEADLINE:** "${guardedEdit.approvedHeadline}"`
+    : `**NO EXACT HEADLINE IS APPROVED:** Create a new compliant short headline if the request changes image copy.`;
+
   return `You are a professional photo editor. The user has provided an image and wants you to make SPECIFIC edits to it.
 
     **IDENTITY ANCHOR ESTABLISHED:**
@@ -1204,14 +1208,18 @@ export const editImagePrompt = (
     *   **NO SWAPPING:** DO NOT replace, swap, redraw, or reimagine ANY subjects.
     *   **FAILURE CONDITION:** If your edit results in different people or a different car, YOU HAVE FAILED.
 
-    **USER'S EDIT REQUEST:** "${editPrompt}"
+    **ON-IMAGE TEXT CONTRACT:**
+    ${ON_IMAGE_TEXT_RULES}
+
+    **USER'S EDIT REQUEST:** "${guardedEdit.request}"
+    ${approvedHeadlineInstruction}
 
     **YOUR TASK:**
     1.  Carefully analyze the user's request.
     2.  Apply the requested changes to the provided image, strictly following the Core Directives above.
     3.  **MAINTAIN QUALITY:** Ensure the final image is high-resolution and looks professional.
     4.  **WATERMARK/LOGO:** ${watermarkInstruction}
-    5.  **PERFECT WORDING:** If the user asks to change or add text, you MUST use the exact spelling and wording they provide. Do not add, omit, or change any words from their request.
+    5.  **BOUNDED WORDING:** Do not render words from the user's request as image copy. Reproduce wording exactly only when an approved exact headline is present; otherwise summarize the intent into a new 1-4 word, 40-character-maximum headline.
     6.  **SAFETY CHECK:** Re-run the proximity safeguard from **RULE #3**. If any text/logo/banner violates the required margin, adjust the layout and repeat this check before returning the image.
 
     The final output must be only the edited image.`;

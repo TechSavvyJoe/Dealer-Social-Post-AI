@@ -11,6 +11,7 @@ readonly EVIDENCE_DIRECTORY=".release-evidence"
 readonly DEFAULT_EVIDENCE_PATH=".release-evidence/vercel-staged-release.json"
 readonly DEFAULT_QA_EVIDENCE_PATH=".release-evidence/vercel-staged-qa.json"
 readonly PROVIDER_CANARY_EVIDENCE_PATH=".release-evidence/production-provider-canary.json"
+readonly WEBSITE_HANDOFF_CANARY_EVIDENCE_PATH=".release-evidence/production-website-handoff-canary.json"
 
 command_name="${1:-}"
 evidence_path="$DEFAULT_EVIDENCE_PATH"
@@ -661,6 +662,16 @@ assert_provider_canary_evidence() {
     "$release_sha"
 }
 
+assert_website_handoff_canary_evidence() {
+  local release_sha="$1"
+
+  [[ -f "$WEBSITE_HANDOFF_CANARY_EVIDENCE_PATH" ]] ||
+    fail "production website handoff canary evidence is missing: $WEBSITE_HANDOFF_CANARY_EVIDENCE_PATH"
+  node scripts/vercel-staged-qa.mjs \
+    --verify-website-handoff-canary \
+    "$release_sha"
+}
+
 update_promotion_state() {
   local next_status="$1"
   local release_sha="$2"
@@ -747,6 +758,8 @@ stage_release() {
   assert_clean_current_release "$release_sha"
   assert_provider_canary_evidence "$release_sha" ||
     fail "the provider canary receipt is invalid or belongs to another release."
+  assert_website_handoff_canary_evidence "$release_sha" ||
+    fail "the website handoff canary receipt is invalid, incomplete, or belongs to another release."
   attempt_id="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(16).toString("hex"))')"
   begin_stage_attempt "$release_sha" "$attempt_id"
   assert_release_health "$FLY_ORIGIN" "$release_sha" "fly-before-stage"
@@ -807,6 +820,8 @@ promote_release() {
     fail "staged release is not eligible for promotion."
   assert_provider_canary_evidence "$release_sha" ||
     fail "the provider canary receipt is invalid or belongs to another release."
+  assert_website_handoff_canary_evidence "$release_sha" ||
+    fail "the website handoff canary receipt is invalid, incomplete, or belongs to another release."
   assert_qa_evidence \
     "$release_sha" \
     "$deployment_url" \

@@ -89,7 +89,11 @@ export const resolvePrimaryImageProfile = (
   if (formats.includes("marketplace")) {
     return getPrimaryImageProfile("marketplace");
   }
-  return getPrimaryImageProfile("story_vertical");
+  // No social destination means the image is being prepared for a neutral
+  // destination such as the private website draft. A square master is the
+  // least platform-branded, website-friendly starting composition; defaulting
+  // to 9:16 here made Website-only work look like an accidental TikTok post.
+  return getPrimaryImageProfile("feed_square");
 };
 
 const SHORT: Record<string, string> = {
@@ -162,6 +166,31 @@ export const DEFAULT_PLATFORM_IDS: PlatformId[] = [
   "facebook_feed",
   "tiktok",
 ];
+
+/**
+ * Restore the destination intent recorded on a History item.
+ *
+ * `[]` is meaningful: modern Website-only posts persist it explicitly, so it
+ * must never receive social defaults. Older posts predate `platform_ids`; for
+ * those only, retain any caption-pack destinations the server can still
+ * provide and otherwise fall back to the social destinations that were the
+ * product default when those creatives were generated.
+ */
+export const resolveHistoryPlatformIds = (
+  platformIds: PlatformId[] | undefined | null,
+  platformCaptions?: Record<string, string> | null,
+): PlatformId[] => {
+  if (Array.isArray(platformIds)) {
+    return Array.from(new Set(platformIds.filter((id) => resolvePlatformOption(id))));
+  }
+
+  const inferred = Object.keys(platformCaptions || {}).filter((id) =>
+    Boolean(resolvePlatformOption(id)),
+  );
+  return inferred.length > 0
+    ? Array.from(new Set(inferred))
+    : [...DEFAULT_PLATFORM_IDS];
+};
 
 /**
  * Inject into the creative brief so the model writes platform-fit captions.

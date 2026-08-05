@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { logPost } from "./posts";
 import { POST_SCENARIOS } from "./postScenarios";
 import {
+  buildFinalWebsiteDraftFallback,
   buildFallbackWebsiteDraft,
   buildWebsiteDraftPrompt,
   cleanWebsiteMarketingCopy,
+  enqueueWebsitePublication,
   listWebsiteDestinations,
   mapScenarioToWebsiteDraft,
   parseWebsiteDraftResponse,
@@ -263,8 +265,68 @@ describe("private website draft parser and privacy boundary", () => {
     expect(websitePublicationNeedsStatusRefresh("draft_ready")).toBe(true);
     expect(websitePublicationNeedsStatusRefresh("published")).toBe(false);
     expect(websitePublicationNeedsStatusRefresh("withdrawn")).toBe(false);
+    expect(websitePublicationNeedsStatusRefresh("not_requested")).toBe(false);
     expect(websitePublicationPollDelay("draft_ready")).toBe(60_000);
     expect(websitePublicationPollDelay("waiting_approval")).toBe(10_000);
+  });
+
+  it("rebuilds final website copy from the edited caption without changing its route", () => {
+    const final = buildFinalWebsiteDraftFallback({
+      dealerName: "Example Motors",
+      caption: "The final edited wording for this delivery.\n#DeliveryDay",
+      currentDraft: {
+        enabled: true,
+        kind: "customer_story",
+        category: "deliveries",
+        title: "Welcome, Jane S.",
+        body: "Old first-generation wording.",
+        altText: "Customer delivery creative.",
+        customerDisplayName: "Jane S.",
+        schemaVersion: 1,
+      },
+    });
+
+    expect(final.kind).toBe("customer_story");
+    expect(final.category).toBe("deliveries");
+    expect(final.title).toBe("Welcome, Jane S.");
+    expect(final.body).toBe("The final edited wording for this delivery.");
+    expect(final.body).not.toContain("Old first-generation wording");
+    expect(final.altText).toContain("review the final image");
+    expect(final.altText).not.toBe("Customer delivery creative.");
+    expect(final.privacyFlags).toContain("review_visual_privacy");
+  });
+
+  it("sends the final website draft only through the explicit handoff endpoint", async () => {
+    const draft = buildFallbackWebsiteDraft({
+      scenarioId: "preowned_spotlight",
+      dealerName: "Example Motors",
+      caption: "Final inventory update.",
+    });
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ status: "queued", attempts: 0, websiteDraft: draft }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      enqueueWebsitePublication("post-final-1", draft, "2026-08-05 09:42:00.000Z"),
+    ).resolves.toMatchObject({ status: "queued", websiteDraft: draft });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/app/posts/post-final-1/website-publication",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          website_draft: draft,
+          expected_post_revision: "2026-08-05 09:42:00.000Z",
+        }),
+      }),
+    );
   });
 });
 

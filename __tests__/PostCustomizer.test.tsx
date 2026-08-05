@@ -224,6 +224,75 @@ describe("PostCustomizer", () => {
 
     fireEvent.click(website as HTMLButtonElement);
     expect(website).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("button", { name: /^TikTok9:16 story-ready$/i }),
+    ).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: /^Feed1080×1080$/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByText(/Social Feed · 1:1 recommended/i)).toBeVisible();
+  });
+
+  it("restores and submits an explicit Website-only destination without TikTok", async () => {
+    const onGenerate =
+      vi.fn<React.ComponentProps<typeof PostCustomizer>["onGenerate"]>();
+    render(
+      <PostCustomizer
+        {...baseProps}
+        onGenerate={onGenerate}
+        initialGenerationParams={{
+          style: StyleOption.Modern,
+          tone: ToneOption.Excited,
+          customerName: "",
+          scenarioId: "preowned_spotlight",
+          platformIds: [],
+          websiteEnabled: true,
+          mediaOutputMode: "photo",
+          primaryFormatId: "feed_square",
+          imageAspectRatio: "1:1",
+        }}
+      />,
+    );
+
+    const website = (await screen.findByText("Website")).closest("button");
+    expect(website).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("button", { name: /^TikTok9:16 story-ready$/i }),
+    ).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: /Generate Post/i }));
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(1));
+    expect(onGenerate.mock.calls[0]?.[6]).toEqual([]);
+    expect(onGenerate.mock.calls[0]?.[5]).toEqual(
+      expect.objectContaining({ websiteEnabled: true }),
+    );
+  });
+
+  it("keeps a legacy Website-only draft Website-only when platform ids are absent", async () => {
+    render(
+      <PostCustomizer
+        {...baseProps}
+        initialGenerationParams={{
+          style: StyleOption.Modern,
+          tone: ToneOption.Excited,
+          customerName: "",
+          scenarioId: "preowned_spotlight",
+          websiteEnabled: true,
+          mediaOutputMode: "photo",
+          primaryFormatId: "feed_square",
+          imageAspectRatio: "1:1",
+        }}
+      />,
+    );
+
+    expect((await screen.findByText("Website")).closest("button")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      screen.getByRole("button", { name: /^TikTok9:16 story-ready$/i }),
+    ).toHaveAttribute("aria-pressed", "false");
   });
 
   /*

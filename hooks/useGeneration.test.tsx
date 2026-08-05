@@ -189,12 +189,12 @@ describe("useGeneration model-tier and provenance wiring", () => {
     expect(mocks.generateSocialPost).toHaveBeenCalledTimes(2);
     expect(mocks.generateSocialPost.mock.calls[0].at(-2)).toBe("studio");
     expect(mocks.generateSocialPost.mock.calls[1].at(-2)).toBe("studio");
-    expect(mocks.generateSocialPost.mock.calls[0].at(-1)).toBe("9:16");
-    expect(mocks.generateSocialPost.mock.calls[1].at(-1)).toBe("9:16");
+    expect(mocks.generateSocialPost.mock.calls[0].at(-1)).toBe("1:1");
+    expect(mocks.generateSocialPost.mock.calls[1].at(-1)).toBe("1:1");
     expect(mocks.generateFunSocialPostImage.mock.calls[0].at(-2)).toBe("studio");
-    expect(mocks.generateFunSocialPostImage.mock.calls[0].at(-1)).toBe("9:16");
+    expect(mocks.generateFunSocialPostImage.mock.calls[0].at(-1)).toBe("1:1");
     expect(mocks.editSocialPostImage.mock.calls[0].at(-2)).toBe("studio");
-    expect(mocks.editSocialPostImage.mock.calls[0].at(-1)).toBe("9:16");
+    expect(mocks.editSocialPostImage.mock.calls[0].at(-1)).toBe("1:1");
     expect(mocks.renderFormat).toHaveBeenCalledTimes(4);
 
     cleanup();
@@ -352,6 +352,69 @@ describe("useGeneration model-tier and provenance wiring", () => {
         }),
       }),
       1,
+    );
+
+    cleanup();
+  });
+
+  it("uses explicit safe review metadata and warns when final website AI fails", async () => {
+    mocks.generateWebsiteDraftMetadata.mockRejectedValueOnce(
+      new Error("metadata provider unavailable"),
+    );
+    const { result, cleanup } = renderGeneration();
+
+    const prepared = await result.current.handlePrepareFinalWebsiteDraft({
+      caption: "The final community caption after editing.",
+      image: generatedResult.image,
+      currentDraft: {
+        enabled: true,
+        kind: "site_update",
+        category: "community",
+        title: "Stale initial title",
+        body: "Stale initial body.",
+        altText: "Stale description for an earlier image.",
+        schemaVersion: 1,
+      },
+    });
+
+    expect(prepared).toMatchObject({
+      title: "Community update",
+      body: "The final community caption after editing.",
+    });
+    expect(prepared?.altText).toContain("review the final image");
+    expect(prepared?.altText).not.toContain("earlier image");
+    expect(mocks.toastWarning).toHaveBeenCalledWith(
+      expect.stringContaining("safe review placeholders"),
+    );
+
+    cleanup();
+  });
+
+  it("warns when malformed final website metadata selects safe placeholders", async () => {
+    mocks.generateWebsiteDraftMetadata.mockResolvedValueOnce("not valid json");
+    const { result, cleanup } = renderGeneration();
+
+    const prepared = await result.current.handlePrepareFinalWebsiteDraft({
+      caption: "The final delivery caption after editing.",
+      image: generatedResult.image,
+      currentDraft: {
+        enabled: true,
+        kind: "customer_story",
+        category: "deliveries",
+        title: "Stale initial title",
+        body: "Stale initial body.",
+        altText: "Stale description for an earlier image.",
+        customerDisplayName: "Alex M.",
+        schemaVersion: 1,
+      },
+    });
+
+    expect(prepared).toMatchObject({
+      title: "Welcome, Alex M.",
+      body: "The final delivery caption after editing.",
+    });
+    expect(mocks.toastWarning).toHaveBeenCalledWith(
+      expect.stringContaining("safe review placeholders"),
     );
 
     cleanup();

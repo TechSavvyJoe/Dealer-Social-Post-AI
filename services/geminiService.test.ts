@@ -6,6 +6,8 @@ import {
   generateFunSocialPostImage,
   generateSocialPost,
   generatePostVideo,
+  generateWebsiteDraftMetadata,
+  type GeneratedImageTextReview,
 } from "./geminiService";
 import { StyleOption, ToneOption, VideoStyle } from "../types";
 import { MODEL_POLICY_VERSION, MODELS, TASKS } from "./modelConfig";
@@ -71,6 +73,42 @@ const stubLoadedVideoImage = () => {
   );
 };
 
+const compliantImageTextReview: GeneratedImageTextReview = {
+  compliant: true,
+  uncertain: false,
+  detectedMarketingText: ["WELCOME HOME"],
+  marketingWordCount: 2,
+  marketingCharacterCount: 12,
+  hasFullSentence: false,
+  hasHashtag: false,
+  hasUrlOrPhone: false,
+  violations: [],
+};
+
+const imageTextReviewResponse = (
+  review: GeneratedImageTextReview = compliantImageTextReview,
+) => ({
+  text: () => JSON.stringify(review),
+  candidates: [{ content: { parts: [{ text: JSON.stringify(review) }] } }],
+});
+
+const isImageTextReviewRequest = (request: {
+  contents?: { parts?: Array<{ text?: string }> };
+}) =>
+  request.contents?.parts?.some((part) =>
+    part.text?.includes("strict visual quality-control inspector"),
+  ) === true;
+
+const generatedImageResponse = (data = "generated-image-data") => ({
+  candidates: [
+    {
+      content: {
+        parts: [{ inlineData: { mimeType: "image/png", data } }],
+      },
+    },
+  ],
+});
+
 /**
  * These tests pin the model-routing behaviour after the 2026-05-27 refactor
  * that moved hardcoded model IDs into `services/modelConfig.ts`. The asserts
@@ -81,23 +119,13 @@ describe("GeminiService model routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mockGenerateContent.mockResolvedValue({
-      text: () =>
-        "A fresh set of keys and a picture-perfect delivery day at Test Dealer. Congratulations on the new ride! #TestDealer",
-      candidates: [
-        {
-          content: {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: "image/png",
-                  data: "generated-image-data",
-                },
-              },
-            ],
-          },
-        },
-      ],
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) return imageTextReviewResponse();
+      return Promise.resolve({
+        text: () =>
+          "A fresh set of keys and a picture-perfect delivery day at Test Dealer. Congratulations on the new ride! #TestDealer",
+        ...generatedImageResponse(),
+      });
     });
 
     mockGenerateVideos.mockResolvedValue({
@@ -156,33 +184,195 @@ describe("GeminiService model routing", () => {
   });
 
   it("uses the final generated image instead of an interim thought image", async () => {
-    mockGenerateContent.mockResolvedValue({
-      candidates: [
-        {
-          content: {
-            parts: [
-              {
-                thought: true,
-                inlineData: {
-                  mimeType: "image/png",
-                  data: "interim-thought-image",
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) return imageTextReviewResponse();
+      return Promise.resolve({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  thought: true,
+                  inlineData: {
+                    mimeType: "image/png",
+                    data: "interim-thought-image",
+                  },
                 },
-              },
-              {
-                inlineData: {
-                  mimeType: "image/jpeg",
-                  data: "final-publishable-image",
+                {
+                  inlineData: {
+                    mimeType: "image/jpeg",
+                    data: "final-publishable-image",
+                  },
                 },
-              },
-            ],
+              ],
+            },
           },
-        },
-      ],
+        ],
+      });
     });
 
     await expect(
       generateFunSocialPostImage("data:image/jpeg;base64,fake", "Final Image Dealer"),
     ).resolves.toBe("data:image/jpeg;base64,final-publishable-image");
+  });
+
+  it("accepts a generated image after one strict compliant vision result", async () => {
+    let imageCalls = 0;
+    let reviewCalls = 0;
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        reviewCalls += 1;
+        return imageTextReviewResponse();
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        imageCalls += 1;
+        return Promise.resolve(generatedImageResponse("compliant-first-image"));
+      }
+      return Promise.resolve({
+        text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,original-photo",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Test Dealer",
+    );
+
+    expect(result.image).toBe("data:image/png;base64,compliant-first-image");
+    expect(imageCalls).toBe(1);
+    expect(reviewCalls).toBe(1);
+    const reviewRequest = mockGenerateContent.mock.calls.find(([request]) =>
+      isImageTextReviewRequest(request),
+    )?.[0];
+    expect(reviewRequest?.generationConfig).toEqual({ maxOutputTokens: 2048 });
+    expect(reviewRequest?.generationConfig).not.toHaveProperty("responseMimeType");
+    expect(reviewRequest?.generationConfig).not.toHaveProperty("responseSchema");
+    expect(
+      mockGenerateContent.mock.calls.some(([request]) =>
+        request.contents?.parts?.some((part: { text?: string }) =>
+          part.text?.includes("zero promotional overlay text"),
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("corrects a noncompliant image once with a text-free retry", async () => {
+    let imageCalls = 0;
+    let reviewCalls = 0;
+    const noncompliantReview: GeneratedImageTextReview = {
+      ...compliantImageTextReview,
+      compliant: false,
+      detectedMarketingText: [
+        "Big smiles all around as the family celebrates their new vehicle today",
+      ],
+      marketingWordCount: 11,
+      marketingCharacterCount: 68,
+      hasFullSentence: true,
+      violations: ["too_many_words", "too_many_characters", "full_sentence"],
+    };
+    const correctedReview = {
+      ...compliantImageTextReview,
+      detectedMarketingText: [],
+      marketingWordCount: 0,
+      marketingCharacterCount: 0,
+    };
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        reviewCalls += 1;
+        return imageTextReviewResponse(
+          reviewCalls === 1 ? noncompliantReview : correctedReview,
+        );
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        imageCalls += 1;
+        return Promise.resolve(
+          generatedImageResponse(
+            imageCalls === 1 ? "long-text-image" : "text-free-correction",
+          ),
+        );
+      }
+      return Promise.resolve({
+        text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,original-photo",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Test Dealer",
+    );
+
+    expect(result.image).toBe("data:image/png;base64,text-free-correction");
+    expect(imageCalls).toBe(2);
+    expect(reviewCalls).toBe(2);
+    const correctionCall = mockGenerateContent.mock.calls.find(([request]) =>
+      request.contents?.parts?.some((part: { text?: string }) =>
+        part.text?.includes("zero promotional overlay text"),
+      ),
+    );
+    expect(correctionCall).toBeDefined();
+  });
+
+  it("rejects a still-noncompliant retry and falls back to the original photo", async () => {
+    let imageCalls = 0;
+    let reviewCalls = 0;
+    const noncompliantReview: GeneratedImageTextReview = {
+      ...compliantImageTextReview,
+      compliant: false,
+      detectedMarketingText: ["Call today for your new vehicle and visit us online"],
+      marketingWordCount: 10,
+      marketingCharacterCount: 52,
+      hasFullSentence: true,
+      violations: ["too_many_words", "too_many_characters", "full_sentence"],
+    };
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        reviewCalls += 1;
+        return imageTextReviewResponse(noncompliantReview);
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        imageCalls += 1;
+        return Promise.resolve(
+          generatedImageResponse(
+            imageCalls === 1 ? "long-text-image" : "still-long-text-image",
+          ),
+        );
+      }
+      return Promise.resolve({
+        text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,original-photo",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Test Dealer",
+    );
+
+    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
+    expect(imageCalls).toBe(2);
+    expect(reviewCalls).toBe(2);
+  });
+
+  it("keeps website metadata requests inside the server text-policy contract", async () => {
+    mockGenerateContent.mockResolvedValueOnce({
+      text: () =>
+        '{"title":"Community update","body":"A private community update for review.","altText":"A dealership community image.","category":"community","privacyFlags":[]}',
+    });
+
+    await generateWebsiteDraftMetadata(
+      "data:image/jpeg;base64,source-photo",
+      "Return the website metadata JSON.",
+    );
+
+    expect(mockGenerateContent).toHaveBeenCalledTimes(1);
+    expect(mockGenerateContent.mock.calls[0]?.[0].generationConfig).toEqual({
+      maxOutputTokens: 2048,
+    });
   });
 
   it("forwards the selected primary canvas as a Gemini image aspect ratio", async () => {
@@ -260,26 +450,13 @@ describe("GeminiService model routing", () => {
   });
 
   it("keeps the Lite image fallback on its supported 1K output", async () => {
-    mockGenerateContent.mockImplementation(({ model }) => {
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) return imageTextReviewResponse();
+      const { model } = request;
       if (model !== MODELS.image.emergency) {
         return Promise.reject(new Error("503 model unavailable"));
       }
-      return Promise.resolve({
-        candidates: [
-          {
-            content: {
-              parts: [
-                {
-                  inlineData: {
-                    mimeType: "image/png",
-                    data: "generated-image-data",
-                  },
-                },
-              ],
-            },
-          },
-        ],
-      });
+      return Promise.resolve(generatedImageResponse());
     });
 
     await generateFunSocialPostImage("data:image/jpeg;base64,fake", "Test Dealer");
@@ -308,24 +485,11 @@ describe("GeminiService model routing", () => {
   });
 
   it("records fallback provenance without exposing prompts or credentials", async () => {
-    mockGenerateContent.mockImplementation(({ model, generationConfig }) => {
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) return imageTextReviewResponse();
+      const { model, generationConfig } = request;
       if (generationConfig?.responseModalities?.includes("IMAGE")) {
-        return Promise.resolve({
-          candidates: [
-            {
-              content: {
-                parts: [
-                  {
-                    inlineData: {
-                      mimeType: "image/png",
-                      data: "generated-image-data",
-                    },
-                  },
-                ],
-              },
-            },
-          ],
-        });
+        return Promise.resolve(generatedImageResponse());
       }
       if (model === TASKS.caption.primary) {
         return Promise.reject(new Error("503 model unavailable"));
@@ -367,24 +531,11 @@ describe("GeminiService model routing", () => {
   });
 
   it("labels a safe local caption as a basic fallback", async () => {
-    mockGenerateContent.mockImplementation(({ generationConfig }) => {
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) return imageTextReviewResponse();
+      const { generationConfig } = request;
       if (generationConfig?.responseModalities?.includes("IMAGE")) {
-        return Promise.resolve({
-          candidates: [
-            {
-              content: {
-                parts: [
-                  {
-                    inlineData: {
-                      mimeType: "image/png",
-                      data: "generated-image-data",
-                    },
-                  },
-                ],
-              },
-            },
-          ],
-        });
+        return Promise.resolve(generatedImageResponse());
       }
       return Promise.reject(new Error("503 upstream unavailable"));
     });

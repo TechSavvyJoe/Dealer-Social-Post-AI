@@ -256,6 +256,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     [platformOptions],
   );
   const initialPlatforms = useMemo(() => {
+    const hasRestoredSelection = Array.isArray(initialGenerationParams?.platformIds);
     const restored = Array.from(
       new Set(
         (initialGenerationParams?.platformIds || []).filter((platformId) =>
@@ -263,10 +264,23 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         ),
       ),
     );
-    return restored.length > 0 ? restored : [...DEFAULT_PLATFORM_IDS];
-  }, [initialGenerationParams?.platformIds, supportedPlatformIds]);
+    // An explicit empty array is an intentional Website-only destination.
+    // Only legacy/new sessions with no saved destination state receive the
+    // social defaults.
+    if (hasRestoredSelection) return restored;
+    // Older Website-only drafts predate explicit empty platform persistence.
+    // Restoring one must not reintroduce a default social destination.
+    return initialGenerationParams?.websiteEnabled ? [] : [...DEFAULT_PLATFORM_IDS];
+  }, [
+    initialGenerationParams?.platformIds,
+    initialGenerationParams?.websiteEnabled,
+    supportedPlatformIds,
+  ]);
   const [selectedPlatforms, setSelectedPlatforms] =
     useState<PlatformId[]>(initialPlatforms);
+  const [platformSelectionTouched, setPlatformSelectionTouched] = useState(() =>
+    Array.isArray(initialGenerationParams?.platformIds),
+  );
   const [websiteSelected, setWebsiteSelected] = useState(
     Boolean(initialGenerationParams?.websiteEnabled),
   );
@@ -437,10 +451,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
   const togglePlatform = useCallback((id: PlatformId) => {
     triggerHapticFeedback();
+    setPlatformSelectionTouched(true);
     setSelectedPlatforms((prev) => {
       if (prev.includes(id)) {
-        // Keep at least one platform selected
-        if (prev.length === 1) return prev;
         return prev.filter((p) => p !== id);
       }
       return [...prev, id];
@@ -462,6 +475,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
   const handleGenerate = useCallback(async () => {
     triggerHapticFeedback();
+    if (selectedPlatforms.length === 0 && !websiteSelected) return;
     if (scenarioNeedsCustomerRelease && !capturedRelease) {
       setReleaseValidationError(true);
       setReleaseModalOpen(true);
@@ -1050,7 +1064,17 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 disabled={websiteAvailability !== "ready"}
                 onClick={() => {
                   triggerHapticFeedback();
-                  setWebsiteSelected((selected) => !selected);
+                  setWebsiteSelected((selected) => {
+                    const next = !selected;
+                    // The social chips begin with convenient defaults. If the
+                    // salesperson has not touched them, choosing Website means
+                    // Website only—not an implicit TikTok/Facebook/Instagram
+                    // selection. Social destinations can still be added after.
+                    if (next && !platformSelectionTouched) {
+                      setSelectedPlatforms([]);
+                    }
+                    return next;
+                  });
                 }}
                 className={cn(
                   "flex min-h-16 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
@@ -1524,7 +1548,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 leftIcon={<Sparkles className={cn(isBusy && "animate-pulse")} />}
                 rightIcon={!isBusy && <ChevronRight />}
                 onClick={handleGenerate}
-                disabled={isBusy}
+                disabled={
+                  isBusy || (selectedPlatforms.length === 0 && !websiteSelected)
+                }
                 aria-label={`Generate Post — ${
                   mediaOutputMode === "photo"
                     ? "create photo outputs"
@@ -1568,6 +1594,14 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   )}
                 </span>
               </Button>
+              {selectedPlatforms.length === 0 && !websiteSelected ? (
+                <p
+                  className="text-center text-xs font-medium text-warning-200"
+                  role="status"
+                >
+                  Choose Website or at least one social destination.
+                </p>
+              ) : null}
               <Button
                 variant="plain"
                 size="sm"

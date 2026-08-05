@@ -30,6 +30,7 @@ describe("release artifact binding", () => {
     const scriptPath = resolve(process.cwd(), "scripts/vercel-staged-release.sh");
     const script = read("scripts/vercel-staged-release.sh");
     const qaScript = read("scripts/vercel-staged-qa.mjs");
+    const websiteCanary = read("scripts/production-website-handoff-canary.mjs");
     const runbook = read("docs/production-backups-and-release.md");
     const packageJson = read("package.json");
     const vercelCliVersion = "58.4.4";
@@ -80,6 +81,16 @@ describe("release artifact binding", () => {
     expect(
       script.match(/assert_provider_canary_evidence/g)?.length,
     ).toBeGreaterThanOrEqual(3);
+    expect(script).toContain("assert_website_handoff_canary_evidence");
+    expect(
+      script.match(/assert_website_handoff_canary_evidence/g)?.length,
+    ).toBeGreaterThanOrEqual(3);
+    expect(script).toContain("--verify-website-handoff-canary");
+    expect(qaScript).toContain("WEBSITE_HANDOFF_CANARY_MAX_AGE_MS");
+    expect(qaScript).toContain("validateWebsiteHandoffCanaryEvidence");
+    expect(websiteCanary).toContain(
+      ".release-evidence/production-website-handoff-canary.json",
+    );
     expect(script).toContain("begin_stage_attempt");
     expect(script).toContain("promotionAttemptedAt");
     expect(script).toContain("deploymentId");
@@ -89,6 +100,8 @@ describe("release artifact binding", () => {
     expect(runbook).toContain('npm run release:vercel:stage -- "$RELEASE_SHA"');
     expect(runbook).toContain("npm run release:vercel:qa");
     expect(runbook).toContain("npm run release:vercel:promote");
+    expect(runbook).toContain("npm run release:website-handoff-canary");
+    expect(runbook).toContain("npm run release:website-handoff-canary:confirm-cleanup");
     expect(packageJson).toContain('"release:vercel:stage"');
     expect(packageJson).toContain('"release:vercel:qa"');
     expect(packageJson).toContain('"release:vercel:promote"');
@@ -152,15 +165,20 @@ describe("release artifact binding", () => {
   it("keeps durable release receipts away from Playwright output", () => {
     const gitignore = read(".gitignore");
     const canary = read("scripts/production-provider-canary.mjs");
+    const websiteCanary = read("scripts/production-website-handoff-canary.mjs");
     const qa = read("scripts/vercel-staged-qa.mjs");
     const stagedSpec = read("e2e/staged-release.spec.ts");
 
     expect(gitignore).toContain(".release-evidence/");
     expect(canary).toContain(".release-evidence/production-provider-canary.json");
     expect(canary).toContain("Atomically invalidate any older pass");
+    expect(websiteCanary).toContain(
+      ".release-evidence/production-website-handoff-canary.json",
+    );
     expect(qa).toContain(".release-evidence/vercel-staged-release.json");
     expect(qa).toContain(".release-evidence/vercel-staged-qa.json");
     expect(qa).toContain("PROVIDER_CANARY_MAX_AGE_MS");
+    expect(qa).toContain("WEBSITE_HANDOFF_CANARY_MAX_AGE_MS");
     expect(qa).toContain("rmSync(qaPath, { force: true })");
     expect(qa).toContain("E2E_STAGED_RELEASE");
     expect(qa).toContain("--fail-on-flaky-tests");
@@ -168,6 +186,7 @@ describe("release artifact binding", () => {
     expect(qa).toContain("acquireReleaseLock");
     expect(qa).toContain("linkSync(candidate, lockPath)");
     expect(qa).toContain("validateProviderCanaryEvidence");
+    expect(qa).toContain("validateWebsiteHandoffCanaryEvidence");
     expect(qa).not.toContain("...process.env");
     expect(stagedSpec).toContain("unsafeRequests");
     expect(stagedSpec).toContain('await context.route("**/*"');

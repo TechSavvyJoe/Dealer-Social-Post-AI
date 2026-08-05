@@ -42,6 +42,7 @@ import {
   websitePublicationPollDelay,
   type WebsitePublication,
 } from "../services/websitePublishing";
+import { resolveHistoryPlatformIds } from "../services/platformCopy";
 
 const STATUS_FILTERS: Array<{ key: ApprovalStatus | "all"; label: string }> = [
   { key: "all", label: "All" },
@@ -313,10 +314,13 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
           historyReadOnly:
             role !== "salesperson" &&
             (!currentPersonId || post.salesperson_id !== currentPersonId),
-          platformIds:
-            post.platform_ids && post.platform_ids.length > 0
-              ? post.platform_ids
-              : undefined,
+          // Preserve an explicit empty selection for Website-only posts while
+          // restoring social destinations for records created before
+          // platform_ids existed.
+          platformIds: resolveHistoryPlatformIds(
+            post.platform_ids,
+            post.platform_captions,
+          ),
           mediaOutputMode: post.media_output_mode || "photo",
           platformCaptions: post.platform_captions,
           primaryFormatId: post.primary_format_id || undefined,
