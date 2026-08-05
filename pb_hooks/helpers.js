@@ -2691,7 +2691,13 @@ function resolvePostScenarioPolicy(scenarioId, customScenariosJson, customerName
         if (scenario && scenario.id === id) {
           return {
             ok: true,
-            releaseRequired: hasCustomer || scenario.requiresCustomer === true,
+            // Website publishing classifies custom Delivery scenarios as
+            // customer stories. Consent must follow that server-owned content
+            // classification even if a malformed/custom UI flag says false.
+            releaseRequired:
+              hasCustomer ||
+              scenario.requiresCustomer === true ||
+              scenario.category === "delivery",
           };
         }
       }

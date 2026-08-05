@@ -24,6 +24,8 @@ import {
   CircleCheck,
   Camera,
   Calendar,
+  Globe2,
+  ExternalLink,
   type LucideIcon,
 } from "lucide-react";
 import confetti from "canvas-confetti";
@@ -88,6 +90,14 @@ import {
   dealershipMentionFor,
 } from "../utils/socialAttribution";
 import { retainNewestVideoJobs } from "../utils/videoJobRetention";
+import {
+  getWebsitePublication,
+  retryWebsitePublication,
+  safeWebsiteReviewUrl,
+  websitePublicationNeedsStatusRefresh,
+  websitePublicationPollDelay,
+  type WebsitePublication,
+} from "../services/websitePublishing";
 
 // Lazy load modals for performance
 const LazyImagePreviewModal = React.lazy(() =>
@@ -120,6 +130,88 @@ const TILE_NEUTRAL =
   "bg-white/[0.06] border border-white/[0.08] text-surface-50 " +
   "hover:bg-white/[0.10] hover:border-white/[0.15]";
 const TILE_ICON_ACCENT = "text-primary-300";
+
+const websitePublicationCopy = (
+  publication: WebsitePublication | undefined,
+): {
+  title: string;
+  detail: string;
+  tone: "neutral" | "info" | "warning" | "success" | "error";
+} => {
+  switch (publication?.status) {
+    case "waiting_approval":
+      return {
+        title: "Website draft waiting for approval",
+        detail:
+          "AI prepared the private draft. Customer Hub delivery starts only after this exact creative is approved.",
+        tone: "warning",
+      };
+    case "queued":
+    case "retrying":
+      return {
+        title: "Website draft queued",
+        detail:
+          "The secure handoff to Customer Hub is queued. Nothing has been published publicly.",
+        tone: "info",
+      };
+    case "delivering":
+      return {
+        title: "Sending private website draft",
+        detail:
+          "Customer Hub is receiving the exact approved creative and website copy.",
+        tone: "info",
+      };
+    case "draft_ready":
+      return publication.lastError
+        ? {
+            title: "Private draft ready — status check needs attention",
+            detail:
+              "The draft and review link are safe in Customer Hub. Retry the status check after the connection issue is corrected.",
+            tone: "warning",
+          }
+        : {
+            title: "Private website draft ready",
+            detail:
+              "Review it in Customer Hub, then publish it when you are satisfied.",
+            tone: "success",
+          };
+    case "published":
+      return {
+        title: "Published on the website",
+        detail: "Customer Hub reports that this website item is public.",
+        tone: "success",
+      };
+    case "failed":
+      return {
+        title: "Website draft delivery needs attention",
+        detail:
+          publication.lastError ||
+          "The private draft was not delivered. Your social post is still saved and can be retried safely.",
+        tone: "error",
+      };
+    case "withdrawn":
+      return {
+        title: "Website draft withdrawn",
+        detail: "This website revision is no longer queued or public.",
+        tone: "neutral",
+      };
+    default:
+      return {
+        title: "Website draft prepared",
+        detail:
+          "AI prepared private website copy. Nothing is public until Customer Hub publishes it.",
+        tone: "neutral",
+      };
+  }
+};
+
+const websitePrivacyFlagCopy: Record<string, string> = {
+  faces_visible: "face may be visible",
+  license_plate_visible: "license plate may be visible",
+  personal_information_visible: "personal information may be visible",
+  minor_may_be_visible: "minor may be visible",
+  review_visual_privacy: "review the entire image closely",
+};
 
 /**
  * A compact secondary tool. Result completion actions intentionally use a
@@ -363,6 +455,11 @@ export const PostResult: React.FC<PostResultProps> = ({
       (requiresApproval ? (post.postId ? "pending" : "submission_failed") : "n_a"),
   );
   const [approvalCheckError, setApprovalCheckError] = useState<string | null>(null);
+  const [websitePublication, setWebsitePublication] = useState<
+    WebsitePublication | undefined
+  >(post.websitePublication);
+  const [websiteCheckError, setWebsiteCheckError] = useState<string | null>(null);
+  const [websiteRetrying, setWebsiteRetrying] = useState(false);
   /** Local edits to per-platform pack captions (share + tab switch must honor these). */
   const [packOverrides, setPackOverrides] = useState<Record<string, string>>({});
   /** Prior image versions after regen/fun/edit (local compare stack, max 5). */
@@ -651,10 +748,12 @@ export const PostResult: React.FC<PostResultProps> = ({
   // byte equivalent to what the manager saw. Delivery unlocks on approval,
   // while edits require starting a new review submission.
   const creativeLockedForReview = reviewRequired;
+  const contentEditingLocked =
+    creativeLockedForReview || Boolean(post.websiteDraft?.enabled);
   const videoReviewLockMessage =
     "This reviewed creative must stay unchanged. Start a new post to create a video.";
   const historyReadOnly = Boolean(post.historyReadOnly);
-  const editableDraft = !reviewRequired && !historyReadOnly;
+  const editableDraft = !contentEditingLocked && !historyReadOnly;
   const originalRequiredMessage =
     "This tool needs the original captured photo. Reopened History keeps the finished creative, so use Edit image or start a new photo instead.";
 
@@ -784,6 +883,8 @@ export const PostResult: React.FC<PostResultProps> = ({
     : releaseLocked
       ? "Release not saved"
       : "Approval pending";
+  const websiteStatusCopy = websitePublicationCopy(websitePublication);
+  const websiteReviewUrl = safeWebsiteReviewUrl(websitePublication?.reviewUrl);
 
   useEffect(() => {
     setApprovalStatus(
@@ -846,6 +947,80 @@ export const PostResult: React.FC<PostResultProps> = ({
       if (timeoutId) clearTimeout(timeoutId);
     };
   }, [approvalStatus, post.postId, reviewRequired, toast]);
+
+  useEffect(() => {
+    setWebsitePublication(post.websitePublication);
+    setWebsiteCheckError(null);
+  }, [post.postId, post.websitePublication]);
+
+  useEffect(() => {
+    if (!post.websiteDraft?.enabled || !post.postId) return;
+    if (
+      websitePublication &&
+      !websitePublicationNeedsStatusRefresh(websitePublication.status)
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    let active = true;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const refresh = async () => {
+      if (typeof document !== "undefined" && document.hidden) {
+        timeoutId = setTimeout(refresh, 60_000);
+        return;
+      }
+      try {
+        const next = await getWebsitePublication(
+          post.postId as string,
+          controller.signal,
+        );
+        if (!active) return;
+        setWebsitePublication(next);
+        setWebsiteCheckError(null);
+        if (websitePublicationNeedsStatusRefresh(next.status)) {
+          timeoutId = setTimeout(refresh, websitePublicationPollDelay(next.status));
+        }
+      } catch (err) {
+        if (!active || (err instanceof DOMException && err.name === "AbortError")) {
+          return;
+        }
+        setWebsiteCheckError(
+          "Website status could not be refreshed. The delivery worker will keep retrying safely.",
+        );
+        timeoutId = setTimeout(refresh, 15_000);
+      }
+    };
+
+    void refresh();
+    return () => {
+      active = false;
+      controller.abort();
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [post.postId, post.websiteDraft?.enabled, websitePublication?.status]);
+
+  const handleRetryWebsite = useCallback(async () => {
+    if (!post.postId || websiteRetrying) return;
+    const retryingStatusCheck = websitePublication?.status === "draft_ready";
+    setWebsiteRetrying(true);
+    try {
+      const next = await retryWebsitePublication(post.postId);
+      setWebsitePublication(next);
+      setWebsiteCheckError(null);
+      toast.success(
+        retryingStatusCheck
+          ? "Website status check queued."
+          : "Private website draft queued again.",
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Website draft could not be retried.",
+      );
+    } finally {
+      setWebsiteRetrying(false);
+    }
+  }, [post.postId, toast, websitePublication?.status, websiteRetrying]);
 
   useEffect(() => {
     if (previousPostTextRef.current === post.text) return;
@@ -2488,7 +2663,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         <CaptionAlternativesModal
           isOpen={
             isCaptionAltsOpen &&
-            !creativeLockedForReview &&
+            !contentEditingLocked &&
             !historyReadOnly &&
             hasOriginalCapture
           }
@@ -2503,7 +2678,7 @@ export const PostResult: React.FC<PostResultProps> = ({
 
       <Suspense fallback={null}>
         <LazyEditTextModal
-          isOpen={isTextEditing && !creativeLockedForReview && !historyReadOnly}
+          isOpen={isTextEditing && !contentEditingLocked && !historyReadOnly}
           onClose={() => setIsTextEditing(false)}
           onSubmit={handleTextEditSubmit}
           originalText={editedText}
@@ -2567,9 +2742,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       </Suspense>
       <Suspense fallback={null}>
         <LazyFunModeDirectorModal
-          isOpen={
-            isFunModeDirectorOpen && !creativeLockedForReview && hasOriginalCapture
-          }
+          isOpen={isFunModeDirectorOpen && !contentEditingLocked && hasOriginalCapture}
           onClose={() => setIsFunModeDirectorOpen(false)}
           enabledFunStyles={enabledFunStyles}
           onSelectStyle={(styleName) => {
@@ -2724,7 +2897,7 @@ export const PostResult: React.FC<PostResultProps> = ({
               variant="outline"
               size="sm"
               className="min-h-11 shrink-0 border-warning-300/30 text-warning-50"
-              disabled={textBusy || creativeLockedForReview || !hasOriginalCapture}
+              disabled={textBusy || contentEditingLocked || !hasOriginalCapture}
               title={!hasOriginalCapture ? originalRequiredMessage : undefined}
               leftIcon={
                 textBusy ? (
@@ -2849,6 +3022,99 @@ export const PostResult: React.FC<PostResultProps> = ({
             </div>
           </motion.div>
         )}
+        {post.websiteDraft?.enabled ? (
+          <motion.div
+            className={cn(
+              "mx-auto flex w-full max-w-3xl flex-col gap-3 rounded-2xl border px-4 py-4 shadow-lg shadow-black/10 sm:flex-row sm:items-center",
+              websiteStatusCopy.tone === "success"
+                ? "border-success-500/30 bg-success-500/10 text-success-100"
+                : websiteStatusCopy.tone === "warning"
+                  ? "border-warning-500/30 bg-warning-500/10 text-warning-100"
+                  : websiteStatusCopy.tone === "error"
+                    ? "border-error-500/30 bg-error-500/10 text-error-100"
+                    : websiteStatusCopy.tone === "info"
+                      ? "border-info-500/30 bg-info-500/10 text-info-100"
+                      : "border-white/10 bg-white/[0.04] text-surface-100",
+            )}
+            initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
+            role={
+              websitePublication?.status === "failed" ||
+              (websitePublication?.status === "draft_ready" &&
+                websitePublication.lastError)
+                ? "alert"
+                : "status"
+            }
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-current/20 bg-black/10">
+              <Globe2 className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-semibold">{websiteStatusCopy.title}</p>
+                <Badge variant={websiteStatusCopy.tone} uppercase={false}>
+                  Private draft
+                </Badge>
+              </div>
+              <p className="mt-1 text-sm leading-relaxed opacity-80">
+                {websiteStatusCopy.detail}
+              </p>
+              {post.websiteDraft.privacyFlags?.length ? (
+                <p className="mt-2 text-xs font-medium opacity-85">
+                  AI review reminders:{" "}
+                  {post.websiteDraft.privacyFlags
+                    .map((flag) => websitePrivacyFlagCopy[flag])
+                    .filter(Boolean)
+                    .join("; ")}
+                  .
+                </p>
+              ) : null}
+              {websiteCheckError ? (
+                <p className="mt-2 text-xs font-medium opacity-75">
+                  {websiteCheckError}
+                </p>
+              ) : null}
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              {websiteReviewUrl ? (
+                <a
+                  href={websiteReviewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex min-h-9 items-center justify-center gap-2 rounded-xl border-2 border-surface-700 px-4 py-2 text-sm font-semibold text-surface-100 transition-colors hover:border-surface-600 hover:bg-surface-800/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                  Review draft
+                </a>
+              ) : null}
+              {(websitePublication?.status === "failed" ||
+                (websitePublication?.status === "draft_ready" &&
+                  websitePublication.lastError)) &&
+              post.postId ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={websiteRetrying}
+                  leftIcon={
+                    websiteRetrying ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    )
+                  }
+                  onClick={() => void handleRetryWebsite()}
+                >
+                  {websiteRetrying
+                    ? "Retrying…"
+                    : websitePublication.status === "draft_ready"
+                      ? "Retry status"
+                      : "Retry"}
+                </Button>
+              ) : null}
+            </div>
+          </motion.div>
+        ) : null}
         {error && (
           <motion.div
             className="mb-4 bg-error-900/50 border border-error-700 text-error-300 px-4 py-3 rounded-xl flex items-center justify-center gap-2 backdrop-blur-sm"
@@ -2898,10 +3164,7 @@ export const PostResult: React.FC<PostResultProps> = ({
             }
             copyCaptionDisabled={deliveryLocked}
             editCaptionDisabled={
-              textBusy ||
-              creativeLockedForReview ||
-              historyReadOnly ||
-              !hasOriginalCapture
+              textBusy || contentEditingLocked || historyReadOnly || !hasOriginalCapture
             }
           />
         ) : null}
@@ -3337,7 +3600,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                       disabled={
                         imageBusy ||
                         !!videoUrl ||
-                        creativeLockedForReview ||
+                        contentEditingLocked ||
                         historyReadOnly ||
                         !hasOriginalCapture
                       }
@@ -3466,7 +3729,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     disabled={
                       imageBusy ||
                       !!videoUrl ||
-                      creativeLockedForReview ||
+                      contentEditingLocked ||
                       historyReadOnly ||
                       !hasOriginalCapture
                     }
@@ -3490,10 +3753,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                         : "Change specific details"
                     }
                     disabled={
-                      imageBusy ||
-                      !!videoUrl ||
-                      creativeLockedForReview ||
-                      historyReadOnly
+                      imageBusy || !!videoUrl || contentEditingLocked || historyReadOnly
                     }
                     busy={imageBusy}
                     label={
@@ -3513,7 +3773,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     ariaLabel="Regenerate caption"
                     disabled={
                       textBusy ||
-                      creativeLockedForReview ||
+                      contentEditingLocked ||
                       historyReadOnly ||
                       !hasOriginalCapture
                     }
@@ -3532,7 +3792,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                         ? "This teammate's saved post is view-only"
                         : "Describe a caption change"
                     }
-                    disabled={textBusy || creativeLockedForReview || historyReadOnly}
+                    disabled={textBusy || contentEditingLocked || historyReadOnly}
                     busy={textBusy}
                     label={textBusy ? "Wait..." : "Edit text"}
                     onClick={() => setIsTextEditing(true)}
@@ -3549,7 +3809,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                       }
                       disabled={
                         textBusy ||
-                        creativeLockedForReview ||
+                        contentEditingLocked ||
                         historyReadOnly ||
                         !hasOriginalCapture
                       }
@@ -3747,8 +4007,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                     <p className="mt-0.5 text-xs text-surface-400">
                       {historyReadOnly
                         ? "This teammate's saved copy is view-only. You can still copy, share, or export it."
-                        : creativeLockedForReview
-                          ? "Review copy is locked to the exact creative submitted to the manager."
+                        : contentEditingLocked
+                          ? post.websiteDraft?.enabled
+                            ? "Website copy is locked to the exact private draft prepared for Customer Hub."
+                            : "Review copy is locked to the exact creative submitted to the manager."
                           : "Ready to copy and post. Tap New caption if you want a different version."}
                     </p>
                   </div>
@@ -3760,7 +4022,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                       }}
                       disabled={
                         textBusy ||
-                        creativeLockedForReview ||
+                        contentEditingLocked ||
                         historyReadOnly ||
                         !hasOriginalCapture
                       }
@@ -3795,7 +4057,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                         onClick={() => setIsCaptionAltsOpen(true)}
                         disabled={
                           textBusy ||
-                          creativeLockedForReview ||
+                          contentEditingLocked ||
                           historyReadOnly ||
                           !hasOriginalCapture
                         }
@@ -3824,7 +4086,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                       type="button"
                       onClick={handleUndo}
                       disabled={
-                        historyIndex === 0 || creativeLockedForReview || historyReadOnly
+                        historyIndex === 0 || contentEditingLocked || historyReadOnly
                       }
                       className={cn(
                         "inline-flex h-11 w-11 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-surface-200 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 disabled:cursor-not-allowed disabled:opacity-30",
@@ -3840,7 +4102,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                       onClick={handleRedo}
                       disabled={
                         historyIndex === textHistory.length - 1 ||
-                        creativeLockedForReview ||
+                        contentEditingLocked ||
                         historyReadOnly
                       }
                       className={cn(
@@ -3932,9 +4194,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                   <CaptionStudio
                     value={editedText}
                     onChange={handleTextChange}
-                    disabled={
-                      isTextLoading || creativeLockedForReview || historyReadOnly
-                    }
+                    disabled={isTextLoading || contentEditingLocked || historyReadOnly}
                     platformId={activeCaptionPlatform}
                     claimLocked={claimLocked}
                     compact={isDesktopLayout}

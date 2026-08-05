@@ -27,6 +27,7 @@ const healthyPayload = {
     legacy_client_compatibility_enabled: false,
     off_box_backup_configured: true,
     off_box_restore_ready: true,
+    website_integration_configured: true,
   },
   counts: { dealers: 4, posts_24h: 12, photo_releases_24h: 3 },
   backup: {

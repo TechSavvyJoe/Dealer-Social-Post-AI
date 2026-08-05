@@ -260,6 +260,10 @@ jobs:
             "GEMINI_API_KEY",
             "TURNSTILE_SECRET",
             "VERCEL_TO_FLY_PROXY_SECRET",
+            "CUSTOMER_HUB_URL",
+            "CUSTOMER_HUB_SECRET",
+            "CUSTOMER_HUB_DESTINATION_ID",
+            "CUSTOMER_HUB_DEALER_ID",
           ];
           const missing = required.filter((name) => !names.has(name));
           if (missing.length) {

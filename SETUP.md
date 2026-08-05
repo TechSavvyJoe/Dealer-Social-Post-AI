@@ -54,6 +54,25 @@ fly deploy \
   --build-arg VITE_ENABLE_OPENAI_FALLBACK=true
 ```
 
+Optional Customer Hub private-draft delivery is configured only in the
+PocketBase runtime:
+
+```bash
+CUSTOMER_HUB_URL=
+CUSTOMER_HUB_SECRET=
+CUSTOMER_HUB_DESTINATION_ID=
+CUSTOMER_HUB_DEALER_ID=
+```
+
+`CUSTOMER_HUB_URL` is the HTTPS site origin. `CUSTOMER_HUB_SECRET` is the
+shared 32+ character HMAC secret installed independently on both backends.
+`CUSTOMER_HUB_DESTINATION_ID` is the agreed safe destination slug, and
+`CUSTOMER_HUB_DEALER_ID` must exactly equal Joe's PocketBase dealer record id.
+The website option remains disabled when any value is blank or the active
+dealer does not match the guard. These values are never `VITE_` variables and
+must never be sent to the browser. Delivery creates only a private Customer Hub
+draft; Joe's final review remains the publication gate.
+
 The example Turnstile key is Cloudflare's public always-pass test key. Use it
 only for local development and CI. Production requires its own public site key
 at build time plus `TURNSTILE_SECRET` and exact

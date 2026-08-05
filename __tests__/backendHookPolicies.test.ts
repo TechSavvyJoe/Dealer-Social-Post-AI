@@ -170,6 +170,19 @@ describe("PocketBase request policies", () => {
     ).toEqual({ ok: true, releaseRequired: false });
     expect(
       helpers.resolvePostScenarioPolicy(
+        "custom_delivery",
+        JSON.stringify([
+          {
+            id: "custom_delivery",
+            category: "delivery",
+            requiresCustomer: false,
+          },
+        ]),
+        "",
+      ),
+    ).toEqual({ ok: true, releaseRequired: true });
+    expect(
+      helpers.resolvePostScenarioPolicy(
         "custom_inventory",
         JSON.stringify([{ id: "custom_inventory", requiresCustomer: false }]),
         "Mia",

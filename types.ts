@@ -1,3 +1,5 @@
+import type { WebsiteDraft, WebsitePublication } from "./services/websitePublishing";
+
 export enum AppStep {
   LOGIN,
   CAPTURE,
@@ -116,6 +118,10 @@ export interface GeneratedPost {
    * was generated (0–1 platforms or pack step failed).
    */
   platformCaptions?: Record<string, string>;
+  /** AI-prepared copy for a private Customer Hub draft; never public by itself. */
+  websiteDraft?: WebsiteDraft;
+  /** Durable server-to-server delivery state for the private website draft. */
+  websitePublication?: WebsitePublication;
   /** User-visible provenance for the primary caption. */
   captionSource?: "ai" | "basic_fallback" | "custom";
   /** True when a safe local template was used instead of a provider result. */
@@ -248,4 +254,8 @@ export interface GenerationParams {
   primaryFormatId?: PrimaryImageFormatId;
   /** Native Gemini image ratio corresponding to `primaryFormatId`. */
   imageAspectRatio?: ImageAspectRatio;
+  /** Separate from manual social targets: prepare a private website draft. */
+  websiteEnabled?: boolean;
+  /** Grounded year/make/model/trim label from VIN decode; never the VIN. */
+  websiteVehicleDescription?: string;
 }

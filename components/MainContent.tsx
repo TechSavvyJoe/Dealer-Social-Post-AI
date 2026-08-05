@@ -77,6 +77,8 @@ interface MainContentProps {
       vin?: string;
       scenarioId?: string;
       hasRelease?: boolean;
+      websiteEnabled?: boolean;
+      websiteVehicleDescription?: string;
       capturedRelease?: {
         customerName: string;
         signaturePngDataUrl: string;
@@ -164,6 +166,8 @@ export const MainContent: React.FC<MainContentProps> = ({
         vin?: string;
         scenarioId?: string;
         hasRelease?: boolean;
+        websiteEnabled?: boolean;
+        websiteVehicleDescription?: string;
         capturedRelease?: {
           customerName: string;
           signaturePngDataUrl: string;
@@ -188,6 +192,8 @@ export const MainContent: React.FC<MainContentProps> = ({
         mediaOutputMode,
         primaryFormatId: outputProfile?.primaryFormatId,
         imageAspectRatio: outputProfile?.imageAspectRatio,
+        websiteEnabled: meta?.websiteEnabled,
+        websiteVehicleDescription: meta?.websiteVehicleDescription,
       });
       await onGenerate(
         style,
@@ -212,6 +218,8 @@ export const MainContent: React.FC<MainContentProps> = ({
           mediaOutputMode: generatedPost.mediaOutputMode,
           primaryFormatId: generatedPost.primaryFormatId,
           imageAspectRatio: generatedPost.imageAspectRatio,
+          websiteEnabled: generatedPost.websiteDraft?.enabled,
+          websiteVehicleDescription: generatedPost.websiteDraft?.vehicleDescription,
         }
       : {};
 
@@ -227,6 +235,10 @@ export const MainContent: React.FC<MainContentProps> = ({
         postDeliveryParams.mediaOutputMode ?? base?.mediaOutputMode ?? "photo",
       primaryFormatId: postDeliveryParams.primaryFormatId ?? base?.primaryFormatId,
       imageAspectRatio: postDeliveryParams.imageAspectRatio ?? base?.imageAspectRatio,
+      websiteEnabled:
+        postDeliveryParams.websiteEnabled ?? base?.websiteEnabled ?? false,
+      websiteVehicleDescription:
+        postDeliveryParams.websiteVehicleDescription ?? base?.websiteVehicleDescription,
     });
     onRemix();
   }, [

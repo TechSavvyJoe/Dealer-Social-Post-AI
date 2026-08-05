@@ -1210,6 +1210,7 @@ routerAdd("GET", "/api/app/health", (c) => {
     legacy_client_compatibility_enabled: false,
     off_box_backup_configured: false,
     off_box_restore_ready: false,
+    website_integration_configured: false,
   };
   const modelPolicy = policies.geminiModelPolicySnapshot();
   const backupEnabled =
@@ -1487,6 +1488,15 @@ routerAdd("GET", "/api/app/health", (c) => {
       .toLowerCase() === "true";
   checks.off_box_backup_configured = backupEnabled;
   checks.off_box_restore_ready = backupRestoreReady;
+  try {
+    const websitePublications = require(__hooks + "/websitePublications.js");
+    const configuredDealerId = ($os.getenv("CUSTOMER_HUB_DEALER_ID") || "").trim();
+    checks.website_integration_configured =
+      !!configuredDealerId &&
+      websitePublications.destinationConfiguration(configuredDealerId).enabled;
+  } catch (_e) {
+    checks.website_integration_configured = false;
+  }
 
   // Top-level ok = critical checks must pass (uptime monitors hit this).
   if (
@@ -1502,7 +1512,8 @@ routerAdd("GET", "/api/app/health", (c) => {
       (!checks.turnstile_secret_set ||
         !checks.turnstile_site_key_set ||
         !checks.turnstile_hostnames_configured)) ||
-    (flyRuntime && !checks.off_box_restore_ready)
+    (flyRuntime &&
+      (!checks.off_box_restore_ready || !checks.website_integration_configured))
   ) {
     result.ok = false;
   }
@@ -2417,6 +2428,13 @@ routerAdd("POST", "/api/app/photo_releases/:id/link-post", (c) => {
       $app.dao().saveRecord(post);
     }
 
+    // Consent and post creation are intentionally separate durable writes.
+    // Wake a waiting website row now; the minute worker also reconciles this
+    // state so a crash between these writes cannot strand the draft.
+    try {
+      require(__hooks + "/websitePublications.js").reconcilePublicationForPost(post.id);
+    } catch (_e) {}
+
     return c.json(200, {
       id: release.id,
       post_id: post.id,
@@ -2452,6 +2470,18 @@ cronAdd("prune-unlinked-photo-releases", "13 * * * *", function () {
   } catch (_e) {
     // Collection/fields may not exist before the forward migration.
   }
+});
+
+// ---- Website destination (server-only credentials, safe public status) --
+routerAdd("GET", "/api/app/website-destinations", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  const websitePublications = require(__hooks + "/websitePublications.js");
+  c.response().header().set("Cache-Control", "private, no-store");
+  return c.json(200, {
+    items: [websitePublications.publicDestinationConfiguration(context.dealer.id)],
+  });
 });
 
 // ---- Posts (log + leaderboard + approval) ------------------------------
@@ -2495,6 +2525,8 @@ routerAdd("POST", "/api/app/posts", (c) => {
   let generationClaimOwner = "";
   let generationClaimCount = 0;
   let createdPostRecord = null;
+  let websitePublicationRecord = null;
+  let websiteDestinationEnabled = false;
 
   try {
     const posts = $app.dao().findCollectionByNameOrId("posts");
@@ -2504,6 +2536,26 @@ routerAdd("POST", "/api/app/posts", (c) => {
     const form = new RecordUpsertForm($app, record);
     form.setFullManageAccess(true);
     const body = $apis.requestInfo(c).data || {};
+    const websitePublications = require(__hooks + "/websitePublications.js");
+    const parsedWebsiteDraft = websitePublications.parseWebsiteDraft(
+      body.website_draft,
+    );
+    if (!parsedWebsiteDraft.ok) {
+      return c.json(400, { error: parsedWebsiteDraft.error });
+    }
+    const websiteDraft = parsedWebsiteDraft.value;
+    if (websiteDraft && websiteDraft.enabled) {
+      const destination = websitePublications.destinationConfiguration(dealer.id);
+      websiteDestinationEnabled = destination.enabled;
+      if (
+        websiteDraft.customerDisplayName &&
+        !(body.customer_name || "").toString().trim()
+      ) {
+        return c.json(400, {
+          error: "A customer identity is required before using a public customer label",
+        });
+      }
+    }
     const scenarioId = helpers.assertString(
       (body.scenario_id || "").toString().trim(),
       80,
@@ -2511,10 +2563,27 @@ routerAdd("POST", "/api/app/posts", (c) => {
     const scenarioPolicy = helpers.resolvePostScenarioPolicy(
       scenarioId,
       dealer.getString("custom_scenarios"),
-      body.customer_name,
+      (body.customer_name || "").toString().trim() ||
+        (websiteDraft && websiteDraft.enabled
+          ? websiteDraft.customerDisplayName || ""
+          : ""),
     );
     if (!scenarioPolicy.ok) {
       return c.json(400, { error: "Invalid post scenario" });
+    }
+    if (
+      websiteDraft &&
+      websiteDraft.enabled &&
+      !websitePublications.websiteDraftMatchesScenario(
+        scenarioId,
+        dealer.getString("custom_scenarios"),
+        websiteDraft,
+      )
+    ) {
+      return c.json(400, {
+        error: "Website draft does not match the selected post type",
+        code: "WEBSITE_MAPPING_CONFLICT",
+      });
     }
     const releaseRequired = scenarioPolicy.releaseRequired;
     const allowedPlatformIds = helpers.allowedPostPlatformIds();
@@ -2642,6 +2711,9 @@ routerAdd("POST", "/api/app/posts", (c) => {
     } catch (_e) {}
     if (approvalStatus === "pending" && !creativeFile) {
       return c.json(400, { error: "Review image is required" });
+    }
+    if (websiteDraft && websiteDraft.enabled && !creativeFile) {
+      return c.json(400, { error: "Website creative image is required" });
     }
 
     // Invalid requests above do not consume this normal storage allowance.
@@ -2858,6 +2930,7 @@ routerAdd("POST", "/api/app/posts", (c) => {
       generation_fallback_count: generationFallbackCount,
       generation_last_success_at: generationLastSuccessAt,
       model_policy_version: modelPolicyVersion,
+      website_draft: parsedWebsiteDraft.serialized,
       // Every derived artifact (approval polling, protected creative, video
       // completion) is bound to the opaque browser session that logged it.
       owner_session_hash: ownerSessionHash,
@@ -2889,6 +2962,16 @@ routerAdd("POST", "/api/app/posts", (c) => {
       return c.json(400, { error: "Review image is required" });
     }
 
+    if (websiteDraft && websiteDraft.enabled && websiteDestinationEnabled) {
+      try {
+        websitePublicationRecord = websitePublications.createPublicationForPost(record);
+      } catch (_websiteQueueError) {
+        // The social post and exact website copy remain saved. History exposes
+        // a retryable website failure even if a config change races this save.
+        console.error("[posts] private website draft queue is unavailable");
+      }
+    }
+
     if (generationClaimToken) {
       helpers.finalizeGenerationEventClaims(
         generationClaimToken,
@@ -2915,6 +2998,11 @@ routerAdd("POST", "/api/app/posts", (c) => {
       platform_captions: parsedPlatformCaptions.value,
       primary_format_id: primaryFormatId,
       image_aspect_ratio: imageAspectRatio,
+      website_draft: websiteDraft && websiteDraft.enabled ? websiteDraft : null,
+      website_publication: websitePublications.publicationSummaryForPost(
+        record,
+        websitePublicationRecord,
+      ),
     });
   } catch (err) {
     if (generationClaimToken) {
@@ -2967,6 +3055,13 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
     if (record.getString("approval_status") !== "n_a") {
       return c.json(409, {
         error: "Approval review copies are immutable; create another post to revise it",
+      });
+    }
+    const websitePublications = require(__hooks + "/websitePublications.js");
+    if (websitePublications.findPublicationForPost(record.id, "")) {
+      return c.json(409, {
+        error:
+          "Website delivery copies are immutable; create another post to revise it",
       });
     }
 
@@ -3157,14 +3252,152 @@ routerAdd("GET", "/api/app/posts/:id/status", (c) => {
     }
 
     c.response().header().set("Cache-Control", "private, no-store");
+    const websitePublications = require(__hooks + "/websitePublications.js");
+    const websitePublication = websitePublications.findPublicationForPost(
+      record.id,
+      "",
+    );
     return c.json(200, {
       id: record.id,
       approval_status: record.getString("approval_status"),
       approved_by: record.getString("approved_by"),
       approved_at: record.getString("approved_at"),
+      website_publication: websitePublications.publicationSummaryForPost(
+        record,
+        websitePublication,
+      ),
     });
   } catch (err) {
     return c.json(404, { error: "Post not found" });
+  }
+});
+
+routerAdd("GET", "/api/app/posts/:id/website-publication", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  try {
+    const post = $app.dao().findRecordById("posts", c.pathParam("id"));
+    if (post.getString("dealer") !== context.dealer.id) {
+      return c.json(403, { error: "Cross-dealer website status read blocked" });
+    }
+    const isManager = context.role === "dealer_admin" || context.role === "super_admin";
+    const token = helpers.readSessionToken(c);
+    const ownerHash = token ? helpers.hashSessionToken(token) : "";
+    const isOwner = !!ownerHash && ownerHash === post.getString("owner_session_hash");
+    const isSamePerson = helpers.isAuthoritativePostPerson(context, post);
+    if (!isManager && !isOwner && !isSamePerson) {
+      return c.json(403, { error: "Website status belongs to another person" });
+    }
+    const websitePublications = require(__hooks + "/websitePublications.js");
+    const publication = websitePublications.findPublicationForPost(post.id, "");
+    c.response().header().set("Cache-Control", "private, no-store");
+    return c.json(
+      200,
+      websitePublications.publicationSummaryForPost(post, publication),
+    );
+  } catch (_e) {
+    return c.json(404, { error: "Post not found" });
+  }
+});
+
+routerAdd("POST", "/api/app/posts/:id/website-publication", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  try {
+    const post = $app.dao().findRecordById("posts", c.pathParam("id"));
+    if (post.getString("dealer") !== context.dealer.id) {
+      return c.json(403, { error: "Cross-dealer website enqueue blocked" });
+    }
+    const isManager = context.role === "dealer_admin" || context.role === "super_admin";
+    const token = helpers.readSessionToken(c);
+    const ownerHash = token ? helpers.hashSessionToken(token) : "";
+    const isOwner = !!ownerHash && ownerHash === post.getString("owner_session_hash");
+    const isSamePerson = helpers.isAuthoritativePostPerson(context, post);
+    if (!isManager && !isOwner && !isSamePerson) {
+      return c.json(403, { error: "Post belongs to another person" });
+    }
+    const websitePublications = require(__hooks + "/websitePublications.js");
+    if (!websitePublications.destinationConfiguration(context.dealer.id).enabled) {
+      return c.json(409, {
+        error: "WEBSITE_DESTINATION_UNAVAILABLE",
+        code: "WEBSITE_DESTINATION_UNAVAILABLE",
+        message:
+          "The private website-draft destination is not configured for this dealership.",
+      });
+    }
+    const parsedDraft = websitePublications.parseWebsiteDraft(
+      post.getString("website_draft"),
+    );
+    if (!parsedDraft.ok || !parsedDraft.value || !parsedDraft.value.enabled) {
+      return c.json(409, { error: "This post has no selected website draft" });
+    }
+    const publication = websitePublications.createPublicationForPost(post);
+    return c.json(
+      200,
+      websitePublications.publicationSummaryForPost(post, publication),
+    );
+  } catch (err) {
+    console.error("[/api/app/posts/:id/website-publication] enqueue failed");
+    return c.json(503, { error: "Website draft could not be queued" });
+  }
+});
+
+routerAdd("POST", "/api/app/posts/:id/website-publication/retry", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  try {
+    const post = $app.dao().findRecordById("posts", c.pathParam("id"));
+    if (post.getString("dealer") !== context.dealer.id) {
+      return c.json(403, { error: "Cross-dealer website retry blocked" });
+    }
+    const isManager = context.role === "dealer_admin" || context.role === "super_admin";
+    const token = helpers.readSessionToken(c);
+    const ownerHash = token ? helpers.hashSessionToken(token) : "";
+    const isOwner = !!ownerHash && ownerHash === post.getString("owner_session_hash");
+    const isSamePerson = helpers.isAuthoritativePostPerson(context, post);
+    if (!isManager && !isOwner && !isSamePerson) {
+      return c.json(403, { error: "Post belongs to another person" });
+    }
+    const websitePublications = require(__hooks + "/websitePublications.js");
+    if (!websitePublications.destinationConfiguration(context.dealer.id).enabled) {
+      return c.json(409, {
+        error: "WEBSITE_DESTINATION_UNAVAILABLE",
+        code: "WEBSITE_DESTINATION_UNAVAILABLE",
+        message:
+          "The private website-draft destination is not configured for this dealership.",
+      });
+    }
+    const publication = websitePublications.retryPublication(post);
+    return c.json(
+      200,
+      websitePublications.publicationSummaryForPost(post, publication),
+    );
+  } catch (err) {
+    const code = (err && err.message ? err.message : "").toString();
+    if (
+      code === "website_draft_already_ready" ||
+      code === "approval_rejected" ||
+      code === "website_mapping_conflict" ||
+      code === "website_request_withdrawn"
+    ) {
+      return c.json(409, { error: code });
+    }
+    console.error("[/api/app/posts/:id/website-publication/retry] retry failed");
+    return c.json(400, { error: "Website draft could not be retried" });
+  }
+});
+
+// At-least-once private-draft delivery. The worker atomically leases each due
+// row, recovers leases abandoned by a process restart, and caps each minute so
+// provider trouble cannot monopolize PocketBase's JSVM worker pool.
+cronAdd("deliver-private-website-drafts", "* * * * *", function () {
+  try {
+    require(__hooks + "/websitePublications.js").processDuePublications(10);
+  } catch (_e) {
+    console.error("[website publications] delivery tick failed");
   }
 });
 
@@ -3379,6 +3612,10 @@ routerAdd("GET", "/api/app/posts", (c) => {
       marketplace: "16:9",
       gbp: "4:3",
     };
+    const websitePublications = require(__hooks + "/websitePublications.js");
+    const websitePublicationByPost = websitePublications.publicationSummariesForDealer(
+      dealer.id,
+    );
     const items = page.map((r) => {
       let platformIds = [];
       try {
@@ -3404,6 +3641,9 @@ routerAdd("GET", "/api/app/posts", (c) => {
         expectedAspectByFormat[storedPrimaryFormatId] === storedImageAspectRatio;
       const primaryFormatId = hasValidOutputProfile ? storedPrimaryFormatId : "";
       const imageAspectRatio = hasValidOutputProfile ? storedImageAspectRatio : "";
+      const storedWebsiteDraft = websitePublications.parseWebsiteDraft(
+        r.getString("website_draft"),
+      );
       return {
         id: r.id,
         dealer: r.getString("dealer"),
@@ -3448,6 +3688,15 @@ routerAdd("GET", "/api/app/posts", (c) => {
         creative_image_url: r.getString("creative_image")
           ? `/api/app/posts/${r.id}/creative-image`
           : "",
+        website_draft:
+          storedWebsiteDraft.ok &&
+          storedWebsiteDraft.value &&
+          storedWebsiteDraft.value.enabled
+            ? storedWebsiteDraft.value
+            : null,
+        website_publication: websitePublicationByPost[r.id]
+          ? websitePublicationByPost[r.id]
+          : websitePublications.publicationSummaryForPost(r, null),
       };
     });
 
@@ -3582,6 +3831,11 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
     if (!result || result.rowsAffected() !== 1) {
       return c.json(409, { error: "This approval has already been decided" });
     }
+    try {
+      require(__hooks + "/websitePublications.js").reconcilePublicationForPost(
+        record.id,
+      );
+    } catch (_e) {}
 
     return c.json(200, {
       id: record.id,

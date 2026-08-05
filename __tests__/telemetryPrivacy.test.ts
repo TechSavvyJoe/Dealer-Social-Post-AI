@@ -252,12 +252,14 @@ describe("telemetry privacy", () => {
     expect(backend).toContain("result.recentErrors");
     expect(backend).toContain("off_box_backup_configured");
     expect(backend).toContain("off_box_restore_ready");
+    expect(backend).toContain("website_integration_configured");
     expect(backend).toContain("turnstile_hostnames_configured");
     expect(backend).toContain("POCKETBASE_BACKUP_VERIFIED_RELEASE_SHA");
     expect(backend).toContain('backupStatus = "release_mismatch"');
     expect(backend).toContain('backupStatus = "stale"');
     expect(backend).toContain("backupVerificationMaxAgeHours = 7 * 24");
-    expect(backend).toContain("flyRuntime && !checks.off_box_restore_ready");
+    expect(backend).toContain("!checks.off_box_restore_ready");
+    expect(backend).toContain("!checks.website_integration_configured");
     expect(helpers).toContain("databaseTimestamp,");
     expect(backend).toContain("const since = helpers.databaseTimestamp(");
     expect(backend).toContain("const cutoff = helpers.databaseTimestamp(");

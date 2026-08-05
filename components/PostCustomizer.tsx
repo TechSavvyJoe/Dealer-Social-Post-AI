@@ -27,6 +27,8 @@ import {
   Trash2,
   Image as ImageIcon,
   Film,
+  Globe2,
+  LockKeyhole,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -68,6 +70,10 @@ import {
   type PlatformId,
 } from "../services/platformCopy";
 import { brandHashtagFromName, formatHashtag } from "../utils/hashtags";
+import {
+  listWebsiteDestinations,
+  type WebsiteDestination,
+} from "../services/websitePublishing";
 
 interface PostCustomizerProps {
   imageSrc: string;
@@ -84,6 +90,8 @@ interface PostCustomizerProps {
       scenarioId?: string;
       hasRelease?: boolean;
       capturedRelease?: CapturedRelease;
+      websiteEnabled?: boolean;
+      websiteVehicleDescription?: string;
     },
     platformIds?: PlatformId[],
     outputProfile?: PrimaryImageProfile,
@@ -259,6 +267,14 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   }, [initialGenerationParams?.platformIds, supportedPlatformIds]);
   const [selectedPlatforms, setSelectedPlatforms] =
     useState<PlatformId[]>(initialPlatforms);
+  const [websiteSelected, setWebsiteSelected] = useState(
+    Boolean(initialGenerationParams?.websiteEnabled),
+  );
+  const [websiteDestination, setWebsiteDestination] =
+    useState<WebsiteDestination | null>(null);
+  const [websiteAvailability, setWebsiteAvailability] = useState<
+    "loading" | "ready" | "unavailable"
+  >("loading");
   const [showMorePlatforms, setShowMorePlatforms] = useState(() => {
     const restored = new Set(initialGenerationParams?.platformIds || []);
     return secondaryPlatformOptions.some((platform) => restored.has(platform.id));
@@ -312,6 +328,29 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   // same protected record to the created post.
   const [capturedRelease, setCapturedRelease] = useState<CapturedRelease | null>(null);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    setWebsiteAvailability("loading");
+    void listWebsiteDestinations(controller.signal)
+      .then((destinations) => {
+        const destination =
+          destinations.find((item) => item.id === "joe_customer_hub") ||
+          destinations[0] ||
+          null;
+        setWebsiteDestination(destination);
+        const ready = Boolean(destination?.enabled);
+        setWebsiteAvailability(ready ? "ready" : "unavailable");
+        if (!ready) setWebsiteSelected(false);
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setWebsiteDestination(null);
+        setWebsiteAvailability("unavailable");
+        setWebsiteSelected(false);
+      });
+    return () => controller.abort();
+  }, [currentDealer?.id]);
+
   // Post scenario — drives prompt context + default style/tone. "customer_delivery"
   // is the implicit default; an undefined value also resolves to that.
   const [scenarioId, setScenarioId] = useState<string>(() => {
@@ -328,6 +367,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     const all = getScenariosForDealer(currentDealer?.custom_scenarios);
     return all.find((s) => s.id === scenarioId) || POST_SCENARIOS[0];
   }, [scenarioId, currentDealer?.custom_scenarios]);
+  const scenarioNeedsCustomerRelease =
+    activeScenario.requiresCustomer || activeScenario.category === "delivery";
 
   // Filter the style picker to the dealer's enabled set. Empty enabled_styles
   // = all enabled (default). Default style is pre-selected when the dealer set
@@ -421,7 +462,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
   const handleGenerate = useCallback(async () => {
     triggerHapticFeedback();
-    if (activeScenario.requiresCustomer && !capturedRelease) {
+    if (scenarioNeedsCustomerRelease && !capturedRelease) {
       setReleaseValidationError(true);
       setReleaseModalOpen(true);
       return;
@@ -570,6 +611,18 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           scenarioId,
           hasRelease: !!capturedRelease,
           capturedRelease: capturedRelease || undefined,
+          websiteEnabled: websiteSelected,
+          websiteVehicleDescription:
+            decodedVehicle && !decodedVehicle.empty
+              ? [
+                  decodedVehicle.year,
+                  decodedVehicle.make,
+                  decodedVehicle.model,
+                  decodedVehicle.trim,
+                ]
+                  .filter(Boolean)
+                  .join(" ")
+              : undefined,
         },
         selectedPlatforms,
         primaryImageProfile,
@@ -588,10 +641,11 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     capturedRelease,
     currentDealer,
     scenarioId,
-    activeScenario.requiresCustomer,
+    scenarioNeedsCustomerRelease,
     selectedPlatforms,
     primaryImageProfile,
     mediaOutputMode,
+    websiteSelected,
     dealershipName,
     onGenerate,
   ]);
@@ -706,7 +760,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
             {/* Customer Name - Compact */}
             <Input
-              label="Customer's name (optional)"
+              label={`Customer's name (${scenarioNeedsCustomerRelease ? "required" : "optional"})`}
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
               placeholder="First name"
@@ -779,8 +833,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             {/* Photo release — capture customer's signed consent before posting their photo */}
             <div className="space-y-2">
               <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
-                Photo release ·{" "}
-                {activeScenario.requiresCustomer ? "required" : "optional"}
+                Photo release · {scenarioNeedsCustomerRelease ? "required" : "optional"}
               </label>
               {capturedRelease ? (
                 <motion.div
@@ -990,6 +1043,72 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   );
                 })}
               </div>
+              <button
+                type="button"
+                aria-pressed={websiteSelected}
+                aria-describedby="website-destination-description"
+                disabled={websiteAvailability !== "ready"}
+                onClick={() => {
+                  triggerHapticFeedback();
+                  setWebsiteSelected((selected) => !selected);
+                }}
+                className={cn(
+                  "flex min-h-16 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
+                  websiteSelected
+                    ? "border-primary-300 bg-primary-500/25 text-primary-50 [.theme-light_&]:text-primary-950"
+                    : "border-white/10 bg-white/[0.035] text-surface-300 hover:border-primary-400/35 hover:bg-white/[0.06]",
+                  websiteAvailability !== "ready" &&
+                    "cursor-not-allowed opacity-60 hover:border-white/10 hover:bg-white/[0.035]",
+                )}
+              >
+                <span
+                  className={cn(
+                    "grid h-10 w-10 shrink-0 place-items-center rounded-xl border",
+                    websiteSelected
+                      ? "border-primary-300/40 bg-primary-400/20 text-primary-100"
+                      : "border-white/10 bg-surface-950/50 text-surface-400",
+                  )}
+                  aria-hidden="true"
+                >
+                  <Globe2 className="h-5 w-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold">Website</span>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-primary-400/25 bg-primary-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-primary-200 [.theme-light_&]:text-primary-900">
+                      <LockKeyhole className="h-2.5 w-2.5" />
+                      Draft only
+                    </span>
+                  </span>
+                  <span
+                    id="website-destination-description"
+                    className="mt-0.5 block text-[10px] leading-relaxed text-surface-400"
+                  >
+                    {websiteAvailability === "loading"
+                      ? "Checking the private website connection…"
+                      : websiteAvailability === "ready"
+                        ? `Private draft for ${(() => {
+                            try {
+                              return new URL(
+                                websiteDestination?.siteUrl || "https://joegallant.me",
+                              ).hostname;
+                            } catch {
+                              return "joegallant.me";
+                            }
+                          })()}. AI prepares it; you publish later in Customer Hub.`
+                        : websiteDestination?.reason ||
+                          "Website drafts are not configured for this dealership yet."}
+                  </span>
+                </span>
+                {websiteSelected ? (
+                  <span
+                    className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary-300 text-primary-950"
+                    aria-hidden="true"
+                  >
+                    <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                  </span>
+                ) : null}
+              </button>
               <div className="overflow-hidden rounded-xl border border-white/10 bg-surface-950/25">
                 <button
                   type="button"

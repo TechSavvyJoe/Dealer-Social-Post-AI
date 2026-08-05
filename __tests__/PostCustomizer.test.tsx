@@ -20,6 +20,30 @@ describe("PostCustomizer", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              items: [
+                {
+                  id: "joe_customer_hub",
+                  label: "Website",
+                  siteUrl: "https://joegallant.me",
+                  enabled: true,
+                  mode: "private_draft",
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("invokes onStyleToneChange when selecting a new style", () => {
@@ -186,6 +210,20 @@ describe("PostCustomizer", () => {
     expect(
       screen.getByRole("button", { name: /More platforms, 1 selected/i }),
     ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("offers Website as a distinct private-draft destination", async () => {
+    render(<PostCustomizer {...baseProps} />);
+
+    const website = (await screen.findByText("Website")).closest("button");
+    expect(website).not.toBeNull();
+    expect(website).toBeEnabled();
+    expect(website).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("Draft only")).toBeInTheDocument();
+    expect(screen.getByText(/Private draft for joegallant.me/i)).toBeInTheDocument();
+
+    fireEvent.click(website as HTMLButtonElement);
+    expect(website).toHaveAttribute("aria-pressed", "true");
   });
 
   /*

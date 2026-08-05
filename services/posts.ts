@@ -13,6 +13,7 @@ import { dataUrlToBlob } from "../utils/imageUtils";
 import { assertAuthEpoch, captureAuthEpoch } from "../utils/authBoundary";
 import type { ImageAspectRatio, MediaOutputMode, PrimaryImageFormatId } from "../types";
 import { readApiError } from "./apiErrors";
+import type { WebsiteDraft, WebsitePublication } from "./websitePublishing";
 
 export type ApprovalStatus = "n_a" | "pending" | "approved" | "rejected";
 
@@ -54,6 +55,8 @@ export interface LogPostInput {
   imageAspectRatio?: ImageAspectRatio;
   /** ISO timestamp for when this post should be published */
   scheduledFor?: string;
+  /** Private Customer Hub draft metadata; server controls any delivery. */
+  websiteDraft?: WebsiteDraft;
 }
 
 export interface PostRecord {
@@ -89,6 +92,8 @@ export interface PostRecord {
   /** Session-authorized route; never a public PocketBase file URL. */
   creative_image_url?: string;
   scheduled_for?: string;
+  website_draft?: WebsiteDraft;
+  website_publication?: WebsitePublication;
 }
 
 export interface PostApprovalStatus {
@@ -186,6 +191,9 @@ export const logPost = async (
     }
     if (input.scheduledFor) {
       form.append("scheduled_for", input.scheduledFor);
+    }
+    if (input.websiteDraft?.enabled) {
+      form.append("website_draft", JSON.stringify(input.websiteDraft));
     }
 
     // Persist caption + creative whenever available so History can reopen

@@ -14,6 +14,8 @@ import {
   ExternalLink,
   Image as ImageIcon,
   Calendar,
+  Globe2,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
@@ -31,6 +33,15 @@ import { AppStep, GeneratedPost } from "../types";
 import { cn } from "../utils/classNames";
 import { useToast } from "./ui/Toast";
 import { LocalMediaArchive } from "./LocalMediaArchive";
+import {
+  getWebsitePublication,
+  listWebsiteDestinations,
+  retryWebsitePublication,
+  safeWebsiteReviewUrl,
+  websitePublicationIsSettled,
+  websitePublicationPollDelay,
+  type WebsitePublication,
+} from "../services/websitePublishing";
 
 const STATUS_FILTERS: Array<{ key: ApprovalStatus | "all"; label: string }> = [
   { key: "all", label: "All" },
@@ -86,6 +97,48 @@ const statusBadge = (status?: ApprovalStatus): React.ReactElement | null => {
   }
 };
 
+const websiteStatusBadge = (
+  publication?: WebsitePublication,
+): React.ReactElement | null => {
+  if (!publication || publication.status === "not_requested") return null;
+  const ready =
+    (publication.status === "draft_ready" && !publication.lastError) ||
+    publication.status === "published";
+  const failed =
+    publication.status === "failed" ||
+    (publication.status === "draft_ready" && !!publication.lastError);
+  const withdrawn = publication.status === "withdrawn";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 text-[10px]",
+        ready
+          ? "text-success-200"
+          : failed
+            ? "text-error-200"
+            : withdrawn
+              ? "text-surface-400"
+              : "text-info-200",
+      )}
+    >
+      <Globe2 className="h-3 w-3" />
+      {publication.status === "draft_ready"
+        ? publication.lastError
+          ? "site status check needs attention"
+          : "site draft ready"
+        : publication.status === "published"
+          ? "site published"
+          : publication.status === "failed"
+            ? "site delivery failed"
+            : publication.status === "withdrawn"
+              ? "site draft withdrawn"
+              : publication.status === "waiting_approval"
+                ? "site waits for approval"
+                : "site draft queued"}
+    </span>
+  );
+};
+
 /**
  * Searchable history of posts for the current dealership.
  * Posts with a stored creative can be reopened for share/export without regen.
@@ -110,8 +163,11 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ApprovalStatus | "all">("all");
   const [openingId, setOpeningId] = useState<string | null>(null);
+  const [websiteRetryingId, setWebsiteRetryingId] = useState<string | null>(null);
+  const [, setWebsiteOriginsReady] = useState(false);
 
   const reqIdRef = useRef(0);
+  const websitePollTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const load = useCallback(
     async (cursor?: string) => {
       if (!dealer) return;
@@ -155,6 +211,60 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
   useEffect(() => {
     void load(undefined);
   }, [load]);
+
+  useEffect(
+    () => () => {
+      websitePollTimersRef.current.forEach((timer) => clearTimeout(timer));
+      websitePollTimersRef.current.clear();
+    },
+    [],
+  );
+
+  const pollWebsitePublication = useCallback(
+    (postId: string, remaining = 36, delayMs = 5_000) => {
+      if (remaining < 1) return;
+      const timer = setTimeout(() => {
+        websitePollTimersRef.current.delete(timer);
+        void getWebsitePublication(postId)
+          .then((publication) => {
+            setItems((current) =>
+              current.map((item) =>
+                item.id === postId
+                  ? { ...item, website_publication: publication }
+                  : item,
+              ),
+            );
+            if (
+              !websitePublicationIsSettled(publication.status) ||
+              publication.status === "draft_ready"
+            ) {
+              pollWebsitePublication(
+                postId,
+                remaining - 1,
+                websitePublicationPollDelay(publication.status),
+              );
+            }
+          })
+          .catch(() => {
+            pollWebsitePublication(postId, remaining - 1, 10_000);
+          });
+      }, delayMs);
+      websitePollTimersRef.current.add(timer);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setWebsiteOriginsReady(false);
+    void listWebsiteDestinations(controller.signal)
+      .then(() => setWebsiteOriginsReady(true))
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setWebsiteOriginsReady(false);
+      });
+    return () => controller.abort();
+  }, [dealer?.id]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -211,6 +321,8 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
           platformCaptions: post.platform_captions,
           primaryFormatId: post.primary_format_id || undefined,
           imageAspectRatio: post.image_aspect_ratio || undefined,
+          websiteDraft: post.website_draft,
+          websitePublication: post.website_publication,
         };
         // A stored creative may come from another device/session, so it does
         // not have the original capture needed for a true same-photo remix.
@@ -240,6 +352,43 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
     ],
   );
 
+  const retryWebsite = useCallback(
+    async (post: PostRecord) => {
+      if (websiteRetryingId) return;
+      setWebsiteRetryingId(post.id);
+      try {
+        const publication = await retryWebsitePublication(post.id);
+        setItems((current) =>
+          current.map((item) =>
+            item.id === post.id ? { ...item, website_publication: publication } : item,
+          ),
+        );
+        if (
+          !websitePublicationIsSettled(publication.status) ||
+          publication.status === "draft_ready"
+        ) {
+          pollWebsitePublication(
+            post.id,
+            36,
+            websitePublicationPollDelay(publication.status),
+          );
+        }
+        toastSuccess(
+          post.website_publication?.status === "draft_ready"
+            ? "Website status check queued."
+            : "Private website draft queued again.",
+        );
+      } catch (err) {
+        toastError(
+          err instanceof Error ? err.message : "Website draft could not be retried.",
+        );
+      } finally {
+        setWebsiteRetryingId(null);
+      }
+    },
+    [pollWebsitePublication, toastError, toastSuccess, websiteRetryingId],
+  );
+
   const exportCsv = useCallback(() => {
     const rows = [
       [
@@ -255,6 +404,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
         "approved_by",
         "approved_at",
         "has_creative",
+        "website_status",
       ],
       ...filtered.map((p) => [
         p.generated_at || "",
@@ -269,6 +419,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
         p.approved_by || "",
         p.approved_at || "",
         p.creative_image_url ? "true" : "false",
+        p.website_publication?.status || "",
       ]),
     ];
     const csv = rows
@@ -504,23 +655,58 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                               <ShieldCheck className="h-3 w-3" /> release
                             </span>
                           )}
+                          {websiteStatusBadge(post.website_publication)}
                         </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant={canOpen ? "outline" : "ghost"}
-                          disabled={!canOpen || isOpening}
-                          leftIcon={
-                            isOpening ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <ExternalLink className="h-3.5 w-3.5" />
-                            )
-                          }
-                          onClick={() => void openCreative(post)}
-                        >
-                          {isOpening ? "Opening…" : "Open"}
-                        </Button>
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          {safeWebsiteReviewUrl(post.website_publication?.reviewUrl) ? (
+                            <a
+                              href={safeWebsiteReviewUrl(
+                                post.website_publication?.reviewUrl,
+                              )}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[10px] font-semibold text-success-100"
+                            >
+                              <Globe2 className="h-3 w-3" /> Site draft
+                            </a>
+                          ) : null}
+                          {post.website_publication?.status === "failed" ||
+                          (post.website_publication?.status === "draft_ready" &&
+                            post.website_publication.lastError) ? (
+                            <button
+                              type="button"
+                              disabled={Boolean(websiteRetryingId)}
+                              onClick={() => void retryWebsite(post)}
+                              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-error-400/25 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 disabled:opacity-50"
+                            >
+                              <RefreshCw
+                                className={cn(
+                                  "h-3 w-3",
+                                  websiteRetryingId === post.id && "animate-spin",
+                                )}
+                              />
+                              {post.website_publication.status === "draft_ready"
+                                ? "Retry status"
+                                : "Retry site"}
+                            </button>
+                          ) : null}
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={canOpen ? "outline" : "ghost"}
+                            disabled={!canOpen || isOpening}
+                            leftIcon={
+                              isOpening ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <ExternalLink className="h-3.5 w-3.5" />
+                              )
+                            }
+                            onClick={() => void openCreative(post)}
+                          >
+                            {isOpening ? "Opening…" : "Open"}
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </article>
@@ -614,6 +800,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                                 <Calendar className="h-3 w-3" /> scheduled
                               </span>
                             )}
+                            {websiteStatusBadge(p.website_publication)}
                           </div>
                         </td>
                         <td className="py-2 px-2">
@@ -623,29 +810,74 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                               by {p.approved_by}
                             </div>
                           )}
+                          {p.website_publication?.lastError &&
+                          (p.website_publication.status === "failed" ||
+                            p.website_publication.status === "draft_ready") ? (
+                            <div
+                              className="mt-1 max-w-44 truncate text-[10px] text-warning-200"
+                              title={p.website_publication.lastError}
+                            >
+                              Website status check needs attention
+                            </div>
+                          ) : null}
                         </td>
                         <td className="py-2 px-2 text-right">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={canOpen ? "outline" : "ghost"}
-                            disabled={!canOpen || isOpening}
-                            leftIcon={
-                              isOpening ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <ExternalLink className="h-3.5 w-3.5" />
-                              )
-                            }
-                            onClick={() => void openCreative(p)}
-                            title={
-                              canOpen
-                                ? "Open for share / export"
-                                : "No creative image on this older log"
-                            }
-                          >
-                            {isOpening ? "Opening…" : "Open"}
-                          </Button>
+                          <div className="flex justify-end gap-1.5">
+                            {safeWebsiteReviewUrl(p.website_publication?.reviewUrl) ? (
+                              <a
+                                href={safeWebsiteReviewUrl(
+                                  p.website_publication?.reviewUrl,
+                                )}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[10px] font-semibold text-success-100"
+                                title="Review private website draft"
+                              >
+                                <Globe2 className="h-3 w-3" /> Site
+                              </a>
+                            ) : null}
+                            {p.website_publication?.status === "failed" ||
+                            (p.website_publication?.status === "draft_ready" &&
+                              p.website_publication.lastError) ? (
+                              <button
+                                type="button"
+                                disabled={Boolean(websiteRetryingId)}
+                                onClick={() => void retryWebsite(p)}
+                                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-error-400/25 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 disabled:opacity-50"
+                              >
+                                <RefreshCw
+                                  className={cn(
+                                    "h-3 w-3",
+                                    websiteRetryingId === p.id && "animate-spin",
+                                  )}
+                                />
+                                {p.website_publication.status === "draft_ready"
+                                  ? "Retry status"
+                                  : "Retry"}
+                              </button>
+                            ) : null}
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={canOpen ? "outline" : "ghost"}
+                              disabled={!canOpen || isOpening}
+                              leftIcon={
+                                isOpening ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                )
+                              }
+                              onClick={() => void openCreative(p)}
+                              title={
+                                canOpen
+                                  ? "Open for share / export"
+                                  : "No creative image on this older log"
+                              }
+                            >
+                              {isOpening ? "Opening…" : "Open"}
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     );
