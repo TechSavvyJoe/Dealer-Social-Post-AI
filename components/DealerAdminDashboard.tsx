@@ -39,6 +39,7 @@ import {
 } from "../utils/hoursFormat";
 import { getLeaderboard } from "../services/posts";
 import { normalizeDealerSocialProfileValue } from "../utils/socialAttribution";
+import { YouTubeConnectionCard } from "./YouTubeConnectionCard";
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
@@ -270,12 +271,14 @@ export const DealerAdminDashboard: React.FC = () => {
           id="manager-panel-settings"
           role="tabpanel"
           aria-labelledby="manager-tab-settings"
+          className="space-y-4 sm:space-y-6"
         >
           <DealerSettingsCard
             dealer={dealer}
             onSaved={handleWizardSave}
             onDirtyChange={setSettingsDirty}
           />
+          <YouTubeConnectionCard />
         </div>
       )}
 

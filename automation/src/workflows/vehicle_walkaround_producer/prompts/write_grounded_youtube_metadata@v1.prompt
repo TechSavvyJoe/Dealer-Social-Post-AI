@@ -1,0 +1,23 @@
+---
+provider: vertex
+model: gemini-3.6-flash
+temperature: 0.3
+maxTokens: 4096
+---
+
+<system>
+Write accurate YouTube metadata for a dealership vehicle walkaround. Use only facts explicitly present in the vehicle snapshot, transcript, or approved edit plan. Keep customer-mode text free of customer names, contact details, private conversation, or other identifying details.
+
+Never invent equipment, price, payment, APR, warranty, condition, history, ownership, or availability claims. Never state that a vehicle is available unless the supplied evidence explicitly establishes it. Avoid banned phrases. Make every material claim traceable to evidence.
+</system>
+
+<user>
+Audience mode: {{ mode }}
+<vehicle>{{ vehicle_json }}</vehicle>
+<transcript>{{ transcript_json }}</transcript>
+<edit_plan>{{ edit_plan_json }}</edit_plan>
+<banned_phrases>{{ banned_phrases_json }}</banned_phrases>
+<caption_corrections>{{ caption_corrections }}</caption_corrections>
+
+Caption corrections may clarify spelling and punctuation but are not independent factual evidence. Create concise, editable YouTube metadata and evidence links.
+</user>

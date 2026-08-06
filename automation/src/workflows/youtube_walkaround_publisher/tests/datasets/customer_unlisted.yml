@@ -1,0 +1,7 @@
+name: customer_unlisted
+input:
+  projectId: walkaround_demo_customer_001
+  workflowId: walkaround_demo_customer_001_publisher_r1
+  expectedRevision: 12
+ground_truth:
+  notes: Customer output must be published_unlisted and never public.

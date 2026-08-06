@@ -42,7 +42,34 @@ ENABLE_OPENAI_FALLBACK=false
 # Public build-time flags; these are compiled into the frontend bundle.
 VITE_ENABLE_CLAUDE_FALLBACK=false
 VITE_ENABLE_OPENAI_FALLBACK=false
+VITE_WALKAROUND_STUDIO_ENABLED=false
 ```
+
+Enable `VITE_WALKAROUND_STUDIO_ENABLED=true` only in a build whose private
+upload broker, durable worker, and dealership YouTube connection have passed
+the walkaround release gates. The browser otherwise exposes only Photo Post.
+
+The PocketBase runtime has a separate fail-closed gate and private service
+configuration. Do not reuse a browser-exposed value for any token or signing
+secret:
+
+```bash
+WALKAROUND_STUDIO_ENABLED=false
+WALKAROUND_GCS_BUCKET=
+WALKAROUND_UPLOAD_BROKER_URL=
+WALKAROUND_UPLOAD_BROKER_TOKEN=
+WALKAROUND_YOUTUBE_BROKER_URL=
+WALKAROUND_YOUTUBE_BROKER_TOKEN=
+WALKAROUND_WORKER_TOKEN=
+WALKAROUND_WORKER_SIGNING_SECRET=
+```
+
+Manager YouTube authorization starts at
+`POST /api/app/walkarounds/youtube/connect`. After Google returns the broker's
+one-time state reference, the manager completes the connection through
+`POST /api/app/walkarounds/youtube/complete`; PocketBase re-fetches the channel
+from the trusted broker and never accepts a browser-supplied channel ID or
+OAuth token.
 
 `GEMINI_API_KEY` and fallback-provider keys are read only by PocketBase hooks. The browser receives none of them. The `VITE_ENABLE_*` values are not secrets: Vite compiles them into the browser bundle. For a Docker/Fly build, pass them explicitly as build arguments while setting the matching `ENABLE_*` values and keys as runtime secrets:
 
@@ -51,7 +78,8 @@ fly deploy \
   --build-arg VITE_TURNSTILE_SITE_KEY=YOUR_PUBLIC_SITE_KEY \
   --build-arg VITE_RELEASE_SHA="$(git rev-parse HEAD)" \
   --build-arg VITE_ENABLE_CLAUDE_FALLBACK=true \
-  --build-arg VITE_ENABLE_OPENAI_FALLBACK=true
+  --build-arg VITE_ENABLE_OPENAI_FALLBACK=true \
+  --build-arg VITE_WALKAROUND_STUDIO_ENABLED=true
 ```
 
 Optional Customer Hub private-draft delivery is configured only in the
