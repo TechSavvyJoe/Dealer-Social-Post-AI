@@ -10,8 +10,6 @@ import type { ImageSelection } from "../types";
 
 interface ImageInputProps {
   onImageSelected: (selection: ImageSelection) => void;
-  /** @deprecated Capture is the workflow home; exit is owned by the header. */
-  onClose?: () => void;
 }
 
 const isMobileDevice = () => {

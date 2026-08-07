@@ -249,13 +249,13 @@ describe("manager password authentication backend contract", () => {
     ).toThrow("manager_accounts exists but is not an auth collection");
   });
 
-  it("enforces the 15-to-128 character password boundary", () => {
+  it("enforces the 8-to-128 character password boundary", () => {
     const helpers = loadHelpers();
 
-    expect(helpers.isManagerLoginPasswordShape("x".repeat(14))).toBe(false);
-    expect(helpers.isStrongManagerPassword("x".repeat(14))).toBe(false);
-    expect(helpers.isManagerLoginPasswordShape("x".repeat(15))).toBe(true);
-    expect(helpers.isStrongManagerPassword("x".repeat(15))).toBe(true);
+    expect(helpers.isManagerLoginPasswordShape("x".repeat(7))).toBe(false);
+    expect(helpers.isStrongManagerPassword("x".repeat(7))).toBe(false);
+    expect(helpers.isManagerLoginPasswordShape("x".repeat(8))).toBe(true);
+    expect(helpers.isStrongManagerPassword("x".repeat(8))).toBe(true);
     expect(helpers.isManagerLoginPasswordShape("x".repeat(128))).toBe(true);
     expect(helpers.isStrongManagerPassword("x".repeat(129))).toBe(false);
   });

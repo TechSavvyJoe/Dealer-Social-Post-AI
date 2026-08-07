@@ -285,7 +285,7 @@ describe("risk-triggered sign-in UX", () => {
     expect(username).toHaveAttribute("aria-describedby", "manager-login-error");
 
     fireEvent.change(username, { target: { value: "manager.one" } });
-    fireEvent.change(password, { target: { value: "too short" } });
+    fireEvent.change(password, { target: { value: "short" } });
     fireEvent.click(submit);
 
     expect(password).toHaveFocus();
@@ -327,10 +327,10 @@ describe("risk-triggered sign-in UX", () => {
     expect(screen.getByLabelText("Password")).toHaveValue("");
   });
 
-  it("keeps an invalid system-admin code inline and clears it on mode change", async () => {
+  it("keeps invalid system-admin credentials inline and clears them on mode change", async () => {
     const onLogin = vi.fn().mockResolvedValue({
       ok: false,
-      code: "INVALID_CODE",
+      code: "INVALID_CREDENTIALS",
     });
     render(
       <ToastProvider>
@@ -339,23 +339,27 @@ describe("risk-triggered sign-in UX", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "System admin" }));
-    const adminCode = await screen.findByLabelText("System admin code");
-    fireEvent.change(adminCode, { target: { value: "Abcdef123456" } });
+    const username = await screen.findByLabelText("Username");
+    const password = screen.getByLabelText("Password");
+    fireEvent.change(username, { target: { value: "admin" } });
+    fireEvent.change(password, { target: { value: "Abcdef123456" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue to system admin" }));
 
     expect(
-      await screen.findByText("Code not recognized. Check the code and try again."),
+      await screen.findByText(
+        "Username or password not recognized. Check both and try again.",
+      ),
     ).toHaveAttribute("role", "alert");
     expect(screen.getAllByRole("alert")).toHaveLength(1);
     await waitFor(() =>
-      expect(screen.getByLabelText("System admin code")).toHaveAttribute(
-        "aria-invalid",
-        "true",
-      ),
+      expect(screen.getByLabelText("Password")).toHaveAttribute("aria-invalid", "true"),
     );
+    // The password is cleared; the username stays for a quick retry.
+    expect(screen.getByLabelText("Password")).toHaveValue("");
+    expect(screen.getByLabelText("Username")).toHaveValue("admin");
 
     fireEvent.click(screen.getByRole("button", { name: "My code" }));
-    expect(screen.queryByText(/code not recognized/i)).toBeNull();
+    expect(screen.queryByText(/not recognized/i)).toBeNull();
     expect(
       screen.getByRole("status", { name: "0 of 4 digits entered" }),
     ).toBeInTheDocument();

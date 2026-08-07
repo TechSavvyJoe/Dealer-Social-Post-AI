@@ -15,6 +15,7 @@ import {
   Zap,
   PartyPopper,
   Gauge,
+  Layers,
   Flame,
   Briefcase,
   Users,
@@ -150,6 +151,13 @@ const STYLE_INFO: Record<
     detail: "Bold type · athletic energy · same car",
     aiHint:
       "Sporty type energy while preserving the exact car and customers from the photo.",
+  },
+  [StyleOption.DepthPop]: {
+    icon: Layers,
+    desc: "3D depth pop",
+    detail: "Headline behind the car · subject glow · thumbnail energy",
+    aiHint:
+      "Oversized headline tucked behind the real car with a glow outline — modern 3D depth.",
   },
 };
 

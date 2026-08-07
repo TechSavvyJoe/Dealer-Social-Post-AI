@@ -21,6 +21,20 @@ const xmlBlock = (tag: string, content: string): string =>
 
 const MAX_ON_IMAGE_HEADLINE_WORDS = 4;
 const MAX_ON_IMAGE_HEADLINE_CHARACTERS = 40;
+
+/**
+ * Shared on-image text budget: the review gate in geminiService must accept
+ * everything the generation prompts legitimately request (headline + optional
+ * badge + optional support line), or compliant renders get destroyed.
+ */
+export const ON_IMAGE_TEXT_BUDGET = {
+  headlineWords: MAX_ON_IMAGE_HEADLINE_WORDS,
+  headlineChars: MAX_ON_IMAGE_HEADLINE_CHARACTERS,
+  badgeWords: 2,
+  maxBlocks: 3,
+  totalWords: 10,
+  totalChars: 90,
+} as const;
 const URL_PATTERN = /(?:https?:\/\/|www\.|(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/\S*)?)/i;
 const PHONE_PATTERN = /(?:\+?\d[\d\s().-]{6,}\d)/;
 const SENTENCE_PUNCTUATION_PATTERN = /[.!?;:]/;
@@ -267,6 +281,14 @@ const imageStyleHint = (style: StyleOption): string => {
       return "Warm community-dealership energy — slight warmth/brightness, friendly rounded type. Still the real customers and real car, not a cartoon.";
     case StyleOption.Sporty:
       return "Athletic campaign energy — tighter contrast, bold italics, red/blue accent type. No fake motion-blur highways or replacement vehicles.";
+    case StyleOption.DepthPop:
+      return `Premium thumbnail depth effect — the headline sits BEHIND the vehicle in 3D space:
+- Render the headline as oversized, thick, high-contrast display type (condensed impact-style sans, solid fill or bold outline) positioned so the vehicle partially overlaps the letters. The car occluding the text creates the depth illusion.
+- Depth-layer order: background → headline text → vehicle & people → small foreground accents.
+- Add a subtle light glow or thin white outline around the vehicle/people silhouette so the subject separates cleanly from the background and the occluded text.
+- Keep every word readable: the vehicle may cover at most ~25% of any single word, and the headline's first and last letters stay visible.
+- For THIS style only, the headline intentionally passes behind the vehicle — that overrides the open-background placement rule for the headline. The person-margin rule still applies: letters never touch or sit within the margin of any person, and never cover faces, hands, plates, or nameplates.
+- A slight perspective tilt on the headline (matching the ground plane) is allowed. No cheesy chrome bevels.`;
     default:
       return "Professional automotive social creative: real photo first, studio-grade type and grade second.";
   }
@@ -397,6 +419,7 @@ This is professional photo editing and design on the source image — NOT generi
 ${imageStyleHint(style)}
 Color & grading: subtle cinematic grade only — lift faces slightly, accurate paint color, controlled contrast, gentle highlight roll-off. Do not invent a new environment or sky replacement.
 Typography: editorial hierarchy (one hero line + optional short support). Refined tracking, high-end weight pairing, generous breathing room. Prefer open sky/pavement/wall safe zones.
+Modern techniques (use when the composition supports them, never all at once): tasteful depth layering where the headline tucks partially behind the vehicle with a subtle subject glow; soft gradient or duotone accent fields behind type; thin-keyline badges. Occluded letters must stay readable and never touch people.
 Avoid: cheesy 3D chrome, burst explosions, clip-art confetti piles, full-frame graphic takeover, meme stickers, watermark spam.
 Compositing: light text shadows ok; logo small and premium; no stock-car pastes, no background replacement, no re-posed people.
 Finish: looks like a finished campaign asset ready for Instagram/Facebook/TikTok paid social.`,

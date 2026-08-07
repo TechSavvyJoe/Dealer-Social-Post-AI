@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 type Policies = {
   serializeProxyBody: (requestInfo: unknown) => string;
   initialApprovalStatus: (dealer: unknown) => "pending" | "n_a";
-  isValidAdminDealerCode: (value: unknown) => boolean;
+
   isAllowedProxyPath: (path: string) => boolean;
   isAllowedProxyRequest: (path: string, method: string) => boolean;
   buildGeminiProxyRequest: (
@@ -35,8 +35,8 @@ type Helpers = {
   serializeDealer: (record: unknown) => Record<string, unknown>;
   serializePerson: (record: unknown) => Record<string, unknown>;
   serializePersonSummary: (record: unknown) => Record<string, unknown>;
-  configuredAdminSecret: () => string;
-  adminSecretFingerprint: (secret: string) => string;
+
+  adminAuthFingerprint: (account: unknown) => string;
   verifyTurnstileToken: (
     token: string,
     remoteIp: string,
@@ -335,16 +335,6 @@ describe("PocketBase request policies", () => {
 
     expect(policies.initialApprovalStatus(requiresApproval)).toBe("pending");
     expect(policies.initialApprovalStatus(noApproval)).toBe("n_a");
-  });
-
-  it("accepts only deployable super-admin codes", () => {
-    expect(policies.isValidAdminDealerCode("CiAdmin7xQ2Z")).toBe(true);
-    expect(policies.isValidAdminDealerCode("999999")).toBe(false);
-    expect(policies.isValidAdminDealerCode("DealerA7")).toBe(false);
-    expect(policies.isValidAdminDealerCode(" CiAdmin7xQ2Z")).toBe(false);
-    expect(policies.isValidAdminDealerCode("CiAdmin7xQ2Z ")).toBe(false);
-    expect(policies.isValidAdminDealerCode("with-hyphen")).toBe(false);
-    expect(policies.isValidAdminDealerCode("waytoolongadmincode")).toBe(false);
   });
 
   it("applies tighter budgets only to expensive generation starts", () => {
@@ -695,7 +685,7 @@ describe("PocketBase request policies", () => {
     expect(hook).toContain("policies.buildOpenAIImageRequest(requestInfo.data)");
     expect(hook).toContain("policies.buildAnthropicMessageRequest(");
     expect(hook).toContain("policies.initialApprovalStatus(dealer)");
-    expect(hook).toContain("policies.isValidAdminDealerCode(");
+    expect(hook).toContain("helpers.ensureAdminAccountProvisioned(");
     expect(hook).not.toContain("vertex_credentials_set");
     expect(hook).not.toContain("requestInfo.body");
     expect(hook).not.toContain("Math.random");
@@ -839,26 +829,26 @@ describe("PocketBase auth helper invariants", () => {
     expect(summary).not.toHaveProperty("created_at");
   });
 
-  it("preserves admin-secret case and fingerprints rotations differently", () => {
+  it("fingerprints an admin account by its rotating credential token key", () => {
     const runtime: any = globalThis;
-    const originalOs = runtime.$os;
     const originalSecurity = runtime.$security;
     try {
-      let configured = "MixedCaseA7Z";
-      runtime.$os = { getenv: () => configured };
       runtime.$security = {
         sha256: (value: string) =>
-          value.endsWith("MixedCaseA7Z") ? "a".repeat(64) : "b".repeat(64),
+          value.endsWith("token-key-1") ? "a".repeat(64) : "b".repeat(64),
       };
+      const account = (tokenKey: string) => ({
+        id: "admin-account-1",
+        getString: (field: string) => (field === "tokenKey" ? tokenKey : ""),
+      });
 
-      expect(helpers.configuredAdminSecret()).toBe("MixedCaseA7Z");
-      expect(helpers.adminSecretFingerprint("MixedCaseA7Z")).not.toBe(
-        helpers.adminSecretFingerprint("mixedcasea7z"),
+      // A password change rotates the account token key, so the derived
+      // fingerprint changes and previously bound sessions stop validating.
+      expect(helpers.adminAuthFingerprint(account("token-key-1"))).not.toBe(
+        helpers.adminAuthFingerprint(account("token-key-2")),
       );
-      configured = " MixedCaseA7Z";
-      expect(helpers.configuredAdminSecret()).toBe("");
+      expect(helpers.adminAuthFingerprint(null)).toBe("");
     } finally {
-      runtime.$os = originalOs;
       runtime.$security = originalSecurity;
     }
   });

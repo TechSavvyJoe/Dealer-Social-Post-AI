@@ -344,6 +344,12 @@ export const useGeneration = () => {
       const result = gatedResult.result;
       const releaseId = gatedResult.releaseId;
 
+      if (result.aiMeta.image.provider === "original") {
+        toastWarning(
+          "AI styling couldn't be applied this time — showing your original photo with the generated caption.",
+        );
+      }
+
       // Scan the caption for compliance triggers. Disclosures go into a
       // separate `disclosures` field so the editable caption textarea
       // never contains them (and a salesperson can't silently delete them).

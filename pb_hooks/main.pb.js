@@ -17,6 +17,22 @@
 var cachedAccessToken = null;
 var tokenExpiry = 0;
 
+// ---------------------------------------------------------------------------
+// Administrator account bootstrap. The system admin signs in with a normal
+// username/password held in the locked admin_accounts auth collection. The
+// initial (and rotated) credential comes from deployment secrets:
+// ADMIN_LOGIN_USERNAME + ADMIN_LOGIN_PASSWORD. Password changes rotate the
+// account token key, which invalidates outstanding administrator sessions.
+// ---------------------------------------------------------------------------
+onAfterBootstrap(() => {
+  try {
+    const helpers = require(__hooks + "/helpers.js");
+    helpers.ensureAdminAccountProvisioned({ syncPassword: true });
+  } catch (err) {
+    console.error("[bootstrap] Administrator account bootstrap failed:", err);
+  }
+});
+
 // Rate limiting - using simple object instead of Map for PocketBase JSVM compatibility
 const proxyHandler = (c) => {
   const helpers = require(__hooks + "/helpers.js");
@@ -1201,7 +1217,7 @@ routerAdd("GET", "/api/app/health", (c) => {
     proxy_token_set: false,
     anthropic_key_set: false,
     openai_key_set: false,
-    admin_dealer_code_set: false,
+    admin_login_configured: false,
     turnstile_enforcement_enabled: false,
     turnstile_secret_set: false,
     turnstile_site_key_set: false,
@@ -1463,9 +1479,15 @@ routerAdd("GET", "/api/app/health", (c) => {
   checks.openai_fallback_enabled =
     checks.openai_key_set &&
     ($os.getenv("ENABLE_OPENAI_FALLBACK") || "").trim().toLowerCase() === "true";
-  checks.admin_dealer_code_set = policies.isValidAdminDealerCode(
-    $os.getenv("ADMIN_DEALER_CODE") || "",
-  );
+  try {
+    // Creation-only self-heal covers fresh databases where migrations landed
+    // after the bootstrap hook already ran.
+    helpers.ensureAdminAccountProvisioned({ syncPassword: false });
+    const adminVerification = helpers.findAdminPasswordVerificationAccount();
+    checks.admin_login_configured = adminVerification.status === "found";
+  } catch (_e) {
+    checks.admin_login_configured = false;
+  }
   const flyRuntime = !!($os.getenv("FLY_APP_NAME") || "").trim();
   const turnstileSecret = ($os.getenv("TURNSTILE_SECRET") || "").toString();
   const turnstileSiteKey = ($os.getenv("TURNSTILE_SITE_KEY") || "").toString();
@@ -1502,7 +1524,7 @@ routerAdd("GET", "/api/app/health", (c) => {
   if (
     !checks.pocketbase ||
     !checks.gemini_key_set ||
-    !checks.admin_dealer_code_set ||
+    !checks.admin_login_configured ||
     (flyRuntime &&
       (!checks.trusted_proxy_configured ||
         !checks.turnstile_secret_set ||
@@ -1717,11 +1739,14 @@ routerAdd("POST", "/api/app/session", (c) => {
         ? ""
         : body.password.toString();
     const requestedAuthType = (body.authType || "").toString();
+    const adminLoginRequested = requestedAuthType === "admin_password";
     const managerLoginRequested =
-      requestedAuthType === "manager_password" ||
-      body.username !== undefined ||
-      body.password !== undefined;
-    const credentialPresent = managerLoginRequested
+      !adminLoginRequested &&
+      (requestedAuthType === "manager_password" ||
+        body.username !== undefined ||
+        body.password !== undefined);
+    const passwordLoginRequested = adminLoginRequested || managerLoginRequested;
+    const credentialPresent = passwordLoginRequested
       ? managerUsername.length > 0 || managerPassword.length > 0
       : dealerCode.length > 0;
 
@@ -1789,14 +1814,16 @@ routerAdd("POST", "/api/app/session", (c) => {
     attemptReservationId = reservation.attemptId;
 
     if (
-      (requestedAuthType && requestedAuthType !== "manager_password") ||
-      (managerLoginRequested &&
-        (body.dealerCode !== undefined || requestedAuthType !== "manager_password"))
+      (requestedAuthType &&
+        requestedAuthType !== "manager_password" &&
+        requestedAuthType !== "admin_password") ||
+      (passwordLoginRequested && body.dealerCode !== undefined) ||
+      (managerLoginRequested && requestedAuthType !== "manager_password")
     ) {
       return rejectInvalidCredential("ambiguous credential payload", credentialPresent);
     }
     if (
-      managerLoginRequested &&
+      passwordLoginRequested &&
       (!helpers.isValidManagerUsername(managerUsername) ||
         !helpers.isManagerLoginPasswordShape(managerPassword))
     ) {
@@ -1805,7 +1832,7 @@ routerAdd("POST", "/api/app/session", (c) => {
         credentialPresent,
       );
     }
-    if (!managerLoginRequested && !/^[A-Za-z0-9]{4,12}$/.test(dealerCode)) {
+    if (!passwordLoginRequested && !/^[A-Za-z0-9]{4,12}$/.test(dealerCode)) {
       return rejectInvalidCredential("malformed code", dealerCode.length > 0);
     }
 
@@ -1815,29 +1842,69 @@ routerAdd("POST", "/api/app/session", (c) => {
     let verifiedPersonPinFingerprint = "";
     let managerAccount = null;
     let verifiedManagerAuthFingerprint = "";
-    // SECURITY: never fall back to a hardcoded admin code. If ADMIN_DEALER_CODE
-    // is unset, super-admin login is simply unavailable.
-    const adminEnv = helpers.configuredAdminSecret();
+    let adminAccount = null;
+    let verifiedAdminAuthFingerprint = "";
 
-    if (!managerLoginRequested && adminEnv && dealerCode === adminEnv) {
-      role = "super_admin";
-      record = helpers.findSystemDealer();
-
-      if (!record) {
-        // The deployment secret is never copied into PocketBase. A stable
-        // marker identifies the one system tenant; the unique partial index in
-        // the integrity migration prevents multiple canonical records.
+    if (adminLoginRequested) {
+      try {
+        helpers.ensureAdminAccountProvisioned({ syncPassword: false });
+      } catch (_e) {}
+      const adminLookup = helpers.findActiveAdminLogin(managerUsername);
+      if (adminLookup.status === "unavailable") {
+        cancelReservedAttempt();
+        return unavailableResponse();
+      }
+      let passwordVerificationAccount = adminLookup.account;
+      if (!passwordVerificationAccount) {
+        const verificationLookup = helpers.findAdminPasswordVerificationAccount();
+        if (verificationLookup.status === "unavailable") {
+          cancelReservedAttempt();
+          return unavailableResponse();
+        }
+        passwordVerificationAccount = verificationLookup.account;
+      }
+      if (passwordVerificationAccount) {
+        let passwordAccepted = false;
         try {
-          const dealers = $app.dao().findCollectionByNameOrId("dealers");
-          const systemDealer = new Record(dealers, {
-            name: "SYSTEM ADMIN",
-            is_system: true,
-          });
-          $app.dao().saveRecord(systemDealer);
-          record = systemDealer;
-        } catch (insertErr) {
-          console.log("[session] system dealer insert raced, re-querying:", insertErr);
+          passwordAccepted =
+            !!passwordVerificationAccount.validatePassword(managerPassword);
+        } catch (_e) {
+          cancelReservedAttempt();
+          return unavailableResponse();
+        }
+        // A valid password for the dummy verification target never becomes an
+        // identity match. Only the account resolved from this exact username
+        // can mint the administrator session.
+        if (adminLookup.status === "found" && passwordAccepted) {
+          adminAccount = adminLookup.account;
+          role = "super_admin";
+          try {
+            verifiedAdminAuthFingerprint = helpers.adminAuthFingerprint(adminAccount);
+          } catch (_e) {
+            cancelReservedAttempt();
+            return unavailableResponse();
+          }
           record = helpers.findSystemDealer();
+          if (!record) {
+            // A stable marker identifies the one system tenant; the unique
+            // partial index in the integrity migration prevents multiple
+            // canonical records.
+            try {
+              const dealers = $app.dao().findCollectionByNameOrId("dealers");
+              const systemDealer = new Record(dealers, {
+                name: "SYSTEM ADMIN",
+                is_system: true,
+              });
+              $app.dao().saveRecord(systemDealer);
+              record = systemDealer;
+            } catch (insertErr) {
+              console.log(
+                "[session] system dealer insert raced, re-querying:",
+                insertErr,
+              );
+              record = helpers.findSystemDealer();
+            }
+          }
         }
       }
     } else if (managerLoginRequested) {
@@ -1935,6 +2002,10 @@ routerAdd("POST", "/api/app/session", (c) => {
         sessionOpts.managerAccountId = managerAccount.id;
         sessionOpts.expectedManagerAuthFingerprint = verifiedManagerAuthFingerprint;
       }
+      if (adminAccount) {
+        sessionOpts.adminAccountId = adminAccount.id;
+        sessionOpts.expectedAdminAuthFingerprint = verifiedAdminAuthFingerprint;
+      }
       const session = helpers.createSession(record.id, role, ip, ua, sessionOpts);
       token = session.token;
       sessionId = session.sessionId || "";
@@ -1955,7 +2026,11 @@ routerAdd("POST", "/api/app/session", (c) => {
         credentialPresent: true,
         detail:
           "auth=" +
-          (managerAccount ? "manager_password" : "code") +
+          (adminAccount
+            ? "admin_password"
+            : managerAccount
+              ? "manager_password"
+              : "code") +
           " role=" +
           role +
           (personRecord ? " person=" + personRecord.id : "") +
@@ -4427,7 +4502,7 @@ routerAdd("PUT", "/api/app/salespeople/:id/manager-login", (c) => {
       return c.json(400, {
         error: "INVALID_MANAGER_PASSWORD",
         code: "INVALID_MANAGER_PASSWORD",
-        message: "Password must be between 15 and 128 characters.",
+        message: "Password must be between 8 and 128 characters.",
       });
     }
 

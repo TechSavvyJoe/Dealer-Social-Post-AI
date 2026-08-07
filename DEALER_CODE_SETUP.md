@@ -3,10 +3,11 @@
 Dealer Social Post AI has three distinct credential types. Do not share or
 substitute one for the other:
 
-- The system administrator signs in with the exact, case-sensitive
-  12-character alphanumeric `ADMIN_DEALER_CODE` deployment secret.
+- The system administrator signs in with a username and an exact 8–128
+  character password. The account is provisioned from the
+  `ADMIN_LOGIN_USERNAME` and `ADMIN_LOGIN_PASSWORD` deployment secrets.
 - Dealership managers sign in with a dealer-scoped username and an exact
-  15–128 character password configured by the system administrator.
+  8–128 character password configured by the system administrator.
 - Salespeople sign in with personal, unique four-digit PINs. Manager PINs
   remain available as a temporary compatibility fallback.
 
@@ -19,9 +20,11 @@ evidence.
 - Browser login goes through `POST /api/app/session`.
 - The server validates the selected credential and returns an opaque, HttpOnly
   app session cookie. It never returns a PocketBase auth token.
-- The system-administrator secret is held only in secure deployment
-  configuration. The database stores a stable system-dealer marker and one-way
-  session fingerprints, not the secret itself.
+- The system-administrator account lives in the locked `admin_accounts`
+  PocketBase auth collection (one-way password verifier only). It is
+  provisioned and rotated at boot from the `ADMIN_LOGIN_USERNAME` and
+  `ADMIN_LOGIN_PASSWORD` deployment secrets. Sessions bind to the account's
+  token key, so a password rotation invalidates outstanding admin sessions.
 - A personal session is continuously revalidated against that person's active
   status, dealer, current role, and credential version.
 - Manager passwords use PocketBase's one-way password verifier in a locked
@@ -55,7 +58,7 @@ PINs are personal and must not be reused as a shared store credential.
 2. Create or edit the manager, then choose **Set up manager login**.
 3. Assign a unique 3–32 character username. It starts with a letter and may use
    lowercase letters, numbers, periods, dashes, and underscores.
-4. Enter and confirm a 15–128 character password. Spaces are allowed; password
+4. Enter and confirm an 8–128 character password. Spaces are allowed; password
    case and whitespace are preserved exactly.
 5. Deliver the username and password through a private channel. The password is
    write-only: it is never returned or revealable after saving.
@@ -83,18 +86,18 @@ PIN, and system-admin attempts through the same `/api/app/session` route.
 
 ## Configure or rotate system-administrator access
 
-`ADMIN_DEALER_CODE` has no default. It must be exactly 12 alphanumeric
-characters and is case-sensitive. Store it only in the deployment secret
-manager and a password manager or Keychain. The login field preserves typed
-case; never uppercase, lowercase, trim, log, or persist the value in a dealer
-record.
+`ADMIN_LOGIN_USERNAME` and `ADMIN_LOGIN_PASSWORD` have no defaults. The
+username is 3–32 characters starting with a letter; the password is 8–128
+exact characters. Store both only in the deployment secret manager and a
+password manager or Keychain. Never log the password or persist it outside
+the PocketBase password verifier.
 
-Rotating the deployment secret invalidates existing administrator session
-fingerprints. Complete a rotation by proving the prior secret, prior
-administrator sessions, and derived impersonation sessions all fail. Use the
-coordinated production runbook for the compatibility-phase and final
-mixed-case rotation sequence; do not perform an uncoordinated rotation during
-a split frontend/backend release.
+On every boot the server provisions the administrator account from these
+secrets: it creates the account if missing, renames it on a username change,
+and resets the password on a password change. Rotating the password changes
+the account's token key, which immediately invalidates existing administrator
+sessions and derived impersonation sessions. Complete a rotation by proving
+the prior password and prior administrator sessions no longer work.
 
 ## Read-only maintenance checks
 

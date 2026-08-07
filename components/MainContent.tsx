@@ -362,7 +362,7 @@ export const MainContent: React.FC<MainContentProps> = ({
               )}
             >
               {captureWorkspace === "photo" || !WALKAROUND_STUDIO_ENABLED ? (
-                <LazyImageInput onImageSelected={onImageSelected} onClose={onReset} />
+                <LazyImageInput onImageSelected={onImageSelected} />
               ) : currentDealer ? (
                 <LazyWalkaroundStudio
                   dealerId={currentDealer.id}

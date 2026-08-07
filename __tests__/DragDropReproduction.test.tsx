@@ -12,7 +12,6 @@ vi.mock("../utils/imageUtils", () => ({
 
 describe("ImageInput Drag and Drop", () => {
   const mockOnImageSelected = vi.fn();
-  const mockOnClose = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -23,7 +22,7 @@ describe("ImageInput Drag and Drop", () => {
   });
 
   it("should send a dropped photo to the single global review flow", async () => {
-    render(<ImageInput onImageSelected={mockOnImageSelected} onClose={mockOnClose} />);
+    render(<ImageInput onImageSelected={mockOnImageSelected} />);
 
     const dropZone = screen.getByText("Add a photo").closest("div")?.parentElement;
     expect(dropZone).toBeInTheDocument();
@@ -67,7 +66,7 @@ describe("ImageInput Drag and Drop", () => {
   });
 
   it("should handle invalid file type drop", async () => {
-    render(<ImageInput onImageSelected={mockOnImageSelected} onClose={mockOnClose} />);
+    render(<ImageInput onImageSelected={mockOnImageSelected} />);
 
     const file = new File(["dummy content"], "test.txt", {
       type: "text/plain",

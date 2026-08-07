@@ -137,16 +137,14 @@ describe("super-admin manager username and password controls", () => {
     const confirmation = screen.getByLabelText("Confirm password");
     const submit = screen.getByRole("button", { name: "Enable manager login" });
 
-    expect(password).toHaveAttribute("minlength", "15");
+    expect(password).toHaveAttribute("minlength", "8");
     expect(password).toHaveAttribute("maxlength", "128");
     fireEvent.change(username, { target: { value: "manager.one" } });
-    fireEvent.change(password, { target: { value: "too short" } });
-    fireEvent.change(confirmation, { target: { value: "too short" } });
+    fireEvent.change(password, { target: { value: "short" } });
+    fireEvent.change(confirmation, { target: { value: "short" } });
     fireEvent.click(submit);
     expect(
-      await screen.findByText(
-        "Manager password must be between 15 and 128 characters.",
-      ),
+      await screen.findByText("Manager password must be between 8 and 128 characters."),
     ).toHaveAttribute("role", "alert");
     expect(password).toHaveFocus();
     expect(password).toHaveAttribute("aria-invalid", "true");

@@ -21,9 +21,10 @@ At minimum, configure:
 # Server-side only. Do not rename this to a VITE_-prefixed variable.
 GEMINI_API_KEY=your-gemini-api-key
 
-# Local-only bootstrap credential. Production must use a separately generated
-# exact-case 12-character alphanumeric value.
-ADMIN_DEALER_CODE=your-12-character-code
+# Local-only bootstrap credentials. Production must use separately generated
+# values stored as deployment secrets (username 3-32 chars, password 8-128).
+ADMIN_LOGIN_USERNAME=admin
+ADMIN_LOGIN_PASSWORD=your-admin-password
 
 # Public frontend configuration.
 VITE_POCKETBASE_URL=http://127.0.0.1:8090

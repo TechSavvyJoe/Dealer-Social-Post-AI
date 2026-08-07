@@ -123,7 +123,7 @@ describe("PocketBase sensitive-storage hardening", () => {
     expect(savedData).not.toHaveProperty("token");
   });
 
-  it("rejects a super-admin context after the deployment secret rotates", () => {
+  it("rejects a super-admin context after the admin credential rotates", () => {
     const session = {
       id: "admin-session",
       getString: (field: string) => {
@@ -136,16 +136,28 @@ describe("PocketBase sensitive-storage hardening", () => {
       getBool: () => false,
     };
     const deleteRecord = vi.fn();
+    // The live account now fingerprints to "c" — the session still carries the
+    // pre-rotation "b" verifier, so it must be revoked.
     runtime.$security = {
       sha256: (value: string) =>
-        value.startsWith("dealer-social-post-ai:admin-session:v1:")
+        value.startsWith("dealer-social-post-ai:admin-auth:v1:")
           ? "c".repeat(64)
           : "a".repeat(64),
     };
-    runtime.$os = { getenv: () => "NewAdmin9Q2Z" };
+    runtime.$os = { getenv: () => "" };
     runtime.$app = {
       dao: () => ({
         findFirstRecordByFilter: () => session,
+        findRecordsByFilter: (collection: string) =>
+          collection === "admin_accounts"
+            ? [
+                {
+                  id: "admin-account-1",
+                  getString: (field: string) =>
+                    field === "tokenKey" ? "rotated-token-key" : "",
+                },
+              ]
+            : [],
         findRecordById: () => ({
           id: "system-dealer",
           getBool: (field: string) => field === "is_system",

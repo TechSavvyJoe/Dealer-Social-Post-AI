@@ -33,7 +33,7 @@ const secretValuePatterns = [
 ];
 
 const assignment =
-  /\b(?:GEMINI_API_KEY|VERTEX_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY|PROXY_ACCESS_TOKEN|VITE_PROXY_ACCESS_TOKEN|PB_ADMIN_EMAIL|PB_ADMIN_PASSWORD|ADMIN_EMAIL|ADMIN_PASSWORD|ADMIN_PASS|ADMIN_DEALER_CODE)\b\s*=\s*["']?([^\s"']+)["']?/i;
+  /\b(?:GEMINI_API_KEY|VERTEX_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY|PROXY_ACCESS_TOKEN|VITE_PROXY_ACCESS_TOKEN|PB_ADMIN_EMAIL|PB_ADMIN_PASSWORD|ADMIN_EMAIL|ADMIN_PASSWORD|ADMIN_PASS|ADMIN_DEALER_CODE|ADMIN_LOGIN_PASSWORD)\b\s*=\s*["']?([^\s"']+)["']?/i;
 const objectCredential =
   /(?:^|[,{])\s*["']?(?:identity|password|client_secret|private_key|access_token|api_key)["']?\s*:\s*["']([^"'\n]+)["']/i;
 const publicRuleMutation =
