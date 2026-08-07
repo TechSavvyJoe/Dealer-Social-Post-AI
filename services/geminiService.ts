@@ -49,7 +49,7 @@ import { requestCache } from "../utils/requestCache";
 import { logEvent as logTelemetry } from "../utils/telemetry";
 import { cleanSocialCaption, ensureUsableCaption } from "../utils/captionQuality";
 import { z } from "zod";
-import { isSafeOnImageHeadline } from "./promptsV2";
+import { isSafeOnImageHeadline, ON_IMAGE_TEXT_BUDGET } from "./promptsV2";
 
 /**
  * Tries each model in the fallback chain for a given task. The action
@@ -415,6 +415,7 @@ const GeneratedImageTextReviewSchema = z
     hasHashtag: z.boolean(),
     hasUrlOrPhone: z.boolean(),
     violations: z.array(ImageTextViolationSchema).max(8),
+    logoPresent: z.boolean().optional(),
   })
   .strict();
 
@@ -428,7 +429,51 @@ export interface GeneratedImageTextReview {
   hasHashtag: boolean;
   hasUrlOrPhone: boolean;
   violations: Array<z.infer<typeof ImageTextViolationSchema>>;
+  /** Whether the supplied dealership logo is visible; absent when no logo. */
+  logoPresent?: boolean;
 }
+
+/**
+ * Model responses frequently wrap JSON in Markdown fences or prose because
+ * the proxy's text-task allowlist has no JSON response mode. Extract the
+ * first balanced object instead of failing the whole review on formatting.
+ */
+const extractJsonObject = (raw: string): unknown => {
+  const direct = raw.trim();
+  try {
+    return JSON.parse(direct);
+  } catch {
+    /* fall through to extraction */
+  }
+  const unfenced = direct.replace(/```(?:json)?/gi, "");
+  const start = unfenced.indexOf("{");
+  if (start === -1) throw new Error("Image text review returned malformed JSON.");
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < unfenced.length; i += 1) {
+    const ch = unfenced[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return JSON.parse(unfenced.slice(start, i + 1));
+        } catch {
+          throw new Error("Image text review returned malformed JSON.");
+        }
+      }
+    }
+  }
+  throw new Error("Image text review returned malformed JSON.");
+};
 
 const generatedImageTextReviewPrompt = (
   dealershipName: string,
@@ -436,14 +481,16 @@ const generatedImageTextReviewPrompt = (
 
 Inspect the image pixels and return only the requested JSON object.
 
-Marketing overlay policy:
-- AI-added headline/support copy may contain at most 4 total words and 40 total characters across the whole image.
-- Reject full sentences, hashtags, URLs, phone numbers, or multiple promotional text blocks.
-- The exact dealership legal name (${dealershipName}) and a supplied dealership logo are brand identity. Exclude those from the marketing word/character counts.
+Marketing overlay policy (this matches the design brief the image was created from):
+- Up to ${ON_IMAGE_TEXT_BUDGET.maxBlocks} separate overlay text blocks are allowed: one headline of at most ${ON_IMAGE_TEXT_BUDGET.headlineWords} words / ${ON_IMAGE_TEXT_BUDGET.headlineChars} characters, plus up to two short accents (a badge of at most ${ON_IMAGE_TEXT_BUDGET.badgeWords} words and one short support line).
+- Across all blocks combined: at most ${ON_IMAGE_TEXT_BUDGET.totalWords} words and ${ON_IMAGE_TEXT_BUDGET.totalChars} characters.
+- Reject full sentences, hashtags, URLs, and phone numbers anywhere in overlay copy.
+- The exact dealership legal name (${dealershipName}) and a supplied dealership logo are brand identity. Exclude those from the marketing word/character counts and block counts.
 - Exclude text naturally photographed in the scene, such as vehicle badges, building signs, clothing, documents, and license plates. Count only designed promotional overlay copy.
-- If text is unreadable, ambiguous, or you cannot confidently distinguish promotional overlay from scene text, set uncertain=true and compliant=false.
+- If text is unreadable, ambiguous, or you cannot confidently distinguish promotional overlay from scene text, set uncertain=true. Only set compliant=false when you can identify a concrete violation.
+- Set logoPresent=true when a dealership logo graphic is visible anywhere in the image, otherwise false.
 
-detectedMarketingText must contain only the promotional overlay strings you counted. violations must use only the allowed enum values. Never include explanations or image details outside the JSON.`;
+detectedMarketingText must contain each overlay text block as its own array entry, exactly as rendered. marketingWordCount and marketingCharacterCount are totals across all blocks. violations must use only the allowed enum values. Return only the JSON object with keys: compliant, uncertain, detectedMarketingText, marketingWordCount, marketingCharacterCount, hasFullSentence, hasHashtag, hasUrlOrPhone, violations, logoPresent. Never include explanations or image details outside the JSON.`;
 
 /**
  * Second-pass vision check for text painted into generated image pixels.
@@ -480,12 +527,7 @@ export const reviewGeneratedImageText = async (
     } as any);
     assertAuthEpoch(requestAuthEpoch);
     const rawText = typeof response.text === "function" ? response.text() : "";
-    let parsedJson: unknown;
-    try {
-      parsedJson = JSON.parse(rawText);
-    } catch {
-      throw new Error("Image text review returned malformed JSON.");
-    }
+    const parsedJson = extractJsonObject(rawText);
     const parsed = GeneratedImageTextReviewSchema.safeParse(parsedJson);
     if (!parsed.success) {
       throw new Error("Image text review returned an invalid structured result.");
@@ -507,8 +549,24 @@ export const reviewGeneratedImageText = async (
     review.marketingCharacterCount,
     derivedCharacterCount,
   );
-  const deterministicHeadlineSafe =
-    !joinedMarketingText || isSafeOnImageHeadline(joinedMarketingText);
+
+  // Per-block evaluation matching the generation contract: each block within
+  // headline limits (display punctuation like a trailing "!" is tolerated),
+  // bounded block count, bounded totals. Joining all blocks and applying the
+  // single-headline rule to the concatenation destroyed compliant renders.
+  const blocksSafe = detectedMarketingText.every((block) => {
+    const displayNormalized = block.replace(/[!?.]+$/u, "").trim();
+    return displayNormalized.length === 0 || isSafeOnImageHeadline(displayNormalized);
+  });
+  const withinBudget =
+    detectedMarketingText.length <= ON_IMAGE_TEXT_BUDGET.maxBlocks &&
+    marketingWordCount <= ON_IMAGE_TEXT_BUDGET.totalWords &&
+    marketingCharacterCount <= ON_IMAGE_TEXT_BUDGET.totalChars &&
+    detectedMarketingText.every(
+      (block) =>
+        block.split(/\s+/).length <= ON_IMAGE_TEXT_BUDGET.headlineWords &&
+        block.length <= ON_IMAGE_TEXT_BUDGET.headlineChars,
+    );
 
   return {
     ...review,
@@ -517,21 +575,38 @@ export const reviewGeneratedImageText = async (
     marketingCharacterCount,
     compliant:
       review.compliant &&
-      !review.uncertain &&
-      marketingWordCount <= 4 &&
-      marketingCharacterCount <= 40 &&
+      withinBudget &&
       !review.hasFullSentence &&
       !review.hasHashtag &&
       !review.hasUrlOrPhone &&
-      deterministicHeadlineSafe,
+      blocksSafe,
   };
 };
 
-const TEXT_FREE_CORRECTION_PROMPT = `This is a corrective photo edit of the attached generated image.
+const TEXT_REDUCTION_CORRECTION_PROMPT = `This is a corrective photo edit of the attached generated image.
 
-Remove every AI-added marketing headline, caption, slogan, hashtag, URL, phone number, and word badge. Do not add replacement words or any new text.
-Preserve the exact people, faces, bodies, vehicle, background, crop, lighting, and colors. Keep a supplied dealership logo unchanged; the exact legal dealership name may remain only when it is part of that logo.
-Return only the corrected image with zero promotional overlay text.`;
+Reduce the AI-added marketing overlay text to the allowed budget:
+- Keep at most one short headline of up to ${ON_IMAGE_TEXT_BUDGET.headlineWords} words (${ON_IMAGE_TEXT_BUDGET.headlineChars} characters max).
+- Keep the supplied dealership logo and the dealership name lockup unchanged — they are brand identity, not marketing copy.
+- Remove every additional slogan, caption line, hashtag, URL, phone number, and extra word badge.
+Do not add new words. Preserve the exact people, faces, bodies, vehicle, background, crop, lighting, and colors.
+Return only the corrected image.`;
+
+const strictTextRetryAddendum = (): string => `
+
+<text_compliance_retry>
+A prior render exceeded the on-image text budget. Re-render the same creative direction with tighter copy:
+- At most one short headline (${ON_IMAGE_TEXT_BUDGET.headlineWords} words / ${ON_IMAGE_TEXT_BUDGET.headlineChars} characters max)
+- At most one ${ON_IMAGE_TEXT_BUDGET.badgeWords}-word badge, only if space allows
+- Keep the dealership name lockup and supplied logo
+- No sentences, hashtags, URLs, or phone numbers anywhere
+</text_compliance_retry>`;
+
+const LOGO_RESTORE_PROMPT = `This is a corrective photo edit of the attached generated image.
+
+The supplied dealership logo (second attached image) is missing from the design. Add it as a small, tasteful watermark in a lower-corner safe zone away from people. Do not distort it.
+Change nothing else: preserve all existing text, people, faces, vehicle, background, crop, lighting, and colors.
+Return only the corrected image.`;
 
 interface ImageTextComplianceInput {
   candidate: ModelRun<string>;
@@ -540,9 +615,36 @@ interface ImageTextComplianceInput {
   imageTier: ImageGenerationTier;
   imageAspectRatio?: ImageAspectRatio;
   requestAuthEpoch: number;
+  /** Original photo + prompt parts, enabling a styled compliant re-render. */
+  regenerationParts?: unknown[];
+  regenerationPrompt?: string;
 }
 
-/** One bounded text-free correction, followed by a second fail-closed review. */
+const concreteViolations = (
+  review: GeneratedImageTextReview,
+): GeneratedImageTextReview["violations"] =>
+  review.violations.filter((violation) => violation !== "unreadable_or_uncertain");
+
+const imagePartFromDataUrl = async (
+  dataUrl: string,
+  requestAuthEpoch: number,
+): Promise<{ inlineData: { mimeType: string; data: string } }> => {
+  const normalised = await normaliseDataUrl(dataUrl);
+  assertAuthEpoch(requestAuthEpoch);
+  const { mimeType, data } = parseDataUrl(normalised);
+  return { inlineData: { mimeType, data } };
+};
+
+/**
+ * Bounded compliance ladder for AI-added overlay text.
+ *
+ * Review errors and pure uncertainty pass the image through with telemetry —
+ * the generation prompt already enforces the text contract, and destroying a
+ * finished creative because a *reviewer* failed is worse than shipping it.
+ * Only confirmed violations trigger correction: first a styled re-render with
+ * tighter copy, then a text-reduction edit, and only a repeat confirmed
+ * violation fails closed.
+ */
 const enforceGeneratedImageTextCompliance = async ({
   candidate,
   dealershipName,
@@ -550,35 +652,104 @@ const enforceGeneratedImageTextCompliance = async ({
   imageTier,
   imageAspectRatio,
   requestAuthEpoch,
+  regenerationParts,
+  regenerationPrompt,
 }: ImageTextComplianceInput): Promise<ModelRun<string>> => {
-  let firstReview: GeneratedImageTextReview | null = null;
-  try {
-    firstReview = await reviewGeneratedImageText(
-      candidate.value,
-      dealershipName,
-      requestAuthEpoch,
-    );
-  } catch (error) {
-    logTelemetry("image.text_compliance.review_failed", {
-      stage: "initial",
-      reason: error instanceof Error ? error.message : String(error),
+  const reviewOrNull = async (
+    image: string,
+    stage: string,
+  ): Promise<GeneratedImageTextReview | null> => {
+    try {
+      return await reviewGeneratedImageText(image, dealershipName, requestAuthEpoch);
+    } catch (error) {
+      logTelemetry("image.text_compliance.review_failed", {
+        stage,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  };
+
+  const restoreLogoIfMissing = async (
+    result: ModelRun<string>,
+    review: GeneratedImageTextReview | null,
+  ): Promise<ModelRun<string>> => {
+    if (!logoImagePart || review?.logoPresent !== false) return result;
+    logTelemetry("image.text_compliance.logo_restore", {});
+    try {
+      const sourcePart = await imagePartFromDataUrl(result.value, requestAuthEpoch);
+      return await generateImageWithFallback(
+        imageTaskForTier(imageTier),
+        [sourcePart, { text: LOGO_RESTORE_PROMPT }, logoImagePart],
+        undefined,
+        imageAspectRatio,
+        requestAuthEpoch,
+      );
+    } catch (error) {
+      logTelemetry("image.text_compliance.logo_restore_failed", {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      return result;
+    }
+  };
+
+  const firstReview = await reviewOrNull(candidate.value, "initial");
+  if (firstReview === null) return candidate;
+  if (firstReview.compliant) return restoreLogoIfMissing(candidate, firstReview);
+
+  const confirmed = concreteViolations(firstReview);
+  if (confirmed.length === 0) {
+    logTelemetry("image.text_compliance.uncertain_pass", {
+      uncertain: firstReview.uncertain,
+      wordCount: firstReview.marketingWordCount,
+      characterCount: firstReview.marketingCharacterCount,
     });
+    return restoreLogoIfMissing(candidate, firstReview);
   }
-  if (firstReview?.compliant) return candidate;
 
   logTelemetry("image.text_compliance.retry", {
-    uncertain: firstReview?.uncertain ?? true,
-    wordCount: firstReview?.marketingWordCount ?? null,
-    characterCount: firstReview?.marketingCharacterCount ?? null,
-    violations: firstReview?.violations ?? ["unreadable_or_uncertain"],
+    uncertain: firstReview.uncertain,
+    wordCount: firstReview.marketingWordCount,
+    characterCount: firstReview.marketingCharacterCount,
+    violations: firstReview.violations,
   });
 
-  const normalisedCandidate = await normaliseDataUrl(candidate.value);
-  assertAuthEpoch(requestAuthEpoch);
-  const { mimeType, data } = parseDataUrl(normalisedCandidate);
+  // Rung 1: styled re-render from the original photo with tighter copy.
+  let bestCandidate = candidate;
+  if (regenerationParts && regenerationPrompt) {
+    try {
+      const retryParts = regenerationParts.map((part) =>
+        part && typeof part === "object" && "text" in (part as object)
+          ? { text: `${(part as { text: string }).text}${strictTextRetryAddendum()}` }
+          : part,
+      );
+      const regenerated = await generateImageWithFallback(
+        imageTaskForTier(imageTier),
+        retryParts,
+        undefined,
+        imageAspectRatio,
+        requestAuthEpoch,
+      );
+      const regeneratedReview = await reviewOrNull(regenerated.value, "regenerated");
+      if (regeneratedReview === null || regeneratedReview.compliant) {
+        return restoreLogoIfMissing(regenerated, regeneratedReview);
+      }
+      if (concreteViolations(regeneratedReview).length === 0) {
+        return restoreLogoIfMissing(regenerated, regeneratedReview);
+      }
+      bestCandidate = regenerated;
+    } catch (error) {
+      logTelemetry("image.text_compliance.regeneration_failed", {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  // Rung 2: reduce overlay text on the best candidate, keeping brand identity.
+  const sourcePart = await imagePartFromDataUrl(bestCandidate.value, requestAuthEpoch);
   const correctionParts: unknown[] = [
-    { inlineData: { mimeType, data } },
-    { text: TEXT_FREE_CORRECTION_PROMPT },
+    sourcePart,
+    { text: TEXT_REDUCTION_CORRECTION_PROMPT },
   ];
   if (logoImagePart) correctionParts.push(logoImagePart);
   const corrected = await generateImageWithFallback(
@@ -591,30 +762,21 @@ const enforceGeneratedImageTextCompliance = async ({
     requestAuthEpoch,
   );
 
-  let correctedReview: GeneratedImageTextReview;
-  try {
-    correctedReview = await reviewGeneratedImageText(
-      corrected.value,
-      dealershipName,
-      requestAuthEpoch,
-    );
-  } catch (error) {
-    logTelemetry("image.text_compliance.review_failed", {
-      stage: "corrected",
-      reason: error instanceof Error ? error.message : String(error),
-    });
-    throw new Error("Corrected image text could not be verified safely.");
+  const correctedReview = await reviewOrNull(corrected.value, "corrected");
+  if (correctedReview === null || correctedReview.compliant) {
+    return restoreLogoIfMissing(corrected, correctedReview);
   }
-  if (!correctedReview.compliant) {
-    logTelemetry("image.text_compliance.rejected", {
-      uncertain: correctedReview.uncertain,
-      wordCount: correctedReview.marketingWordCount,
-      characterCount: correctedReview.marketingCharacterCount,
-      violations: correctedReview.violations,
-    });
-    throw new Error("Generated image text exceeded the safe headline limit.");
+  if (concreteViolations(correctedReview).length === 0) {
+    return restoreLogoIfMissing(corrected, correctedReview);
   }
-  return corrected;
+
+  logTelemetry("image.text_compliance.rejected", {
+    uncertain: correctedReview.uncertain,
+    wordCount: correctedReview.marketingWordCount,
+    characterCount: correctedReview.marketingCharacterCount,
+    violations: correctedReview.violations,
+  });
+  throw new Error("Generated image text exceeded the safe headline limit.");
 };
 
 /**
@@ -689,6 +851,8 @@ export const generateFunSocialPostImage = async (
       imageTier,
       imageAspectRatio,
       requestAuthEpoch,
+      regenerationParts: imageParts,
+      regenerationPrompt: funPrompt,
     })
   ).value;
 };
@@ -736,6 +900,8 @@ export const editSocialPostImage = async (
       imageTier,
       imageAspectRatio,
       requestAuthEpoch,
+      regenerationParts: imageParts,
+      regenerationPrompt: editInstruction,
     })
   ).value;
 };
@@ -1169,6 +1335,8 @@ export const generateSocialPost = async (
         imageTier,
         imageAspectRatio,
         requestAuthEpoch,
+        regenerationParts: imageParts,
+        regenerationPrompt: imagePrompt,
       });
     } catch (err) {
       console.warn(
