@@ -836,7 +836,14 @@ function saveRelease(c, helpers) {
 }
 
 function validRelease(dao, project) {
-  if (!bool(project, "contains_identifiable_non_employee")) return true;
+  // A customer-audience capture always requires a signed release. The
+  // self-attested `contains_identifiable_non_employee` flag comes from the
+  // client at creation and is never re-derived, so it can only ever ADD a
+  // release requirement — never waive the one the audience implies.
+  const requiresRelease =
+    project.getString("audience_mode") === "customer" ||
+    bool(project, "contains_identifiable_non_employee");
+  if (!requiresRelease) return true;
   try {
     const release = dao.findFirstRecordByFilter(
       "walkaround_releases",
@@ -1217,7 +1224,11 @@ function youtubeConnection(dao, dealerId) {
 }
 
 function publishProject(c, helpers) {
-  const authorized = projectForContext(c, helpers);
+  // Publishing pushes video to the dealership's YouTube channel and, when the
+  // dealer does not require explicit approval, mints the approval record
+  // itself below. It therefore carries at least the authority of
+  // approveProject and must be manager-gated the same way.
+  const authorized = projectForContext(c, helpers, { manager: true });
   if (!authorized) return;
   const project = authorized.project;
   if (

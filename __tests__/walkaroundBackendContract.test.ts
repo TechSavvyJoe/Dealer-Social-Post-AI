@@ -128,6 +128,31 @@ describe("Vehicle Walkaround PocketBase boundary", () => {
     }
   });
 
+  it("requires a signed release for every customer-audience capture", () => {
+    const hook = read("pb_hooks/walkarounds.js");
+    const gate = hook.slice(
+      hook.indexOf("function validRelease("),
+      hook.indexOf("function enqueueTask("),
+    );
+    // The self-attested flag may only ADD a release requirement. Keying the
+    // gate on it alone let a client omit the field and skip consent entirely.
+    expect(gate).toContain('project.getString("audience_mode") === "customer"');
+    expect(gate).not.toMatch(
+      /^\s*if \(!bool\(project, "contains_identifiable_non_employee"\)\) return true;/m,
+    );
+  });
+
+  it("gates publishing behind the same manager authority as approval", () => {
+    const hook = read("pb_hooks/walkarounds.js");
+    const publish = hook.slice(
+      hook.indexOf("function publishProject("),
+      hook.indexOf("function deleteProject("),
+    );
+    // publishProject can self-mint an approval when the dealer does not
+    // require one, so it must not be reachable by a plain salesperson.
+    expect(publish).toContain("projectForContext(c, helpers, { manager: true })");
+  });
+
   it("keeps bearer URLs and OAuth tokens out of PocketBase persistence", () => {
     const hook = read("pb_hooks/walkarounds.js");
     const migration = read("pb_migrations/1751100000_vehicle_walkaround_studio.js");
