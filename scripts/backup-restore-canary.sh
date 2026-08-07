@@ -62,7 +62,8 @@ docker run --rm \
   --hooksDir=/pb/pb_hooks >/dev/null
 
 container_id="$(docker run --detach \
-  --env ADMIN_DEALER_CODE="${admin_code}" \
+  --env ADMIN_LOGIN_USERNAME=canary.admin \
+  --env ADMIN_LOGIN_PASSWORD="${admin_code}-canary" \
   --env GEMINI_API_KEY=test-backup-placeholder \
   --env POCKETBASE_R2_BACKUPS_ENABLED=true \
   --env POCKETBASE_BACKUP_LAST_VERIFIED_AT="$restore_verified_at" \

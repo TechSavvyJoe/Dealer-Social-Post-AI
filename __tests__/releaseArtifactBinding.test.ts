@@ -111,12 +111,26 @@ describe("release artifact binding", () => {
     const directory = mkdtempSync(join(tmpdir(), "dealer-release-shell-lock-"));
     const scriptsDirectory = join(directory, "scripts");
     const evidenceDirectory = join(directory, ".release-evidence");
+    const shimDirectory = join(directory, "bin");
     const scriptPath = join(scriptsDirectory, "vercel-staged-release.sh");
     const lockPath = join(evidenceDirectory, "vercel-release.lock");
 
     try {
       mkdirSync(scriptsDirectory, { recursive: true });
       mkdirSync(evidenceDirectory, { recursive: true, mode: 0o700 });
+      // The script's require_tools guard demands the pinned Node before it
+      // reaches lock handling. Shim `node --version` so these tests exercise
+      // lock ordering on any host runtime; all other node calls pass through.
+      mkdirSync(shimDirectory, { recursive: true });
+      writeFileSync(
+        join(shimDirectory, "node"),
+        `#!/usr/bin/env bash\nif [[ "$1" == "--version" ]]; then echo "v22.23.1"; exit 0; fi\nexec "${process.execPath}" "$@"\n`,
+        { mode: 0o755 },
+      );
+      const spawnEnv = {
+        ...process.env,
+        PATH: `${shimDirectory}:${process.env.PATH ?? ""}`,
+      };
       writeFileSync(scriptPath, read("scripts/vercel-staged-release.sh"), {
         mode: 0o700,
       });
@@ -135,7 +149,7 @@ describe("release artifact binding", () => {
       const result = spawnSync("bash", [scriptPath, "invalid"], {
         cwd: directory,
         encoding: "utf8",
-        env: process.env,
+        env: spawnEnv,
       });
       const output = `${result.stdout || ""}\n${result.stderr || ""}`;
 
@@ -148,7 +162,7 @@ describe("release artifact binding", () => {
       const uncontended = spawnSync("bash", [scriptPath, "invalid"], {
         cwd: directory,
         encoding: "utf8",
-        env: process.env,
+        env: spawnEnv,
       });
       const uncontendedOutput = `${uncontended.stdout || ""}\n${
         uncontended.stderr || ""

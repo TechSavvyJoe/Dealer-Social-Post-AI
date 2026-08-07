@@ -22,7 +22,7 @@ primary_region = "iad"
   # Liveness only: PocketBase's built-in /api/health returns 200 whenever the
   # server is up. Do NOT point this at /api/app/health — that endpoint returns
   # 503 when readiness-critical config (e.g. GEMINI_API_KEY,
-  # ADMIN_DEALER_CODE) is missing, which would make Fly drop the machine from
+  # ADMIN_LOGIN_USERNAME/PASSWORD) is missing, which would make Fly drop the machine from
   # rotation and blackhole ALL traffic on a configuration gap. Deep readiness
   # (ok:true) is still verified at deploy
   # time by the CI workflow and by external uptime monitors hitting /api/app/health.

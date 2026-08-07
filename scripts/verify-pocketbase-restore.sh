@@ -117,7 +117,8 @@ fi
 
 container_id="$(docker run --detach \
   --name "$container_name" \
-  --env ADMIN_DEALER_CODE=testRstr7K3X \
+  --env ADMIN_LOGIN_USERNAME=restore.admin \
+  --env ADMIN_LOGIN_PASSWORD=testRstr7K3X-drill \
   --env GEMINI_API_KEY=test-restore-placeholder \
   --env POCKETBASE_R2_BACKUPS_ENABLED=true \
   --env POCKETBASE_BACKUP_LAST_VERIFIED_AT="$restore_verified_at" \

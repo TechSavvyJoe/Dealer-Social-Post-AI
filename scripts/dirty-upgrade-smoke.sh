@@ -164,7 +164,8 @@ docker rm --force "$base_container" >/dev/null
 base_container=""
 
 current_container="$(docker run --detach \
-  --env ADMIN_DEALER_CODE="${admin_code}" \
+  --env ADMIN_LOGIN_USERNAME=upgrade.admin \
+  --env ADMIN_LOGIN_PASSWORD="${admin_code}-upgrade" \
   --env GEMINI_API_KEY=test-upgrade-placeholder \
   --env POCKETBASE_R2_BACKUPS_ENABLED=true \
   --env POCKETBASE_BACKUP_LAST_VERIFIED_AT="$restore_verified_at" \
