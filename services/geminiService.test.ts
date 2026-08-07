@@ -312,7 +312,7 @@ describe("GeminiService model routing", () => {
     expect(retryCall).toBeDefined();
   });
 
-  it("rejects repeat confirmed violations and falls back to the original photo", async () => {
+  it("runs the full ladder for repeat craft violations but still ships a render", async () => {
     let imageCalls = 0;
     let reviewCalls = 0;
     const noncompliantReview: GeneratedImageTextReview = {
@@ -345,10 +345,14 @@ describe("GeminiService model routing", () => {
       "Test Dealer",
     );
 
-    // Ladder: initial render, tighter-copy re-render, text-reduction edit —
-    // then fail closed to the untouched original photo.
-    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
-    expect(result.aiMeta.image.provider).toBe("original");
+    // Ladder still runs in full: initial render, tighter-copy re-render, then
+    // the text-reduction edit. But an overlay that is merely too wordy is a
+    // craft problem, not an unsafe one, so the last render ships instead of
+    // the untouched photo — losing the whole creative reads to the user as the
+    // app having done nothing. Unsafe overlays (phone/link/hashtag) still fall
+    // back; that is covered by its own test below.
+    expect(result.image).toBe("data:image/png;base64,still-long-3");
+    expect(result.aiMeta.image.provider).not.toBe("original");
     expect(imageCalls).toBe(3);
     expect(reviewCalls).toBe(3);
     const reductionCall = mockGenerateContent.mock.calls.find(([request]) =>
@@ -386,6 +390,81 @@ describe("GeminiService model routing", () => {
     // A broken reviewer must never destroy a finished creative.
     expect(result.image).toBe("data:image/png;base64,styled-overlay-image");
     expect(imageCalls).toBe(1);
+  });
+
+  it("keeps the rendered creative when every rung is flagged only on craft grounds", async () => {
+    // The reviewer stays unhappy through regeneration and correction, but only
+    // ever reports word-count/sentence findings. Discarding the render here
+    // drops the salesperson back to their raw camera photo, which is the exact
+    // "it did nothing to my image" failure this ladder exists to prevent.
+    let imageCalls = 0;
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        return imageTextReviewResponse({
+          ...compliantImageTextReview,
+          compliant: false,
+          uncertain: false,
+          detectedMarketingText: ["YOUR NEW ADVENTURE STARTS HERE TODAY"],
+          marketingWordCount: 6,
+          marketingCharacterCount: 36,
+          hasFullSentence: true,
+          hasHashtag: false,
+          hasUrlOrPhone: false,
+          violations: ["full_sentence"],
+        });
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        imageCalls += 1;
+        return Promise.resolve(generatedImageResponse(`render-${imageCalls}`));
+      }
+      return Promise.resolve({
+        text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,original-photo",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Test Dealer",
+    );
+
+    expect(result.image).not.toBe("data:image/jpeg;base64,original-photo");
+    expect(result.image).toMatch(/^data:image\/png;base64,render-/);
+  });
+
+  it("still refuses an overlay carrying a phone number or link", async () => {
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        return imageTextReviewResponse({
+          ...compliantImageTextReview,
+          compliant: false,
+          uncertain: false,
+          detectedMarketingText: ["CALL 555-0142"],
+          marketingWordCount: 2,
+          marketingCharacterCount: 13,
+          hasUrlOrPhone: true,
+          violations: ["url_or_phone"],
+        });
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        return Promise.resolve(generatedImageResponse("phone-overlay"));
+      }
+      return Promise.resolve({
+        text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,original-photo",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Test Dealer",
+    );
+
+    // Unsafe overlay content is the one case where falling back to the
+    // untouched photo is the correct outcome.
+    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
   });
 
   it("parses a fenced JSON review response instead of failing it", async () => {

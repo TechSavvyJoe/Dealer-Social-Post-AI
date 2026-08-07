@@ -625,6 +625,18 @@ const concreteViolations = (
 ): GeneratedImageTextReview["violations"] =>
   review.violations.filter((violation) => violation !== "unreadable_or_uncertain");
 
+/**
+ * Overlay findings that must never ship: a phone number, a URL, or a hashtag
+ * burned into the pixels. Everything else the reviewer reports (too many
+ * words/characters, "reads like a sentence", multiple blocks) is a craft
+ * judgment that must not be allowed to discard a finished render.
+ */
+const hasUnsafeOverlayContent = (review: GeneratedImageTextReview): boolean =>
+  review.hasUrlOrPhone ||
+  review.hasHashtag ||
+  review.violations.includes("url_or_phone") ||
+  review.violations.includes("hashtag");
+
 const imagePartFromDataUrl = async (
   dataUrl: string,
   requestAuthEpoch: number,
@@ -776,6 +788,22 @@ const enforceGeneratedImageTextCompliance = async ({
     characterCount: correctedReview.marketingCharacterCount,
     violations: correctedReview.violations,
   });
+
+  // Only contact details and link-like overlays are genuinely unsafe to ship;
+  // word/character/sentence findings are craft judgments. Throwing on those
+  // discards every render and drops the caller back to the untouched source
+  // photo -- no headline, no badge, no logo -- which is a worse outcome than a
+  // slightly long headline, and it is indistinguishable to the user from the
+  // app doing nothing at all.
+  if (!hasUnsafeOverlayContent(correctedReview)) {
+    logTelemetry("image.text_compliance.accepted_over_budget", {
+      violations: correctedReview.violations,
+      wordCount: correctedReview.marketingWordCount,
+      characterCount: correctedReview.marketingCharacterCount,
+    });
+    return restoreLogoIfMissing(corrected, correctedReview);
+  }
+
   throw new Error("Generated image text exceeded the safe headline limit.");
 };
 
