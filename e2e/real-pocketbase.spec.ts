@@ -8,7 +8,8 @@ import {
 } from "@playwright/test";
 
 const realPocketBaseEnabled = process.env.E2E_REAL_POCKETBASE === "true";
-const adminCode = process.env.E2E_ADMIN_CODE || "";
+const adminUsername = process.env.E2E_ADMIN_USERNAME || "";
+const adminPassword = process.env.E2E_ADMIN_PASSWORD || "";
 const apiContractVersion = "2026-07-31.v4";
 
 type JsonObject = Record<string, unknown>;
@@ -143,30 +144,47 @@ test.describe("real PocketBase release flow", () => {
     context,
     page,
   }, testInfo) => {
-    expect(adminCode).toMatch(/^[A-Za-z0-9]{12}$/);
+    expect(adminUsername).not.toBe("");
+    expect(adminPassword.length).toBeGreaterThanOrEqual(8);
 
     await page.goto("/", { waitUntil: "networkidle" });
     if (browserName === "chromium") {
       await assertActiveProductionServiceWorker(page);
     }
 
-    // A mixed-case deployment secret must not accept a case-altered variant.
-    const caseIndex = adminCode.search(/[A-Za-z]/);
+    // The administrator password is compared exactly: a case-altered variant
+    // must not authenticate.
+    const caseIndex = adminPassword.search(/[A-Za-z]/);
     if (caseIndex >= 0) {
-      const char = adminCode[caseIndex];
-      const wrongCaseCode =
-        adminCode.slice(0, caseIndex) +
+      const char = adminPassword[caseIndex];
+      const wrongCasePassword =
+        adminPassword.slice(0, caseIndex) +
         (char === char.toUpperCase() ? char.toLowerCase() : char.toUpperCase()) +
-        adminCode.slice(caseIndex + 1);
+        adminPassword.slice(caseIndex + 1);
       const wrongCaseResponse = await page.request.post("/api/app/session", {
-        data: { dealerCode: wrongCaseCode },
+        data: {
+          authType: "admin_password",
+          username: adminUsername,
+          password: wrongCasePassword,
+        },
       });
       expect(wrongCaseResponse.status()).toBe(401);
-      expect((await wrongCaseResponse.json()).code).toBe("INVALID_CODE");
     }
 
+    // An unknown username must fail the same way, without disclosing which
+    // half of the pair was wrong.
+    const unknownUserResponse = await page.request.post("/api/app/session", {
+      data: {
+        authType: "admin_password",
+        username: `${adminUsername}.nope`,
+        password: adminPassword,
+      },
+    });
+    expect(unknownUserResponse.status()).toBe(401);
+
     await page.getByRole("button", { name: "System admin" }).click();
-    await page.getByLabel("System admin code", { exact: true }).fill(adminCode);
+    await page.getByLabel("Username", { exact: true }).fill(adminUsername);
+    await page.getByLabel("Password", { exact: true }).fill(adminPassword);
     const adminLoginPromise = page.waitForResponse(
       (response) =>
         response.url().endsWith("/api/app/session") &&

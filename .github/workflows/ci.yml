@@ -110,7 +110,8 @@ jobs:
             --env GEMINI_API_KEY=test-gemini-key \
             --env ALLOW_TEST_PROVIDER_ORIGIN=true \
             --env GEMINI_API_URL_BASE=http://host.docker.internal:18081/ \
-            --env ADMIN_DEALER_CODE="${CI_ADMIN_DEALER_CODE:-CiAdmin7xQ2Z}" \
+            --env ADMIN_LOGIN_USERNAME="${CI_ADMIN_LOGIN_USERNAME:-ci.admin}" \
+            --env ADMIN_LOGIN_PASSWORD="${CI_ADMIN_LOGIN_PASSWORD:-CiAdmin7xQ2Z}" \
             --env LEGACY_CLIENT_COMPATIBILITY_ENABLED=true \
             --env POCKETBASE_R2_BACKUPS_ENABLED=true \
             --env POCKETBASE_BACKUP_LAST_VERIFIED_AT="$restore_verified_at" \
@@ -147,11 +148,12 @@ jobs:
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
             http://127.0.0.1:8090/api/proxy/v1beta/files/not-real:download)" = "401"
 
-          login_code="${CI_ADMIN_DEALER_CODE:-CiAdmin7xQ2Z}"
+          login_username="${CI_ADMIN_LOGIN_USERNAME:-ci.admin}"
+          login_secret="${CI_ADMIN_LOGIN_PASSWORD:-CiAdmin7xQ2Z}"
           test "$(curl --silent --output /tmp/login.json --cookie-jar /tmp/cookies.txt \
             --write-out '%{http_code}' --request POST \
             --header 'Content-Type: application/json' \
-            --data "{\"dealerCode\":\"${login_code}\"}" \
+            --data "{\"authType\":\"admin_password\",\"username\":\"${login_username}\",\"password\":\"${login_secret}\"}" \
             http://127.0.0.1:8090/api/app/session)" = "200"
           session_cookie="$(awk '$6 == "dealer_session" { print $7 }' /tmp/cookies.txt)"
           test -n "$session_cookie"
@@ -172,7 +174,8 @@ jobs:
 
           E2E_BASE_URL=http://127.0.0.1:8090 \
           E2E_REAL_POCKETBASE=true \
-          E2E_ADMIN_CODE="$login_code" \
+          E2E_ADMIN_USERNAME="$login_username" \
+          E2E_ADMIN_PASSWORD="$login_secret" \
             npx playwright test e2e/real-pocketbase.spec.ts \
               --project=chromium-desktop-1440 \
               --project=webkit-desktop-1440 \
