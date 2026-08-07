@@ -20,5 +20,5 @@
     "strict": true
   },
   "include": ["**/*"],
-  "exclude": ["node_modules", "dist", "pb_migrations"]
+  "exclude": ["node_modules", "dist", "pb_migrations", "automation"]
 }
