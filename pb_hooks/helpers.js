@@ -161,33 +161,170 @@ function recordBool(record, field) {
 }
 
 /**
- * Return the deployment credential only when it is valid exactly as supplied.
- * Whitespace is deliberately not normalized: ADMIN_DEALER_CODE is a secret,
- * not user-facing prose, and login comparison is case-sensitive.
+ * One-way session binding for the PocketBase-managed administrator account.
+ * The fingerprint incorporates the account's token key, which PocketBase
+ * rotates on password change — so rotating the admin password invalidates
+ * every outstanding administrator session.
  */
-function configuredAdminSecret() {
-  let raw = "";
+function adminAuthFingerprint(account) {
+  if (!account) return "";
+  let tokenKey = "";
   try {
-    raw = ($os.getenv("ADMIN_DEALER_CODE") || "").toString();
+    tokenKey = account.tokenKey
+      ? account.tokenKey().toString()
+      : account.getString("tokenKey");
   } catch (_e) {
     return "";
   }
-  if (raw !== raw.trim()) return "";
-  return /^[A-Za-z0-9]{12}$/.test(raw) ? raw : "";
-}
-
-/** One-way, context-bound verifier used to invalidate admin sessions on rotation. */
-function adminSecretFingerprint(secret) {
-  if (!secret || typeof secret !== "string") return "";
+  if (!account.id || !tokenKey) return "";
   try {
     const fingerprint = $security.sha256(
-      "dealer-social-post-ai:admin-session:v1:" + secret,
+      "dealer-social-post-ai:admin-auth:v1:" + account.id + ":" + tokenKey,
     );
     if (/^[a-f0-9]{64}$/i.test(fingerprint || "")) {
       return fingerprint.toLowerCase();
     }
   } catch (_e) {}
   throw new Error("Secure admin credential fingerprinting is unavailable");
+}
+
+/**
+ * Resolve the administrator auth record for a submitted username without
+ * exposing whether the username exists. Callers still validate the password.
+ */
+function findActiveAdminLogin(username) {
+  const normalized = normalizeManagerUsername(username);
+  if (!isValidManagerUsername(normalized)) {
+    return { status: "not_found", account: null };
+  }
+  try {
+    const accounts = $app
+      .dao()
+      .findRecordsByFilter("admin_accounts", "username = {:username}", "id", 2, 0, {
+        username: normalized,
+      });
+    if (!accounts || typeof accounts.length !== "number") {
+      return { status: "unavailable", account: null };
+    }
+    if (accounts.length !== 1) {
+      return { status: "not_found", account: null };
+    }
+    return { status: "found", account: accounts[0] };
+  } catch (_e) {
+    return { status: "unavailable", account: null };
+  }
+}
+
+/**
+ * Idempotent administrator-account provisioning from deployment secrets
+ * (ADMIN_LOGIN_USERNAME + ADMIN_LOGIN_PASSWORD).
+ *
+ * Called with syncPassword=true at bootstrap (handles username/password
+ * rotation), and with syncPassword=false from the health route and the login
+ * path as a creation-only self-heal for fresh databases where migrations may
+ * land after the bootstrap hook has already run.
+ */
+function ensureAdminAccountProvisioned(options) {
+  const syncPassword = !!(options && options.syncPassword);
+  const username = normalizeManagerUsername($os.getenv("ADMIN_LOGIN_USERNAME") || "");
+  const password = ($os.getenv("ADMIN_LOGIN_PASSWORD") || "").toString();
+
+  let accounts;
+  try {
+    accounts = $app
+      .dao()
+      .findRecordsByFilter("admin_accounts", "id != ''", "-created", 2, 0, {});
+  } catch (_e) {
+    // Collection missing (migrations not applied yet) — nothing to do.
+    return;
+  }
+
+  if (!username || !password) {
+    if (!accounts.length && syncPassword) {
+      console.log(
+        "[admin-bootstrap] Administrator login is not configured. Set ADMIN_LOGIN_USERNAME and ADMIN_LOGIN_PASSWORD deployment secrets.",
+      );
+    }
+    return;
+  }
+  if (!isValidManagerUsername(username) || !isManagerLoginPasswordShape(password)) {
+    if (syncPassword) {
+      console.error(
+        "[admin-bootstrap] ADMIN_LOGIN_USERNAME/ADMIN_LOGIN_PASSWORD are invalid (username: 3-32 chars starting with a letter; password: 8-128 chars). Administrator login left unchanged.",
+      );
+    }
+    return;
+  }
+
+  let target = null;
+  for (let i = 0; i < accounts.length; i++) {
+    if (normalizeManagerUsername(accounts[i].getString("username")) === username) {
+      target = accounts[i];
+      break;
+    }
+  }
+
+  try {
+    if (!target && accounts.length > 1) {
+      if (syncPassword) {
+        console.error(
+          "[admin-bootstrap] Multiple administrator accounts exist and none match ADMIN_LOGIN_USERNAME. Not modifying credentials.",
+        );
+      }
+      return;
+    }
+    if (!target && accounts.length === 1) {
+      if (!syncPassword) return;
+      // Username rotation: rename the single existing account.
+      target = accounts[0];
+      target.setUsername(username);
+      target.setPassword(password);
+      $app.dao().saveRecord(target);
+      console.log("[admin-bootstrap] Administrator username/password rotated.");
+      return;
+    }
+    if (!target) {
+      const collection = $app.dao().findCollectionByNameOrId("admin_accounts");
+      const account = new Record(collection);
+      account.setUsername(username);
+      account.setPassword(password);
+      account.setVerified(true);
+      $app.dao().saveRecord(account);
+      console.log("[admin-bootstrap] Administrator account created.");
+      return;
+    }
+    if (!syncPassword) return;
+    let passwordCurrent = false;
+    try {
+      passwordCurrent = !!target.validatePassword(password);
+    } catch (_e) {}
+    if (!passwordCurrent) {
+      // Password rotation: outstanding administrator sessions are invalidated
+      // because the account token key changes with the password.
+      target.setPassword(password);
+      $app.dao().saveRecord(target);
+      console.log("[admin-bootstrap] Administrator password rotated.");
+    }
+  } catch (err) {
+    console.error("[admin-bootstrap] Administrator account provisioning failed:", err);
+  }
+}
+
+/** Cost-equivalent negative password check target for unknown admin usernames. */
+function findAdminPasswordVerificationAccount() {
+  try {
+    const accounts = $app
+      .dao()
+      .findRecordsByFilter("admin_accounts", "id != ''", "id", 1, 0, {});
+    if (!accounts || typeof accounts.length !== "number") {
+      return { status: "unavailable", account: null };
+    }
+    return accounts.length
+      ? { status: "found", account: accounts[0] }
+      : { status: "empty", account: null };
+  } catch (_e) {
+    return { status: "unavailable", account: null };
+  }
 }
 
 function personPinFingerprint(person) {
@@ -244,12 +381,32 @@ function validateSuperAdminSession(session, daoOverride) {
   if (recordBool(session, "is_impersonation")) return null;
   if (session.getString("impersonator_session")) return null;
 
-  const secret = configuredAdminSecret();
-  if (!secret) return null;
-  const fingerprint = adminSecretFingerprint(secret);
-  if (session.getString("admin_secret_fingerprint") !== fingerprint) {
-    return null;
+  // The session must match a current administrator account's credential
+  // fingerprint. Password rotation changes the account token key, so stale
+  // sessions stop validating here.
+  const sessionFingerprint = session.getString("admin_secret_fingerprint");
+  if (!/^[a-f0-9]{64}$/i.test(sessionFingerprint || "")) return null;
+  let matched = false;
+  try {
+    const dao = daoOverride || $app.dao();
+    const accounts = dao.findRecordsByFilter(
+      "admin_accounts",
+      "id != ''",
+      "id",
+      10,
+      0,
+      {},
+    );
+    for (let i = 0; i < (accounts ? accounts.length : 0); i++) {
+      if (adminAuthFingerprint(accounts[i]) === sessionFingerprint) {
+        matched = true;
+        break;
+      }
+    }
+  } catch (err) {
+    throwSessionValidationUnavailable(err);
   }
+  if (!matched) return null;
 
   let dealer = null;
   try {
@@ -526,9 +683,25 @@ function createSessionWithDao(dao, dealerId, role, ip, userAgent, opts) {
     if (!recordBool(dealer, "is_system")) {
       throw new Error("Super-admin session requires the system dealer");
     }
-    const secret = configuredAdminSecret();
-    if (!secret) throw new Error("Administrative login is not configured");
-    adminFingerprint = adminSecretFingerprint(secret);
+    if (!options.adminAccountId || !options.expectedAdminAuthFingerprint) {
+      throw new Error("Administrator credential provenance is required");
+    }
+    let adminAccount = null;
+    try {
+      adminAccount = dao.findRecordById(
+        "admin_accounts",
+        options.adminAccountId.toString(),
+      );
+    } catch (_e) {
+      throw new Error("Administrator credential record is invalid");
+    }
+    adminFingerprint = adminAuthFingerprint(adminAccount);
+    if (
+      !adminFingerprint ||
+      adminFingerprint !== options.expectedAdminAuthFingerprint.toString()
+    ) {
+      throw new Error("Administrator credential changed during sign-in");
+    }
   } else {
     if (role !== "dealer_admin" && role !== "salesperson") {
       throw new Error("Session role is invalid");
@@ -685,13 +858,38 @@ function replaceImpersonationSession(
       throw new Error("Impersonation source is invalid");
     }
 
+    // The replacement inherits the source's validated administrator
+    // credential binding.
+    const sourceFingerprint = source.getString("admin_secret_fingerprint");
+    let adminAccount = null;
+    const adminAccounts = txDao.findRecordsByFilter(
+      "admin_accounts",
+      "id != ''",
+      "id",
+      10,
+      0,
+      {},
+    );
+    for (let i = 0; i < (adminAccounts ? adminAccounts.length : 0); i++) {
+      if (adminAuthFingerprint(adminAccounts[i]) === sourceFingerprint) {
+        adminAccount = adminAccounts[i];
+        break;
+      }
+    }
+    if (!adminAccount) {
+      throw new Error("Impersonation source is invalid");
+    }
+
     minted = createSessionWithDao(
       txDao,
       systemDealer.id,
       "super_admin",
       ip,
       userAgent,
-      {},
+      {
+        adminAccountId: adminAccount.id,
+        expectedAdminAuthFingerprint: sourceFingerprint,
+      },
     );
     txDao.deleteRecord(child);
     txDao.deleteRecord(source);
@@ -722,7 +920,7 @@ function isValidManagerUsername(value) {
 
 /** Login accepts only bounded input; setup applies the stronger composition rule. */
 function isManagerLoginPasswordShape(value) {
-  return typeof value === "string" && value.length >= 15 && value.length <= 128;
+  return typeof value === "string" && value.length >= 8 && value.length <= 128;
 }
 
 function isStrongManagerPassword(value) {
@@ -2830,8 +3028,10 @@ module.exports = {
   readSessionToken,
   findSessionByToken,
   findSystemDealer,
-  configuredAdminSecret,
-  adminSecretFingerprint,
+  adminAuthFingerprint,
+  findActiveAdminLogin,
+  findAdminPasswordVerificationAccount,
+  ensureAdminAccountProvisioned,
   personPinFingerprint,
   managerAuthFingerprint,
   // Token lifecycle

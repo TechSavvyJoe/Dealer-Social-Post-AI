@@ -220,10 +220,8 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
       managerUsernameRef.current?.focus();
       return;
     }
-    if (managerPassword.length < 15 || managerPassword.length > 128) {
-      setManagerPasswordError(
-        "Manager password must be between 15 and 128 characters.",
-      );
+    if (managerPassword.length < 8 || managerPassword.length > 128) {
+      setManagerPasswordError("Manager password must be between 8 and 128 characters.");
       managerPasswordRef.current?.focus();
       return;
     }
@@ -544,10 +542,10 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
-                  minLength={15}
+                  minLength={8}
                   maxLength={128}
                   error={managerPasswordError || undefined}
-                  helperText="15 characters minimum; spaces are allowed"
+                  helperText="8 characters minimum; spaces are allowed"
                   fullWidth
                 />
                 <Input
@@ -567,7 +565,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck={false}
-                  minLength={15}
+                  minLength={8}
                   maxLength={128}
                   error={managerPasswordConfirmError || undefined}
                   fullWidth

@@ -28,7 +28,7 @@ interface HealthPayload {
     openai_key_set: boolean;
     claude_fallback_enabled: boolean;
     openai_fallback_enabled: boolean;
-    admin_dealer_code_set: boolean;
+    admin_login_configured: boolean;
     turnstile_enforcement_enabled: boolean;
     turnstile_secret_set: boolean;
     turnstile_site_key_set: boolean;
@@ -89,7 +89,7 @@ const healthCheckKeys: Array<keyof HealthPayload["checks"]> = [
   "openai_key_set",
   "claude_fallback_enabled",
   "openai_fallback_enabled",
-  "admin_dealer_code_set",
+  "admin_login_configured",
   "turnstile_enforcement_enabled",
   "turnstile_secret_set",
   "turnstile_site_key_set",
@@ -184,11 +184,11 @@ const checkRows: Array<{
     hint: "Requires OPENAI_API_KEY, ENABLE_OPENAI_FALLBACK=true, and the matching Vite build flag.",
   },
   {
-    key: "admin_dealer_code_set",
-    label: "ADMIN_DEALER_CODE",
+    key: "admin_login_configured",
+    label: "Administrator login",
     icon: ShieldCheck,
     critical: true,
-    hint: "Required for exact-case super-admin login; final releases use 12 mixed-case alphanumeric characters.",
+    hint: "Requires the ADMIN_LOGIN_USERNAME and ADMIN_LOGIN_PASSWORD deployment secrets to provision the administrator account.",
   },
   {
     key: "trusted_proxy_configured",

@@ -58,8 +58,8 @@ describe("PocketBase 0.22 multipart routes", () => {
     );
     expect(helpers).toContain("if (allowCode && body.code !== undefined)");
     expect(helpers).toContain("if (code && !/^[A-Za-z0-9]{4,12}$/.test(code))");
-    expect(helpers).toContain("function configuredAdminSecret()");
-    expect(helpers).toContain("function adminSecretFingerprint(secret)");
+    expect(helpers).toContain("function adminAuthFingerprint(account)");
+    expect(helpers).toContain("function findActiveAdminLogin(username)");
     expect(helpers).toContain("Dealer logo must be a PNG, JPEG, or WebP image");
     expect(helpers).toContain("file.size > 5 * 1024 * 1024");
     expect(helpers).toContain(

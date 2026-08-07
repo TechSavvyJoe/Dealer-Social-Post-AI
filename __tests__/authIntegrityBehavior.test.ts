@@ -9,8 +9,7 @@ type StringMap = Record<string, unknown>;
 type PocketBaseRecord = ReturnType<typeof makeRecord>;
 
 type AuthHelpers = {
-  configuredAdminSecret: () => string;
-  adminSecretFingerprint: (secret: string) => string;
+  adminAuthFingerprint: (account: PocketBaseRecord) => string;
   personPinFingerprint: (person: PocketBaseRecord) => string;
   createSession: (
     dealerId: string,
@@ -421,9 +420,10 @@ describe("people integrity migration behavior", () => {
 describe("authoritative session revalidation", () => {
   const helpers = loadCommonJs<AuthHelpers>("pb_hooks/helpers.js");
   const token = "a".repeat(64);
+  const adminAuthFp = () =>
+    sha256("dealer-social-post-ai:admin-auth:v1:admin-account-1:token-key-1");
 
   function installRuntime(options?: {
-    adminSecret?: string;
     session?: PocketBaseRecord;
     person?: PocketBaseRecord;
     dealer?: PocketBaseRecord;
@@ -432,7 +432,10 @@ describe("authoritative session revalidation", () => {
     impersonationChildren?: PocketBaseRecord[];
     impersonationLookupError?: Error;
   }) {
-    let adminSecret = options?.adminSecret ?? "MixedCaseA7Z";
+    const adminAccount = makeRecord("admin-account-1", {
+      username: "admin",
+      tokenKey: "token-key-1",
+    });
     const deleted: string[] = [];
     const session =
       options?.session ??
@@ -443,9 +446,7 @@ describe("authoritative session revalidation", () => {
         is_impersonation: false,
         impersonator_session: "",
         expires_at: "2999-01-01T00:00:00.000Z",
-        admin_secret_fingerprint: sha256(
-          "dealer-social-post-ai:admin-session:v1:MixedCaseA7Z",
-        ),
+        admin_secret_fingerprint: adminAuthFp(),
       });
     const dealer = options?.dealer ?? makeRecord("dealer-1", { is_system: false });
     const systemDealer =
@@ -485,6 +486,9 @@ describe("authoritative session revalidation", () => {
         _offset: number,
         params: StringMap,
       ) => {
+        if (collection === "admin_accounts") {
+          return [adminAccount];
+        }
         if (collection !== "sessions") {
           throw new Error(`Unexpected records lookup: ${collection}`);
         }
@@ -501,9 +505,7 @@ describe("authoritative session revalidation", () => {
           .slice(0, limit);
       },
     };
-    runtime.$os = {
-      getenv: (name: string) => (name === "ADMIN_DEALER_CODE" ? adminSecret : ""),
-    };
+    runtime.$os = { getenv: () => "" };
     runtime.$security = { sha256 };
     runtime.$app = { dao: () => dao };
 
@@ -511,23 +513,24 @@ describe("authoritative session revalidation", () => {
       deleted,
       session,
       person,
-      setAdminSecret(value: string) {
-        adminSecret = value;
+      rotateAdminCredential() {
+        adminAccount.set("tokenKey", "token-key-2");
       },
     };
   }
 
-  it("accepts exact-case admin authority and revokes it after case-only rotation", () => {
+  it("accepts admin authority and revokes it after credential rotation", () => {
     const state = installRuntime();
     const firstRequest = makeRequestContext(token);
 
-    expect(helpers.configuredAdminSecret()).toBe("MixedCaseA7Z");
     expect(helpers.sessionContext(firstRequest.context)).toMatchObject({
       role: "super_admin",
       isImpersonating: false,
     });
 
-    state.setAdminSecret("mixedcasea7z");
+    // Password rotation changes the account token key; sessions bound to the
+    // previous credential must revoke immediately.
+    state.rotateAdminCredential();
     const rotatedRequest = makeRequestContext(token);
     expect(helpers.sessionContext(rotatedRequest.context)).toBeNull();
     expect(state.deleted).toContain("admin-session");
@@ -545,9 +548,7 @@ describe("authoritative session revalidation", () => {
       is_impersonation: false,
       impersonator_session: "",
       expires_at: "2999-01-01T00:00:00.000Z",
-      admin_secret_fingerprint: sha256(
-        "dealer-social-post-ai:admin-session:v1:MixedCaseA7Z",
-      ),
+      admin_secret_fingerprint: adminAuthFp(),
     });
     const child = makeRecord("impersonated-session", {
       role: "salesperson",
@@ -579,9 +580,7 @@ describe("authoritative session revalidation", () => {
       is_impersonation: false,
       impersonator_session: "",
       expires_at: "2999-01-01T00:00:00.000Z",
-      admin_secret_fingerprint: sha256(
-        "dealer-social-post-ai:admin-session:v1:MixedCaseA7Z",
-      ),
+      admin_secret_fingerprint: adminAuthFp(),
     });
     const child = makeRecord("expired-impersonated-session", {
       role: "salesperson",
@@ -613,9 +612,7 @@ describe("authoritative session revalidation", () => {
       is_impersonation: false,
       impersonator_session: "",
       expires_at: "2999-01-01T00:00:00.000Z",
-      admin_secret_fingerprint: sha256(
-        "dealer-social-post-ai:admin-session:v1:MixedCaseA7Z",
-      ),
+      admin_secret_fingerprint: adminAuthFp(),
     });
     const state = installRuntime({
       session: source,
@@ -684,9 +681,7 @@ describe("authoritative session revalidation", () => {
       is_impersonation: false,
       impersonator_session: "",
       expires_at: "2999-01-01T00:00:00.000Z",
-      admin_secret_fingerprint: sha256(
-        "dealer-social-post-ai:admin-session:v1:MixedCaseA7Z",
-      ),
+      admin_secret_fingerprint: adminAuthFp(),
     });
     const child = makeRecord("impersonated-session", {
       role: "salesperson",
@@ -835,20 +830,22 @@ describe("authoritative session revalidation", () => {
       is_impersonation: false,
       impersonator_session: "",
       expires_at: "2999-01-01T00:00:00.000Z",
-      admin_secret_fingerprint: sha256(
-        "dealer-social-post-ai:admin-session:v1:MixedCaseA7Z",
-      ),
+      admin_secret_fingerprint: adminAuthFp(),
     });
     const existingChild = makeRecord("existing-child", {
       is_impersonation: true,
       impersonator_session: source.id,
       expires_at: "2999-01-01T00:00:00.000Z",
     });
+    const adminAccount = makeRecord("admin-account-1", {
+      username: "admin",
+      tokenKey: "token-key-1",
+    });
     const saveRecord = vi.fn();
-    const findRecordsByFilter = vi.fn(() => [existingChild]);
-    runtime.$os = {
-      getenv: (name: string) => (name === "ADMIN_DEALER_CODE" ? "MixedCaseA7Z" : ""),
-    };
+    const findRecordsByFilter = vi.fn((collection: string) =>
+      collection === "admin_accounts" ? [adminAccount] : [existingChild],
+    );
+    runtime.$os = { getenv: () => "" };
     runtime.$security = {
       sha256,
       randomStringWithAlphabet: () => "a".repeat(64),
@@ -896,9 +893,7 @@ describe("authoritative session revalidation", () => {
       is_impersonation: false,
       impersonator_session: "",
       expires_at: "2999-01-01T00:00:00.000Z",
-      admin_secret_fingerprint: sha256(
-        "dealer-social-post-ai:admin-session:v1:MixedCaseA7Z",
-      ),
+      admin_secret_fingerprint: adminAuthFp(),
     });
     const child = makeRecord("child-session", {
       role: "salesperson",
@@ -912,10 +907,12 @@ describe("authoritative session revalidation", () => {
       [source.id, source],
       [child.id, child],
     ]);
+    const adminAccount = makeRecord("admin-account-1", {
+      username: "admin",
+      tokenKey: "token-key-1",
+    });
     let replacementNumber = 0;
-    runtime.$os = {
-      getenv: (name: string) => (name === "ADMIN_DEALER_CODE" ? "MixedCaseA7Z" : ""),
-    };
+    runtime.$os = { getenv: () => "" };
     runtime.$security = {
       sha256,
       randomStringWithAlphabet: () => "a".repeat(64),
@@ -929,9 +926,14 @@ describe("authoritative session revalidation", () => {
 
     const dao: any = {
       findCollectionByNameOrId: () => ({ id: "sessions" }),
+      findRecordsByFilter: (collection: string) =>
+        collection === "admin_accounts" ? [adminAccount] : [],
       findRecordById: (collection: string, id: string) => {
         if (collection === "dealers" && id === systemDealer.id) {
           return systemDealer;
+        }
+        if (collection === "admin_accounts" && id === adminAccount.id) {
+          return adminAccount;
         }
         if (collection === "sessions" && sessions.has(id)) {
           return sessions.get(id);
@@ -1529,10 +1531,10 @@ describe("Turnstile and route authority contracts", () => {
       expect(route).toContain(`"${code}"`);
     }
     expect(route.indexOf("helpers.verifyTurnstileToken")).toBeLessThan(
-      route.indexOf("dealerCode === adminEnv"),
+      route.indexOf("helpers.findActiveAdminLogin"),
     );
     expect(route.indexOf("helpers.reserveLoginAttempt")).toBeLessThan(
-      route.indexOf("dealerCode === adminEnv"),
+      route.indexOf("helpers.findActiveAdminLogin"),
     );
     expect(route.indexOf("helpers.reserveLoginAttempt")).toBeLessThan(
       route.indexOf("helpers.findActivePersonByPin"),
@@ -1541,10 +1543,13 @@ describe("Turnstile and route authority contracts", () => {
       route.indexOf("malformed code"),
     );
     expect(route).toContain("sessionOpts.expectedPersonPinFingerprint");
+    expect(route).toContain("sessionOpts.expectedAdminAuthFingerprint");
     expect(route.indexOf("helpers.finalizeLoginAttempt")).toBeLessThan(
       route.indexOf("helpers.buildSessionCookie(token)"),
     );
-    expect(route).toContain("dealerCode === adminEnv");
+    // The legacy env-secret comparison is gone for good.
+    expect(route).not.toContain("ADMIN_DEALER_CODE");
+    expect(route).not.toContain("dealerCode === adminEnv");
     expect(route).not.toMatch(/dealerCode\.(?:toLowerCase|toUpperCase)/);
   });
 

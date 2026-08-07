@@ -25,8 +25,9 @@ import type { LoginResult, SessionLoginRequest } from "../stores/appStore";
 
 /** Personal manager / user access codes are exactly 4 digits. */
 const PERSON_CODE_LENGTH = 4;
-/** Super-admin env secret may be longer alphanumeric. */
-const ADMIN_CODE_LENGTH = 12;
+/** Manager and administrator passwords are 8-128 exact characters. */
+const MIN_PASSWORD_LENGTH = 8;
+const MAX_PASSWORD_LENGTH = 128;
 
 interface LoginScreenProps {
   onLogin: (
@@ -47,23 +48,26 @@ const STUDIO_STEPS = [
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [entryMode, setEntryMode] = useState<EntryMode>("personal");
   const [dealerCode, setDealerCode] = useState("");
-  const [adminCode, setAdminCode] = useState("");
+  const [adminUsername, setAdminUsername] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
   const [managerUsername, setManagerUsername] = useState("");
   const [managerPassword, setManagerPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-  const [showAdminCode, setShowAdminCode] = useState(false);
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [showManagerPassword, setShowManagerPassword] = useState(false);
   const [pendingAttempt, setPendingAttempt] = useState<EntryMode | null>(null);
   const [challengeNonce, setChallengeNonce] = useState(0);
   const [lockoutUntil, setLockoutUntil] = useState(0);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [personalCodeError, setPersonalCodeError] = useState("");
-  const [adminCodeError, setAdminCodeError] = useState("");
+  const [adminLoginError, setAdminLoginError] = useState("");
+  const [adminErrorTarget, setAdminErrorTarget] = useState<ManagerErrorTarget>(null);
   const [managerLoginError, setManagerLoginError] = useState("");
   const [managerErrorTarget, setManagerErrorTarget] =
     useState<ManagerErrorTarget>(null);
-  const adminInputRef = useRef<HTMLInputElement>(null);
+  const adminUsernameRef = useRef<HTMLInputElement>(null);
+  const adminPasswordRef = useRef<HTMLInputElement>(null);
   const managerUsernameRef = useRef<HTMLInputElement>(null);
   const managerPasswordRef = useRef<HTMLInputElement>(null);
   const isMountedRef = useRef(true);
@@ -97,7 +101,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         if (result.ok) {
           setPendingAttempt(null);
           setManagerPassword("");
-          setAdminCode("");
+          setAdminPassword("");
           setIsSuccess(true);
           toast.success("Access confirmed.");
           await new Promise((resolve) =>
@@ -118,7 +122,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               const retryAfter = Math.max(1, result.retryAfterSeconds || 900);
               setPendingAttempt(null);
               setManagerPassword("");
-              setAdminCode("");
+              setAdminPassword("");
               setClockNow(Date.now());
               setLockoutUntil(Date.now() + retryAfter * 1000);
               toast.error("Sign-in is temporarily locked.");
@@ -140,7 +144,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 setManagerErrorTarget("credentials");
                 requestAnimationFrame(() => managerPasswordRef.current?.focus());
               } else {
-                setAdminCodeError("Code not recognized. Check the code and try again.");
+                setAdminPassword("");
+                setAdminLoginError(
+                  "Username or password not recognized. Check both and try again.",
+                );
+                setAdminErrorTarget("credentials");
+                requestAnimationFrame(() => adminPasswordRef.current?.focus());
               }
               break;
             default:
@@ -170,27 +179,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   );
 
   const submitCode = useCallback(
-    async (
-      codeToSubmit: string,
-      mode: "personal" | "system",
-      turnstileToken?: string,
-    ) => {
+    async (codeToSubmit: string, turnstileToken?: string) => {
       const normalizedCode = codeToSubmit.trim();
-      const requiredLength =
-        mode === "personal" ? PERSON_CODE_LENGTH : ADMIN_CODE_LENGTH;
-      if (normalizedCode.length !== requiredLength) {
+      if (normalizedCode.length !== PERSON_CODE_LENGTH) {
         if (normalizedCode.length > 0) {
-          toast.info(
-            mode === "personal"
-              ? "Enter your 4-digit access code."
-              : "Enter the complete 12-character system admin code.",
-          );
+          toast.info("Enter your 4-digit access code.");
         }
         return;
       }
       await submitCredentials(
         { authType: "code", dealerCode: normalizedCode },
-        mode,
+        "personal",
         turnstileToken,
       );
     },
@@ -208,7 +207,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         managerUsernameRef.current?.focus();
         return;
       }
-      if (managerPassword.length < 15 || managerPassword.length > 128) {
+      if (
+        managerPassword.length < MIN_PASSWORD_LENGTH ||
+        managerPassword.length > MAX_PASSWORD_LENGTH
+      ) {
         setManagerLoginError("Enter the complete manager password.");
         setManagerErrorTarget("password");
         managerPasswordRef.current?.focus();
@@ -227,6 +229,39 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       );
     },
     [managerPassword, managerUsername, submitCredentials],
+  );
+
+  const submitAdminLogin = useCallback(
+    async (turnstileToken?: string) => {
+      const normalizedUsername = adminUsername.trim().toLowerCase();
+      if (!/^[a-z][a-z0-9._-]{2,31}$/.test(normalizedUsername)) {
+        setAdminLoginError("Enter the administrator username.");
+        setAdminErrorTarget("username");
+        adminUsernameRef.current?.focus();
+        return;
+      }
+      if (
+        adminPassword.length < MIN_PASSWORD_LENGTH ||
+        adminPassword.length > MAX_PASSWORD_LENGTH
+      ) {
+        setAdminLoginError("Enter the complete administrator password.");
+        setAdminErrorTarget("password");
+        adminPasswordRef.current?.focus();
+        return;
+      }
+      setAdminLoginError("");
+      setAdminErrorTarget(null);
+      await submitCredentials(
+        {
+          authType: "admin_password",
+          username: normalizedUsername,
+          password: adminPassword,
+        },
+        "system",
+        turnstileToken,
+      );
+    },
+    [adminPassword, adminUsername, submitCredentials],
   );
 
   const lockoutSeconds = Math.max(0, Math.ceil((lockoutUntil - clockNow) / 1000));
@@ -264,7 +299,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
       setDealerCode(nextCode);
       if (nextCode.length === PERSON_CODE_LENGTH) {
-        await submitCode(nextCode, "personal");
+        await submitCode(nextCode);
       }
     },
     [dealerCode, isLoading, isSuccess, submitCode],
@@ -277,13 +312,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       setShowManagerPassword(false);
     }
     if (mode !== "system") {
-      setAdminCode("");
-      setShowAdminCode(false);
+      setAdminPassword("");
+      setShowAdminPassword(false);
     }
     setEntryMode(mode);
     setPendingAttempt(null);
     setPersonalCodeError("");
-    setAdminCodeError("");
+    setAdminLoginError("");
+    setAdminErrorTarget(null);
     setManagerLoginError("");
     setManagerErrorTarget(null);
   }, []);
@@ -293,7 +329,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     setEntryMode(pendingAttempt);
     setPendingAttempt(null);
     setPersonalCodeError("");
-    setAdminCodeError("");
+    setAdminLoginError("");
+    setAdminErrorTarget(null);
     setManagerLoginError("");
     setManagerErrorTarget(null);
   }, [pendingAttempt]);
@@ -301,7 +338,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   useEffect(() => {
     if (isLoading || isSuccess) return;
     const frame = requestAnimationFrame(() => {
-      if (entryMode === "system") adminInputRef.current?.focus();
+      if (entryMode === "system") adminUsernameRef.current?.focus();
       if (entryMode === "manager") managerUsernameRef.current?.focus();
     });
     return () => cancelAnimationFrame(frame);
@@ -332,35 +369,28 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         event.preventDefault();
         if (entryMode === "manager") {
           void submitManagerLogin();
+        } else if (entryMode === "system") {
+          void submitAdminLogin();
         } else {
-          const activeCode = entryMode === "system" ? adminCode : dealerCode;
-          void submitCode(activeCode, entryMode);
+          void submitCode(dealerCode);
         }
       } else if (event.key === "Backspace" && entryMode === "personal") {
         event.preventDefault();
         void handleDialpadKeyPress("backspace");
       } else if (event.key === "Escape") {
         event.preventDefault();
-        if (entryMode === "system") setAdminCode("");
+        if (entryMode === "system") setAdminPassword("");
         if (entryMode === "manager") setManagerPassword("");
         if (entryMode === "personal") setDealerCode("");
-      } else if (entryMode !== "manager" && /^\d$/.test(event.key)) {
+      } else if (entryMode === "personal" && /^\d$/.test(event.key)) {
         event.preventDefault();
-        if (entryMode === "system") {
-          setAdminCodeError("");
-          setAdminCode((current) =>
-            `${current}${event.key}`.slice(0, ADMIN_CODE_LENGTH),
-          );
-        } else {
-          void handleDialpadKeyPress(event.key as DialpadKey);
-        }
+        void handleDialpadKeyPress(event.key as DialpadKey);
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
-    adminCode,
     dealerCode,
     entryMode,
     handleDialpadKeyPress,
@@ -368,6 +398,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     isSuccess,
     pendingAttempt,
     returnToCodeEntry,
+    submitAdminLogin,
     submitCode,
     submitManagerLogin,
   ]);
@@ -533,7 +564,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                         ? "Tap your 4-digit code. We sign you in automatically."
                         : entryMode === "manager"
                           ? "Use your dealership manager username and password."
-                          : "Enter the exact 12-character system admin code."}
+                          : "Use your system administrator username and password."}
                     </p>
                   </div>
                 </div>
@@ -616,10 +647,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     onToken={(token) => {
                       if (pendingAttempt === "manager") {
                         void submitManagerLogin(token);
+                      } else if (pendingAttempt === "system") {
+                        void submitAdminLogin(token);
                       } else {
-                        const code =
-                          pendingAttempt === "system" ? adminCode : dealerCode;
-                        void submitCode(code, pendingAttempt, token);
+                        void submitCode(dealerCode, token);
                       }
                     }}
                     onExpired={() =>
@@ -815,7 +846,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     className="flex min-h-0 flex-col justify-start overflow-y-auto overscroll-contain lg:justify-center"
                     onSubmit={(event) => {
                       event.preventDefault();
-                      void submitCode(adminCode, "system");
+                      void submitAdminLogin();
                     }}
                   >
                     <div className="rounded-2xl border border-white/[0.08] bg-[#101722] p-4 sm:p-5">
@@ -828,79 +859,121 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                             System administrator
                           </h2>
                           <p className="mt-1 text-sm leading-relaxed text-surface-400">
-                            Platform owner code from your deployment secret.
+                            Platform-owner access across every dealership.
                           </p>
                         </div>
                       </div>
 
-                      <Input
-                        ref={adminInputRef}
-                        label="System admin code"
-                        value={adminCode}
-                        type={showAdminCode ? "text" : "password"}
-                        onChange={(event) => {
-                          setAdminCodeError("");
-                          setAdminCode(
-                            event.target.value
-                              .replace(/[^a-zA-Z0-9]/g, "")
-                              .slice(0, ADMIN_CODE_LENGTH),
-                          );
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === "Escape") {
-                            setAdminCode("");
-                            setAdminCodeError("");
+                      <div className="space-y-3">
+                        <Input
+                          ref={adminUsernameRef}
+                          label="Username"
+                          name="admin-username"
+                          value={adminUsername}
+                          onChange={(event) => {
+                            setAdminLoginError("");
+                            setAdminErrorTarget(null);
+                            setAdminUsername(event.target.value.slice(0, 32));
+                          }}
+                          leftIcon={<UserRound />}
+                          autoComplete="username"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          inputMode="text"
+                          enterKeyHint="next"
+                          maxLength={32}
+                          aria-invalid={
+                            adminLoginError &&
+                            (adminErrorTarget === "username" ||
+                              adminErrorTarget === "credentials")
+                              ? true
+                              : undefined
                           }
-                        }}
-                        leftIcon={<KeyRound />}
-                        rightAction={
-                          <button
-                            type="button"
-                            className="flex h-9 w-9 items-center justify-center rounded-lg text-surface-400 transition hover:bg-white/[0.06] hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
-                            onClick={() => setShowAdminCode((value) => !value)}
-                            aria-label={
-                              showAdminCode
-                                ? "Hide system admin code"
-                                : "Show system admin code"
-                            }
-                          >
-                            {showAdminCode ? (
-                              <EyeOff className="h-4 w-4" aria-hidden="true" />
-                            ) : (
-                              <Eye className="h-4 w-4" aria-hidden="true" />
-                            )}
-                          </button>
-                        }
-                        autoComplete="current-password"
-                        autoCapitalize="none"
-                        autoCorrect="off"
-                        spellCheck={false}
-                        inputMode="text"
-                        enterKeyHint="go"
-                        maxLength={ADMIN_CODE_LENGTH}
-                        aria-invalid={adminCodeError ? true : undefined}
-                        aria-describedby={
-                          adminCodeError ? "system-admin-code-error" : undefined
-                        }
-                        helperText={`Exact case · ${adminCode.length}/${ADMIN_CODE_LENGTH} characters`}
-                        fullWidth
-                      />
-                      {adminCodeError ? (
+                          aria-describedby={
+                            adminLoginError &&
+                            (adminErrorTarget === "username" ||
+                              adminErrorTarget === "credentials")
+                              ? "admin-login-error"
+                              : undefined
+                          }
+                          fullWidth
+                        />
+                        <Input
+                          ref={adminPasswordRef}
+                          label="Password"
+                          name="admin-password"
+                          value={adminPassword}
+                          type={showAdminPassword ? "text" : "password"}
+                          onChange={(event) => {
+                            setAdminLoginError("");
+                            setAdminErrorTarget(null);
+                            setAdminPassword(
+                              event.target.value.slice(0, MAX_PASSWORD_LENGTH),
+                            );
+                          }}
+                          leftIcon={<KeyRound />}
+                          rightAction={
+                            <button
+                              type="button"
+                              className="flex h-11 w-11 items-center justify-center rounded-lg text-surface-400 transition hover:bg-white/[0.06] hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                              onClick={() => setShowAdminPassword((value) => !value)}
+                              aria-label={
+                                showAdminPassword
+                                  ? "Hide administrator password"
+                                  : "Show administrator password"
+                              }
+                            >
+                              {showAdminPassword ? (
+                                <EyeOff className="h-4 w-4" aria-hidden="true" />
+                              ) : (
+                                <Eye className="h-4 w-4" aria-hidden="true" />
+                              )}
+                            </button>
+                          }
+                          autoComplete="current-password"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          enterKeyHint="go"
+                          maxLength={MAX_PASSWORD_LENGTH}
+                          aria-invalid={
+                            adminLoginError &&
+                            (adminErrorTarget === "password" ||
+                              adminErrorTarget === "credentials")
+                              ? true
+                              : undefined
+                          }
+                          aria-describedby={
+                            adminLoginError &&
+                            (adminErrorTarget === "password" ||
+                              adminErrorTarget === "credentials")
+                              ? "admin-login-error"
+                              : undefined
+                          }
+                          fullWidth
+                        />
+                      </div>
+
+                      {adminLoginError ? (
                         <p
-                          id="system-admin-code-error"
+                          id="admin-login-error"
                           className="mt-2 px-1 text-sm text-error-300"
                           role="alert"
                         >
-                          {adminCodeError}
+                          {adminLoginError}
                         </p>
-                      ) : null}
+                      ) : (
+                        <p className="mt-2 px-1 text-xs text-surface-500">
+                          Credentials come from your deployment secrets.
+                        </p>
+                      )}
 
                       <Button
                         type="submit"
                         variant="primary"
                         size="lg"
                         fullWidth
-                        disabled={adminCode.length !== ADMIN_CODE_LENGTH}
                         className="mt-4 min-h-12 sm:min-h-14"
                         rightIcon={<ArrowRight className="h-4 w-4" />}
                       >

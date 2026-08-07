@@ -30,11 +30,6 @@ function initialApprovalStatus(dealer) {
   return recordBool(dealer, "requires_approval") ? "pending" : "n_a";
 }
 
-function isValidAdminDealerCode(value) {
-  const raw = value === undefined || value === null ? "" : value.toString();
-  return /^[A-Za-z0-9]{12}$/.test(raw);
-}
-
 // Canonical disclosure templates for approval-bound social copy. These are an
 // authorization contract, not a UI hint: a client-provided marker or edited
 // approximation never satisfies the required text.
@@ -1202,7 +1197,6 @@ function isAllowedImageProxyUrl(rawUrl, configuredHosts) {
 module.exports = {
   serializeProxyBody,
   initialApprovalStatus,
-  isValidAdminDealerCode,
   canonicalPostCompliance,
   canonicalPostComplianceSet,
   validatePostCompliance,

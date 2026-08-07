@@ -126,14 +126,20 @@ describe("frontend production pass", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "System admin" }));
-    const adminInput = await screen.findByLabelText("System admin code");
-    await user.type(adminInput, "Admin9xQ2Z7p");
-    expect(adminInput).toHaveValue("Admin9xQ2Z7p");
+    const adminUsername = await screen.findByLabelText("Username");
+    await user.type(adminUsername, "admin");
+    const adminPassword = screen.getByLabelText("Password");
+    await user.type(adminPassword, "Admin9xQ2Z7p");
+    expect(adminPassword).toHaveValue("Admin9xQ2Z7p");
 
     await user.click(screen.getByRole("button", { name: /Continue to system admin/i }));
     await waitFor(() =>
       expect(onLogin).toHaveBeenCalledWith(
-        { authType: "code", dealerCode: "Admin9xQ2Z7p" },
+        {
+          authType: "admin_password",
+          username: "admin",
+          password: "Admin9xQ2Z7p",
+        },
         undefined,
       ),
     );
@@ -161,14 +167,14 @@ describe("frontend production pass", () => {
     await user.keyboard("A");
 
     expect(systemAdminTab).toHaveFocus();
-    expect(screen.queryByLabelText("System admin code")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
     expect(onLogin).not.toHaveBeenCalled();
 
     await user.keyboard("{Enter}");
-    const adminCode = await screen.findByLabelText("System admin code");
-    await waitFor(() => expect(adminCode).toHaveFocus());
+    const adminUsername = await screen.findByLabelText("Username");
+    await waitFor(() => expect(adminUsername).toHaveFocus());
     expect(
-      screen.getByText("Enter the exact 12-character system admin code."),
+      screen.getByText("Use your system administrator username and password."),
     ).toBeVisible();
   });
 
