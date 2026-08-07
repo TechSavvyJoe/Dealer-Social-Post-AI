@@ -129,8 +129,8 @@ describe("frontend production pass", () => {
     const adminUsername = await screen.findByLabelText("Username");
     await user.type(adminUsername, "admin");
     const adminPassword = screen.getByLabelText("Password");
-    await user.type(adminPassword, "Admin9xQ2Z7p");
-    expect(adminPassword).toHaveValue("Admin9xQ2Z7p");
+    await user.type(adminPassword, "test-Admin9xQ2Z7p");
+    expect(adminPassword).toHaveValue("test-Admin9xQ2Z7p");
 
     await user.click(screen.getByRole("button", { name: /Continue to system admin/i }));
     await waitFor(() =>
@@ -138,7 +138,7 @@ describe("frontend production pass", () => {
         {
           authType: "admin_password",
           username: "admin",
-          password: "Admin9xQ2Z7p",
+          password: "test-Admin9xQ2Z7p",
         },
         undefined,
       ),

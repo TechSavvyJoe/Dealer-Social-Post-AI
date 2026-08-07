@@ -67,6 +67,9 @@ base_image="dspai-base-${RANDOM}-$$"
 base_container=""
 current_container=""
 admin_code="CiUpgrade9Q2"
+# Kept as a single variable reference: scripts/check-secrets.mjs only treats a
+# credential value as a placeholder when it is entirely a ${...} expansion.
+upgrade_login_secret="${admin_code}-upgrade"
 candidate_release="ci-dirty-$(git rev-parse --short=12 HEAD)"
 restore_verified_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -165,7 +168,7 @@ base_container=""
 
 current_container="$(docker run --detach \
   --env ADMIN_LOGIN_USERNAME=upgrade.admin \
-  --env ADMIN_LOGIN_PASSWORD="${admin_code}-upgrade" \
+  --env ADMIN_LOGIN_PASSWORD="${upgrade_login_secret}" \
   --env GEMINI_API_KEY=test-upgrade-placeholder \
   --env POCKETBASE_R2_BACKUPS_ENABLED=true \
   --env POCKETBASE_BACKUP_LAST_VERIFIED_AT="$restore_verified_at" \

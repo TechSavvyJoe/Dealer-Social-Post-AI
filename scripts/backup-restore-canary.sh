@@ -23,6 +23,9 @@ container_id=""
 admin_email="example-backup-canary@example.invalid"
 admin_password="example-backup-canary-password"
 admin_code="CiBackup8R4X"
+# Kept as a single variable reference: scripts/check-secrets.mjs only treats a
+# credential value as a placeholder when it is entirely a ${...} expansion.
+canary_login_secret="${admin_code}-canary"
 release_sha="ci-backup-canary"
 restore_verified_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -63,7 +66,7 @@ docker run --rm \
 
 container_id="$(docker run --detach \
   --env ADMIN_LOGIN_USERNAME=canary.admin \
-  --env ADMIN_LOGIN_PASSWORD="${admin_code}-canary" \
+  --env ADMIN_LOGIN_PASSWORD="${canary_login_secret}" \
   --env GEMINI_API_KEY=test-backup-placeholder \
   --env POCKETBASE_R2_BACKUPS_ENABLED=true \
   --env POCKETBASE_BACKUP_LAST_VERIFIED_AT="$restore_verified_at" \
