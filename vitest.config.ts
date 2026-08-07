@@ -20,7 +20,11 @@ export default defineConfig({
     // workers prevents CPU starvation from turning 5-second assertions into
     // scheduling failures on 2-core CI and 8-core developer machines.
     maxWorkers: 2,
-    exclude: ["**/node_modules/**", "**/dist/**", "**/e2e/**"],
+    // automation/ is a separate package with its own dependencies, vitest
+    // config and check script. Root `npm ci` does not install its deps, so
+    // running its suites from here fails in CI while passing for anyone who
+    // has run npm install inside that directory.
+    exclude: ["**/node_modules/**", "**/dist/**", "**/e2e/**", "automation/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
