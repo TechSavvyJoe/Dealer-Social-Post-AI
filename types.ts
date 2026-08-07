@@ -31,6 +31,7 @@ export enum StyleOption {
   Modern = "Modern & Bold",
   Friendly = "Fun & Friendly",
   Sporty = "Sporty & Dynamic",
+  DepthPop = "3D Depth Pop",
 }
 
 export enum ToneOption {

@@ -41,7 +41,8 @@ export interface LoginResult {
 
 export type SessionLoginRequest =
   | { authType: "code"; dealerCode: string }
-  | { authType: "manager_password"; username: string; password: string };
+  | { authType: "manager_password"; username: string; password: string }
+  | { authType: "admin_password"; username: string; password: string };
 
 interface AppState {
   // Core State
@@ -359,9 +360,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   login: async (credentials: SessionLoginRequest, turnstileToken?: string) => {
     try {
       const loginBody =
-        credentials.authType === "manager_password"
+        credentials.authType === "manager_password" ||
+        credentials.authType === "admin_password"
           ? {
-              authType: "manager_password",
+              authType: credentials.authType,
               username: credentials.username.trim().toLowerCase(),
               // Passwords are exact credentials; preserve case, whitespace,
               // punctuation, and password-manager supplied values.
