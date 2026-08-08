@@ -143,6 +143,14 @@ describe("Fly backup source identity", () => {
       "utf8",
     );
 
+    // Both Vercel ids are pinned, not read from repository secrets. A stale
+    // VERCEL_ORG_ID secret made `vercel pull` report "Project not found" and
+    // blocked the first real run of this job; the ids are not secret and are
+    // already pinned in the release scripts.
+    expect(flyDeploy).toContain("VERCEL_ORG_ID: team_Tc8DG6XMPUCefkTa3u71mmlN");
+    expect(flyDeploy).toContain("VERCEL_PROJECT_ID: prj_h5phWNMNtK4D9dqwbOHrrrRMqrRi");
+    expect(flyDeploy).not.toContain("secrets.VERCEL_ORG_ID");
+
     // The frontend must never publish ahead of the backend it proxies to.
     expect(flyDeploy).toContain("release-frontend:");
     expect(flyDeploy).toContain("needs: deploy");
