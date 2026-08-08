@@ -129,9 +129,42 @@ describe("Fly backup source identity", () => {
     );
     expect(flyDeploy).toContain('--image "$CANDIDATE_IMAGE_REF"');
     expect(flyDeploy).not.toContain("flyctl deploy --remote-only");
-    expect(flyDeploy.match(/Refuse a superseded main release/g)).toHaveLength(2);
+    // Every job that ships a release carries the guard: backup-gate, deploy
+    // and release-frontend.
+    expect(flyDeploy.match(/Refuse a superseded main release/g)).toHaveLength(3);
     expect(flyDeploy).toContain(
       "machine?.image_ref?.digest !== process.env.EXPECTED_IMAGE_DIGEST",
+    );
+  });
+
+  it("ships the Vercel frontend from the same gate that ships the backend", () => {
+    const flyDeploy = readFileSync(
+      resolve(process.cwd(), ".github/workflows/fly-deploy.yml"),
+      "utf8",
+    );
+
+    // The frontend must never publish ahead of the backend it proxies to.
+    expect(flyDeploy).toContain("release-frontend:");
+    expect(flyDeploy).toContain("needs: deploy");
+    expect(flyDeploy).toContain("if: needs.deploy.result == 'success'");
+    expect(flyDeploy).toContain("Confirm the backend already serves this release");
+
+    // The build must be bound to its release, or the service worker keeps
+    // serving the previous app shell under a "dsp-development" cache key.
+    expect(flyDeploy).toContain('VITE_RELEASE_SHA="$RELEASE_SHA"');
+    expect(flyDeploy).toContain('--fixed-strings "$RELEASE_SHA" .vercel/output/static');
+    expect(flyDeploy).toContain('--fixed-strings "dsp-${RELEASE_SHA}"');
+
+    // Traffic moves only after the immutable deployment has been verified,
+    // and `promote` alone does not move the canonical host.
+    expect(flyDeploy).toContain("--prebuilt --prod --skip-domain --yes --json");
+    expect(flyDeploy).toContain(
+      'alias set \\\n            "$DEPLOYMENT_URL" "$CANONICAL_HOST"',
+    );
+    expect(flyDeploy).toContain("--assert-alias");
+    expect(flyDeploy.match(/--assert-live-bundle/g)).toHaveLength(2);
+    expect(flyDeploy).toContain(
+      '"$PRODUCTION_ORIGIN" .vercel/output/static "$RELEASE_SHA"',
     );
   });
 

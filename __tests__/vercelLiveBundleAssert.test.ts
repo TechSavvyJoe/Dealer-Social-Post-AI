@@ -1,0 +1,324 @@
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  assertLiveBundleMatchesBuild,
+  collectBuiltChunks,
+  evaluateGraphResult,
+  extractChunkReferences,
+  isChunkFileName,
+  parseEntryScripts,
+  resolveCanonicalAlias,
+  sha256,
+  validateAliasResolution,
+  walkLiveGraph,
+} from "../scripts/vercel-live-bundle-assert.mjs";
+
+const RELEASE_SHA = "a".repeat(40);
+const CANONICAL_HOST = "dealer-social-post-ai.vercel.app";
+const temporaryDirectories: string[] = [];
+
+/**
+ * Builds a throwaway static directory shaped like `.vercel/output/static`:
+ * an entry chunk that imports a geminiService chunk, plus the shell.
+ */
+const buildStaticFixture = (
+  overrides: { entry?: string; gemini?: string; entrySource?: string } = {},
+) => {
+  const directory = mkdtempSync(join(tmpdir(), "dsp-live-bundle-"));
+  temporaryDirectories.push(directory);
+  const entry = overrides.entry ?? "index-D3iON-aV.js";
+  const gemini = overrides.gemini ?? "geminiService-Cx1TuEkG.js";
+  mkdirSync(join(directory, "assets"), { recursive: true });
+  const entrySource =
+    overrides.entrySource ??
+    `const s="${RELEASE_SHA}";import("./${gemini}");export{s};`;
+  writeFileSync(join(directory, "assets", entry), entrySource);
+  writeFileSync(join(directory, "assets", gemini), `export const caption=()=>1;`);
+  writeFileSync(
+    join(directory, "index.html"),
+    `<!doctype html><html><head><script type="module" crossorigin src="/assets/${entry}"></script></head><body></body></html>`,
+  );
+  return { directory, entry, gemini, entrySource };
+};
+
+/** Serves a static fixture over the injected fetch seam. */
+const serveFixture = (fixture: ReturnType<typeof buildStaticFixture>) => {
+  const files = new Map<string, string>([
+    [
+      "/",
+      `<!doctype html><html><head><script type="module" crossorigin src="/assets/${fixture.entry}"></script></head><body></body></html>`,
+    ],
+    [`/assets/${fixture.entry}`, fixture.entrySource],
+    [`/assets/${fixture.gemini}`, `export const caption=()=>1;`],
+  ]);
+  return async (path: string) => {
+    const body = files.get(path);
+    if (body === undefined) throw new Error(`${path} returned HTTP 404.`);
+    const bytes = Buffer.from(body);
+    return { bytes, text: body };
+  };
+};
+
+afterEach(() => {
+  while (temporaryDirectories.length) {
+    rmSync(temporaryDirectories.pop()!, { recursive: true, force: true });
+  }
+});
+
+describe("built chunk collection", () => {
+  it("indexes every emitted JavaScript chunk by name and digest", () => {
+    const fixture = buildStaticFixture();
+    const chunks = collectBuiltChunks(fixture.directory);
+    expect([...chunks.keys()].sort()).toEqual([fixture.entry, fixture.gemini].sort());
+    expect(chunks.get(fixture.gemini)!.digest).toBe(
+      sha256(Buffer.from("export const caption=()=>1;")),
+    );
+  });
+
+  it("refuses a directory that emitted no chunks", () => {
+    const directory = mkdtempSync(join(tmpdir(), "dsp-empty-"));
+    temporaryDirectories.push(directory);
+    mkdirSync(join(directory, "assets"), { recursive: true });
+    expect(() => collectBuiltChunks(directory)).toThrow(/no JavaScript chunks/);
+    expect(() => collectBuiltChunks(join(directory, "missing"))).toThrow(/no assets/);
+  });
+});
+
+describe("module graph parsing", () => {
+  it("reads the entry point out of the application shell", () => {
+    expect(
+      parseEntryScripts(
+        `<script type="module" crossorigin src="/assets/index-D3iON-aV.js"></script>`,
+      ),
+    ).toEqual(["/assets/index-D3iON-aV.js"]);
+    expect(() => parseEntryScripts("<html></html>")).toThrow(/no JavaScript entry/);
+  });
+
+  it("collects relative and preload-manifest chunk references", () => {
+    const references = extractChunkReferences(
+      `import("./geminiService-Cx1TuEkG.js");"assets/vendor-DkOvrxcr.js";'/assets/ui-DpWxPK4c.js'`,
+    );
+    expect([...references].sort()).toEqual([
+      "geminiService-Cx1TuEkG.js",
+      "ui-DpWxPK4c.js",
+      "vendor-DkOvrxcr.js",
+    ]);
+  });
+
+  it("rejects traversal and non-chunk names", () => {
+    expect(isChunkFileName("geminiService-Cx1TuEkG.js")).toBe(true);
+    expect(isChunkFileName("../../etc/passwd-AAAAAAAA.js")).toBe(false);
+    expect(isChunkFileName("sw.js")).toBe(false);
+    expect(isChunkFileName("")).toBe(false);
+  });
+});
+
+describe("live graph walk", () => {
+  it("matches every reachable chunk when the alias serves the new build", async () => {
+    const fixture = buildStaticFixture();
+    const result = await walkLiveGraph({
+      entryScripts: [`/assets/${fixture.entry}`],
+      builtChunks: collectBuiltChunks(fixture.directory),
+      fetchPath: serveFixture(fixture),
+    });
+    expect([...result.matched].sort()).toEqual([fixture.entry, fixture.gemini].sort());
+    expect(result.mismatched).toEqual([]);
+    expect(result.missingFromBuild).toEqual([]);
+    expect(evaluateGraphResult(result)).toEqual([]);
+  });
+
+  it("flags a live chunk whose bytes differ from the build", async () => {
+    const fixture = buildStaticFixture();
+    const serve = serveFixture(fixture);
+    const result = await walkLiveGraph({
+      entryScripts: [`/assets/${fixture.entry}`],
+      builtChunks: collectBuiltChunks(fixture.directory),
+      fetchPath: async (path: string) => {
+        if (path === `/assets/${fixture.gemini}`) {
+          const bytes = Buffer.from("export const caption=()=>2;");
+          return { bytes, text: bytes.toString() };
+        }
+        return serve(path);
+      },
+    });
+    expect(result.mismatched).toEqual([fixture.gemini]);
+    expect(evaluateGraphResult(result).join(" ")).toMatch(/stale bytes/);
+  });
+
+  it("flags a chunk name this build never emitted", async () => {
+    const fixture = buildStaticFixture();
+    const result = await walkLiveGraph({
+      entryScripts: [`/assets/${fixture.entry}`],
+      builtChunks: collectBuiltChunks(fixture.directory),
+      fetchPath: async (path: string) => {
+        if (path === `/assets/${fixture.entry}`) {
+          const body = `import("./geminiService-STALE001.js");`;
+          return { bytes: Buffer.from(body), text: body };
+        }
+        return serveFixture(fixture)(path);
+      },
+    });
+    expect(result.missingFromBuild).toEqual(["geminiService-STALE001.js"]);
+    expect(evaluateGraphResult(result).join(" ")).toMatch(/never emitted/);
+  });
+
+  it("fails when the required geminiService chunk is unreachable", () => {
+    expect(
+      evaluateGraphResult({
+        matched: new Set(["index-D3iON-aV.js"]),
+        mismatched: [],
+        missingFromBuild: [],
+      }).join(" "),
+    ).toMatch(/geminiService-\*\.js was reachable/);
+  });
+});
+
+describe("end-to-end live bundle assertion", () => {
+  it("passes when the origin serves exactly the built graph", async () => {
+    const fixture = buildStaticFixture();
+    const summary = await assertLiveBundleMatchesBuild({
+      origin: `https://${CANONICAL_HOST}`,
+      staticDirectory: fixture.directory,
+      releaseSha: RELEASE_SHA,
+      fetchPath: serveFixture(fixture),
+    });
+    expect(summary.requiredChunks).toEqual([fixture.gemini]);
+    expect(summary.verifiedChunks).toContain(fixture.entry);
+  });
+
+  it("fails fast when the alias still serves a previous entry chunk", async () => {
+    const current = buildStaticFixture({
+      entry: "index-NEW00001.js",
+      gemini: "geminiService-NEW00001.js",
+    });
+    const previous = buildStaticFixture({
+      entry: "index-OLD00001.js",
+      gemini: "geminiService-OLD00001.js",
+    });
+    await expect(
+      assertLiveBundleMatchesBuild({
+        origin: `https://${CANONICAL_HOST}`,
+        staticDirectory: current.directory,
+        releaseSha: RELEASE_SHA,
+        fetchPath: serveFixture(previous),
+      }),
+    ).rejects.toThrow(/pointing at an older deployment/);
+  });
+
+  it("fails when no verified chunk carries the release SHA", async () => {
+    const fixture = buildStaticFixture({
+      entrySource: `import("./geminiService-Cx1TuEkG.js");`,
+    });
+    await expect(
+      assertLiveBundleMatchesBuild({
+        origin: `https://${CANONICAL_HOST}`,
+        staticDirectory: fixture.directory,
+        releaseSha: RELEASE_SHA,
+        fetchPath: serveFixture(fixture),
+      }),
+    ).rejects.toThrow(/carries release/);
+  });
+
+  it("requires a full release SHA", async () => {
+    const fixture = buildStaticFixture();
+    await expect(
+      assertLiveBundleMatchesBuild({
+        origin: `https://${CANONICAL_HOST}`,
+        staticDirectory: fixture.directory,
+        releaseSha: "abc123",
+        fetchPath: serveFixture(fixture),
+      }),
+    ).rejects.toThrow(/40-character/);
+  });
+});
+
+describe("canonical alias resolution", () => {
+  it("accepts the alias record for the deployment just released", () => {
+    expect(
+      validateAliasResolution(
+        { alias: CANONICAL_HOST, deploymentId: "dpl_New123" },
+        { expectedDeploymentId: "dpl_New123", canonicalHost: CANONICAL_HOST },
+      ),
+    ).toBeNull();
+  });
+
+  it("rejects an alias still pointing at the previous deployment", () => {
+    expect(
+      validateAliasResolution(
+        { alias: CANONICAL_HOST, deploymentId: "dpl_Old123" },
+        { expectedDeploymentId: "dpl_New123", canonicalHost: CANONICAL_HOST },
+      ),
+    ).toMatch(/was not moved/);
+  });
+
+  it("rejects malformed and mismatched alias records", () => {
+    expect(
+      validateAliasResolution(
+        { alias: CANONICAL_HOST, deploymentId: "not-a-deployment" },
+        { expectedDeploymentId: "dpl_New123", canonicalHost: CANONICAL_HOST },
+      ),
+    ).toMatch(/did not resolve/);
+    expect(
+      validateAliasResolution(
+        { alias: "some-other-host.vercel.app", deploymentId: "dpl_New123" },
+        { expectedDeploymentId: "dpl_New123", canonicalHost: CANONICAL_HOST },
+      ),
+    ).toMatch(/wrong alias record/);
+    expect(
+      validateAliasResolution(undefined, {
+        expectedDeploymentId: "dpl_New123",
+        canonicalHost: CANONICAL_HOST,
+      }),
+    ).toMatch(/did not resolve/);
+  });
+
+  it("retries a flaky alias lookup before giving up", async () => {
+    let calls = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      if (calls < 3) throw new Error("ECONNRESET");
+      return {
+        ok: true,
+        json: async () => ({ alias: CANONICAL_HOST, deploymentId: "dpl_New123" }),
+      };
+    }) as unknown as typeof fetch;
+    try {
+      const record = await resolveCanonicalAlias({
+        host: CANONICAL_HOST,
+        teamId: "team_Example",
+        token: "test-token",
+        delayMs: 0,
+        sleep: async () => {},
+      });
+      expect(record.deploymentId).toBe("dpl_New123");
+      expect(calls).toBe(3);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("gives up with a clear message after exhausting attempts", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({
+      ok: false,
+      status: 404,
+    })) as unknown as typeof fetch;
+    try {
+      await expect(
+        resolveCanonicalAlias({
+          host: CANONICAL_HOST,
+          teamId: "team_Example",
+          token: "test-token",
+          attempts: 2,
+          delayMs: 0,
+          sleep: async () => {},
+        }),
+      ).rejects.toThrow(/HTTP 404/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});

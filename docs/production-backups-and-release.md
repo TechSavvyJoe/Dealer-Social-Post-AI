@@ -87,6 +87,54 @@ flyctl ssh console --app dealer-social-post-ai-production --command \
 # Store TEMP_ADMIN_CODE securely for the cutover proof; do not echo it.
 ```
 
+## Automatic production release
+
+A merge to `main` releases both origins without anyone running a command. CI
+must pass, then the `Deploy production` workflow runs `backup-gate` → `deploy`
+(Fly backend) → `release-frontend` (Vercel). Each job independently refuses a
+superseded `main`.
+
+`release-frontend` runs after `deploy`, never beside it, because the frontend
+rewrites `/api/*` to Fly: the backend has to serve the release before the client
+that calls it becomes reachable. The job pulls the production environment,
+refuses a Cloudflare test sitekey, builds with `VITE_RELEASE_SHA`, and refuses a
+bundle that is not stamped with its own SHA. It deploys with `--skip-domain`,
+verifies the immutable deployment, and only then moves traffic.
+
+Two things must be true before it reports success, and both are asserted:
+
+- `dealer-social-post-ai.vercel.app` resolves to the deployment just created.
+  `vercel promote` is not sufficient on its own — this project has
+  `autoAssignCustomDomains` disabled, so promote attaches only the
+  `*-joes-projects-*.vercel.app` aliases and leaves the canonical host on the
+  previous deployment. The workflow calls `vercel alias set` explicitly. The
+  check reads the alias → deployment mapping from the Vercel API, because
+  `vercel inspect` omits the canonical host from a deployment's own alias list
+  even when that host resolves to it.
+- The origin users load actually serves this build. `scripts/vercel-live-bundle-assert.mjs`
+  fetches the live shell, walks the module graph to the `geminiService-*.js`
+  chunk, and byte-compares every chunk it reaches against the artifact built for
+  the deployed SHA. This is what catches a deploy that reports success while the
+  alias still serves an old bundle. Run it by hand at any time:
+
+  ```bash
+  npm run release:vercel:assert-live -- https://dealer-social-post-ai.vercel.app .vercel/output/static "$(git rev-parse HEAD)"
+  ```
+
+Why this is a lighter gate than the ceremony below: the staged path cannot run
+unattended. Its provider canary needs `RELEASE_CANARY_PERSON_PIN` — a real
+production salesperson PIN — plus paid caption, image, and video generation on
+every merge, and its promotion step requires a human browser-QA receipt. Putting
+that PIN in CI secrets and auto-issuing the QA receipt would keep the appearance
+of those gates while removing their substance. The automated job instead asserts
+the properties a machine can actually prove: correct release binding, a healthy
+backend on the same SHA, security headers, a verified immutable deployment, and
+a canonical alias that demonstrably serves the new bytes.
+
+Use the staged ceremony below — not this job — for releases that change provider
+prompts, media pipelines, pricing or compliance logic, or anything else that
+needs a human to look at generated output before customers do.
+
 ## Required gates and staged promotion
 
 1. Select one commit SHA. Require secret scan, model-policy and Vercel-config drift checks, scoped format check, three consecutive Vitest passes, typecheck, build, full dependency audit, Chromium/WebKit browser tests, dirty-upgrade smoke, deterministic provider-boundary canaries, the private website-handoff contract canary, and the local backup/restore canary.
