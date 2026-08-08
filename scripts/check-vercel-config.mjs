@@ -108,8 +108,23 @@ for (const directive of ["script-src", "frame-src", "connect-src"]) {
     throw new Error(`Production CSP blocks Turnstile in ${directive}.`);
   }
 }
+// Generated video is handed around as a blob: object URL. Sharing, exporting
+// and saving all read it back with fetch(), which connect-src governs, and
+// 'self' does not cover the blob: scheme. Losing this silently breaks every
+// share and export path while the clip still plays, because media-src allows
+// blob: independently.
+for (const directive of ["connect-src", "media-src", "img-src"]) {
+  if (!cspDirectives.get(directive)?.includes("blob:")) {
+    throw new Error(
+      `Production CSP must allow blob: in ${directive}; media sharing and export read object URLs.`,
+    );
+  }
+}
 if (cspDirectives.get("script-src")?.includes("https:")) {
   throw new Error("Production CSP must not allow arbitrary HTTPS scripts.");
+}
+if (cspDirectives.get("script-src")?.includes("blob:")) {
+  throw new Error("Production CSP must not allow blob: scripts.");
 }
 if (cspDirectives.get("frame-src")?.includes("https:")) {
   throw new Error("Production CSP must not allow arbitrary HTTPS frames.");

@@ -10,7 +10,14 @@ export const contentSecurityPolicy = [
   "worker-src 'self' blob:",
   "manifest-src 'self'",
   "frame-src https://challenges.cloudflare.com",
-  "connect-src 'self' https://challenges.cloudflare.com https://vpic.nhtsa.dot.gov",
+  // `blob:` is required and is NOT implied by 'self'. Generated video arrives
+  // as an object URL from URL.createObjectURL, and reading it back into a File
+  // to share, export or save goes through fetch(), which connect-src governs.
+  // Without it the clip still plays — media-src allows blob: — while every
+  // share and export path fails with an opaque "Failed to fetch". The Fly
+  // origin sends no CSP at all, so this only ever broke on the Vercel origin
+  // users actually load.
+  "connect-src 'self' blob: https://challenges.cloudflare.com https://vpic.nhtsa.dot.gov",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
