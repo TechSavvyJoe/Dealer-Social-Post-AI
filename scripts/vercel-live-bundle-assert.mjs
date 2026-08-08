@@ -25,6 +25,10 @@ const CANONICAL_PRODUCTION_ORIGIN = "https://dealer-social-post-ai.vercel.app";
 const REQUIRED_CHUNK_PREFIXES = ["geminiService-"];
 const MAX_GRAPH_DEPTH = 6;
 const REQUEST_TIMEOUT_MS = 20_000;
+// A freshly moved alias is usually visible in under five seconds, but a slow
+// CDN update must not fail a release that actually succeeded.
+const DEFAULT_PROPAGATION_ATTEMPTS = 10;
+const DEFAULT_PROPAGATION_DELAY_MS = 10_000;
 
 const fail = (message) => {
   console.error(`Live bundle assertion failed: ${message}`);
@@ -303,6 +307,54 @@ export const assertLiveBundleMatchesBuild = async ({
   };
 };
 
+/**
+ * Retries the assertion while a freshly moved alias propagates.
+ *
+ * An alias that has genuinely not moved and one that is still propagating look
+ * identical from outside — both serve the previous entry chunk — so this cannot
+ * discriminate between them and deliberately does not try. It only bounds how
+ * long a correct deploy is allowed to look wrong. Past the deadline the real
+ * error is raised, so a genuinely stale alias still fails the release; it just
+ * fails a minute later instead of instantly.
+ */
+export const assertLiveBundleWithPropagation = async ({
+  origin,
+  staticDirectory,
+  releaseSha,
+  attempts = DEFAULT_PROPAGATION_ATTEMPTS,
+  delayMs = DEFAULT_PROPAGATION_DELAY_MS,
+  sleep = (ms) => new Promise((done) => setTimeout(done, ms)),
+  assertOnce = assertLiveBundleMatchesBuild,
+  onRetry = (_attempt, _total, _error) => {},
+}) => {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await assertOnce({ origin, staticDirectory, releaseSha });
+    } catch (error) {
+      lastError = error;
+      // A malformed invocation will never come good by waiting.
+      if (!isExactSha(releaseSha)) throw error;
+      if (attempt < attempts) {
+        onRetry(attempt, attempts, error);
+        await sleep(delayMs);
+      }
+    }
+  }
+  const waited = Math.round(((attempts - 1) * delayMs) / 1000);
+  throw new Error(
+    `${origin} did not serve the deployed bundle within ${waited}s. ` +
+      `Last failure: ${lastError?.message || String(lastError)}`,
+  );
+};
+
+const positiveIntegerFromEnv = (name, fallback) => {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
+
 const invokedAsScript =
   process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
 
@@ -311,13 +363,26 @@ if (invokedAsScript) {
   try {
     if (command === "--assert-live-bundle") {
       const [origin, staticDirectory, releaseSha] = process.argv.slice(3);
-      const summary = await assertLiveBundleMatchesBuild({
+      const summary = await assertLiveBundleWithPropagation({
         origin: origin || CANONICAL_PRODUCTION_ORIGIN,
         staticDirectory: resolve(
           staticDirectory ||
             join(dirnameOfThisFile(), "..", ".vercel", "output", "static"),
         ),
         releaseSha: releaseSha || "",
+        attempts: positiveIntegerFromEnv(
+          "LIVE_BUNDLE_ASSERT_ATTEMPTS",
+          DEFAULT_PROPAGATION_ATTEMPTS,
+        ),
+        delayMs: positiveIntegerFromEnv(
+          "LIVE_BUNDLE_ASSERT_DELAY_MS",
+          DEFAULT_PROPAGATION_DELAY_MS,
+        ),
+        onRetry: (attempt, total, error) => {
+          console.error(
+            `Attempt ${attempt}/${total}: ${error?.message || error} — retrying.`,
+          );
+        },
       });
       console.log(JSON.stringify(summary, null, 2));
     } else if (command === "--assert-alias") {

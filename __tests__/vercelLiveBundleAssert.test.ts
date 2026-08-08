@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   assertLiveBundleMatchesBuild,
+  assertLiveBundleWithPropagation,
   collectBuiltChunks,
   evaluateGraphResult,
   extractChunkReferences,
@@ -231,6 +232,97 @@ describe("end-to-end live bundle assertion", () => {
         fetchPath: serveFixture(fixture),
       }),
     ).rejects.toThrow(/40-character/);
+  });
+});
+
+/** A complete assertion summary, matching what a real pass returns. */
+const passingSummary = () => ({
+  origin: `https://${CANONICAL_HOST}`,
+  releaseSha: RELEASE_SHA,
+  entryScripts: ["/assets/index-NEW00001.js"],
+  verifiedChunks: ["geminiService-NEW00001.js", "index-NEW00001.js"],
+  requiredChunks: ["geminiService-NEW00001.js"],
+});
+
+describe("alias propagation tolerance", () => {
+  it("succeeds once a slow alias update becomes visible", async () => {
+    let calls = 0;
+    const summary = await assertLiveBundleWithPropagation({
+      origin: `https://${CANONICAL_HOST}`,
+      staticDirectory: "/unused",
+      releaseSha: RELEASE_SHA,
+      delayMs: 0,
+      sleep: async () => {},
+      assertOnce: async () => {
+        calls += 1;
+        if (calls < 3) {
+          throw new Error(
+            "The canonical alias is still pointing at an older deployment.",
+          );
+        }
+        return passingSummary();
+      },
+    });
+    expect(calls).toBe(3);
+    expect(summary.origin).toBe(`https://${CANONICAL_HOST}`);
+  });
+
+  it("still fails a genuinely stale alias, surfacing the real error", async () => {
+    let calls = 0;
+    await expect(
+      assertLiveBundleWithPropagation({
+        origin: `https://${CANONICAL_HOST}`,
+        staticDirectory: "/unused",
+        releaseSha: RELEASE_SHA,
+        attempts: 4,
+        delayMs: 0,
+        sleep: async () => {},
+        assertOnce: async () => {
+          calls += 1;
+          throw new Error("serves entry script /assets/index-OLD.js");
+        },
+      }),
+    ).rejects.toThrow(/did not serve the deployed bundle within .*index-OLD\.js/s);
+    expect(calls).toBe(4);
+  });
+
+  it("does not waste retries on a malformed release SHA", async () => {
+    let calls = 0;
+    await expect(
+      assertLiveBundleWithPropagation({
+        origin: `https://${CANONICAL_HOST}`,
+        staticDirectory: "/unused",
+        releaseSha: "not-a-sha",
+        delayMs: 0,
+        sleep: async () => {},
+        assertOnce: async () => {
+          calls += 1;
+          throw new Error("a full 40-character lowercase release SHA is required.");
+        },
+      }),
+    ).rejects.toThrow(/40-character/);
+    expect(calls).toBe(1);
+  });
+
+  it("reports progress so a slow release is visible in CI logs", async () => {
+    const seen: number[] = [];
+    let calls = 0;
+    await assertLiveBundleWithPropagation({
+      origin: `https://${CANONICAL_HOST}`,
+      staticDirectory: "/unused",
+      releaseSha: RELEASE_SHA,
+      delayMs: 0,
+      sleep: async () => {},
+      onRetry: (attempt: number) => {
+        seen.push(attempt);
+      },
+      assertOnce: async () => {
+        calls += 1;
+        if (calls < 3) throw new Error("not yet");
+        return passingSummary();
+      },
+    });
+    expect(seen).toEqual([1, 2]);
   });
 });
 
