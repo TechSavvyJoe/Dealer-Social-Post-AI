@@ -1,4 +1,4 @@
-name: Deploy to Fly.io
+name: Deploy production
 
 on:
   workflow_run:
@@ -388,3 +388,218 @@ jobs:
           flyctl logs --app dealer-social-post-ai-production --no-tail || true
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+  # Vercel serves the origin users actually load, and vercel.ts keeps
+  # git.deploymentEnabled.main = false so a push never publishes straight to
+  # production. Without this job the frontend only moves when somebody runs
+  # scripts/vercel-staged-release.sh by hand, which is how a merged
+  # services/geminiService.ts fix sat unshipped for three days on 2026-08-07
+  # while CI, Fly and the dashboard were all green.
+  #
+  # It runs after `deploy` rather than beside it because the frontend rewrites
+  # /api/* to Fly: the backend must already serve this SHA before the client
+  # that calls it becomes reachable.
+  release-frontend:
+    name: Release verified frontend
+    needs: deploy
+    if: needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+      VERCEL_CLI_VERSION: 58.4.4
+      CANONICAL_HOST: dealer-social-post-ai.vercel.app
+      PRODUCTION_ORIGIN: https://dealer-social-post-ai.vercel.app
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      # Not a secret: the same project id is already pinned in
+      # scripts/vercel-staged-qa.mjs and scripts/vercel-staged-release.sh so
+      # every release path fails closed if the repo is ever relinked.
+      VERCEL_PROJECT_ID: prj_h5phWNMNtK4D9dqwbOHrrrRMqrRi
+      VERCEL_PROJECT_NAME: dealer-social-post-ai
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Require the release credentials
+        run: |
+          if [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ]; then
+            echo "Frontend release blocked: set the VERCEL_TOKEN and VERCEL_ORG_ID repository secrets." >&2
+            exit 1
+          fi
+
+      - name: Refuse a superseded main release
+        env:
+          CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          current_main="$(git ls-remote --exit-code origin refs/heads/main | awk 'NR == 1 { print $1 }')"
+          if [ "$current_main" != "$CANDIDATE_SHA" ]; then
+            echo "Frontend release blocked: a newer main commit exists." >&2
+            exit 1
+          fi
+
+      - name: Confirm the backend already serves this release
+        run: |
+          curl --silent --show-error --fail --max-time 20 \
+            https://dealer-social-post-ai-production.fly.dev/api/app/health \
+            --output /tmp/fly-health.json
+          grep --quiet --fixed-strings "\"releaseSha\":\"${RELEASE_SHA}\"" /tmp/fly-health.json
+
+      - name: Pull the production environment
+        run: |
+          npx --yes "vercel@${VERCEL_CLI_VERSION}" pull \
+            --yes --environment=production --token "$VERCEL_TOKEN"
+          node -e '
+            const link = require("./.vercel/project.json");
+            if (
+              link.orgId !== process.env.VERCEL_ORG_ID ||
+              link.projectId !== process.env.VERCEL_PROJECT_ID
+            ) {
+              console.error("Frontend release blocked: linked to an unexpected Vercel project.");
+              process.exit(1);
+            }
+          '
+
+      - name: Require a real production Turnstile site key
+        run: |
+          site_key="$(node -e '
+            const fs = require("node:fs");
+            const text = fs.readFileSync(".vercel/.env.production.local", "utf8");
+            for (const line of text.split(/\r?\n/)) {
+              const trimmed = line.trim();
+              if (!trimmed || trimmed.startsWith("#")) continue;
+              const separator = trimmed.indexOf("=");
+              if (separator <= 0) continue;
+              if (trimmed.slice(0, separator).trim() !== "VITE_TURNSTILE_SITE_KEY") continue;
+              let value = trimmed.slice(separator + 1).trim();
+              if (value.startsWith("\"") && value.endsWith("\"")) value = JSON.parse(value);
+              process.stdout.write(value);
+            }
+          ')"
+          if ! printf '%s' "$site_key" | grep --quiet --extended-regexp '^[A-Za-z0-9_-]{20,}$'; then
+            echo "Frontend release blocked: production is missing a real Turnstile site key." >&2
+            exit 1
+          fi
+          case "$site_key" in
+            1x00000000000000000000AA|2x00000000000000000000AB|1x00000000000000000000BB|2x00000000000000000000BB|3x00000000000000000000FF)
+              echo "Frontend release blocked: Cloudflare test sitekeys are CI-only." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Build the release bundle
+        run: |
+          VITE_RELEASE_SHA="$RELEASE_SHA" \
+            npx --yes "vercel@${VERCEL_CLI_VERSION}" build --prod --token "$VERCEL_TOKEN"
+          # A bundle that does not carry its own SHA is the "dsp-development"
+          # build that reached production on 2026-08-07: unversioned, so the
+          # service worker never invalidates the previous app shell.
+          grep -Rqs --include='*.js' --fixed-strings "$RELEASE_SHA" .vercel/output/static ||
+            {
+              echo "Frontend release blocked: the built bundle is not stamped with its release SHA." >&2
+              exit 1
+            }
+          grep --quiet --fixed-strings "dsp-${RELEASE_SHA}" .vercel/output/static/sw.js ||
+            {
+              echo "Frontend release blocked: the service worker is not bound to this release." >&2
+              exit 1
+            }
+
+      - name: Deploy without moving traffic
+        id: deploy-frontend
+        run: |
+          npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy \
+            --prebuilt --prod --skip-domain --yes --json --token "$VERCEL_TOKEN" \
+            > /tmp/vercel-deploy.json
+          deployment_url="$(node -e '
+            const payload = require("/tmp/vercel-deploy.json");
+            const candidate = [payload.url, payload.deploymentUrl, payload.deployment?.url]
+              .find((value) => typeof value === "string" && value.trim());
+            if (!candidate) process.exit(1);
+            const url = /^https:\/\//i.test(candidate) ? candidate : `https://${candidate}`;
+            const parsed = new URL(url);
+            if (parsed.protocol !== "https:" || !parsed.hostname.endsWith(".vercel.app")) {
+              process.exit(1);
+            }
+            process.stdout.write(`https://${parsed.hostname}`);
+          ')"
+          npx --yes "vercel@${VERCEL_CLI_VERSION}" inspect "$deployment_url" \
+            --json --token "$VERCEL_TOKEN" > /tmp/vercel-inspect.json
+          deployment_id="$(node -e '
+            const deployment = require("/tmp/vercel-inspect.json");
+            if (
+              !/^dpl_[A-Za-z0-9]+$/.test(deployment.id || "") ||
+              deployment.name !== process.env.VERCEL_PROJECT_NAME ||
+              deployment.readyState !== "READY" ||
+              deployment.target !== "production"
+            ) {
+              process.exit(1);
+            }
+            process.stdout.write(deployment.id);
+          ')"
+          echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"
+          echo "deployment_id=$deployment_id" >> "$GITHUB_OUTPUT"
+          echo "Staged $deployment_id at $deployment_url"
+
+      - name: Verify the deployment before it takes traffic
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy-frontend.outputs.deployment_url }}
+        run: |
+          curl --silent --show-error --fail --max-time 20 \
+            "${DEPLOYMENT_URL}/api/app/health" --output /tmp/staged-health.json
+          grep --quiet --fixed-strings "\"releaseSha\":\"${RELEASE_SHA}\"" /tmp/staged-health.json
+          grep --quiet --fixed-strings '"status":"verified"' /tmp/staged-health.json
+          curl --silent --show-error --fail --max-time 20 \
+            "${DEPLOYMENT_URL}/api/app/proxy-readiness" --output /tmp/staged-proxy.json
+          grep --quiet --fixed-strings '"ok":true' /tmp/staged-proxy.json
+          node scripts/vercel-live-bundle-assert.mjs --assert-live-bundle \
+            "$DEPLOYMENT_URL" .vercel/output/static "$RELEASE_SHA"
+
+      # `vercel promote` is not enough on its own. This project has
+      # autoAssignCustomDomains disabled, so promote attaches only the
+      # *-joes-projects-*.vercel.app aliases and leaves the canonical host on
+      # the previous deployment. The explicit alias set is what users see.
+      - name: Move the canonical production alias
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy-frontend.outputs.deployment_url }}
+        run: |
+          npx --yes "vercel@${VERCEL_CLI_VERSION}" alias set \
+            "$DEPLOYMENT_URL" "$CANONICAL_HOST" --scope "$VERCEL_ORG_ID" --token "$VERCEL_TOKEN"
+
+      - name: Prove the alias moved and the live bundle changed
+        env:
+          DEPLOYMENT_ID: ${{ steps.deploy-frontend.outputs.deployment_id }}
+        run: |
+          # Alias side, not deployment side: `vercel inspect` omits the
+          # canonical host from a deployment's alias list even when that host
+          # resolves to it, so a deployment-side check proves nothing.
+          node scripts/vercel-live-bundle-assert.mjs --assert-alias "$DEPLOYMENT_ID"
+          # The assertion that would have caught the 2026-08-07 incident:
+          # fetch the origin users load, walk to the geminiService chunk and
+          # byte-compare it against the artifact built for this SHA.
+          node scripts/vercel-live-bundle-assert.mjs --assert-live-bundle \
+            "$PRODUCTION_ORIGIN" .vercel/output/static "$RELEASE_SHA"
+          curl --silent --show-error --fail --max-time 20 \
+            "${PRODUCTION_ORIGIN}/api/app/health" --output /tmp/production-health.json
+          grep --quiet --fixed-strings "\"releaseSha\":\"${RELEASE_SHA}\"" /tmp/production-health.json
+
+      - name: Report the released frontend
+        env:
+          DEPLOYMENT_ID: ${{ steps.deploy-frontend.outputs.deployment_id }}
+          DEPLOYMENT_URL: ${{ steps.deploy-frontend.outputs.deployment_url }}
+        run: |
+          {
+            echo "### Frontend released"
+            echo
+            echo "- Release: \`$RELEASE_SHA\`"
+            echo "- Deployment: \`$DEPLOYMENT_ID\`"
+            echo "- Immutable URL: $DEPLOYMENT_URL"
+            echo "- Canonical origin: $PRODUCTION_ORIGIN"
+          } >> "$GITHUB_STEP_SUMMARY"
