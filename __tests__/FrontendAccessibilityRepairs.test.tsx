@@ -177,6 +177,86 @@ describe("frontend accessibility repairs", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("re-checks for a new release when the installed app returns to the foreground", async () => {
+    class WaitingWorker extends EventTarget {
+      state: ServiceWorkerState = "installed";
+      postMessage = vi.fn();
+    }
+    const registration = Object.assign(new EventTarget(), {
+      installing: null,
+      waiting: null as ServiceWorker | null,
+      update: vi.fn().mockResolvedValue(undefined),
+    });
+    const serviceWorker = Object.assign(new EventTarget(), {
+      controller: {},
+      register: vi.fn().mockResolvedValue(registration),
+    });
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: serviceWorker,
+    });
+    let visibility: DocumentVisibilityState = "visible";
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibility,
+    });
+
+    // Registration alone must not raise a banner: nothing is waiting yet.
+    render(
+      <PwaUpdatePrompt enabled foregroundCheckIntervalMs={0} onReload={vi.fn()} />,
+    );
+    await waitFor(() => expect(serviceWorker.register).toHaveBeenCalledTimes(1));
+    expect(
+      screen.queryByRole("region", { name: "A new version is ready" }),
+    ).not.toBeInTheDocument();
+
+    // Backgrounded: a release ships and its worker installs, but no
+    // `updatefound` reaches this document.
+    visibility = "hidden";
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    registration.waiting = new WaitingWorker() as unknown as ServiceWorker;
+
+    // Resumed from the app switcher — the banner must appear without a cold
+    // relaunch, and a fresh check must be requested.
+    visibility = "visible";
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+
+    expect(await screen.findByRole("button", { name: "Update" })).toBeVisible();
+    expect(registration.update).toHaveBeenCalled();
+  });
+
+  it("does not hammer the network with foreground update checks", async () => {
+    const registration = Object.assign(new EventTarget(), {
+      installing: null,
+      waiting: null,
+      update: vi.fn().mockResolvedValue(undefined),
+    });
+    const serviceWorker = Object.assign(new EventTarget(), {
+      controller: {},
+      register: vi.fn().mockResolvedValue(registration),
+    });
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: serviceWorker,
+    });
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+
+    render(
+      <PwaUpdatePrompt enabled foregroundCheckIntervalMs={60_000} onReload={vi.fn()} />,
+    );
+    await waitFor(() => expect(serviceWorker.register).toHaveBeenCalledTimes(1));
+
+    for (let i = 0; i < 5; i += 1) {
+      act(() => document.dispatchEvent(new Event("visibilitychange")));
+      act(() => window.dispatchEvent(new Event("focus")));
+    }
+    // Registration itself just checked; the throttle must suppress the rest.
+    expect(registration.update).not.toHaveBeenCalled();
+  });
+
   it("deduplicates persistent errors and pauses timed toasts", () => {
     vi.useFakeTimers();
     const Harness = () => {

@@ -6,6 +6,8 @@ interface PwaUpdatePromptProps {
   enabled?: boolean;
   updateTimeoutMs?: number;
   onReload?: () => void;
+  /** Test hook: minimum gap between foreground update checks. */
+  foregroundCheckIntervalMs?: number;
 }
 
 /**
@@ -16,6 +18,7 @@ export const PwaUpdatePrompt: React.FC<PwaUpdatePromptProps> = ({
   enabled = !import.meta.env.DEV,
   updateTimeoutMs = 15_000,
   onReload = () => window.location.reload(),
+  foregroundCheckIntervalMs = 60_000,
 }) => {
   const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -44,23 +47,47 @@ export const PwaUpdatePrompt: React.FC<PwaUpdatePromptProps> = ({
       installingWorker?.addEventListener("statechange", handleInstallingStateChange);
     };
 
+    // An installed PWA is resumed from the app switcher far more often than it
+    // is launched cold, and registration only checks for a new worker once. A
+    // resumed app therefore kept serving the previously cached shell with no
+    // banner, so a shipped fix looked like it had not worked. Re-check on
+    // foreground. This still never activates on its own — the user decides, so
+    // an in-progress post is never discarded underneath them.
+    let lastCheck = 0;
+    const checkForUpdate = () => {
+      if (disposed || !registration || document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastCheck < foregroundCheckIntervalMs) return;
+      lastCheck = now;
+      // A worker that finished installing while we were backgrounded is already
+      // waiting and fires no further `updatefound`.
+      offerUpdate(registration.waiting);
+      void registration.update().catch(() => undefined);
+    };
+
     void navigator.serviceWorker
       .register("/sw.js", { scope: "/" })
       .then((nextRegistration) => {
         if (disposed) return;
         registration = nextRegistration;
+        lastCheck = Date.now();
         offerUpdate(nextRegistration.waiting);
         nextRegistration.addEventListener("updatefound", handleUpdateFound);
       })
       .catch((error) => console.warn("[sw] registration failed", error));
 
+    document.addEventListener("visibilitychange", checkForUpdate);
+    window.addEventListener("focus", checkForUpdate);
+
     return () => {
       disposed = true;
+      document.removeEventListener("visibilitychange", checkForUpdate);
+      window.removeEventListener("focus", checkForUpdate);
       registration?.removeEventListener("updatefound", handleUpdateFound);
       installingWorker?.removeEventListener("statechange", handleInstallingStateChange);
       updateCleanupRef.current?.();
     };
-  }, [enabled]);
+  }, [enabled, foregroundCheckIntervalMs]);
 
   const applyUpdate = () => {
     if (!waitingWorker || isUpdating) return;
