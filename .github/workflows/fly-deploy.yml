@@ -412,10 +412,14 @@ jobs:
       CANONICAL_HOST: dealer-social-post-ai.vercel.app
       PRODUCTION_ORIGIN: https://dealer-social-post-ai.vercel.app
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      # Not a secret: the same project id is already pinned in
-      # scripts/vercel-staged-qa.mjs and scripts/vercel-staged-release.sh so
-      # every release path fails closed if the repo is ever relinked.
+      # Neither id is a secret, and both are already pinned as plain constants
+      # in scripts/vercel-staged-qa.mjs and scripts/vercel-staged-release.sh.
+      # Reading the org id from a repository secret instead added a silent
+      # failure mode with no security benefit: the stale VERCEL_ORG_ID secret
+      # made `vercel pull` report "Project not found" and blocked the first
+      # real run of this job. Pinning both keeps the workflow and the scripts
+      # failing closed on the same values.
+      VERCEL_ORG_ID: team_Tc8DG6XMPUCefkTa3u71mmlN
       VERCEL_PROJECT_ID: prj_h5phWNMNtK4D9dqwbOHrrrRMqrRi
       VERCEL_PROJECT_NAME: dealer-social-post-ai
     steps:
@@ -428,10 +432,10 @@ jobs:
           node-version-file: .node-version
           cache: npm
 
-      - name: Require the release credentials
+      - name: Require the release credential
         run: |
-          if [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ]; then
-            echo "Frontend release blocked: set the VERCEL_TOKEN and VERCEL_ORG_ID repository secrets." >&2
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "Frontend release blocked: set the VERCEL_TOKEN repository secret." >&2
             exit 1
           fi
 
