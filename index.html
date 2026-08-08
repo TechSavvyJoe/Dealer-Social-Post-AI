@@ -34,32 +34,55 @@
         --header-safe-top: max(var(--sat), 12px);
       }
 
+      /* Mobile shell: pin to the visual viewport instead of measuring it.
+         Previously html/body used `-webkit-fill-available` (iOS resolves this
+         to the SMALL viewport, chrome visible) while body's `min-height` and
+         .app-container used `100dvh` (the DYNAMIC viewport, which grows as
+         Safari's chrome retracts). Those two models disagree during and after
+         a chrome transition, which produced both reported iPhone symptoms:
+         body grew taller than the visual viewport, so the document itself
+         became scrollable and rubber-banded — "the app unlocks and you can
+         swipe outside it" — and .app-container was sized to a dvh that no
+         longer matched the real viewport, leaving a strip of body gradient
+         below it — "it doesn't reach the bottom".
+
+         `position: fixed; inset: 0` pins the shell to the visual viewport with
+         no viewport units at all, so there is nothing left to disagree. With
+         viewport-fit=cover this covers the full screen including behind the
+         home indicator, and #root's safe-area padding keeps content clear of
+         it. `interactive-widget=resizes-content` keeps the soft keyboard
+         resizing this same box. Desktop restores normal document flow below. */
       html {
         height: 100%;
-        height: -webkit-fill-available;
         width: 100%;
         max-width: 100%;
+        overflow: hidden;
+        /* Must be on html too: Safari does not reliably propagate
+           overscroll-behavior from body to the viewport. */
+        overscroll-behavior: none;
       }
 
       body {
         margin: 0;
+        padding: 0;
+        position: fixed;
+        inset: 0;
         width: 100%;
         max-width: 100%;
-        overflow-x: hidden;
-        padding: 0;
-        /* Lock to visual viewport so login cannot grow the document and scroll */
-        height: 100%;
-        height: -webkit-fill-available;
-        min-height: 100dvh;
+        /* inset:0 defines the box; explicit min-height:0 neutralises the
+           `min-height: 100dvh` that globals.css sets in @layer base. */
+        height: auto;
+        min-height: 0;
+        overflow: hidden;
+        overscroll-behavior: none;
       }
 
       .app-container {
         width: 100%;
         max-width: 100%;
-        /* Mobile: fixed viewport shell. Desktop media query switches to min-height. */
+        /* Fills the viewport-pinned body. No viewport units on mobile. */
         height: 100%;
-        height: 100dvh;
-        max-height: 100dvh;
+        max-height: 100%;
         min-height: 0;
         background-color: #090d17; /* matches --color-surface-base */
         overflow: hidden;
@@ -99,7 +122,20 @@
 
       /* Desktop styles - add subtle bezel; no decorative indigo glow. */
       @media (min-width: 769px) and (min-height: 600px) {
+        /* Release the mobile viewport pin so the document scrolls normally. */
+        html {
+          height: auto;
+          overflow: visible;
+          overscroll-behavior: auto;
+        }
         body {
+          /* `relative`, not `static`: body was a positioned ancestor before
+             the mobile pin, and desktop keeps that containing block. */
+          position: relative;
+          inset: auto;
+          overflow-x: hidden;
+          overflow-y: visible;
+          overscroll-behavior: auto;
           padding: clamp(1rem, 2vw, 2rem);
           height: auto;
           min-height: 100dvh;
