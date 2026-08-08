@@ -134,18 +134,47 @@ test.describe("Dealer Social Post AI Flow", () => {
       const safeArea = await page.locator("#root").evaluate((root) => {
         const style = getComputedStyle(root);
         const bounds = root.getBoundingClientRect();
+        const de = document.documentElement;
+        const bodyStyle = getComputedStyle(document.body);
+        const container = document.querySelector(".app-container");
         return {
           paddingTop: style.paddingTop,
           paddingBottom: style.paddingBottom,
           top: bounds.top,
           bottom: bounds.bottom,
           viewportHeight: window.innerHeight,
+          // Shell geometry contract. Headless Chromium cannot reproduce iOS
+          // Safari's collapsing chrome, so the rendered symptom is not
+          // observable here — but the structure that causes it is.
+          bodyPosition: bodyStyle.position,
+          bodyMinHeight: bodyStyle.minHeight,
+          htmlOverscroll: getComputedStyle(de).overscrollBehaviorY,
+          bodyOverscroll: bodyStyle.overscrollBehaviorY,
+          documentScrollOverflow: de.scrollHeight - de.clientHeight,
+          containerBottom: container
+            ? Math.round(container.getBoundingClientRect().bottom)
+            : -1,
         };
       });
       expect(safeArea.paddingTop).toBe("59px");
       expect(safeArea.paddingBottom).toBe("34px");
       expect(safeArea.top).toBe(0);
       expect(safeArea.bottom).toBe(safeArea.viewportHeight);
+
+      // The mobile shell is pinned to the visual viewport. Mixing
+      // `-webkit-fill-available` with `100dvh` let body outgrow the viewport on
+      // iOS, which both opened a rubber-band scroll surface outside the app and
+      // left a gap under the shell. Assert the structure, not the symptom.
+      expect(safeArea.bodyPosition).toBe("fixed");
+      expect(safeArea.bodyMinHeight).toBe("0px");
+      // Must be set on html as well: Safari does not reliably propagate
+      // overscroll-behavior from body to the viewport.
+      expect(safeArea.htmlOverscroll).toBe("none");
+      expect(safeArea.bodyOverscroll).toBe("none");
+      // Nothing to drag: the document itself must never scroll on mobile.
+      expect(safeArea.documentScrollOverflow).toBe(0);
+      // The shell background reaches the physical bottom of the screen.
+      expect(safeArea.containerBottom).toBe(safeArea.viewportHeight);
       await expectNoHorizontalOverflow(page);
     } finally {
       await cdp.send("Emulation.setSafeAreaInsetsOverride", {
