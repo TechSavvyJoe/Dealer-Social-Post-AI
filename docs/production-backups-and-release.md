@@ -80,7 +80,7 @@ The system-administrator account is provisioned and rotated at boot from the `AD
 set +x
 read -r -s -p "New admin password (8-128 chars): " NEW_ADMIN_PASSWORD
 printf '\n'
-printf 'ADMIN_LOGIN_PASSWORD=%s\n' "$NEW_ADMIN_PASSWORD" |
+printf '%s=%s\n' ADMIN_LOGIN_PASSWORD "$NEW_ADMIN_PASSWORD" |
   flyctl secrets import --app dealer-social-post-ai-production
 flyctl ssh console --app dealer-social-post-ai-production --command \
   'sqlite3 /pb/pb_data/data.db "DELETE FROM sessions WHERE role = '\''super_admin'\'' OR is_impersonation = 1;"'
@@ -223,7 +223,7 @@ gh variable set LEGACY_CLIENT_COMPATIBILITY_ENABLED --env production --body fals
 {
   printf 'TURNSTILE_ENFORCEMENT_ENABLED=true\n'
   printf 'LEGACY_CLIENT_COMPATIBILITY_ENABLED=false\n'
-  printf 'ADMIN_LOGIN_PASSWORD=%s\n' "$FINAL_ADMIN_PASSWORD"
+  printf '%s=%s\n' ADMIN_LOGIN_PASSWORD "$FINAL_ADMIN_PASSWORD"
 } | flyctl secrets import --app dealer-social-post-ai-production
 flyctl ssh console --app dealer-social-post-ai-production --command \
   'sqlite3 /pb/pb_data/data.db "DELETE FROM sessions WHERE role = '\''super_admin'\'' OR is_impersonation = 1 OR admin_secret_fingerprint != '\'''\'';"'
