@@ -395,6 +395,18 @@ function personPinFingerprint(person) {
  */
 function backfillSalespersonPinHashes() {
   const summary = { converted: 0, skipped: 0, failed: 0 };
+  // Never touch plaintext rows before the pin_hash migration has applied: on
+  // PB 0.22 this bootstrap hook is not ordered strictly after pending
+  // migrations on an upgraded database, and converting under the old schema
+  // races the people-integrity repair (blanking codes it then re-mints). The
+  // initial conversion happens inside migration 1751300001; this sweep only
+  // catches stragglers written by an old process during the deploy window.
+  try {
+    const collection = $app.dao().findCollectionByNameOrId("salespeople");
+    if (!collection.schema.getFieldByName("pin_hash")) return summary;
+  } catch (_e) {
+    return summary;
+  }
   const BATCH = 500;
   // 10k is the entire four-digit space; anything above it means rows are
   // failing conversion and re-appearing — stop rather than spin.
