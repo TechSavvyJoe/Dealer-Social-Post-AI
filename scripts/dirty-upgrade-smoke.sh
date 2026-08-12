@@ -111,6 +111,8 @@ docker run --rm \
   "$current_image" \
   -c 'chown -R pbuser:pbuser /pb/pb_data'
 
+# ADMIN_DEALER_CODE only exists for base images older than the
+# admin_password migration (1751200000); current images ignore it.
 base_container="$(docker run --detach \
   --env ADMIN_DEALER_CODE="${admin_code}" \
   --env ADMIN_LOGIN_USERNAME=upgrade.admin \

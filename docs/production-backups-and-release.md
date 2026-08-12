@@ -70,21 +70,21 @@ Before the backend-first release, set these GitHub `production` environment vari
 - `TURNSTILE_ENFORCEMENT_ENABLED=false` for the compatibility phase.
 - `LEGACY_CLIENT_COMPATIBILITY_ENABLED=true` for exactly one backend-first release.
 
-Store `FLY_API_TOKEN` in that environment. Install `TURNSTILE_SECRET`, `ADMIN_DEALER_CODE`, `GEMINI_API_KEY`, `VERCEL_TO_FLY_PROXY_SECRET`, `CUSTOMER_HUB_URL`, `CUSTOMER_HUB_SECRET`, `CUSTOMER_HUB_DESTINATION_ID`, and `CUSTOMER_HUB_DEALER_ID` as Fly secrets. The deploy workflow checks that all eight secret names exist; backend readiness proves the proxy credential has a safe length, verifies that the private Customer Hub destination is configured, and refuses every published Turnstile test credential even while enforcement is temporarily disabled.
+Store `FLY_API_TOKEN` in that environment. Install `ADMIN_LOGIN_USERNAME`, `ADMIN_LOGIN_PASSWORD`, `GEMINI_API_KEY`, `TURNSTILE_SECRET`, `VERCEL_TO_FLY_PROXY_SECRET`, `CUSTOMER_HUB_URL`, `CUSTOMER_HUB_SECRET`, `CUSTOMER_HUB_DESTINATION_ID`, and `CUSTOMER_HUB_DEALER_ID` as Fly secrets. The deploy workflow checks that all nine secret names exist; backend readiness proves the proxy credential has a safe length, verifies that the private Customer Hub destination is configured, and refuses every published Turnstile test credential even while enforcement is temporarily disabled.
 
-## Two-phase administrator credential
+## Administrator credential rotation
 
-The old frontend uppercases its admin input, so the backend-first phase needs a temporary 12-character uppercase/digit secret. Keep it only in a password manager or Keychain and Fly. Never persist it in a dealer record, repository, command log, or release evidence. Rotating `ADMIN_DEALER_CODE` invalidates its one-way session fingerprints; also delete existing super-admin and impersonation rows so revocation is immediate rather than lazy.
+The system-administrator account is provisioned and rotated at boot from the `ADMIN_LOGIN_USERNAME` and `ADMIN_LOGIN_PASSWORD` Fly secrets. Keep the password only in a password manager or Keychain and Fly (8–128 characters). Never persist it in a dealer record, repository, command log, or release evidence. Rotating `ADMIN_LOGIN_PASSWORD` changes the account's token key, which invalidates outstanding admin sessions on its own; deleting existing super-admin and impersonation rows as well makes revocation immediate rather than lazy.
 
 ```bash
 set +x
-ADMIN_SECRET_NAME=ADMIN_DEALER_CODE
-TEMP_ADMIN_CODE="$(openssl rand -hex 6 | tr 'a-f' 'A-F')"
-printf '%s=%s\n' "$ADMIN_SECRET_NAME" "$TEMP_ADMIN_CODE" |
+read -r -s -p "New admin password (8-128 chars): " NEW_ADMIN_PASSWORD
+printf '\n'
+printf 'ADMIN_LOGIN_PASSWORD=%s\n' "$NEW_ADMIN_PASSWORD" |
   flyctl secrets import --app dealer-social-post-ai-production
 flyctl ssh console --app dealer-social-post-ai-production --command \
   'sqlite3 /pb/pb_data/data.db "DELETE FROM sessions WHERE role = '\''super_admin'\'' OR is_impersonation = 1;"'
-# Store TEMP_ADMIN_CODE securely for the cutover proof; do not echo it.
+unset NEW_ADMIN_PASSWORD
 ```
 
 ## Automatic production release
@@ -210,37 +210,36 @@ needs a human to look at generated output before customers do.
 
 ## Post-promotion security cutover
 
-Keep a pre-rotation admin session cookie in a permission-restricted temporary cookie jar and retain the temporary admin code only in a protected shell variable. Generate or retrieve a new mixed-case, 12-character alphanumeric secret, validate it without printing, then enable Turnstile and turn off the compatibility bridge in one Fly restart. Mirror the two flags in GitHub for later deploys.
+Keep a pre-rotation admin session cookie in a permission-restricted temporary cookie jar and retain the outgoing admin password only in a protected shell variable. Choose a new 8–128 character password, validate it without printing, then enable Turnstile and turn off the compatibility bridge in one Fly restart. Mirror the two flags in GitHub for later deploys.
 
 ```bash
 set +x
-ADMIN_SECRET_NAME=ADMIN_DEALER_CODE
-read -r -s -p "Final mixed-case 12-character admin code: " FINAL_ADMIN_CODE
+read -r -s -p "Final admin password (8-128 chars): " FINAL_ADMIN_PASSWORD
 printf '\n'
-[[ "$FINAL_ADMIN_CODE" =~ ^[A-Za-z0-9]{12}$ ]]
-[[ "$FINAL_ADMIN_CODE" =~ [A-Z] && "$FINAL_ADMIN_CODE" =~ [a-z] && "$FINAL_ADMIN_CODE" =~ [0-9] ]]
+[[ "${#FINAL_ADMIN_PASSWORD}" -ge 8 && "${#FINAL_ADMIN_PASSWORD}" -le 128 ]]
 
 gh variable set TURNSTILE_ENFORCEMENT_ENABLED --env production --body true
 gh variable set LEGACY_CLIENT_COMPATIBILITY_ENABLED --env production --body false
 {
   printf 'TURNSTILE_ENFORCEMENT_ENABLED=true\n'
   printf 'LEGACY_CLIENT_COMPATIBILITY_ENABLED=false\n'
-  printf '%s=%s\n' "$ADMIN_SECRET_NAME" "$FINAL_ADMIN_CODE"
+  printf 'ADMIN_LOGIN_PASSWORD=%s\n' "$FINAL_ADMIN_PASSWORD"
 } | flyctl secrets import --app dealer-social-post-ai-production
 flyctl ssh console --app dealer-social-post-ai-production --command \
   'sqlite3 /pb/pb_data/data.db "DELETE FROM sessions WHERE role = '\''super_admin'\'' OR is_impersonation = 1 OR admin_secret_fingerprint != '\'''\'';"'
+unset FINAL_ADMIN_PASSWORD
 ```
 
 Prove all of the following before declaring the release complete:
 
-- The previous admin code returns HTTP 401 while the new code succeeds with exact case and fails with altered case.
+- The previous admin password returns HTTP 401 while the new password succeeds with exact case and fails with altered case.
 - The saved pre-rotation admin cookie and every impersonation cookie return HTTP 401 and are cleared.
 - Three known-invalid synthetic codes remain frictionless; the fourth returns `CHALLENGE_REQUIRED`, renders the managed widget, and succeeds only with hostname/action/token validation. Invalid token, wrong hostname/action, and verifier outage are not mislabeled as a bad PIN.
 - An authenticated health response shows Turnstile enforcement enabled, the secret/site key set, trusted proxy configured, legacy compatibility disabled, current contract/policy versions, verified backup state, and no unexpected provider fallback spike.
 
 Failed sign-ins share a 15-minute IP risk bucket. Do not combine the previous-secret/exact-case proof and the three-frictionless-attempt Turnstile proof from the same fresh IP window: use separate clean egress IPs or wait the full window between groups. Wrong-hostname, wrong-action, verifier-outage, and ten-failure lockout negative tests belong in the isolated PocketBase environment; never deliberately break the production verifier secret.
 
-Unset both admin variables after proof and securely delete the temporary cookie jar. Remove the first-release Fly image bootstrap variables as soon as v2 reports its SHA.
+Clear the admin password from your shell after proof and securely delete the temporary cookie jar. Remove the first-release Fly image bootstrap variables as soon as v2 reports its SHA.
 
 ## Monitoring and rollback
 
@@ -266,6 +265,28 @@ Monitor health, recent redacted client-error aggregates, generation fallback rat
   unset RECOVERY_DB
   ```
 
-  Boot that scrubbed copy only with the current mixed-case `ADMIN_DEALER_CODE` supplied from Fly secrets, rerun the exact-case and prior-session rejection proofs, then take and verify a new sanitized archive before switching the production volume. Never restore a rotated credential or a pre-hardening session row.
+  Boot that scrubbed copy only with the current `ADMIN_LOGIN_USERNAME` / `ADMIN_LOGIN_PASSWORD` supplied from Fly secrets, rerun the exact-case and prior-session rejection proofs, then take and verify a new sanitized archive before switching the production volume. Never restore a rotated credential or a pre-hardening session row.
 
 Record the authentication-hardening minimum SHA, Fly release/image digest, compatible Vercel deployment URL, immutable backup object manifest, restore-drill run, canary results, cutover evidence, and rollback targets together. A local backup canary proves tooling; only the source-bound off-box workflow proves production recovery.
+
+## Temporary bridge flags — verify and retire
+
+Two flags were introduced as one-release bridges and must not outlive their purpose. Their
+production values live in GitHub environment variables / Fly secrets, so the repository cannot
+prove they were retired — verify them directly:
+
+```bash
+gh variable list --env production | grep -E 'LEGACY_CLIENT_COMPATIBILITY_ENABLED|ALLOW_FLY_IMAGE_IDENTITY_BOOTSTRAP'
+```
+
+- `LEGACY_CLIENT_COMPATIBILITY_ENABLED` — set `true` only for the single backend-first
+  compatibility release; production must be `false` now. If it still reads `true`, run
+  `gh variable set LEGACY_CLIENT_COMPATIBILITY_ENABLED --env production --body false` and
+  redeploy.
+- `ALLOW_FLY_IMAGE_IDENTITY_BOOTSTRAP` (+ `FLY_IMAGE_IDENTITY_BOOTSTRAP_EXPIRES_AT`) — a
+  first-release escape hatch that weakens backup provenance (attests against a Fly image digest
+  instead of a release SHA). Remove both variables as soon as v2 reports its SHA in
+  `/api/app/health`.
+
+Once both are verified `false`/absent in production, delete the flags from `.env.example`, CI,
+and the workflows in a follow-up release.

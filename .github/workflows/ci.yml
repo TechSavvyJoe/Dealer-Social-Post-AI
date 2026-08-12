@@ -40,6 +40,28 @@ jobs:
           VITE_RELEASE_SHA: ${{ github.sha }}
       - run: npm run security:audit
 
+  # The automation/ package is a self-contained Output.ai + Temporal worker that
+  # requires Node >= 24 while the repo root pins Node 22. It is deliberately
+  # excluded from the root tsconfig/vitest runs (adding it there breaks root
+  # `npm ci`-based CI and therefore blocks Fly deploys, which trigger on CI
+  # success). This job is its verification path — do NOT fold it into
+  # typecheck-and-test.
+  automation-checks:
+    name: automation package (typecheck + vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: automation/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: automation
+      - run: npm run check
+        working-directory: automation
+
   playwright:
     name: Playwright e2e
     runs-on: ubuntu-latest

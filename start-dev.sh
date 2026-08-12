@@ -18,7 +18,8 @@ if [ ! -f .env.local ]; then
 # Server-side only — never prefix AI keys with VITE_.
 
 GEMINI_API_KEY=your-api-key-here
-ADMIN_DEALER_CODE=
+ADMIN_LOGIN_USERNAME=
+ADMIN_LOGIN_PASSWORD=
 
 # Optional cross-provider fallbacks
 # ANTHROPIC_API_KEY=
@@ -58,8 +59,8 @@ else
     echo "✓ GEMINI_API_KEY is configured"
 fi
 
-if [ -z "$ADMIN_DEALER_CODE" ]; then
-    echo "⚠️  ADMIN_DEALER_CODE is unset — readiness will remain unhealthy until you set it."
+if [ -z "$ADMIN_LOGIN_USERNAME" ] || [ -z "$ADMIN_LOGIN_PASSWORD" ]; then
+    echo "⚠️  ADMIN_LOGIN_USERNAME / ADMIN_LOGIN_PASSWORD are unset — the system-admin account will not be provisioned, so super-admin login will fail."
 fi
 
 # Check if node_modules exists

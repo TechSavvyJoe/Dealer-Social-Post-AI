@@ -59,3 +59,4 @@ credentials.json
 *-credentials.json
 .vercel
 .superpowers/
+.playwright-mcp/
