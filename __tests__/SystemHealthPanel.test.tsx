@@ -19,6 +19,7 @@ const healthyPayload = {
     claude_fallback_enabled: false,
     openai_fallback_enabled: false,
     admin_login_configured: true,
+    pin_pepper_configured: true,
     turnstile_enforcement_enabled: true,
     turnstile_secret_set: true,
     turnstile_site_key_set: true,

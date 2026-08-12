@@ -7,12 +7,13 @@
  *   - salespeople.pin_hash stores hs256(pin, SALESPERSON_PIN_PEPPER) as lowercase
  *     hex. The pepper lives only in deployment secrets, so a copied database
  *     cannot be brute-forced across the 10^4 code space.
- *   - The global unique index on pin is replaced by a dealer-scoped unique index
- *     on (dealer, pin_hash). During the compatibility bridge, PIN generation
- *     still enforces global uniqueness in code (see
- *     assertPersonPinAvailableWithDao), so PIN-only login from a stale client
- *     bundle stays unambiguous. Per-dealer reuse unlocks when the bridge is
- *     retired.
+ *   - The global unique index moves from plaintext pin to pin_hash and stays
+ *     GLOBAL for the whole compatibility bridge: while stale client bundles may
+ *     still sign in with a PIN alone, a database-level global constraint is the
+ *     only race-proof guarantee that one code resolves to one person (the
+ *     application-level check-then-insert is not). Per-dealer reuse arrives in
+ *     the release that requires dealer context at login, which swaps this index
+ *     for a (dealer, pin_hash) one.
  *
  * The data backfill deliberately lives in onAfterBootstrap (pb_hooks/main.pb.js)
  * rather than here: it needs the runtime pepper secret and must also sweep any
@@ -47,36 +48,20 @@ migrate(
       return (
         value.indexOf("idx_salespeople_pin`") === -1 &&
         value.indexOf("idx_salespeople_pin ") === -1 &&
-        value.indexOf("idx_salespeople_dealer_pin_hash") === -1
+        value.indexOf("idx_salespeople_pin_hash") === -1
       );
     });
     people.indexes.push(
-      "CREATE UNIQUE INDEX `idx_salespeople_dealer_pin_hash` ON `salespeople` (`dealer`, `pin_hash`) WHERE `pin_hash` != ''",
+      "CREATE UNIQUE INDEX `idx_salespeople_pin_hash` ON `salespeople` (`pin_hash`) WHERE `pin_hash` != ''",
     );
     dao.saveCollection(people);
   },
-  (db) => {
-    const dao = new Dao(db);
-    const people = dao.findCollectionByNameOrId("salespeople");
-
-    const pinField = people.schema.getFieldByName("pin");
-    if (pinField) {
-      pinField.required = true;
-      pinField.options = pinField.options || {};
-      pinField.options.min = 4;
-      pinField.options.max = 4;
-      pinField.options.pattern = "^[0-9]{4}$";
-    }
-
-    people.schema = Array.from(people.schema).filter(
-      (field) => field.name !== "pin_hash",
+  (_db) => {
+    // Forward-only. After the bootstrap backfill the hash is the ONLY
+    // credential material — dropping pin_hash to restore the old schema would
+    // permanently lock out every converted manager and salesperson.
+    throw new Error(
+      "1751300000_person_pin_hash is forward-only: peppered hashes cannot be reverted to plaintext PINs.",
     );
-    people.indexes = Array.from(people.indexes || []).filter(
-      (index) => String(index).indexOf("idx_salespeople_dealer_pin_hash") === -1,
-    );
-    people.indexes.push(
-      "CREATE UNIQUE INDEX `idx_salespeople_pin` ON `salespeople` (`pin`) WHERE `pin` != ''",
-    );
-    dao.saveCollection(people);
   },
 );

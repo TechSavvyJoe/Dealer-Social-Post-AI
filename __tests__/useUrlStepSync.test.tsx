@@ -48,6 +48,39 @@ describe("useUrlStepSync", () => {
     expect(window.location.hash).toBe("#/capture");
   });
 
+  it("keeps ordinary transitions writing history after a Back-driven one", () => {
+    render(<Harness />);
+    act(() => {
+      useAppStore.getState().setStep(AppStep.CUSTOMIZE);
+    });
+    act(() => {
+      popTo("#/capture");
+    });
+    // The popstate marker must not leak into the next UI-driven transition.
+    act(() => {
+      useAppStore.getState().setStep(AppStep.CUSTOMIZE);
+    });
+    expect(window.location.hash).toBe("#/customize");
+  });
+
+  it("refuses URL-driven entry into role-gated dashboards", () => {
+    render(<Harness />);
+    act(() => {
+      useAppStore.setState({ role: "salesperson", step: AppStep.CAPTURE });
+    });
+    act(() => {
+      popTo("#/admin");
+    });
+    expect(useAppStore.getState().step).toBe(AppStep.CAPTURE);
+    expect(window.location.hash).toBe("#/capture");
+
+    act(() => {
+      popTo("#/dealership");
+    });
+    expect(useAppStore.getState().step).toBe(AppStep.CAPTURE);
+    expect(window.location.hash).toBe("#/capture");
+  });
+
   it("never discards a generated result on Back — it restores the URL and surfaces the guard", () => {
     const onBlocked = vi.fn();
     render(<Harness onBlocked={onBlocked} />);

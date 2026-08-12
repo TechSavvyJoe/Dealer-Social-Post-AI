@@ -50,13 +50,13 @@ export const useUrlStepSync = (options?: { onBlockedResultBack?: () => void }) =
   // Forward sync: store → URL.
   useEffect(() => {
     const target = STEP_TO_HASH[step];
-    if (window.location.hash === target.slice(1) || window.location.hash === target) {
-      return;
-    }
-    if (applyingPop.current) {
-      applyingPop.current = false;
-      return;
-    }
+    // Consume the marker unconditionally: a URL-driven transition lands here
+    // with the hash already correct, and leaving the marker set would make
+    // the NEXT ordinary transition skip its history entry.
+    const cameFromPopstate = applyingPop.current;
+    applyingPop.current = false;
+    if (window.location.hash === target) return;
+    if (cameFromPopstate) return;
     if (REPLACE_STEPS.has(step)) {
       window.history.replaceState(null, "", target);
     } else {
@@ -96,6 +96,20 @@ export const useUrlStepSync = (options?: { onBlockedResultBack?: () => void }) =
       if (
         (target === AppStep.RESULT || target === AppStep.GENERATING) &&
         !state.generatedPost
+      ) {
+        window.history.replaceState(null, "", STEP_TO_HASH[current]);
+        return;
+      }
+      // Dashboards are role-gated: a stale history entry (for example #/admin
+      // left behind by impersonation) must not render an unauthorized console.
+      if (target === AppStep.ADMIN && state.role !== "super_admin") {
+        window.history.replaceState(null, "", STEP_TO_HASH[current]);
+        return;
+      }
+      if (
+        target === AppStep.DEALER_ADMIN &&
+        state.role !== "dealer_admin" &&
+        state.role !== "super_admin"
       ) {
         window.history.replaceState(null, "", STEP_TO_HASH[current]);
         return;

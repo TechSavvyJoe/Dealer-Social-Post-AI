@@ -1753,8 +1753,15 @@ describe("Turnstile and route authority contracts", () => {
       resolve(process.cwd(), "pb_migrations/1751300000_person_pin_hash.js"),
       "utf8",
     );
-    expect(migration).toContain("idx_salespeople_dealer_pin_hash");
-    expect(migration).toContain("`dealer`, `pin_hash`");
+    // Global (not dealer-scoped) uniqueness must hold at the database level
+    // while PIN-only login remains possible — the application-level
+    // check-then-insert alone is raceable across dealerships.
+    expect(migration).toContain("idx_salespeople_pin_hash");
+    expect(migration).toContain(
+      "UNIQUE INDEX `idx_salespeople_pin_hash` ON `salespeople` (`pin_hash`)",
+    );
+    // Rolling back would destroy the only credential material.
+    expect(migration).toContain("forward-only");
   });
 
   it("ignores legacy attribution fields and derives identity from the validated session", () => {

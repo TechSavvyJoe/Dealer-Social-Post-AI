@@ -395,59 +395,75 @@ function personPinFingerprint(person) {
  */
 function backfillSalespersonPinHashes() {
   const summary = { converted: 0, skipped: 0, failed: 0 };
-  let rows;
-  try {
-    rows = $app
-      .dao()
-      .findRecordsByFilter("salespeople", "pin != ''", "created", 500, 0, {});
-  } catch (_e) {
-    return summary;
-  }
-  if (!rows || !rows.length) return summary;
-  if (salespersonPinPepper().length < 32) {
-    console.error(
-      "[pin-backfill] SALESPERSON_PIN_PEPPER is missing or too short; " +
-        rows.length +
-        " plaintext access codes remain unhashed.",
-    );
-    summary.skipped = rows.length;
-    return summary;
-  }
-  for (let i = 0; i < rows.length; i++) {
-    const person = rows[i];
+  const BATCH = 500;
+  // 10k is the entire four-digit space; anything above it means rows are
+  // failing conversion and re-appearing — stop rather than spin.
+  const MAX_BATCHES = 25;
+  for (let batch = 0; batch < MAX_BATCHES; batch++) {
+    let rows;
     try {
-      $app.dao().runInTransaction(function (txDao) {
-        const txPerson = txDao.findRecordById("salespeople", person.id);
-        const pin = txPerson.getString("pin");
-        if (!isValidPersonPin(pin)) return;
-        if (isValidPersonPinHash(txPerson.getString("pin_hash"))) {
+      rows = $app
+        .dao()
+        .findRecordsByFilter("salespeople", "pin != ''", "created", BATCH, 0, {});
+    } catch (_e) {
+      return summary;
+    }
+    if (!rows || !rows.length) return summary;
+    if (salespersonPinPepper().length < 32) {
+      console.error(
+        "[pin-backfill] SALESPERSON_PIN_PEPPER is missing or too short; " +
+          rows.length +
+          " plaintext access codes remain unhashed.",
+      );
+      summary.skipped += rows.length;
+      return summary;
+    }
+    let convertedThisBatch = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const person = rows[i];
+      try {
+        $app.dao().runInTransaction(function (txDao) {
+          const txPerson = txDao.findRecordById("salespeople", person.id);
+          const pin = txPerson.getString("pin");
+          if (!isValidPersonPin(pin)) return;
+          if (isValidPersonPinHash(txPerson.getString("pin_hash"))) {
+            txPerson.set("pin", "");
+            txDao.saveRecord(txPerson);
+            return;
+          }
+          txPerson.set("pin_hash", personPinHash(pin));
           txPerson.set("pin", "");
           txDao.saveRecord(txPerson);
-          return;
-        }
-        txPerson.set("pin_hash", personPinHash(pin));
-        txPerson.set("pin", "");
-        txDao.saveRecord(txPerson);
-        const nextFingerprint = personPinFingerprint(txPerson);
-        const sessions = txDao.findRecordsByFilter(
-          "sessions",
-          "person = {:personId}",
-          "created",
-          200,
-          0,
-          { personId: txPerson.id },
-        );
-        for (let j = 0; j < (sessions || []).length; j++) {
-          sessions[j].set("person_pin_fingerprint", nextFingerprint);
-          txDao.saveRecord(sessions[j]);
-        }
-      });
-      summary.converted++;
-    } catch (err) {
-      summary.failed++;
-      console.error("[pin-backfill] failed for person " + person.id + ": " + err);
+          const nextFingerprint = personPinFingerprint(txPerson);
+          const sessions = txDao.findRecordsByFilter(
+            "sessions",
+            "person = {:personId}",
+            "created",
+            200,
+            0,
+            { personId: txPerson.id },
+          );
+          for (let j = 0; j < (sessions || []).length; j++) {
+            sessions[j].set("person_pin_fingerprint", nextFingerprint);
+            txDao.saveRecord(sessions[j]);
+          }
+        });
+        summary.converted++;
+        convertedThisBatch++;
+      } catch (err) {
+        summary.failed++;
+        console.error("[pin-backfill] failed for person " + person.id + ": " + err);
+      }
     }
+    // A batch that converted nothing means only failing rows remain; another
+    // pass would loop on the same records forever.
+    if (convertedThisBatch === 0) return summary;
   }
+  console.error(
+    "[pin-backfill] stopped after " +
+      MAX_BATCHES +
+      " batches with plaintext rows remaining — investigate before relying on the sweep.",
+  );
   return summary;
 }
 

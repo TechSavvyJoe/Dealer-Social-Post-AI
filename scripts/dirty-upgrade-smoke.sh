@@ -230,7 +230,7 @@ duplicate_pin_groups="$(docker exec "$current_container" sqlite3 \
   "SELECT (SELECT COUNT(*) FROM (SELECT pin_hash FROM salespeople WHERE pin_hash != '' GROUP BY pin_hash HAVING COUNT(*) > 1)) + (SELECT COUNT(*) FROM (SELECT pin FROM salespeople WHERE pin != '' GROUP BY pin HAVING COUNT(*) > 1));")"
 unique_partial_index_count="$(docker exec "$current_container" sqlite3 \
   /pb/pb_data/data.db \
-  "SELECT COUNT(*) FROM pragma_index_list('salespeople') WHERE name = 'idx_salespeople_dealer_pin_hash' AND \"unique\" = 1 AND partial = 1;")"
+  "SELECT COUNT(*) FROM pragma_index_list('salespeople') WHERE name = 'idx_salespeople_pin_hash' AND \"unique\" = 1 AND partial = 1;")"
 legacy_manager_repaired_count="$(docker exec "$current_container" sqlite3 \
   /pb/pb_data/data.db \
   "SELECT COUNT(*) FROM salespeople WHERE dealer = 'dirtydealer0001' AND role = 'manager' AND active = 1 AND pin = '' AND length(pin_hash) = 64 AND pin_needs_distribution = 1;")"

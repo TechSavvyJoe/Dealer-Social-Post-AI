@@ -30,6 +30,7 @@ interface HealthPayload {
     claude_fallback_enabled: boolean;
     openai_fallback_enabled: boolean;
     admin_login_configured: boolean;
+    pin_pepper_configured: boolean;
     turnstile_enforcement_enabled: boolean;
     turnstile_secret_set: boolean;
     turnstile_site_key_set: boolean;
@@ -91,6 +92,7 @@ const healthCheckKeys: Array<keyof HealthPayload["checks"]> = [
   "claude_fallback_enabled",
   "openai_fallback_enabled",
   "admin_login_configured",
+  "pin_pepper_configured",
   "turnstile_enforcement_enabled",
   "turnstile_secret_set",
   "turnstile_site_key_set",
@@ -190,6 +192,13 @@ const checkRows: Array<{
     icon: ShieldCheck,
     critical: true,
     hint: "Requires the ADMIN_LOGIN_USERNAME and ADMIN_LOGIN_PASSWORD deployment secrets to provision the administrator account.",
+  },
+  {
+    key: "pin_pepper_configured",
+    label: "Access-code pepper",
+    icon: KeyRound,
+    critical: true,
+    hint: "SALESPERSON_PIN_PEPPER deployment secret. Without it, personal-code sign-in and roster changes fail closed.",
   },
   {
     key: "trusted_proxy_configured",

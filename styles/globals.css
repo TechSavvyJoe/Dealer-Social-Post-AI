@@ -749,11 +749,11 @@
     @apply transition-shadow duration-300 ease-apple;
   }
 
-  /* Interactive card state */
+  /* Interactive card state — border/background emphasis, no glow. */
   .card-interactive {
     @apply cursor-pointer;
-    @apply transition-all duration-200 ease-apple;
-    @apply hover:shadow-glow-primary;
+    @apply transition-colors duration-200 ease-apple;
+    @apply hover:border-strong hover:bg-surface-raised;
     @apply active:scale-[0.98];
   }
 

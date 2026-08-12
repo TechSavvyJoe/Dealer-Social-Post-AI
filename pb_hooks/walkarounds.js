@@ -452,7 +452,6 @@ function sanitizedUploadHeaders(value) {
 function createProject(c, helpers) {
   const context = contextOrResponse(c, helpers);
   if (!context) return;
-  if (!dealerActionAllowed(c, helpers, context, "creation", 12)) return;
   const body = $apis.requestInfo(c).data || {};
   const audience = body.audience || body.audienceMode || body.audience_mode;
   if (audience !== "customer" && audience !== "inventory")
@@ -474,6 +473,10 @@ function createProject(c, helpers) {
   const token = helpers.readSessionToken(c);
   const ownerHash = token ? helpers.hashSessionToken(token) : "";
   if (!ownerHash) return c.json(401, { error: "No active session" });
+  // Charge the shared dealer quota only for a request that will be accepted:
+  // malformed submissions must not be able to exhaust the store's hourly
+  // budget (per-IP throttling in contextOrResponse covers abuse).
+  if (!dealerActionAllowed(c, helpers, context, "creation", 12)) return;
   const collection = $app.dao().findCollectionByNameOrId("walkaround_projects");
   const project = new Record(collection);
   project.set("dealer", context.dealer.id);
@@ -945,7 +948,6 @@ function enqueueTask(dao, project, kind, key, payload) {
 function processProject(c, helpers) {
   const authorized = projectForContext(c, helpers);
   if (!authorized) return;
-  if (!dealerActionAllowed(c, helpers, authorized.context, "processing", 20)) return;
   const project = authorized.project;
   if (
     ["uploaded", "retryable_failed"].indexOf(project.getString("production_state")) ===
@@ -982,6 +984,9 @@ function processProject(c, helpers) {
       error: "Required walkaround release is missing",
       code: "CONSENT_REQUIRED",
     });
+  // Every eligibility gate has passed — only now does the attempt count
+  // against the dealership's hourly processing budget.
+  if (!dealerActionAllowed(c, helpers, authorized.context, "processing", 20)) return;
   const revision = Number(project.get("metadata_revision") || 1);
   const priorTasks = $app
     .dao()
