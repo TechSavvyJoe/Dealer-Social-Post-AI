@@ -35,13 +35,22 @@ export const Header: React.FC<HeaderProps> = ({
   const [showTooltip, setShowTooltip] = useState<string | null>(null);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
 
-  // Track scroll position for enhanced blur effect
+  // Track scroll position for the blur/shadow treatment. On mobile the body
+  // is viewport-pinned and scrolling happens inside #main-content, so bind to
+  // the real scrollport with window as the desktop document-flow fallback.
   useEffect(() => {
+    const scrollport = document.getElementById("main-content");
+    const readOffset = () => (scrollport ? scrollport.scrollTop : window.scrollY);
     const handleScroll = () => {
-      setIsScrolled(window.scrollY > 10);
+      setIsScrolled(readOffset() > 10);
     };
+    const target: HTMLElement | Window = scrollport ?? window;
+    target.addEventListener("scroll", handleScroll, { passive: true });
     window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
+    return () => {
+      target.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("scroll", handleScroll);
+    };
   }, []);
 
   const handleLogout = () => {

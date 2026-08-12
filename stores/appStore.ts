@@ -89,7 +89,6 @@ interface AppState {
   theme: "dark" | "light" | "system";
   preferredStyle: StyleOption;
   preferredTone: ToneOption;
-  compactMode: boolean;
   imageQualityTier: ImageQualityTier;
 
   // Actions
@@ -104,7 +103,6 @@ interface AppState {
       theme: "dark" | "light" | "system";
       preferredStyle: StyleOption;
       preferredTone: ToneOption;
-      compactMode: boolean;
       imageQualityTier: ImageQualityTier;
     }>,
   ) => void;
@@ -227,7 +225,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   theme: "dark",
   preferredStyle: StyleOption.Modern,
   preferredTone: ToneOption.Excited,
-  compactMode: false,
   imageQualityTier: "standard",
 
   applyAuthPayload: (body) => {
@@ -255,7 +252,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         selectedImage: undefined,
         generatedPost: undefined,
         generationParams: undefined,
-        compactMode: preferences.compactMode,
         imageQualityTier: preferences.imageQualityTier,
         theme: preferences.theme,
         preferredStyle: preferences.preferredStyle,
@@ -374,7 +370,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       const newState = { ...state, ...prefs };
       saveSession({
         theme: newState.theme,
-        compactMode: newState.compactMode,
         imageQualityTier: newState.imageQualityTier,
         preferredStyle: newState.preferredStyle,
         preferredTone: newState.preferredTone,
@@ -638,7 +633,6 @@ export const useAppStore = create<AppState>((set, get) => ({
               ? session?.generationParams || null
               : null) as GenerationParams | null,
             step: restoredStep,
-            compactMode: session?.compactMode ?? false,
             imageQualityTier: session?.imageQualityTier ?? "standard",
             ...(session?.theme
               ? { theme: session.theme as "dark" | "light" | "system" }
@@ -672,9 +666,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     } finally {
       // Restore standalone preferences even when the API is unavailable, and
       // always release the blocking startup screen.
-      if (session?.compactMode !== undefined) {
-        set({ compactMode: session.compactMode });
-      }
       if (session?.imageQualityTier) {
         set({ imageQualityTier: session.imageQualityTier });
       }

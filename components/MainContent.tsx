@@ -15,6 +15,7 @@ import {
 } from "../types";
 import { LoadingOverlay } from "./LoadingOverlay";
 import { PageTransition } from "./ui/PageTransition";
+import { ProgressSteps } from "./ProgressSteps";
 import { Button } from "./ui/Button";
 import { Shimmer } from "./ui/Shimmer";
 import type { LoginResult, SessionLoginRequest } from "../stores/appStore";
@@ -458,9 +459,17 @@ export const MainContent: React.FC<MainContentProps> = ({
     }
   };
 
+  const showJourneyProgress =
+    displayedStep === AppStep.CAPTURE ||
+    displayedStep === AppStep.CUSTOMIZE ||
+    displayedStep === AppStep.GENERATING;
+
   return (
     <PageTransition pageKey={String(displayedStep)}>
-      <div className="flex h-full min-h-0 w-full flex-1 flex-col">{stepContent()}</div>
+      <div className="flex h-full min-h-0 w-full flex-1 flex-col">
+        {showJourneyProgress && <ProgressSteps activeStep={displayedStep} />}
+        {stepContent()}
+      </div>
     </PageTransition>
   );
 };

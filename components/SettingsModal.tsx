@@ -8,8 +8,6 @@ import type { ImageQualityTier } from "../types";
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  compactMode: boolean;
-  onToggleCompactMode: (value: boolean) => void;
   imageQualityTier: ImageQualityTier;
   onImageQualityTierChange: (value: ImageQualityTier) => void;
   theme: "dark" | "light" | "system";
@@ -19,8 +17,6 @@ interface SettingsModalProps {
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
-  compactMode,
-  onToggleCompactMode,
   imageQualityTier,
   onImageQualityTierChange,
   theme,
@@ -45,32 +41,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       }
     >
       <div className="space-y-5">
-        <div className="flex items-start gap-3 rounded-2xl border border-hairline bg-fill-subtle p-4">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary-500/25 bg-primary-500/10">
-            <Settings className="w-5 h-5 text-primary-300" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="font-semibold text-surface-50">Compact mode</p>
-            <p className="mt-1 text-sm leading-relaxed text-surface-400">
-              Reduce spacing on desktop for a denser layout.
-            </p>
-          </div>
-          <label className="relative inline-flex h-8 w-14 shrink-0 cursor-pointer items-center">
-            <span className="sr-only">Toggle compact mode</span>
-            <input
-              type="checkbox"
-              checked={compactMode}
-              onChange={(e) => {
-                triggerHapticFeedback();
-                onToggleCompactMode(e.target.checked);
-              }}
-              className="peer sr-only"
-            />
-            <span className="absolute inset-0 rounded-full border border-hairline bg-surface-800 transition-colors peer-checked:bg-primary-600" />
-            <span className="relative ml-1 h-6 w-6 rounded-full bg-white shadow-md transition-transform peer-checked:translate-x-6" />
-          </label>
-        </div>
-
         {/* Sunlight Mode (Theme) */}
         <div className="rounded-2xl border border-hairline bg-fill-subtle p-4">
           <div className="flex items-start gap-3">

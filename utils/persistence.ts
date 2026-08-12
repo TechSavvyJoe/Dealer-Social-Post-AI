@@ -10,7 +10,6 @@ interface PersistedState {
   dealerId?: string;
   step?: number;
   loginTimestamp?: number;
-  compactMode?: boolean;
   imageQualityTier?: "standard" | "studio";
   theme?: string;
   preferredStyle?: string;

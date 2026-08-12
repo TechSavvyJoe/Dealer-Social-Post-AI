@@ -21,7 +21,7 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
 
   return (
     <nav
-      className="w-full max-w-screen-2xl px-2 md:px-4 mx-auto py-3 md:py-4 sticky top-0 z-20 backdrop-blur-md bg-surface-900/70 border-b border-hairline"
+      className="mx-auto w-full max-w-screen-2xl shrink-0 px-2 py-2.5 md:px-4"
       aria-label="Progress"
     >
       <ol className="flex flex-wrap items-center justify-center gap-2 sm:gap-4">

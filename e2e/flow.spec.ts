@@ -1126,4 +1126,18 @@ test.describe("Dealer Social Post AI Flow", () => {
     expect(websitePostCount).toBe(1);
     await expectNoHorizontalOverflow(page);
   });
+
+  test("surfaces the offline banner and clears it on reconnect", async ({
+    page,
+    context,
+  }) => {
+    await page.goto("/");
+    await expect(page.getByText("You're offline", { exact: false })).toHaveCount(0);
+
+    await context.setOffline(true);
+    await expect(page.getByText("You're offline", { exact: false })).toBeVisible();
+
+    await context.setOffline(false);
+    await expect(page.getByText("You're offline", { exact: false })).toHaveCount(0);
+  });
 });

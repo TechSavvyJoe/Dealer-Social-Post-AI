@@ -3,8 +3,10 @@ import { AnimatePresence } from "framer-motion";
 import { Header } from "./components/Header";
 import { ImpersonationBanner } from "./components/ImpersonationBanner";
 import { MainContent } from "./components/MainContent";
+import { OfflineBanner } from "./components/OfflineBanner";
 import { useAppController } from "./hooks/useAppController";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useUrlStepSync } from "./hooks/useUrlStepSync";
 import { AppStep } from "./types";
 import { useToast } from "./components/ui/Toast";
 import { useAppStore } from "./stores/appStore";
@@ -39,7 +41,6 @@ const AppContent: React.FC = () => {
     error,
     preferredStyle,
     preferredTone,
-    compactMode,
     imageQualityTier,
     isRestoringSession,
     setStep,
@@ -110,6 +111,15 @@ const AppContent: React.FC = () => {
   }, [step, theme]);
 
   const toast = useToast();
+
+  // Mirror the step machine into #/step history entries so the platform Back
+  // gesture steps through the flow instead of exiting the installed app.
+  useUrlStepSync({
+    onBlockedResultBack: () =>
+      toast.info(
+        "Unsaved creative in progress. Click 'Start Over' or 'Remix' to exit.",
+      ),
+  });
 
   // Power-user shortcuts. Step-aware so each key does the smart thing where you are.
   useKeyboardShortcuts({
@@ -186,6 +196,7 @@ const AppContent: React.FC = () => {
         color: "rgb(var(--color-text-primary))",
       }}
     >
+      <OfflineBanner />
       {isImpersonating && <ImpersonationBanner />}
       {currentDealer && (step !== AppStep.RESULT || isDesktopLayout) && (
         <Header
@@ -289,10 +300,8 @@ const AppContent: React.FC = () => {
         <LazySettingsModal
           isOpen={isSettingsOpen}
           onClose={() => setIsSettingsOpen(false)}
-          compactMode={compactMode}
           imageQualityTier={imageQualityTier}
           theme={theme}
-          onToggleCompactMode={(value) => setPreferences({ compactMode: value })}
           onImageQualityTierChange={(value) =>
             setPreferences({ imageQualityTier: value })
           }
