@@ -488,15 +488,12 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-surface-900/60 border border-surface-800 rounded-2xl p-4 sm:p-6 space-y-6 shadow-elevation-2 backdrop-blur-xl"
+      className="rounded-lg border border-hairline bg-surface-overlay p-4 sm:p-6 space-y-6"
     >
       <div className="flex items-center gap-3">
         <div
           className="h-8 w-1.5 rounded-full"
-          style={{
-            background:
-              "linear-gradient(180deg, var(--brand-primary-400), var(--brand-primary))",
-          }}
+          style={{ background: "var(--brand-primary)" }}
           aria-hidden="true"
         />
         <div>
@@ -1100,15 +1097,12 @@ export const DealerTeamCard: React.FC = () => {
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-surface-900/60 border border-surface-800 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
+      className="rounded-lg border border-hairline bg-surface-overlay p-4 sm:p-6 space-y-4"
     >
       <div className="flex items-center gap-3">
         <div
           className="h-8 w-1.5 rounded-full"
-          style={{
-            background:
-              "linear-gradient(180deg, var(--brand-primary-400), var(--brand-primary))",
-          }}
+          style={{ background: "var(--brand-primary)" }}
           aria-hidden="true"
         />
         <div>
