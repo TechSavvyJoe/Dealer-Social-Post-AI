@@ -128,6 +128,47 @@ describe("Vehicle Walkaround PocketBase boundary", () => {
     }
   });
 
+  it("binds worker signatures to method, path, idempotency key, and a nonce", () => {
+    const hooks = read("pb_hooks/walkarounds.js");
+
+    // v2 message layout — must stay byte-identical to the automation signer
+    // (automation/src/shared/clients/backend.ts signWalkaroundRequest, covered
+    // by automation/src/shared/clients/backend.test.ts).
+    const v2Pieces = [
+      '"v2." +',
+      "timestamp +",
+      "nonce +",
+      "method +",
+      "path +",
+      "idempotency +",
+      "bodyHash,",
+    ];
+    for (const piece of v2Pieces) {
+      expect(hooks).toContain(piece);
+    }
+    expect(hooks).toContain('c.request().header.get("X-Walkaround-Nonce")');
+    expect(hooks).toContain('c.request().header.get("X-Walkaround-Signature-Version")');
+    expect(hooks).toContain("c.request().method");
+    expect(hooks).toContain("c.request().url.path");
+
+    // Verified nonces are single-use inside the freshness window, and only
+    // verified nonces enter the cache.
+    expect(hooks).toContain("_seenWalkaroundNonces");
+    expect(hooks).toContain('return deny("replayed nonce")');
+    const markIndex = hooks.indexOf("_seenWalkaroundNonces[nonce] = Date.now()");
+    const verifyIndex = hooks.indexOf('return deny("signature mismatch")');
+    expect(markIndex).toBeGreaterThan(verifyIndex);
+
+    // Legacy v1 stays behind a kill switch scheduled for removal.
+    expect(hooks).toContain("WALKAROUND_SIGNATURE_V1_ALLOWED");
+
+    // Rejections are audited and both surfaces are rate limited.
+    expect(hooks).toContain('"walkaround_internal_unauthorized"');
+    expect(hooks).toContain('"walkaround-internal:" + helpers.clientIP(c)');
+    expect(hooks).toContain('"walkaround-app:" + helpers.clientIP(c)');
+    expect(hooks).toContain('dealerActionAllowed(c, helpers, context, "creation"');
+  });
+
   it("requires a signed release for every customer-audience capture", () => {
     const hook = read("pb_hooks/walkarounds.js");
     const gate = hook.slice(

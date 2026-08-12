@@ -107,12 +107,70 @@ function contextOrResponse(c, helpers) {
     });
     return null;
   }
+  // Single choke point for every walkaround app route. Same in-process bucket
+  // semantics as /api/proxy/*.
+  try {
+    const rate = helpers.checkProxyRateLimit(
+      "walkaround-app:" + helpers.clientIP(c),
+      120,
+      60 * 1000,
+    );
+    if (!rate.ok) {
+      try {
+        helpers.logCoalescedAuthEvent(
+          "walkaround_rate_limited",
+          {
+            ip: helpers.clientIP(c),
+            userAgent: helpers.userAgent(c),
+            detail: "app route window exceeded",
+          },
+          15 * 60,
+          30,
+        );
+      } catch (_e) {}
+      c.json(429, {
+        error: "Too many requests",
+        retry_after_seconds: Math.ceil((rate.retryAfterMs || 1000) / 1000),
+      });
+      return null;
+    }
+  } catch (_e) {}
   const context = helpers.sessionContext(c);
   if (!context || !context.person || bool(context.dealer, "is_system")) {
     c.json(401, { error: "No active dealer person session" });
     return null;
   }
   return context;
+}
+
+/**
+ * Tighter per-dealer window for the routes that authorize real spend
+ * (project creation → 10 GB of signed uploads; processing → a Temporal
+ * workflow with Vertex/Shotstack/Auphonic cost). Returns true when allowed.
+ */
+function dealerActionAllowed(c, helpers, context, action, maxPerHour) {
+  try {
+    const dealerId =
+      context && context.dealer && context.dealer.id
+        ? context.dealer.id.toString()
+        : "unknown";
+    const rate = helpers.checkProxyRateLimit(
+      "walkaround-" + action + ":" + dealerId,
+      maxPerHour,
+      60 * 60 * 1000,
+    );
+    if (!rate.ok) {
+      c.json(429, {
+        error:
+          "This dealership has reached its hourly walkaround " +
+          action +
+          " limit. Try again later.",
+        retry_after_seconds: Math.ceil((rate.retryAfterMs || 1000) / 1000),
+      });
+      return false;
+    }
+  } catch (_e) {}
+  return true;
 }
 
 function projectForContext(c, helpers, options) {
@@ -394,6 +452,7 @@ function sanitizedUploadHeaders(value) {
 function createProject(c, helpers) {
   const context = contextOrResponse(c, helpers);
   if (!context) return;
+  if (!dealerActionAllowed(c, helpers, context, "creation", 12)) return;
   const body = $apis.requestInfo(c).data || {};
   const audience = body.audience || body.audienceMode || body.audience_mode;
   if (audience !== "customer" && audience !== "inventory")
@@ -886,6 +945,7 @@ function enqueueTask(dao, project, kind, key, payload) {
 function processProject(c, helpers) {
   const authorized = projectForContext(c, helpers);
   if (!authorized) return;
+  if (!dealerActionAllowed(c, helpers, authorized.context, "processing", 20)) return;
   const project = authorized.project;
   if (
     ["uploaded", "retryable_failed"].indexOf(project.getString("production_state")) ===
@@ -1625,13 +1685,70 @@ function rawRequestBody(c) {
   }
 }
 
+/**
+ * Nonces already accepted inside the freshness window. Best-effort process
+ * state with the same semantics as every rate-limit bucket in this backend
+ * (per process, reset on restart); the authoritative anti-replay controls are
+ * the v2 signature's method+path+idempotency binding plus per-route
+ * idempotency dedupe on mutations.
+ */
+const _seenWalkaroundNonces = {};
+let _lastNoncePrune = 0;
+
+function pruneSeenWalkaroundNonces(now) {
+  if (now - _lastNoncePrune < 60 * 1000) return;
+  _lastNoncePrune = now;
+  const keys = Object.keys(_seenWalkaroundNonces);
+  for (let i = 0; i < keys.length; i++) {
+    if (_seenWalkaroundNonces[keys[i]] <= now) delete _seenWalkaroundNonces[keys[i]];
+  }
+}
+
 function internalAuth(c, rawBody) {
   if (!featureEnabled()) return null;
+  let helpers = null;
+  try {
+    helpers = require(__hooks + "/helpers.js");
+  } catch (_e) {
+    return null;
+  }
+  const deny = function (detail) {
+    // Parity with /api/proxy/*: rejected worker calls become coalesced audit
+    // rows instead of a silent null, so a brute-force against the internal
+    // surface is visible.
+    try {
+      helpers.logCoalescedAuthEvent(
+        "walkaround_internal_unauthorized",
+        {
+          ip: helpers.clientIP(c),
+          userAgent: helpers.userAgent(c),
+          detail: detail,
+        },
+        15 * 60,
+        30,
+      );
+    } catch (_e) {}
+    return null;
+  };
+  try {
+    // The internal surface is publicly reachable (Fly origin + Vercel /api
+    // rewrite); throttle before any comparison work.
+    const rate = helpers.checkProxyRateLimit(
+      "walkaround-internal:" + helpers.clientIP(c),
+      300,
+      60 * 1000,
+    );
+    if (!rate.ok) return deny("rate limited");
+  } catch (_e) {
+    return null;
+  }
   let token = "",
     secret = "",
     authorization = "",
     timestamp = "",
     signature = "",
+    signatureVersion = "",
+    nonce = "",
     idempotency = "";
   try {
     token = ($os.getenv("WALKAROUND_WORKER_TOKEN") || "").toString();
@@ -1639,6 +1756,12 @@ function internalAuth(c, rawBody) {
     authorization = (c.request().header.get("Authorization") || "").toString();
     timestamp = (c.request().header.get("X-Walkaround-Timestamp") || "").toString();
     signature = (c.request().header.get("X-Walkaround-Signature") || "")
+      .toString()
+      .toLowerCase();
+    signatureVersion = (c.request().header.get("X-Walkaround-Signature-Version") || "")
+      .toString()
+      .trim();
+    nonce = (c.request().header.get("X-Walkaround-Nonce") || "")
       .toString()
       .toLowerCase();
     idempotency = (c.request().header.get("Idempotency-Key") || "").toString();
@@ -1658,21 +1781,77 @@ function internalAuth(c, rawBody) {
     suppliedToken.length !== token.length ||
     $security.sha256(suppliedToken) !== $security.sha256(token)
   )
-    return null;
+    return deny("bearer mismatch");
   const seconds = Number(timestamp);
   if (
     !Number.isInteger(seconds) ||
     Math.abs(Math.floor(Date.now() / 1000) - seconds) > 300
   )
-    return null;
-  const expected = ($security.hs256(timestamp + "." + rawBody, secret) || "")
-    .toString()
-    .toLowerCase();
+    return deny("stale timestamp");
+  let expected = "";
+  if (signatureVersion === "2") {
+    // v2 binds the signature to everything the handler will trust: method,
+    // exact path (so a captured signed-read cannot mint URLs for another
+    // project), the idempotency key (so a captured claim cannot re-lease
+    // with a fresh key), and a single-use nonce.
+    if (!/^[a-f0-9]{32}$/.test(nonce)) return deny("malformed nonce");
+    const now = Date.now();
+    pruneSeenWalkaroundNonces(now);
+    if (_seenWalkaroundNonces[nonce] && _seenWalkaroundNonces[nonce] > now) {
+      return deny("replayed nonce");
+    }
+    let method = "";
+    let path = "";
+    try {
+      method = (c.request().method || "").toString().toUpperCase();
+      path = (c.request().url.path || "").toString();
+    } catch (_e) {
+      return deny("request introspection failed");
+    }
+    if (!method || !path) return deny("request introspection failed");
+    const bodyHash = ($security.sha256(rawBody) || "").toString().toLowerCase();
+    expected = (
+      $security.hs256(
+        "v2." +
+          timestamp +
+          "." +
+          nonce +
+          "." +
+          method +
+          "." +
+          path +
+          "." +
+          idempotency +
+          "." +
+          bodyHash,
+        secret,
+      ) || ""
+    )
+      .toString()
+      .toLowerCase();
+  } else {
+    // Legacy v1 covers only timestamp+body. Allowed for one release while the
+    // worker fleet updates; flip WALKAROUND_SIGNATURE_V1_ALLOWED=false, then
+    // delete this branch.
+    const v1Allowed =
+      ($os.getenv("WALKAROUND_SIGNATURE_V1_ALLOWED") || "true")
+        .toString()
+        .trim()
+        .toLowerCase() !== "false";
+    if (!v1Allowed) return deny("v1 signature rejected");
+    expected = ($security.hs256(timestamp + "." + rawBody, secret) || "")
+      .toString()
+      .toLowerCase();
+  }
   if (
     !/^[a-f0-9]{64}$/.test(signature) ||
     $security.sha256(signature) !== $security.sha256(expected)
   )
-    return null;
+    return deny("signature mismatch");
+  if (signatureVersion === "2") {
+    // Mark only verified nonces so garbage requests cannot poison the cache.
+    _seenWalkaroundNonces[nonce] = Date.now() + 10 * 60 * 1000;
+  }
   return { idempotencyKey: idempotency };
 }
 

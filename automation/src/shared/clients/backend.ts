@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 
 import { credentials } from "@outputai/credentials";
 import { FatalError } from "@outputai/core";
@@ -25,6 +25,48 @@ function backendConfig() {
   };
 }
 
+/**
+ * v2 signing contract, mirrored by `internalAuth` in pb_hooks/walkarounds.js:
+ *
+ *   message   = "v2." + timestamp + "." + nonce + "." + METHOD + "." + path
+ *               + "." + idempotencyKey + "." + sha256hex(rawBody)
+ *   signature = hmacSha256Hex(message, signingSecret)
+ *
+ * Binding the method, exact request path, and idempotency key into the
+ * signature means a captured request cannot be replayed against another
+ * project/asset path or re-leased with a fresh idempotency key; the
+ * single-use nonce closes exact replay inside the freshness window.
+ */
+export function signWalkaroundRequest(options: {
+  method: string;
+  path: string;
+  rawBody: string;
+  idempotencyKey?: string;
+  signingSecret: string;
+  timestamp?: string;
+  nonce?: string;
+}): { timestamp: string; nonce: string; signature: string } {
+  const timestamp = options.timestamp ?? String(Math.floor(Date.now() / 1000));
+  const nonce = options.nonce ?? randomBytes(16).toString("hex");
+  const bodyHash = createHash("sha256").update(options.rawBody).digest("hex");
+  const canonicalPath = options.path.startsWith("/")
+    ? options.path
+    : `/${options.path}`;
+  const message = [
+    "v2",
+    timestamp,
+    nonce,
+    options.method.toUpperCase(),
+    canonicalPath,
+    options.idempotencyKey ?? "",
+    bodyHash,
+  ].join(".");
+  const signature = createHmac("sha256", options.signingSecret)
+    .update(message)
+    .digest("hex");
+  return { timestamp, nonce, signature };
+}
+
 async function request<T>(
   method: Method,
   path: string,
@@ -33,10 +75,13 @@ async function request<T>(
 ): Promise<T> {
   const config = backendConfig();
   const rawBody = body === undefined ? "" : JSON.stringify(body);
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const signature = createHmac("sha256", config.signingSecret)
-    .update(`${timestamp}.${rawBody}`)
-    .digest("hex");
+  const { timestamp, nonce, signature } = signWalkaroundRequest({
+    method,
+    path,
+    rawBody,
+    idempotencyKey,
+    signingSecret: config.signingSecret,
+  });
   const client = httpClient({
     prefixUrl: config.baseUrl,
     timeout: 30_000,
@@ -44,6 +89,8 @@ async function request<T>(
     headers: {
       authorization: `Bearer ${config.bearerToken}`,
       "x-walkaround-timestamp": timestamp,
+      "x-walkaround-nonce": nonce,
+      "x-walkaround-signature-version": "2",
       "x-walkaround-signature": signature,
       ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
     },
