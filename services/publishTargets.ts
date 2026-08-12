@@ -705,12 +705,49 @@ export const openPreparedTarget = (
 /**
  * Publish via the appropriate path for this target.
  */
+/**
+ * The seam a future direct API slots into. Every target today is a
+ * client-side handoff (share sheet / clipboard / intent URL); when a
+ * platform's OAuth broker lands, its adapter becomes `direct` and ONLY the
+ * publish path changes — tiles, captions, compliance budgeting, and status
+ * reporting stay identical. UI must branch on `adapter.kind`, never on
+ * platform ids.
+ */
+export type PublishAdapter =
+  | { kind: "handoff"; target: PublishTarget }
+  | {
+      kind: "direct";
+      target: PublishTarget;
+      /** Starts the OAuth connect flow for this platform. */
+      connect: () => Promise<void>;
+      /** Publishes through the platform API; same status vocabulary. */
+      publish: (content: PublishContent) => Promise<PublishStatus>;
+    };
+
+export const adapterFor = (targetId: string): PublishAdapter | null => {
+  const target = findTarget(targetId);
+  if (!target) return null;
+  // All ten registry targets are handoffs today; directApiConnected is the
+  // flag a wired broker will flip per-target.
+  return { kind: "handoff", target };
+};
+
 export const publishTo = async (
   targetId: string,
   content: PublishContent,
 ): Promise<PublishStatus> => {
   const target = findTarget(targetId);
   if (!target) return { kind: "error", message: "Unknown publish target" };
+
+  // Every handoff needs the network (share payloads, intent URLs, app
+  // stores' auth); fail honestly before any half-working share sheet opens.
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return {
+      kind: "error",
+      message:
+        "You're offline. Your post is saved on this device — reconnect to share it.",
+    };
+  }
 
   try {
     const file = await buildShareFile(target, content);
