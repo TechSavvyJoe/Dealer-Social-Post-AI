@@ -191,7 +191,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
               onClick={() => setCategory(cat)}
               className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
                 category === cat
-                  ? "border-primary-400 bg-primary-500/20 text-white shadow-glow-primary"
+                  ? "border-primary-400 bg-primary-500/20 text-white"
                   : "border-white/15 text-white/70 hover:border-primary-300/60 hover:bg-white/5"
               }`}
             >
@@ -248,7 +248,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
               key={style.id}
               className={`relative px-3 py-2.5 rounded-lg border transition-all text-left group ${
                 selectedStyle === style.id
-                  ? "border-primary-400 bg-primary-500/20 shadow-glow-primary"
+                  ? "border-primary-400 bg-primary-500/20"
                   : "border-white/10 bg-white/5 hover:border-white/30 hover:bg-white/10"
               }`}
               whileHover={{ scale: 1.02 }}

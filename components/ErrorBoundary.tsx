@@ -157,7 +157,7 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-surface-950 p-4">
-          <div className="glass-card p-8 max-w-lg w-full text-center border border-red-500/30 rounded-2xl bg-surface-900/80 backdrop-blur-xl">
+          <div className="p-8 max-w-lg w-full text-center border border-error-500/30 rounded-lg bg-surface-overlay shadow-elevation-3">
             <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
               <svg
                 className="w-8 h-8 text-red-400"

@@ -963,7 +963,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       className={cn(
                         "relative flex items-center gap-2 rounded-xl border px-3 py-3 text-left transition-all overflow-hidden",
                         isActive
-                          ? "border-primary-400 bg-primary-500/20 shadow-glow-primary"
+                          ? "border-primary-400 bg-primary-500/20"
                           : "border-white/10 bg-white/5 hover:border-primary-400/30 hover:bg-white/10",
                       )}
                       whileTap={{ scale: 0.98 }}
@@ -1376,7 +1376,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       className={cn(
                         "relative flex items-center gap-1.5 rounded-full border px-4 py-2 whitespace-nowrap transition-all flex-shrink-0 snap-center",
                         isActive
-                          ? "border-success-400 bg-success-500/20 shadow-glow-success"
+                          ? "border-success-400 bg-success-500/20"
                           : "border-white/10 bg-white/5 hover:border-success-400/30 hover:bg-white/10",
                       )}
                       whileTap={{ scale: 0.95 }}
