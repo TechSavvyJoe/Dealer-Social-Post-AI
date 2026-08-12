@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
-import { Icon } from "./Icons";
+import { AlertTriangle, RefreshCw, RotateCcw } from "lucide-react";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Button } from "./ui/Button";
 import { Modal } from "./ui/Modal";
@@ -170,7 +170,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
       >
         <div className="flex flex-col items-center justify-center text-center">
           <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-error-500/30 bg-error-500/10">
-            <Icon type="error" className="w-8 h-8 text-error-300" />
+            <AlertTriangle className="w-8 h-8 text-error-300" />
           </div>
           <p className="text-error-100 text-base leading-relaxed">{error}</p>
           <Button onClick={handleClose} className="mt-6">
@@ -221,7 +221,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
             className="absolute top-3 left-3 border-white/15 bg-surface-950/60 text-surface-50 hover:bg-surface-900/80"
             aria-label="Flip camera"
           >
-            <Icon type="restart" className="w-6 h-6" />
+            <RotateCcw className="w-6 h-6" />
           </Button>
         </div>
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4">
@@ -232,7 +232,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
             variant="outline"
             size="icon"
           >
-            <Icon type="retake" className="w-6 h-6" />
+            <RefreshCw className="w-6 h-6" />
           </Button>
           <button
             onClick={handleCapture}

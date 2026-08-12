@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, memo } from "react";
-import { Icon } from "./Icons";
+import { AlertTriangle, Camera, Upload } from "lucide-react";
 import { fileToNormalizedDataUrl } from "../utils/imageUtils";
 import { WebcamCapture } from "./WebcamCapture";
 import { triggerHapticFeedback } from "../utils/haptics";
@@ -148,7 +148,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
   if (error) {
     return (
       <div className="w-full h-full flex flex-col items-center justify-center bg-error-900/25 border border-error-700/50 text-error-200 p-8 text-center rounded-2xl">
-        <Icon type="error" className="w-16 h-16 text-error-300 mb-4" />
+        <AlertTriangle className="w-16 h-16 text-error-300 mb-4" />
         <p className="text-error-100 text-lg">{error}</p>
         <Button
           variant="primary"
@@ -256,7 +256,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
           {isDraggingOver && (
             <div className="absolute inset-4 z-10 grid place-items-center rounded-2xl border-2 border-dashed border-primary-300 bg-primary-950/85 pointer-events-none">
               <div className="text-center">
-                <Icon type="upload" className="mx-auto h-10 w-10 text-primary-200" />
+                <Upload className="mx-auto h-10 w-10 text-primary-200" />
                 <p className="mt-3 text-lg font-semibold text-white">Drop image here</p>
               </div>
             </div>
@@ -273,7 +273,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
           />
           <div className="relative max-w-sm text-center">
             <div className="mx-auto grid h-20 w-20 place-items-center rounded-full border border-white/15 bg-white/[0.04] shadow-[0_20px_70px_rgba(0,0,0,0.5)]">
-              <Icon type="camera" className="h-8 w-8 text-primary-200" />
+              <Camera className="h-8 w-8 text-primary-200" />
             </div>
             <p className="mt-6 text-xl font-semibold tracking-tight text-surface-50">
               Ready for the delivery moment
@@ -302,7 +302,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
                 disabled={isProcessing}
                 fullWidth
                 size="lg"
-                leftIcon={<Icon type="camera" className="h-5 w-5" />}
+                leftIcon={<Camera className="h-5 w-5" />}
               >
                 Take photo
               </Button>
@@ -312,7 +312,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
                 variant="outline"
                 fullWidth
                 size="lg"
-                leftIcon={<Icon type="upload" className="h-5 w-5" />}
+                leftIcon={<Upload className="h-5 w-5" />}
               >
                 Choose from device
               </Button>

@@ -1,5 +1,5 @@
 import React from "react";
-import { Icon } from "./Icons";
+import { Settings, Sparkles } from "lucide-react";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Button } from "./ui/Button";
 import { Modal } from "./ui/Modal";
@@ -47,7 +47,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       <div className="space-y-5">
         <div className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary-500/25 bg-primary-500/10">
-            <Icon type="settings" className="w-5 h-5 text-primary-300" />
+            <Settings className="w-5 h-5 text-primary-300" />
           </div>
           <div className="min-w-0 flex-1">
             <p className="font-semibold text-surface-50">Compact mode</p>
@@ -75,7 +75,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
           <div className="flex items-start gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary-500/25 bg-primary-500/10">
-              <Icon type="sparkles" className="h-5 w-5 text-primary-300" />
+              <Sparkles className="h-5 w-5 text-primary-300" />
             </div>
             <div>
               <p className="font-semibold text-surface-50">Theme (Sunlight Mode)</p>
@@ -114,7 +114,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
           <div className="flex items-start gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary-500/25 bg-primary-500/10">
-              <Icon type="sparkles" className="h-5 w-5 text-primary-300" />
+              <Sparkles className="h-5 w-5 text-primary-300" />
             </div>
             <div>
               <p className="font-semibold text-surface-50">Image quality</p>

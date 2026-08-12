@@ -1,5 +1,5 @@
 import React from "react";
-import { Icon } from "./Icons";
+import { Delete } from "lucide-react";
 import { cn } from "../utils/classNames";
 
 export type DialpadKey =
@@ -94,7 +94,7 @@ export const Dialpad: React.FC<DialpadProps> = ({ onKeyPress }) => (
         onClick={() => onKeyPress("backspace")}
         ariaLabel="Delete last digit"
       >
-        <Icon type="backspace" className="h-[1.35em] w-[1.35em]" />
+        <Delete className="h-[1.35em] w-[1.35em]" />
       </DialpadButton>
     </div>
   </div>

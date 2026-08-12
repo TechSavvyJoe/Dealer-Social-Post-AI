@@ -1,5 +1,4 @@
 import React, { useEffect, memo } from "react";
-import { Icon } from "./Icons";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";

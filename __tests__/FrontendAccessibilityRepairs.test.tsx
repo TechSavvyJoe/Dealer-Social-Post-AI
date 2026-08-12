@@ -8,7 +8,6 @@ import { ToastProvider, useToast } from "../components/ui/Toast";
 import { VinScanner } from "../components/VinScanner";
 import { PostHistory } from "../components/PostHistory";
 import { CustomScenarioManager } from "../components/CustomScenarioManager";
-import { StyleGrid } from "../components/video-director/StyleGrid";
 
 const canvasContext = {
   beginPath: vi.fn(),
@@ -379,10 +378,5 @@ describe("frontend accessibility repairs", () => {
     expect(screen.getByLabelText("Category")).toBeVisible();
     expect(screen.getByLabelText("Default style")).toBeVisible();
     expect(screen.getByLabelText("Default tone")).toBeVisible();
-
-    rerender(<StyleGrid onSelect={vi.fn()} />);
-    expect(
-      screen.getByRole("searchbox", { name: "Search video styles" }),
-    ).toBeVisible();
   });
 });

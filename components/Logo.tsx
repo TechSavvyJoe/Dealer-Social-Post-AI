@@ -1,9 +1,11 @@
 import React from "react";
 
 /**
- * Product identity: a salesperson and customer share a vehicle-delivery moment
- * inside a social-post card, with a restrained AI polish point. The full
- * canonical name remains readable at narrow-phone sizes.
+ * Product identity: the car-roofline mark — the same geometry as
+ * public/brand-mark.svg and every PWA/app icon — inlined so the tile can
+ * follow the dealer's white-label brand color, beside the product wordmark.
+ * The wordmark reads through the theme's primary text token so it works in
+ * both Sunlight Mode and dark.
  */
 export const Logo: React.FC<{ className?: string }> = ({
   className = "h-auto w-52",
@@ -16,28 +18,22 @@ export const Logo: React.FC<{ className?: string }> = ({
     aria-label="Dealer Social Post AI"
   >
     <g transform="scale(.3666667)" aria-hidden="true">
-      <rect width="120" height="120" rx="28" fill="#07101f" />
-      <rect x="8" y="8" width="104" height="104" rx="23" fill="#4f7cff" />
-      <rect x="15" y="15" width="90" height="90" rx="17" fill="#07101f" />
-      <path d="M33 81 39 61q2-6 8-6h26q6 0 8 6l6 20v8H33Z" fill="#4f7cff" />
-      <path d="m46 61-4 12h36l-4-12Z" fill="#f8fafc" />
-      <rect x="38" y="77" width="9" height="5" rx="2.5" fill="#f8fafc" />
-      <rect x="73" y="77" width="9" height="5" rx="2.5" fill="#f8fafc" />
-      <rect x="48" y="84" width="24" height="3" rx="1.5" fill="#cbdcff" />
-      <circle cx="24" cy="48" r="7" fill="#f8fafc" />
-      <path d="M16 88V66q0-9 8-9h1q8 0 8 9v22Z" fill="#f8fafc" />
-      <path d="m30 61 23-15 5 8-25 18Z" fill="#f8fafc" />
-      <circle cx="96" cy="48" r="7" fill="#cbdcff" />
-      <path d="M87 88V66q0-9 8-9h1q8 0 8 9v22Z" fill="#cbdcff" />
-      <path d="m90 61-23-15-5 8 25 18Z" fill="#cbdcff" />
-      <circle cx="60" cy="48" r="5" fill="#67e8f9" />
-      <circle cx="60" cy="48" r="2.3" fill="#07101f" />
-      <rect x="58.5" y="53" width="3" height="9" rx="1.5" fill="#67e8f9" />
-      <path d="m60 61 5 4-5 4-3-3 3-2-3-2Z" fill="#67e8f9" />
-      <rect x="18" y="92" width="84" height="3" rx="1.5" fill="#26334a" />
-      <circle cx="24" cy="101" r="4" fill="#4f7cff" />
-      <rect x="33" y="98" width="32" height="6" rx="3" fill="#26334a" />
-      <path d="m93 19 3 8 8 3-8 3-3 8-3-8-8-3 8-3Z" fill="#67e8f9" />
+      <rect width="120" height="120" rx="26" fill="var(--brand-primary, #1e40af)" />
+      <g transform="scale(0.234375)">
+        <path
+          d="M96 344 v-16 c0 -22 12 -36 33 -42 l50 -92 c16 -29 39 -43 70 -43 h54 c31 0 54 14 70 43 l50 92 c21 6 33 20 33 42 v16 z"
+          fill="#f8fafc"
+        />
+        <path
+          d="M196 268 l30 -55 c8 -14 18 -20 32 -20 h-6 v75 z"
+          fill="var(--brand-primary, #1e40af)"
+        />
+        <path d="M246 193 h20 v75 h-20 z" fill="var(--brand-primary, #1e40af)" />
+        <path
+          d="M286 268 v-75 h-6 c14 0 24 6 32 20 l30 55 z"
+          fill="var(--brand-primary, #1e40af)"
+        />
+      </g>
     </g>
     <text
       x="56"
@@ -46,7 +42,7 @@ export const Logo: React.FC<{ className?: string }> = ({
       fontSize="18"
       fontWeight="800"
       letterSpacing="-0.5"
-      fill="#f8fafc"
+      fill="rgb(var(--color-text-primary, 244 247 252))"
     >
       Dealer Social Post AI
     </text>

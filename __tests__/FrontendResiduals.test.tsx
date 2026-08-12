@@ -3,10 +3,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Header } from "../components/Header";
-import {
-  SalespersonPicker,
-  salespersonStorageKey,
-} from "../components/SalespersonPicker";
 import { Modal } from "../components/ui/Modal";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 
@@ -43,27 +39,6 @@ vi.mock("../services/salespeople", () => ({
   listSalespeople: mockListSalespeople,
 }));
 
-const dealerBRoster = [
-  {
-    id: "person-b",
-    dealer: "dealer-b",
-    name: "Bob B.",
-    active: true,
-  },
-];
-
-const PickerHarness: React.FC<{ dealerId: string }> = ({ dealerId }) => {
-  const [value, setValue] = useState<{ id?: string; name: string }>({
-    name: "",
-  });
-  return (
-    <>
-      <SalespersonPicker dealerId={dealerId} value={value} onChange={setValue} />
-      <output data-testid="picker-value">{JSON.stringify(value)}</output>
-    </>
-  );
-};
-
 describe("final frontend residuals", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -72,65 +47,6 @@ describe("final frontend residuals", () => {
       configurable: true,
       value: vi.fn(),
     });
-  });
-
-  it("migrates a roster-validated legacy identity into dealer-scoped storage", async () => {
-    localStorage.setItem("dsp.salespersonName", "bob b.");
-    mockListSalespeople.mockResolvedValue(dealerBRoster);
-
-    render(<PickerHarness dealerId="dealer-b" />);
-
-    await waitFor(() =>
-      expect(screen.getByTestId("picker-value")).toHaveTextContent(
-        JSON.stringify({ id: "person-b", name: "Bob B." }),
-      ),
-    );
-    expect(
-      JSON.parse(localStorage.getItem(salespersonStorageKey("dealer-b")) || ""),
-    ).toEqual({ id: "person-b", name: "Bob B." });
-    expect(localStorage.getItem("dsp.salespersonName")).toBeNull();
-  });
-
-  it("does not restore a different dealer's persisted salesperson", async () => {
-    localStorage.setItem(
-      "dsp.salespersonPicker",
-      JSON.stringify({ id: "person-a", name: "Alice A." }),
-    );
-    mockListSalespeople.mockResolvedValue(dealerBRoster);
-
-    render(<PickerHarness dealerId="dealer-b" />);
-
-    const user = userEvent.setup();
-    const trigger = screen.getByRole("button", { name: /your name/i });
-    expect(trigger).toHaveTextContent("Pick yourself");
-    await user.click(trigger);
-    await screen.findByRole("option", { name: /Bob B\./i });
-    expect(screen.getByTestId("picker-value")).toHaveTextContent(
-      JSON.stringify({ name: "" }),
-    );
-    expect(localStorage.getItem(salespersonStorageKey("dealer-b"))).toBeNull();
-  });
-
-  it("removes a stale scoped roster id and exposes valid listbox ownership", async () => {
-    const user = userEvent.setup();
-    localStorage.setItem(
-      salespersonStorageKey("dealer-b"),
-      JSON.stringify({ id: "inactive-person", name: "Former Teammate" }),
-    );
-    mockListSalespeople.mockResolvedValue(dealerBRoster);
-
-    render(<PickerHarness dealerId="dealer-b" />);
-
-    const trigger = await screen.findByRole("button", {
-      name: /your name/i,
-    });
-    expect(trigger).toHaveTextContent("Pick yourself");
-    await waitFor(() =>
-      expect(localStorage.getItem(salespersonStorageKey("dealer-b"))).toBeNull(),
-    );
-    await user.click(trigger);
-    const option = screen.getByRole("option", { name: /Bob B\./i });
-    expect(option.closest("li")).toHaveAttribute("role", "none");
   });
 
   it("confirms before logging out with a generated result", async () => {

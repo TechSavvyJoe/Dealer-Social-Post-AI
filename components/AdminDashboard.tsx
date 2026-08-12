@@ -2,25 +2,26 @@ import React, { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dealer } from "../types";
 import * as db from "../services/database";
-import { Icon } from "./Icons";
 import { logError } from "../utils/telemetry";
 import { motion } from "framer-motion";
 import { Button } from "./ui/Button";
 import { Skeleton } from "./ui/Skeleton";
 import {
   Building2,
-  Pencil,
-  RefreshCw,
-  Shield,
-  UserRound,
-  Users,
-  Eye,
   ChevronLeft,
   ChevronRight,
+  Eye,
   KeyRound,
   Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
   Search,
+  Shield,
+  Trash2,
   UserCog,
+  UserRound,
+  Users,
 } from "lucide-react";
 import { PersonEditModal } from "./PersonEditModal";
 import { SystemHealthPanel } from "./SystemHealthPanel";
@@ -508,7 +509,7 @@ export const AdminDashboard: React.FC = () => {
             <Button
               variant="primary"
               size="sm"
-              leftIcon={<Icon type="plus" className="h-4 w-4" />}
+              leftIcon={<Plus className="h-4 w-4" />}
               onClick={() => {
                 if (showDealerForm) resetDealerForm();
                 else {
@@ -707,7 +708,7 @@ export const AdminDashboard: React.FC = () => {
                         title="Delete dealer"
                         aria-label={`Delete ${dealer.name}`}
                       >
-                        <Icon type="trash" className="h-4 w-4" />
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
