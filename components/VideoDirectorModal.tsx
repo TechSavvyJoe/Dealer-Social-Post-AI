@@ -248,7 +248,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
           </div>
 
           {/* Aspect + sound + duration */}
-          <div className="space-y-3 rounded-xl border border-white/10 bg-surface-950/40 p-3">
+          <div className="space-y-3 rounded-xl border border-hairline bg-surface-950/40 p-3">
             <fieldset className="space-y-2">
               <legend className="text-xs font-semibold text-white/80">
                 Video quality
@@ -409,14 +409,14 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
         </div>
 
         {EXPERIMENTAL_STYLES.length > 0 && (
-          <div className="border-t border-white/10 pt-2">
+          <div className="border-t border-hairline pt-2">
             <button
               type="button"
               onClick={() => {
                 triggerHapticFeedback();
                 setShowMore(!showMore);
               }}
-              className="flex min-h-11 w-full items-center justify-between rounded-lg px-2 py-3 text-sm text-surface-300 transition-colors hover:bg-white/5 hover:text-surface-50 touch-manipulation"
+              className="flex min-h-11 w-full items-center justify-between rounded-lg px-2 py-3 text-sm text-surface-300 transition-colors hover:bg-fill-subtle hover:text-surface-50 touch-manipulation"
             >
               <span>{showMore ? "Hide" : "Show"} extra styles</span>
               <Icon

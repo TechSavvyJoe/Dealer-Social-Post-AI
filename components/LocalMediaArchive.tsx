@@ -99,7 +99,7 @@ export const LocalMediaArchive: React.FC<LocalMediaArchiveProps> = ({ dealerId }
 
   return (
     <section
-      className="space-y-3 rounded-2xl border border-white/10 bg-surface-950/35 p-3 sm:p-4"
+      className="space-y-3 rounded-2xl border border-hairline bg-surface-950/35 p-3 sm:p-4"
       aria-labelledby="local-media-heading"
     >
       <div className="flex flex-wrap items-end justify-between gap-2">
@@ -128,7 +128,7 @@ export const LocalMediaArchive: React.FC<LocalMediaArchiveProps> = ({ dealerId }
           return (
             <article
               key={record.id}
-              className="min-w-0 overflow-hidden rounded-xl border border-white/10 bg-surface-900/70"
+              className="min-w-0 overflow-hidden rounded-xl border border-hairline bg-surface-900/70"
             >
               <div className="relative aspect-square overflow-hidden bg-black">
                 {isVideo ? (
@@ -148,7 +148,7 @@ export const LocalMediaArchive: React.FC<LocalMediaArchiveProps> = ({ dealerId }
                     loading="lazy"
                   />
                 )}
-                <span className="pointer-events-none absolute left-2 top-2 inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/70 px-2 py-1 text-[10px] font-semibold text-white">
+                <span className="pointer-events-none absolute left-2 top-2 inline-flex items-center gap-1 rounded-full border border-strong bg-black/70 px-2 py-1 text-[10px] font-semibold text-white">
                   {isVideo ? (
                     <Film className="h-3 w-3" aria-hidden="true" />
                   ) : (
@@ -206,7 +206,7 @@ export const LocalMediaArchive: React.FC<LocalMediaArchiveProps> = ({ dealerId }
                         setBusyId(null);
                       }
                     }}
-                    className="grid min-h-10 min-w-10 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-surface-300 transition-colors hover:border-error-400/40 hover:bg-error-500/10 hover:text-error-200 disabled:opacity-50"
+                    className="grid min-h-10 min-w-10 place-items-center rounded-lg border border-hairline bg-fill-subtle text-surface-300 transition-colors hover:border-error-400/40 hover:bg-error-500/10 hover:text-error-200 disabled:opacity-50"
                     aria-label={`Delete ${isVideo ? "video" : "image"} ${index + 1}`}
                     title="Delete local copy"
                   >

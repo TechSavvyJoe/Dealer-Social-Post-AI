@@ -325,7 +325,7 @@ export const MainContent: React.FC<MainContentProps> = ({
           <div className="mx-auto w-full max-w-5xl space-y-4">
             {WALKAROUND_STUDIO_ENABLED && (
               <div
-                className="mx-auto grid w-full max-w-xl grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-surface-900/70 p-2"
+                className="mx-auto grid w-full max-w-xl grid-cols-2 gap-2 rounded-2xl border border-hairline bg-surface-900/70 p-2"
                 aria-label="Creation mode"
               >
                 <button
@@ -335,7 +335,7 @@ export const MainContent: React.FC<MainContentProps> = ({
                   className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors ${
                     captureWorkspace === "photo"
                       ? "bg-primary-500 text-white shadow-lg"
-                      : "text-surface-300 hover:bg-white/5 hover:text-surface-100"
+                      : "text-surface-300 hover:bg-fill-subtle hover:text-surface-100"
                   }`}
                 >
                   <Camera className="h-5 w-5" aria-hidden="true" />
@@ -348,7 +348,7 @@ export const MainContent: React.FC<MainContentProps> = ({
                   className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors ${
                     captureWorkspace === "walkaround"
                       ? "bg-primary-500 text-white shadow-lg"
-                      : "text-surface-300 hover:bg-white/5 hover:text-surface-100"
+                      : "text-surface-300 hover:bg-fill-subtle hover:text-surface-100"
                   }`}
                 >
                   <Video className="h-5 w-5" aria-hidden="true" />

@@ -192,11 +192,11 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
       title="Take photo"
       description="Frame the vehicle and customer, then capture when ready."
       size="full"
-      className="sm:max-w-4xl bg-surface-900 border-white/10"
+      className="sm:max-w-4xl bg-surface-900 border-hairline"
     >
       <div className="space-y-5">
         <div
-          className={`relative w-full ${aspectRatioClass} bg-black rounded-2xl overflow-hidden shadow-2xl border border-white/10`}
+          className={`relative w-full ${aspectRatioClass} bg-black rounded-2xl overflow-hidden shadow-2xl border border-hairline`}
         >
           <video
             ref={videoRef}
@@ -218,7 +218,7 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
             }}
             variant="outline"
             size="icon"
-            className="absolute top-3 left-3 border-white/15 bg-surface-950/60 text-surface-50 hover:bg-surface-900/80"
+            className="absolute top-3 left-3 border-strong bg-surface-950/60 text-surface-50 hover:bg-surface-900/80"
             aria-label="Flip camera"
           >
             <RotateCcw className="w-6 h-6" />

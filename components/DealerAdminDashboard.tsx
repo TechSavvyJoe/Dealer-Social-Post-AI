@@ -166,7 +166,7 @@ export const DealerAdminDashboard: React.FC = () => {
             <img
               src={dealer.logo}
               alt={`${dealer.name} logo`}
-              className="h-10 w-10 shrink-0 rounded-xl object-contain bg-white/10 p-1 ring-1 ring-white/10 sm:h-12 sm:w-12"
+              className="h-10 w-10 shrink-0 rounded-xl object-contain bg-fill-hover p-1 ring-1 ring-hairline sm:h-12 sm:w-12"
             />
           ) : (
             <div
@@ -517,7 +517,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             onChange={(e) => setWebsite(e.target.value)}
             placeholder="https://yourdealership.com"
             fullWidth
-            className="bg-white/5 border-white/10 focus:border-primary-400"
+            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
           <Input
             label="Phone"
@@ -525,7 +525,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             onChange={(e) => setPhone(e.target.value)}
             placeholder="(313) 555-0100"
             fullWidth
-            className="bg-white/5 border-white/10 focus:border-primary-400"
+            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
         </div>
         <Input
@@ -534,7 +534,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           onChange={(e) => setAddress(e.target.value)}
           placeholder="123 Main St, Detroit MI 48201"
           fullWidth
-          className="bg-white/5 border-white/10 focus:border-primary-400"
+          className="bg-fill-subtle border-hairline focus:border-primary-400"
         />
         <HoursPicker
           value={hoursWeek}
@@ -547,7 +547,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           onChange={(e) => setTagline(e.target.value)}
           placeholder="Family-owned since 1985 · No-haggle pricing"
           fullWidth
-          className="bg-white/5 border-white/10 focus:border-primary-400"
+          className="bg-fill-subtle border-hairline focus:border-primary-400"
         />
       </section>
 
@@ -561,7 +561,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             onChange={(e) => setFacebookUrl(e.target.value)}
             placeholder="https://www.facebook.com/yourdealership"
             fullWidth
-            className="bg-white/5 border-white/10 focus:border-primary-400"
+            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
           <Input
             label="Facebook Page tag"
@@ -570,7 +570,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             placeholder="@Your Dealership"
             helperText="Added to Facebook/Marketplace captions. Facebook may ask the salesperson to tap the Page suggestion once."
             fullWidth
-            className="bg-white/5 border-white/10 focus:border-primary-400"
+            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -580,7 +580,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             onChange={(e) => setInstagramHandle(e.target.value)}
             placeholder="@yourdealership"
             fullWidth
-            className="bg-white/5 border-white/10 focus:border-primary-400"
+            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
           <Input
             label="TikTok"
@@ -588,7 +588,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             onChange={(e) => setTiktokHandle(e.target.value)}
             placeholder="@yourdealership"
             fullWidth
-            className="bg-white/5 border-white/10 focus:border-primary-400"
+            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
           <Input
             label="X / Twitter"
@@ -596,7 +596,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             onChange={(e) => setXHandle(e.target.value)}
             placeholder="@yourdealership"
             fullWidth
-            className="bg-white/5 border-white/10 focus:border-primary-400"
+            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
           <Input
             label="LinkedIn company tag"
@@ -605,7 +605,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             placeholder="@your-company"
             helperText="LinkedIn may ask the salesperson to choose the company suggestion."
             fullWidth
-            className="bg-white/5 border-white/10 focus:border-primary-400"
+            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
         </div>
         <Input
@@ -614,7 +614,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           onChange={(e) => setGbpUrl(e.target.value)}
           placeholder="https://g.page/yourdealership"
           fullWidth
-          className="bg-white/5 border-white/10 focus:border-primary-400"
+          className="bg-fill-subtle border-hairline focus:border-primary-400"
         />
       </section>
 
@@ -632,7 +632,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           rows={4}
           fullWidth
           placeholder={`e.g. "Confident, no exclamation points, never 'family-owned'. Local Detroit references are good."`}
-          className="bg-white/5 border-white/10 focus:border-primary-400"
+          className="bg-fill-subtle border-hairline focus:border-primary-400"
         />
       </section>
 
@@ -648,7 +648,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           rows={3}
           fullWidth
           placeholder={"#YourDealership\n#DetroitFord\n#NewRide"}
-          className="bg-white/5 border-white/10 focus:border-primary-400 font-mono text-sm"
+          className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono text-sm"
         />
         <Textarea
           label="Default footer / CTA"
@@ -657,7 +657,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           rows={2}
           fullWidth
           placeholder="Stop by 123 Main St — open until 9pm. Call us at (313) 555-0100."
-          className="bg-white/5 border-white/10 focus:border-primary-400"
+          className="bg-fill-subtle border-hairline focus:border-primary-400"
         />
       </section>
 
@@ -681,7 +681,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
                   "rounded-xl border px-3 py-2.5 flex items-center justify-between gap-2",
                   enabled
                     ? "border-primary-500/40 bg-primary-500/5"
-                    : "border-white/10 bg-white/5 opacity-60",
+                    : "border-hairline bg-fill-subtle opacity-60",
                 )}
               >
                 <div className="min-w-0">
@@ -699,7 +699,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
                       "text-[10px] px-2 py-1 rounded-md transition-colors",
                       isDefault
                         ? "bg-amber-500/30 text-amber-100"
-                        : "bg-white/5 hover:bg-white/10 text-surface-300",
+                        : "bg-fill-subtle hover:bg-fill-hover text-surface-300",
                       !enabled && "opacity-30 cursor-not-allowed",
                     )}
                   >
@@ -711,7 +711,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
                     className={cn(
                       "text-[10px] px-2 py-1 rounded-md transition-colors",
                       enabled
-                        ? "bg-white/5 hover:bg-white/10 text-surface-300"
+                        ? "bg-fill-subtle hover:bg-fill-hover text-surface-300"
                         : "bg-success-500/20 hover:bg-success-500/30 text-success-100",
                     )}
                   >
@@ -744,7 +744,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           rows={4}
           fullWidth
           placeholder={`guaranteed approval\nno credit check\nlowest price guaranteed`}
-          className="bg-white/5 border-white/10 focus:border-primary-400 font-mono text-sm"
+          className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono text-sm"
         />
       </section>
 
@@ -759,7 +759,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
               type="color"
               value={HEX_RE.test(color) ? color : "#1d4ed8"}
               onChange={(e) => setColor(e.target.value)}
-              className="h-10 w-14 rounded-lg border border-white/10 bg-transparent cursor-pointer"
+              className="h-10 w-14 rounded-lg border border-hairline bg-transparent cursor-pointer"
               aria-label="Pick brand color"
             />
             <Input
@@ -769,7 +769,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
               onChange={(e) => setColor(e.target.value)}
               placeholder="#1d4ed8"
               fullWidth
-              className="bg-white/5 border-white/10 focus:border-primary-400 font-mono"
+              className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono"
             />
           </div>
         </div>
@@ -782,7 +782,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             onChange={(e) => setOem(e.target.value)}
             placeholder="Ford, GM, Stellantis, Independent…"
             fullWidth
-            className="bg-white/5 border-white/10 focus:border-primary-400"
+            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
         </div>
       </section>
@@ -817,7 +817,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
               "px-3 py-2 rounded-lg text-sm transition-colors border",
               !approval
                 ? "border-success-500/40 bg-success-500/10 text-success-100"
-                : "border-white/10 bg-white/5 text-surface-300",
+                : "border-hairline bg-fill-subtle text-surface-300",
             )}
           >
             No approval required
@@ -833,7 +833,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
               "px-3 py-2 rounded-lg text-sm transition-colors border",
               approval
                 ? "border-warning-500/40 bg-warning-500/10 text-warning-100"
-                : "border-white/10 bg-white/5 text-surface-300",
+                : "border-hairline bg-fill-subtle text-surface-300",
             )}
           >
             Require manager approval
@@ -850,7 +850,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
         </div>
       )}
 
-      <div className="sticky bottom-2 z-10 flex items-center justify-between rounded-xl border border-white/10 bg-surface-950/95 px-3 py-3 shadow-elevation-3 backdrop-blur-xl">
+      <div className="sticky bottom-2 z-10 flex items-center justify-between rounded-xl border border-hairline bg-surface-950/95 px-3 py-3 shadow-elevation-3 backdrop-blur-xl">
         <div className="text-[11px] text-surface-500">
           {savedAt
             ? `Saved ${savedAt.toLocaleTimeString([], {
@@ -1132,7 +1132,7 @@ export const DealerTeamCard: React.FC = () => {
             value={newName}
             onChange={(e) => setNewName(e.target.value.slice(0, 120))}
             placeholder="e.g. Sarah Chen"
-            className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-surface-100 focus:border-primary-400 focus:outline-none"
+            className="mt-1 w-full bg-fill-subtle border border-hairline rounded-lg px-3 py-2 text-sm text-surface-100 focus:border-primary-400 focus:outline-none"
           />
         </div>
         <Button
@@ -1170,7 +1170,7 @@ export const DealerTeamCard: React.FC = () => {
             here until you mark it as shared.
           </p>
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <span className="flex-1 rounded-lg border border-white/10 bg-surface-950/70 px-3 py-2.5 text-center font-mono text-lg tracking-[0.3em] text-surface-50">
+            <span className="flex-1 rounded-lg border border-hairline bg-surface-950/70 px-3 py-2.5 text-center font-mono text-lg tracking-[0.3em] text-surface-50">
               {oneTimeCode.pin}
             </span>
             <Button
@@ -1233,8 +1233,8 @@ export const DealerTeamCard: React.FC = () => {
                 p.active
                   ? p.pinNeedsDistribution
                     ? "border-warning-400/25 bg-warning-500/[0.06]"
-                    : "border-white/10 bg-surface-900/40"
-                  : "border-white/5 bg-surface-900/20 opacity-60",
+                    : "border-hairline bg-surface-900/40"
+                  : "border-hairline bg-surface-900/20 opacity-60",
               )}
             >
               <div className="min-w-0">
@@ -1299,7 +1299,7 @@ export const DealerTeamCard: React.FC = () => {
                           hasManagerLogin: false,
                         })
                       }
-                      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md bg-white/5 text-surface-300 hover:bg-white/10"
+                      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md bg-fill-subtle text-surface-300 hover:bg-fill-hover"
                       title="Edit profile"
                       aria-label={`Edit ${p.name}`}
                     >
@@ -1311,7 +1311,7 @@ export const DealerTeamCard: React.FC = () => {
                       className={cn(
                         "min-h-11 text-[11px] px-3 py-2 rounded-md transition-colors",
                         p.active
-                          ? "bg-white/5 hover:bg-white/10 text-surface-300"
+                          ? "bg-fill-subtle hover:bg-fill-hover text-surface-300"
                           : "bg-success-500/20 hover:bg-success-500/30 text-success-100",
                       )}
                       title={p.active ? "Deactivate" : "Reactivate"}

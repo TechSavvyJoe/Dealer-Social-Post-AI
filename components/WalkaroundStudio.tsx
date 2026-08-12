@@ -452,7 +452,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
     });
 
   const inputClass =
-    "min-h-11 w-full rounded-xl border border-white/10 bg-surface-950/45 px-3 py-2 text-surface-50 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/30 disabled:opacity-60";
+    "min-h-11 w-full rounded-xl border border-hairline bg-surface-950/45 px-3 py-2 text-surface-50 outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/30 disabled:opacity-60";
 
   const ready = project?.productionState === "review_ready";
   const approved =
@@ -520,7 +520,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
       )}
 
       {!project ? (
-        <section className="space-y-5 rounded-2xl border border-white/10 bg-surface-900/65 p-4 sm:p-6">
+        <section className="space-y-5 rounded-2xl border border-hairline bg-surface-900/65 p-4 sm:p-6">
           <div className="grid gap-4 sm:grid-cols-2">
             <fieldset>
               <legend className="mb-2 text-sm font-semibold text-surface-100">
@@ -533,7 +533,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
                     type="button"
                     aria-pressed={audience === value}
                     onClick={() => setAudience(value)}
-                    className={`min-h-12 rounded-xl border px-3 text-sm font-semibold capitalize ${audience === value ? "border-primary-400 bg-primary-500/20 text-primary-100" : "border-white/10 text-surface-300"}`}
+                    className={`min-h-12 rounded-xl border px-3 text-sm font-semibold capitalize ${audience === value ? "border-primary-400 bg-primary-500/20 text-primary-100" : "border-hairline text-surface-300"}`}
                   >
                     {value}
                   </button>
@@ -558,7 +558,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
                       if (value === "one_take")
                         setClips((current) => current.slice(0, 1));
                     }}
-                    className={`min-h-12 rounded-xl border px-3 text-sm font-semibold ${captureMode === value ? "border-primary-400 bg-primary-500/20 text-primary-100" : "border-white/10 text-surface-300"}`}
+                    className={`min-h-12 rounded-xl border px-3 text-sm font-semibold ${captureMode === value ? "border-primary-400 bg-primary-500/20 text-primary-100" : "border-hairline text-surface-300"}`}
                   >
                     {value === "one_take" ? "One take" : "Multiple clips"}
                   </button>
@@ -567,7 +567,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
             </fieldset>
           </div>
 
-          <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-surface-950/35 p-4 text-sm text-surface-200">
+          <label className="flex items-start gap-3 rounded-xl border border-hairline bg-surface-950/35 p-4 text-sm text-surface-200">
             <input
               type="checkbox"
               className="mt-1"
@@ -635,7 +635,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
               {clips.map((clip, index) => (
                 <div
                   key={clip.key}
-                  className="flex items-center gap-2 rounded-xl border border-white/10 bg-surface-950/35 p-3"
+                  className="flex items-center gap-2 rounded-xl border border-hairline bg-surface-950/35 p-3"
                 >
                   <Film
                     className="h-5 w-5 shrink-0 text-primary-300"
@@ -743,7 +743,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
         </section>
       ) : (
         <div className="space-y-5">
-          <section className="rounded-2xl border border-white/10 bg-surface-900/65 p-4 sm:p-6">
+          <section className="rounded-2xl border border-hairline bg-surface-900/65 p-4 sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-xs uppercase tracking-wider text-surface-400">
@@ -862,7 +862,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
           </section>
 
           {ready && (
-            <section className="space-y-4 rounded-2xl border border-white/10 bg-surface-900/65 p-4 sm:p-6">
+            <section className="space-y-4 rounded-2xl border border-hairline bg-surface-900/65 p-4 sm:p-6">
               <div>
                 <h2 className="text-xl font-semibold text-surface-50">
                   Review the exact export
@@ -975,7 +975,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
                   }
                 />
               </label>
-              <div className="rounded-xl border border-white/10 bg-surface-950/35 p-4">
+              <div className="rounded-xl border border-hairline bg-surface-950/35 p-4">
                 <label className="block text-sm font-medium text-surface-200">
                   Request changes to the actual video edit
                   <textarea
@@ -1052,7 +1052,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
           )}
 
           {ready && (
-            <section className="space-y-4 rounded-2xl border border-white/10 bg-surface-900/65 p-4 sm:p-6">
+            <section className="space-y-4 rounded-2xl border border-hairline bg-surface-900/65 p-4 sm:p-6">
               <div>
                 <h2 className="text-xl font-semibold text-surface-50">
                   YouTube publication

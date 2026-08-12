@@ -188,7 +188,7 @@ export class ErrorBoundary extends Component<Props, State> {
               </button>
               <button
                 onClick={() => window.location.reload()}
-                className="px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg transition-colors text-sm"
+                className="px-4 py-2.5 bg-fill-hover hover:border-strong border border-hairline text-white rounded-lg transition-colors text-sm"
               >
                 Refresh page
               </button>
@@ -201,7 +201,7 @@ export class ErrorBoundary extends Component<Props, State> {
               </button>
               <button
                 onClick={this.handleCopyDetails}
-                className="px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg transition-colors text-sm"
+                className="px-4 py-2.5 bg-fill-hover hover:border-strong border border-hairline text-white rounded-lg transition-colors text-sm"
               >
                 {this.state.copied ? "Copied" : "Copy error details"}
               </button>

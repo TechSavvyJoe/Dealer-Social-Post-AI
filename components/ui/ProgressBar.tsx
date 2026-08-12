@@ -49,7 +49,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
 
       <div
         className={cn(
-          "relative bg-surface-800/50 rounded-full overflow-hidden backdrop-blur-sm border border-white/5",
+          "relative bg-surface-800/50 rounded-full overflow-hidden backdrop-blur-sm border border-hairline",
           sizeStyles[size],
         )}
         role="progressbar"

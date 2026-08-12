@@ -285,7 +285,7 @@ export const Leaderboard: React.FC = () => {
                 <div
                   className={cn(
                     "flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center",
-                    idx === 0 ? "bg-amber-500/15" : "bg-white/5",
+                    idx === 0 ? "bg-amber-500/15" : "bg-fill-subtle",
                   )}
                 >
                   {idx < 3 ? (

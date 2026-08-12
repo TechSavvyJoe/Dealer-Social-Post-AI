@@ -78,7 +78,7 @@ export const EditTextModal: React.FC<EditTextModalProps> = ({
           <label className="block text-sm font-medium text-surface-300 mb-2">
             Original Text
           </label>
-          <div className="w-full bg-surface-800/50 text-surface-400 border border-white/10 rounded-xl px-4 py-3 text-sm max-h-32 overflow-y-auto custom-scrollbar">
+          <div className="w-full bg-surface-800/50 text-surface-400 border border-hairline rounded-xl px-4 py-3 text-sm max-h-32 overflow-y-auto custom-scrollbar">
             {originalText.split("\n").map((line, i) => (
               <span key={i}>
                 {line}
@@ -100,7 +100,7 @@ export const EditTextModal: React.FC<EditTextModalProps> = ({
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="e.g., Make it funnier, or add a question at the end..."
-            className="w-full bg-surface-800/50 text-surface-50 border-2 border-white/20 rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary-400 focus:border-primary-400 outline-none transition h-32 resize-none placeholder:text-surface-500"
+            className="w-full bg-surface-800/50 text-surface-50 border-2 border-strong rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary-400 focus:border-primary-400 outline-none transition h-32 resize-none placeholder:text-surface-500"
           />
           {submitError ? (
             <p

@@ -140,7 +140,7 @@ export const ApprovalQueue: React.FC = () => {
         onChange={(e) => setApprover(e.target.value)}
         placeholder="e.g. Joe G. (GSM)"
         fullWidth
-        className="bg-white/5 border-white/10 focus:border-primary-400"
+        className="bg-fill-subtle border-hairline focus:border-primary-400"
       />
 
       {error && <ErrorBanner message={error} onRetry={() => void load()} />}
@@ -215,13 +215,13 @@ export const ApprovalQueue: React.FC = () => {
                       )}
                     </div>
                   </div>
-                  <div className="order-3 grid w-full gap-3 rounded-xl border border-white/10 bg-black/15 p-3 sm:grid-cols-[minmax(0,12rem)_1fr]">
+                  <div className="order-3 grid w-full gap-3 rounded-xl border border-hairline bg-black/15 p-3 sm:grid-cols-[minmax(0,12rem)_1fr]">
                     {post.creative_image_url ? (
                       <img
                         src={post.creative_image_url}
                         alt={`Creative awaiting approval for ${post.customer_name || "customer delivery"}`}
                         loading="lazy"
-                        className="aspect-square w-full rounded-lg border border-white/10 bg-surface-950 object-contain"
+                        className="aspect-square w-full rounded-lg border border-hairline bg-surface-950 object-contain"
                       />
                     ) : (
                       <div className="flex aspect-square w-full items-center justify-center rounded-lg border border-dashed border-error-500/30 bg-error-500/5 px-3 text-center text-xs text-error-200">
@@ -247,7 +247,7 @@ export const ApprovalQueue: React.FC = () => {
                             ([platformId, caption]) => (
                               <div
                                 key={platformId}
-                                className="rounded-md border border-white/10 bg-black/15 px-3 py-2"
+                                className="rounded-md border border-hairline bg-black/15 px-3 py-2"
                               >
                                 <p className="mb-1 text-[10px] font-semibold text-surface-300">
                                   {PLATFORM_LABELS.get(platformId) || platformId}

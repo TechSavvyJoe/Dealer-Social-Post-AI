@@ -202,7 +202,7 @@ const AppContent: React.FC = () => {
       <div className="flex min-h-0 flex-1">
         {step === AppStep.RESULT && isDesktopLayout ? (
           <aside
-            className="flex w-[5.25rem] shrink-0 flex-col items-center border-r border-white/[0.08] bg-surface-950/35 px-2 py-4"
+            className="flex w-[5.25rem] shrink-0 flex-col items-center border-r border-hairline bg-surface-950/35 px-2 py-4"
             aria-label="Publishing workspace navigation"
           >
             <nav className="flex w-full flex-1 flex-col gap-2">
@@ -216,7 +216,7 @@ const AppContent: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsHistoryOpen(true)}
-                className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-transparent px-1 text-[10px] font-medium text-surface-400 transition-colors hover:border-white/10 hover:bg-white/[0.05] hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-transparent px-1 text-[10px] font-medium text-surface-400 transition-colors hover:border-hairline hover:bg-fill-subtle hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
               >
                 <History className="h-5 w-5" aria-hidden="true" />
                 My work
@@ -225,7 +225,7 @@ const AppContent: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsSettingsOpen(true)}
-              className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-transparent px-1 text-[10px] font-medium text-surface-400 transition-colors hover:border-white/10 hover:bg-white/[0.05] hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+              className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-transparent px-1 text-[10px] font-medium text-surface-400 transition-colors hover:border-hairline hover:bg-fill-subtle hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
             >
               <Settings className="h-5 w-5" aria-hidden="true" />
               Settings

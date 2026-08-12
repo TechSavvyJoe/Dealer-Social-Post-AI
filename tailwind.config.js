@@ -156,6 +156,10 @@ export default {
         hairline: "rgb(var(--color-border) / <alpha-value>)",
         strong: "rgb(var(--color-border-strong) / <alpha-value>)",
       },
+      ringColor: {
+        hairline: "rgb(var(--color-border) / <alpha-value>)",
+        strong: "rgb(var(--color-border-strong) / <alpha-value>)",
+      },
       textColor: {
         "content-primary": "rgb(var(--color-text-primary) / <alpha-value>)",
         "content-secondary": "rgb(var(--color-text-secondary) / <alpha-value>)",

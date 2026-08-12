@@ -70,14 +70,15 @@ const solidBrand = cn(
 
 const tintedBrand = cn(
   "bg-primary-500/15",
-  "text-primary-300",
+  // Light-blue ink reads on dark surfaces; Sunlight Mode needs the deep ramp.
+  "text-primary-300 [.theme-light_&]:text-primary-700",
   "border border-primary-500/25",
   "hover:bg-primary-500/25 hover:border-primary-500/35",
   "active:scale-[0.98]",
 );
 
 const plainBrand = cn(
-  "text-primary-300",
+  "text-primary-300 [.theme-light_&]:text-primary-700",
   "hover:bg-primary-500/10",
   "active:bg-primary-500/15",
   "active:scale-[0.98]",

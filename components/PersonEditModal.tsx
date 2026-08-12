@@ -353,7 +353,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
     >
       <div className="space-y-5">
         {/* Identity header */}
-        <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-surface-800/80 to-surface-900/90 p-4">
+        <div className="relative overflow-hidden rounded-2xl border border-hairline bg-gradient-to-br from-surface-800/80 to-surface-900/90 p-4">
           <div
             className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-primary-500/10 blur-2xl"
             aria-hidden
@@ -367,7 +367,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                 {person?.name}
               </div>
               <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-surface-400">
-                <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 font-medium text-surface-300">
+                <span className="inline-flex items-center gap-1 rounded-full bg-fill-subtle px-2 py-0.5 font-medium text-surface-300">
                   {roleLabel}
                 </span>
                 {storeName ? <span className="truncate">{storeName}</span> : null}
@@ -453,7 +453,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                     "shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide",
                     person?.hasManagerLogin
                       ? "bg-success-500/15 text-success-200 ring-1 ring-success-500/25"
-                      : "bg-surface-800 text-surface-400 ring-1 ring-white/10",
+                      : "bg-surface-800 text-surface-400 ring-1 ring-hairline",
                   )}
                 >
                   {person?.hasManagerLogin ? "Enabled" : "Not set"}
@@ -500,7 +500,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                   rightAction={
                     <button
                       type="button"
-                      className="flex h-11 w-11 items-center justify-center rounded-lg text-surface-400 transition hover:bg-white/[0.06] hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                      className="flex h-11 w-11 items-center justify-center rounded-lg text-surface-400 transition hover:bg-fill-subtle hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
                       onClick={() => setShowManagerPassword((value) => !value)}
                       aria-label={
                         showManagerPassword
@@ -639,10 +639,10 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
             </div>
           ) : null}
 
-          <div className="space-y-3 rounded-2xl border border-white/10 bg-surface-950/50 p-4">
+          <div className="space-y-3 rounded-2xl border border-hairline bg-surface-950/50 p-4">
             <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
               <div className="flex min-w-0 items-start gap-3">
-                <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-white/5 ring-1 ring-white/10">
+                <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-fill-subtle ring-1 ring-hairline">
                   <KeyRound className="h-4 w-4 text-surface-300" />
                 </div>
                 <div>
@@ -663,7 +663,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                     ? "bg-warning-500/15 text-warning-200 ring-1 ring-warning-500/30"
                     : hasExistingCode
                       ? "bg-success-500/15 text-success-200 ring-1 ring-success-500/25"
-                      : "bg-surface-800 text-surface-400 ring-1 ring-white/10",
+                      : "bg-surface-800 text-surface-400 ring-1 ring-hairline",
                 )}
               >
                 {needsDistribution
@@ -681,12 +681,12 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                   privately, then mark it as shared.
                 </p>
                 <div className="flex items-center gap-2">
-                  <div className="flex flex-1 items-center justify-between rounded-lg border border-white/10 bg-surface-950/80 px-3 py-2.5 font-mono text-lg tracking-[0.35em] text-surface-50">
+                  <div className="flex flex-1 items-center justify-between rounded-lg border border-hairline bg-surface-950/80 px-3 py-2.5 font-mono text-lg tracking-[0.35em] text-surface-50">
                     <span>{showCredentialPin ? credentialPin : "••••"}</span>
                     <button
                       type="button"
                       onClick={() => setShowCredentialPin((v) => !v)}
-                      className="ml-2 inline-flex min-h-9 min-w-9 items-center justify-center rounded-md text-surface-400 hover:bg-white/5 hover:text-surface-100"
+                      className="ml-2 inline-flex min-h-9 min-w-9 items-center justify-center rounded-md text-surface-400 hover:bg-fill-subtle hover:text-surface-100"
                       aria-label={
                         showCredentialPin ? "Hide access code" : "Show access code"
                       }
@@ -805,7 +805,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
             )}
           </div>
 
-          <label className="flex min-h-12 cursor-pointer items-center gap-3 rounded-2xl border border-white/10 bg-surface-950/40 px-4 py-3.5 transition-colors hover:border-white/15">
+          <label className="flex min-h-12 cursor-pointer items-center gap-3 rounded-2xl border border-hairline bg-surface-950/40 px-4 py-3.5 transition-colors hover:border-strong">
             <input
               type="checkbox"
               checked={active}

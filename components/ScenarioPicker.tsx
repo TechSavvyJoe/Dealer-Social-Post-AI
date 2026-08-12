@@ -178,7 +178,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
         }}
         className={cn(
           "w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl",
-          "bg-white/5 border border-white/10 hover:bg-white/10 transition-colors",
+          "bg-fill-subtle border border-hairline hover:bg-fill-hover transition-colors",
           "text-left text-sm",
         )}
       >
@@ -223,7 +223,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.15 }}
-            className="rounded-xl border border-white/10 bg-surface-900/95 backdrop-blur-xl shadow-2xl p-2 max-h-96 overflow-y-auto"
+            className="rounded-xl border border-hairline bg-surface-900/95 backdrop-blur-xl shadow-2xl p-2 max-h-96 overflow-y-auto"
           >
             {grouped.map(([category, list]) => (
               <div key={category} role="presentation" className="mb-2 last:mb-0">
@@ -253,7 +253,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-900",
                           active
                             ? "bg-primary-500/20 text-primary-100"
-                            : "hover:bg-white/5 text-surface-100",
+                            : "hover:bg-fill-subtle text-surface-100",
                         )}
                       >
                         {(() => {
@@ -264,7 +264,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
                                 "flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg mt-0.5 transition-colors",
                                 active
                                   ? "bg-primary-500/20 text-primary-200"
-                                  : "bg-white/[0.06] text-surface-300",
+                                  : "bg-fill-subtle text-surface-300",
                               )}
                             >
                               <Icon className="w-4 h-4" />
@@ -286,7 +286,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
                 </div>
               </div>
             ))}
-            <div className="border-t border-white/5 mt-1 pt-2 px-2 pb-1 text-[10px] text-surface-500 flex items-center gap-1">
+            <div className="border-t border-hairline mt-1 pt-2 px-2 pb-1 text-[10px] text-surface-500 flex items-center gap-1">
               <Sparkles className="w-3 h-3" />
               Picking a scenario tunes the prompt + defaults. Override anything below.
             </div>

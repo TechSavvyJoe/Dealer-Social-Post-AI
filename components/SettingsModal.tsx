@@ -45,7 +45,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       }
     >
       <div className="space-y-5">
-        <div className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+        <div className="flex items-start gap-3 rounded-2xl border border-hairline bg-fill-subtle p-4">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary-500/25 bg-primary-500/10">
             <Settings className="w-5 h-5 text-primary-300" />
           </div>
@@ -66,13 +66,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               }}
               className="peer sr-only"
             />
-            <span className="absolute inset-0 rounded-full border border-white/10 bg-surface-800 transition-colors peer-checked:bg-primary-600" />
+            <span className="absolute inset-0 rounded-full border border-hairline bg-surface-800 transition-colors peer-checked:bg-primary-600" />
             <span className="relative ml-1 h-6 w-6 rounded-full bg-white shadow-md transition-transform peer-checked:translate-x-6" />
           </label>
         </div>
 
         {/* Sunlight Mode (Theme) */}
-        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+        <div className="rounded-2xl border border-hairline bg-fill-subtle p-4">
           <div className="flex items-start gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary-500/25 bg-primary-500/10">
               <Sparkles className="h-5 w-5 text-primary-300" />
@@ -86,7 +86,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
           <div
-            className="mt-4 grid grid-cols-3 gap-1 rounded-xl border border-white/10 bg-surface-950/70 p-1"
+            className="mt-4 grid grid-cols-3 gap-1 rounded-xl border border-hairline bg-surface-950/70 p-1"
             role="group"
             aria-label="Theme"
           >
@@ -111,7 +111,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+        <div className="rounded-2xl border border-hairline bg-fill-subtle p-4">
           <div className="flex items-start gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary-500/25 bg-primary-500/10">
               <Sparkles className="h-5 w-5 text-primary-300" />
@@ -125,7 +125,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
           <div
-            className="mt-4 grid grid-cols-2 gap-1 rounded-xl border border-white/10 bg-surface-950/70 p-1"
+            className="mt-4 grid grid-cols-2 gap-1 rounded-xl border border-hairline bg-surface-950/70 p-1"
             role="group"
             aria-label="Image quality"
           >

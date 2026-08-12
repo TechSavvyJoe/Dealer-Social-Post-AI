@@ -527,7 +527,7 @@ export const AdminDashboard: React.FC = () => {
             <motion.div
               initial={{ opacity: 0, y: -12 }}
               animate={{ opacity: 1, y: 0 }}
-              className="rounded-2xl border border-white/10 bg-surface-900/70 p-5 shadow-elevation-3 backdrop-blur-xl sm:p-6"
+              className="rounded-2xl border border-hairline bg-surface-900/70 p-5 shadow-elevation-3 backdrop-blur-xl sm:p-6"
             >
               <form onSubmit={handleDealerSubmit} className="space-y-4">
                 <div>
@@ -639,7 +639,7 @@ export const AdminDashboard: React.FC = () => {
                     "rounded-2xl border p-4 shadow-elevation-1 backdrop-blur-xl sm:p-5",
                     isSelected
                       ? "border-primary-500/50 bg-primary-500/10 ring-1 ring-primary-400/30"
-                      : "border-white/10 bg-surface-900/55",
+                      : "border-hairline bg-surface-900/55",
                   )}
                 >
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -654,7 +654,7 @@ export const AdminDashboard: React.FC = () => {
                         <img
                           src={dealer.logo}
                           alt=""
-                          className="h-14 w-14 rounded-xl border border-white/10 bg-surface-950/50 object-contain p-2"
+                          className="h-14 w-14 rounded-xl border border-hairline bg-surface-950/50 object-contain p-2"
                         />
                       ) : (
                         <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-primary-500/20 bg-primary-500/10">
@@ -732,7 +732,7 @@ export const AdminDashboard: React.FC = () => {
           className="space-y-4"
         >
           <div className="grid gap-2 sm:grid-cols-3">
-            <div className="rounded-xl border border-white/10 bg-surface-900/55 p-3">
+            <div className="rounded-xl border border-hairline bg-surface-900/55 p-3">
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
                 Scope
               </p>
@@ -740,7 +740,7 @@ export const AdminDashboard: React.FC = () => {
                 {selectedDealer?.name || "All dealerships"}
               </p>
             </div>
-            <div className="rounded-xl border border-white/10 bg-surface-900/55 p-3">
+            <div className="rounded-xl border border-hairline bg-surface-900/55 p-3">
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
                 Showing
               </p>
@@ -748,7 +748,7 @@ export const AdminDashboard: React.FC = () => {
                 {tab === "admins" ? "Managers" : "Salespeople"}
               </p>
             </div>
-            <div className="rounded-xl border border-white/10 bg-surface-900/55 p-3">
+            <div className="rounded-xl border border-hairline bg-surface-900/55 p-3">
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
                 People
               </p>
@@ -760,7 +760,7 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="sticky top-0 z-10 rounded-2xl border border-white/10 bg-surface-950/95 p-3 shadow-elevation-2 backdrop-blur-xl">
+          <div className="sticky top-0 z-10 rounded-2xl border border-hairline bg-surface-950/95 p-3 shadow-elevation-2 backdrop-blur-xl">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <label className="relative min-w-0 flex-1">
                 <span className="sr-only">Search people</span>
@@ -796,7 +796,7 @@ export const AdminDashboard: React.FC = () => {
           </div>
 
           {selectedDealer ? (
-            <div className="rounded-2xl border border-white/10 bg-surface-900/60 p-4 sm:p-5">
+            <div className="rounded-2xl border border-hairline bg-surface-900/60 p-4 sm:p-5">
               <h3 className="text-lg font-bold text-surface-50">
                 {tab === "admins"
                   ? `Add manager · ${selectedDealer.name}`
@@ -857,7 +857,7 @@ export const AdminDashboard: React.FC = () => {
                 This one-time response is not stored in the roster.
               </p>
               <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-                <code className="flex-1 rounded-xl border border-white/10 bg-surface-950/80 px-4 py-3 text-center text-xl tracking-[0.4em] text-surface-50">
+                <code className="flex-1 rounded-xl border border-hairline bg-surface-950/80 px-4 py-3 text-center text-xl tracking-[0.4em] text-surface-50">
                   {oneTimeCredential.pin}
                 </code>
                 <Button
@@ -923,7 +923,7 @@ export const AdminDashboard: React.FC = () => {
               <div
                 key={person.id}
                 className={cn(
-                  "flex flex-col gap-3 rounded-2xl border border-white/10 bg-surface-900/55 p-4 sm:flex-row sm:items-center sm:justify-between",
+                  "flex flex-col gap-3 rounded-2xl border border-hairline bg-surface-900/55 p-4 sm:flex-row sm:items-center sm:justify-between",
                   !person.active && "opacity-60",
                 )}
               >
@@ -945,7 +945,7 @@ export const AdminDashboard: React.FC = () => {
                           ? "bg-warning-500/10 text-warning-200 ring-1 ring-warning-500/20"
                           : person.hasPin
                             ? "bg-success-500/10 text-success-300 ring-1 ring-success-500/20"
-                            : "bg-surface-800 text-surface-500 ring-1 ring-white/10",
+                            : "bg-surface-800 text-surface-500 ring-1 ring-hairline",
                       )}
                     >
                       {person.pinNeedsDistribution
@@ -960,7 +960,7 @@ export const AdminDashboard: React.FC = () => {
                           "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
                           person.hasManagerLogin
                             ? "bg-primary-500/10 text-primary-200 ring-1 ring-primary-400/25"
-                            : "bg-surface-800 text-surface-400 ring-1 ring-white/10",
+                            : "bg-surface-800 text-surface-400 ring-1 ring-hairline",
                         )}
                       >
                         {person.hasManagerLogin
@@ -1016,7 +1016,7 @@ export const AdminDashboard: React.FC = () => {
           </div>
 
           {(cursorHistory.length > 0 || peoplePage?.nextCursor) && (
-            <div className="flex items-center justify-between border-t border-white/10 pt-3">
+            <div className="flex items-center justify-between border-t border-hairline pt-3">
               <Button
                 variant="outline"
                 size="sm"

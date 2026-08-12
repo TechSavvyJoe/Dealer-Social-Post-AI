@@ -231,9 +231,9 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
         </ol>
       </div>
 
-      <div className="capture-studio-grid grid min-h-0 overflow-hidden rounded-[1.5rem] border border-white/10 bg-surface-900 shadow-2xl shadow-black/25 sm:min-h-[480px] sm:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.65fr)] lg:min-h-[540px] lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.7fr)] lg:rounded-[1.75rem]">
+      <div className="capture-studio-grid grid min-h-0 overflow-hidden rounded-[1.5rem] border border-hairline bg-surface-900 shadow-2xl shadow-black/25 sm:min-h-[480px] sm:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.65fr)] lg:min-h-[540px] lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.7fr)] lg:rounded-[1.75rem]">
         <section
-          className={`capture-studio-preview relative flex min-h-[300px] items-center justify-center overflow-hidden border-b border-white/10 bg-surface-950 p-4 transition-colors sm:min-h-[480px] sm:border-b-0 sm:border-r sm:p-5 lg:min-h-[640px] lg:p-6 ${
+          className={`capture-studio-preview relative flex min-h-[300px] items-center justify-center overflow-hidden border-b border-hairline bg-surface-950 p-4 transition-colors sm:min-h-[480px] sm:border-b-0 sm:border-r sm:p-5 lg:min-h-[640px] lg:p-6 ${
             isDraggingOver ? "border-primary-400 bg-primary-950/30" : ""
           }`}
           aria-label="Photo drop zone"
@@ -245,7 +245,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
               aria-live="polite"
             >
               <div className="text-center">
-                <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-white/15 border-t-primary-300" />
+                <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-strong border-t-primary-300" />
                 <p className="mt-4 font-medium text-surface-50">
                   Preparing your photo…
                 </p>
@@ -272,7 +272,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
             aria-hidden="true"
           />
           <div className="relative max-w-sm text-center">
-            <div className="mx-auto grid h-20 w-20 place-items-center rounded-full border border-white/15 bg-white/[0.04] shadow-[0_20px_70px_rgba(0,0,0,0.5)]">
+            <div className="mx-auto grid h-20 w-20 place-items-center rounded-full border border-strong bg-fill-subtle shadow-[0_20px_70px_rgba(0,0,0,0.5)]">
               <Camera className="h-8 w-8 text-primary-200" />
             </div>
             <p className="mt-6 text-xl font-semibold tracking-tight text-surface-50">
@@ -319,7 +319,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
             </div>
           </div>
 
-          <div className="capture-studio-tips mt-8 border-t border-white/10 pt-6">
+          <div className="capture-studio-tips mt-8 border-t border-hairline pt-6">
             <p className="text-xs font-semibold text-surface-200">
               For the cleanest result
             </p>

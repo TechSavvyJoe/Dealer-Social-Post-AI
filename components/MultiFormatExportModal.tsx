@@ -172,7 +172,7 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
                 className={
                   isPreferred
                     ? "flex flex-col rounded-2xl border border-primary-400/30 bg-primary-500/5 overflow-hidden"
-                    : "flex flex-col rounded-2xl border border-white/10 bg-white/5 overflow-hidden"
+                    : "flex flex-col rounded-2xl border border-hairline bg-fill-subtle overflow-hidden"
                 }
               >
                 {/* Preview uses the real export aspect so black side bars aren't
@@ -232,7 +232,7 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
           })}
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3 pt-2 border-t border-white/10">
+        <div className="flex flex-col sm:flex-row gap-3 pt-2 border-t border-hairline">
           <Button
             variant="filled"
             size="md"

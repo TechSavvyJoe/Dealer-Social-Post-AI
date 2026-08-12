@@ -490,7 +490,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
           "flex min-h-[5.5rem] flex-col items-start gap-2 rounded-2xl border p-4 text-left transition-colors",
           target.id === "facebook_feed"
             ? "border-[#1877F2]/50 bg-[#1877F2]/15 hover:bg-[#1877F2]/20"
-            : "border-white/10 bg-white/5 hover:bg-white/10",
+            : "border-hairline bg-fill-subtle hover:bg-fill-hover",
           isActive ? "ring-2 ring-primary-400/60" : "",
           "disabled:cursor-not-allowed disabled:opacity-50",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
@@ -580,7 +580,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
           </div>
         ) : null}
 
-        <div className="flex items-start gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs leading-relaxed text-surface-300">
+        <div className="flex items-start gap-2 rounded-xl border border-hairline bg-fill-subtle px-3 py-2.5 text-xs leading-relaxed text-surface-300">
           <ClipboardPaste className="mt-0.5 h-4 w-4 shrink-0 text-primary-300" />
           <div className="space-y-1">
             <p>
@@ -596,14 +596,14 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         </div>
 
         {moreTargets.length > 0 && (
-          <details className="group rounded-xl border border-white/10 bg-surface-950/40">
+          <details className="group rounded-xl border border-hairline bg-surface-950/40">
             <summary className="cursor-pointer list-none px-3 py-2.5 text-sm font-semibold text-surface-200 marker:content-none [&::-webkit-details-marker]:hidden">
               More options
               <span className="ml-2 text-xs font-normal text-surface-500 group-open:hidden">
                 (Google, Marketplace, …)
               </span>
             </summary>
-            <div className="grid grid-cols-2 gap-2 border-t border-white/5 p-3 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-2 border-t border-hairline p-3 sm:grid-cols-3">
               {moreTargets.map(tile)}
             </div>
           </details>
@@ -682,7 +682,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
           </div>
         ) : selectedPreparation?.status === "preparing" ? (
           <div
-            className="flex min-h-20 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 text-sm text-surface-400"
+            className="flex min-h-20 items-center justify-center gap-2 rounded-xl border border-hairline bg-fill-subtle text-sm text-surface-400"
             role="status"
           >
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -764,7 +764,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
               </div>
 
               {showMetaChecklist && (
-                <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-surface-100">
+                <div className="rounded-lg border border-hairline bg-black/20 px-3 py-2 text-surface-100">
                   <p className="mb-1.5 font-semibold text-surface-50">
                     Finish in the Facebook app
                   </p>
@@ -787,7 +787,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
               )}
 
               {selectedPrepared && status.status.kind !== "error" ? (
-                <div className="flex flex-wrap gap-2 border-t border-white/10 pt-2">
+                <div className="flex flex-wrap gap-2 border-t border-hairline pt-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -797,7 +797,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                         setOperationError(ok ? null : "Could not copy the caption.");
                       });
                     }}
-                    className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-surface-100"
+                    className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-hairline bg-fill-subtle px-3 py-2 text-xs font-semibold text-surface-100"
                   >
                     <ClipboardPaste className="h-3.5 w-3.5" />
                     {copyState === "copying"
@@ -816,7 +816,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                           );
                         }
                       }}
-                      className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-surface-100"
+                      className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-hairline bg-fill-subtle px-3 py-2 text-xs font-semibold text-surface-100"
                     >
                       Save media
                     </button>
@@ -840,7 +840,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                   variant="primary"
                   size="md"
                   fullWidth
-                  className="min-h-11 border-t border-white/10"
+                  className="min-h-11 border-t border-hairline"
                   rightIcon={<ArrowRight className="h-4 w-4" aria-hidden="true" />}
                   onClick={onQueueAdvance}
                 >

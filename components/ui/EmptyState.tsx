@@ -43,7 +43,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
         transition={{ delay: 0.1, type: "spring", stiffness: 200 }}
       >
         <div className="absolute inset-0 bg-primary-500/20 blur-3xl rounded-full" />
-        <div className="relative w-20 h-20 rounded-2xl bg-surface-800/50 backdrop-blur-sm border border-white/10 flex items-center justify-center">
+        <div className="relative w-20 h-20 rounded-2xl bg-surface-800/50 backdrop-blur-sm border border-hairline flex items-center justify-center">
           <Icon className="h-10 w-10 text-primary-400" strokeWidth={1.5} />
         </div>
       </motion.div>

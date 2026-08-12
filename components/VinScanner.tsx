@@ -300,7 +300,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
       <div className="space-y-4">
         {/* Mode toggle */}
         <div
-          className="flex gap-2 bg-surface-950/30 p-1 rounded-xl border border-white/5"
+          className="flex gap-2 bg-surface-950/30 p-1 rounded-xl border border-hairline"
           role="group"
           aria-label="VIN entry method"
         >
@@ -342,7 +342,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
               exit={{ opacity: 0 }}
               className="space-y-3"
             >
-              <div className="relative aspect-[4/3] w-full overflow-hidden rounded-xl border border-white/10 bg-black">
+              <div className="relative aspect-[4/3] w-full overflow-hidden rounded-xl border border-hairline bg-black">
                 <video
                   ref={videoRef}
                   className="w-full h-full object-cover"
@@ -400,7 +400,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
                 placeholder="1FMSK8DH5NGA12345"
                 maxLength={17}
                 fullWidth
-                className="bg-white/5 border-white/10 focus:border-primary-400 font-mono uppercase tracking-wider"
+                className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono uppercase tracking-wider"
               />
               <Button
                 variant="filled"
