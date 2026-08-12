@@ -44,6 +44,32 @@ export type SessionLoginRequest =
   | { authType: "manager_password"; username: string; password: string }
   | { authType: "admin_password"; username: string; password: string };
 
+/**
+ * The store a device last signed into. Sent as an optional hint with personal
+ * access-code logins so the backend can scope its lookup to this dealership;
+ * deliberately kept outside the session payload so logout does not clear it.
+ */
+const LAST_DEALER_STORAGE_KEY = "dealer-social-post-ai.last-dealer-id";
+
+const readRememberedDealerId = (): string => {
+  try {
+    const value = localStorage.getItem(LAST_DEALER_STORAGE_KEY) || "";
+    return /^[a-z0-9]{15}$/.test(value) ? value : "";
+  } catch {
+    return "";
+  }
+};
+
+const rememberDealerId = (dealerId: string): void => {
+  try {
+    if (/^[a-z0-9]{15}$/.test(dealerId)) {
+      localStorage.setItem(LAST_DEALER_STORAGE_KEY, dealerId);
+    }
+  } catch {
+    // Private-mode storage failures only cost the scoping hint.
+  }
+};
+
 interface AppState {
   // Core State
   step: AppStep;
@@ -369,7 +395,12 @@ export const useAppStore = create<AppState>((set, get) => ({
               // punctuation, and password-manager supplied values.
               password: credentials.password,
             }
-          : { dealerCode: credentials.dealerCode };
+          : {
+              dealerCode: credentials.dealerCode,
+              ...(readRememberedDealerId()
+                ? { dealerId: readRememberedDealerId() }
+                : {}),
+            };
       const res = await fetchSession({
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -385,6 +416,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       const body = await res.json();
       const dealer = body.dealer;
+
+      if (dealer && credentials.authType === "code" && dealer.id) {
+        rememberDealerId(String(dealer.id));
+      }
 
       if (dealer) {
         // A successful credential exchange starts a clean tenant workspace.

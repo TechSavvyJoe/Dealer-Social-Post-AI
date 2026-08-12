@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readApiError } from "../services/apiErrors";
-import {
-  revealPersonPin,
-  rotatePersonPin,
-  type CredentialResult,
-} from "../services/salespeople";
+import { rotatePersonPin, type CredentialResult } from "../services/salespeople";
 import {
   AUTH_SESSION_REJECTED_EVENT,
   assertAuthEpoch,
@@ -93,10 +89,7 @@ describe("runtime authentication boundary", () => {
     );
   });
 
-  it.each([
-    ["rotated", rotatePersonPin, "/rotate-pin"],
-    ["revealed", revealPersonPin, "/reveal-pin"],
-  ] as const)(
+  it.each([["rotated", rotatePersonPin, "/rotate-pin"]] as const)(
     "discards a delayed %s PIN response from an older authenticated workspace",
     async (_operation, requestCredential, expectedPath) => {
       setActiveAuthEpoch(20);

@@ -70,7 +70,7 @@ Before the backend-first release, set these GitHub `production` environment vari
 - `TURNSTILE_ENFORCEMENT_ENABLED=false` for the compatibility phase.
 - `LEGACY_CLIENT_COMPATIBILITY_ENABLED=true` for exactly one backend-first release.
 
-Store `FLY_API_TOKEN` in that environment. Install `ADMIN_LOGIN_USERNAME`, `ADMIN_LOGIN_PASSWORD`, `GEMINI_API_KEY`, `TURNSTILE_SECRET`, `VERCEL_TO_FLY_PROXY_SECRET`, `CUSTOMER_HUB_URL`, `CUSTOMER_HUB_SECRET`, `CUSTOMER_HUB_DESTINATION_ID`, and `CUSTOMER_HUB_DEALER_ID` as Fly secrets. The deploy workflow checks that all nine secret names exist; backend readiness proves the proxy credential has a safe length, verifies that the private Customer Hub destination is configured, and refuses every published Turnstile test credential even while enforcement is temporarily disabled.
+Store `FLY_API_TOKEN` in that environment. Install `ADMIN_LOGIN_USERNAME`, `ADMIN_LOGIN_PASSWORD`, `SALESPERSON_PIN_PEPPER` (32+ random chars, e.g. `openssl rand -hex 24`; peppers the one-way salesperson access-code hashes — rotating it invalidates every stored code), `GEMINI_API_KEY`, `TURNSTILE_SECRET`, `VERCEL_TO_FLY_PROXY_SECRET`, `CUSTOMER_HUB_URL`, `CUSTOMER_HUB_SECRET`, `CUSTOMER_HUB_DESTINATION_ID`, and `CUSTOMER_HUB_DEALER_ID` as Fly secrets. The deploy workflow checks that all ten secret names exist; backend readiness proves the proxy credential has a safe length, verifies that the private Customer Hub destination is configured, and refuses every published Turnstile test credential even while enforcement is temporarily disabled.
 
 ## Administrator credential rotation
 

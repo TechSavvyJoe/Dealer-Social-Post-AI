@@ -116,6 +116,7 @@ docker run --rm \
 base_container="$(docker run --detach \
   --env ADMIN_DEALER_CODE="${admin_code}" \
   --env ADMIN_LOGIN_USERNAME=upgrade.admin \
+  --env SALESPERSON_PIN_PEPPER=ci-pin-pepper-0123456789abcdef0123456789 \
   --env ADMIN_LOGIN_PASSWORD="${upgrade_login_secret}" \
   --env GEMINI_API_KEY=test-upgrade-placeholder \
   --env POCKETBASE_R2_BACKUPS_ENABLED=true \
@@ -172,6 +173,7 @@ base_container=""
 
 current_container="$(docker run --detach \
   --env ADMIN_LOGIN_USERNAME=upgrade.admin \
+  --env SALESPERSON_PIN_PEPPER=ci-pin-pepper-0123456789abcdef0123456789 \
   --env ADMIN_LOGIN_PASSWORD="${upgrade_login_secret}" \
   --env GEMINI_API_KEY=test-upgrade-placeholder \
   --env POCKETBASE_R2_BACKUPS_ENABLED=true \
@@ -201,27 +203,37 @@ after_migrations="$(docker exec "$current_container" sqlite3 \
   /pb/pb_data/data.db 'SELECT COUNT(*) FROM _migrations;')"
 session_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
   "http://127.0.0.1:${current_port}/api/app/session")"
+# The bootstrap backfill converts plaintext access codes to peppered hashes.
+# Recompute the expected HMAC here so the smoke proves the exact transform, not
+# just "some hash landed".
+expected_pin_hash() {
+  printf %s "dealer-social-post-ai:person-pin-hash:v1:$1" |
+    openssl dgst -sha256 -hmac "ci-pin-pepper-0123456789abcdef0123456789" -hex |
+    sed 's/^.*= //'
+}
+valid_pin_hash="$(expected_pin_hash 2468)"
+duplicate_pin_hash="$(expected_pin_hash 1357)"
 preserved_valid_pin="$(docker exec "$current_container" sqlite3 \
   /pb/pb_data/data.db \
-  "SELECT COUNT(*) FROM salespeople WHERE id = 'dirtyvalid00001' AND pin = '2468' AND COALESCE(pin_needs_distribution, 0) = 0;")"
+  "SELECT COUNT(*) FROM salespeople WHERE id = 'dirtyvalid00001' AND pin = '' AND pin_hash = '${valid_pin_hash}' AND COALESCE(pin_needs_distribution, 0) = 0;")"
 original_duplicate_count="$(docker exec "$current_container" sqlite3 \
   /pb/pb_data/data.db \
-  "SELECT COUNT(*) FROM salespeople WHERE id IN ('dirtydupe000001', 'dirtydupe000002') AND pin = '1357';")"
+  "SELECT COUNT(*) FROM salespeople WHERE id IN ('dirtydupe000001', 'dirtydupe000002') AND pin_hash = '${duplicate_pin_hash}';")"
 repaired_distribution_count="$(docker exec "$current_container" sqlite3 \
   /pb/pb_data/data.db \
   "SELECT COUNT(*) FROM salespeople WHERE id IN ('dirtydupe000001', 'dirtydupe000002', 'dirtybad0000001') AND pin_needs_distribution = 1;")"
 invalid_repaired_pin_count="$(docker exec "$current_container" sqlite3 \
   /pb/pb_data/data.db \
-  "SELECT COUNT(*) FROM salespeople WHERE id IN ('dirtyvalid00001', 'dirtydupe000001', 'dirtydupe000002', 'dirtybad0000001') AND (length(pin) != 4 OR pin NOT GLOB '[0-9][0-9][0-9][0-9]');")"
+  "SELECT COUNT(*) FROM salespeople WHERE id IN ('dirtyvalid00001', 'dirtydupe000001', 'dirtydupe000002', 'dirtybad0000001') AND (pin != '' OR length(pin_hash) != 64 OR pin_hash NOT GLOB '[0-9a-f]*');")"
 duplicate_pin_groups="$(docker exec "$current_container" sqlite3 \
   /pb/pb_data/data.db \
-  "SELECT COUNT(*) FROM (SELECT pin FROM salespeople WHERE pin != '' GROUP BY pin HAVING COUNT(*) > 1);")"
+  "SELECT (SELECT COUNT(*) FROM (SELECT pin_hash FROM salespeople WHERE pin_hash != '' GROUP BY pin_hash HAVING COUNT(*) > 1)) + (SELECT COUNT(*) FROM (SELECT pin FROM salespeople WHERE pin != '' GROUP BY pin HAVING COUNT(*) > 1));")"
 unique_partial_index_count="$(docker exec "$current_container" sqlite3 \
   /pb/pb_data/data.db \
-  "SELECT COUNT(*) FROM pragma_index_list('salespeople') WHERE name = 'idx_salespeople_pin' AND \"unique\" = 1 AND partial = 1;")"
+  "SELECT COUNT(*) FROM pragma_index_list('salespeople') WHERE name = 'idx_salespeople_dealer_pin_hash' AND \"unique\" = 1 AND partial = 1;")"
 legacy_manager_repaired_count="$(docker exec "$current_container" sqlite3 \
   /pb/pb_data/data.db \
-  "SELECT COUNT(*) FROM salespeople WHERE dealer = 'dirtydealer0001' AND role = 'manager' AND active = 1 AND length(pin) = 4 AND pin GLOB '[0-9][0-9][0-9][0-9]' AND pin_needs_distribution = 1;")"
+  "SELECT COUNT(*) FROM salespeople WHERE dealer = 'dirtydealer0001' AND role = 'manager' AND active = 1 AND pin = '' AND length(pin_hash) = 64 AND pin_needs_distribution = 1;")"
 legacy_admin_code_scrubbed="$(docker exec "$current_container" sqlite3 \
   /pb/pb_data/data.db \
   "SELECT COUNT(*) FROM dealers WHERE id = 'dirtydealer0001' AND COALESCE(admin_code, '') = '';")"

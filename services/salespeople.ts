@@ -214,17 +214,6 @@ export const rotatePersonPin = async (id: string): Promise<CredentialResult> => 
   return normalizeCredential(body);
 };
 
-export const revealPersonPin = async (id: string): Promise<CredentialResult> => {
-  const body = await json<{
-    person: Record<string, unknown>;
-    pin: string;
-  }>(`/api/app/salespeople/${encodeURIComponent(id)}/reveal-pin`, {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
-  return normalizeCredential(body);
-};
-
 export const acknowledgePinDistribution = async (id: string): Promise<RosterPerson> => {
   const body = await json<Record<string, unknown>>(
     `/api/app/salespeople/${encodeURIComponent(id)}/acknowledge-pin`,

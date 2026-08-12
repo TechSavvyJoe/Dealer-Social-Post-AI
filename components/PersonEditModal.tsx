@@ -21,7 +21,6 @@ import {
   acknowledgePinDistribution,
   configureManagerLogin,
   disableManagerLogin,
-  revealPersonPin,
   rotatePersonPin,
   updatePerson,
 } from "../services/salespeople";
@@ -141,28 +140,6 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
       onCredentialIssued?.(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not rotate the code.");
-    } finally {
-      setCredentialBusy(false);
-    }
-  };
-
-  const handleReveal = async () => {
-    if (
-      !person?.id ||
-      !allowPinReveal ||
-      credentialBusy ||
-      managerLoginBusy ||
-      saving
-    ) {
-      return;
-    }
-    setCredentialBusy(true);
-    setError(null);
-    try {
-      const result = await revealPersonPin(person.id);
-      showCredential(result.pin, result.person.pinNeedsDistribution);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not reveal the code.");
     } finally {
       setCredentialBusy(false);
     }
@@ -819,17 +796,10 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                       : "Generate code"}
                 </Button>
                 {allowPinReveal && hasExistingCode ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="min-h-11 flex-1"
-                    disabled={mutationBusy}
-                    leftIcon={<Eye className="h-3.5 w-3.5" />}
-                    onClick={() => void handleReveal()}
-                  >
-                    Reveal current code
-                  </Button>
+                  <p className="flex-1 self-center text-xs text-surface-500">
+                    Codes are stored securely and can't be shown again — generate a new
+                    one if it was lost.
+                  </p>
                 ) : null}
               </div>
             )}

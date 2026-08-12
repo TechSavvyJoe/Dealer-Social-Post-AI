@@ -31,6 +31,18 @@ onAfterBootstrap(() => {
   } catch (err) {
     console.error("[bootstrap] Administrator account bootstrap failed:", err);
   }
+  try {
+    const helpers = require(__hooks + "/helpers.js");
+    // Converts any plaintext access codes to peppered hashes and rewrites the
+    // affected sessions' fingerprints in the same transaction, so the storage
+    // change never logs anyone out. Idempotent; no-op once converted.
+    const summary = helpers.backfillSalespersonPinHashes();
+    if (summary.converted || summary.failed || summary.skipped) {
+      console.log("[bootstrap] access-code hash backfill: " + JSON.stringify(summary));
+    }
+  } catch (err) {
+    console.error("[bootstrap] Access-code hash backfill failed:", err);
+  }
 });
 
 // Rate limiting - using simple object instead of Map for PocketBase JSVM compatibility
@@ -1503,6 +1515,9 @@ routerAdd("GET", "/api/app/health", (c) => {
     helpers.configuredTurnstileHostnames().length > 0;
   checks.trusted_proxy_configured =
     ($os.getenv("VERCEL_TO_FLY_PROXY_SECRET") || "").toString().length >= 32;
+  // Access-code hashing is inert without its pepper: PIN logins fail closed and
+  // the plaintext backfill cannot run. Deploys must not pass readiness without it.
+  checks.pin_pepper_configured = helpers.salespersonPinPepper().length >= 32;
   checks.legacy_client_compatibility_enabled =
     ($os.getenv("LEGACY_CLIENT_COMPATIBILITY_ENABLED") || "")
       .toString()
@@ -1527,6 +1542,7 @@ routerAdd("GET", "/api/app/health", (c) => {
     !checks.admin_login_configured ||
     (flyRuntime &&
       (!checks.trusted_proxy_configured ||
+        !checks.pin_pepper_configured ||
         !checks.turnstile_secret_set ||
         !checks.turnstile_site_key_set ||
         !checks.turnstile_hostnames_configured)) ||
@@ -1731,6 +1747,13 @@ routerAdd("POST", "/api/app/session", (c) => {
       body.dealerCode === undefined || body.dealerCode === null
         ? ""
         : body.dealerCode.toString();
+    // Optional store hint remembered by the device after a prior login. It only
+    // scopes the personal-code lookup — the PIN itself remains the credential.
+    const rememberedDealerId = /^[a-z0-9]{15}$/.test(
+      (body.dealerId || "").toString().trim(),
+    )
+      ? (body.dealerId || "").toString().trim()
+      : "";
     const managerUsername = helpers.normalizeManagerUsername(body.username);
     // Passwords are exact credentials. Never trim, normalize, case-fold, log,
     // or persist the submitted value outside PocketBase's password verifier.
@@ -1955,7 +1978,7 @@ routerAdd("POST", "/api/app/session", (c) => {
       // Personal 4-digit codes on the people roster (managers + salespeople).
       // Shared dealer/admin codes are no longer accepted for store login.
       const pinLookup = helpers.isValidPersonPin(dealerCode)
-        ? helpers.findActivePersonByPin(dealerCode)
+        ? helpers.findActivePersonByPin(dealerCode, rememberedDealerId)
         : { status: "not_found", person: null };
       if (pinLookup.status === "unavailable") {
         cancelReservedAttempt();
@@ -4262,7 +4285,10 @@ routerAdd("POST", "/api/app/salespeople", (c) => {
     const record = new Record(salespeople, {
       dealer: targetDealer.id,
       name: helpers.assertString(name, 120),
-      pin: pin,
+      // Storage keeps only the peppered hash; the plaintext code is returned
+      // exactly once in this response for the manager to hand out.
+      pin: "",
+      pin_hash: helpers.personPinHash(pin),
       pin_needs_distribution: true,
       role: personRole,
       active: body.active === false ? false : true,
@@ -4369,7 +4395,7 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
           : !!txPerson.get("active");
         let nextActive = wasActive;
         let nextRole = existingRole;
-        let nextPin = txPerson.getString("pin");
+        let nextPin = "";
         let pinChanged = false;
         if (hasPinUpdate) {
           nextPin = helpers.assertPersonPinAvailableWithDao(
@@ -4377,9 +4403,11 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
             requestedPin,
             txPerson.id,
           );
-          pinChanged = nextPin !== txPerson.getString("pin");
+          const nextPinHash = helpers.personPinHash(nextPin);
+          pinChanged = nextPinHash !== txPerson.getString("pin_hash");
           if (pinChanged) {
-            txPerson.set("pin", nextPin);
+            txPerson.set("pin", "");
+            txPerson.set("pin_hash", nextPinHash);
             txPerson.set("pin_needs_distribution", true);
           }
         }
@@ -4387,11 +4415,7 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
         if (hasActiveUpdate) {
           nextActive = requestedActive;
           if (!wasActive && nextActive) {
-            helpers.assertPersonPinAvailableWithDao(
-              txDao,
-              txPerson.getString("pin"),
-              txPerson.id,
-            );
+            helpers.assertStoredPersonCredentialAvailableWithDao(txDao, txPerson);
           }
           txPerson.set("active", nextActive);
         }
@@ -4690,7 +4714,8 @@ routerAdd("POST", "/api/app/salespeople/:id/rotate-pin", (c) => {
       }
       pin = helpers.generateUniquePersonPinWithDao(txDao);
       const revoked = helpers.revokePersonSessionsWithDao(txDao, txPerson.id);
-      txPerson.set("pin", pin);
+      txPerson.set("pin", "");
+      txPerson.set("pin_hash", helpers.personPinHash(pin));
       txPerson.set("pin_needs_distribution", true);
       txDao.saveRecord(txPerson);
       committedPerson = txPerson;
@@ -4720,52 +4745,20 @@ routerAdd("POST", "/api/app/salespeople/:id/rotate-pin", (c) => {
   }
 });
 
+// Access codes are stored only as peppered one-way hashes, so revealing a
+// current code is cryptographically impossible. The route stays registered so
+// stale clients receive an explanatory 410 instead of a confusing 404.
 routerAdd("POST", "/api/app/salespeople/:id/reveal-pin", (c) => {
   const helpers = require(__hooks + "/helpers.js");
   c.response().header().set("Cache-Control", "private, no-store");
   const context = helpers.sessionContext(c);
   if (!context) return c.json(401, { error: "No active session" });
-  if (context.role !== "super_admin") {
-    return c.json(403, {
-      error: "PIN_REVEAL_FORBIDDEN",
-      code: "PIN_REVEAL_FORBIDDEN",
-      message: "Only system admin can reveal an access code.",
-    });
-  }
-
-  try {
-    const record = $app.dao().findRecordById("salespeople", c.pathParam("id"));
-    const pin = record.getString("pin");
-    if (!helpers.isValidPersonPin(pin)) {
-      return c.json(409, {
-        error: "PIN_UNAVAILABLE",
-        code: "PIN_UNAVAILABLE",
-        message: "This person does not have a valid access code.",
-      });
-    }
-    const audited = helpers.logAuthEvent("person_pin_revealed", {
-      dealerId: record.getString("dealer"),
-      credentialPresent: true,
-      ip: helpers.clientIP(c),
-      userAgent: helpers.userAgent(c),
-      detail: "person=" + record.id,
-    });
-    if (!audited) {
-      return c.json(503, {
-        error: "AUDIT_UNAVAILABLE",
-        code: "UNAVAILABLE",
-        message: "The access code cannot be revealed until auditing is available.",
-      });
-    }
-    return c.json(200, { person: helpers.serializePerson(record), pin: pin });
-  } catch (err) {
-    console.error("[/api/app/salespeople/:id/reveal-pin] error", err);
-    return c.json(404, {
-      error: "PERSON_NOT_FOUND",
-      code: "PERSON_NOT_FOUND",
-      message: "Person not found.",
-    });
-  }
+  return c.json(410, {
+    error: "PIN_REVEAL_RETIRED",
+    code: "PIN_REVEAL_RETIRED",
+    message:
+      "Access codes are stored hashed and can no longer be revealed. Rotate the code to issue a new one.",
+  });
 });
 
 routerAdd("POST", "/api/app/salespeople/:id/acknowledge-pin", (c) => {

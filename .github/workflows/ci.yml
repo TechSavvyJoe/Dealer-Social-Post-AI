@@ -134,6 +134,7 @@ jobs:
             --env GEMINI_API_URL_BASE=http://host.docker.internal:18081/ \
             --env ADMIN_LOGIN_USERNAME="${CI_ADMIN_LOGIN_USERNAME:-ci.admin}" \
             --env ADMIN_LOGIN_PASSWORD="${CI_ADMIN_LOGIN_PASSWORD:-CiAdmin7xQ2Z}" \
+            --env SALESPERSON_PIN_PEPPER=ci-pin-pepper-0123456789abcdef0123456789 \
             --env LEGACY_CLIENT_COMPATIBILITY_ENABLED=true \
             --env POCKETBASE_R2_BACKUPS_ENABLED=true \
             --env POCKETBASE_BACKUP_LAST_VERIFIED_AT="$restore_verified_at" \

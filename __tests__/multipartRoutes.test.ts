@@ -71,7 +71,9 @@ describe("PocketBase 0.22 multipart routes", () => {
     expect(hook).toContain('"/api/app/salespeople/:id/reveal-pin"');
     expect(hook).toContain('"/api/app/salespeople/:id/acknowledge-pin"');
     expect(hook).toContain('helpers.runAuditedTransaction("person_pin_rotated"');
-    expect(hook).toContain('helpers.logAuthEvent("person_pin_revealed"');
+    // Reveal is retired: hashed storage makes returning a current code impossible.
+    expect(hook).toContain('"PIN_REVEAL_RETIRED"');
+    expect(hook).not.toContain('helpers.logAuthEvent("person_pin_revealed"');
     expect(hook).toContain("helpers.revokePersonSessionsWithDao(");
     expect(helpers).toContain("function revokeDealerSessions(");
     expect(helpers).toContain("function revokePersonSessions(");

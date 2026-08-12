@@ -1654,31 +1654,29 @@ describe("Turnstile and route authority contracts", () => {
         expect(route.indexOf("helpers.runAuditedTransaction")).toBeLessThan(
           route.indexOf("pin: pin"),
         );
+        expect(route).toContain("pin: pin");
+        // Rotation stores only the peppered hash; plaintext leaves in the
+        // one-time response and never lands in a record field.
+        expect(route).toContain('txPerson.set("pin", "")');
+        expect(route).toContain('txPerson.set("pin_hash", helpers.personPinHash(pin))');
       } else {
-        expect(route).toContain("helpers.logAuthEvent(");
-        expect(route).toContain("if (!audited)");
-        expect(route).toContain('code: "UNAVAILABLE"');
-        expect(route.indexOf("if (!audited)")).toBeLessThan(route.indexOf("pin: pin"));
+        // Reveal is retired: hashed storage cannot produce a current code.
+        expect(route).toContain("c.json(410");
+        expect(route).toContain('"PIN_REVEAL_RETIRED"');
+        expect(route).not.toContain("pin: pin");
+        expect(route).not.toContain('getString("pin")');
       }
-      expect(route).toContain("pin: pin");
     }
   });
 
-  it("fails a PIN reveal closed when the audit event cannot be persisted", () => {
+  it("retires PIN reveal with an explanatory 410 and never touches the record", () => {
     const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
     const routeStart = hook.indexOf(
       'routerAdd("POST", "/api/app/salespeople/:id/reveal-pin"',
     );
     const routeEnd = hook.indexOf("routerAdd(", routeStart + 20);
     const routeSource = hook.slice(routeStart, routeEnd);
-    const person = makeRecord("person-1", {
-      dealer: "dealer-1",
-      name: "Alex Morgan",
-      role: "salesperson",
-      active: true,
-      pin: "4821",
-    });
-    const audit = vi.fn(() => false);
+    const findRecordById = vi.fn();
     let handler: ((context: any) => unknown) | undefined;
     const responseHeader = vi.fn();
     const json = vi.fn((status: number, payload: StringMap) => ({
@@ -1693,36 +1691,70 @@ describe("Turnstile and route authority contracts", () => {
       },
       require: () => ({
         sessionContext: () => ({ role: "super_admin" }),
-        isValidPersonPin: () => true,
-        logAuthEvent: audit,
-        clientIP: () => "127.0.0.1",
-        userAgent: () => "vitest",
-        serializePerson: () => ({ id: person.id }),
       }),
       $app: {
-        dao: () => ({ findRecordById: () => person }),
+        dao: () => ({ findRecordById }),
       },
       console,
     });
 
     expect(handler).toBeTypeOf("function");
     const result = handler?.({
-      pathParam: () => person.id,
+      pathParam: () => "person-1",
       response: () => ({ header: () => ({ set: responseHeader }) }),
       json,
     }) as { status: number; payload: StringMap };
 
-    expect(audit).toHaveBeenCalledOnce();
     expect(responseHeader).toHaveBeenCalledWith("Cache-Control", "private, no-store");
-    expect(result).toEqual({
-      status: 503,
-      payload: {
-        error: "AUDIT_UNAVAILABLE",
-        code: "UNAVAILABLE",
-        message: "The access code cannot be revealed until auditing is available.",
-      },
-    });
-    expect(JSON.stringify(result)).not.toContain("4821");
+    expect(findRecordById).not.toHaveBeenCalled();
+    expect(result.status).toBe(410);
+    expect(result.payload.code).toBe("PIN_REVEAL_RETIRED");
+    expect(JSON.stringify(result)).not.toMatch(/\b\d{4}\b/);
+  });
+
+  it("stores salesperson access codes only as peppered hashes", () => {
+    const helpers = readFileSync(resolve(process.cwd(), "pb_hooks/helpers.js"), "utf8");
+    const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
+
+    // Hashing derives from the deployment pepper and fails closed without it.
+    expect(helpers).toContain("function personPinHash(pin)");
+    expect(helpers).toContain('$os.getenv("SALESPERSON_PIN_PEPPER")');
+    expect(helpers).toContain("SALESPERSON_PIN_PEPPER is not configured");
+    expect(helpers).toContain(
+      '"dealer-social-post-ai:person-pin-hash:v1:" + normalized',
+    );
+
+    // Login resolves the hash first (dealer-scoped when the device remembers
+    // its store); the plaintext filter survives only as the bridge fallback.
+    expect(helpers).toContain(
+      '"pin_hash = {:hash} && dealer = {:dealer} && active = true"',
+    );
+    expect(helpers).toContain('"pin_hash = {:hash} && active = true"');
+
+    // Session fingerprints bind to the stored hash (v2), and the bootstrap
+    // sweep converts plaintext rows while rewriting live session fingerprints.
+    expect(helpers).toContain('"dealer-social-post-ai:person-pin:v2:"');
+    expect(helpers).toContain("function backfillSalespersonPinHashes()");
+    expect(hook).toContain("helpers.backfillSalespersonPinHashes()");
+
+    // Availability checks cover both storage forms during the bridge.
+    expect(helpers).toContain('"(pin = {:pin} || pin_hash = {:hash})"');
+
+    // Creation writes the hash, never the plaintext.
+    expect(hook).toContain("pin_hash: helpers.personPinHash(pin)");
+
+    // Readiness fails without the pepper so a deploy cannot silently disable
+    // PIN logins.
+    expect(hook).toContain("checks.pin_pepper_configured");
+
+    // The migration swaps the global plaintext index for the dealer-scoped
+    // hash index.
+    const migration = readFileSync(
+      resolve(process.cwd(), "pb_migrations/1751300000_person_pin_hash.js"),
+      "utf8",
+    );
+    expect(migration).toContain("idx_salespeople_dealer_pin_hash");
+    expect(migration).toContain("`dealer`, `pin_hash`");
   });
 
   it("ignores legacy attribution fields and derives identity from the validated session", () => {

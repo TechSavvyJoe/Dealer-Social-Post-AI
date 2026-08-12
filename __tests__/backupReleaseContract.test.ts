@@ -538,7 +538,7 @@ describe("Fly backup source identity", () => {
       "utf8",
     );
     const temporaryRotation = runbook.slice(
-      runbook.indexOf("## Two-phase administrator credential"),
+      runbook.indexOf("## Administrator credential rotation"),
       runbook.indexOf("## Required gates"),
     );
     expect(temporaryRotation).toContain(
