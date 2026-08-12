@@ -2973,7 +2973,9 @@ function dealerOwnsProviderResource(dealerId, input) {
   if (!normalizedExpiry || normalizedExpiry <= now) {
     try {
       $app.dao().deleteRecord(record);
-    } catch (_e) {}
+    } catch (e) {
+      console.warn("[provider-resources] expired-claim delete failed: " + e);
+    }
     return false;
   }
   return record.getString("dealer") === dealerId;
@@ -3173,7 +3175,10 @@ function purgeExpiredSessionsAndOldEvents() {
     for (let i = 0; i < expiredSessions.length; i++) {
       try {
         $app.dao().deleteRecord(expiredSessions[i]);
-      } catch (_e) {}
+      } catch (e) {
+        // Tolerate one bad row, but keep a systematically failing GC visible.
+        console.warn("[session-gc] expired-session delete failed: " + e);
+      }
     }
 
     const ninetyDaysAgo = databaseTimestamp(
@@ -3187,7 +3192,9 @@ function purgeExpiredSessionsAndOldEvents() {
     for (let i = 0; i < oldEvents.length; i++) {
       try {
         $app.dao().deleteRecord(oldEvents[i]);
-      } catch (_e) {}
+      } catch (e) {
+        console.warn("[session-gc] auth-event prune failed: " + e);
+      }
     }
   } catch (err) {
     console.error("[purgeExpiredSessionsAndOldEvents] error", err);
