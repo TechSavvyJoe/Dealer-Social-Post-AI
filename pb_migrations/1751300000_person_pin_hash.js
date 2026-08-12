@@ -15,9 +15,11 @@
  *     the release that requires dealer context at login, which swaps this index
  *     for a (dealer, pin_hash) one.
  *
- * The data backfill deliberately lives in onAfterBootstrap (pb_hooks/main.pb.js)
- * rather than here: it needs the runtime pepper secret and must also sweep any
- * straggler rows written by an old process during the deploy window.
+ * The data conversion runs in migration 1751300001 (strictly ordered after
+ * this schema change and the people-integrity repair — the bootstrap hook is
+ * NOT ordered after pending migrations on PB 0.22, which raced). The
+ * schema-guarded bootstrap sweep only catches stragglers written by an old
+ * process during the deploy window.
  */
 migrate(
   (db) => {
@@ -53,6 +55,14 @@ migrate(
     });
     people.indexes.push(
       "CREATE UNIQUE INDEX `idx_salespeople_pin_hash` ON `salespeople` (`pin_hash`) WHERE `pin_hash` != ''",
+    );
+    // The plaintext partial index stays for the whole bridge: the old binary
+    // (still serving during the deploy window) enforces uniqueness only via a
+    // raceable check-then-insert on `pin`, and this index is its DB backstop.
+    // It costs nothing afterwards (converted rows have pin = '') and leaves
+    // with the pin column in the release that ends the bridge.
+    people.indexes.push(
+      "CREATE UNIQUE INDEX `idx_salespeople_pin` ON `salespeople` (`pin`) WHERE `pin` != ''",
     );
     dao.saveCollection(people);
   },

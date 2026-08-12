@@ -15,11 +15,12 @@ const computeIsDesktop = (): boolean => {
   const width = window.innerWidth;
   if (width < 1200) return false;
   if (width >= 1440) return true;
+  // "Mobi" matches the "Mobile" token every phone UA carries (Android
+  // included); Android tablets ship neither "Mobile" nor "Tablet", so any
+  // Android-specific clause only misclassifies them.
   const uaIsPhone =
     typeof navigator !== "undefined" &&
-    /Mobi|Android(?!.*Tablet)|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-      navigator.userAgent,
-    );
+    /Mobi|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   return !uaIsPhone;
 };
 

@@ -169,11 +169,15 @@ describe("Vehicle Walkaround PocketBase boundary", () => {
     expect(hooks).toContain("c.request().method");
     expect(hooks).toContain("c.request().url.path");
 
-    // Verified nonces are single-use inside the freshness window, and only
+    // Verified nonces are single-use inside the freshness window, held in
+    // $app.store() so the record spans PocketBase's pooled hook VMs (a
+    // module-level map would admit one replay per pool member), and only
     // verified nonces enter the cache.
-    expect(hooks).toContain("_seenWalkaroundNonces");
+    expect(hooks).toContain("$app.store().set(NONCE_KEY_PREFIX + nonce");
     expect(hooks).toContain('return deny("replayed nonce")');
-    const markIndex = hooks.indexOf("_seenWalkaroundNonces[nonce] = Date.now()");
+    // lastIndexOf: the first occurrence is the helper's definition; the call
+    // site inside internalAuth must come after signature verification.
+    const markIndex = hooks.lastIndexOf("markWalkaroundNonceSeen(nonce)");
     const verifyIndex = hooks.indexOf('return deny("signature mismatch")');
     expect(markIndex).toBeGreaterThan(verifyIndex);
 

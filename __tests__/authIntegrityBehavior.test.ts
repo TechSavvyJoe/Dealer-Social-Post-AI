@@ -1724,12 +1724,14 @@ describe("Turnstile and route authority contracts", () => {
       '"dealer-social-post-ai:person-pin-hash:v1:" + normalized',
     );
 
-    // Login resolves the hash first (dealer-scoped when the device remembers
-    // its store); the plaintext filter survives only as the bridge fallback.
-    expect(helpers).toContain(
+    // Login resolves the hash first; while the hash index is globally unique
+    // a scoped pre-query would be a redundant second lookup, so the dealerId
+    // hint is accepted but unused until the dealer-scoped release. The
+    // plaintext filter survives only as the bridge fallback.
+    expect(helpers).toContain('"pin_hash = {:hash} && active = true"');
+    expect(helpers).not.toContain(
       '"pin_hash = {:hash} && dealer = {:dealer} && active = true"',
     );
-    expect(helpers).toContain('"pin_hash = {:hash} && active = true"');
 
     // Session fingerprints bind to the stored hash (v2), and the bootstrap
     // sweep converts plaintext rows while rewriting live session fingerprints.
@@ -1759,6 +1761,11 @@ describe("Turnstile and route authority contracts", () => {
     expect(migration).toContain("idx_salespeople_pin_hash");
     expect(migration).toContain(
       "UNIQUE INDEX `idx_salespeople_pin_hash` ON `salespeople` (`pin_hash`)",
+    );
+    // The plaintext partial index survives the bridge as the DB backstop for
+    // the still-serving old binary's raceable check-then-insert.
+    expect(migration).toContain(
+      "UNIQUE INDEX `idx_salespeople_pin` ON `salespeople` (`pin`) WHERE `pin` != ''",
     );
     // Rolling back would destroy the only credential material.
     expect(migration).toContain("forward-only");

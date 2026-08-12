@@ -30,7 +30,8 @@ interface HealthPayload {
     claude_fallback_enabled: boolean;
     openai_fallback_enabled: boolean;
     admin_login_configured: boolean;
-    pin_pepper_configured: boolean;
+    /** Added 2026-08; optional so a pre-upgrade backend's payload still renders. */
+    pin_pepper_configured?: boolean;
     turnstile_enforcement_enabled: boolean;
     turnstile_secret_set: boolean;
     turnstile_site_key_set: boolean;
@@ -92,7 +93,6 @@ const healthCheckKeys: Array<keyof HealthPayload["checks"]> = [
   "claude_fallback_enabled",
   "openai_fallback_enabled",
   "admin_login_configured",
-  "pin_pepper_configured",
   "turnstile_enforcement_enabled",
   "turnstile_secret_set",
   "turnstile_site_key_set",
@@ -128,6 +128,10 @@ const isHealthPayload = (value: unknown): value is HealthPayload => {
     typeof value.apiContractVersion === "string" &&
     typeof value.modelPolicyVersion === "string" &&
     healthCheckKeys.every((key) => typeof checks[key] === "boolean") &&
+    // Keys added after the first release are optional: a payload from a
+    // not-yet-upgraded backend must degrade to "unknown", not blind the panel.
+    (checks.pin_pepper_configured === undefined ||
+      typeof checks.pin_pepper_configured === "boolean") &&
     typeof backup.configured === "boolean" &&
     (backup.lastVerifiedAt === null || typeof backup.lastVerifiedAt === "string") &&
     (backup.verifiedReleaseSha === null ||
@@ -343,10 +347,10 @@ export const SystemHealthPanel: React.FC = () => {
 
   const overallOk = data?.ok ?? false;
   const criticalFailures = checkRows.filter(
-    (r) => r.critical && data && !data.checks[r.key],
+    (r) => r.critical && data && data.checks[r.key] === false,
   );
   const advisories = checkRows.filter(
-    (r) => !r.critical && data && !data.checks[r.key],
+    (r) => !r.critical && data && data.checks[r.key] === false,
   );
 
   // One truthful headline: criticals win, then the endpoint's own verdict,
@@ -364,18 +368,16 @@ export const SystemHealthPanel: React.FC = () => {
     status === "loading"
       ? "Checking system health…"
       : status === "critical"
-        ? `${Math.max(criticalFailures.length, 1)} critical ${
-            criticalFailures.length === 1 ? "issue needs" : "issues need"
-          } attention`
+        ? criticalFailures.length > 0
+          ? `${criticalFailures.length} critical ${
+              criticalFailures.length === 1 ? "issue needs" : "issues need"
+            } attention`
+          : "Service reports a readiness failure"
         : status === "advisory"
           ? `Operational — ${advisories.length} ${
               advisories.length === 1 ? "advisory" : "advisories"
             }`
           : "All systems operational";
-
-  // Only criticals interrupt; advisories are counted in the headline and
-  // live in the Details disclosure with everything else.
-  const failingRows = criticalFailures;
 
   return (
     <motion.div
@@ -443,9 +445,9 @@ export const SystemHealthPanel: React.FC = () => {
       )}
 
       {/* Failing checks surface themselves; healthy ones stay behind Details. */}
-      {failingRows.length > 0 && (
+      {criticalFailures.length > 0 && (
         <ul className="border-t border-hairline px-4 py-2 sm:px-5">
-          {failingRows.map((row) => (
+          {criticalFailures.map((row) => (
             <li key={row.key} className="flex items-start gap-2.5 py-1.5">
               <XCircle
                 className={cn(
@@ -469,7 +471,7 @@ export const SystemHealthPanel: React.FC = () => {
         <div className="space-y-4 border-t border-hairline px-4 py-4 sm:px-5">
           <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
             {checkRows.map((row) => {
-              const ok = data ? data.checks[row.key] : null;
+              const ok = data ? (data.checks[row.key] ?? null) : null;
               return (
                 <div
                   key={row.key}

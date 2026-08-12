@@ -21,9 +21,10 @@ const lighten = (hex: string, pct: number): string => {
   const r = parseInt(m.slice(0, 2), 16);
   const g = parseInt(m.slice(2, 4), 16);
   const b = parseInt(m.slice(4, 6), 16);
-  const lr = Math.round(r + (255 - r) * pct);
-  const lg = Math.round(g + (255 - g) * pct);
-  const lb = Math.round(b + (255 - b) * pct);
+  const clamp = (v: number) => Math.min(255, Math.max(0, Math.round(v)));
+  const lr = clamp(r + (255 - r) * pct);
+  const lg = clamp(g + (255 - g) * pct);
+  const lb = clamp(b + (255 - b) * pct);
   return `#${lr.toString(16).padStart(2, "0")}${lg
     .toString(16)
     .padStart(2, "0")}${lb.toString(16).padStart(2, "0")}`;

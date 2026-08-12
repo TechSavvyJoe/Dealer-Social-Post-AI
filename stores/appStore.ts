@@ -220,9 +220,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: null,
   isRestoringSession: true,
   authEpoch: 0,
-  // New installs open in the dealership-studio theme shown throughout the
-  // product. Explicitly saved light/system preferences still restore below.
-  theme: "dark",
+  // Seed the theme synchronously from the persisted session so light-mode
+  // users don't flash dark between mount and the async restore resolving.
+  // New installs still open in the dealership-studio dark theme.
+  theme: ((): "dark" | "light" | "system" => {
+    try {
+      const persisted = loadSession()?.theme;
+      return persisted === "light" || persisted === "system" ? persisted : "dark";
+    } catch {
+      return "dark";
+    }
+  })(),
   preferredStyle: StyleOption.Modern,
   preferredTone: ToneOption.Excited,
   imageQualityTier: "standard",
@@ -390,12 +398,13 @@ export const useAppStore = create<AppState>((set, get) => ({
               // punctuation, and password-manager supplied values.
               password: credentials.password,
             }
-          : {
-              dealerCode: credentials.dealerCode,
-              ...(readRememberedDealerId()
-                ? { dealerId: readRememberedDealerId() }
-                : {}),
-            };
+          : (() => {
+              const rememberedDealerId = readRememberedDealerId();
+              return {
+                dealerCode: credentials.dealerCode,
+                ...(rememberedDealerId ? { dealerId: rememberedDealerId } : {}),
+              };
+            })();
       const res = await fetchSession({
         method: "POST",
         headers: { "Content-Type": "application/json" },

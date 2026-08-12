@@ -19,6 +19,7 @@ import {
   EXPORT_FORMATS,
 } from "../utils/multiFormatExport";
 import { dataUrlToBlob } from "../utils/imageUtils";
+import { isCurrentlyOffline } from "../utils/connectionManager";
 import { fitCaptionToBudget } from "../utils/hashtags";
 import {
   downloadPreparedMediaFile,
@@ -610,6 +611,11 @@ export const preparePublishShare = async (
 export const sharePrepared = async (
   prepared: PreparedPublishShare,
 ): Promise<PublishStatus> => {
+  // The real production share path enters here (ShareDialog); every handoff
+  // needs the network, so fail honestly before the share sheet half-opens.
+  const offline = offlinePublishStatus();
+  if (offline) return offline;
+
   if (typeof navigator === "undefined" || typeof navigator.share !== "function") {
     return {
       kind: "fallback",
@@ -732,6 +738,15 @@ export const adapterFor = (targetId: string): PublishAdapter | null => {
   return { kind: "handoff", target };
 };
 
+const offlinePublishStatus = (): PublishStatus | null =>
+  isCurrentlyOffline()
+    ? {
+        kind: "error",
+        message:
+          "You're offline. Your post is saved on this device — reconnect to share it.",
+      }
+    : null;
+
 export const publishTo = async (
   targetId: string,
   content: PublishContent,
@@ -739,15 +754,8 @@ export const publishTo = async (
   const target = findTarget(targetId);
   if (!target) return { kind: "error", message: "Unknown publish target" };
 
-  // Every handoff needs the network (share payloads, intent URLs, app
-  // stores' auth); fail honestly before any half-working share sheet opens.
-  if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    return {
-      kind: "error",
-      message:
-        "You're offline. Your post is saved on this device — reconnect to share it.",
-    };
-  }
+  const offline = offlinePublishStatus();
+  if (offline) return offline;
 
   try {
     const file = await buildShareFile(target, content);

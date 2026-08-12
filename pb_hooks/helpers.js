@@ -431,18 +431,24 @@ function backfillSalespersonPinHashes() {
       return summary;
     }
     let convertedThisBatch = 0;
+    let malformedThisBatch = 0;
     for (let i = 0; i < rows.length; i++) {
       const person = rows[i];
+      let outcome = "converted";
       try {
         $app.dao().runInTransaction(function (txDao) {
           const txPerson = txDao.findRecordById("salespeople", person.id);
           const pin = txPerson.getString("pin");
-          if (!isValidPersonPin(pin)) return;
-          if (isValidPersonPinHash(txPerson.getString("pin_hash"))) {
-            txPerson.set("pin", "");
-            txDao.saveRecord(txPerson);
+          if (!isValidPersonPin(pin)) {
+            // Not convertible and not clearable; leave for investigation.
+            outcome = "malformed";
             return;
           }
+          // A plaintext code alongside a stored hash can only mean an
+          // old-process write AFTER conversion (new code always blanks pin
+          // in the same save that writes pin_hash), so the plaintext is the
+          // NEWER credential — always re-hash it rather than resurrecting
+          // the stored hash, and rebind live sessions to the result.
           txPerson.set("pin_hash", personPinHash(pin));
           txPerson.set("pin", "");
           txDao.saveRecord(txPerson);
@@ -460,16 +466,29 @@ function backfillSalespersonPinHashes() {
             txDao.saveRecord(sessions[j]);
           }
         });
-        summary.converted++;
-        convertedThisBatch++;
+        if (outcome === "malformed") {
+          malformedThisBatch++;
+        } else {
+          summary.converted++;
+          convertedThisBatch++;
+        }
       } catch (err) {
         summary.failed++;
         console.error("[pin-backfill] failed for person " + person.id + ": " + err);
       }
     }
-    // A batch that converted nothing means only failing rows remain; another
-    // pass would loop on the same records forever.
-    if (convertedThisBatch === 0) return summary;
+    // Malformed/failed rows keep matching the batch filter; a batch with no
+    // real conversion means only those remain — stop instead of spinning.
+    if (convertedThisBatch === 0) {
+      if (malformedThisBatch > 0) {
+        console.warn(
+          "[pin-backfill] " +
+            malformedThisBatch +
+            " row(s) hold a non-empty but malformed pin and were left untouched — investigate manually.",
+        );
+      }
+      return summary;
+    }
   }
   console.error(
     "[pin-backfill] stopped after " +
@@ -1204,32 +1223,29 @@ function findActivePersonByPin(pin, dealerId) {
     // the bootstrap sweep has not converted yet.
     pinHash = "";
   }
-  const scopedDealer = (dealerId || "").toString().trim();
   try {
-    // Primary: peppered hash, dealer-scoped when the client remembers its
-    // store. A dealer mismatch intentionally falls through to the global
-    // lookup during the bridge window (existing hashes stay globally unique),
-    // so a device handed to a different store cannot dead-end.
+    // Primary: peppered hash. While idx_salespeople_pin_hash is globally
+    // unique (the whole compatibility bridge), a dealer-scoped pre-query
+    // would always resolve to the same single row as this global one, so the
+    // dealerId hint is accepted but deliberately unused until the release
+    // that requires dealer context at login swaps the index to
+    // (dealer, pin_hash) and this lookup becomes scoped for real.
     if (pinHash) {
-      const filters = scopedDealer
-        ? [
-            "pin_hash = {:hash} && dealer = {:dealer} && active = true",
-            "pin_hash = {:hash} && active = true",
-          ]
-        : ["pin_hash = {:hash} && active = true"];
-      for (let i = 0; i < filters.length; i++) {
-        const records = $app
-          .dao()
-          .findRecordsByFilter("salespeople", filters[i], "created", 1, 0, {
-            hash: pinHash,
-            dealer: scopedDealer,
-          });
-        if (!records || typeof records.length !== "number") {
-          return { status: "unavailable", person: null };
-        }
-        if (records.length > 0) {
-          return { status: "found", person: records[0] };
-        }
+      const records = $app
+        .dao()
+        .findRecordsByFilter(
+          "salespeople",
+          "pin_hash = {:hash} && active = true",
+          "created",
+          1,
+          0,
+          { hash: pinHash },
+        );
+      if (!records || typeof records.length !== "number") {
+        return { status: "unavailable", person: null };
+      }
+      if (records.length > 0) {
+        return { status: "found", person: records[0] };
       }
     }
     // Bridge fallback: rows written by an old process before the bootstrap
@@ -3308,7 +3324,6 @@ module.exports = {
   safeDealerMutationError,
   safePhotoReleaseError,
   isValidPersonPin,
-  isValidPersonPinHash,
   personPinHash,
   salespersonPinPepper,
   backfillSalespersonPinHashes,

@@ -1691,21 +1691,47 @@ function rawRequestBody(c) {
 }
 
 /**
- * Nonces already accepted inside the freshness window. Best-effort process
- * state with the same semantics as every rate-limit bucket in this backend
- * (per process, reset on restart); the authoritative anti-replay controls are
- * the v2 signature's method+path+idempotency binding plus per-route
- * idempotency dedupe on mutations.
+ * Nonces already accepted inside the freshness window, held in $app.store()
+ * so the record is shared across PocketBase's pooled hook VMs (module-level
+ * state is per-VM and would let a replay succeed once per pool member). The
+ * check-then-set below is not atomic, so two perfectly simultaneous replays
+ * could both pass — the v2 signature's method+path+idempotency binding plus
+ * per-route idempotency dedupe on mutations remain the authoritative
+ * anti-replay controls; this cache closes the practical window.
  */
-const _seenWalkaroundNonces = {};
-let _lastNoncePrune = 0;
+const NONCE_TTL_MS = 10 * 60 * 1000;
+const NONCE_KEY_PREFIX = "walkaroundNonce:";
+const NONCE_PRUNE_AT_KEY = "walkaroundNoncePrunedAt";
+
+function seenWalkaroundNonceUntil(nonce) {
+  try {
+    return Number($app.store().get(NONCE_KEY_PREFIX + nonce) || 0);
+  } catch (_e) {
+    return 0;
+  }
+}
+
+function markWalkaroundNonceSeen(nonce) {
+  try {
+    $app.store().set(NONCE_KEY_PREFIX + nonce, Date.now() + NONCE_TTL_MS);
+  } catch (_e) {}
+}
 
 function pruneSeenWalkaroundNonces(now) {
-  if (now - _lastNoncePrune < 60 * 1000) return;
-  _lastNoncePrune = now;
-  const keys = Object.keys(_seenWalkaroundNonces);
-  for (let i = 0; i < keys.length; i++) {
-    if (_seenWalkaroundNonces[keys[i]] <= now) delete _seenWalkaroundNonces[keys[i]];
+  try {
+    const last = Number($app.store().get(NONCE_PRUNE_AT_KEY) || 0);
+    if (now - last < 60 * 1000) return;
+    $app.store().set(NONCE_PRUNE_AT_KEY, now);
+    const all = $app.store().getAll();
+    const keys = Object.keys(all || {});
+    for (let i = 0; i < keys.length; i++) {
+      if (keys[i].indexOf(NONCE_KEY_PREFIX) === 0 && Number(all[keys[i]] || 0) <= now) {
+        $app.store().remove(keys[i]);
+      }
+    }
+  } catch (_e) {
+    // Entries are tiny and worker traffic is low; if enumeration is
+    // unavailable the cache simply grows until the next deploy restart.
   }
 }
 
@@ -1802,7 +1828,7 @@ function internalAuth(c, rawBody) {
     if (!/^[a-f0-9]{32}$/.test(nonce)) return deny("malformed nonce");
     const now = Date.now();
     pruneSeenWalkaroundNonces(now);
-    if (_seenWalkaroundNonces[nonce] && _seenWalkaroundNonces[nonce] > now) {
+    if (seenWalkaroundNonceUntil(nonce) > now) {
       return deny("replayed nonce");
     }
     let method = "";
@@ -1855,7 +1881,7 @@ function internalAuth(c, rawBody) {
     return deny("signature mismatch");
   if (signatureVersion === "2") {
     // Mark only verified nonces so garbage requests cannot poison the cache.
-    _seenWalkaroundNonces[nonce] = Date.now() + 10 * 60 * 1000;
+    markWalkaroundNonceSeen(nonce);
   }
   return { idempotencyKey: idempotency };
 }

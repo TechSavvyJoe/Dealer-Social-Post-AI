@@ -328,11 +328,12 @@
   }
 
   /* Focus ring — always brand color, always 3px, always visible. */
+  /* Outline (not box-shadow) so utility-layer shadows like shadow-sm on
+     buttons can never override the indicator — outlines render independently
+     of box-shadow and follow the element's border radius. */
   *:focus-visible {
-    outline: none;
-    box-shadow: var(--shadow-focus);
-    border-radius: var(--radius-md);
-    transition: box-shadow var(--duration-fast) var(--ease-out);
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
   }
 
   /* Better default for buttons and inputs */

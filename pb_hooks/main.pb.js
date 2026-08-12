@@ -4096,7 +4096,11 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
             txPerson.id,
           );
           const nextPinHash = helpers.personPinHash(nextPin);
-          pinChanged = nextPinHash !== txPerson.getString("pin_hash");
+          // Unchanged in either representation is a no-op: a not-yet-converted
+          // row resubmitting its own plaintext must not revoke sessions.
+          pinChanged =
+            nextPinHash !== txPerson.getString("pin_hash") &&
+            nextPin !== txPerson.getString("pin");
           if (pinChanged) {
             txPerson.set("pin", "");
             txPerson.set("pin_hash", nextPinHash);

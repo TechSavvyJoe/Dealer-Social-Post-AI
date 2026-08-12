@@ -23,10 +23,15 @@
             localStorage.getItem("dealer-social-post-ai.session") || "null",
           );
           var t = s && s.theme;
+          // Step 4 is the publish result, which the app always renders dark
+          // (publish-studio-theme) — painting it light first would invert the
+          // very flash this script exists to remove.
+          var resultStep = s && s.step === 4;
           if (
-            t === "light" ||
-            (t === "system" &&
-              window.matchMedia("(prefers-color-scheme: light)").matches)
+            !resultStep &&
+            (t === "light" ||
+              (t === "system" &&
+                window.matchMedia("(prefers-color-scheme: light)").matches))
           ) {
             document.documentElement.classList.add("theme-light");
             var m = document.querySelector('meta[name="theme-color"]');
