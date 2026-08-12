@@ -234,6 +234,51 @@ Classy, confident, expensive-looking. Apple-keynote restraint + premium OEM broc
 Not template Canva, not clip-art, not meme energy, not stock-photo composites.
 Every choice (type, grade, spacing, logo scale) should look intentional enough to justify a four- or five-figure creative fee.`;
 
+/**
+ * The generated overlay has to survive next to human work in the same feed. The
+ * failure mode is not ugly type — it is *arbitrary* type: default-weight words
+ * dropped at the canvas edge, a second element parked in an unrelated corner,
+ * and an invented icon floating with no purpose. Those three tells are what
+ * make an image read as "auto-generated", so each one is named and forbidden
+ * explicitly rather than implied by an adjective like "premium".
+ */
+const layoutAndTypeCraft = `Compose like a senior art director building a layout on a grid — not like a tool dropping text onto a photo.
+
+LAYOUT GRID (decide this before drawing any text):
+- Set one margin of ~7% of the short edge, and apply it on ALL FOUR sides. EVERY text element, rule, and logo aligns to that margin. Nothing floats.
+- The margin is a hard boundary, not a suggestion. No glyph may cross it or visually kiss the canvas edge. Type that runs edge-to-edge is the single clearest sign of an auto-generated layout.
+- SIZE TO FIT THE MARGIN: choose the headline size so the longest line ends comfortably INSIDE the right margin. If it does not fit, reduce the type size or break the line — never stretch, condense, or bleed to the edge. Ending the longest line short of the margin looks deliberate; touching the edge looks broken.
+- Choose ONE anchor region for the type system (typically lower-left or lower-third). Build a single stacked block there: optional eyebrow, then headline, then optional support line — all sharing one left edge.
+- Prefer placing the store signature in that SAME column, on the same left edge, below the headline. Only if the composition truly demands it may it sit in the opposite bottom corner — and then its outer edge must land on exactly the same margin as the headline's, so the two read as one system.
+- Reserve genuine empty space. A confident layout leaves 55-70% of the canvas as breathing room and photo.
+
+TYPE SYSTEM (one family, at most two weights):
+- Headline: tight, deliberate tracking (slightly negative on large display sizes). Cap height sized so the full headline occupies at most ~28% of canvas height. Multi-line headlines use tight leading (~0.95x) and a clean ragged right — never justified, never centered-and-stretched.
+- Eyebrow/support line (optional, 1-3 words): ~20% of the headline's cap height, UPPERCASE, generous letterspacing (+10%). This small/large contrast is what makes a layout look designed.
+- Never set two elements at nearly the same size — near-equal sizes read as indecision. Commit to clear hierarchy.
+- Type edges must be crisp and vector-clean: correct kerning, even stroke weights, no warped/doubled/melted letterforms, no misspellings.
+
+LEGIBILITY:
+- If the anchor region is busy, lay a soft linear gradient scrim from that edge (transparent → 45-60% black) under the type. Gradient scrim only — never a hard-edged black bar or a boxed label.
+- Do not outline or drop-shadow type by default. If contrast still fails, use one soft directional shadow, not a glow.
+
+STORE SIGNATURE:
+- Treat the dealership name as a signature block, not a headline: small, uppercase, letterspaced, optionally paired with a hairline rule or the supplied logo locked to it.
+- It must never rival the headline for attention.
+
+ACCENT (at most ONE, or none):
+- A hairline rule, a short solid color bar behind the eyebrow, or a thin underline. Pull its color from the scene (vehicle paint, brand color) — never a random hue.
+
+NEVER INVENT GRAPHICS:
+- Do not add icons, symbols, keys, sparkles, stars, arrows, swooshes, badges, ribbons, seals, confetti, or decorative shapes. The ONLY permitted logo is the supplied store logo image.
+- A stray decorative icon is an instant failure — it is the clearest signal that a machine composed the layout.
+- NEVER draw, redraw, recreate, or approximate a manufacturer/OEM logo or emblem (Ford, Chevrolet, Toyota, Honda, the blue oval, a bowtie, etc.), and never invent a dealership badge, crest, or emblem. A fabricated trademark is a legal failure, not a style choice.
+- If no store logo image is supplied, render the store identity as TEXT ONLY. Do not compensate for the missing logo by inventing one.
+- Manufacturer emblems already physically present on the real vehicle stay exactly as photographed — never enlarge, relocate, or duplicate them into the layout.
+
+THE MARGIN IS EMPTY SPACE, NOT A DRAWN EDGE:
+- The margin is interior breathing room only. Never draw a border, frame, outline, keyline, or colored band around the canvas edge, and never inset the photo inside a plain field. The photograph always bleeds fully to all four canvas edges.`;
+
 // ----------------------------------------------------------------------------
 // TEXT — Caption
 // ----------------------------------------------------------------------------
@@ -410,6 +455,7 @@ This is professional photo editing and design on the source image — NOT generi
   sections.push(xmlBlock("subject_preservation", subjectPreservation));
   sections.push(xmlBlock("safe_zones", safeZoneRules));
   sections.push(xmlBlock("campaign_quality", campaignQualityBar));
+  sections.push(xmlBlock("layout_and_type_craft", layoutAndTypeCraft));
   sections.push(xmlBlock("on_image_text_contract", ON_IMAGE_TEXT_RULES));
 
   sections.push(
@@ -418,9 +464,9 @@ This is professional photo editing and design on the source image — NOT generi
       `Style: ${style}
 ${imageStyleHint(style)}
 Color & grading: subtle cinematic grade only — lift faces slightly, accurate paint color, controlled contrast, gentle highlight roll-off. Do not invent a new environment or sky replacement.
-Typography: editorial hierarchy (one hero line + optional short support). Refined tracking, high-end weight pairing, generous breathing room. Prefer open sky/pavement/wall safe zones.
-Modern techniques (use when the composition supports them, never all at once): tasteful depth layering where the headline tucks partially behind the vehicle with a subtle subject glow; soft gradient or duotone accent fields behind type; thin-keyline badges. Occluded letters must stay readable and never touch people.
-Avoid: cheesy 3D chrome, burst explosions, clip-art confetti piles, full-frame graphic takeover, meme stickers, watermark spam.
+Typography: follow layout_and_type_craft exactly — it defines the grid, hierarchy, and signature treatment. Prefer open sky/pavement/wall safe zones.
+Modern techniques (use at most ONE, only when the composition supports it): depth layering where the headline tucks partially behind the vehicle with a subtle subject glow; a soft gradient or duotone accent field behind type; a thin-keyline badge. Occluded letters must stay readable and never touch people.
+Avoid: cheesy 3D chrome, burst explosions, clip-art confetti piles, full-frame graphic takeover, meme stickers, watermark spam, and any decorative icon that is not the supplied store logo.
 Compositing: light text shadows ok; logo small and premium; no stock-car pastes, no background replacement, no re-posed people.
 Finish: looks like a finished campaign asset ready for Instagram/Facebook/TikTok paid social.`,
     ),
@@ -460,8 +506,10 @@ ${
       "process",
       `1. Lock the input photo as canvas. Note the bounding boxes of all people and the vehicle.
 2. Enhance: lift brightness, balance color, sharpen — the same way a professional photographer would post-process a delivery shot.
-3. Place the overlay text and watermark inside safe zones only. Verify the 12%/32px margin rule before finalizing.
-4. Final pass: confirm the people, the car, and the scene are pixel-equivalent to the input apart from the post-process and the overlays.`,
+3. Commit to the layout grid FIRST: pick the margin, pick the single anchor region, and decide the type hierarchy before rendering any glyph.
+4. Place the overlay text and watermark inside safe zones only. Verify the 12%/32px margin rule before finalizing.
+5. Art-director's final pass — fix anything that fails: does every element sit fully inside the margin on all four sides, with the longest headline line ending clearly short of the right margin? Does the photo still bleed to all four edges with no drawn frame or border? Is every element on the same margin? Is there one clear dominant element instead of two competing ones? Is there any invented icon, badge, or fabricated manufacturer emblem to delete? Is the store signature subordinate to the headline? Is all lettering crisp and correctly spelled?
+6. Confirm the people, the car, and the scene are pixel-equivalent to the input apart from the post-process and the overlays.`,
     ),
   );
 

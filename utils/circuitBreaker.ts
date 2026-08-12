@@ -14,7 +14,14 @@ interface CircuitBreakerOptions {
 }
 
 interface CircuitStats {
-  failures: number;
+  /**
+   * Timestamps of recent failures, pruned to `failureWindow` on every record.
+   * A plain counter cannot express "5 failures within 60s": it only ever saw
+   * the gap between two consecutive failures, so a service failing once a
+   * minute accumulated toward the threshold indefinitely and eventually
+   * tripped despite being healthy.
+   */
+  failureTimes: number[];
   successes: number;
   lastFailure: number;
   state: CircuitState;
@@ -34,7 +41,7 @@ class CircuitBreaker {
   private getStats(service: string): CircuitStats {
     if (!this.stats.has(service)) {
       this.stats.set(service, {
-        failures: 0,
+        failureTimes: [],
         successes: 0,
         lastFailure: 0,
         state: "CLOSED",
@@ -88,7 +95,7 @@ class CircuitBreaker {
     if (stats.state === "HALF_OPEN") {
       if (stats.successes >= this.defaultOptions.successThreshold) {
         stats.state = "CLOSED";
-        stats.failures = 0;
+        stats.failureTimes = [];
         stats.successes = 0;
         console.log(`[CircuitBreaker] ${service}: HALF_OPEN -> CLOSED`);
       }
@@ -106,25 +113,24 @@ class CircuitBreaker {
     const stats = this.getStats(service);
     const now = Date.now();
     stats.halfOpenInFlight = false;
-    // Roll the failure window: if the last failure is older than the window,
-    // start counting fresh so `failures` reflects a recent failure *rate*.
-    if (
-      stats.lastFailure &&
-      now - stats.lastFailure > this.defaultOptions.failureWindow
-    ) {
-      stats.failures = 0;
-    }
-    stats.failures++;
+    // True rolling window: drop every failure that has aged out, then count
+    // what actually happened inside the window. Only a genuine burst of
+    // recent failures should trip the breaker — a slow trickle of transient
+    // blips must not, because an open breaker fails image generation closed
+    // and silently ships the untouched original photo.
+    const windowStart = now - this.defaultOptions.failureWindow;
+    stats.failureTimes = stats.failureTimes.filter((at) => at > windowStart);
+    stats.failureTimes.push(now);
     stats.lastFailure = now;
     stats.successes = 0;
 
     if (stats.state === "HALF_OPEN") {
       stats.state = "OPEN";
       console.log(`[CircuitBreaker] ${service}: HALF_OPEN -> OPEN`);
-    } else if (stats.failures >= this.defaultOptions.failureThreshold) {
+    } else if (stats.failureTimes.length >= this.defaultOptions.failureThreshold) {
       stats.state = "OPEN";
       console.log(
-        `[CircuitBreaker] ${service}: CLOSED -> OPEN (${stats.failures} failures)`,
+        `[CircuitBreaker] ${service}: CLOSED -> OPEN (${stats.failureTimes.length} failures in ${this.defaultOptions.failureWindow}ms)`,
       );
     }
   }
