@@ -31,36 +31,39 @@ export default {
         ],
       },
 
-      // Refined color palette - Apple-inspired with better contrast
+      // DEALER TRUST palette. `primary` 300-700 resolve through the
+      // --brand-N-rgb custom properties (defaulting to the navy ramp in
+      // styles/globals.css and overridden per-dealer by useDealerTheme), so
+      // every bg-primary-* / text-primary-* / ring-primary-* utility is
+      // white-label-aware without touching call sites.
       colors: {
-        // Primary blue (Apple-like)
         primary: {
           50: "#eff6ff",
           100: "#dbeafe",
           200: "#bfdbfe",
-          300: "#93c5fd",
-          400: "#60a5fa",
-          500: "#3b82f6", // Main primary
-          600: "#2563eb",
-          700: "#1d4ed8",
-          800: "#1e40af",
-          900: "#1e3a8a",
-          950: "#172554",
+          300: "rgb(var(--brand-300-rgb) / <alpha-value>)",
+          400: "rgb(var(--brand-400-rgb) / <alpha-value>)",
+          500: "rgb(var(--brand-500-rgb) / <alpha-value>)",
+          600: "rgb(var(--brand-600-rgb) / <alpha-value>)",
+          700: "rgb(var(--brand-700-rgb) / <alpha-value>)",
+          800: "#172554",
+          900: "#111c40",
+          950: "#0b1330",
         },
 
-        // Secondary purple gradient
+        // Secondary is a calm slate, not purple — per the DEALER TRUST system.
         secondary: {
-          50: "#faf5ff",
-          100: "#f3e8ff",
-          200: "#e9d5ff",
-          300: "#d8b4fe",
-          400: "#c084fc",
-          500: "#a855f7",
-          600: "#9333ea", // Main secondary
-          700: "#7e22ce",
-          800: "#6b21a8",
-          900: "#581c87",
-          950: "#3b0764",
+          50: "#f8fafc",
+          100: "#f1f5f9",
+          200: "#e2e8f0",
+          300: "#cbd5e1",
+          400: "#94a3b8",
+          500: "#64748b",
+          600: "#475569", // Main secondary
+          700: "#334155",
+          800: "#1e293b",
+          900: "#0f172a",
+          950: "#020617",
         },
 
         // Success (Apple green)
@@ -139,6 +142,30 @@ export default {
         },
       },
 
+      // Theme-aware semantic aliases — the target vocabulary for retiring
+      // dark-only bg-white/* , border-white/* , and text-white utilities.
+      backgroundColor: {
+        "fill-subtle": "var(--fill-subtle)",
+        "fill-hover": "var(--fill-hover)",
+        "surface-base": "rgb(var(--color-surface-base) / <alpha-value>)",
+        "surface-elevated": "rgb(var(--color-surface-elevated) / <alpha-value>)",
+        "surface-overlay": "rgb(var(--color-surface-overlay) / <alpha-value>)",
+        "surface-raised": "rgb(var(--color-surface-raised) / <alpha-value>)",
+      },
+      borderColor: {
+        hairline: "rgb(var(--color-border) / <alpha-value>)",
+        strong: "rgb(var(--color-border-strong) / <alpha-value>)",
+      },
+      ringColor: {
+        hairline: "rgb(var(--color-border) / <alpha-value>)",
+        strong: "rgb(var(--color-border-strong) / <alpha-value>)",
+      },
+      textColor: {
+        "content-primary": "rgb(var(--color-text-primary) / <alpha-value>)",
+        "content-secondary": "rgb(var(--color-text-secondary) / <alpha-value>)",
+        "content-tertiary": "rgb(var(--color-text-tertiary) / <alpha-value>)",
+      },
+
       // Spacing scale - 4px base unit (consistent with Apple HIG)
       spacing: {
         0.5: "0.125rem", // 2px
@@ -184,10 +211,7 @@ export default {
         lg: ["1.125rem", { lineHeight: "1.75rem", letterSpacing: "-0.01em" }], // 18px
         xl: ["1.25rem", { lineHeight: "1.75rem", letterSpacing: "-0.01em" }], // 20px
         "2xl": ["1.5rem", { lineHeight: "2rem", letterSpacing: "-0.02em" }], // 24px
-        "3xl": [
-          "1.875rem",
-          { lineHeight: "2.25rem", letterSpacing: "-0.02em" },
-        ], // 30px
+        "3xl": ["1.875rem", { lineHeight: "2.25rem", letterSpacing: "-0.02em" }], // 30px
         "4xl": ["2.25rem", { lineHeight: "2.5rem", letterSpacing: "-0.02em" }], // 36px
         "5xl": ["3rem", { lineHeight: "1", letterSpacing: "-0.025em" }], // 48px
         "6xl": ["3.75rem", { lineHeight: "1", letterSpacing: "-0.025em" }], // 60px
@@ -200,41 +224,31 @@ export default {
       boxShadow: {
         xs: "0 1px 2px 0 rgb(0 0 0 / 0.05)",
         sm: "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",
-        DEFAULT:
-          "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
+        DEFAULT: "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
         md: "0 10px 15px -3px rgb(0 0 0 / 0.15), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
         lg: "0 20px 25px -5px rgb(0 0 0 / 0.15), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
         xl: "0 25px 50px -12px rgb(0 0 0 / 0.25)",
         "2xl": "0 35px 60px -15px rgb(0 0 0 / 0.3)",
         inner: "inset 0 2px 4px 0 rgb(0 0 0 / 0.05)",
 
-        // Colored glow shadows (for interactive elements)
-        "glow-primary": "0 0 20px -5px rgb(59 130 246 / 0.5)",
-        "glow-primary-lg": "0 0 40px -10px rgb(59 130 246 / 0.6)",
-        "glow-success": "0 0 20px -5px rgb(34 197 94 / 0.5)",
-        "glow-error": "0 0 20px -5px rgb(239 68 68 / 0.5)",
-        "glow-warning": "0 0 20px -5px rgb(245 158 11 / 0.5)",
-
-        // Elevation system (Material Design inspired)
-        "elevation-1":
-          "0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24)",
-        "elevation-2":
-          "0 3px 6px rgba(0, 0, 0, 0.15), 0 2px 4px rgba(0, 0, 0, 0.12)",
-        "elevation-3":
-          "0 10px 20px rgba(0, 0, 0, 0.15), 0 3px 6px rgba(0, 0, 0, 0.10)",
-        "elevation-4":
-          "0 15px 25px rgba(0, 0, 0, 0.15), 0 5px 10px rgba(0, 0, 0, 0.05)",
-        "elevation-5": "0 20px 40px rgba(0, 0, 0, 0.2)",
+        // DEALER TRUST elevation — flat by default, lift only on raise.
+        // Legacy elevation-N call sites resolve to the calm shadow vars
+        // instead of the retired Material stack (glow shadows are gone).
+        "elevation-1": "var(--shadow-sm)",
+        "elevation-2": "var(--shadow-sm)",
+        "elevation-3": "var(--shadow-md)",
+        "elevation-4": "var(--shadow-md)",
+        "elevation-5": "var(--shadow-lg)",
       },
 
-      // Border radius - Apple-inspired rounded corners
+      // Border radius — DEALER TRUST scale (6/10/14/20) via tokens.
       borderRadius: {
         none: "0",
-        sm: "0.25rem", // 4px
-        DEFAULT: "0.5rem", // 8px
-        md: "0.5rem", // 8px
-        lg: "0.75rem", // 12px
-        xl: "1rem", // 16px
+        sm: "var(--radius-sm)", // 6px
+        DEFAULT: "var(--radius-md)", // 10px
+        md: "var(--radius-md)", // 10px
+        lg: "var(--radius-lg)", // 14px
+        xl: "var(--radius-xl)", // 20px
         "2xl": "1.25rem", // 20px
         "3xl": "1.5rem", // 24px
         "4xl": "2rem", // 32px
@@ -255,13 +269,11 @@ export default {
         1000: "1000ms",
       },
 
-      // Custom easing curves - Apple's spring animations
+      // Easing — fast, eased, never showy (spring/bounce retired).
       transitionTimingFunction: {
         apple: "cubic-bezier(0.4, 0.0, 0.2, 1)",
         "apple-in": "cubic-bezier(0.4, 0.0, 1, 1)",
         "apple-out": "cubic-bezier(0.0, 0.0, 0.2, 1)",
-        spring: "cubic-bezier(0.175, 0.885, 0.32, 1.275)",
-        bounce: "cubic-bezier(0.68, -0.55, 0.265, 1.55)",
       },
 
       // Custom animations
@@ -413,34 +425,6 @@ export default {
     },
   },
   plugins: [
-    function ({ addUtilities, theme }) {
-      const utilities = {
-        ".glass": {
-          backgroundColor: "rgba(255, 255, 255, 0.05)",
-          backdropFilter: "blur(16px)",
-          border: "1px solid rgba(255, 255, 255, 0.1)",
-        },
-        ".glass-dark": {
-          backgroundColor: "rgba(15, 23, 42, 0.6)",
-          backdropFilter: "blur(16px)",
-          border: "1px solid rgba(255, 255, 255, 0.05)",
-        },
-        ".glass-card": {
-          backgroundColor: "rgba(30, 41, 59, 0.4)",
-          backdropFilter: "blur(12px)",
-          border: "1px solid rgba(255, 255, 255, 0.08)",
-          boxShadow:
-            "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
-        },
-        ".text-glow": {
-          textShadow: "0 0 10px rgba(255, 255, 255, 0.5)",
-        },
-        ".text-glow-primary": {
-          textShadow: `0 0 20px ${theme("colors.primary.500")}`,
-        },
-      };
-      addUtilities(utilities);
-    },
     // Animation delay plugin
     function ({ matchUtilities, theme }) {
       matchUtilities(

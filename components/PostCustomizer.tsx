@@ -697,8 +697,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         transition={{ duration: 0.3 }}
       >
         {isDesktopLayout && (
-          <section className="sticky top-24 overflow-hidden rounded-[1.75rem] border border-white/10 bg-surface-950 shadow-2xl shadow-black/30">
-            <div className="flex items-center justify-between border-b border-white/10 px-5 py-4 text-xs font-semibold tracking-[0.12em] text-surface-400">
+          <section className="sticky top-24 overflow-hidden rounded-[1.75rem] border border-hairline bg-surface-950 shadow-2xl shadow-black/30">
+            <div className="flex items-center justify-between border-b border-hairline px-5 py-4 text-xs font-semibold tracking-[0.12em] text-surface-400">
               <span>PHOTO STAGE</span>
               <span className="text-primary-300">02 DETAILS</span>
             </div>
@@ -713,12 +713,12 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 aria-hidden="true"
               />
             </div>
-            <div className="flex items-center justify-between border-t border-white/10 px-5 py-4 text-xs text-surface-400">
+            <div className="flex items-center justify-between border-t border-hairline px-5 py-4 text-xs text-surface-400">
               <span>Review the full frame before generating.</span>
               <button
                 type="button"
                 onClick={onBack}
-                className="font-semibold text-surface-200 hover:text-white"
+                className="font-semibold text-content-secondary hover:text-content-primary"
               >
                 Change photo
               </button>
@@ -728,14 +728,14 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
         <Card
           elevation={2}
-          className="relative overflow-hidden border-white/10 bg-surface-900"
+          className="relative overflow-hidden border-hairline bg-surface-900"
         >
           <CardHeader className="relative pb-3">
             <div className="flex items-center gap-3">
               {/* Compact image preview */}
               <motion.div
                 className={cn(
-                  "h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-white/20 shadow-lg sm:h-20 sm:w-20",
+                  "h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-strong shadow-lg sm:h-20 sm:w-20",
                   isDesktopLayout && "hidden",
                 )}
                 whileHover={{ scale: 1.05 }}
@@ -793,7 +793,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   : undefined
               }
               fullWidth
-              className="bg-white/5 border-white/10 focus:border-primary-400 focus:bg-white/10 transition-colors"
+              className="bg-fill-subtle border-hairline focus:border-primary-400 focus:bg-fill-hover transition-colors"
             />
 
             {/* VIN Scanner — show pill if vehicle decoded, otherwise show CTA */}
@@ -844,7 +844,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                     setVinScannerOpen(true);
                   }}
                   fullWidth
-                  className="border-dashed border-white/20 bg-white/5 hover:bg-white/10"
+                  className="border-dashed border-strong bg-fill-subtle hover:bg-fill-hover"
                   disabled={Boolean(capturedRelease)}
                 >
                   Scan VIN (optional — boosts accuracy)
@@ -904,7 +904,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                     setReleaseModalOpen(true);
                   }}
                   fullWidth
-                  className="border-dashed border-white/20 bg-white/5 hover:bg-white/10"
+                  className="border-dashed border-strong bg-fill-subtle hover:bg-fill-hover"
                   disabled={!currentDealer}
                 >
                   Capture customer release
@@ -963,8 +963,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       className={cn(
                         "relative flex items-center gap-2 rounded-xl border px-3 py-3 text-left transition-all overflow-hidden",
                         isActive
-                          ? "border-primary-400 bg-primary-500/20 shadow-glow-primary"
-                          : "border-white/10 bg-white/5 hover:border-primary-400/30 hover:bg-white/10",
+                          ? "border-primary-400 bg-primary-500/20"
+                          : "border-hairline bg-fill-subtle hover:border-primary-400/30 hover:bg-fill-hover",
                       )}
                       whileTap={{ scale: 0.98 }}
                     >
@@ -1044,7 +1044,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         "min-h-11 shrink-0 snap-start rounded-full border px-3.5 py-2 text-left transition-colors",
                         on
                           ? "border-primary-400 bg-primary-500/25 text-primary-50 [.theme-light_&]:text-primary-950"
-                          : "border-white/10 bg-white/5 text-surface-300 hover:border-primary-400/40",
+                          : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/40",
                       )}
                     >
                       <span className="flex items-center gap-1.5 text-sm font-semibold">
@@ -1088,9 +1088,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   "flex min-h-16 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
                   websiteSelected
                     ? "border-primary-300 bg-primary-500/25 text-primary-50 [.theme-light_&]:text-primary-950"
-                    : "border-white/10 bg-white/[0.035] text-surface-300 hover:border-primary-400/35 hover:bg-white/[0.06]",
+                    : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/35 hover:bg-fill-subtle",
                   websiteAvailability !== "ready" &&
-                    "cursor-not-allowed opacity-60 hover:border-white/10 hover:bg-white/[0.035]",
+                    "cursor-not-allowed opacity-60 hover:border-hairline hover:bg-fill-subtle",
                 )}
               >
                 <span
@@ -1098,7 +1098,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                     "grid h-10 w-10 shrink-0 place-items-center rounded-xl border",
                     websiteSelected
                       ? "border-primary-300/40 bg-primary-400/20 text-primary-100"
-                      : "border-white/10 bg-surface-950/50 text-surface-400",
+                      : "border-hairline bg-surface-950/50 text-surface-400",
                   )}
                   aria-hidden="true"
                 >
@@ -1141,7 +1141,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   </span>
                 ) : null}
               </button>
-              <div className="overflow-hidden rounded-xl border border-white/10 bg-surface-950/25">
+              <div className="overflow-hidden rounded-xl border border-hairline bg-surface-950/25">
                 <button
                   type="button"
                   aria-expanded={showMorePlatforms}
@@ -1151,7 +1151,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                     triggerHapticFeedback();
                     setShowMorePlatforms((current) => !current);
                   }}
-                  className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-white/5"
+                  className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-fill-subtle"
                 >
                   <span>
                     <span className="block text-xs font-semibold text-surface-200">
@@ -1184,7 +1184,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       animate={{ height: "auto", opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}
                       transition={{ duration: 0.18 }}
-                      className="overflow-hidden border-t border-white/10"
+                      className="overflow-hidden border-t border-hairline"
                     >
                       <div className="grid grid-cols-2 gap-2 p-2.5 sm:grid-cols-3 xl:grid-cols-5">
                         {secondaryPlatformOptions.map((platform) => {
@@ -1199,7 +1199,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                                 "min-h-16 rounded-xl border px-2.5 py-2 text-left transition-colors",
                                 selected
                                   ? "border-primary-400 bg-primary-500/20 text-primary-50 [.theme-light_&]:text-primary-950"
-                                  : "border-white/10 bg-white/[0.035] text-surface-300 hover:border-primary-400/35 hover:bg-white/[0.06]",
+                                  : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/35 hover:bg-fill-subtle",
                               )}
                             >
                               <span className="flex items-center gap-1.5 text-xs font-semibold">
@@ -1224,7 +1224,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   ) : null}
                 </AnimatePresence>
               </div>
-              <fieldset className="rounded-xl border border-white/10 bg-surface-950/30 p-1.5">
+              <fieldset className="rounded-xl border border-hairline bg-surface-950/30 p-1.5">
                 <legend className="sr-only">
                   Media to create for each destination
                 </legend>
@@ -1265,7 +1265,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                           "min-h-12 rounded-lg border px-2 py-2 text-left transition-colors",
                           selected
                             ? "border-primary-300 bg-primary-500/30 text-primary-50 [.theme-light_&]:text-primary-950"
-                            : "border-transparent bg-white/[0.035] text-surface-300 hover:border-primary-400/35",
+                            : "border-transparent bg-fill-subtle text-surface-300 hover:border-primary-400/35",
                         )}
                       >
                         <span className="flex items-center gap-1.5 text-xs font-semibold">
@@ -1309,7 +1309,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       "min-h-9 shrink-0 rounded-lg border px-2.5 text-[10px] font-semibold uppercase tracking-wide transition-colors",
                       primaryFormatOverride === null
                         ? "border-primary-300 bg-primary-500/30 text-primary-50 [.theme-light_&]:text-primary-950"
-                        : "border-white/10 bg-white/5 text-surface-300 hover:border-primary-400/40",
+                        : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/40",
                     )}
                   >
                     Auto
@@ -1331,7 +1331,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                           "min-h-12 rounded-lg border px-2 py-1.5 text-left transition-colors",
                           selected
                             ? "border-primary-300 bg-primary-500/30 text-primary-50 shadow-sm [.theme-light_&]:text-primary-950"
-                            : "border-white/10 bg-surface-950/25 text-surface-300 hover:border-primary-400/40",
+                            : "border-hairline bg-surface-950/25 text-surface-300 hover:border-primary-400/40",
                         )}
                       >
                         <span className="block text-[11px] font-semibold leading-tight">
@@ -1376,8 +1376,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       className={cn(
                         "relative flex items-center gap-1.5 rounded-full border px-4 py-2 whitespace-nowrap transition-all flex-shrink-0 snap-center",
                         isActive
-                          ? "border-success-400 bg-success-500/20 shadow-glow-success"
-                          : "border-white/10 bg-white/5 hover:border-success-400/30 hover:bg-white/10",
+                          ? "border-success-400 bg-success-500/20"
+                          : "border-hairline bg-fill-subtle hover:border-success-400/30 hover:bg-fill-hover",
                       )}
                       whileTap={{ scale: 0.95 }}
                     >
@@ -1406,7 +1406,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
                 Caption
               </label>
-              <div className="flex gap-2 bg-surface-950/30 p-1 rounded-xl border border-white/5">
+              <div className="flex gap-2 bg-surface-950/30 p-1 rounded-xl border border-hairline">
                 <Button
                   variant={captionSource === "ai" ? "filled" : "ghost"}
                   aria-pressed={captionSource === "ai"}
@@ -1459,14 +1459,14 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                     rows={3}
                     placeholder="Write your caption here..."
                     fullWidth
-                    className="bg-white/5 border-white/10 focus:border-primary-400"
+                    className="bg-fill-subtle border-hairline focus:border-primary-400"
                   />
                 </motion.div>
               )}
             </AnimatePresence>
 
             {/* Advanced Options - Collapsible */}
-            <div className="border-t border-white/10 pt-3">
+            <div className="border-t border-hairline pt-3">
               <button
                 type="button"
                 aria-expanded={showAdvanced}
@@ -1595,7 +1595,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         ? "Create video plan"
                         : "Create photo + video set"}
                   {!isBusy && (
-                    <kbd className="hidden sm:inline-flex items-center gap-1 px-1.5 py-1 rounded bg-white/15 border border-white/20 text-white/80">
+                    <kbd className="hidden sm:inline-flex items-center gap-1 px-1.5 py-1 rounded bg-fill-hover border border-strong text-content-secondary">
                       <Command className="w-3 h-3" />
                       <CornerDownLeft className="w-3 h-3" />
                     </kbd>

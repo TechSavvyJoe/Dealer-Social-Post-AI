@@ -153,8 +153,8 @@ export const CaptionAlternativesModal: React.FC<CaptionAlternativesModalProps> =
                     : v.error
                       ? "border-error-500/40 bg-error-500/5"
                       : v.loading
-                        ? "border-white/10 bg-white/5"
-                        : "border-white/10 bg-white/5 hover:border-primary-400/50 hover:bg-white/10",
+                        ? "border-hairline bg-fill-subtle"
+                        : "border-hairline bg-fill-subtle hover:border-primary-400/50 hover:bg-fill-hover",
                 )}
               >
                 <div className="flex items-center justify-between mb-2">
@@ -193,7 +193,7 @@ export const CaptionAlternativesModal: React.FC<CaptionAlternativesModalProps> =
           })}
         </div>
 
-        <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/10">
+        <div className="flex items-center justify-between gap-2 pt-2 border-t border-hairline">
           <div className="text-[11px] text-surface-500 flex items-center gap-1">
             <Sparkles className="w-3 h-3" />
             Tap any variant to use it. Compliance disclosures stay attached.

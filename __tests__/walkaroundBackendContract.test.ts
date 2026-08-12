@@ -128,6 +128,69 @@ describe("Vehicle Walkaround PocketBase boundary", () => {
     }
   });
 
+  it("keeps private-key material and shell execution out of the hooks", () => {
+    // The deleted legacy Vertex path minted service-account JWTs by writing
+    // the private key to disk and piping it through openssl. Nothing in
+    // pb_hooks may reintroduce shell execution or on-disk key material.
+    for (const file of [
+      "pb_hooks/main.pb.js",
+      "pb_hooks/helpers.js",
+      "pb_hooks/walkarounds.js",
+      "pb_hooks/websitePublications.js",
+      "pb_hooks/requestPolicies.js",
+    ]) {
+      const source = read(file);
+      expect(source).not.toContain("openssl");
+      expect(source).not.toContain("$os.cmd(");
+      expect(source).not.toContain("VERTEX_SERVICE_ACCOUNT_JSON");
+    }
+  });
+
+  it("binds worker signatures to method, path, idempotency key, and a nonce", () => {
+    const hooks = read("pb_hooks/walkarounds.js");
+
+    // v2 message layout — must stay byte-identical to the automation signer
+    // (automation/src/shared/clients/backend.ts signWalkaroundRequest, covered
+    // by automation/src/shared/clients/backend.test.ts).
+    const v2Pieces = [
+      '"v2." +',
+      "timestamp +",
+      "nonce +",
+      "method +",
+      "path +",
+      "idempotency +",
+      "bodyHash,",
+    ];
+    for (const piece of v2Pieces) {
+      expect(hooks).toContain(piece);
+    }
+    expect(hooks).toContain('c.request().header.get("X-Walkaround-Nonce")');
+    expect(hooks).toContain('c.request().header.get("X-Walkaround-Signature-Version")');
+    expect(hooks).toContain("c.request().method");
+    expect(hooks).toContain("c.request().url.path");
+
+    // Verified nonces are single-use inside the freshness window, held in
+    // $app.store() so the record spans PocketBase's pooled hook VMs (a
+    // module-level map would admit one replay per pool member), and only
+    // verified nonces enter the cache.
+    expect(hooks).toContain("$app.store().set(NONCE_KEY_PREFIX + nonce");
+    expect(hooks).toContain('return deny("replayed nonce")');
+    // lastIndexOf: the first occurrence is the helper's definition; the call
+    // site inside internalAuth must come after signature verification.
+    const markIndex = hooks.lastIndexOf("markWalkaroundNonceSeen(nonce)");
+    const verifyIndex = hooks.indexOf('return deny("signature mismatch")');
+    expect(markIndex).toBeGreaterThan(verifyIndex);
+
+    // Legacy v1 stays behind a kill switch scheduled for removal.
+    expect(hooks).toContain("WALKAROUND_SIGNATURE_V1_ALLOWED");
+
+    // Rejections are audited and both surfaces are rate limited.
+    expect(hooks).toContain('"walkaround_internal_unauthorized"');
+    expect(hooks).toContain('"walkaround-internal:" + helpers.clientIP(c)');
+    expect(hooks).toContain('"walkaround-app:" + helpers.clientIP(c)');
+    expect(hooks).toContain('dealerActionAllowed(c, helpers, context, "creation"');
+  });
+
   it("requires a signed release for every customer-audience capture", () => {
     const hook = read("pb_hooks/walkarounds.js");
     const gate = hook.slice(

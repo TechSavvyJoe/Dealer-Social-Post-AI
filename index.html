@@ -11,6 +11,35 @@
       content="Create dealership-ready social posts with AI-assisted captions, branded images, video, compliance controls, and fast multi-format sharing."
     />
     <meta name="theme-color" content="#090d17" />
+    <!-- Pre-paint theme: applies the persisted Sunlight Mode class before the
+         first frame so light-theme users never see a dark flash. The React
+         store stays the runtime authority. Plain (non-module) script so Vite
+         ships it byte-identical; its sha256 is allowlisted in vercel.ts and
+         guarded by __tests__/prePaintTheme.test.ts. -->
+    <script>
+      (function () {
+        try {
+          var s = JSON.parse(
+            localStorage.getItem("dealer-social-post-ai.session") || "null",
+          );
+          var t = s && s.theme;
+          // Step 4 is the publish result, which the app always renders dark
+          // (publish-studio-theme) — painting it light first would invert the
+          // very flash this script exists to remove.
+          var resultStep = s && s.step === 4;
+          if (
+            !resultStep &&
+            (t === "light" ||
+              (t === "system" &&
+                window.matchMedia("(prefers-color-scheme: light)").matches))
+          ) {
+            document.documentElement.classList.add("theme-light");
+            var m = document.querySelector('meta[name="theme-color"]');
+            if (m) m.setAttribute("content", "#f8fafc");
+          }
+        } catch (e) {}
+      })();
+    </script>
     <meta name="application-name" content="Dealer Social Post AI" />
     <meta name="format-detection" content="telephone=no" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -90,6 +119,11 @@
         isolation: isolate;
         display: flex;
         flex-direction: column;
+      }
+
+      /* Sunlight Mode boot surface — set pre-paint by the head script. */
+      .theme-light .app-container {
+        background-color: #f8fafc;
       }
 
       #root {

@@ -44,6 +44,32 @@ export type SessionLoginRequest =
   | { authType: "manager_password"; username: string; password: string }
   | { authType: "admin_password"; username: string; password: string };
 
+/**
+ * The store a device last signed into. Sent as an optional hint with personal
+ * access-code logins so the backend can scope its lookup to this dealership;
+ * deliberately kept outside the session payload so logout does not clear it.
+ */
+const LAST_DEALER_STORAGE_KEY = "dealer-social-post-ai.last-dealer-id";
+
+const readRememberedDealerId = (): string => {
+  try {
+    const value = localStorage.getItem(LAST_DEALER_STORAGE_KEY) || "";
+    return /^[a-z0-9]{15}$/.test(value) ? value : "";
+  } catch {
+    return "";
+  }
+};
+
+const rememberDealerId = (dealerId: string): void => {
+  try {
+    if (/^[a-z0-9]{15}$/.test(dealerId)) {
+      localStorage.setItem(LAST_DEALER_STORAGE_KEY, dealerId);
+    }
+  } catch {
+    // Private-mode storage failures only cost the scoping hint.
+  }
+};
+
 interface AppState {
   // Core State
   step: AppStep;
@@ -63,7 +89,6 @@ interface AppState {
   theme: "dark" | "light" | "system";
   preferredStyle: StyleOption;
   preferredTone: ToneOption;
-  compactMode: boolean;
   imageQualityTier: ImageQualityTier;
 
   // Actions
@@ -78,7 +103,6 @@ interface AppState {
       theme: "dark" | "light" | "system";
       preferredStyle: StyleOption;
       preferredTone: ToneOption;
-      compactMode: boolean;
       imageQualityTier: ImageQualityTier;
     }>,
   ) => void;
@@ -196,12 +220,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: null,
   isRestoringSession: true,
   authEpoch: 0,
-  // New installs open in the dealership-studio theme shown throughout the
-  // product. Explicitly saved light/system preferences still restore below.
-  theme: "dark",
+  // Seed the theme synchronously from the persisted session so light-mode
+  // users don't flash dark between mount and the async restore resolving.
+  // New installs still open in the dealership-studio dark theme.
+  theme: ((): "dark" | "light" | "system" => {
+    try {
+      const persisted = loadSession()?.theme;
+      return persisted === "light" || persisted === "system" ? persisted : "dark";
+    } catch {
+      return "dark";
+    }
+  })(),
   preferredStyle: StyleOption.Modern,
   preferredTone: ToneOption.Excited,
-  compactMode: false,
   imageQualityTier: "standard",
 
   applyAuthPayload: (body) => {
@@ -229,7 +260,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         selectedImage: undefined,
         generatedPost: undefined,
         generationParams: undefined,
-        compactMode: preferences.compactMode,
         imageQualityTier: preferences.imageQualityTier,
         theme: preferences.theme,
         preferredStyle: preferences.preferredStyle,
@@ -348,7 +378,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       const newState = { ...state, ...prefs };
       saveSession({
         theme: newState.theme,
-        compactMode: newState.compactMode,
         imageQualityTier: newState.imageQualityTier,
         preferredStyle: newState.preferredStyle,
         preferredTone: newState.preferredTone,
@@ -369,7 +398,13 @@ export const useAppStore = create<AppState>((set, get) => ({
               // punctuation, and password-manager supplied values.
               password: credentials.password,
             }
-          : { dealerCode: credentials.dealerCode };
+          : (() => {
+              const rememberedDealerId = readRememberedDealerId();
+              return {
+                dealerCode: credentials.dealerCode,
+                ...(rememberedDealerId ? { dealerId: rememberedDealerId } : {}),
+              };
+            })();
       const res = await fetchSession({
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -385,6 +420,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       const body = await res.json();
       const dealer = body.dealer;
+
+      if (dealer && credentials.authType === "code" && dealer.id) {
+        rememberDealerId(String(dealer.id));
+      }
 
       if (dealer) {
         // A successful credential exchange starts a clean tenant workspace.
@@ -603,7 +642,6 @@ export const useAppStore = create<AppState>((set, get) => ({
               ? session?.generationParams || null
               : null) as GenerationParams | null,
             step: restoredStep,
-            compactMode: session?.compactMode ?? false,
             imageQualityTier: session?.imageQualityTier ?? "standard",
             ...(session?.theme
               ? { theme: session.theme as "dark" | "light" | "system" }
@@ -637,9 +675,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     } finally {
       // Restore standalone preferences even when the API is unavailable, and
       // always release the blocking startup screen.
-      if (session?.compactMode !== undefined) {
-        set({ compactMode: session.compactMode });
-      }
       if (session?.imageQualityTier) {
         set({ imageQualityTier: session.imageQualityTier });
       }

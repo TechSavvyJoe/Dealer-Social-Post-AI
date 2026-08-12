@@ -327,19 +327,175 @@ function findAdminPasswordVerificationAccount() {
   }
 }
 
+/** Lowercase-hex shape of a peppered access-code hash. */
+function isValidPersonPinHash(value) {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
+function salespersonPinPepper() {
+  try {
+    return ($os.getenv("SALESPERSON_PIN_PEPPER") || "").toString().trim();
+  } catch (_e) {
+    return "";
+  }
+}
+
+/**
+ * Peppered one-way transform for personal access codes. A four-digit code has
+ * only 10^4 possibilities, so the security of stored credentials rests entirely
+ * on the server-side pepper: without it a copied database row is useless.
+ */
+function personPinHash(pin) {
+  const normalized = normalizePersonPin(pin);
+  if (!isValidPersonPin(normalized)) {
+    throw new Error("Access code must be exactly 4 digits");
+  }
+  const pepper = salespersonPinPepper();
+  if (pepper.length < 32) {
+    throw new Error("SALESPERSON_PIN_PEPPER is not configured");
+  }
+  const digest = $security.hs256(
+    "dealer-social-post-ai:person-pin-hash:v1:" + normalized,
+    pepper,
+  );
+  if (!isValidPersonPinHash((digest || "").toLowerCase())) {
+    throw new Error("Secure access-code hashing is unavailable");
+  }
+  return digest.toLowerCase();
+}
+
 function personPinFingerprint(person) {
   if (!person) return "";
+  const pinHash = person.getString("pin_hash");
   const pin = person.getString("pin");
-  if (!isValidPersonPin(pin)) return "";
+  if (!isValidPersonPinHash(pinHash) && !isValidPersonPin(pin)) return "";
   try {
-    const fingerprint = $security.sha256(
-      "dealer-social-post-ai:person-pin:v1:" + person.id + ":" + pin,
-    );
+    // v2 binds sessions to the stored hash; v1 (plaintext-derived) remains only
+    // for straggler rows written by an old process before the bootstrap sweep.
+    const fingerprint = isValidPersonPinHash(pinHash)
+      ? $security.sha256(
+          "dealer-social-post-ai:person-pin:v2:" + person.id + ":" + pinHash,
+        )
+      : $security.sha256(
+          "dealer-social-post-ai:person-pin:v1:" + person.id + ":" + pin,
+        );
     if (/^[a-f0-9]{64}$/i.test(fingerprint || "")) {
       return fingerprint.toLowerCase();
     }
   } catch (_e) {}
   throw new Error("Secure person credential fingerprinting is unavailable");
+}
+
+/**
+ * One-boot sweep that converts plaintext access codes to peppered hashes.
+ * Idempotent: only rows with a plaintext pin and no hash are touched. Each
+ * person converts inside one transaction that also rewrites the fingerprints
+ * of their live sessions, so nobody is logged out by the storage change.
+ * Returns counts so the bootstrap log shows exactly what happened.
+ */
+function backfillSalespersonPinHashes() {
+  const summary = { converted: 0, skipped: 0, failed: 0 };
+  // Never touch plaintext rows before the pin_hash migration has applied: on
+  // PB 0.22 this bootstrap hook is not ordered strictly after pending
+  // migrations on an upgraded database, and converting under the old schema
+  // races the people-integrity repair (blanking codes it then re-mints). The
+  // initial conversion happens inside migration 1751300001; this sweep only
+  // catches stragglers written by an old process during the deploy window.
+  try {
+    const collection = $app.dao().findCollectionByNameOrId("salespeople");
+    if (!collection.schema.getFieldByName("pin_hash")) return summary;
+  } catch (_e) {
+    return summary;
+  }
+  const BATCH = 500;
+  // 10k is the entire four-digit space; anything above it means rows are
+  // failing conversion and re-appearing — stop rather than spin.
+  const MAX_BATCHES = 25;
+  for (let batch = 0; batch < MAX_BATCHES; batch++) {
+    let rows;
+    try {
+      rows = $app
+        .dao()
+        .findRecordsByFilter("salespeople", "pin != ''", "created", BATCH, 0, {});
+    } catch (_e) {
+      return summary;
+    }
+    if (!rows || !rows.length) return summary;
+    if (salespersonPinPepper().length < 32) {
+      console.error(
+        "[pin-backfill] SALESPERSON_PIN_PEPPER is missing or too short; " +
+          rows.length +
+          " plaintext access codes remain unhashed.",
+      );
+      summary.skipped += rows.length;
+      return summary;
+    }
+    let convertedThisBatch = 0;
+    let malformedThisBatch = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const person = rows[i];
+      let outcome = "converted";
+      try {
+        $app.dao().runInTransaction(function (txDao) {
+          const txPerson = txDao.findRecordById("salespeople", person.id);
+          const pin = txPerson.getString("pin");
+          if (!isValidPersonPin(pin)) {
+            // Not convertible and not clearable; leave for investigation.
+            outcome = "malformed";
+            return;
+          }
+          // A plaintext code alongside a stored hash can only mean an
+          // old-process write AFTER conversion (new code always blanks pin
+          // in the same save that writes pin_hash), so the plaintext is the
+          // NEWER credential — always re-hash it rather than resurrecting
+          // the stored hash, and rebind live sessions to the result.
+          txPerson.set("pin_hash", personPinHash(pin));
+          txPerson.set("pin", "");
+          txDao.saveRecord(txPerson);
+          const nextFingerprint = personPinFingerprint(txPerson);
+          const sessions = txDao.findRecordsByFilter(
+            "sessions",
+            "person = {:personId}",
+            "created",
+            200,
+            0,
+            { personId: txPerson.id },
+          );
+          for (let j = 0; j < (sessions || []).length; j++) {
+            sessions[j].set("person_pin_fingerprint", nextFingerprint);
+            txDao.saveRecord(sessions[j]);
+          }
+        });
+        if (outcome === "malformed") {
+          malformedThisBatch++;
+        } else {
+          summary.converted++;
+          convertedThisBatch++;
+        }
+      } catch (err) {
+        summary.failed++;
+        console.error("[pin-backfill] failed for person " + person.id + ": " + err);
+      }
+    }
+    // Malformed/failed rows keep matching the batch filter; a batch with no
+    // real conversion means only those remain — stop instead of spinning.
+    if (convertedThisBatch === 0) {
+      if (malformedThisBatch > 0) {
+        console.warn(
+          "[pin-backfill] " +
+            malformedThisBatch +
+            " row(s) hold a non-empty but malformed pin and were left untouched — investigate manually.",
+        );
+      }
+      return summary;
+    }
+  }
+  console.error(
+    "[pin-backfill] stopped after " +
+      MAX_BATCHES +
+      " batches with plaintext rows remaining — investigate before relying on the sweep.",
+  );
+  return summary;
 }
 
 /** One-way session binding for PocketBase-managed manager credentials. */
@@ -1053,13 +1209,48 @@ function assertManagerUsernameAvailableWithDao(dao, username, personId) {
  * both cases in PocketBase 0.22, so use a bounded list query whose empty array
  * is an authoritative not-found result.
  */
-function findActivePersonByPin(pin) {
+function findActivePersonByPin(pin, dealerId) {
   const normalized = normalizePersonPin(pin);
   if (!isValidPersonPin(normalized)) {
     return { status: "not_found", person: null };
   }
+  let pinHash = "";
   try {
-    const records = $app
+    pinHash = personPinHash(normalized);
+  } catch (_e) {
+    // A missing pepper makes hashed lookups impossible; readiness surfaces the
+    // configuration gap, and the plaintext fallback below still covers rows
+    // the bootstrap sweep has not converted yet.
+    pinHash = "";
+  }
+  try {
+    // Primary: peppered hash. While idx_salespeople_pin_hash is globally
+    // unique (the whole compatibility bridge), a dealer-scoped pre-query
+    // would always resolve to the same single row as this global one, so the
+    // dealerId hint is accepted but deliberately unused until the release
+    // that requires dealer context at login swaps the index to
+    // (dealer, pin_hash) and this lookup becomes scoped for real.
+    if (pinHash) {
+      const records = $app
+        .dao()
+        .findRecordsByFilter(
+          "salespeople",
+          "pin_hash = {:hash} && active = true",
+          "created",
+          1,
+          0,
+          { hash: pinHash },
+        );
+      if (!records || typeof records.length !== "number") {
+        return { status: "unavailable", person: null };
+      }
+      if (records.length > 0) {
+        return { status: "found", person: records[0] };
+      }
+    }
+    // Bridge fallback: rows written by an old process before the bootstrap
+    // sweep converts them. Remove together with the plaintext pin column.
+    const legacy = $app
       .dao()
       .findRecordsByFilter(
         "salespeople",
@@ -1069,13 +1260,12 @@ function findActivePersonByPin(pin) {
         0,
         { pin: normalized },
       );
-    if (!records || typeof records.length !== "number") {
+    if (!legacy || typeof legacy.length !== "number") {
       return { status: "unavailable", person: null };
     }
-    if (records.length > 0) {
-      return { status: "found", person: records[0] };
+    if (legacy.length > 0) {
+      return { status: "found", person: legacy[0] };
     }
-
     return { status: "not_found", person: null };
   } catch (_e) {
     return { status: "unavailable", person: null };
@@ -1085,15 +1275,18 @@ function findActivePersonByPin(pin) {
 /**
  * Ensure a pin is globally free (optionally excluding a record id). Inactive
  * records keep their credential reserved so reactivation cannot fail or cause
- * an identity collision later.
+ * an identity collision later. Checks both the peppered hash and any
+ * not-yet-converted plaintext rows; global (not per-dealer) uniqueness is kept
+ * deliberately while stale client bundles may still log in with a PIN alone.
  */
 function assertPersonPinAvailableWithDao(dao, pin, excludePersonId) {
   const normalized = normalizePersonPin(pin);
   if (!isValidPersonPin(normalized)) {
     throw new Error("Access code must be exactly 4 digits");
   }
-  let filter = "pin = {:pin}";
-  const params = { pin: normalized };
+  const pinHash = personPinHash(normalized);
+  let filter = "(pin = {:pin} || pin_hash = {:hash})";
+  const params = { pin: normalized, hash: pinHash };
   if (excludePersonId) {
     filter += " && id != {:excludeId}";
     params.excludeId = excludePersonId;
@@ -1104,6 +1297,31 @@ function assertPersonPinAvailableWithDao(dao, pin, excludePersonId) {
   }
   if (matches.length) throw new Error("Access code is already in use");
   return normalized;
+}
+
+/**
+ * Reactivation-time variant for records that already store only a hash: proves
+ * the stored credential still has no other claimant without needing plaintext.
+ */
+function assertStoredPersonCredentialAvailableWithDao(dao, person) {
+  const pinHash = person.getString("pin_hash");
+  const pin = person.getString("pin");
+  let filter = "";
+  const params = { excludeId: person.id };
+  if (isValidPersonPinHash(pinHash)) {
+    filter = "pin_hash = {:hash} && id != {:excludeId}";
+    params.hash = pinHash;
+  } else if (isValidPersonPin(pin)) {
+    filter = "pin = {:pin} && id != {:excludeId}";
+    params.pin = pin;
+  } else {
+    throw new Error("This person does not have a valid access code.");
+  }
+  const matches = dao.findRecordsByFilter("salespeople", filter, "id", 2, 0, params);
+  if (!matches || typeof matches.length !== "number") {
+    throw new Error("Access-code availability could not be verified");
+  }
+  if (matches.length) throw new Error("Access code is already in use");
 }
 
 function assertPersonPinAvailable(pin, excludePersonId) {
@@ -1139,7 +1357,7 @@ function serializePerson(record) {
   return {
     ...serializePersonSummary(record),
     created_at: record.getString("created_at"),
-    hasPin: isValidPersonPin(pin),
+    hasPin: isValidPersonPin(pin) || isValidPersonPinHash(record.getString("pin_hash")),
     pinNeedsDistribution: recordBool(record, "pin_needs_distribution"),
     hasManagerLogin: isValidManagerUsername(managerUsername),
     managerUsername: isValidManagerUsername(managerUsername)
@@ -1160,8 +1378,12 @@ function generateUniquePersonPinWithDao(dao) {
     try {
       assertPersonPinAvailableWithDao(dao, pin, "");
       return pin;
-    } catch (_e) {
-      /* try again */
+    } catch (err) {
+      // Only a genuine collision means "try the next code". A missing pepper
+      // or database failure would otherwise burn 10k retries and surface as a
+      // misleading "space exhausted" error.
+      const message = err && err.message ? String(err.message) : String(err);
+      if (message.indexOf("already in use") === -1) throw err;
     }
   }
   throw new Error("The four-digit access-code space is exhausted");
@@ -2795,7 +3017,9 @@ function dealerOwnsProviderResource(dealerId, input) {
   if (!normalizedExpiry || normalizedExpiry <= now) {
     try {
       $app.dao().deleteRecord(record);
-    } catch (_e) {}
+    } catch (e) {
+      console.warn("[provider-resources] expired-claim delete failed: " + e);
+    }
     return false;
   }
   return record.getString("dealer") === dealerId;
@@ -2995,7 +3219,10 @@ function purgeExpiredSessionsAndOldEvents() {
     for (let i = 0; i < expiredSessions.length; i++) {
       try {
         $app.dao().deleteRecord(expiredSessions[i]);
-      } catch (_e) {}
+      } catch (e) {
+        // Tolerate one bad row, but keep a systematically failing GC visible.
+        console.warn("[session-gc] expired-session delete failed: " + e);
+      }
     }
 
     const ninetyDaysAgo = databaseTimestamp(
@@ -3009,7 +3236,9 @@ function purgeExpiredSessionsAndOldEvents() {
     for (let i = 0; i < oldEvents.length; i++) {
       try {
         $app.dao().deleteRecord(oldEvents[i]);
-      } catch (_e) {}
+      } catch (e) {
+        console.warn("[session-gc] auth-event prune failed: " + e);
+      }
     }
   } catch (err) {
     console.error("[purgeExpiredSessionsAndOldEvents] error", err);
@@ -3095,6 +3324,9 @@ module.exports = {
   safeDealerMutationError,
   safePhotoReleaseError,
   isValidPersonPin,
+  personPinHash,
+  salespersonPinPepper,
+  backfillSalespersonPinHashes,
   normalizePersonPin,
   normalizeManagerUsername,
   isValidManagerUsername,
@@ -3107,6 +3339,7 @@ module.exports = {
   assertManagerUsernameAvailableWithDao,
   assertPersonPinAvailableWithDao,
   assertPersonPinAvailable,
+  assertStoredPersonCredentialAvailableWithDao,
   personRoleToSessionRole,
   serializePerson,
   serializePersonSummary,

@@ -258,6 +258,7 @@ jobs:
           const required = [
             "ADMIN_LOGIN_USERNAME",
             "ADMIN_LOGIN_PASSWORD",
+            "SALESPERSON_PIN_PEPPER",
             "GEMINI_API_KEY",
             "TURNSTILE_SECRET",
             "VERCEL_TO_FLY_PROXY_SECRET",

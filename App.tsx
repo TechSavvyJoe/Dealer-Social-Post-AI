@@ -3,8 +3,10 @@ import { AnimatePresence } from "framer-motion";
 import { Header } from "./components/Header";
 import { ImpersonationBanner } from "./components/ImpersonationBanner";
 import { MainContent } from "./components/MainContent";
+import { OfflineBanner } from "./components/OfflineBanner";
 import { useAppController } from "./hooks/useAppController";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useUrlStepSync } from "./hooks/useUrlStepSync";
 import { AppStep } from "./types";
 import { useToast } from "./components/ui/Toast";
 import { useAppStore } from "./stores/appStore";
@@ -39,7 +41,6 @@ const AppContent: React.FC = () => {
     error,
     preferredStyle,
     preferredTone,
-    compactMode,
     imageQualityTier,
     isRestoringSession,
     setStep,
@@ -110,6 +111,15 @@ const AppContent: React.FC = () => {
   }, [step, theme]);
 
   const toast = useToast();
+
+  // Mirror the step machine into #/step history entries so the platform Back
+  // gesture steps through the flow instead of exiting the installed app.
+  useUrlStepSync({
+    onBlockedResultBack: () =>
+      toast.info(
+        "Unsaved creative in progress. Click 'Start Over' or 'Remix' to exit.",
+      ),
+  });
 
   // Power-user shortcuts. Step-aware so each key does the smart thing where you are.
   useKeyboardShortcuts({
@@ -186,6 +196,7 @@ const AppContent: React.FC = () => {
         color: "rgb(var(--color-text-primary))",
       }}
     >
+      <OfflineBanner />
       {isImpersonating && <ImpersonationBanner />}
       {currentDealer && (step !== AppStep.RESULT || isDesktopLayout) && (
         <Header
@@ -202,7 +213,7 @@ const AppContent: React.FC = () => {
       <div className="flex min-h-0 flex-1">
         {step === AppStep.RESULT && isDesktopLayout ? (
           <aside
-            className="flex w-[5.25rem] shrink-0 flex-col items-center border-r border-white/[0.08] bg-surface-950/35 px-2 py-4"
+            className="flex w-[5.25rem] shrink-0 flex-col items-center border-r border-hairline bg-surface-950/35 px-2 py-4"
             aria-label="Publishing workspace navigation"
           >
             <nav className="flex w-full flex-1 flex-col gap-2">
@@ -216,7 +227,7 @@ const AppContent: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsHistoryOpen(true)}
-                className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-transparent px-1 text-[10px] font-medium text-surface-400 transition-colors hover:border-white/10 hover:bg-white/[0.05] hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-transparent px-1 text-[10px] font-medium text-surface-400 transition-colors hover:border-hairline hover:bg-fill-subtle hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
               >
                 <History className="h-5 w-5" aria-hidden="true" />
                 My work
@@ -225,7 +236,7 @@ const AppContent: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsSettingsOpen(true)}
-              className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-transparent px-1 text-[10px] font-medium text-surface-400 transition-colors hover:border-white/10 hover:bg-white/[0.05] hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+              className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-transparent px-1 text-[10px] font-medium text-surface-400 transition-colors hover:border-hairline hover:bg-fill-subtle hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
             >
               <Settings className="h-5 w-5" aria-hidden="true" />
               Settings
@@ -289,10 +300,8 @@ const AppContent: React.FC = () => {
         <LazySettingsModal
           isOpen={isSettingsOpen}
           onClose={() => setIsSettingsOpen(false)}
-          compactMode={compactMode}
           imageQualityTier={imageQualityTier}
           theme={theme}
-          onToggleCompactMode={(value) => setPreferences({ compactMode: value })}
           onImageQualityTierChange={(value) =>
             setPreferences({ imageQualityTier: value })
           }

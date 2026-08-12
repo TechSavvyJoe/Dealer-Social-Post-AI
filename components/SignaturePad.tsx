@@ -229,7 +229,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
           Customer signature
         </legend>
         <div
-          className="mb-3 grid grid-cols-2 gap-1 rounded-xl border border-white/10 bg-surface-950/50 p-1"
+          className="mb-3 grid grid-cols-2 gap-1 rounded-xl border border-hairline bg-surface-950/50 p-1"
           role="group"
           aria-label="Signature method"
         >
@@ -242,7 +242,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
               className={`min-h-11 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
                 signatureMethod === method
                   ? "bg-primary-500/25 text-primary-100"
-                  : "text-surface-400 hover:bg-white/5 hover:text-surface-200"
+                  : "text-surface-400 hover:bg-fill-subtle hover:text-surface-200"
               }`}
             >
               {method === "draw" ? "Draw signature" : "Type name"}
@@ -254,7 +254,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
           <>
             <div
               ref={canvasContainerRef}
-              className="relative w-full overflow-hidden rounded-xl border border-white/20 bg-surface-950/60"
+              className="relative w-full overflow-hidden rounded-xl border border-strong bg-surface-950/60"
               style={{ maxWidth: `${width}px`, aspectRatio: `${width} / ${height}` }}
             >
               <canvas
@@ -295,7 +295,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
                 type="button"
                 onClick={clear}
                 disabled={!hasStrokes}
-                className="flex min-h-11 items-center gap-1 rounded px-3 py-2 text-surface-300 transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
+                className="flex min-h-11 items-center gap-1 rounded px-3 py-2 text-surface-300 transition-colors hover:bg-fill-subtle disabled:cursor-not-allowed disabled:opacity-30"
               >
                 <Eraser className="h-3 w-3" />
                 Clear
@@ -303,7 +303,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
             </div>
           </>
         ) : (
-          <div className="space-y-3 rounded-xl border border-white/15 bg-surface-950/40 p-3">
+          <div className="space-y-3 rounded-xl border border-strong bg-surface-950/40 p-3">
             <div>
               <label
                 htmlFor={typedNameId}
@@ -320,7 +320,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
                 className="min-h-11 w-full rounded-xl border-2 border-surface-700 bg-surface-900/60 px-3 py-2 text-base text-surface-50 focus:border-primary-500 focus:outline-none"
               />
             </div>
-            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-white/10 p-3 text-sm text-surface-200">
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-hairline p-3 text-sm text-surface-200">
               <input
                 type="checkbox"
                 checked={attested}

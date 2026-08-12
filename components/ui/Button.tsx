@@ -6,14 +6,16 @@ import { triggerHapticFeedback } from "../../utils/haptics";
 import { SPRING_CONFIGS, shouldReduceMotion } from "../../utils/animations";
 
 /**
- * Button variants following Apple's hierarchy:
- * - filled: Primary action (solid background)
- * - tinted: Secondary action (tinted background)
- * - plain: Tertiary action (text only)
- * - outline: Alternative action (bordered)
- * - danger: Destructive action (red)
- * - gradient-sky: Brand blue gradient (AI/creative features)
- * - gradient-teal: Success/info gradient (confirmation actions)
+ * Button variants — DEALER TRUST system: flat fills, hairline borders, no
+ * gradients, no glow, motion limited to a tap compression. The historical
+ * variant names are kept as aliases so no call site churns:
+ * - filled / primary: solid brand action
+ * - tinted / secondary: brand-tinted secondary action
+ * - plain / ghost: text-only tertiary action
+ * - outline: hairline-bordered alternative action
+ * - danger: destructive action (solid red)
+ * - gradient-sky: legacy alias of filled
+ * - gradient-teal: legacy alias — now a solid success button
  */
 type Variant =
   | "filled"
@@ -49,91 +51,63 @@ interface ButtonProps extends Omit<HTMLMotionProps<"button">, "size"> {
   disableHaptics?: boolean;
 }
 
-// Base styles - accessibility and layout
+// Base styles - accessibility and layout. Focus is owned by the global
+// brand-aware *:focus-visible rule in globals.css — no per-component ring.
 const baseStyles = cn(
   "inline-flex items-center justify-center gap-2",
   "font-semibold tracking-tight",
-  "rounded-xl",
-  "transition-all duration-200 ease-apple",
-  "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950",
-  "focus-visible:shadow-[0_0_0_4px_rgba(59,130,246,0.25)]",
+  "rounded-lg",
+  "transition-colors duration-[var(--duration-fast)] ease-apple",
   "disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none",
   "select-none touch-manipulation",
 );
 
-// Variant styles with Apple-inspired colors
+const solidBrand = cn(
+  "bg-primary-600 text-white shadow-sm",
+  "hover:bg-primary-700",
+  "active:scale-[0.98]",
+);
+
+const tintedBrand = cn(
+  "bg-primary-500/15",
+  // Light-blue ink reads on dark surfaces; Sunlight Mode needs the deep ramp.
+  "text-primary-300 [.theme-light_&]:text-primary-700",
+  "border border-primary-500/25",
+  "hover:bg-primary-500/25 hover:border-primary-500/35",
+  "active:scale-[0.98]",
+);
+
+const plainBrand = cn(
+  "text-primary-300 [.theme-light_&]:text-primary-700",
+  "hover:bg-primary-500/10",
+  "active:bg-primary-500/15",
+  "active:scale-[0.98]",
+);
+
+// Variant styles — flat DEALER TRUST fills.
 const variantStyles: Record<Variant, string> = {
-  filled: cn(
-    "bg-gradient-to-b from-primary-500 to-primary-600",
-    "text-white",
-    "shadow-elevation-2",
-    "hover:shadow-elevation-3 hover:shadow-glow-primary",
-    "hover:from-primary-600 hover:to-primary-700",
-    "active:scale-[0.98]",
-  ),
-  primary: cn(
-    // Alias for filled
-    "bg-gradient-to-b from-primary-500 to-primary-600",
-    "text-white",
-    "shadow-elevation-2",
-    "hover:shadow-elevation-3 hover:shadow-glow-primary",
-    "hover:from-primary-600 hover:to-primary-700",
-    "active:scale-[0.98]",
-  ),
-  tinted: cn(
-    "bg-primary-500/15",
-    "text-primary-400",
-    "border border-primary-500/20",
-    "hover:bg-primary-500/25 hover:border-primary-500/30",
-    "active:scale-[0.98]",
-  ),
-  secondary: cn(
-    // Alias for tinted
-    "bg-primary-500/15",
-    "text-primary-400",
-    "border border-primary-500/20",
-    "hover:bg-primary-500/25 hover:border-primary-500/30",
-    "active:scale-[0.98]",
-  ),
-  plain: cn(
-    "text-primary-400",
-    "hover:bg-primary-500/10",
-    "active:bg-primary-500/15",
-    "active:scale-[0.98]",
-  ),
-  ghost: cn(
-    // Alias for plain
-    "text-primary-400",
-    "hover:bg-primary-500/10",
-    "active:bg-primary-500/15",
-    "active:scale-[0.98]",
-  ),
+  filled: solidBrand,
+  primary: solidBrand,
+  tinted: tintedBrand,
+  secondary: tintedBrand,
+  plain: plainBrand,
+  ghost: plainBrand,
   outline: cn(
-    "border-2 border-surface-700",
-    "text-surface-100",
-    "hover:border-surface-600 hover:bg-surface-800/50",
+    "border border-hairline",
+    "text-content-primary",
+    "hover:border-strong hover:bg-fill-hover",
     "active:scale-[0.98]",
   ),
   danger: cn(
-    "bg-gradient-to-b from-error-500 to-error-600",
-    "text-white",
-    "shadow-elevation-2",
-    "hover:shadow-elevation-3 hover:shadow-glow-error",
-    "hover:from-error-600 hover:to-error-700",
+    "bg-error-600 text-white shadow-sm",
+    "hover:bg-error-700",
     "active:scale-[0.98]",
   ),
-  "gradient-sky": cn(
-    "bg-gradient-to-r from-sky-500 to-primary-500",
-    "text-white",
-    "shadow-elevation-2",
-    "hover:shadow-elevation-3 hover:brightness-110",
-    "active:scale-[0.98]",
-  ),
+  // Legacy gradient names — flat now, kept so call sites don't churn.
+  "gradient-sky": solidBrand,
   "gradient-teal": cn(
-    "bg-gradient-to-r from-teal-500 to-cyan-500",
-    "text-white",
-    "shadow-elevation-2",
-    "hover:shadow-elevation-3 hover:brightness-110",
+    "bg-success-600 text-white shadow-sm",
+    "hover:bg-success-700",
     "active:scale-[0.98]",
   ),
 };
@@ -200,9 +174,6 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         onClick={handleClick}
         whileTap={
           !disabled && !loading && !shouldReduceMotion() ? { scale: 0.98 } : undefined
-        }
-        whileHover={
-          !disabled && !loading && !shouldReduceMotion() ? { scale: 1.02 } : undefined
         }
         transition={{
           type: "spring",

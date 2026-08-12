@@ -196,7 +196,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
             type="button"
             onClick={handleChooseAnother}
             disabled={isExporting}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-surface-100 transition-colors hover:border-white/25 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-strong bg-fill-subtle px-5 py-3 text-sm font-semibold text-surface-100 transition-colors hover:border-strong hover:bg-fill-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RotateCcw className="h-4 w-4" aria-hidden="true" />
             Choose another
@@ -239,7 +239,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
       }
     >
       <div className="space-y-4">
-        <div className="relative flex min-h-[16rem] items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-black sm:min-h-[24rem]">
+        <div className="relative flex min-h-[16rem] items-center justify-center overflow-hidden rounded-xl border border-hairline bg-black sm:min-h-[24rem]">
           {imageSrc && (
             <img
               ref={imageRef}

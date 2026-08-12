@@ -35,13 +35,22 @@ export const Header: React.FC<HeaderProps> = ({
   const [showTooltip, setShowTooltip] = useState<string | null>(null);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
 
-  // Track scroll position for enhanced blur effect
+  // Track scroll position for the blur/shadow treatment. On mobile the body
+  // is viewport-pinned and scrolling happens inside #main-content, so bind to
+  // the real scrollport with window as the desktop document-flow fallback.
   useEffect(() => {
+    const scrollport = document.getElementById("main-content");
+    const readOffset = () => (scrollport ? scrollport.scrollTop : window.scrollY);
     const handleScroll = () => {
-      setIsScrolled(window.scrollY > 10);
+      setIsScrolled(readOffset() > 10);
     };
+    const target: HTMLElement | Window = scrollport ?? window;
+    target.addEventListener("scroll", handleScroll, { passive: true });
     window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
+    return () => {
+      target.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("scroll", handleScroll);
+    };
   }, []);
 
   const handleLogout = () => {
@@ -88,7 +97,7 @@ export const Header: React.FC<HeaderProps> = ({
             ? "bg-surface-900/90 backdrop-blur-2xl shadow-lg shadow-black/15"
             : "bg-surface-900/70 backdrop-blur-xl",
           "border-b",
-          isScrolled ? "border-white/10" : "border-white/5",
+          isScrolled ? "border-hairline" : "border-hairline",
         )}
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -112,7 +121,7 @@ export const Header: React.FC<HeaderProps> = ({
                 />
                 <Logo className="hidden h-9 w-[13.5rem] shrink-0 sm:block" />
                 <span
-                  className="hidden h-7 w-px shrink-0 bg-white/10 md:block"
+                  className="hidden h-7 w-px shrink-0 bg-fill-hover md:block"
                   aria-hidden="true"
                 />
                 <div className="hidden min-w-0 md:block">
@@ -134,14 +143,14 @@ export const Header: React.FC<HeaderProps> = ({
                     <img
                       src={dealer.logo}
                       alt={`${dealer.name} logo`}
-                      className="relative h-10 w-10 object-contain rounded-2xl bg-white/[0.07] p-1.5 ring-1 ring-white/10 shadow-sm transition-all duration-200 group-hover:ring-white/20 sm:h-11 sm:w-11"
+                      className="relative h-10 w-10 object-contain rounded-2xl bg-fill-hover p-1.5 ring-1 ring-hairline shadow-sm transition-all duration-200 group-hover:ring-strong sm:h-11 sm:w-11"
                     />
                   ) : (
                     <div
                       className={cn(
                         "flex h-10 w-10 items-center justify-center rounded-2xl sm:h-11 sm:w-11",
                         "font-semibold text-[color:var(--brand-foreground)] text-xl",
-                        "ring-1 ring-white/10 shadow-sm",
+                        "ring-1 ring-hairline shadow-sm",
                       )}
                       style={{ backgroundColor: "var(--brand-primary)" }}
                       aria-hidden="true"
@@ -185,7 +194,7 @@ export const Header: React.FC<HeaderProps> = ({
           >
             {studioMode && person ? (
               <div
-                className="hidden min-h-10 items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.045] px-2.5 sm:flex"
+                className="hidden min-h-10 items-center gap-2.5 rounded-xl border border-hairline bg-fill-subtle px-2.5 sm:flex"
                 aria-label={`Posting as ${person.name}`}
               >
                 <span
@@ -226,7 +235,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <AnimatePresence>
                   {showTooltip === "history" && (
                     <motion.div
-                      className="absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-lg border border-white/10 bg-surface-950/95 px-2 py-1 text-xs text-surface-200 shadow-lg sm:hidden"
+                      className="absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-lg border border-hairline bg-surface-950/95 px-2 py-1 text-xs text-surface-200 shadow-lg sm:hidden"
                       initial={{ opacity: 0, y: -5 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -5 }}
@@ -259,7 +268,7 @@ export const Header: React.FC<HeaderProps> = ({
               <AnimatePresence>
                 {showTooltip === "settings" && (
                   <motion.div
-                    className="absolute top-full left-1/2 -translate-x-1/2 mt-2 rounded-lg border border-white/10 bg-surface-950/95 px-2 py-1 text-xs text-surface-200 shadow-lg whitespace-nowrap sm:hidden z-50"
+                    className="absolute top-full left-1/2 -translate-x-1/2 mt-2 rounded-lg border border-hairline bg-surface-950/95 px-2 py-1 text-xs text-surface-200 shadow-lg whitespace-nowrap sm:hidden z-50"
                     initial={{ opacity: 0, y: -5 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -5 }}
@@ -295,7 +304,7 @@ export const Header: React.FC<HeaderProps> = ({
               <AnimatePresence>
                 {showTooltip === "logout" && (
                   <motion.div
-                    className="absolute top-full left-1/2 -translate-x-1/2 mt-2 rounded-lg border border-white/10 bg-surface-950/95 px-2 py-1 text-xs text-surface-200 shadow-lg whitespace-nowrap sm:hidden z-50"
+                    className="absolute top-full left-1/2 -translate-x-1/2 mt-2 rounded-lg border border-hairline bg-surface-950/95 px-2 py-1 text-xs text-surface-200 shadow-lg whitespace-nowrap sm:hidden z-50"
                     initial={{ opacity: 0, y: -5 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -5 }}

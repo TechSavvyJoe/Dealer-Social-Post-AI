@@ -30,9 +30,9 @@ Both image tiers request 2K from Flash and Pro, then 1K from the Lite image fall
 
 ## Vertex status
 
-Generic `/api/proxy/vertex/*` browser routes are intentionally denied by the server allowlist. A dealer session must not be able to select arbitrary Google Cloud projects, models, or billable operations.
+Generic `/api/proxy/vertex/*` browser routes are intentionally denied by the server allowlist, and the legacy Vertex service-account code path has been deleted from `pb_hooks/main.pb.js` entirely (it wrote a private key to disk and shelled out to openssl, and was one policy edit away from reachable). A dealer session must not be able to select arbitrary Google Cloud projects, models, or billable operations.
 
-Do not configure `VERTEX_SERVICE_ACCOUNT_JSON` for this release. If Vertex is needed later, add a dedicated server-to-server route with all of the following before enabling it:
+`VERTEX_SERVICE_ACCOUNT_JSON` is not read by anything. If Vertex is needed later, add a dedicated server-to-server route with all of the following before enabling it:
 
 - service-to-service authentication distinct from dealer browser sessions;
 - exact project, region, model, and method allowlists;

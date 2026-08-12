@@ -293,7 +293,7 @@ test.describe("real PocketBase release flow", () => {
     await installLoopbackSessionCookie(context, page, adminCookie);
     await page.reload({ waitUntil: "networkidle" });
 
-    await expect(page.getByRole("heading", { name: "System Admin" })).toBeVisible({
+    await expect(page.getByRole("heading", { name: "System admin" })).toBeVisible({
       timeout: 15_000,
     });
     // WebKit can replace the loopback-only non-Secure test cookie when the
@@ -307,7 +307,7 @@ test.describe("real PocketBase release flow", () => {
     );
     await expect(page.getByRole("tab", { name: "Admins" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Users" })).toBeVisible();
-    await expect(page.getByLabel("Dealership view")).toHaveValue("");
+    await expect(page.getByLabel("Store", { exact: true })).toHaveValue("");
 
     const suffix = `${testInfo.project.name}-${Date.now().toString(36)}`
       .replace(/[^a-z0-9-]/gi, "")
@@ -334,7 +334,7 @@ test.describe("real PocketBase release flow", () => {
     expect(dealerId).toMatch(/^[a-z0-9]{15}$/);
     await expect(page.locator("h3").filter({ hasText: dealerName })).toBeVisible();
 
-    await page.getByLabel("Dealership view").selectOption(dealerId);
+    await page.getByLabel("Store", { exact: true }).selectOption(dealerId);
     await page.getByRole("tab", { name: "Admins" }).click();
     const managerPanel = page
       .getByRole("heading", { name: `Add manager · ${dealerName}` })
@@ -496,7 +496,7 @@ test.describe("real PocketBase release flow", () => {
     expect(JSON.stringify(legacyRoster)).not.toContain(salespersonCredential.pin);
 
     // Prove the approved all-store view can find a person and retains a store label.
-    await page.getByLabel("Dealership view").selectOption("");
+    await page.getByLabel("Store", { exact: true }).selectOption("");
     await page.getByPlaceholder("Search salespeople…").fill(salespersonName);
     const filteredSalespersonRow = rosterRow(page, salespersonName);
     await expect(filteredSalespersonRow).toBeVisible();
@@ -504,7 +504,7 @@ test.describe("real PocketBase release flow", () => {
       filteredSalespersonRow.getByText(dealerName, { exact: true }),
     ).toBeVisible();
     await page.getByPlaceholder("Search salespeople…").fill("");
-    await page.getByLabel("Dealership view").selectOption(dealerId);
+    await page.getByLabel("Store", { exact: true }).selectOption(dealerId);
 
     // A manager can authenticate with the dealer-scoped username/password and
     // receives an authoritative, credential-free identity in API and manager UI.

@@ -2,25 +2,26 @@ import React, { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dealer } from "../types";
 import * as db from "../services/database";
-import { Icon } from "./Icons";
 import { logError } from "../utils/telemetry";
 import { motion } from "framer-motion";
 import { Button } from "./ui/Button";
 import { Skeleton } from "./ui/Skeleton";
 import {
   Building2,
-  Pencil,
-  RefreshCw,
-  Shield,
-  UserRound,
-  Users,
-  Eye,
   ChevronLeft,
   ChevronRight,
+  Eye,
   KeyRound,
   Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
   Search,
+  Shield,
+  Trash2,
   UserCog,
+  UserRound,
+  Users,
 } from "lucide-react";
 import { PersonEditModal } from "./PersonEditModal";
 import { SystemHealthPanel } from "./SystemHealthPanel";
@@ -402,99 +403,98 @@ export const AdminDashboard: React.FC = () => {
   };
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-4 p-0 sm:space-y-6 sm:p-2 lg:p-4">
+    <div className="mx-auto w-full max-w-5xl space-y-5 p-0 sm:space-y-6 sm:p-2 lg:p-4">
+      {/* Page identity first; diagnostics are a quiet strip below it. */}
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-content-tertiary">
+            Platform
+          </p>
+          <h2 className="mt-1 text-2xl font-bold tracking-tight text-content-primary">
+            System admin
+          </h2>
+          <p className="mt-1 max-w-xl text-sm text-content-secondary">
+            Work across every dealership, or narrow the hub to one store. Every person
+            remains clearly labeled and tenant-scoped.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          leftIcon={<RefreshCw className="h-4 w-4" />}
+          onClick={() => {
+            void refetch();
+            if (tab !== "dealers") void refetchPeople();
+          }}
+          disabled={isPending}
+        >
+          {isPending ? "Refreshing…" : "Refresh"}
+        </Button>
+      </header>
+
       <SystemHealthPanel />
 
-      <div className="rounded-2xl border border-white/10 bg-surface-900/45 p-5 shadow-elevation-2 backdrop-blur-xl sm:p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h2 className="text-3xl font-bold text-surface-50 sm:text-4xl">
-              System Admin
-            </h2>
-            <p className="mt-2 text-sm text-surface-400">
-              Work across every dealership, or narrow the hub to one store. Every person
-              remains clearly labeled and tenant-scoped.
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={<RefreshCw className="h-4 w-4" />}
-            onClick={() => {
-              void refetch();
-              if (tab !== "dealers") void refetchPeople();
-            }}
-            disabled={isPending}
-          >
-            {isPending ? "Refreshing…" : "Refresh"}
-          </Button>
+      {/* Section toolbar: underline tabs + the tenant scope control. */}
+      <div className="flex flex-col gap-3 border-b border-hairline lg:flex-row lg:items-end lg:justify-between">
+        <div
+          className="-mb-px flex w-full gap-1 overflow-x-auto sm:w-auto"
+          role="tablist"
+          aria-label="System admin sections"
+        >
+          {tabs.map(({ key, label, icon: TabIcon }) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              id={`admin-tab-${key}`}
+              aria-controls={`admin-panel-${key}`}
+              aria-selected={tab === key}
+              tabIndex={tab === key ? 0 : -1}
+              onClick={() => setTab(key)}
+              onKeyDown={(event) => handleTabKeyDown(event, key)}
+              className={cn(
+                "flex min-w-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-semibold transition-colors",
+                tab === key
+                  ? "border-primary-500 text-content-primary"
+                  : "border-transparent text-content-tertiary hover:text-content-secondary",
+              )}
+            >
+              <TabIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+              {label}
+            </button>
+          ))}
         </div>
 
-        <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div
-            className="inline-flex w-full gap-1 rounded-xl border border-surface-800 bg-surface-950/60 p-1 sm:w-auto"
-            role="tablist"
-            aria-label="System admin sections"
+        <div className="flex min-w-0 items-center gap-2 pb-2 lg:max-w-sm">
+          <label
+            htmlFor="selected-dealer"
+            className="shrink-0 text-xs font-medium uppercase tracking-wide text-content-tertiary"
           >
-            {tabs.map(({ key, label, icon: TabIcon }) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                id={`admin-tab-${key}`}
-                aria-controls={`admin-panel-${key}`}
-                aria-selected={tab === key}
-                tabIndex={tab === key ? 0 : -1}
-                onClick={() => setTab(key)}
-                onKeyDown={(event) => handleTabKeyDown(event, key)}
-                className={cn(
-                  "flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold transition-colors sm:flex-none sm:px-4",
-                  tab === key
-                    ? "bg-primary-500/30 text-primary-100"
-                    : "text-surface-400 hover:text-surface-200",
-                )}
-              >
-                <TabIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                {label}
-              </button>
+            Store
+          </label>
+          <select
+            id="selected-dealer"
+            value={selectedDealerId}
+            onChange={(e) => selectDealer(e.target.value)}
+            className="w-full min-w-0 rounded-md border border-hairline bg-surface-overlay px-3 py-2 text-sm text-content-primary"
+          >
+            <option value="">All dealerships</option>
+            {storeDealers.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
             ))}
-          </div>
-
-          <div className="flex min-w-0 flex-1 flex-col gap-1 sm:max-w-md sm:items-end">
-            <label
-              htmlFor="selected-dealer"
-              className="text-xs font-medium uppercase tracking-wide text-surface-400"
-            >
-              Dealership view
-            </label>
-            <select
-              id="selected-dealer"
-              value={selectedDealerId}
-              onChange={(e) => selectDealer(e.target.value)}
-              className="w-full rounded-xl border border-surface-700 bg-surface-900/70 px-3 py-2.5 text-sm text-surface-100"
-            >
-              <option value="">All dealerships</option>
-              {storeDealers.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-            {selectedDealer ? (
-              <p className="text-xs text-primary-300/90">
-                Showing people for{" "}
-                <strong className="font-semibold text-primary-200">
-                  {selectedDealer.name}
-                </strong>
-              </p>
-            ) : (
-              <p className="text-xs text-surface-500">
-                Viewing every store. Select one dealership to add a person.
-              </p>
-            )}
-          </div>
+          </select>
         </div>
       </div>
+      {selectedDealer ? (
+        <p className="-mt-3 text-xs text-content-tertiary sm:-mt-4">
+          Showing people for{" "}
+          <strong className="font-semibold text-content-secondary">
+            {selectedDealer.name}
+          </strong>
+        </p>
+      ) : null}
 
       {tab === "dealers" && (
         <div
@@ -508,7 +508,7 @@ export const AdminDashboard: React.FC = () => {
             <Button
               variant="primary"
               size="sm"
-              leftIcon={<Icon type="plus" className="h-4 w-4" />}
+              leftIcon={<Plus className="h-4 w-4" />}
               onClick={() => {
                 if (showDealerForm) resetDealerForm();
                 else {
@@ -527,7 +527,7 @@ export const AdminDashboard: React.FC = () => {
             <motion.div
               initial={{ opacity: 0, y: -12 }}
               animate={{ opacity: 1, y: 0 }}
-              className="rounded-2xl border border-white/10 bg-surface-900/70 p-5 shadow-elevation-3 backdrop-blur-xl sm:p-6"
+              className="rounded-2xl border border-hairline bg-surface-900/70 p-5 shadow-elevation-3 backdrop-blur-xl sm:p-6"
             >
               <form onSubmit={handleDealerSubmit} className="space-y-4">
                 <div>
@@ -639,7 +639,7 @@ export const AdminDashboard: React.FC = () => {
                     "rounded-2xl border p-4 shadow-elevation-1 backdrop-blur-xl sm:p-5",
                     isSelected
                       ? "border-primary-500/50 bg-primary-500/10 ring-1 ring-primary-400/30"
-                      : "border-white/10 bg-surface-900/55",
+                      : "border-hairline bg-surface-900/55",
                   )}
                 >
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -654,7 +654,7 @@ export const AdminDashboard: React.FC = () => {
                         <img
                           src={dealer.logo}
                           alt=""
-                          className="h-14 w-14 rounded-xl border border-white/10 bg-surface-950/50 object-contain p-2"
+                          className="h-14 w-14 rounded-xl border border-hairline bg-surface-950/50 object-contain p-2"
                         />
                       ) : (
                         <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-primary-500/20 bg-primary-500/10">
@@ -707,7 +707,7 @@ export const AdminDashboard: React.FC = () => {
                         title="Delete dealer"
                         aria-label={`Delete ${dealer.name}`}
                       >
-                        <Icon type="trash" className="h-4 w-4" />
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
@@ -732,7 +732,7 @@ export const AdminDashboard: React.FC = () => {
           className="space-y-4"
         >
           <div className="grid gap-2 sm:grid-cols-3">
-            <div className="rounded-xl border border-white/10 bg-surface-900/55 p-3">
+            <div className="rounded-xl border border-hairline bg-surface-900/55 p-3">
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
                 Scope
               </p>
@@ -740,7 +740,7 @@ export const AdminDashboard: React.FC = () => {
                 {selectedDealer?.name || "All dealerships"}
               </p>
             </div>
-            <div className="rounded-xl border border-white/10 bg-surface-900/55 p-3">
+            <div className="rounded-xl border border-hairline bg-surface-900/55 p-3">
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
                 Showing
               </p>
@@ -748,7 +748,7 @@ export const AdminDashboard: React.FC = () => {
                 {tab === "admins" ? "Managers" : "Salespeople"}
               </p>
             </div>
-            <div className="rounded-xl border border-white/10 bg-surface-900/55 p-3">
+            <div className="rounded-xl border border-hairline bg-surface-900/55 p-3">
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
                 People
               </p>
@@ -760,7 +760,7 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="sticky top-0 z-10 rounded-2xl border border-white/10 bg-surface-950/95 p-3 shadow-elevation-2 backdrop-blur-xl">
+          <div className="sticky top-0 z-10 rounded-2xl border border-hairline bg-surface-950/95 p-3 shadow-elevation-2 backdrop-blur-xl">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <label className="relative min-w-0 flex-1">
                 <span className="sr-only">Search people</span>
@@ -796,7 +796,7 @@ export const AdminDashboard: React.FC = () => {
           </div>
 
           {selectedDealer ? (
-            <div className="rounded-2xl border border-white/10 bg-surface-900/60 p-4 sm:p-5">
+            <div className="rounded-2xl border border-hairline bg-surface-900/60 p-4 sm:p-5">
               <h3 className="text-lg font-bold text-surface-50">
                 {tab === "admins"
                   ? `Add manager · ${selectedDealer.name}`
@@ -857,7 +857,7 @@ export const AdminDashboard: React.FC = () => {
                 This one-time response is not stored in the roster.
               </p>
               <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-                <code className="flex-1 rounded-xl border border-white/10 bg-surface-950/80 px-4 py-3 text-center text-xl tracking-[0.4em] text-surface-50">
+                <code className="flex-1 rounded-xl border border-hairline bg-surface-950/80 px-4 py-3 text-center text-xl tracking-[0.4em] text-surface-50">
                   {oneTimeCredential.pin}
                 </code>
                 <Button
@@ -923,7 +923,7 @@ export const AdminDashboard: React.FC = () => {
               <div
                 key={person.id}
                 className={cn(
-                  "flex flex-col gap-3 rounded-2xl border border-white/10 bg-surface-900/55 p-4 sm:flex-row sm:items-center sm:justify-between",
+                  "flex flex-col gap-3 rounded-2xl border border-hairline bg-surface-900/55 p-4 sm:flex-row sm:items-center sm:justify-between",
                   !person.active && "opacity-60",
                 )}
               >
@@ -945,7 +945,7 @@ export const AdminDashboard: React.FC = () => {
                           ? "bg-warning-500/10 text-warning-200 ring-1 ring-warning-500/20"
                           : person.hasPin
                             ? "bg-success-500/10 text-success-300 ring-1 ring-success-500/20"
-                            : "bg-surface-800 text-surface-500 ring-1 ring-white/10",
+                            : "bg-surface-800 text-surface-500 ring-1 ring-hairline",
                       )}
                     >
                       {person.pinNeedsDistribution
@@ -960,7 +960,7 @@ export const AdminDashboard: React.FC = () => {
                           "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
                           person.hasManagerLogin
                             ? "bg-primary-500/10 text-primary-200 ring-1 ring-primary-400/25"
-                            : "bg-surface-800 text-surface-400 ring-1 ring-white/10",
+                            : "bg-surface-800 text-surface-400 ring-1 ring-hairline",
                         )}
                       >
                         {person.hasManagerLogin
@@ -1016,7 +1016,7 @@ export const AdminDashboard: React.FC = () => {
           </div>
 
           {(cursorHistory.length > 0 || peoplePage?.nextCursor) && (
-            <div className="flex items-center justify-between border-t border-white/10 pt-3">
+            <div className="flex items-center justify-between border-t border-hairline pt-3">
               <Button
                 variant="outline"
                 size="sm"

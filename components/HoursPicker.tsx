@@ -38,7 +38,7 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
 }) => {
   const controlIdPrefix = `hours-${React.useId().replace(/:/g, "")}`;
   const selectClass =
-    "rounded-lg border border-white/10 bg-surface-950/60 px-2 py-1.5 text-sm text-surface-100 focus:border-primary-400 focus:outline-none disabled:opacity-50";
+    "rounded-lg border border-hairline bg-surface-950/60 px-2 py-1.5 text-sm text-surface-100 focus:border-primary-400 focus:outline-none disabled:opacity-50";
 
   const updateDay = (day: DayKey, patch: Partial<WeekHours[DayKey]>) => {
     onChange({
@@ -79,7 +79,7 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
   return (
     <div
       className={cn(
-        "space-y-3 rounded-xl border border-white/10 bg-surface-950/40 p-3 sm:p-4",
+        "space-y-3 rounded-xl border border-hairline bg-surface-950/40 p-3 sm:p-4",
         className,
       )}
     >
@@ -109,7 +109,7 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
                 "grid grid-cols-1 items-center gap-2 rounded-lg border px-3 py-2 sm:grid-cols-[5.5rem_1fr]",
                 row.open
                   ? "border-primary-500/30 bg-primary-500/5"
-                  : "border-white/5 bg-white/[0.02] opacity-80",
+                  : "border-hairline bg-fill-subtle opacity-80",
               )}
             >
               <button

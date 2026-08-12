@@ -2,10 +2,26 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 async function expectNoSeriousAxeViolations(page: import("@playwright/test").Page) {
-  const results = await new AxeBuilder({ page })
-    .disableRules(["color-contrast"])
-    .analyze();
+  const results = await new AxeBuilder({ page }).analyze();
+  // Contrast runs log-only while the token migration settles: violations are
+  // printed for triage but do not fail the gate yet. Flip to enforcing by
+  // removing this filter once the log stays clean.
+  const contrastViolations = results.violations.filter(
+    (violation) => violation.id === "color-contrast",
+  );
+  if (contrastViolations.length > 0) {
+    console.warn(
+      "[axe][log-only] color-contrast violations:",
+      JSON.stringify(
+        contrastViolations.map((violation) => ({
+          impact: violation.impact,
+          nodes: violation.nodes.slice(0, 5).map((node) => node.target.join(" ")),
+        })),
+      ),
+    );
+  }
   const violations = results.violations
+    .filter((violation) => violation.id !== "color-contrast")
     .filter(
       (violation) => violation.impact === "serious" || violation.impact === "critical",
     )
@@ -1109,5 +1125,19 @@ test.describe("Dealer Social Post AI Flow", () => {
     await page.waitForTimeout(100);
     expect(websitePostCount).toBe(1);
     await expectNoHorizontalOverflow(page);
+  });
+
+  test("surfaces the offline banner and clears it on reconnect", async ({
+    page,
+    context,
+  }) => {
+    await page.goto("/");
+    await expect(page.getByText("You're offline", { exact: false })).toHaveCount(0);
+
+    await context.setOffline(true);
+    await expect(page.getByText("You're offline", { exact: false })).toBeVisible();
+
+    await context.setOffline(false);
+    await expect(page.getByText("You're offline", { exact: false })).toHaveCount(0);
   });
 });

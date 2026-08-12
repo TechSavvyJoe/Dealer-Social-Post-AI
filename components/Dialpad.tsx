@@ -1,5 +1,5 @@
 import React from "react";
-import { Icon } from "./Icons";
+import { Delete } from "lucide-react";
 import { cn } from "../utils/classNames";
 
 export type DialpadKey =
@@ -23,10 +23,10 @@ const DialpadButton: React.FC<{
       // Fill the grid cell — height comes from parent remaining space
       "flex h-full min-h-0 w-full touch-manipulation select-none items-center justify-center rounded-2xl lg:min-h-11",
       "text-[clamp(1.1rem,2.8dvh,1.5rem)] font-semibold tabular-nums text-surface-50",
-      "border border-white/[0.09] bg-[#171d29]",
+      "border border-hairline bg-surface-elevated",
       "shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-[background-color,border-color,transform] duration-150",
-      "hover:border-white/20 hover:bg-[#202838] active:translate-y-px active:bg-[#252e40]",
-      "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b1017]",
+      "hover:border-strong hover:bg-surface-raised active:translate-y-px active:bg-surface-raised",
+      "focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/80 focus-visible:ring-offset-2 focus-visible:ring-offset-2",
       className,
     )}
   >
@@ -94,7 +94,7 @@ export const Dialpad: React.FC<DialpadProps> = ({ onKeyPress }) => (
         onClick={() => onKeyPress("backspace")}
         ariaLabel="Delete last digit"
       >
-        <Icon type="backspace" className="h-[1.35em] w-[1.35em]" />
+        <Delete className="h-[1.35em] w-[1.35em]" />
       </DialpadButton>
     </div>
   </div>

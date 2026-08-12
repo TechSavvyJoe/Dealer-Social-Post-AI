@@ -137,7 +137,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
       size="xl"
       title="Fun mode"
       description="Top styles only — bold campaign looks that still keep your real car and customers."
-      className="bg-gradient-to-br from-surface-900 to-surface-800 p-0 overflow-hidden border-white/10"
+      className="bg-gradient-to-br from-surface-900 to-surface-800 p-0 overflow-hidden border-hairline"
       footer={
         <>
           <Button
@@ -191,8 +191,8 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
               onClick={() => setCategory(cat)}
               className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
                 category === cat
-                  ? "border-primary-400 bg-primary-500/20 text-white shadow-glow-primary"
-                  : "border-white/15 text-white/70 hover:border-primary-300/60 hover:bg-white/5"
+                  ? "border-primary-400 bg-primary-500/20 text-white"
+                  : "border-strong text-white/70 hover:border-primary-300/60 hover:bg-fill-subtle"
               }`}
             >
               {cat}
@@ -203,7 +203,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
           <Search className="w-4 h-4 text-white/60 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             aria-label="Search fun styles"
-            className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-3 py-2 text-sm text-white placeholder:text-white/50 focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent transition-all"
+            className="w-full bg-fill-subtle border border-hairline rounded-xl pl-10 pr-3 py-2 text-sm text-white placeholder:text-white/50 focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent transition-all"
             placeholder="Search styles or keywords"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -227,7 +227,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
                   className={`px-2 py-1 rounded-full border text-[11px] transition-all ${
                     selectedStyle === id
                       ? "border-primary-400 text-white bg-primary-500/10"
-                      : "border-white/20 text-white/70 hover:border-primary-300 hover:text-white"
+                      : "border-strong text-white/70 hover:border-primary-300 hover:text-white"
                   }`}
                 >
                   {style.name}
@@ -248,8 +248,8 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
               key={style.id}
               className={`relative px-3 py-2.5 rounded-lg border transition-all text-left group ${
                 selectedStyle === style.id
-                  ? "border-primary-400 bg-primary-500/20 shadow-glow-primary"
-                  : "border-white/10 bg-white/5 hover:border-white/30 hover:bg-white/10"
+                  ? "border-primary-400 bg-primary-500/20"
+                  : "border-hairline bg-fill-subtle hover:border-strong hover:bg-fill-hover"
               }`}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -266,7 +266,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
                   <h3 className="text-white font-medium text-sm group-hover:text-primary-300 transition-colors">
                     {style.name}
                   </h3>
-                  <p className="text-[10px] text-white/50 border border-white/10 rounded-full px-1.5 py-0.5">
+                  <p className="text-[10px] text-white/50 border border-hairline rounded-full px-1.5 py-0.5">
                     {style.category}
                   </p>
                 </div>
@@ -285,7 +285,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
                     className={`pointer-events-auto relative z-10 p-1 rounded-full border transition-all ${
                       isFavorite
                         ? "border-yellow-300/70 bg-yellow-400/10 text-yellow-200"
-                        : "border-white/20 text-white/60 hover:border-yellow-200/60 hover:text-yellow-200"
+                        : "border-strong text-white/60 hover:border-yellow-200/60 hover:text-yellow-200"
                     }`}
                     aria-label={`${isFavorite ? "Remove" : "Add"} ${style.name} ${isFavorite ? "from" : "to"} favorites`}
                   >

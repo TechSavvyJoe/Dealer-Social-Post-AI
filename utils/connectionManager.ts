@@ -87,3 +87,10 @@ class ConnectionManager {
 
 // Singleton instance
 export const connectionManager = new ConnectionManager();
+
+/**
+ * Point-in-time offline probe for guards in non-React code paths; components
+ * that need updates subscribe to `connectionManager` instead.
+ */
+export const isCurrentlyOffline = (): boolean =>
+  typeof navigator !== "undefined" && navigator.onLine === false;

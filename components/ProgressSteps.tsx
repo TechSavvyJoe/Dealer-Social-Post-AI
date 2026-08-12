@@ -21,7 +21,7 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
 
   return (
     <nav
-      className="w-full max-w-screen-2xl px-2 md:px-4 mx-auto py-3 md:py-4 sticky top-0 z-20 backdrop-blur-md bg-surface-900/70 border-b border-white/[0.06]"
+      className="mx-auto w-full max-w-screen-2xl shrink-0 px-2 py-2.5 md:px-4"
       aria-label="Progress"
     >
       <ol className="flex flex-wrap items-center justify-center gap-2 sm:gap-4">
@@ -46,8 +46,7 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
                       ),
                     isComplete &&
                       cn("border-success-500/50 bg-success-500/10 text-success-100"),
-                    isUpcoming &&
-                      "border-white/[0.08] bg-surface-800/45 text-surface-400",
+                    isUpcoming && "border-hairline bg-surface-800/45 text-surface-400",
                   )}
                   initial={false}
                   animate={{
@@ -95,7 +94,7 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
                 <div className="hidden sm:flex items-center h-8 w-8 md:w-12 lg:w-16">
                   <div className="relative w-full h-[2px] overflow-hidden">
                     {/* Background line */}
-                    <div className="absolute inset-0 bg-white/[0.08]" />
+                    <div className="absolute inset-0 bg-fill-hover" />
 
                     {/* Progress line */}
                     <motion.div

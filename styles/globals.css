@@ -37,6 +37,22 @@
        useDealerTheme.ts can override if a dealer picks a pastel brand. */
     --brand-foreground: #ffffff;
 
+    /* RGB triplets of the same brand ramp, consumed by tailwind.config.js as
+       primary-300..700 (rgb(var(--brand-N-rgb) / <alpha-value>)). Overridden
+       at runtime by useDealerTheme so EVERY primary-* utility follows the
+       dealer's white-label color. Keep in lockstep with the hex vars above. */
+    --brand-300-rgb: 147 197 253; /* #93c5fd */
+    --brand-400-rgb: 96 165 250; /* #60a5fa */
+    --brand-500-rgb: 37 99 235; /* #2563eb */
+    --brand-600-rgb: 30 64 175; /* #1e40af */
+    --brand-700-rgb: 30 58 138; /* #1e3a8a */
+
+    /* Theme-aware translucent fills — replacements for dark-only bg-white/5
+       and bg-white/10. Rendered values match the old dark-mode look exactly;
+       Sunlight Mode flips them to ink-tinted fills. */
+    --fill-subtle: rgba(255, 255, 255, 0.05);
+    --fill-hover: rgba(255, 255, 255, 0.1);
+
     /* --- Surface (background) scale — calm neutral charcoal, NOT swirly --- */
     --color-surface-base: 9 13 23; /* near-black, OKLCH(0.15 0.02 250) ish */
     --color-surface-elevated: 17 22 36; /* one step lighter */
@@ -138,6 +154,9 @@
     --color-border-strong: 148 163 184;
     --color-border-light: 226 232 240;
 
+    --fill-subtle: rgba(15, 23, 42, 0.04);
+    --fill-hover: rgba(15, 23, 42, 0.08);
+
     /* Invert surface palette so bg-surface-900 becomes light */
     --surface-50: 2 6 23;
     --surface-100: 15 23 42;
@@ -171,6 +190,9 @@
     --color-border: 42 56 78;
     --color-border-strong: 67 84 110;
     --color-border-light: 30 41 59;
+
+    --fill-subtle: rgba(255, 255, 255, 0.05);
+    --fill-hover: rgba(255, 255, 255, 0.1);
 
     --surface-50: 248 250 252;
     --surface-100: 241 245 249;
@@ -306,11 +328,12 @@
   }
 
   /* Focus ring — always brand color, always 3px, always visible. */
+  /* Outline (not box-shadow) so utility-layer shadows like shadow-sm on
+     buttons can never override the indicator — outlines render independently
+     of box-shadow and follow the element's border radius. */
   *:focus-visible {
-    outline: none;
-    box-shadow: var(--shadow-focus);
-    border-radius: var(--radius-md);
-    transition: box-shadow var(--duration-fast) var(--ease-out);
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
   }
 
   /* Better default for buttons and inputs */
@@ -632,62 +655,6 @@
     }
   }
 
-  /* Glass morphism effect */
-  .glass {
-    @apply bg-white/5 backdrop-blur-xl border border-white/10;
-    @apply shadow-xl;
-  }
-
-  .glass-strong {
-    @apply bg-white/10 backdrop-blur-2xl border border-white/20;
-    @apply shadow-2xl;
-  }
-
-  /* Gradient backgrounds */
-  .gradient-primary {
-    @apply bg-gradient-to-r from-primary-500 to-secondary-600;
-  }
-
-  .gradient-success {
-    @apply bg-gradient-to-r from-success-500 to-primary-500;
-  }
-
-  .gradient-warning {
-    @apply bg-gradient-to-r from-warning-500 to-error-500;
-  }
-
-  /* Text gradients */
-  .text-gradient-primary {
-    @apply bg-gradient-to-r from-primary-400 to-secondary-500 bg-clip-text text-transparent;
-  }
-
-  .text-gradient-success {
-    @apply bg-gradient-to-r from-success-400 to-primary-400 bg-clip-text text-transparent;
-  }
-
-  /* Animated gradient background */
-  .gradient-animated {
-    background: linear-gradient(
-      -45deg,
-      rgb(59 130 246 / 0.1),
-      rgb(147 51 234 / 0.1),
-      rgb(236 72 153 / 0.1),
-      rgb(59 130 246 / 0.1)
-    );
-    background-size: 400% 400%;
-    animation: gradient-shift 15s ease infinite;
-  }
-
-  @keyframes gradient-shift {
-    0%,
-    100% {
-      background-position: 0% 50%;
-    }
-    50% {
-      background-position: 100% 50%;
-    }
-  }
-
   /* Container with max-width */
   .container-custom {
     @apply max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-10;
@@ -698,10 +665,15 @@
     @apply min-w-[44px] min-h-[44px] inline-flex items-center justify-center;
   }
 
-  /* Card hover effect */
+  /* Interactive-card affordance — border/background emphasis, no lift. */
   .card-hover {
-    @apply transition-all duration-300 ease-apple;
-    @apply hover:scale-[1.02] hover:shadow-elevation-3;
+    transition:
+      border-color var(--duration-base) var(--ease-out),
+      background-color var(--duration-base) var(--ease-out);
+  }
+  .card-hover:hover {
+    border-color: rgb(var(--color-border-strong));
+    background-color: rgb(var(--color-surface-raised));
   }
 
   /* Button press effect */
@@ -709,15 +681,16 @@
     @apply active:scale-[0.98] transition-transform duration-100;
   }
 
-  /* Shimmer effect for skeletons */
+  /* Shimmer effect for skeletons — theme-aware so Sunlight Mode skeletons
+     read as light cards instead of dark slabs. */
   .shimmer {
     background: linear-gradient(
       90deg,
-      rgb(15 23 42) 0%,
-      rgb(30 41 59) 20%,
-      rgb(51 65 85) 40%,
-      rgb(30 41 59) 60%,
-      rgb(15 23 42) 100%
+      rgb(var(--color-surface-elevated)) 0%,
+      rgb(var(--color-surface-overlay)) 20%,
+      rgb(var(--color-surface-raised)) 40%,
+      rgb(var(--color-surface-overlay)) 60%,
+      rgb(var(--color-surface-elevated)) 100%
     );
     background-size: 200% 100%;
     animation: shimmer 2s linear infinite;
@@ -777,11 +750,11 @@
     @apply transition-shadow duration-300 ease-apple;
   }
 
-  /* Interactive card state */
+  /* Interactive card state — border/background emphasis, no glow. */
   .card-interactive {
     @apply cursor-pointer;
-    @apply transition-all duration-200 ease-apple;
-    @apply hover:shadow-glow-primary;
+    @apply transition-colors duration-200 ease-apple;
+    @apply hover:border-strong hover:bg-surface-raised;
     @apply active:scale-[0.98];
   }
 

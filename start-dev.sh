@@ -18,7 +18,11 @@ if [ ! -f .env.local ]; then
 # Server-side only — never prefix AI keys with VITE_.
 
 GEMINI_API_KEY=your-api-key-here
-ADMIN_DEALER_CODE=
+ADMIN_LOGIN_USERNAME=
+ADMIN_LOGIN_PASSWORD=
+# Dev-only pepper so personal-code creation/sign-in works locally.
+# Production uses a real secret (openssl rand -hex 24) — never this value.
+SALESPERSON_PIN_PEPPER=dev-only-pin-pepper-0123456789abcdef
 
 # Optional cross-provider fallbacks
 # ANTHROPIC_API_KEY=
@@ -58,8 +62,12 @@ else
     echo "✓ GEMINI_API_KEY is configured"
 fi
 
-if [ -z "$ADMIN_DEALER_CODE" ]; then
-    echo "⚠️  ADMIN_DEALER_CODE is unset — readiness will remain unhealthy until you set it."
+if [ -z "$ADMIN_LOGIN_USERNAME" ] || [ -z "$ADMIN_LOGIN_PASSWORD" ]; then
+    echo "⚠️  ADMIN_LOGIN_USERNAME / ADMIN_LOGIN_PASSWORD are unset — the system-admin account will not be provisioned, so super-admin login will fail."
+fi
+
+if [ "${#SALESPERSON_PIN_PEPPER}" -lt 32 ]; then
+    echo "⚠️  SALESPERSON_PIN_PEPPER is unset or too short (needs 32+ chars) — creating people and personal-code sign-in will fail."
 fi
 
 # Check if node_modules exists

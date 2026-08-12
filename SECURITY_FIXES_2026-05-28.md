@@ -4,20 +4,21 @@ Three P0 holes from the launch-readiness review are now closed. This doc is your
 
 ## What changed
 
-| Hole | Status | Fix |
-|---|---|---|
-| **Privilege escalation via forged `<id>::<role>` cookie** | ✅ closed | New `sessions` collection. Cookie carries an opaque 64-char hex token only. Role is resolved server-side from the DB row. Legacy `::role` cookies are explicitly rejected. |
-| **Bundled `VITE_PROXY_ACCESS_TOKEN` lets anyone hit Gemini/Vertex** | ✅ closed | All four proxy routes (`/api/proxy/*`, `/api/proxy/openai/*`, `/api/proxy/anthropic/*`, `/api/proxy-image`) now require a session cookie. Frontend stripped of the bundled token; sends `credentials: "include"` instead. |
-| **No rate limit on login or proxy** | ✅ closed | Login: 10 fails / IP / 15 min → 429. Proxy: 60 req / dealer / min sliding window. Both log to the new `auth_events` collection. |
-| **Vertex JWT cache is dead code** (`cachedAccessToken`/`tokenExpiry` undeclared) | ✅ fixed | Declared at module scope. Tokens now reuse for ~60 min instead of shelling out to OpenSSL per request. |
-| **JWT temp file race** (`now`-based filenames at second precision) | ✅ fixed | Per-request 12-char random hex suffix on `temp_key`/`temp_token`/`temp_sig` files. |
-| **`posts(dealer, generated_at)` index missing** | ✅ added | New migration `1748100200_add_posts_index.js`. |
-| **Fly VM under-provisioned** (256MB, 0 min machines) | ✅ bumped | 1GB / 2 cpus / `min_machines_running = 1` + health check. |
-| **Playwright CI workflow deleted** | ✅ restored | New `.github/workflows/ci.yml` runs typecheck + vitest, plus Playwright when `e2e/` exists. |
+| Hole                                                                             | Status      | Fix                                                                                                                                                                                                                       |
+| -------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Privilege escalation via forged `<id>::<role>` cookie**                        | ✅ closed   | New `sessions` collection. Cookie carries an opaque 64-char hex token only. Role is resolved server-side from the DB row. Legacy `::role` cookies are explicitly rejected.                                                |
+| **Bundled `VITE_PROXY_ACCESS_TOKEN` lets anyone hit Gemini/Vertex**              | ✅ closed   | All four proxy routes (`/api/proxy/*`, `/api/proxy/openai/*`, `/api/proxy/anthropic/*`, `/api/proxy-image`) now require a session cookie. Frontend stripped of the bundled token; sends `credentials: "include"` instead. |
+| **No rate limit on login or proxy**                                              | ✅ closed   | Login: 10 fails / IP / 15 min → 429. Proxy: 60 req / dealer / min sliding window. Both log to the new `auth_events` collection.                                                                                           |
+| **Vertex JWT cache is dead code** (`cachedAccessToken`/`tokenExpiry` undeclared) | ✅ fixed    | Declared at module scope. Tokens now reuse for ~60 min instead of shelling out to OpenSSL per request.                                                                                                                    |
+| **JWT temp file race** (`now`-based filenames at second precision)               | ✅ fixed    | Per-request 12-char random hex suffix on `temp_key`/`temp_token`/`temp_sig` files.                                                                                                                                        |
+| **`posts(dealer, generated_at)` index missing**                                  | ✅ added    | New migration `1748100200_add_posts_index.js`.                                                                                                                                                                            |
+| **Fly VM under-provisioned** (256MB, 0 min machines)                             | ✅ bumped   | 1GB / 2 cpus / `min_machines_running = 1` + health check.                                                                                                                                                                 |
+| **Playwright CI workflow deleted**                                               | ✅ restored | New `.github/workflows/ci.yml` runs typecheck + vitest, plus Playwright when `e2e/` exists.                                                                                                                               |
 
 ## Files touched
 
 ### New
+
 - `pb_migrations/1748100000_create_sessions.js`
 - `pb_migrations/1748100100_create_auth_events.js`
 - `pb_migrations/1748100200_add_posts_index.js`
@@ -25,7 +26,10 @@ Three P0 holes from the launch-readiness review are now closed. This doc is your
 - `scripts/smoke_test_auth.sh`
 - `SECURITY_FIXES_2026-05-28.md` (this doc)
 
+> **Historical note (2026-08):** `scripts/smoke_test_auth.sh` asserted the retired shared-code scheme and has been deleted. Current verification is automated: CI's `production container + migration and backup safety` job plus `e2e/real-pocketbase.spec.ts` cover every assertion this script made, against the current username/password + hashed-PIN scheme.
+
 ### Modified
+
 - `pb_hooks/helpers.js` — full rewrite. Opaque-token resolution, IP/UA helpers, audit logging, rate-limit checker.
 - `pb_hooks/main.pb.js` — session POST/GET/DELETE redone; proxy routes require session; OpenSSL temp files race-fixed; module-scope token cache.
 - `services/geminiProxy.ts` — drop `VITE_PROXY_ACCESS_TOKEN`, add `credentials: "include"`, surface 401/429 to caller.
@@ -36,7 +40,9 @@ Three P0 holes from the launch-readiness review are now closed. This doc is your
 - `fly.toml` — 1GB/2cpu, min_machines=1, health check.
 
 ### Still requires manual cleanup (Cowork sandbox can't `rm`)
+
 From your terminal:
+
 ```bash
 cd ~/AI\ App\ Development\ Projects/Dealer-Social-Post-AI
 rm -rf dist-fresh dist-new dist-v2 dist-v3 dist-v4 dist-v5 dist-v6 dist-v7 dist-v8 dist-v9 dist-v10 dist-v11

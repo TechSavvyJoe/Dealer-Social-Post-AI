@@ -245,7 +245,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/5 border border-primary-500/30 rounded-2xl p-4 sm:p-6 space-y-4"
+      className="bg-fill-subtle border border-primary-500/30 rounded-2xl p-4 sm:p-6 space-y-4"
     >
       <div className="flex items-center gap-3">
         <div
@@ -301,7 +301,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 <div
                   className={cn(
                     "h-px flex-1 mx-1",
-                    done ? "bg-success-400/50" : "bg-white/10",
+                    done ? "bg-success-400/50" : "bg-fill-hover",
                   )}
                 />
               )}
@@ -332,7 +332,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                   onChange={(e) => setWebsite(e.target.value)}
                   placeholder="https://yourdealership.com"
                   fullWidth
-                  className="bg-white/5 border-white/10 focus:border-primary-400"
+                  className="bg-fill-subtle border-hairline focus:border-primary-400"
                 />
                 <Input
                   label="Phone"
@@ -340,7 +340,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="(313) 555-0100"
                   fullWidth
-                  className="bg-white/5 border-white/10 focus:border-primary-400"
+                  className="bg-fill-subtle border-hairline focus:border-primary-400"
                 />
               </div>
               <Input
@@ -349,7 +349,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 onChange={(e) => setAddress(e.target.value)}
                 placeholder="123 Main St, Detroit MI 48201"
                 fullWidth
-                className="bg-white/5 border-white/10 focus:border-primary-400"
+                className="bg-fill-subtle border-hairline focus:border-primary-400"
               />
               <HoursPicker value={hoursWeek} onChange={setHoursWeek} preview={hours} />
               <Input
@@ -358,7 +358,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 onChange={(e) => setTagline(e.target.value)}
                 placeholder="Family-owned since 1985 · No-haggle pricing"
                 fullWidth
-                className="bg-white/5 border-white/10 focus:border-primary-400"
+                className="bg-fill-subtle border-hairline focus:border-primary-400"
               />
             </div>
           )}
@@ -375,7 +375,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 onChange={(e) => setFacebookUrl(e.target.value)}
                 placeholder="https://www.facebook.com/yourdealership"
                 fullWidth
-                className="bg-white/5 border-white/10 focus:border-primary-400"
+                className="bg-fill-subtle border-hairline focus:border-primary-400"
               />
               <Input
                 label="Facebook Page tag"
@@ -384,7 +384,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 placeholder="@Your Dealership"
                 helperText="Added to Facebook and Marketplace captions. Tap Facebook's Page suggestion if it appears."
                 fullWidth
-                className="bg-white/5 border-white/10 focus:border-primary-400"
+                className="bg-fill-subtle border-hairline focus:border-primary-400"
               />
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <Input
@@ -393,7 +393,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                   onChange={(e) => setInstagramHandle(e.target.value)}
                   placeholder="@yourdealership"
                   fullWidth
-                  className="bg-white/5 border-white/10 focus:border-primary-400"
+                  className="bg-fill-subtle border-hairline focus:border-primary-400"
                 />
                 <Input
                   label="TikTok"
@@ -401,7 +401,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                   onChange={(e) => setTiktokHandle(e.target.value)}
                   placeholder="@yourdealership"
                   fullWidth
-                  className="bg-white/5 border-white/10 focus:border-primary-400"
+                  className="bg-fill-subtle border-hairline focus:border-primary-400"
                 />
                 <Input
                   label="X / Twitter"
@@ -409,7 +409,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                   onChange={(e) => setXHandle(e.target.value)}
                   placeholder="@yourdealership"
                   fullWidth
-                  className="bg-white/5 border-white/10 focus:border-primary-400"
+                  className="bg-fill-subtle border-hairline focus:border-primary-400"
                 />
                 <Input
                   label="LinkedIn company tag"
@@ -418,7 +418,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                   placeholder="@your-company"
                   helperText="LinkedIn may ask you to select the company suggestion once."
                   fullWidth
-                  className="bg-white/5 border-white/10 focus:border-primary-400"
+                  className="bg-fill-subtle border-hairline focus:border-primary-400"
                 />
               </div>
               <Input
@@ -427,7 +427,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 onChange={(e) => setGbpUrl(e.target.value)}
                 placeholder="https://g.page/yourdealership"
                 fullWidth
-                className="bg-white/5 border-white/10 focus:border-primary-400"
+                className="bg-fill-subtle border-hairline focus:border-primary-400"
               />
             </div>
           )}
@@ -446,7 +446,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 rows={3}
                 placeholder={"#YourDealership\n#DetroitFord\n#NewRide"}
                 fullWidth
-                className="bg-white/5 border-white/10 focus:border-primary-400 font-mono text-sm"
+                className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono text-sm"
               />
               <Textarea
                 label="Default footer / CTA"
@@ -455,7 +455,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 rows={2}
                 placeholder="Stop by 123 Main St — open until 9pm. Call us at (313) 555-0100."
                 fullWidth
-                className="bg-white/5 border-white/10 focus:border-primary-400"
+                className="bg-fill-subtle border-hairline focus:border-primary-400"
               />
             </div>
           )}
@@ -478,7 +478,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                         "rounded-xl border px-3 py-2.5 flex items-center justify-between gap-2",
                         enabled
                           ? "border-primary-500/40 bg-primary-500/5"
-                          : "border-white/10 bg-white/5 opacity-60",
+                          : "border-hairline bg-fill-subtle opacity-60",
                       )}
                     >
                       <div className="min-w-0">
@@ -496,7 +496,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                             "text-[10px] px-2 py-1 rounded-md transition-colors",
                             isDefault
                               ? "bg-amber-500/30 text-amber-100"
-                              : "bg-white/5 hover:bg-white/10 text-surface-300",
+                              : "bg-fill-subtle hover:bg-fill-hover text-surface-300",
                             !enabled && "opacity-30 cursor-not-allowed",
                           )}
                           title={
@@ -513,7 +513,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                           className={cn(
                             "text-[10px] px-2 py-1 rounded-md transition-colors",
                             enabled
-                              ? "bg-white/5 hover:bg-white/10 text-surface-300"
+                              ? "bg-fill-subtle hover:bg-fill-hover text-surface-300"
                               : "bg-success-500/20 hover:bg-success-500/30 text-success-100",
                           )}
                         >
@@ -544,7 +544,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 placeholder={`e.g. "Confident, no exclamation points, never use 'family-owned'. Lead with the customer, not the car. Local Detroit references are good."`}
                 rows={4}
                 fullWidth
-                className="bg-white/5 border-white/10 focus:border-primary-400"
+                className="bg-fill-subtle border-hairline focus:border-primary-400"
               />
               <p className="text-[11px] text-surface-500">
                 Examples that work: tone words ("warm, no hype"), forbidden clichés
@@ -566,7 +566,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 placeholder={`guaranteed approval\nno credit check\nlowest price guaranteed\nbest deal in town`}
                 rows={4}
                 fullWidth
-                className="bg-white/5 border-white/10 focus:border-primary-400 font-mono text-sm"
+                className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono text-sm"
               />
               <p className="text-[11px] text-surface-500">
                 FTC + most OEM brand standards prohibit "guaranteed approval", "no
@@ -587,7 +587,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                   type="color"
                   value={HEX_RE.test(color) ? color : "#1d4ed8"}
                   onChange={(e) => setColor(e.target.value)}
-                  className="h-12 w-16 rounded-lg border border-white/10 bg-transparent cursor-pointer"
+                  className="h-12 w-16 rounded-lg border border-hairline bg-transparent cursor-pointer"
                   aria-label="Pick brand color"
                 />
                 <Input
@@ -596,7 +596,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                   onChange={(e) => setColor(e.target.value)}
                   placeholder="#1d4ed8"
                   fullWidth
-                  className="bg-white/5 border-white/10 focus:border-primary-400 font-mono"
+                  className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono"
                 />
               </div>
               {color && HEX_RE.test(color) && (
@@ -622,7 +622,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                     "p-3 rounded-xl border text-left text-sm transition-colors",
                     !requiresApproval
                       ? "border-success-500/50 bg-success-500/10 text-success-100"
-                      : "border-white/10 bg-white/5 text-surface-300 hover:border-white/20",
+                      : "border-hairline bg-fill-subtle text-surface-300 hover:border-strong",
                   )}
                 >
                   <div className="font-semibold">No review needed</div>
@@ -638,7 +638,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                     "p-3 rounded-xl border text-left text-sm transition-colors",
                     requiresApproval
                       ? "border-warning-500/50 bg-warning-500/10 text-warning-100"
-                      : "border-white/10 bg-white/5 text-surface-300 hover:border-white/20",
+                      : "border-hairline bg-fill-subtle text-surface-300 hover:border-strong",
                   )}
                 >
                   <div className="font-semibold">Manager approves first</div>
@@ -674,7 +674,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
       )}
 
       {step.id !== "done" && (
-        <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/10">
+        <div className="flex items-center justify-between gap-2 pt-2 border-t border-hairline">
           <Button
             variant="ghost"
             size="sm"

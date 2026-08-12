@@ -19,6 +19,7 @@ import {
   EXPORT_FORMATS,
 } from "../utils/multiFormatExport";
 import { dataUrlToBlob } from "../utils/imageUtils";
+import { isCurrentlyOffline } from "../utils/connectionManager";
 import { fitCaptionToBudget } from "../utils/hashtags";
 import {
   downloadPreparedMediaFile,
@@ -610,6 +611,11 @@ export const preparePublishShare = async (
 export const sharePrepared = async (
   prepared: PreparedPublishShare,
 ): Promise<PublishStatus> => {
+  // The real production share path enters here (ShareDialog); every handoff
+  // needs the network, so fail honestly before the share sheet half-opens.
+  const offline = offlinePublishStatus();
+  if (offline) return offline;
+
   if (typeof navigator === "undefined" || typeof navigator.share !== "function") {
     return {
       kind: "fallback",
@@ -705,12 +711,51 @@ export const openPreparedTarget = (
 /**
  * Publish via the appropriate path for this target.
  */
+/**
+ * The seam a future direct API slots into. Every target today is a
+ * client-side handoff (share sheet / clipboard / intent URL); when a
+ * platform's OAuth broker lands, its adapter becomes `direct` and ONLY the
+ * publish path changes — tiles, captions, compliance budgeting, and status
+ * reporting stay identical. UI must branch on `adapter.kind`, never on
+ * platform ids.
+ */
+export type PublishAdapter =
+  | { kind: "handoff"; target: PublishTarget }
+  | {
+      kind: "direct";
+      target: PublishTarget;
+      /** Starts the OAuth connect flow for this platform. */
+      connect: () => Promise<void>;
+      /** Publishes through the platform API; same status vocabulary. */
+      publish: (content: PublishContent) => Promise<PublishStatus>;
+    };
+
+export const adapterFor = (targetId: string): PublishAdapter | null => {
+  const target = findTarget(targetId);
+  if (!target) return null;
+  // All ten registry targets are handoffs today; directApiConnected is the
+  // flag a wired broker will flip per-target.
+  return { kind: "handoff", target };
+};
+
+const offlinePublishStatus = (): PublishStatus | null =>
+  isCurrentlyOffline()
+    ? {
+        kind: "error",
+        message:
+          "You're offline. Your post is saved on this device — reconnect to share it.",
+      }
+    : null;
+
 export const publishTo = async (
   targetId: string,
   content: PublishContent,
 ): Promise<PublishStatus> => {
   const target = findTarget(targetId);
   if (!target) return { kind: "error", message: "Unknown publish target" };
+
+  const offline = offlinePublishStatus();
+  if (offline) return offline;
 
   try {
     const file = await buildShareFile(target, content);

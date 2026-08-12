@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import {
   Activity,
   CheckCircle2,
+  ChevronDown,
   XCircle,
   Loader2,
   RefreshCw,
@@ -29,6 +30,8 @@ interface HealthPayload {
     claude_fallback_enabled: boolean;
     openai_fallback_enabled: boolean;
     admin_login_configured: boolean;
+    /** Added 2026-08; optional so a pre-upgrade backend's payload still renders. */
+    pin_pepper_configured?: boolean;
     turnstile_enforcement_enabled: boolean;
     turnstile_secret_set: boolean;
     turnstile_site_key_set: boolean;
@@ -125,6 +128,10 @@ const isHealthPayload = (value: unknown): value is HealthPayload => {
     typeof value.apiContractVersion === "string" &&
     typeof value.modelPolicyVersion === "string" &&
     healthCheckKeys.every((key) => typeof checks[key] === "boolean") &&
+    // Keys added after the first release are optional: a payload from a
+    // not-yet-upgraded backend must degrade to "unknown", not blind the panel.
+    (checks.pin_pepper_configured === undefined ||
+      typeof checks.pin_pepper_configured === "boolean") &&
     typeof backup.configured === "boolean" &&
     (backup.lastVerifiedAt === null || typeof backup.lastVerifiedAt === "string") &&
     (backup.verifiedReleaseSha === null ||
@@ -191,6 +198,13 @@ const checkRows: Array<{
     hint: "Requires the ADMIN_LOGIN_USERNAME and ADMIN_LOGIN_PASSWORD deployment secrets to provision the administrator account.",
   },
   {
+    key: "pin_pepper_configured",
+    label: "Access-code pepper",
+    icon: KeyRound,
+    critical: true,
+    hint: "SALESPERSON_PIN_PEPPER deployment secret. Without it, personal-code sign-in and roster changes fail closed.",
+  },
+  {
     key: "trusted_proxy_configured",
     label: "Vercel to Fly trust",
     icon: ShieldCheck,
@@ -249,15 +263,17 @@ const checkRows: Array<{
 ];
 
 /**
- * Super-admin system health card. Pings /api/app/health and visualizes each
- * required env var + the PB connection + 24h activity counts. Use this as the
- * first stop when debugging a production issue.
+ * Super-admin system health surface. Pings /api/app/health and renders a
+ * one-line status strip: healthy systems stay out of the way, failing checks
+ * surface themselves, and full diagnostics live behind the Details
+ * disclosure. First stop when debugging a production issue.
  */
 export const SystemHealthPanel: React.FC = () => {
   const [data, setData] = useState<HealthPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const load = useCallback(async () => {
     const requestAuthEpoch = captureAuthEpoch();
@@ -331,289 +347,334 @@ export const SystemHealthPanel: React.FC = () => {
 
   const overallOk = data?.ok ?? false;
   const criticalFailures = checkRows.filter(
-    (r) => r.critical && data && !data.checks[r.key],
+    (r) => r.critical && data && data.checks[r.key] === false,
   );
+  const advisories = checkRows.filter(
+    (r) => !r.critical && data && data.checks[r.key] === false,
+  );
+
+  // One truthful headline: criticals win, then the endpoint's own verdict,
+  // then advisories. "All systems operational" can never share the strip
+  // with a critical list.
+  const status = !data
+    ? ("loading" as const)
+    : criticalFailures.length > 0 || !overallOk
+      ? ("critical" as const)
+      : advisories.length > 0
+        ? ("advisory" as const)
+        : ("operational" as const);
+
+  const headline =
+    status === "loading"
+      ? "Checking system health…"
+      : status === "critical"
+        ? criticalFailures.length > 0
+          ? `${criticalFailures.length} critical ${
+              criticalFailures.length === 1 ? "issue needs" : "issues need"
+            } attention`
+          : "Service reports a readiness failure"
+        : status === "advisory"
+          ? `Operational — ${advisories.length} ${
+              advisories.length === 1 ? "advisory" : "advisories"
+            }`
+          : "All systems operational";
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-surface-900/60 border border-surface-800 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
+      className="rounded-lg border border-hairline bg-surface-overlay"
     >
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          <div
-            className="h-8 w-1.5 rounded-full"
-            style={{
-              background:
-                "linear-gradient(180deg, var(--brand-primary-400), var(--brand-primary))",
-            }}
-            aria-hidden="true"
-          />
-          <div>
-            <h3 className="text-xl font-bold text-surface-50 flex items-center gap-2">
-              <Server className="w-5 h-5 text-primary-300" />
-              System health
-              {data &&
-                (overallOk ? (
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-success-300 inline-flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" /> all green
-                  </span>
-                ) : (
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-error-300 inline-flex items-center gap-1">
-                    <XCircle className="w-3 h-3" /> degraded
-                  </span>
-                ))}
-            </h3>
-            <p className="text-xs text-surface-400">
-              {lastChecked
-                ? `Last checked ${lastChecked.toLocaleTimeString()} — auto-refreshes every minute`
-                : "Loading…"}
-            </p>
-          </div>
+      {/* Status strip — the only part most sessions ever need. */}
+      <div className="flex items-center gap-3 px-4 py-3 sm:px-5">
+        <span
+          className={cn(
+            "h-2.5 w-2.5 shrink-0 rounded-full",
+            status === "loading" && "bg-surface-500 animate-pulse",
+            status === "operational" && "bg-success-500",
+            status === "advisory" && "bg-warning-500",
+            status === "critical" && "bg-error-500",
+          )}
+          aria-hidden="true"
+        />
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-sm font-semibold text-content-primary">
+            {headline}
+          </h3>
+          <p className="truncate text-xs text-content-tertiary">
+            {lastChecked
+              ? `Checked ${lastChecked.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · refreshes every minute`
+              : "Contacting the health endpoint…"}
+          </p>
         </div>
         <Button
           variant="ghost"
-          size="sm"
-          leftIcon={
-            loading ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="w-3.5 h-3.5" />
-            )
-          }
+          size="icon"
+          aria-label="Refresh system health"
           onClick={() => void load()}
           disabled={loading}
         >
-          Refresh
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+          rightIcon={
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 transition-transform duration-[var(--duration-base)]",
+                expanded && "rotate-180",
+              )}
+            />
+          }
+        >
+          Details
         </Button>
       </div>
 
       {error && (
-        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 text-error-400" /> {error}
+        <div className="mx-4 mb-3 flex items-center gap-2 rounded-md border border-error-500/40 bg-error-500/10 px-3 py-2 text-xs text-error-300 sm:mx-5">
+          <AlertTriangle className="h-4 w-4 shrink-0" /> {error}
         </div>
       )}
 
+      {/* Failing checks surface themselves; healthy ones stay behind Details. */}
       {criticalFailures.length > 0 && (
-        <div className="rounded-xl border border-error-700/50 bg-error-900/30 px-3 py-2 text-error-100 text-xs">
-          <strong>Critical:</strong> {criticalFailures.map((c) => c.label).join(", ")} —
-          fix before users hit the app.
-        </div>
+        <ul className="border-t border-hairline px-4 py-2 sm:px-5">
+          {criticalFailures.map((row) => (
+            <li key={row.key} className="flex items-start gap-2.5 py-1.5">
+              <XCircle
+                className={cn(
+                  "mt-0.5 h-4 w-4 shrink-0",
+                  row.critical ? "text-error-400" : "text-warning-400",
+                )}
+                aria-hidden="true"
+              />
+              <div className="min-w-0">
+                <span className="text-sm font-medium text-content-primary">
+                  {row.label}
+                </span>
+                <span className="ml-2 text-xs text-content-tertiary">{row.hint}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-        {checkRows.map((row) => {
-          const ok = data ? data.checks[row.key] : null;
-          const Icon = row.icon;
-          return (
-            <div
-              key={row.key}
-              className={cn(
-                "rounded-xl border p-3 flex items-start gap-3",
-                ok === true && "border-success-500/30 bg-success-500/5",
-                ok === false && row.critical && "border-error-500/40 bg-error-500/5",
-                ok === false &&
-                  !row.critical &&
-                  "border-warning-500/30 bg-warning-500/5",
-                ok === null && "border-surface-800 bg-surface-900/40",
-              )}
-            >
-              <Icon
-                className={cn(
-                  "w-4 h-4 flex-shrink-0 mt-0.5",
-                  ok === true && "text-success-300",
-                  ok === false && row.critical && "text-error-300",
-                  ok === false && !row.critical && "text-warning-300",
-                  ok === null && "text-surface-400",
-                )}
-              />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-surface-50">{row.label}</div>
-                <div className="text-[11px] text-surface-400 leading-relaxed">
-                  {row.hint}
-                </div>
-              </div>
-              {ok === true && (
-                <CheckCircle2 className="w-4 h-4 text-success-300 flex-shrink-0" />
-              )}
-              {ok === false && (
-                <XCircle
-                  className={cn(
-                    "w-4 h-4 flex-shrink-0",
-                    row.critical ? "text-error-300" : "text-warning-300",
-                  )}
-                />
-              )}
-              {ok === null && (
-                <Loader2 className="w-4 h-4 text-surface-400 flex-shrink-0 animate-spin" />
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {data?.counts ? (
-        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-surface-800">
-          <Stat label="Dealers" value={data.counts.dealers} />
-          <Stat label="Posts (24h)" value={data.counts.posts_24h} />
-          <Stat label="Releases (24h)" value={data.counts.photo_releases_24h} />
-        </div>
-      ) : data ? (
-        <div className="rounded-xl border border-surface-800 bg-surface-900/40 px-3 py-2 text-xs text-surface-400">
-          Activity counts are unavailable from this health endpoint.
-        </div>
-      ) : null}
-
-      {data ? (
-        <div className="grid gap-3 border-t border-surface-800 pt-3 lg:grid-cols-[1fr_1fr]">
-          <section className="rounded-xl border border-surface-800 bg-surface-950/45 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
-                  Release contract
-                </p>
-                <p className="mt-1 font-mono text-xs text-surface-200">
-                  {data.releaseSha === "unknown"
-                    ? "Release SHA unavailable"
-                    : data.releaseSha.slice(0, 16)}
-                </p>
-              </div>
-              <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold text-surface-300">
-                API {data.apiContractVersion}
-              </span>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-surface-400">
-              <span>Health v{data.version}</span>
-              <span aria-hidden="true">·</span>
-              <span>Model policy v{data.modelPolicyVersion}</span>
-            </div>
-          </section>
-
-          <section
-            className={cn(
-              "rounded-xl border p-4",
-              data.backup.status === "verified"
-                ? "border-success-500/25 bg-success-500/5"
-                : "border-warning-500/25 bg-warning-500/5",
-            )}
-          >
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
-              Recovery readiness
-            </p>
-            <p className="mt-1 text-sm font-semibold text-surface-100">
-              {data.backup.status === "verified"
-                ? "Off-box restore verified"
-                : data.backup.status === "verification_required"
-                  ? "Restore drill required"
-                  : data.backup.status === "release_unknown"
-                    ? "Running release is unidentified"
-                    : data.backup.status === "release_mismatch"
-                      ? "Restore evidence is for another release"
-                      : data.backup.status === "stale"
-                        ? "Restore evidence has expired"
-                        : "R2 backup not configured"}
-            </p>
-            <p className="mt-1 text-xs text-surface-400">
-              {data.backup.lastVerifiedAt
-                ? `Last verified ${new Date(data.backup.lastVerifiedAt).toLocaleString()}`
-                : "No verified restore timestamp is available for this release."}
-            </p>
-            <p className="mt-1 text-[11px] text-surface-500">
-              Evidence expires after {data.backup.maxAgeHours} hours and must match this
-              release SHA.
-            </p>
-          </section>
-        </div>
-      ) : null}
-
-      {data?.generation ? (
-        <section className="space-y-3 rounded-xl border border-surface-800 bg-surface-950/35 p-4">
-          <div className="flex flex-wrap items-end justify-between gap-2">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
-                Generation · last 24 hours
-              </p>
-              <p className="mt-1 text-sm text-surface-300">
-                Provider results and clearly labeled safe-template fallbacks.
-              </p>
-            </div>
-            <p className="text-xs text-surface-500">
-              {data.generation.lastSuccessfulAt
-                ? `Last success ${new Date(data.generation.lastSuccessfulAt).toLocaleString()}`
-                : "No recent provider success"}
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-            <MiniStat label="AI success" value={data.generation.aiSuccesses24h} />
-            <MiniStat
-              label="Basic fallback"
-              value={data.generation.basicFallbacks24h}
-              warning={data.generation.basicFallbacks24h > 0}
-            />
-            <MiniStat
-              label="Fallback hops"
-              value={data.generation.fallbackAttempts24h}
-            />
-            <MiniStat label="Standard" value={data.generation.standardTier24h} />
-            <MiniStat label="Studio" value={data.generation.studioTier24h} />
-            <MiniStat
-              label="Provider attempts"
-              value={data.generation.providerAttempts24h}
-            />
-            <MiniStat
-              label="Provider failures"
-              value={data.generation.providerFailures24h}
-              warning={data.generation.providerFailures24h > 0}
-            />
-          </div>
-        </section>
-      ) : null}
-
-      {data?.recentErrors ? (
-        <section className="rounded-xl border border-surface-800 bg-surface-950/35 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
-                Actionable client errors · 24 hours
-              </p>
-              <p className="mt-1 text-sm text-surface-300">
-                Redacted aggregates only; retained for 14 days.
-              </p>
-            </div>
-            <span className="text-2xl font-bold tabular-nums text-surface-50">
-              {data.recentErrors.total24h}
-            </span>
-          </div>
-          {data.recentErrors.topActions.length > 0 ? (
-            <ul className="mt-3 divide-y divide-white/5 text-xs">
-              {data.recentErrors.topActions.map((action) => (
-                <li
-                  key={action.name}
-                  className="flex items-center justify-between gap-3 py-2 text-surface-300"
+      {expanded && (
+        <div className="space-y-4 border-t border-hairline px-4 py-4 sm:px-5">
+          <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
+            {checkRows.map((row) => {
+              const ok = data ? (data.checks[row.key] ?? null) : null;
+              return (
+                <div
+                  key={row.key}
+                  title={row.hint}
+                  className="flex items-center gap-2.5 border-b border-hairline/60 py-2"
                 >
-                  <code className="min-w-0 truncate">{action.name}</code>
-                  <span className="font-semibold tabular-nums text-surface-100">
-                    {action.count}
+                  {ok === true && (
+                    <CheckCircle2
+                      className="h-3.5 w-3.5 shrink-0 text-success-500"
+                      aria-hidden="true"
+                    />
+                  )}
+                  {ok === false && (
+                    <XCircle
+                      className={cn(
+                        "h-3.5 w-3.5 shrink-0",
+                        row.critical ? "text-error-400" : "text-warning-400",
+                      )}
+                      aria-hidden="true"
+                    />
+                  )}
+                  {ok === null && (
+                    <Loader2
+                      className="h-3.5 w-3.5 shrink-0 animate-spin text-content-tertiary"
+                      aria-hidden="true"
+                    />
+                  )}
+                  <span className="truncate text-sm text-content-secondary">
+                    {row.label}
                   </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-3 text-xs text-success-300">
-              No redacted client errors recorded in this window.
-            </p>
-          )}
-        </section>
-      ) : null}
+                  <span className="sr-only">
+                    {ok === true ? "passing" : ok === false ? "failing" : "checking"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {data?.counts ? (
+            <div className="grid grid-cols-3 gap-2">
+              <Stat label="Dealers" value={data.counts.dealers} />
+              <Stat label="Posts (24h)" value={data.counts.posts_24h} />
+              <Stat label="Releases (24h)" value={data.counts.photo_releases_24h} />
+            </div>
+          ) : data ? (
+            <div className="rounded-md border border-hairline px-3 py-2 text-xs text-content-tertiary">
+              Activity counts are unavailable from this health endpoint.
+            </div>
+          ) : null}
+
+          {data ? (
+            <div className="grid gap-3 lg:grid-cols-[1fr_1fr]">
+              <section className="rounded-md border border-hairline p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-content-tertiary">
+                      Release contract
+                    </p>
+                    <p className="mt-1 font-mono text-xs text-content-secondary">
+                      {data.releaseSha === "unknown"
+                        ? "Release SHA unavailable"
+                        : data.releaseSha.slice(0, 16)}
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-hairline bg-fill-subtle px-2.5 py-1 text-[10px] font-semibold text-content-secondary">
+                    API {data.apiContractVersion}
+                  </span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-content-tertiary">
+                  <span>Health v{data.version}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>Model policy v{data.modelPolicyVersion}</span>
+                </div>
+              </section>
+
+              <section className="rounded-md border border-hairline p-4">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-content-tertiary">
+                  Recovery readiness
+                </p>
+                <p
+                  className={cn(
+                    "mt-1 text-sm font-semibold",
+                    data.backup.status === "verified"
+                      ? "text-success-500"
+                      : "text-warning-500",
+                  )}
+                >
+                  {data.backup.status === "verified"
+                    ? "Off-box restore verified"
+                    : data.backup.status === "verification_required"
+                      ? "Restore drill required"
+                      : data.backup.status === "release_unknown"
+                        ? "Running release is unidentified"
+                        : data.backup.status === "release_mismatch"
+                          ? "Restore evidence is for another release"
+                          : data.backup.status === "stale"
+                            ? "Restore evidence has expired"
+                            : "R2 backup not configured"}
+                </p>
+                <p className="mt-1 text-xs text-content-tertiary">
+                  {data.backup.lastVerifiedAt
+                    ? `Last verified ${new Date(data.backup.lastVerifiedAt).toLocaleString()}`
+                    : "No verified restore timestamp is available for this release."}
+                </p>
+                <p className="mt-1 text-[11px] text-content-tertiary">
+                  Evidence expires after {data.backup.maxAgeHours} hours and must match
+                  this release SHA.
+                </p>
+              </section>
+            </div>
+          ) : null}
+
+          {data?.generation ? (
+            <section className="space-y-3 rounded-md border border-hairline p-4">
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-content-tertiary">
+                    Generation · last 24 hours
+                  </p>
+                  <p className="mt-1 text-sm text-content-secondary">
+                    Provider results and clearly labeled safe-template fallbacks.
+                  </p>
+                </div>
+                <p className="text-xs text-content-tertiary">
+                  {data.generation.lastSuccessfulAt
+                    ? `Last success ${new Date(data.generation.lastSuccessfulAt).toLocaleString()}`
+                    : "No recent provider success"}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+                <MiniStat label="AI success" value={data.generation.aiSuccesses24h} />
+                <MiniStat
+                  label="Basic fallback"
+                  value={data.generation.basicFallbacks24h}
+                  warning={data.generation.basicFallbacks24h > 0}
+                />
+                <MiniStat
+                  label="Fallback hops"
+                  value={data.generation.fallbackAttempts24h}
+                />
+                <MiniStat label="Standard" value={data.generation.standardTier24h} />
+                <MiniStat label="Studio" value={data.generation.studioTier24h} />
+                <MiniStat
+                  label="Provider attempts"
+                  value={data.generation.providerAttempts24h}
+                />
+                <MiniStat
+                  label="Provider failures"
+                  value={data.generation.providerFailures24h}
+                  warning={data.generation.providerFailures24h > 0}
+                />
+              </div>
+            </section>
+          ) : null}
+
+          {data?.recentErrors ? (
+            <section className="rounded-md border border-hairline p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-content-tertiary">
+                    Actionable client errors · 24 hours
+                  </p>
+                  <p className="mt-1 text-sm text-content-secondary">
+                    Redacted aggregates only; retained for 14 days.
+                  </p>
+                </div>
+                <span className="text-2xl font-bold tabular-nums text-content-primary">
+                  {data.recentErrors.total24h}
+                </span>
+              </div>
+              {data.recentErrors.topActions.length > 0 ? (
+                <ul className="mt-3 divide-y divide-hairline text-xs">
+                  {data.recentErrors.topActions.map((action) => (
+                    <li
+                      key={action.name}
+                      className="flex items-center justify-between gap-3 py-2 text-content-secondary"
+                    >
+                      <code className="min-w-0 truncate">{action.name}</code>
+                      <span className="font-semibold tabular-nums text-content-primary">
+                        {action.count}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-3 text-xs text-success-500">
+                  No redacted client errors recorded in this window.
+                </p>
+              )}
+            </section>
+          ) : null}
+        </div>
+      )}
     </motion.div>
   );
 };
 
 const Stat: React.FC<{ label: string; value: number }> = ({ label, value }) => (
-  <div className="rounded-xl border border-surface-800 bg-surface-900/40 px-3 py-2 text-center">
-    <div className="text-2xl font-bold text-surface-50 tabular-nums">{value}</div>
-    <div className="text-[10px] uppercase tracking-wide text-surface-400">{label}</div>
+  <div className="rounded-md border border-hairline px-3 py-2 text-center">
+    <div className="text-2xl font-bold tabular-nums text-content-primary">{value}</div>
+    <div className="text-[10px] uppercase tracking-wide text-content-tertiary">
+      {label}
+    </div>
   </div>
 );
 
@@ -624,14 +685,19 @@ const MiniStat: React.FC<{
 }> = ({ label, value, warning = false }) => (
   <div
     className={cn(
-      "rounded-lg border px-3 py-2",
-      warning
-        ? "border-warning-500/20 bg-warning-500/5"
-        : "border-white/5 bg-white/[0.025]",
+      "rounded-md border px-3 py-2",
+      warning ? "border-warning-500/40" : "border-hairline",
     )}
   >
-    <div className="text-lg font-bold tabular-nums text-surface-50">{value}</div>
-    <div className="text-[9px] font-semibold uppercase tracking-wide text-surface-500">
+    <div
+      className={cn(
+        "text-lg font-bold tabular-nums",
+        warning ? "text-warning-500" : "text-content-primary",
+      )}
+    >
+      {value}
+    </div>
+    <div className="text-[9px] font-semibold uppercase tracking-wide text-content-tertiary">
       {label}
     </div>
   </div>

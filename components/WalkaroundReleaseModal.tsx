@@ -101,7 +101,7 @@ export const WalkaroundReleaseModal: React.FC<WalkaroundReleaseModalProps> = ({
         <label className="block text-sm font-medium text-surface-200">
           Customer&apos;s full legal name
           <input
-            className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-surface-950/45 px-3 py-2 text-surface-50 outline-none focus:border-primary-400"
+            className="mt-2 min-h-11 w-full rounded-xl border border-hairline bg-surface-950/45 px-3 py-2 text-surface-50 outline-none focus:border-primary-400"
             value={signedName}
             onChange={(event) => setSignedName(event.target.value)}
           />

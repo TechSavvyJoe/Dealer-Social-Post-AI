@@ -217,7 +217,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                 onChange={(e) => setEditing({ ...editing, label: e.target.value })}
                 placeholder="Spring Clearance — F-150"
                 fullWidth
-                className="bg-white/5 border-white/10 focus:border-primary-400"
+                className="bg-fill-subtle border-hairline focus:border-primary-400"
               />
               <div>
                 <label
@@ -265,7 +265,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
               onChange={(e) => setEditing({ ...editing, blurb: e.target.value })}
               placeholder="F-150 push, April 1–30"
               fullWidth
-              className="bg-white/5 border-white/10 focus:border-primary-400"
+              className="bg-fill-subtle border-hairline focus:border-primary-400"
             />
 
             <Textarea
@@ -277,7 +277,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
               rows={4}
               fullWidth
               placeholder={`Scenario: April F-150 clearance push. Emphasize trim levels still on the lot. Soft "limited stock" framing — never "guaranteed lowest price". End with CTA to schedule a test drive this weekend.`}
-              className="bg-white/5 border-white/10 focus:border-primary-400 font-mono text-sm"
+              className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono text-sm"
             />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -339,7 +339,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
               onChange={(e) => setHashtagsInput(e.target.value)}
               placeholder="#F150 #SpringEvent #TruckMonth"
               fullWidth
-              className="bg-white/5 border-white/10 focus:border-primary-400 font-mono text-sm"
+              className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono text-sm"
             />
 
             <Input
@@ -350,7 +350,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
               }
               placeholder="The F-150 you've been waiting on is here."
               fullWidth
-              className="bg-white/5 border-white/10 focus:border-primary-400"
+              className="bg-fill-subtle border-hairline focus:border-primary-400"
             />
 
             <div className="flex flex-wrap gap-3 text-[11px] text-surface-300 pt-1">
@@ -364,7 +364,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                       requiresCustomer: e.target.checked,
                     })
                   }
-                  className="rounded border-white/20 bg-white/5"
+                  className="rounded border-strong bg-fill-subtle"
                 />
                 Requires customer in photo
               </label>
@@ -378,13 +378,13 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                       requiresVehicle: e.target.checked,
                     })
                   }
-                  className="rounded border-white/20 bg-white/5"
+                  className="rounded border-strong bg-fill-subtle"
                 />
                 Requires vehicle in photo
               </label>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-hairline">
               <Button
                 variant="ghost"
                 size="sm"
@@ -419,7 +419,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
       </AnimatePresence>
 
       {scenarios.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-4 text-center text-xs text-surface-400">
+        <div className="rounded-xl border border-dashed border-strong bg-fill-subtle p-4 text-center text-xs text-surface-400">
           No custom scenarios yet — add one to give your team more on-brand options.
         </div>
       ) : (
@@ -427,13 +427,13 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
           {scenarios.map((s) => (
             <li
               key={s.id}
-              className="rounded-xl border border-white/10 bg-surface-900/40 px-3 py-2.5 flex items-center justify-between gap-3"
+              className="rounded-xl border border-hairline bg-surface-900/40 px-3 py-2.5 flex items-center justify-between gap-3"
             >
               <div className="min-w-0 flex items-start gap-2.5">
                 {(() => {
                   const Icon = SCENARIO_CATEGORY_ICON[s.category];
                   return (
-                    <span className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg bg-white/[0.06] text-surface-300 mt-0.5">
+                    <span className="flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg bg-fill-subtle text-surface-300 mt-0.5">
                       <Icon className="w-4 h-4" />
                     </span>
                   );
@@ -456,7 +456,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                   onClick={() => startEdit(s)}
                   className={cn(
                     "text-[11px] px-2 py-1 rounded-md transition-colors",
-                    "bg-white/5 hover:bg-white/10 text-surface-200",
+                    "bg-fill-subtle hover:bg-fill-hover text-surface-200",
                     "flex items-center gap-1",
                   )}
                   title="Edit scenario"

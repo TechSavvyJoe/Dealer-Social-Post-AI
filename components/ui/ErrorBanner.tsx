@@ -39,7 +39,7 @@ export const ErrorBanner: React.FC<ErrorBannerProps> = ({
         onClick={onRetry}
         className={cn(
           "flex-shrink-0 inline-flex items-center gap-1 font-semibold text-error-100",
-          "hover:text-white transition-colors",
+          "hover:text-content-primary transition-colors",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-400/70 rounded",
         )}
       >

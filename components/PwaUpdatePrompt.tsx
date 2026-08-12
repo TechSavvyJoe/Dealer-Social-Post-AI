@@ -183,7 +183,7 @@ export const PwaUpdatePrompt: React.FC<PwaUpdatePromptProps> = ({
           }}
           disabled={isUpdating}
           aria-label="Update later"
-          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl text-surface-300 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
+          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl text-surface-300 transition-colors hover:bg-fill-hover hover:text-white disabled:opacity-50"
         >
           <X className="h-5 w-5" aria-hidden="true" />
         </button>

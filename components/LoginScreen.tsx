@@ -417,7 +417,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     >
       <div
         className={cn(
-          "relative grid h-full min-h-0 w-full flex-1 border border-white/[0.09] bg-[#0b1017] shadow-[0_24px_80px_rgba(0,0,0,0.38)]",
+          "relative grid h-full min-h-0 w-full flex-1 border border-hairline bg-surface-base shadow-lg",
           // Fill the #root content box only — never max-h 100dvh (that fights safe-area)
           "overflow-hidden rounded-none border-x-0",
           "min-[420px]:mx-2 min-[420px]:rounded-2xl min-[420px]:border-x",
@@ -430,11 +430,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           aria-hidden="true"
         />
 
-        <aside className="relative hidden min-h-[38rem] overflow-hidden border-r border-white/[0.07] bg-[#111824] p-10 lg:flex lg:flex-col">
+        <aside className="relative hidden min-h-[38rem] overflow-hidden border-r border-hairline bg-surface-elevated p-10 lg:flex lg:flex-col">
           <Logo className="relative z-10 h-auto w-[250px]" />
 
           <div
-            className="absolute right-10 top-24 h-64 w-52 border border-white/[0.08]"
+            className="absolute right-10 top-24 h-64 w-52 border border-hairline"
             aria-hidden="true"
           >
             <span className="absolute -left-px -top-px h-10 w-10 border-l-2 border-t-2 border-primary-400/75" />
@@ -459,7 +459,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               the delivery moment is still fresh.
             </p>
 
-            <ol className="mt-8 grid grid-cols-3 gap-3 border-t border-white/[0.08] pt-5">
+            <ol className="mt-8 grid grid-cols-3 gap-3 border-t border-hairline pt-5">
               {STUDIO_STEPS.map(({ label, detail, icon: StepIcon }, index) => (
                 <li key={label} className="min-w-0">
                   <div className="mb-2 flex items-center gap-2 text-primary-300">
@@ -546,7 +546,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 transition={motionTransition}
               >
                 <div className="flex shrink-0 items-start gap-3">
-                  <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
+                  <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-hairline bg-fill-subtle">
                     <ShieldCheck
                       className="h-5 w-5 text-primary-300"
                       aria-hidden="true"
@@ -570,7 +570,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 </div>
 
                 <div
-                  className="grid shrink-0 grid-cols-3 gap-1 rounded-2xl border border-white/[0.08] bg-black/25 p-1.5"
+                  className="grid shrink-0 grid-cols-3 gap-1 rounded-2xl border border-hairline bg-fill-hover p-1.5"
                   role="group"
                   aria-label="Access type"
                 >
@@ -711,7 +711,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       void submitManagerLogin();
                     }}
                   >
-                    <div className="rounded-2xl border border-white/[0.08] bg-[#101722] p-4 sm:p-5">
+                    <div className="rounded-2xl border border-hairline bg-surface-elevated p-4 sm:p-5">
                       <div className="mb-4 flex items-start gap-3">
                         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300">
                           <KeyRound className="h-5 w-5" aria-hidden="true" />
@@ -776,7 +776,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                           rightAction={
                             <button
                               type="button"
-                              className="flex h-11 w-11 items-center justify-center rounded-lg text-surface-400 transition hover:bg-white/[0.06] hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                              className="flex h-11 w-11 items-center justify-center rounded-lg text-surface-400 transition hover:bg-fill-subtle hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
                               onClick={() => setShowManagerPassword((value) => !value)}
                               aria-label={
                                 showManagerPassword
@@ -849,7 +849,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       void submitAdminLogin();
                     }}
                   >
-                    <div className="rounded-2xl border border-white/[0.08] bg-[#101722] p-4 sm:p-5">
+                    <div className="rounded-2xl border border-hairline bg-surface-elevated p-4 sm:p-5">
                       <div className="mb-4 flex items-start gap-3">
                         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300">
                           <KeyRound className="h-5 w-5" aria-hidden="true" />
@@ -916,7 +916,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                           rightAction={
                             <button
                               type="button"
-                              className="flex h-11 w-11 items-center justify-center rounded-lg text-surface-400 transition hover:bg-white/[0.06] hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                              className="flex h-11 w-11 items-center justify-center rounded-lg text-surface-400 transition hover:bg-fill-subtle hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
                               onClick={() => setShowAdminPassword((value) => !value)}
                               aria-label={
                                 showAdminPassword

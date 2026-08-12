@@ -150,7 +150,7 @@ export const Modal: React.FC<ModalProps> = ({
                 : { type: "spring", duration: 0.4, bounce: 0 }
             }
             className={cn(
-              "relative w-full bg-surface-900 border border-white/10 shadow-2xl overflow-hidden flex flex-col",
+              "relative w-full bg-surface-900 border border-hairline shadow-2xl overflow-hidden flex flex-col",
               "rounded-t-2xl sm:rounded-2xl", // Sheet-like on mobile
               "max-h-[calc(100dvh_-_var(--header-safe-top))] sm:max-h-[90vh]",
               sizeClasses[size],
@@ -167,7 +167,7 @@ export const Modal: React.FC<ModalProps> = ({
 
             {/* Header */}
             {(title || description || showCloseButton) && (
-              <div className="flex items-start justify-between gap-3 border-b border-white/5 px-4 py-3 sm:items-center sm:px-6 sm:py-4">
+              <div className="flex items-start justify-between gap-3 border-b border-hairline px-4 py-3 sm:items-center sm:px-6 sm:py-4">
                 <div className="min-w-0">
                   {title && (
                     <h2
@@ -192,7 +192,7 @@ export const Modal: React.FC<ModalProps> = ({
                     onClick={onClose}
                     disabled={disableClose}
                     aria-label="Close dialog"
-                    className="min-h-11 min-w-11 shrink-0 -mr-1 rounded-full p-2 text-surface-400 transition-colors hover:bg-white/5 hover:text-surface-50 disabled:cursor-wait disabled:opacity-45 sm:-mr-2"
+                    className="min-h-11 min-w-11 shrink-0 -mr-1 rounded-full p-2 text-surface-400 transition-colors hover:bg-fill-subtle hover:text-surface-50 disabled:cursor-wait disabled:opacity-45 sm:-mr-2"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -212,7 +212,7 @@ export const Modal: React.FC<ModalProps> = ({
 
             {/* Footer */}
             {footer && (
-              <div className="flex flex-wrap justify-end gap-2 rounded-b-2xl border-t border-white/5 bg-surface-950/30 px-4 pt-3 pb-[max(1rem,var(--sab))] sm:gap-3 sm:px-6 sm:pt-4">
+              <div className="flex flex-wrap justify-end gap-2 rounded-b-2xl border-t border-hairline bg-surface-950/30 px-4 pt-3 pb-[max(1rem,var(--sab))] sm:gap-3 sm:px-6 sm:pt-4">
                 {footer}
               </div>
             )}

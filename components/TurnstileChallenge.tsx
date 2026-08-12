@@ -177,7 +177,7 @@ export const TurnstileChallenge: React.FC<TurnstileChallengeProps> = ({
           <button
             type="button"
             onClick={onBack}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold text-surface-300 transition-colors hover:bg-white/5 hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold text-surface-300 transition-colors hover:bg-fill-subtle hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
             Edit sign-in details

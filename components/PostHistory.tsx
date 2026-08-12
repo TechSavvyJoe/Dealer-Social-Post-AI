@@ -454,16 +454,13 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-surface-900/60 border border-surface-800 rounded-2xl p-4 sm:p-6 space-y-4 shadow-elevation-2 backdrop-blur-xl"
+      className="rounded-lg border border-hairline bg-surface-overlay p-4 sm:p-6 space-y-4"
     >
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <div
             className="h-8 w-1.5 rounded-full"
-            style={{
-              background:
-                "linear-gradient(180deg, var(--brand-primary-400), var(--brand-primary))",
-            }}
+            style={{ background: "var(--brand-primary)" }}
             aria-hidden="true"
           />
           <div>
@@ -505,7 +502,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search loaded posts by name, VIN, salesperson…"
             fullWidth
-            className="bg-white/5 border-white/10 focus:border-primary-400 pl-9"
+            className="bg-fill-subtle border-hairline focus:border-primary-400 pl-9"
           />
         </div>
         <div className="flex bg-surface-950/60 p-1 rounded-xl border border-surface-800 overflow-x-auto">
@@ -597,14 +594,14 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                 return (
                   <article
                     key={post.id}
-                    className="flex min-w-0 gap-3 rounded-xl border border-white/8 bg-surface-950/35 p-3"
+                    className="flex min-w-0 gap-3 rounded-xl border border-hairline bg-surface-950/35 p-3"
                   >
                     {canOpen ? (
                       <button
                         type="button"
                         onClick={() => void openCreative(post)}
                         disabled={isOpening}
-                        className="h-20 w-16 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-surface-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                        className="h-20 w-16 shrink-0 overflow-hidden rounded-lg border border-hairline bg-surface-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
                         aria-label={`Open post from ${formatWhen(post.generated_at)}`}
                       >
                         <img
@@ -616,7 +613,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                       </button>
                     ) : (
                       <div
-                        className="flex h-20 w-16 shrink-0 items-center justify-center rounded-lg border border-white/5 bg-surface-950/80 text-surface-600"
+                        className="flex h-20 w-16 shrink-0 items-center justify-center rounded-lg border border-hairline bg-surface-950/80 text-surface-600"
                         aria-label="No stored image"
                       >
                         <ImageIcon className="h-5 w-5" />
@@ -738,7 +735,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                     return (
                       <tr
                         key={p.id}
-                        className="border-t border-white/5 hover:bg-white/[0.02] transition-colors"
+                        className="border-t border-hairline hover:bg-fill-subtle transition-colors"
                       >
                         <td className="py-2 px-2">
                           {p.creative_image_url ? (
@@ -746,7 +743,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                               type="button"
                               onClick={() => void openCreative(p)}
                               disabled={isOpening}
-                              className="h-12 w-12 overflow-hidden rounded-lg border border-white/10 bg-surface-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                              className="h-12 w-12 overflow-hidden rounded-lg border border-hairline bg-surface-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
                               aria-label="Open creative"
                             >
                               <img
@@ -758,7 +755,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                             </button>
                           ) : (
                             <div
-                              className="flex h-12 w-12 items-center justify-center rounded-lg border border-white/5 bg-surface-950/80 text-surface-600"
+                              className="flex h-12 w-12 items-center justify-center rounded-lg border border-hairline bg-surface-950/80 text-surface-600"
                               title="No image stored (older log)"
                             >
                               <ImageIcon className="h-4 w-4" />

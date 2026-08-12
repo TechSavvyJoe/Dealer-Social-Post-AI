@@ -77,7 +77,7 @@ export const RecentCaptureShelf: React.FC<RecentCaptureShelfProps> = ({
 
   return (
     <section
-      className="mt-5 rounded-2xl border border-white/10 bg-surface-900/65 p-4 shadow-xl shadow-black/15 sm:p-5"
+      className="mt-5 rounded-2xl border border-hairline bg-surface-900/65 p-4 shadow-xl shadow-black/15 sm:p-5"
       aria-labelledby="recovery-shelf-heading"
     >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -126,7 +126,7 @@ export const RecentCaptureShelf: React.FC<RecentCaptureShelfProps> = ({
                   }
                 }}
                 disabled={Boolean(openingId)}
-                className="relative block h-24 w-28 overflow-hidden rounded-xl border border-white/15 bg-surface-950 text-left transition-colors hover:border-primary-400/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                className="relative block h-24 w-28 overflow-hidden rounded-xl border border-strong bg-surface-950 text-left transition-colors hover:border-primary-400/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
                 aria-label={`Reuse original photo ${index + 1} from ${formatCaptureTime(
                   record.createdAt,
                 )}`}
@@ -152,7 +152,7 @@ export const RecentCaptureShelf: React.FC<RecentCaptureShelfProps> = ({
                   triggerHapticFeedback();
                   await deleteArchivedMedia(record.id);
                 }}
-                className="absolute right-1.5 top-1.5 grid h-8 w-8 place-items-center rounded-full border border-white/20 bg-black/75 text-surface-100 shadow-md transition-colors hover:border-error-300/60 hover:bg-error-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-300"
+                className="absolute right-1.5 top-1.5 grid h-8 w-8 place-items-center rounded-full border border-strong bg-black/75 text-surface-100 shadow-md transition-colors hover:border-error-300/60 hover:bg-error-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-300"
                 aria-label={`Delete original photo ${index + 1}`}
                 title="Delete recovery copy"
               >

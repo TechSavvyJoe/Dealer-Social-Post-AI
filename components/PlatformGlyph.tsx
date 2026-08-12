@@ -257,16 +257,15 @@ const GLYPHS: Readonly<Record<PlatformGlyphKey, React.FC<GlyphSvgProps>>> = {
 
 const TONE_CLASSES: Readonly<Record<PlatformGlyphKey, string>> = {
   instagram:
-    "border-white/20 bg-[linear-gradient(135deg,#6d28d9_0%,#db2777_48%,#f97316_100%)] text-white shadow-[0_5px_14px_rgba(219,39,119,0.24)]",
+    "border-strong bg-[linear-gradient(135deg,#6d28d9_0%,#db2777_48%,#f97316_100%)] text-white shadow-[0_5px_14px_rgba(219,39,119,0.24)]",
   facebook:
     "border-[#4391f5] bg-[#1877f2] text-white shadow-[0_5px_14px_rgba(24,119,242,0.22)]",
-  tiktok:
-    "border-white/15 bg-[#09090b] text-white shadow-[0_5px_14px_rgba(0,0,0,0.28)]",
+  tiktok: "border-strong bg-[#09090b] text-white shadow-[0_5px_14px_rgba(0,0,0,0.28)]",
   google_business:
     "border-slate-200 bg-white text-slate-900 shadow-[0_5px_14px_rgba(15,23,42,0.14)]",
   linkedin:
     "border-[#2f7fbd] bg-[#0a66c2] text-white shadow-[0_5px_14px_rgba(10,102,194,0.22)]",
-  x: "border-white/15 bg-[#050505] text-white shadow-[0_5px_14px_rgba(0,0,0,0.28)]",
+  x: "border-strong bg-[#050505] text-white shadow-[0_5px_14px_rgba(0,0,0,0.28)]",
   marketplace:
     "border-[#4391f5] bg-[linear-gradient(145deg,#2584ff,#0a5dd8)] text-white shadow-[0_5px_14px_rgba(24,119,242,0.22)]",
   native:

@@ -49,7 +49,7 @@ export const LoadingOverlay: React.FC<LoadingOverlayProps> = ({
       aria-busy="true"
     >
       <motion.div
-        className="w-full max-w-lg rounded-2xl border border-white/10 bg-surface-900/75 p-5 shadow-2xl shadow-black/20 backdrop-blur-lg sm:p-7"
+        className="w-full max-w-lg rounded-2xl border border-hairline bg-surface-900/75 p-5 shadow-2xl shadow-black/20 backdrop-blur-lg sm:p-7"
         initial={shouldReduceMotion ? false : { opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: shouldReduceMotion ? 0 : 0.3 }}
@@ -100,7 +100,7 @@ export const LoadingOverlay: React.FC<LoadingOverlayProps> = ({
                   "flex min-w-0 flex-col gap-1 border-t-2 pt-2 text-[10px] font-semibold uppercase tracking-wide",
                   isComplete && "border-success-400 text-success-300",
                   isActive && "border-primary-400 text-primary-200",
-                  !isComplete && !isActive && "border-white/10 text-surface-500",
+                  !isComplete && !isActive && "border-hairline text-surface-500",
                 )}
                 aria-current={isActive ? "step" : undefined}
               >

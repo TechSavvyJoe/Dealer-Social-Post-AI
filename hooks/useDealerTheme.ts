@@ -11,8 +11,6 @@ import { useAppStore } from "../stores/appStore";
  * their brand color changes.
  */
 
-const DEFAULT_BRAND = "#1d4ed8"; // Tailwind primary-700 — current chrome
-
 /**
  * Lighten a hex color toward white by `pct` (0..1). Used to generate
  * the 600/500/400 shades from a single brand hex.
@@ -23,9 +21,10 @@ const lighten = (hex: string, pct: number): string => {
   const r = parseInt(m.slice(0, 2), 16);
   const g = parseInt(m.slice(2, 4), 16);
   const b = parseInt(m.slice(4, 6), 16);
-  const lr = Math.round(r + (255 - r) * pct);
-  const lg = Math.round(g + (255 - g) * pct);
-  const lb = Math.round(b + (255 - b) * pct);
+  const clamp = (v: number) => Math.min(255, Math.max(0, Math.round(v)));
+  const lr = clamp(r + (255 - r) * pct);
+  const lg = clamp(g + (255 - g) * pct);
+  const lb = clamp(b + (255 - b) * pct);
   return `#${lr.toString(16).padStart(2, "0")}${lg
     .toString(16)
     .padStart(2, "0")}${lb.toString(16).padStart(2, "0")}`;
@@ -56,7 +55,30 @@ export const useDealerTheme = (): void => {
     if (typeof document === "undefined") return;
     const root = document.documentElement;
     const raw = dealer?.brand_color?.trim();
-    const base = isValidHex(raw) ? expandShortHex(raw) : DEFAULT_BRAND;
+
+    if (!isValidHex(raw)) {
+      // No dealer brand: clear inline overrides so the stylesheet's exact
+      // DEALER TRUST navy ramp applies (derived values would drift slightly).
+      for (const prop of [
+        "--brand-primary",
+        "--brand-primary-700",
+        "--brand-primary-600",
+        "--brand-primary-500",
+        "--brand-primary-400",
+        "--brand-primary-300",
+        "--color-primary",
+        "--color-primary-hover",
+        "--brand-700-rgb",
+        "--brand-600-rgb",
+        "--brand-500-rgb",
+        "--brand-400-rgb",
+        "--brand-300-rgb",
+      ]) {
+        root.style.removeProperty(prop);
+      }
+      return;
+    }
+    const base = expandShortHex(raw);
 
     root.style.setProperty("--brand-primary", base);
     root.style.setProperty("--brand-primary-700", base);
@@ -69,6 +91,16 @@ export const useDealerTheme = (): void => {
       "--color-primary-hover",
       hexToRgbTriplet(lighten(base, -0.15)),
     );
+
+    // RGB triplets drive the Tailwind primary-300..700 utilities directly
+    // (see tailwind.config.js), so every button, chip, ring, and selected
+    // state follows the dealer's brand — not just the 22 gradient accents
+    // that consumed the hex vars historically.
+    root.style.setProperty("--brand-700-rgb", hexToRgbTriplet(lighten(base, -0.12)));
+    root.style.setProperty("--brand-600-rgb", hexToRgbTriplet(base));
+    root.style.setProperty("--brand-500-rgb", hexToRgbTriplet(lighten(base, 0.2)));
+    root.style.setProperty("--brand-400-rgb", hexToRgbTriplet(lighten(base, 0.36)));
+    root.style.setProperty("--brand-300-rgb", hexToRgbTriplet(lighten(base, 0.55)));
 
     return () => {
       // Don't reset to default on unmount — that would flash. Wait for the

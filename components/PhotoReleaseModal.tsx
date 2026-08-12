@@ -163,7 +163,7 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
                 onChange={(e) => setCustomerName(e.target.value)}
                 placeholder="Jane Smith"
                 fullWidth
-                className="bg-white/5 border-white/10 focus:border-primary-400"
+                className="bg-fill-subtle border-hairline focus:border-primary-400"
               />
 
               {vin && (
@@ -194,7 +194,7 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
                 )}
               </AnimatePresence>
 
-              <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-white/10">
+              <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-hairline">
                 <div className="flex-1">
                   <Button
                     variant="filled"

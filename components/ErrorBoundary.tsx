@@ -157,7 +157,7 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-surface-950 p-4">
-          <div className="glass-card p-8 max-w-lg w-full text-center border border-red-500/30 rounded-2xl bg-surface-900/80 backdrop-blur-xl">
+          <div className="p-8 max-w-lg w-full text-center border border-error-500/30 rounded-lg bg-surface-overlay shadow-elevation-3">
             <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
               <svg
                 className="w-8 h-8 text-red-400"
@@ -188,7 +188,7 @@ export class ErrorBoundary extends Component<Props, State> {
               </button>
               <button
                 onClick={() => window.location.reload()}
-                className="px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg transition-colors text-sm"
+                className="px-4 py-2.5 bg-fill-hover hover:border-strong border border-hairline text-white rounded-lg transition-colors text-sm"
               >
                 Refresh page
               </button>
@@ -201,7 +201,7 @@ export class ErrorBoundary extends Component<Props, State> {
               </button>
               <button
                 onClick={this.handleCopyDetails}
-                className="px-4 py-2.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg transition-colors text-sm"
+                className="px-4 py-2.5 bg-fill-hover hover:border-strong border border-hairline text-white rounded-lg transition-colors text-sm"
               >
                 {this.state.copied ? "Copied" : "Copy error details"}
               </button>

@@ -3,20 +3,7 @@
  * It allows the frontend to send requests to paths like:
  * - `/api/proxy/v1beta/models/gemini-3.6-flash:generateContent` (Gemini API)
  * and forwards only configured model/method pairs with the server-side key.
- * Legacy Vertex code below is unreachable because requestPolicies intentionally
- * denies every `vertex/*` path; do not re-enable it without an S2S-only route.
  */
-// ---------------------------------------------------------------------------
-// Vertex AI access-token cache (module scope so it actually persists across
-// requests). Previous version referenced undeclared cachedAccessToken /
-// tokenExpiry inside the closure — JSVM hoisted them as globals on first
-// write but reading them before write threw ReferenceError, which is why
-// the in-handler comment said "Caching is disabled for now". Fixed by
-// declaring at module scope.
-// ---------------------------------------------------------------------------
-var cachedAccessToken = null;
-var tokenExpiry = 0;
-
 // ---------------------------------------------------------------------------
 // Administrator account bootstrap. The system admin signs in with a normal
 // username/password held in the locked admin_accounts auth collection. The
@@ -30,6 +17,18 @@ onAfterBootstrap(() => {
     helpers.ensureAdminAccountProvisioned({ syncPassword: true });
   } catch (err) {
     console.error("[bootstrap] Administrator account bootstrap failed:", err);
+  }
+  try {
+    const helpers = require(__hooks + "/helpers.js");
+    // Converts any plaintext access codes to peppered hashes and rewrites the
+    // affected sessions' fingerprints in the same transaction, so the storage
+    // change never logs anyone out. Idempotent; no-op once converted.
+    const summary = helpers.backfillSalespersonPinHashes();
+    if (summary.converted || summary.failed || summary.skipped) {
+      console.log("[bootstrap] access-code hash backfill: " + JSON.stringify(summary));
+    }
+  } catch (err) {
+    console.error("[bootstrap] Access-code hash backfill failed:", err);
   }
 });
 
@@ -55,10 +54,7 @@ const proxyHandler = (c) => {
     // provider traffic without both the explicit test flag and loopback host.
     GEMINI_API_URL_BASE = providerTestBase;
   }
-  const VERTEX_AI_URL_BASE = "https://{LOCATION}-aiplatform.googleapis.com/";
-
   const geminiApiKey = $os.getenv("GEMINI_API_KEY");
-  // Vertex API Key no longer used, we use Service Account
 
   let path = null;
   let generationAudit = null;
@@ -247,311 +243,19 @@ const proxyHandler = (c) => {
       }
     }
 
-    // Detect if this is a Vertex AI request or Gemini API request
-    const isVertexAI = path.startsWith("vertex/");
-    let baseUrl;
-    let authHeader = {};
-
-    if (isVertexAI) {
-      // Vertex AI endpoint -> Use Service Account Auth.
-      // Token is cached at module scope (declared at top of file). Vertex
-      // tokens last 60 minutes; we refresh when <60s remaining.
-      try {
-        const getVertexAccessToken = () => {
-          const now = Math.floor(Date.now() / 1000);
-
-          // Reuse cached token when still valid
-          if (cachedAccessToken && tokenExpiry - 60 > now) {
-            return cachedAccessToken;
-          }
-
-          let serviceAccount;
-          const envKey = $os.getenv("VERTEX_SERVICE_ACCOUNT_JSON");
-
-          if (envKey) {
-            try {
-              serviceAccount = JSON.parse(envKey);
-            } catch (e) {
-              throw new Error(
-                "Failed to parse VERTEX_SERVICE_ACCOUNT_JSON: " + e.toString(),
-              );
-            }
-          } else {
-            // Try to construct from individual env vars (Fly.io secrets)
-            const privateKey = $os.getenv("private_key");
-            const clientEmail = $os.getenv("client_email");
-            const privateKeyId = $os.getenv("private_key_id");
-            const projectId = $os.getenv("project_id");
-
-            if (privateKey && clientEmail && privateKeyId) {
-              serviceAccount = {
-                type: $os.getenv("type") || "service_account",
-                project_id: projectId,
-                private_key_id: privateKeyId,
-                private_key: privateKey,
-                client_email: clientEmail,
-                client_id: $os.getenv("client_id") || "",
-                auth_uri:
-                  $os.getenv("auth_uri") || "https://accounts.google.com/o/oauth2/auth",
-                token_uri:
-                  $os.getenv("token_uri") || "https://oauth2.googleapis.com/token",
-                auth_provider_x509_cert_url:
-                  $os.getenv("auth_provider_x509_cert_url") ||
-                  "https://www.googleapis.com/oauth2/v1/certs",
-                client_x509_cert_url: $os.getenv("client_x509_cert_url") || "",
-                universe_domain: $os.getenv("universe_domain") || "googleapis.com",
-              };
-              console.log(
-                "[Vertex] Constructed service account from individual env vars",
-              );
-            } else {
-              // Fall back to file
-              const keyPath = `${__hooks}/vertex_key.json`;
-              // Read key file
-              if (!$os.getFile(keyPath).exists()) {
-                throw new Error(
-                  "Vertex credentials not found. Set VERTEX_SERVICE_ACCOUNT_JSON env var, individual service account fields, or create vertex_key.json",
-                );
-              }
-              const rawKey = $os.readFile(keyPath);
-              const keyStr = String.fromCharCode.apply(null, rawKey);
-              serviceAccount = JSON.parse(keyStr);
-            }
-          }
-
-          // Create JWT
-          const header = {
-            alg: "RS256",
-            typ: "JWT",
-            kid: serviceAccount.private_key_id,
-          };
-
-          const claims = {
-            iss: serviceAccount.client_email,
-            sub: serviceAccount.client_email,
-            aud: "https://oauth2.googleapis.com/token",
-            iat: now,
-            exp: now + 3600,
-            scope: "https://www.googleapis.com/auth/cloud-platform",
-          };
-
-          // Pure JS Base64 URL Encode
-          const base64UrlEncode = (str) => {
-            const chars =
-              "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
-            let output = "";
-            let i = 0;
-
-            // Convert string to byte array (assuming UTF-8/ASCII)
-            // For simple JSON, charCodeAt is fine.
-            // If we had multi-byte chars, we'd need TextEncoder, but Goja might not have it.
-            // Since header/claims are ASCII JSON, this is safe.
-
-            while (i < str.length) {
-              let chr1 = str.charCodeAt(i++);
-              let chr2 = str.charCodeAt(i++);
-              let chr3 = str.charCodeAt(i++);
-
-              let enc1 = chr1 >> 2;
-              let enc2 = ((chr1 & 3) << 4) | (chr2 >> 4);
-              let enc3 = ((chr2 & 15) << 2) | (chr3 >> 6);
-              let enc4 = chr3 & 63;
-
-              if (isNaN(chr2)) {
-                enc3 = enc4 = 64;
-              } else if (isNaN(chr3)) {
-                enc4 = 64;
-              }
-
-              output =
-                output +
-                chars.charAt(enc1) +
-                chars.charAt(enc2) +
-                chars.charAt(enc3) +
-                chars.charAt(enc4);
-            }
-
-            return output.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-          };
-
-          // Sign JWT. Temp filenames carry a per-request random suffix so
-          // two concurrent Vertex requests in the same second can't clobber
-          // each other's key files. (Date.now()/1000 was seconds-precision.)
-          const reqId = helpers.secureRandomString(24, "0123456789abcdef");
-          const tempDir = `${__hooks}/../temp`;
-          const tempKey = `${tempDir}/temp_key_${reqId}.pem`;
-          const tempToken = `${tempDir}/temp_token_${reqId}.txt`;
-          const tempSig = `${tempDir}/temp_sig_${reqId}.bin`;
-
-          // Helper to safely remove files (ignore errors if file doesn't exist)
-          const safeRemove = (path) => {
-            try {
-              $os.remove(path);
-            } catch (e) {
-              /* ignore */
-            }
-          };
-
-          try {
-            // Ensure temp directory exists using full path with restrictive perms
-            try {
-              $os.cmd("/bin/mkdir", "-p", tempDir).output();
-              $os.cmd("/bin/chmod", "700", tempDir).output();
-            } catch (e) {
-              // Directory may already exist, ignore
-            }
-
-            const encodedHeader = base64UrlEncode(JSON.stringify(header));
-            const encodedClaims = base64UrlEncode(JSON.stringify(claims));
-            const unsignedToken = `${encodedHeader}.${encodedClaims}`;
-
-            let keyContent = serviceAccount.private_key;
-            if (!keyContent.endsWith("\n")) keyContent += "\n";
-            $os.writeFile(tempKey, keyContent);
-            $os.writeFile(tempToken, unsignedToken);
-
-            // Ensure permissions are readable
-            try {
-              $os.cmd("/bin/chmod", "600", tempKey).output();
-              $os.cmd("/bin/chmod", "600", tempToken).output();
-            } catch (e) {
-              // Ignore chmod errors
-            }
-
-            // Use /usr/bin/openssl on Linux/Docker, fallback to other paths
-            let opensslBin = "/usr/bin/openssl";
-            try {
-              // Test if openssl exists at the expected path
-              $os.cmd("/bin/sh", "-c", `test -x ${opensslBin}`).output();
-            } catch (e) {
-              // Try alternate paths
-              opensslBin = "openssl"; // fallback to PATH
-            }
-
-            // Step 1: Sign using sh with full path
-            const signCmd = $os.cmd(
-              "/bin/sh",
-              "-c",
-              `${opensslBin} dgst -sha256 -sign "${tempKey}" -out "${tempSig}" "${tempToken}" 2>&1`,
-            );
-            const signOut = signCmd.output();
-
-            // Check if output contains error messages
-            if (signOut && signOut.length > 0) {
-              const outStr = String.fromCharCode.apply(null, signOut);
-              if (
-                outStr.includes("error") ||
-                outStr.includes("Error") ||
-                outStr.includes("Usage") ||
-                outStr.includes("Permission denied")
-              ) {
-                throw new Error(`OpenSSL Error: ${outStr}`);
-              }
-            }
-
-            // Step 2: Base64 encode signature
-            const b64Cmd = $os.cmd(
-              "/bin/sh",
-              "-c",
-              `${opensslBin} base64 -in "${tempSig}"`,
-            );
-            const b64 = b64Cmd.output();
-
-            let base64Sig = String.fromCharCode.apply(null, b64);
-            base64Sig = base64Sig.replace(/\s/g, "");
-            const encodedSig = base64Sig
-              .replace(/\+/g, "-")
-              .replace(/\//g, "_")
-              .replace(/=+$/, "");
-
-            const jwt = `${unsignedToken}.${encodedSig}`;
-            // console.log("[Auth] Generated JWT:", jwt); // REMOVED FOR SECURITY
-
-            // Exchange for Access Token
-            const tokenResp = $http.send({
-              url: "https://oauth2.googleapis.com/token",
-              method: "POST",
-              headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
-            });
-
-            if (tokenResp.statusCode !== 200) {
-              console.log(
-                "[Auth] Token Exchange Failed. Status:",
-                tokenResp.statusCode,
-              );
-              // Do not log raw body if it contains sensitive info, but usually error body is safe.
-              // However, to be safe, we'll just log the status and throw.
-              throw new Error(
-                `Token exchange failed with status ${tokenResp.statusCode}`,
-              );
-            }
-
-            const tokenData = tokenResp.json;
-            console.log("[Auth] Successfully acquired Vertex AI Access Token");
-            cachedAccessToken = tokenData.access_token;
-            tokenExpiry = now + (tokenData.expires_in || 3600);
-            return cachedAccessToken;
-          } catch (err) {
-            console.log(
-              "[Auth] Signing failed:",
-              helpers.safeProviderTransportDiagnostic(err),
-            );
-            throw err;
-          } finally {
-            // Safely clean up temp files (ignore errors if files don't exist)
-            safeRemove(tempKey);
-            safeRemove(tempToken);
-            safeRemove(tempSig);
-          }
-        };
-
-        const accessToken = getVertexAccessToken();
-        authHeader = { Authorization: `Bearer ${accessToken}` };
-      } catch (e) {
-        console.error(
-          "Failed to get Vertex Access Token:",
-          helpers.safeProviderTransportDiagnostic(e),
-        );
-        return c.json(500, {
-          error: "Vertex AI authentication is temporarily unavailable",
-        });
-      }
-
-      // Extract location from path (e.g., vertex/v1beta1/projects/PROJECT/locations/us-central1/...)
-      const pathParts = path.split("/");
-      let location = "us-central1"; // default
-      const locationIndex = pathParts.indexOf("locations");
-      if (locationIndex !== -1 && pathParts.length > locationIndex + 1) {
-        location = pathParts[locationIndex + 1];
-      }
-
-      // SSRF guard: `location` is interpolated directly into the upstream host
-      // (`{LOCATION}-aiplatform.googleapis.com`) AND this request carries a live
-      // GCP OAuth bearer token. A crafted value (e.g. "evil.example#" or one
-      // containing "@") could redirect the authenticated request off-Google and
-      // exfiltrate the token. Pin to the GCP region grammar before use.
-      if (!/^[a-z]+-[a-z]+[0-9]+$/.test(location)) {
-        return c.json(400, { error: "Invalid Vertex AI location" });
-      }
-
-      baseUrl = VERTEX_AI_URL_BASE.replace("{LOCATION}", location);
-      // Remove "vertex/" prefix from path
-      path = path.substring(7); // Remove "vertex/"
-    } else {
-      // Gemini API endpoint -> Use API Key
-      if (!geminiApiKey) {
-        console.error("GEMINI_API_KEY environment variable is not set.");
-        return c.json(500, {
-          error: "Gemini API key is not configured on the server.",
-        });
-      }
-      baseUrl = GEMINI_API_URL_BASE;
-      // Keep provider credentials out of URLs, access logs, and intermediary
-      // query-string telemetry. Google's Gemini API supports this header on
-      // every route used here.
-      authHeader = { "x-goog-api-key": geminiApiKey };
+    // requestPolicies allowlists only Gemini API paths (vertex/* is denied
+    // before this handler), so the proxy speaks exactly one upstream dialect.
+    if (!geminiApiKey) {
+      console.error("GEMINI_API_KEY environment variable is not set.");
+      return c.json(500, {
+        error: "Gemini API key is not configured on the server.",
+      });
     }
+    const baseUrl = GEMINI_API_URL_BASE;
+    // Keep provider credentials out of URLs, access logs, and intermediary
+    // query-string telemetry. Google's Gemini API supports this header on
+    // every route used here.
+    const authHeader = { "x-goog-api-key": geminiApiKey };
 
     // Build target URL, preserve incoming query params
     const finalBaseUrl = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
@@ -582,12 +286,11 @@ const proxyHandler = (c) => {
       targetUrl += separator + queryParts.join("&");
     }
 
-    const apiType = isVertexAI ? "Vertex AI" : "Gemini API";
     const safeLogUrl = targetUrl
       .replace(/key=[^&]+/, "key=HIDDEN")
       .replace(/(\/operations\/)[^?]+/, "$1[redacted]")
       .replace(/(\/files\/)[^?]+/, "$1[redacted]");
-    console.log(`[Proxy ${apiType}] ${requestInfo.method} ${safeLogUrl}`);
+    console.log(`[Proxy Gemini API] ${requestInfo.method} ${safeLogUrl}`);
 
     // Always pin binary file downloads to alt=media so Google returns bytes,
     // not a JSON metadata envelope that browsers cannot play.
@@ -810,13 +513,12 @@ const proxyHandler = (c) => {
         null,
       );
     }
-    const apiType = path && path.startsWith("vertex/") ? "Vertex AI" : "Gemini API";
     console.error(
-      `[Proxy ${apiType}] Error:`,
+      "[Proxy Gemini API] Error:",
       helpers.safeProviderTransportDiagnostic(err),
     );
     return c.json(500, {
-      error: `${apiType} request failed`,
+      error: "Gemini API request failed",
     });
   }
 };
@@ -1069,7 +771,7 @@ routerAdd("POST", "/api/proxy/anthropic/v1/messages", (c) => {
   }
 });
 
-// Register the catch-all Gemini/Vertex proxy AFTER the more specific routes.
+// Register the catch-all Gemini proxy AFTER the more specific routes.
 routerAdd("GET", "/api/proxy/:path(*)", proxyHandler);
 routerAdd("POST", "/api/proxy/:path(*)", proxyHandler);
 
@@ -1503,6 +1205,9 @@ routerAdd("GET", "/api/app/health", (c) => {
     helpers.configuredTurnstileHostnames().length > 0;
   checks.trusted_proxy_configured =
     ($os.getenv("VERCEL_TO_FLY_PROXY_SECRET") || "").toString().length >= 32;
+  // Access-code hashing is inert without its pepper: PIN logins fail closed and
+  // the plaintext backfill cannot run. Deploys must not pass readiness without it.
+  checks.pin_pepper_configured = helpers.salespersonPinPepper().length >= 32;
   checks.legacy_client_compatibility_enabled =
     ($os.getenv("LEGACY_CLIENT_COMPATIBILITY_ENABLED") || "")
       .toString()
@@ -1527,6 +1232,7 @@ routerAdd("GET", "/api/app/health", (c) => {
     !checks.admin_login_configured ||
     (flyRuntime &&
       (!checks.trusted_proxy_configured ||
+        !checks.pin_pepper_configured ||
         !checks.turnstile_secret_set ||
         !checks.turnstile_site_key_set ||
         !checks.turnstile_hostnames_configured)) ||
@@ -1731,6 +1437,13 @@ routerAdd("POST", "/api/app/session", (c) => {
       body.dealerCode === undefined || body.dealerCode === null
         ? ""
         : body.dealerCode.toString();
+    // Optional store hint remembered by the device after a prior login. It only
+    // scopes the personal-code lookup — the PIN itself remains the credential.
+    const rememberedDealerId = /^[a-z0-9]{15}$/.test(
+      (body.dealerId || "").toString().trim(),
+    )
+      ? (body.dealerId || "").toString().trim()
+      : "";
     const managerUsername = helpers.normalizeManagerUsername(body.username);
     // Passwords are exact credentials. Never trim, normalize, case-fold, log,
     // or persist the submitted value outside PocketBase's password verifier.
@@ -1955,7 +1668,7 @@ routerAdd("POST", "/api/app/session", (c) => {
       // Personal 4-digit codes on the people roster (managers + salespeople).
       // Shared dealer/admin codes are no longer accepted for store login.
       const pinLookup = helpers.isValidPersonPin(dealerCode)
-        ? helpers.findActivePersonByPin(dealerCode)
+        ? helpers.findActivePersonByPin(dealerCode, rememberedDealerId)
         : { status: "not_found", person: null };
       if (pinLookup.status === "unavailable") {
         cancelReservedAttempt();
@@ -2540,7 +2253,9 @@ cronAdd("prune-unlinked-photo-releases", "13 * * * *", function () {
     for (let i = 0; i < expired.length; i++) {
       try {
         $app.dao().deleteRecord(expired[i]);
-      } catch (_e) {}
+      } catch (e) {
+        console.warn("[photo-releases] expired-release prune failed: " + e);
+      }
     }
   } catch (_e) {
     // Collection/fields may not exist before the forward migration.
@@ -4262,7 +3977,10 @@ routerAdd("POST", "/api/app/salespeople", (c) => {
     const record = new Record(salespeople, {
       dealer: targetDealer.id,
       name: helpers.assertString(name, 120),
-      pin: pin,
+      // Storage keeps only the peppered hash; the plaintext code is returned
+      // exactly once in this response for the manager to hand out.
+      pin: "",
+      pin_hash: helpers.personPinHash(pin),
       pin_needs_distribution: true,
       role: personRole,
       active: body.active === false ? false : true,
@@ -4369,7 +4087,7 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
           : !!txPerson.get("active");
         let nextActive = wasActive;
         let nextRole = existingRole;
-        let nextPin = txPerson.getString("pin");
+        let nextPin = "";
         let pinChanged = false;
         if (hasPinUpdate) {
           nextPin = helpers.assertPersonPinAvailableWithDao(
@@ -4377,9 +4095,15 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
             requestedPin,
             txPerson.id,
           );
-          pinChanged = nextPin !== txPerson.getString("pin");
+          const nextPinHash = helpers.personPinHash(nextPin);
+          // Unchanged in either representation is a no-op: a not-yet-converted
+          // row resubmitting its own plaintext must not revoke sessions.
+          pinChanged =
+            nextPinHash !== txPerson.getString("pin_hash") &&
+            nextPin !== txPerson.getString("pin");
           if (pinChanged) {
-            txPerson.set("pin", nextPin);
+            txPerson.set("pin", "");
+            txPerson.set("pin_hash", nextPinHash);
             txPerson.set("pin_needs_distribution", true);
           }
         }
@@ -4387,11 +4111,7 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
         if (hasActiveUpdate) {
           nextActive = requestedActive;
           if (!wasActive && nextActive) {
-            helpers.assertPersonPinAvailableWithDao(
-              txDao,
-              txPerson.getString("pin"),
-              txPerson.id,
-            );
+            helpers.assertStoredPersonCredentialAvailableWithDao(txDao, txPerson);
           }
           txPerson.set("active", nextActive);
         }
@@ -4690,7 +4410,8 @@ routerAdd("POST", "/api/app/salespeople/:id/rotate-pin", (c) => {
       }
       pin = helpers.generateUniquePersonPinWithDao(txDao);
       const revoked = helpers.revokePersonSessionsWithDao(txDao, txPerson.id);
-      txPerson.set("pin", pin);
+      txPerson.set("pin", "");
+      txPerson.set("pin_hash", helpers.personPinHash(pin));
       txPerson.set("pin_needs_distribution", true);
       txDao.saveRecord(txPerson);
       committedPerson = txPerson;
@@ -4720,52 +4441,20 @@ routerAdd("POST", "/api/app/salespeople/:id/rotate-pin", (c) => {
   }
 });
 
+// Access codes are stored only as peppered one-way hashes, so revealing a
+// current code is cryptographically impossible. The route stays registered so
+// stale clients receive an explanatory 410 instead of a confusing 404.
 routerAdd("POST", "/api/app/salespeople/:id/reveal-pin", (c) => {
   const helpers = require(__hooks + "/helpers.js");
   c.response().header().set("Cache-Control", "private, no-store");
   const context = helpers.sessionContext(c);
   if (!context) return c.json(401, { error: "No active session" });
-  if (context.role !== "super_admin") {
-    return c.json(403, {
-      error: "PIN_REVEAL_FORBIDDEN",
-      code: "PIN_REVEAL_FORBIDDEN",
-      message: "Only system admin can reveal an access code.",
-    });
-  }
-
-  try {
-    const record = $app.dao().findRecordById("salespeople", c.pathParam("id"));
-    const pin = record.getString("pin");
-    if (!helpers.isValidPersonPin(pin)) {
-      return c.json(409, {
-        error: "PIN_UNAVAILABLE",
-        code: "PIN_UNAVAILABLE",
-        message: "This person does not have a valid access code.",
-      });
-    }
-    const audited = helpers.logAuthEvent("person_pin_revealed", {
-      dealerId: record.getString("dealer"),
-      credentialPresent: true,
-      ip: helpers.clientIP(c),
-      userAgent: helpers.userAgent(c),
-      detail: "person=" + record.id,
-    });
-    if (!audited) {
-      return c.json(503, {
-        error: "AUDIT_UNAVAILABLE",
-        code: "UNAVAILABLE",
-        message: "The access code cannot be revealed until auditing is available.",
-      });
-    }
-    return c.json(200, { person: helpers.serializePerson(record), pin: pin });
-  } catch (err) {
-    console.error("[/api/app/salespeople/:id/reveal-pin] error", err);
-    return c.json(404, {
-      error: "PERSON_NOT_FOUND",
-      code: "PERSON_NOT_FOUND",
-      message: "Person not found.",
-    });
-  }
+  return c.json(410, {
+    error: "PIN_REVEAL_RETIRED",
+    code: "PIN_REVEAL_RETIRED",
+    message:
+      "Access codes are stored hashed and can no longer be revealed. Rotate the code to issue a new one.",
+  });
 });
 
 routerAdd("POST", "/api/app/salespeople/:id/acknowledge-pin", (c) => {

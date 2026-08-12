@@ -52,7 +52,7 @@ export const YouTubeConnectionCard: React.FC = () => {
   };
 
   return (
-    <section className="rounded-2xl border border-white/10 bg-surface-900/65 p-5 sm:p-6">
+    <section className="rounded-2xl border border-hairline bg-surface-900/65 p-5 sm:p-6">
       <div className="flex items-start gap-3">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-error-500/15">
           <Video className="h-5 w-5 text-error-300" />
@@ -111,7 +111,7 @@ export const YouTubeConnectionCard: React.FC = () => {
               <label className="block text-sm font-medium text-surface-200">
                 One-time authorization return code
                 <input
-                  className="mt-2 min-h-11 w-full rounded-xl border border-white/10 bg-surface-950/45 px-3 py-2 text-surface-50 outline-none focus:border-primary-400"
+                  className="mt-2 min-h-11 w-full rounded-xl border border-hairline bg-surface-950/45 px-3 py-2 text-surface-50 outline-none focus:border-primary-400"
                   autoComplete="off"
                   value={stateReference}
                   onChange={(event) => setStateReference(event.target.value)}

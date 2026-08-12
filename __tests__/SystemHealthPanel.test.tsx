@@ -19,6 +19,7 @@ const healthyPayload = {
     claude_fallback_enabled: false,
     openai_fallback_enabled: false,
     admin_login_configured: true,
+    pin_pepper_configured: true,
     turnstile_enforcement_enabled: true,
     turnstile_secret_set: true,
     turnstile_site_key_set: true,
@@ -79,13 +80,17 @@ describe("SystemHealthPanel readiness diagnostics", () => {
 
     render(<SystemHealthPanel />);
 
-    expect(await screen.findByText("degraded")).toBeInTheDocument();
+    // The strip headline is truthful: criticals win.
+    expect(
+      await screen.findByText("1 critical issue needs attention"),
+    ).toBeInTheDocument();
+    // Critical failures surface themselves without opening Details.
+    expect(screen.getByText("Release restore evidence")).toBeInTheDocument();
+    // Full diagnostics (backup verdict) live behind the Details disclosure.
+    fireEvent.click(screen.getByRole("button", { name: /Details/ }));
     expect(
       screen.getByText("Restore evidence is for another release"),
     ).toBeInTheDocument();
-    expect(screen.getByText("Critical:").parentElement).toHaveTextContent(
-      "Release restore evidence",
-    );
     expect(screen.queryByText(/\/api\/app\/health 503/)).toBeNull();
   });
 
@@ -98,15 +103,17 @@ describe("SystemHealthPanel readiness diagnostics", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<SystemHealthPanel />);
-    expect(await screen.findByText("all green")).toBeInTheDocument();
+    expect(await screen.findByText(/Operational — \d+ advisor/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh system health" }));
     expect(await screen.findByText("Gateway busy (503)")).toBeInTheDocument();
-    expect(screen.getByText("all green")).toBeInTheDocument();
+    expect(screen.getByText(/Operational — \d+ advisor/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh system health" }));
     expect(await screen.findByText("Network disconnected")).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByText("all green")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByText(/Operational — \d+ advisor/)).toBeNull(),
+    );
   });
 
   it("clears stale diagnostics when the endpoint returns non-JSON", async () => {
@@ -124,12 +131,14 @@ describe("SystemHealthPanel readiness diagnostics", () => {
     );
 
     render(<SystemHealthPanel />);
-    expect(await screen.findByText("all green")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByText(/Operational — \d+ advisor/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh system health" }));
 
     expect(
       await screen.findByText("Health response was not valid JSON (502)."),
     ).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByText("all green")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByText(/Operational — \d+ advisor/)).toBeNull(),
+    );
   });
 });

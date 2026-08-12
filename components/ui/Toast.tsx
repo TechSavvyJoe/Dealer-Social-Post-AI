@@ -319,7 +319,7 @@ const ToastItem: React.FC<ToastItemProps> = ({
       <button
         type="button"
         onClick={() => onRemove(toast.id)}
-        className="-my-2 -mr-2 inline-flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-lg text-surface-400 transition-colors hover:bg-white/10 hover:text-surface-200 [.theme-light_&]:text-surface-700"
+        className="-my-2 -mr-2 inline-flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-lg text-surface-400 transition-colors hover:bg-fill-hover hover:text-surface-200 [.theme-light_&]:text-surface-700"
         aria-label="Close notification"
       >
         <X className="w-4 h-4" />

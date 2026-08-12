@@ -1,48 +1,48 @@
 import { useState, useEffect } from "react";
 
+/**
+ * One predicate decides the desktop studio layout, shared by the initial
+ * render and every listener (the old code used stricter checks on mount than
+ * on resize, so the classification could flip after any window drag).
+ *
+ * Width is the primary signal. The user-agent veto applies only below 1440px
+ * and deliberately excludes iPads: a 12.9" iPad Pro in landscape (1366px)
+ * is a desk device for this product and gets the full studio. Touch alone is
+ * not a veto — every target device has touch.
+ */
+const computeIsDesktop = (): boolean => {
+  if (typeof window === "undefined") return true;
+  const width = window.innerWidth;
+  if (width < 1200) return false;
+  if (width >= 1440) return true;
+  // "Mobi" matches the "Mobile" token every phone UA carries (Android
+  // included); Android tablets ship neither "Mobile" nor "Tablet", so any
+  // Android-specific clause only misclassifies them.
+  const uaIsPhone =
+    typeof navigator !== "undefined" &&
+    /Mobi|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  return !uaIsPhone;
+};
+
 export const useLayoutMode = () => {
-  const [isDesktopLayout, setIsDesktopLayout] = useState(() => {
-    if (typeof window === "undefined") return true;
-    const pointerFine =
-      typeof window.matchMedia === "function"
-        ? window.matchMedia("(pointer: fine)").matches
-        : true;
-    const canHover =
-      typeof window.matchMedia === "function"
-        ? window.matchMedia("(hover: hover)").matches
-        : true;
-    const uaIsMobile =
-      typeof navigator !== "undefined"
-        ? /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-            navigator.userAgent,
-          )
-        : false;
-    const hasTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
-    const isWideScreen = window.innerWidth >= 1200;
-    return (
-      isWideScreen &&
-      pointerFine &&
-      canHover &&
-      !uaIsMobile &&
-      (!hasTouch || window.innerWidth >= 1440)
-    );
-  });
+  const [isDesktopLayout, setIsDesktopLayout] = useState(computeIsDesktop);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const updateLayoutMode = () => {
-      const uaIsMobile =
-        /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-          navigator.userAgent,
-        );
-      const hasTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
-      const isWideScreen = window.innerWidth >= 1200;
-      const isDesktop =
-        isWideScreen && !uaIsMobile && (!hasTouch || window.innerWidth >= 1440);
-      setIsDesktopLayout(isDesktop);
+    const update = () => setIsDesktopLayout(computeIsDesktop());
+
+    const mql =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia("(min-width: 1200px)")
+        : null;
+    mql?.addEventListener?.("change", update);
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    return () => {
+      mql?.removeEventListener?.("change", update);
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
     };
-    window.addEventListener("resize", updateLayoutMode);
-    return () => window.removeEventListener("resize", updateLayoutMode);
   }, []);
 
   return isDesktopLayout;

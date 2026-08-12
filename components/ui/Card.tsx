@@ -3,15 +3,16 @@ import { motion, type HTMLMotionProps } from "framer-motion";
 import { cn } from "../../utils/classNames";
 
 /**
- * Card component with refined glass morphism and elevation system.
- * Based on Apple's card design with subtle depth and blur effects.
+ * Card — DEALER TRUST system: solid theme-aware surface with a hairline
+ * border. Flat by default; interactive cards get border/background emphasis
+ * instead of lift, and elevation maps to the calm shadow tokens.
  */
 export interface CardProps extends HTMLMotionProps<"div"> {
   /** Enable hover effects for interactive cards */
   interactive?: boolean;
-  /** Elevation level (1-5) following Material Design */
+  /** Elevation level (1-5), mapped onto the flat shadow token scale */
   elevation?: 1 | 2 | 3 | 4 | 5;
-  /** Disable glass morphism effect */
+  /** Deprecated: cards are always solid now; kept for call-site compatibility */
   solid?: boolean;
 }
 
@@ -21,7 +22,7 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(
       className,
       interactive = false,
       elevation = 2,
-      solid = false,
+      solid: _solid = false,
       children,
       ...props
     },
@@ -31,27 +32,22 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(
       <motion.div
         ref={ref}
         className={cn(
-          // Base styles
-          "rounded-2xl overflow-hidden",
-          "transition-all duration-300 ease-apple",
+          // Base styles — solid surface, hairline border, token radius
+          "rounded-lg overflow-hidden",
+          "bg-surface-overlay border border-hairline",
+          "transition-colors duration-[var(--duration-base)] ease-apple",
 
-          // Glass morphism or solid background
-          solid ? "bg-surface-900 border border-surface-800" : "glass", // Using the utility class from globals.css
-
-          // Elevation shadows
-          elevation === 1 && "shadow-elevation-1",
-          elevation === 2 && "shadow-elevation-2",
+          // Elevation shadows (flat token scale)
+          elevation <= 2 && "shadow-elevation-1",
           elevation === 3 && "shadow-elevation-3",
-          elevation === 4 && "shadow-elevation-4",
-          elevation === 5 && "shadow-elevation-5",
+          elevation >= 4 && "shadow-elevation-5",
 
-          // Interactive states
+          // Interactive states — emphasis, not lift
           interactive && "card-hover cursor-pointer",
 
           className,
         )}
         initial={false}
-        whileHover={interactive ? { y: -4, scale: 1.01 } : undefined}
         whileTap={interactive ? { scale: 0.99 } : undefined}
         transition={{ type: "spring", stiffness: 300, damping: 25 }}
         {...props}
@@ -77,7 +73,7 @@ export const CardHeader = React.forwardRef<HTMLDivElement, CardHeaderProps>(
     <div
       ref={ref}
       className={cn(
-        "border-b border-white/5",
+        "border-b border-hairline",
         padded ? "px-6 py-5" : "px-5 py-4",
         className,
       )}
@@ -100,7 +96,10 @@ export const CardTitle = React.forwardRef<HTMLHeadingElement, CardTitleProps>(
   ({ className, as: Component = "h3", ...props }, ref) => (
     <Component
       ref={ref}
-      className={cn("font-semibold text-lg text-surface-50 tracking-tight", className)}
+      className={cn(
+        "font-semibold text-lg text-content-primary tracking-tight",
+        className,
+      )}
       {...props}
     />
   ),
@@ -117,7 +116,7 @@ export const CardDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <p
     ref={ref}
-    className={cn("text-sm text-surface-400 mt-1.5 leading-relaxed", className)}
+    className={cn("text-sm text-content-secondary mt-1.5 leading-relaxed", className)}
     {...props}
   />
 ));
@@ -159,7 +158,7 @@ export const CardFooter = React.forwardRef<HTMLDivElement, CardFooterProps>(
     <div
       ref={ref}
       className={cn(
-        "border-t border-white/5",
+        "border-t border-hairline",
         "flex items-center gap-3",
         padded ? "px-6 py-5" : "px-5 py-4",
         className,

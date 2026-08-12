@@ -1,5 +1,4 @@
 import React, { useEffect, memo } from "react";
-import { Icon } from "./Icons";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
@@ -25,7 +24,7 @@ export const ImagePreviewModal: React.FC<ImagePreviewModalProps> = memo(
         isOpen={isOpen}
         onClose={handleClose}
         size="xl"
-        className="bg-black/90 border-white/10 p-0 overflow-hidden"
+        className="bg-black/90 border-hairline p-0 overflow-hidden"
         showCloseButton={true}
         title="Review Photo"
         footer={

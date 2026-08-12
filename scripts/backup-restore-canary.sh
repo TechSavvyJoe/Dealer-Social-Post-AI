@@ -66,6 +66,7 @@ docker run --rm \
 
 container_id="$(docker run --detach \
   --env ADMIN_LOGIN_USERNAME=canary.admin \
+  --env SALESPERSON_PIN_PEPPER=ci-pin-pepper-0123456789abcdef0123456789 \
   --env ADMIN_LOGIN_PASSWORD="${canary_login_secret}" \
   --env GEMINI_API_KEY=test-backup-placeholder \
   --env POCKETBASE_R2_BACKUPS_ENABLED=true \
