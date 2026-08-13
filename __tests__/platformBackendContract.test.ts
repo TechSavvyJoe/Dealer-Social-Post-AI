@@ -30,10 +30,19 @@ describe("platform contracts at the PocketBase boundary", () => {
   it("persists canonical platform-valid social identities", () => {
     const helpers = loadPocketBaseHelpers();
 
+    // A Facebook @mention only resolves against the Page username, so the
+    // spaced display name is closed up rather than stored verbatim.
     expect(
       helpers.normalizeDealerSocialField(
         "facebook_page_tag",
         "  @Bob Maxey\nFord of Howell  ",
+      ),
+    ).toBe("BobMaxeyFordofHowell");
+    // LinkedIn resolves a company from a typed suggestion and keeps its spaces.
+    expect(
+      helpers.normalizeDealerSocialField(
+        "linkedin_company_tag",
+        "  Bob Maxey  Ford of Howell  ",
       ),
     ).toBe("Bob Maxey Ford of Howell");
     expect(
@@ -69,7 +78,7 @@ describe("platform contracts at the PocketBase boundary", () => {
         false,
       ),
     ).toEqual({
-      facebook_page_tag: "Bob Maxey Ford of Howell",
+      facebook_page_tag: "BobMaxeyFordofHowell",
       instagram_handle: "bobmaxeyford",
     });
   });

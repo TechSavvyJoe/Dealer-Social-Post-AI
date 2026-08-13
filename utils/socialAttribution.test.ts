@@ -24,17 +24,40 @@ describe("dealership social attribution", () => {
   });
 
   it("uses only the handle belonging to the selected destination", () => {
-    expect(dealershipMentionFor("facebook_feed", dealer)).toBe(
-      "@Bob Maxey Ford of Howell",
-    );
-    expect(dealershipMentionFor("marketplace", dealer)).toBe(
-      "@Bob Maxey Ford of Howell",
-    );
+    // A Facebook @mention resolves against the Page username, so the store's
+    // spaced display name is closed up. "@Bob Maxey Ford of Howell" is not a
+    // mention Facebook can link — it renders as plain text plus a stray tag.
+    expect(dealershipMentionFor("facebook_feed", dealer)).toBe("@BobMaxeyFordofHowell");
+    expect(dealershipMentionFor("marketplace", dealer)).toBe("@BobMaxeyFordofHowell");
     expect(dealershipMentionFor("instagram_reel", dealer)).toBe("@bobmaxeyford");
     expect(dealershipMentionFor("tiktok", dealer)).toBe("@bobmaxeyford");
     expect(dealershipMentionFor("x_twitter", dealer)).toBe("@BobMaxeyFord");
     expect(dealershipMentionFor("linkedin", dealer)).toBe("@bob-maxey-ford");
     expect(dealershipMentionFor("gbp", dealer)).toBe("");
+  });
+
+  it("closes up a Facebook Page tag so the mention can actually resolve", () => {
+    // Joe pastes the store's display name; Facebook only links the username.
+    expect(
+      normalizeDealerSocialProfileValue(
+        "facebook_page_tag",
+        "Bob Maxey Ford of Howell",
+      ),
+    ).toBe("BobMaxeyFordofHowell");
+    expect(
+      normalizeDealerSocialProfileValue("facebook_page_tag", "@BobMaxeyFordofHowell"),
+    ).toBe("BobMaxeyFordofHowell");
+    // Periods are legal in a Page username and must survive.
+    expect(
+      normalizeDealerSocialProfileValue("facebook_page_tag", "bob.maxey.ford"),
+    ).toBe("bob.maxey.ford");
+    // LinkedIn is a different shape of value and keeps its spaced name.
+    expect(
+      normalizeDealerSocialProfileValue(
+        "linkedin_company_tag",
+        "Bob Maxey Ford of Howell",
+      ),
+    ).toBe("Bob Maxey Ford of Howell");
   });
 
   it("normalizes platform usernames without mistaking content URLs for handles", () => {
@@ -131,15 +154,15 @@ describe("dealership social attribution", () => {
 
   it("appends a mention once without altering the original copy", () => {
     expect(appendDealershipMention("Delivery day!", "facebook_feed", dealer)).toBe(
-      "Delivery day!\n\n@Bob Maxey Ford of Howell",
+      "Delivery day!\n\n@BobMaxeyFordofHowell",
     );
     expect(
       appendDealershipMention(
-        "Delivery day!\n\n@Bob Maxey Ford of Howell",
+        "Delivery day!\n\n@BobMaxeyFordofHowell",
         "facebook_feed",
         dealer,
       ),
-    ).toBe("Delivery day!\n\n@Bob Maxey Ford of Howell");
+    ).toBe("Delivery day!\n\n@BobMaxeyFordofHowell");
   });
 
   it("does not treat a longer handle as the configured dealership mention", () => {

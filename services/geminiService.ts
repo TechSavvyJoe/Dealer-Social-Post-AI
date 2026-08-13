@@ -46,7 +46,10 @@ import {
 import { generateTextViaClaude, shouldFallbackToClaude } from "./claudeAdapter";
 import { generateImageViaOpenAI, shouldFallbackToOpenAI } from "./openaiAdapter";
 import { requestCache } from "../utils/requestCache";
-import { logEvent as logTelemetry } from "../utils/telemetry";
+import {
+  logEvent as logTelemetry,
+  logError as logImageDegraded,
+} from "../utils/telemetry";
 import { cleanSocialCaption, ensureUsableCaption } from "../utils/captionQuality";
 import { z } from "zod";
 import { isSafeOnImageHeadline, ON_IMAGE_TEXT_BUDGET } from "./promptsV2";
@@ -1371,10 +1374,19 @@ export const generateSocialPost = async (
         "[generateSocialPost] AI image failed; shipping original photo with caption",
         err,
       );
-      logTelemetry("image.fallback.original", {
+      const task = imageTaskForTier(imageTier);
+      // Error level on purpose: only error events are beaconed to
+      // /api/telemetry, and this is the one signal that means the product
+      // silently did nothing to a salesperson's photo. As an info event it
+      // never left the browser, so a months-long degradation was invisible
+      // from the server. `task` and `fallbackCount` are on the server-side
+      // payload allowlist; `reason` is kept for the local buffer and dropped
+      // server-side, so no error text is persisted.
+      logImageDegraded("image.fallback.original", {
+        task,
+        fallbackCount: attemptedModelsFromError(err),
         reason: err instanceof Error ? err.message : String(err),
       });
-      const task = imageTaskForTier(imageTier);
       return {
         value: normalisedImage,
         aiMeta: recordExecution(

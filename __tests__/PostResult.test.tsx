@@ -632,7 +632,8 @@ describe("PostResult job-first flow", () => {
       destination: "facebook_feed",
       field: "facebook_page_tag",
       value: "Bob Maxey Ford of Howell",
-      mention: "@Bob Maxey Ford of Howell",
+      // Closed up, because Facebook only links the Page username.
+      mention: "@BobMaxeyFordofHowell",
     },
     {
       destination: "instagram_feed",
@@ -717,7 +718,7 @@ describe("PostResult job-first flow", () => {
       }),
     );
     expect(writeText.mock.calls[0]?.[0]).toContain(
-      "Visible primary caption.\n\n@Bob Maxey Ford of Howell",
+      "Visible primary caption.\n\n@BobMaxeyFordofHowell",
     );
     expect(writeText.mock.calls[0]?.[0]).not.toContain("Hidden Facebook caption.");
 
@@ -728,7 +729,7 @@ describe("PostResult job-first flow", () => {
       }),
     );
     expect(writeText.mock.calls[1]?.[0]).toContain(
-      "Hidden Facebook caption.\n\n@Bob Maxey Ford of Howell",
+      "Hidden Facebook caption.\n\n@BobMaxeyFordofHowell",
     );
   });
 

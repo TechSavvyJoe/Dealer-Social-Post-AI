@@ -2676,7 +2676,19 @@ function normalizeDealerSocialField(field, rawValue) {
     throw new Error("Social profiles must be saved as a Page name or handle");
   }
 
-  if (field === "facebook_page_tag" || field === "linkedin_company_tag") {
+  // A Facebook @mention resolves only against the Page username, which never
+  // contains spaces: storing the spaced display name rendered "@Bob Maxey Ford
+  // of Howell" and linked to nothing. Close the value up here as well, so a
+  // stale or non-browser client cannot persist a mention that cannot resolve.
+  if (field === "facebook_page_tag") {
+    value = value.replace(/[^A-Za-z0-9.]+/g, "").replace(/^\.+|\.+$/g, "");
+    if (!value) return "";
+    return assertString(value, DEALER_TEXT_FIELD_LIMITS[field]);
+  }
+
+  // LinkedIn keeps its spaced company display name: that composer resolves a
+  // company from a typed suggestion rather than from a username.
+  if (field === "linkedin_company_tag") {
     value = value
       .replace(/[\u0000-\u001f\u007f]+/g, " ")
       .replace(/\s+/g, " ")

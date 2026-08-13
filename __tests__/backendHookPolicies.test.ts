@@ -749,8 +749,10 @@ describe("PocketBase auth helper invariants", () => {
       false,
       false,
     );
+    // The Facebook Page tag is closed up so the mention can resolve; the
+    // LinkedIn company name legitimately keeps its spacing.
     expect(mutation).toEqual({
-      facebook_page_tag: "Bob Maxey Ford of Howell",
+      facebook_page_tag: "BobMaxeyFordofHowell",
       linkedin_company_tag: "bob-maxey-ford",
     });
 
