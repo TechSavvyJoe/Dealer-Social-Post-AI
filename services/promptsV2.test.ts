@@ -130,3 +130,42 @@ describe("legacy image prompt fallback", () => {
     expect(editPrompt).toContain("NO EXACT HEADLINE IS APPROVED");
   });
 });
+
+describe("image layout art direction", () => {
+  const prompt = () =>
+    generateImagePromptV2(StyleOption.Modern, "Bob Maxey Ford of Howell", false);
+
+  // Each assertion below pins a defect observed in a real render against the
+  // production image model. Removing any of these rules reintroduces a
+  // specific, verified failure — not a hypothetical style preference.
+  it("forbids the fabricated-OEM-emblem render defect", () => {
+    // A render invented a Ford blue-oval badge when no logo image was supplied.
+    // Fabricating a manufacturer trademark is a legal exposure, not a style bug.
+    expect(prompt()).toContain("NEVER draw, redraw, recreate, or approximate a");
+    expect(prompt()).toContain("render the store identity as TEXT ONLY");
+  });
+
+  it("forbids the drawn-frame render defect", () => {
+    // A render read "margin on all four sides" as a literal white border and
+    // inset the photograph inside it.
+    expect(prompt()).toContain("The margin is interior breathing room only");
+    expect(prompt()).toContain(
+      "photograph always bleeds fully to all four canvas edges",
+    );
+  });
+
+  it("forbids the edge-to-edge headline defect", () => {
+    // A render stretched the headline to the canvas edge instead of sizing it
+    // to fit inside the margin.
+    expect(prompt()).toContain("SIZE TO FIT THE MARGIN");
+  });
+
+  it("requires a single grid, real type hierarchy, and no invented icons", () => {
+    // The first render placed default-weight type at the edge, parked the store
+    // name in an unrelated corner, and floated a clip-art key.
+    const built = prompt();
+    expect(built).toContain("layout_and_type_craft");
+    expect(built).toContain("Never set two elements at nearly the same size");
+    expect(built).toContain("NEVER INVENT GRAPHICS");
+  });
+});

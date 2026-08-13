@@ -24,7 +24,18 @@ export default defineConfig({
     // config and check script. Root `npm ci` does not install its deps, so
     // running its suites from here fails in CI while passing for anyone who
     // has run npm install inside that directory.
-    exclude: ["**/node_modules/**", "**/dist/**", "**/e2e/**", "automation/**"],
+    //
+    // .claude/worktrees/ holds git worktrees for in-flight branches. They carry
+    // a full second copy of the suite, so without this a leftover worktree
+    // silently doubles the local run and reports failures from code that is no
+    // longer on main. CI checks out clean and never sees them.
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/e2e/**",
+      "automation/**",
+      ".claude/**",
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
