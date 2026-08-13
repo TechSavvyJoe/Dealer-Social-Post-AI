@@ -392,6 +392,42 @@ describe("GeminiService model routing", () => {
     expect(imageCalls).toBe(1);
   });
 
+  it("reports an original-photo fallback at error level so the server sees it", async () => {
+    // Only error-level telemetry is beaconed to /api/telemetry and counted in
+    // the admin health panel's recentErrors. Shipping the untouched photo is
+    // the product silently doing nothing, so it has to reach the server —
+    // as an info event this degradation was invisible outside the browser.
+    const telemetry = await import("../utils/telemetry");
+    const errorSpy = vi.spyOn(telemetry, "logError");
+
+    mockGenerateContent.mockImplementation((request) => {
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        return Promise.reject(new Error("503 model unavailable"));
+      }
+      return Promise.resolve({
+        text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,original-photo",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Test Dealer",
+    );
+
+    expect(result.aiMeta.image.provider).toBe("original");
+    const degraded = errorSpy.mock.calls.find(
+      ([name]) => name === "image.fallback.original",
+    );
+    expect(degraded).toBeDefined();
+    // Both keys are on the server-side payload allowlist, so they survive
+    // sanitization and make the stored event actionable.
+    expect(degraded?.[1]).toMatchObject({ task: "image_standard" });
+    expect(typeof degraded?.[1]?.fallbackCount).toBe("number");
+    errorSpy.mockRestore();
+  });
+
   it("keeps the rendered creative when every rung is flagged only on craft grounds", async () => {
     // The reviewer stays unhappy through regeneration and correction, but only
     // ever reports word-count/sentence findings. Discarding the render here

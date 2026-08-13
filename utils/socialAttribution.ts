@@ -137,6 +137,27 @@ const normalizeUsernameTag = (
   return cleaned ? `@${cleaned}` : "";
 };
 
+/**
+ * A Facebook @mention only resolves against the Page *username*, which never
+ * contains spaces. Pasting the store's display name ("Bob Maxey Ford of
+ * Howell") previously stored it verbatim and rendered "@Bob Maxey Ford of
+ * Howell", which links to nothing — so close the value up rather than reject
+ * it. Page usernames allow letters, numbers, and periods only.
+ *
+ * LinkedIn deliberately keeps its spaced display name: that composer resolves
+ * a company from a typed suggestion, so it is not the same shape of value.
+ */
+const normalizeFacebookPageTag = (value: string | null | undefined): string => {
+  const cleaned = String(value || "")
+    .trim()
+    .normalize("NFKC")
+    .replace(/^@+/, "")
+    .replace(/[^A-Za-z0-9.]+/g, "")
+    .replace(/^\.+|\.+$/g, "")
+    .slice(0, 100);
+  return cleaned ? `@${cleaned}` : "";
+};
+
 /** Normalize pasted handles/URLs without storing markup or multiline content. */
 export const normalizeSocialTag = (value: string | null | undefined): string => {
   const cleaned = tagFromUrl(
@@ -172,7 +193,9 @@ export const normalizeDealerSocialProfileValue = (
         ? normalizeUsernameTag(value, "tiktok")
         : field === "x_handle"
           ? normalizeUsernameTag(value, "x")
-          : normalizeSocialTag(facebookPageValue);
+          : field === "facebook_page_tag"
+            ? normalizeFacebookPageTag(facebookPageValue)
+            : normalizeSocialTag(facebookPageValue);
   return normalized.replace(/^@/u, "");
 };
 
