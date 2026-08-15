@@ -74,6 +74,24 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Install metadata must not be served stale. Versioned icon URLs keep the
+  // pixels immutable, while the stable manifest URL must describe the newest
+  // icon set before a user adds the app to their Home Screen.
+  if (url.pathname === "/manifest.webmanifest") {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (res && res.status === 200 && res.type === "basic") {
+            const copy = res.clone();
+            caches.open(STATIC_CACHE).then((cache) => cache.put(req, copy));
+          }
+          return res;
+        })
+        .catch(() => caches.match(req)),
+    );
+    return;
+  }
+
   // Stale-while-revalidate for static assets.
   event.respondWith(
     caches.match(req).then((cached) => {

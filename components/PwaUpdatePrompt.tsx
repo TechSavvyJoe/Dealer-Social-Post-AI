@@ -66,7 +66,7 @@ export const PwaUpdatePrompt: React.FC<PwaUpdatePromptProps> = ({
     };
 
     void navigator.serviceWorker
-      .register("/sw.js", { scope: "/" })
+      .register("/sw.js", { scope: "/", updateViaCache: "none" })
       .then((nextRegistration) => {
         if (disposed) return;
         registration = nextRegistration;
@@ -140,10 +140,9 @@ export const PwaUpdatePrompt: React.FC<PwaUpdatePromptProps> = ({
     <section
       role="region"
       aria-labelledby={titleId}
-      className="fixed left-1/2 z-[110] flex max-w-[30rem] -translate-x-1/2 flex-wrap items-center gap-3 rounded-2xl border border-primary-300/30 bg-surface-900/95 p-3 text-surface-50 shadow-elevation-4 backdrop-blur-xl"
+      className="pwa-update-prompt fixed left-1/2 z-[110] flex max-w-[30rem] -translate-x-1/2 flex-wrap items-center gap-3 rounded-2xl border border-primary-300/30 bg-surface-900/95 p-3 text-surface-50 shadow-elevation-4 backdrop-blur-xl"
       style={{
         width: "calc(100% - max(1rem, var(--sal)) - max(1rem, var(--sar)))",
-        bottom: "max(1rem, var(--sab))",
         marginLeft: "calc((var(--sal) - var(--sar)) / 2)",
       }}
     >
@@ -155,7 +154,7 @@ export const PwaUpdatePrompt: React.FC<PwaUpdatePromptProps> = ({
         <p id={titleId} className="text-sm font-semibold">
           A new version is ready
         </p>
-        <p className="text-xs text-surface-300">
+        <p className="hidden text-xs text-surface-300 sm:block">
           Update now, or finish your current work and update later.
         </p>
         {updateError && (

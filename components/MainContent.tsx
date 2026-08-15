@@ -463,10 +463,20 @@ export const MainContent: React.FC<MainContentProps> = ({
     displayedStep === AppStep.CAPTURE ||
     displayedStep === AppStep.CUSTOMIZE ||
     displayedStep === AppStep.GENERATING;
+  const ownsViewportHeight =
+    displayedStep === AppStep.LOGIN || displayedStep === AppStep.GENERATING;
+  const contentLayout = ownsViewportHeight ? "viewport" : "content";
 
   return (
-    <PageTransition pageKey={String(displayedStep)}>
-      <div className="flex h-full min-h-0 w-full flex-1 flex-col">
+    <PageTransition pageKey={String(displayedStep)} layout={contentLayout}>
+      <div
+        className={
+          ownsViewportHeight
+            ? "flex h-full min-h-0 w-full flex-1 flex-col"
+            : "flex min-h-full w-full flex-none flex-col"
+        }
+        data-page-content-layout={contentLayout}
+      >
         {showJourneyProgress && <ProgressSteps activeStep={displayedStep} />}
         {stepContent()}
       </div>

@@ -422,6 +422,22 @@
     }
   }
 
+  /* Keep release controls away from the phone's Home indicator and the
+     app's bottom task controls. A waiting worker used to render a wrapping,
+     fixed-bottom card over Capture/Result and looked exactly like clipped
+     content in the installed iPhone app. */
+  .pwa-update-prompt {
+    top: calc(var(--header-safe-top) + 4.75rem);
+    bottom: auto;
+  }
+
+  @media (min-width: 640px) {
+    .pwa-update-prompt {
+      top: auto;
+      bottom: max(1rem, var(--sab));
+    }
+  }
+
   /* Dialogs are portaled to body, outside the safe-area-padded app root. */
   .modal-viewport {
     padding-top: max(0.5rem, var(--sat));

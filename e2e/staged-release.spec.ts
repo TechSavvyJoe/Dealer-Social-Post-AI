@@ -215,14 +215,20 @@ test.describe("Hosted staged release", () => {
       expect(manifest.description).toContain("dealership-ready social posts");
       expect(manifest.icons).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ src: "/icon-192.png", sizes: "192x192" }),
-          expect.objectContaining({ src: "/icon-512.png", sizes: "512x512" }),
+          expect.objectContaining({
+            src: "/dealer-social-icon-v2-192.png",
+            sizes: "192x192",
+          }),
+          expect.objectContaining({
+            src: "/dealer-social-icon-v2-512.png",
+            sizes: "512x512",
+          }),
         ]),
       );
       for (const asset of [
-        "/icon-192.png",
-        "/icon-512.png",
-        "/apple-touch-icon.png",
+        "/dealer-social-icon-v2-192.png",
+        "/dealer-social-icon-v2-512.png",
+        "/dealer-social-icon-v2-180.png",
         "/brand-mark.svg",
       ]) {
         const response = await getSameOrigin(asset);

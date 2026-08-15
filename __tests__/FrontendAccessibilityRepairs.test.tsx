@@ -121,6 +121,10 @@ describe("frontend accessibility repairs", () => {
     const onReload = vi.fn();
     render(<PwaUpdatePrompt enabled onReload={onReload} />);
     await waitFor(() => expect(serviceWorker.register).toHaveBeenCalledTimes(1));
+    expect(serviceWorker.register).toHaveBeenCalledWith("/sw.js", {
+      scope: "/",
+      updateViaCache: "none",
+    });
 
     act(() => {
       registration.dispatchEvent(new Event("updatefound"));
@@ -129,6 +133,9 @@ describe("frontend accessibility repairs", () => {
     });
 
     const updateButton = await screen.findByRole("button", { name: "Update" });
+    expect(screen.getByRole("region", { name: "A new version is ready" })).toHaveClass(
+      "pwa-update-prompt",
+    );
     expect(screen.getByRole("button", { name: "Update later" })).toBeVisible();
     await user.click(updateButton);
 
