@@ -20,13 +20,13 @@ type InstallManifest = {
 };
 
 const installPngs = [
-  { src: "/dealer-social-icon-v2-180.png", size: 180 },
-  { src: "/dealer-social-icon-v2-192.png", size: 192 },
-  { src: "/dealer-social-icon-v2-512.png", size: 512 },
-  { src: "/dealer-social-icon-v2-1024.png", size: 1024 },
-  { src: "/dealer-social-icon-v2-maskable-192.png", size: 192 },
-  { src: "/dealer-social-icon-v2-maskable-512.png", size: 512 },
-  { src: "/dealer-social-icon-v2-maskable-1024.png", size: 1024 },
+  { src: "/dealer-social-dsp-v3-180.png", size: 180 },
+  { src: "/dealer-social-dsp-v3-192.png", size: 192 },
+  { src: "/dealer-social-dsp-v3-512.png", size: 512 },
+  { src: "/dealer-social-dsp-v3-1024.png", size: 1024 },
+  { src: "/dealer-social-dsp-v3-maskable-192.png", size: 192 },
+  { src: "/dealer-social-dsp-v3-maskable-512.png", size: 512 },
+  { src: "/dealer-social-dsp-v3-maskable-1024.png", size: 1024 },
 ] as const;
 
 async function expectPng(
@@ -108,7 +108,9 @@ async function expectMaskableSafeZone(page: Page, sources: string[]) {
           const red = pixels[index];
           const green = pixels[index + 1];
           const blue = pixels[index + 2];
-          if (red < 210 || green < 210 || blue < 210) continue;
+          const isIvory = red >= 210 && green >= 210 && blue >= 205;
+          const isCoral = red >= 220 && green >= 55 && green <= 175 && blue <= 135;
+          if (!isIvory && !isCoral) continue;
           const pixel = index / 4;
           const x = pixel % canvas.width;
           const y = Math.floor(pixel / canvas.width);
@@ -126,8 +128,8 @@ async function expectMaskableSafeZone(page: Page, sources: string[]) {
   }, sources);
 
   // Adaptive launchers guarantee only the central circle with radius 40% of
-  // the canvas. The light card is the essential mark, so every one of its
-  // pixels must remain inside that circle while the blue field stays full bleed.
+  // the canvas. Both the ivory D/P and coral S are essential, so every glyph
+  // pixel must remain inside that circle while the navy field stays full bleed.
   for (const result of results) {
     expect(result.maximumLightPixelDistanceRatio).toBeLessThanOrEqual(0.4);
   }
@@ -189,7 +191,7 @@ test.describe("Home Screen PWA contracts", () => {
     await expect(manifestLink).toHaveAttribute("href", "/manifest.webmanifest");
     await expect(appleTouchIcon).toHaveAttribute(
       "href",
-      "/dealer-social-icon-v2-180.png",
+      "/dealer-social-dsp-v3-180.png",
     );
     await expect(appleTouchIcon).toHaveAttribute("sizes", "180x180");
     await expect(
@@ -219,37 +221,37 @@ test.describe("Home Screen PWA contracts", () => {
 
     const requiredManifestIcons: ManifestIcon[] = [
       {
-        src: "/dealer-social-icon-v2-192.png",
+        src: "/dealer-social-dsp-v3-192.png",
         sizes: "192x192",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/dealer-social-icon-v2-512.png",
+        src: "/dealer-social-dsp-v3-512.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/dealer-social-icon-v2-1024.png",
+        src: "/dealer-social-dsp-v3-1024.png",
         sizes: "1024x1024",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/dealer-social-icon-v2-maskable-192.png",
+        src: "/dealer-social-dsp-v3-maskable-192.png",
         sizes: "192x192",
         type: "image/png",
         purpose: "maskable",
       },
       {
-        src: "/dealer-social-icon-v2-maskable-512.png",
+        src: "/dealer-social-dsp-v3-maskable-512.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "maskable",
       },
       {
-        src: "/dealer-social-icon-v2-maskable-1024.png",
+        src: "/dealer-social-dsp-v3-maskable-1024.png",
         sizes: "1024x1024",
         type: "image/png",
         purpose: "maskable",
@@ -271,20 +273,20 @@ test.describe("Home Screen PWA contracts", () => {
       installPngs.map(({ src, size }) => expectPng(request, src, size)),
     );
     await expectFullBleedArtwork(page, [
-      "/dealer-social-icon-v2-180.png",
-      "/dealer-social-icon-v2-maskable-192.png",
-      "/dealer-social-icon-v2-maskable-512.png",
-      "/dealer-social-icon-v2-maskable-1024.png",
+      "/dealer-social-dsp-v3-180.png",
+      "/dealer-social-dsp-v3-maskable-192.png",
+      "/dealer-social-dsp-v3-maskable-512.png",
+      "/dealer-social-dsp-v3-maskable-1024.png",
     ]);
     await expectMaskableSafeZone(page, [
-      "/dealer-social-icon-v2-maskable-192.png",
-      "/dealer-social-icon-v2-maskable-512.png",
-      "/dealer-social-icon-v2-maskable-1024.png",
+      "/dealer-social-dsp-v3-maskable-192.png",
+      "/dealer-social-dsp-v3-maskable-512.png",
+      "/dealer-social-dsp-v3-maskable-1024.png",
     ]);
     for (const size of [192, 512, 1024]) {
       const [regular, maskable] = await Promise.all([
-        request.get(`/dealer-social-icon-v2-${size}.png`),
-        request.get(`/dealer-social-icon-v2-maskable-${size}.png`),
+        request.get(`/dealer-social-dsp-v3-${size}.png`),
+        request.get(`/dealer-social-dsp-v3-maskable-${size}.png`),
       ]);
       expect((await regular.body()).equals(await maskable.body())).toBe(false);
     }

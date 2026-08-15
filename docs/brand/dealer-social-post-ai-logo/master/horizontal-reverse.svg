@@ -1,27 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 88">
-  <g transform="scale(.7333333)">
-    <rect width="120" height="120" rx="28" fill="#07101f"/>
-    <rect x="8" y="8" width="104" height="104" rx="23" fill="#4f7cff"/>
-    <rect x="15" y="15" width="90" height="90" rx="17" fill="#07101f"/>
-    <path d="M33 81 39 61q2-6 8-6h26q6 0 8 6l6 20v8H33Z" fill="#4f7cff"/>
-    <path d="m46 61-4 12h36l-4-12Z" fill="#f8fafc"/>
-    <rect x="38" y="77" width="9" height="5" rx="2.5" fill="#f8fafc"/>
-    <rect x="73" y="77" width="9" height="5" rx="2.5" fill="#f8fafc"/>
-    <rect x="48" y="84" width="24" height="3" rx="1.5" fill="#cbdcff"/>
-    <circle cx="24" cy="48" r="7" fill="#f8fafc"/>
-    <path d="M16 88V66q0-9 8-9h1q8 0 8 9v22Z" fill="#f8fafc"/>
-    <path d="m30 61 23-15 5 8-25 18Z" fill="#f8fafc"/>
-    <circle cx="96" cy="48" r="7" fill="#cbdcff"/>
-    <path d="M87 88V66q0-9 8-9h1q8 0 8 9v22Z" fill="#cbdcff"/>
-    <path d="m90 61-23-15-5 8 25 18Z" fill="#cbdcff"/>
-    <circle cx="60" cy="48" r="5" fill="#67e8f9"/>
-    <circle cx="60" cy="48" r="2.3" fill="#07101f"/>
-    <rect x="58.5" y="53" width="3" height="9" rx="1.5" fill="#67e8f9"/>
-    <path d="m60 61 5 4-5 4-3-3 3-2-3-2Z" fill="#67e8f9"/>
-    <rect x="18" y="92" width="84" height="3" rx="1.5" fill="#26334a"/>
-    <circle cx="24" cy="101" r="4" fill="#4f7cff"/>
-    <rect x="33" y="98" width="32" height="6" rx="3" fill="#26334a"/>
-    <path d="m93 19 3 8 8 3-8 3-3 8-3-8-8-3 8-3Z" fill="#67e8f9"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 104" role="img" aria-labelledby="reverse-title reverse-description">
+  <title id="reverse-title">Dealer Social Post AI</title>
+  <desc id="reverse-description">Reverse horizontal v3 Campaign Aperture DSP combination mark for dark backgrounds.</desc>
+  <defs>
+    <linearGradient id="dsp-rev-bg" x1="18" y1="8" x2="101" y2="112" gradientUnits="userSpaceOnUse"><stop stop-color="#07182B"/><stop offset="0.58" stop-color="#0C2B50"/><stop offset="1" stop-color="#123A67"/></linearGradient>
+    <radialGradient id="dsp-rev-light" cx="0" cy="0" r="1" gradientTransform="translate(72 24) rotate(112) scale(82)" gradientUnits="userSpaceOnUse"><stop stop-color="#2F6DA5" stop-opacity="0.42"/><stop offset="1" stop-color="#2F6DA5" stop-opacity="0"/></radialGradient>
+    <linearGradient id="dsp-rev-ivory" x1="0" y1="28" x2="0" y2="93" gradientUnits="userSpaceOnUse"><stop stop-color="#FFFFFF"/><stop offset="1" stop-color="#E8EADF"/></linearGradient>
+    <linearGradient id="dsp-rev-coral" x1="48" y1="31" x2="70" y2="90" gradientUnits="userSpaceOnUse"><stop stop-color="#FF8A62"/><stop offset="1" stop-color="#FF5A44"/></linearGradient>
+    <filter id="dsp-rev-shadow" x="-25%" y="-25%" width="150%" height="170%" color-interpolation-filters="sRGB"><feDropShadow dx="0" dy="2" stdDeviation="1.5" flood-color="#020817" flood-opacity="0.48"/></filter>
+  </defs>
+  <g transform="translate(6 6) scale(.7666667)" aria-hidden="true">
+    <rect width="120" height="120" rx="27" fill="url(#dsp-rev-bg)"/>
+    <rect width="120" height="120" rx="27" fill="url(#dsp-rev-light)"/>
+    <g filter="url(#dsp-rev-shadow)">
+      <path d="M23 29h10c11 0 17 9 17 21v20c0 12-6 21-17 21H23V29Zm9 10v42h1c5 0 8-4 8-11V50c0-7-3-11-8-11h-1Z" fill="#031126" fill-opacity="0.75" transform="translate(0 2)"/>
+      <path d="M76 31h9c10 0 16 7 16 18s-6 18-16 18h-1v24h-8V31Zm8 9v18h1c5 0 7-3 7-9s-2-9-7-9h-1Z" fill="#031126" fill-opacity="0.75" transform="translate(0 2)"/>
+      <path d="M69 38c-4-5-10-6-14-2-4 5-1 10 6 13l5 2c7 3 9 9 7 16-2 9-7 18-14 19-6 0-10-4-12-8" fill="none" stroke="#8F2C2B" stroke-width="9" stroke-linecap="butt" stroke-linejoin="round" transform="translate(0 2)"/>
+      <path d="M23 29h10c11 0 17 9 17 21v20c0 12-6 21-17 21H23V29Zm9 10v42h1c5 0 8-4 8-11V50c0-7-3-11-8-11h-1Z" fill="url(#dsp-rev-ivory)"/>
+      <path d="M76 31h9c10 0 16 7 16 18s-6 18-16 18h-1v24h-8V31Zm8 9v18h1c5 0 7-3 7-9s-2-9-7-9h-1Z" fill="url(#dsp-rev-ivory)"/>
+      <path d="M69 38c-4-5-10-6-14-2-4 5-1 10 6 13l5 2c7 3 9 9 7 16-2 9-7 18-14 19-6 0-10-4-12-8" fill="none" stroke="url(#dsp-rev-coral)" stroke-width="9" stroke-linecap="butt" stroke-linejoin="round"/>
+    </g>
   </g>
-  <text id="wordmark" x="108" y="54" font-family="Inter" font-size="30" font-weight="800" letter-spacing="-0.8" fill="#f8fafc">Dealer Social Post AI</text>
+  <text id="wordmark" x="122" y="63" direction="ltr" font-family="Inter, Arial, sans-serif" font-size="32" font-weight="800" letter-spacing="-1" fill="#F5F6F0">Dealer Social Post AI</text>
 </svg>

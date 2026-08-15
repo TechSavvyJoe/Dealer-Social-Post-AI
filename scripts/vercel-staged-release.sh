@@ -438,35 +438,64 @@ if (!manifestResponse.headers.get("content-type")?.includes("manifest+json")) {
   throw new Error(`${label} returned an invalid web app manifest content type.`);
 }
 const manifest = JSON.parse(manifestText);
+const expectedManifestIcons = [
+  ["/dealer-social-dsp-v3-192.png", "192x192", "image/png", "any"],
+  ["/dealer-social-dsp-v3-512.png", "512x512", "image/png", "any"],
+  ["/dealer-social-dsp-v3-1024.png", "1024x1024", "image/png", "any"],
+  ["/dealer-social-dsp-v3-maskable-192.png", "192x192", "image/png", "maskable"],
+  ["/dealer-social-dsp-v3-maskable-512.png", "512x512", "image/png", "maskable"],
+  ["/dealer-social-dsp-v3-maskable-1024.png", "1024x1024", "image/png", "maskable"],
+  ["/dsp-brand-mark-v3-monochrome.svg", "any", "image/svg+xml", "monochrome"],
+];
 if (
   manifest.name !== "Dealer Social Post AI" ||
   manifest.display !== "standalone" ||
   !Array.isArray(manifest.icons) ||
-  !manifest.icons.some((icon) => icon?.src === "/dealer-social-icon-v2-192.png") ||
-  !manifest.icons.some((icon) => icon?.src === "/dealer-social-icon-v2-512.png")
+  !expectedManifestIcons.every(([src, sizes, type, purpose]) =>
+    manifest.icons.some(
+      (icon) =>
+        icon?.src === src &&
+        icon?.sizes === sizes &&
+        icon?.type === type &&
+        icon?.purpose === purpose,
+    ),
+  )
 ) {
   throw new Error(`${label} web app manifest is incomplete.`);
 }
 for (const icon of [
-  "/dealer-social-icon-v2-192.png",
-  "/dealer-social-icon-v2-512.png",
-  "/dealer-social-icon-v2-180.png",
+  "/dealer-social-dsp-v3-180.png",
+  "/dealer-social-dsp-v3-192.png",
+  "/dealer-social-dsp-v3-512.png",
+  "/dealer-social-dsp-v3-1024.png",
+  "/dealer-social-dsp-v3-maskable-192.png",
+  "/dealer-social-dsp-v3-maskable-512.png",
+  "/dealer-social-dsp-v3-maskable-1024.png",
+  "/dealer-social-favicon-v3-32.png",
 ]) {
   const { response, bytes } = await fetchBytes(icon);
   if (
     !response.headers.get("content-type")?.startsWith("image/png") ||
+    !response.headers.get("cache-control")?.includes("immutable") ||
     !bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))
   ) {
     throw new Error(`${label} returned an invalid PNG app icon for ${icon}.`);
   }
 }
-const { response: markResponse, bytes: markBytes } =
-  await fetchBytes("/brand-mark.svg");
-if (
-  !markResponse.headers.get("content-type")?.startsWith("image/svg+xml") ||
-  !markBytes.toString("utf8", 0, 200).includes("<svg")
-) {
-  throw new Error(`${label} returned an invalid SVG brand mark.`);
+for (const mark of [
+  "/dsp-brand-mark-v3.svg",
+  "/dsp-brand-mark-v3-micro.svg",
+  "/dsp-brand-mark-v3-maskable.svg",
+  "/dsp-brand-mark-v3-monochrome.svg",
+]) {
+  const { response, bytes } = await fetchBytes(mark);
+  if (
+    !response.headers.get("content-type")?.startsWith("image/svg+xml") ||
+    !response.headers.get("cache-control")?.includes("immutable") ||
+    !bytes.toString("utf8", 0, 200).includes("<svg")
+  ) {
+    throw new Error(`${label} returned an invalid SVG brand mark for ${mark}.`);
+  }
 }
 
 const { response: workerResponse, text: worker } = await fetchText("/sw.js");
