@@ -13,6 +13,7 @@ import { useAppStore } from "./stores/appStore";
 import { Modal } from "./components/ui/Modal";
 import { Button } from "./components/ui/Button";
 import { History, LayoutDashboard, Settings } from "lucide-react";
+import { PwaUpdatePrompt } from "./components/PwaUpdatePrompt";
 
 // Lazy load heavyweight modals
 const LazySettingsModal = React.lazy(() =>
@@ -198,6 +199,7 @@ const AppContent: React.FC = () => {
     >
       <OfflineBanner />
       {isImpersonating && <ImpersonationBanner />}
+      <PwaUpdatePrompt />
       {currentDealer && (step !== AppStep.RESULT || isDesktopLayout) && (
         <Header
           dealer={currentDealer}

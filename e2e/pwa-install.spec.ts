@@ -81,6 +81,58 @@ async function expectFullBleedArtwork(page: Page, sources: string[]) {
   expect(results).toEqual(sources.map((src) => ({ src, minimumAlpha: 255 })));
 }
 
+async function expectMaskableSafeZone(page: Page, sources: string[]) {
+  const results = await page.evaluate(async (imageSources) => {
+    return Promise.all(
+      imageSources.map(async (src) => {
+        const image = new Image();
+        image.src = src;
+        await image.decode();
+        const canvas = document.createElement("canvas");
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const drawingContext = canvas.getContext("2d", {
+          willReadFrequently: true,
+        });
+        if (!drawingContext) throw new Error(`Unable to inspect ${src}`);
+        drawingContext.drawImage(image, 0, 0);
+        const pixels = drawingContext.getImageData(
+          0,
+          0,
+          canvas.width,
+          canvas.height,
+        ).data;
+        const center = canvas.width / 2;
+        let maximumLightPixelDistance = 0;
+        for (let index = 0; index < pixels.length; index += 4) {
+          const red = pixels[index];
+          const green = pixels[index + 1];
+          const blue = pixels[index + 2];
+          if (red < 210 || green < 210 || blue < 210) continue;
+          const pixel = index / 4;
+          const x = pixel % canvas.width;
+          const y = Math.floor(pixel / canvas.width);
+          maximumLightPixelDistance = Math.max(
+            maximumLightPixelDistance,
+            Math.hypot(x - center, y - center),
+          );
+        }
+        return {
+          src,
+          maximumLightPixelDistanceRatio: maximumLightPixelDistance / canvas.width,
+        };
+      }),
+    );
+  }, sources);
+
+  // Adaptive launchers guarantee only the central circle with radius 40% of
+  // the canvas. The light card is the essential mark, so every one of its
+  // pixels must remain inside that circle while the blue field stays full bleed.
+  for (const result of results) {
+    expect(result.maximumLightPixelDistanceRatio).toBeLessThanOrEqual(0.4);
+  }
+}
+
 async function stubAuthenticatedCapture(page: Page) {
   await page.route("**/api/app/session", async (route) => {
     await route.fulfill({
@@ -100,6 +152,7 @@ async function stubAuthenticatedCapture(page: Page) {
           role: "salesperson",
           active: true,
         },
+        is_impersonation: true,
       }),
     });
   });
@@ -223,6 +276,18 @@ test.describe("Home Screen PWA contracts", () => {
       "/dealer-social-icon-v2-maskable-512.png",
       "/dealer-social-icon-v2-maskable-1024.png",
     ]);
+    await expectMaskableSafeZone(page, [
+      "/dealer-social-icon-v2-maskable-192.png",
+      "/dealer-social-icon-v2-maskable-512.png",
+      "/dealer-social-icon-v2-maskable-1024.png",
+    ]);
+    for (const size of [192, 512, 1024]) {
+      const [regular, maskable] = await Promise.all([
+        request.get(`/dealer-social-icon-v2-${size}.png`),
+        request.get(`/dealer-social-icon-v2-maskable-${size}.png`),
+      ]);
+      expect((await regular.body()).equals(await maskable.body())).toBe(false);
+    }
   });
 
   test("keeps authenticated Capture usable in iPhone standalone display mode", async ({
@@ -303,32 +368,41 @@ test.describe("Home Screen PWA contracts", () => {
       expect(standaloneMediaRule).toContain("body");
       expect(standaloneMediaRule).toContain("padding-top: 0px");
 
-      const updatePromptPlacement = await page.evaluate(() => {
-        const probe = document.createElement("section");
-        probe.className = "pwa-update-prompt fixed";
-        probe.style.height = "80px";
-        document.body.append(probe);
-        const style = getComputedStyle(probe);
-        const bounds = probe.getBoundingClientRect();
-        probe.style.height = "120px";
-        const resizedBounds = probe.getBoundingClientRect();
-        const placement = {
-          position: style.position,
-          top: bounds.top,
-          topAfterHeightChange: resizedBounds.top,
-          bottom: bounds.bottom,
-          viewportHeight: window.innerHeight,
+      const impersonationBanner = page
+        .getByRole("status")
+        .filter({ hasText: "Impersonating" });
+      await expect(impersonationBanner).toBeVisible();
+      const stackedChrome = await page.evaluate(() => {
+        const banner = Array.from(
+          document.querySelectorAll<HTMLElement>("[role=status]"),
+        ).find((element) => element.textContent?.includes("Impersonating"));
+        const header = document.querySelector<HTMLElement>("header");
+        if (!banner || !header || !header.parentElement) {
+          throw new Error("Missing shell chrome");
+        }
+        const prompt = document.createElement("section");
+        prompt.className = "pwa-update-prompt";
+        prompt.style.height = "80px";
+        header.parentElement.insertBefore(prompt, header);
+        const promptBounds = prompt.getBoundingClientRect();
+        const bannerBounds = banner.getBoundingClientRect();
+        const headerBounds = header.getBoundingClientRect();
+        const result = {
+          promptPosition: getComputedStyle(prompt).position,
+          bannerBottom: bannerBounds.bottom,
+          promptTop: promptBounds.top,
+          promptBottom: promptBounds.bottom,
+          headerTop: headerBounds.top,
         };
-        probe.remove();
-        return placement;
+        prompt.remove();
+        return result;
       });
-      expect(updatePromptPlacement.position).toBe("fixed");
-      expect(updatePromptPlacement.top).toBeGreaterThanOrEqual(59);
-      expect(updatePromptPlacement.topAfterHeightChange).toBe(
-        updatePromptPlacement.top,
+      expect(stackedChrome.promptPosition).toBe("relative");
+      expect(stackedChrome.promptTop).toBeGreaterThanOrEqual(
+        stackedChrome.bannerBottom,
       );
-      expect(updatePromptPlacement.bottom).toBeLessThan(
-        updatePromptPlacement.viewportHeight,
+      expect(stackedChrome.headerTop).toBeGreaterThanOrEqual(
+        stackedChrome.promptBottom,
       );
 
       const shell = await page.locator("#root").evaluate((element) => {

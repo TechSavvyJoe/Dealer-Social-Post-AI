@@ -7,7 +7,6 @@ import App from "./App";
 import { getQueryClient } from "./services/queryClient";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/ui/Toast";
-import { PwaUpdatePrompt } from "./components/PwaUpdatePrompt";
 
 // Auto-reload on chunk load failure (e.g. after deployment)
 window.addEventListener("vite:preloadError", (event) => {
@@ -36,7 +35,6 @@ root.render(
           <ErrorBoundary>
             <App />
           </ErrorBoundary>
-          <PwaUpdatePrompt />
         </ToastProvider>
         {showReactQueryDevtools && (
           <Suspense fallback={null}>

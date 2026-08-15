@@ -140,11 +140,7 @@ export const PwaUpdatePrompt: React.FC<PwaUpdatePromptProps> = ({
     <section
       role="region"
       aria-labelledby={titleId}
-      className="pwa-update-prompt fixed left-1/2 z-[110] flex max-w-[30rem] -translate-x-1/2 flex-wrap items-center gap-3 rounded-2xl border border-primary-300/30 bg-surface-900/95 p-3 text-surface-50 shadow-elevation-4 backdrop-blur-xl"
-      style={{
-        width: "calc(100% - max(1rem, var(--sal)) - max(1rem, var(--sar)))",
-        marginLeft: "calc((var(--sal) - var(--sar)) / 2)",
-      }}
+      className="pwa-update-prompt z-[110] flex max-w-[30rem] flex-wrap items-center gap-3 rounded-2xl border border-primary-300/30 bg-surface-900/95 p-3 text-surface-50 shadow-elevation-4 backdrop-blur-xl"
     >
       <span className="sr-only" role="status" aria-live="polite">
         A new application version is ready.

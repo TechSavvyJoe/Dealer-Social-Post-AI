@@ -422,19 +422,31 @@
     }
   }
 
-  /* Keep release controls away from the phone's Home indicator and the
-     app's bottom task controls. A waiting worker used to render a wrapping,
-     fixed-bottom card over Capture/Result and looked exactly like clipped
-     content in the installed iPhone app. */
+  /* On phones, the release notice participates in the shell stack between
+     any impersonation warning and the regular header. It therefore consumes
+     real space instead of covering either top chrome or bottom task controls.
+     Desktop has enough room for the familiar fixed notification. */
   .pwa-update-prompt {
-    top: calc(var(--header-safe-top) + 4.75rem);
-    bottom: auto;
+    position: relative;
+    inset: auto;
+    width: calc(100% - 1rem);
+    margin: 0.5rem auto;
+    flex: 0 0 auto;
+    align-self: center;
   }
 
-  @media (min-width: 640px) {
+  /* Keep the notice in flow for every layout the app classifies as mobile.
+     This breakpoint intentionally matches useLayoutMode.ts so a tablet or a
+     wide phone never gets a fixed notice over the mobile Result action bar. */
+  @media (min-width: 1200px) and (min-height: 600px) {
     .pwa-update-prompt {
+      position: fixed;
+      left: 50%;
       top: auto;
       bottom: max(1rem, var(--sab));
+      width: min(30rem, calc(100vw - 2rem));
+      margin: 0;
+      transform: translateX(-50%);
     }
   }
 

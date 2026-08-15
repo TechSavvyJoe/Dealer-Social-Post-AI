@@ -113,6 +113,13 @@ describe("installable product identity", () => {
     ]) {
       expect(pngIsOpaque(path)).toBe(true);
     }
+    for (const size of [192, 512, 1024]) {
+      expect(
+        read(`public/dealer-social-icon-v2-${size}.png`).equals(
+          read(`public/dealer-social-icon-v2-maskable-${size}.png`),
+        ),
+      ).toBe(false);
+    }
   });
 
   it("advertises the vector favicon, install manifest, and Apple app identity", () => {
@@ -126,12 +133,34 @@ describe("installable product identity", () => {
   });
 
   it("keeps vector identity self-contained and structurally scalable", () => {
-    for (const path of ["public/brand-mark.svg", "public/brand-mark-monochrome.svg"]) {
+    for (const path of [
+      "public/brand-mark.svg",
+      "public/brand-mark-maskable.svg",
+      "public/brand-mark-monochrome.svg",
+    ]) {
       const svg = read(path).toString("utf8");
       expect(svg).toMatch(/viewBox="0 0 120 120"/);
       expect(svg).not.toMatch(/(?:href|src)=["'](?:https?:|\/\/|data:)/i);
       expect(svg).not.toMatch(/@import|url\(\s*(?:https?:|\/\/)/i);
     }
+    expect(read("public/brand-mark-maskable.svg").toString("utf8")).toContain(
+      'transform="translate(13.2 13.2) scale(0.78)"',
+    );
+  });
+
+  it("stacks the real update prompt inside mobile shell chrome", () => {
+    const app = read("App.tsx").toString("utf8");
+    const entrypoint = read("index.tsx").toString("utf8");
+    const styles = read("styles/globals.css").toString("utf8");
+    const impersonation = app.indexOf("<ImpersonationBanner />");
+    const updatePrompt = app.indexOf("<PwaUpdatePrompt />");
+    const header = app.indexOf("<Header");
+
+    expect(impersonation).toBeGreaterThan(-1);
+    expect(updatePrompt).toBeGreaterThan(impersonation);
+    expect(header).toBeGreaterThan(updatePrompt);
+    expect(entrypoint).not.toContain("<PwaUpdatePrompt />");
+    expect(styles).toContain("@media (min-width: 1200px) and (min-height: 600px)");
   });
 
   it("fails service-worker installation when the required offline shell is missing", () => {

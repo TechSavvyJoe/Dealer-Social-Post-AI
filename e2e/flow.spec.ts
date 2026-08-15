@@ -580,6 +580,17 @@ test.describe("Dealer Social Post AI Flow", () => {
     await expect(contentWrapper.locator(".capture-studio-grid")).toHaveCount(1);
     await expect(captureGrid).toBeVisible();
     await expect(captureSidebar).toBeVisible();
+    expect(
+      await captureSidebar.evaluate((sidebar) => {
+        const preview = document.querySelector(".capture-studio-preview");
+        return Boolean(
+          preview &&
+          (sidebar.compareDocumentPosition(preview) &
+            Node.DOCUMENT_POSITION_FOLLOWING) !==
+            0,
+        );
+      }),
+    ).toBe(true);
 
     const expectDocumentLockedToViewport = async () => {
       const geometry = await page.evaluate(() => ({
@@ -1293,7 +1304,20 @@ test.describe("Dealer Social Post AI Flow", () => {
     page,
     context,
   }) => {
+    // Keep this banner contract independent from a developer's active local
+    // session and wait for the login route's lazy chunk before disconnecting.
+    // Otherwise a very small/slow phone can go offline while Vite is still
+    // fetching the authenticated Capture chunk, turning a banner test into a
+    // nondeterministic module-load failure.
+    await page.route("**/api/app/session", async (route) => {
+      await route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "No active session" }),
+      });
+    });
     await page.goto("/");
+    await expect(page.getByRole("heading", { name: /^sign in$/i })).toBeVisible();
     await expect(page.getByText("You're offline", { exact: false })).toHaveCount(0);
 
     await context.setOffline(true);
