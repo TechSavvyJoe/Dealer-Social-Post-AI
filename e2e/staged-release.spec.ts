@@ -288,26 +288,35 @@ test.describe("Hosted staged release", () => {
       await expect(page.getByRole("button", { name: /system admin/i })).toBeFocused();
       await page.keyboard.press("Enter");
 
-      const adminInput = page.locator('input[autocomplete="current-password"]');
-      await expect(adminInput).toBeFocused();
-      await expect(adminInput).toHaveAttribute("type", "password");
-      await expect(adminInput).toHaveAttribute("autocomplete", "current-password");
-      await expect(adminInput).toHaveAttribute("autocapitalize", "none");
-      await adminInput.fill("Aa1Bb2Cc3Dd4");
-      await expect(adminInput).toHaveValue("Aa1Bb2Cc3Dd4");
-      await expect(page.getByText("Exact case · 12/12 characters")).toBeVisible();
+      const adminUsernameInput = page.locator('input[name="admin-username"]');
+      await expect(adminUsernameInput).toBeFocused();
+      await expect(adminUsernameInput).toHaveAttribute("autocomplete", "username");
+      await expect(adminUsernameInput).toHaveAttribute("autocapitalize", "none");
+      await adminUsernameInput.fill("system.owner");
+      await page.keyboard.press("Tab");
+
+      const adminPasswordInput = page.locator('input[name="admin-password"]');
+      await expect(adminPasswordInput).toBeFocused();
+      await expect(adminPasswordInput).toHaveAttribute("type", "password");
+      await expect(adminPasswordInput).toHaveAttribute(
+        "autocomplete",
+        "current-password",
+      );
+      await expect(adminPasswordInput).toHaveAttribute("autocapitalize", "none");
+      await adminPasswordInput.fill("Aa1Bb2Cc3Dd4");
+      await expect(adminPasswordInput).toHaveValue("Aa1Bb2Cc3Dd4");
       await page.keyboard.press("Tab");
       await expect(
-        page.getByRole("button", { name: "Show system admin code" }),
+        page.getByRole("button", { name: "Show administrator password" }),
       ).toBeFocused();
       await page.keyboard.press("Enter");
-      await expect(adminInput).toHaveAttribute("type", "text");
-      await expect(adminInput).toHaveValue("Aa1Bb2Cc3Dd4");
+      await expect(adminPasswordInput).toHaveAttribute("type", "text");
+      await expect(adminPasswordInput).toHaveValue("Aa1Bb2Cc3Dd4");
       await expect(
-        page.getByRole("button", { name: "Hide system admin code" }),
+        page.getByRole("button", { name: "Hide administrator password" }),
       ).toBeFocused();
       await page.keyboard.press("Enter");
-      await expect(adminInput).toHaveAttribute("type", "password");
+      await expect(adminPasswordInput).toHaveAttribute("type", "password");
 
       await expectNoSeriousAxeViolations(page);
       await expectNoHorizontalOverflow(page);

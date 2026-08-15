@@ -824,7 +824,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                           {managerLoginError}
                         </p>
                       ) : (
-                        <p className="mt-2 px-1 text-xs text-surface-500">
+                        <p className="mt-2 px-1 text-xs text-surface-400">
                           Contact your system administrator if you need access reset.
                         </p>
                       )}
@@ -964,7 +964,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                           {adminLoginError}
                         </p>
                       ) : (
-                        <p className="mt-2 px-1 text-xs text-surface-500">
+                        <p className="mt-2 px-1 text-xs text-surface-400">
                           Credentials come from your deployment secrets.
                         </p>
                       )}
