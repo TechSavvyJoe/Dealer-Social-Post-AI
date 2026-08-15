@@ -1,6 +1,11 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+// These restored-post fixtures represent creatives generated under the current
+// reviewed image policy. Keep this in sync with config/gemini-model-policy.json;
+// an intentional policy bump should quarantine them until the fixture is updated.
+const CURRENT_TEST_MODEL_POLICY_VERSION = "5";
+
 async function expectNoSeriousAxeViolations(page: import("@playwright/test").Page) {
   const results = await new AxeBuilder({ page }).analyze();
   // Contrast runs log-only while the token migration settles: violations are
@@ -590,7 +595,7 @@ test.describe("Dealer Social Post AI Flow", () => {
     await expect(
       page.getByRole("heading", { name: "Capture the handoff." }),
     ).toBeVisible();
-    await page.evaluate(async () => {
+    await page.evaluate(async (modelPolicyVersion) => {
       const image =
         "data:image/svg+xml;charset=utf-8," +
         encodeURIComponent(
@@ -636,6 +641,7 @@ test.describe("Dealer Social Post AI Flow", () => {
             text: "A standout delivery deserves a standout moment. Congratulations on the new ride!",
             postId: "qa-post-1",
             releaseStatus: "saved",
+            aiMeta: { modelPolicyVersion },
             platformIds: ["facebook_feed", "linkedin"],
             mediaOutputMode: "photo",
             primaryFormatId: "feed_portrait",
@@ -652,7 +658,7 @@ test.describe("Dealer Social Post AI Flow", () => {
           },
         }),
       );
-    });
+    }, CURRENT_TEST_MODEL_POLICY_VERSION);
     await page.reload();
 
     const isDesktop = testInfo.project.name.endsWith("desktop-1440");
@@ -940,7 +946,7 @@ test.describe("Dealer Social Post AI Flow", () => {
     await expect(
       page.getByRole("heading", { name: "Capture the handoff." }),
     ).toBeVisible();
-    await page.evaluate(async () => {
+    await page.evaluate(async (modelPolicyVersion) => {
       const image = `data:image/svg+xml;base64,${btoa(
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080"><rect width="1080" height="1080" fill="#07111f"/><path d="M140 640h800l-92-210H310z" fill="#e8eef8"/><circle cx="350" cy="680" r="88" fill="#2563eb"/><circle cx="760" cy="680" r="88" fill="#2563eb"/><text x="540" y="860" text-anchor="middle" font-family="Arial" font-size="54" fill="white">SYNTHETIC QA</text></svg>',
       )}`;
@@ -982,6 +988,7 @@ test.describe("Dealer Social Post AI Flow", () => {
             text: "Final synthetic caption after salesperson review.",
             postId: "qa-website-1",
             releaseStatus: "saved",
+            aiMeta: { modelPolicyVersion },
             platformIds: [],
             mediaOutputMode: "photo",
             primaryFormatId: "feed_square",
@@ -1012,7 +1019,7 @@ test.describe("Dealer Social Post AI Flow", () => {
           },
         }),
       );
-    });
+    }, CURRENT_TEST_MODEL_POLICY_VERSION);
     await page.reload();
 
     await expect(
@@ -1108,7 +1115,11 @@ test.describe("Dealer Social Post AI Flow", () => {
     expect(websiteRequestBody).toEqual({
       expected_post_revision: "2026-08-05 09:43:00.000Z",
       website_draft: expect.objectContaining({
-        body: "Final synthetic website copy prepared only after review.",
+        // Customer stories are now built deterministically from the reviewed
+        // caption so a metadata model cannot introduce a different customer.
+        body: expect.stringContaining(
+          "Final synthetic caption after salesperson review.",
+        ),
         kind: "customer_story",
         category: "deliveries",
       }),

@@ -1,0 +1,56 @@
+{
+  "skill_name": "dealership-campaign-creative-director",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Use $dealership-campaign-creative-director to assess this regular real-photo dealership overlay. Give a ship/revise/reject decision, the exact retained visual contract, and a concise acceptance record. Run or apply the bundled deterministic validator; do not invent anything not present in the fixture.",
+      "expected_output": "A ship decision for the photographic candidate, preserving the exact people, truck, dealership spelling, single WELCOME HOME headline, name-free pixels, and integrated premium overlay.",
+      "files": ["evals/fixtures/regular-real-photo.json"],
+      "expectations": [
+        "The output approves the candidate rather than requesting an unnecessary transformation.",
+        "The output preserves the same people, vehicle, and real photographed setting.",
+        "The output keeps exactly WELCOME HOME and Northstar Ford while keeping personal names out of pixels.",
+        "The deterministic validation result is a pass with no hard or craft failures."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Use $dealership-campaign-creative-director to assess the explicitly requested Fun transformation in the fixture. Return a ship/revise/reject decision and explain why the transformation is energetic without replacing the real customers or vehicle. Apply the deterministic validator.",
+      "expected_output": "A ship decision that recognizes the supplied genuine logo, exact KEYS DAY headline, requested playful transformation, preserved identities, and campaign-grade execution.",
+      "files": ["evals/fixtures/fun-transformation.json"],
+      "expectations": [
+        "The output treats the transformation as authorized only because the fixture explicitly requests Fun mode.",
+        "The output confirms the same people and vehicle remain recognizable.",
+        "The output distinguishes the supplied genuine logo from a generated mark.",
+        "The deterministic validation result is a pass."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Use $dealership-campaign-creative-director to compare the two Depth Pop fixtures. Identify which candidate is shippable, reject the pasted-on treatment, and give the smallest correction needed. Apply the deterministic validator to both.",
+      "expected_output": "A comparison that rejects the floating flat treatment and approves only the candidate whose 3D elements share the photographed scene's perspective, light, shadows, occlusion, and depth planes.",
+      "files": [
+        "evals/fixtures/depth-pop-floating-fail.json",
+        "evals/fixtures/depth-pop-integrated-pass.json"
+      ],
+      "expectations": [
+        "The output rejects depth-pop-floating-fail.json for missing environmental integration.",
+        "The output approves depth-pop-integrated-pass.json.",
+        "The correction calls for perspective, light, shadows, occlusion, and scene-plane integration rather than more decorative 3D objects.",
+        "The validator results match the fixtures' expected pass values."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Use $dealership-campaign-creative-director to audit the unsafe candidate fixture. State whether it can ship, identify every hard rejection, and provide a safe regeneration contract. Apply the deterministic validator and do not repeat the unsafe customer name as proposed public copy.",
+      "expected_output": "A fail-closed rejection covering the wrong personal name, incorrect dealer spelling, fabricated logo, prompt leak, extra headline, and social UI, followed by a name-free exact-brand correction contract.",
+      "files": ["evals/fixtures/wrong-name-fake-logo-prompt-leak.json"],
+      "expectations": [
+        "The output rejects the candidate and never calls it acceptable with a warning.",
+        "The output identifies personal-name text, wrong dealership spelling, fabricated logo, prompt leakage, and social UI as hard failures.",
+        "The safe correction uses only WELCOME HOME and exact Northstar Ford text with no customer name or invented mark.",
+        "The deterministic validation result fails for the expected hard reasons."
+      ]
+    }
+  ]
+}

@@ -50,14 +50,20 @@ See [SETUP.md](SETUP.md) for the full local and production configuration and [VE
 | `caption`            | quality  | `gemini-3.6-flash` → `gemini-3.5-flash-lite`                                    | 2,048 tokens               |
 | `caption_regenerate` | quality  | `gemini-3.6-flash` → `gemini-3.5-flash-lite`                                    | 2,048 tokens               |
 | `caption_edit`       | fast     | `gemini-3.5-flash-lite` → `gemini-3.6-flash`                                    | 2,048 tokens               |
-| `image_standard`     | standard | `gemini-3.1-flash-image` → `gemini-3-pro-image` → `gemini-3.1-flash-lite-image` | 2K → 2K → 1K; 4,096 tokens |
-| `image_studio`       | studio   | `gemini-3-pro-image` → `gemini-3.1-flash-image` → `gemini-3.1-flash-lite-image` | 2K → 2K → 1K; 4,096 tokens |
+| `image_standard`     | standard | `gemini-3-pro-image` → `gemini-3.1-flash-image` → `gemini-3.1-flash-lite-image` | 2K → 2K → 1K; 4,096 tokens |
+| `image_studio`       | studio   | `gemini-3-pro-image` → `gemini-3.1-flash-image` → `gemini-3.1-flash-lite-image` | 4K → 2K → 1K; 4,096 tokens |
 | `video_standard`     | standard | `veo-3.1-fast-generate-preview`                                                 | 720p                       |
 | `video_quality`      | quality  | `veo-3.1-generate-preview`                                                      | 1080p                      |
 
-The standard image route starts with Flash; only the explicit Studio preference starts with Pro. Standard and quality video are separate one-model routes, not fallbacks for one another. The Veo IDs above are Gemini API identifiers; Vertex-only `-001` IDs are not interchangeable.
+Both image routes start with Pro for reliable customer-facing typography. Standard requests 2K; the explicit Studio preference requests 4K from Pro for final hero creative, then both use the same bounded Flash/Lite fallbacks. Standard and quality video are separate one-model routes, not fallbacks for one another. The Veo IDs above are Gemini API identifiers; Vertex-only `-001` IDs are not interchangeable.
 
 The source of truth is [config/gemini-model-policy.json](config/gemini-model-policy.json). `services/modelConfig.ts` consumes that artifact, PocketBase enforces the same contract, and `npm run model-policy:check` rejects drift.
+
+### Campaign creative skills
+
+Image generation is directed by reusable, scenario-aware skills in `services/creativeSkills.ts`: campaign art direction, photo-type planning, regular-photo fidelity, explicit Fun transformation, environmental 3D compositing, customer dignity and identity, dealer/OEM brand accuracy, platform finishing, and output QA. Regular mode preserves the real people, exact vehicle, and recognizable location; Fun mode performs the selected full-scene artistic treatment; Depth Pop can place dimensional graphics into real scene planes with matched perspective, light, occlusion, contact shadow, and depth of field.
+
+The companion repository skill lives at `skills/dealership-campaign-creative-director/`. It includes a creative contract, deterministic review validator, fixtures, eval definitions, and a static eval viewer. Run `npm run skill:creative-director:check` to verify its regular, Fun, integrated-3D, and hard-failure cases. Customer names are never authorized in generated image pixels; approved public labels remain editable caption metadata.
 
 ## Architecture
 

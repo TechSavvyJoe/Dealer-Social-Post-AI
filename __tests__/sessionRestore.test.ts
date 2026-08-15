@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchSession, resolveRestoredStep, useAppStore } from "../stores/appStore";
+import {
+  fetchSession,
+  resolveRestoredCustomerIdentityRequired,
+  resolveRestoredImageReviewRequired,
+  resolveRestoredStep,
+  useAppStore,
+} from "../stores/appStore";
+import { MODEL_POLICY_VERSION } from "../services/modelConfig";
 import { AppStep, StyleOption, ToneOption } from "../types";
 
 const localStorageMock = (() => {
@@ -40,6 +47,23 @@ afterEach(() => {
 });
 
 describe("session restore navigation", () => {
+  it("fails legacy identity flags closed while preserving explicit non-customer posts", () => {
+    expect(resolveRestoredCustomerIdentityRequired(undefined, undefined)).toBe(true);
+    expect(resolveRestoredCustomerIdentityRequired(undefined, false)).toBe(false);
+    expect(resolveRestoredCustomerIdentityRequired(false, undefined)).toBe(false);
+    expect(resolveRestoredCustomerIdentityRequired(true, false)).toBe(true);
+  });
+
+  it("quarantines browser-restored creatives without current on-pixel provenance", () => {
+    expect(resolveRestoredImageReviewRequired(undefined, undefined)).toBe(true);
+    expect(resolveRestoredImageReviewRequired(undefined, "4")).toBe(true);
+    expect(resolveRestoredImageReviewRequired(undefined, MODEL_POLICY_VERSION)).toBe(
+      false,
+    );
+    expect(resolveRestoredImageReviewRequired(true, MODEL_POLICY_VERSION)).toBe(true);
+    expect(resolveRestoredImageReviewRequired(false, undefined)).toBe(false);
+  });
+
   it("never restores a result step without a complete generated post", () => {
     expect(resolveRestoredStep("salesperson", AppStep.RESULT, false, false)).toBe(
       AppStep.CAPTURE,

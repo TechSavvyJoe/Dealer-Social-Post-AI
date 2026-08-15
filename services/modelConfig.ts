@@ -29,6 +29,7 @@ interface ModelPolicyDocument {
     textFast: string;
     imageStandard: string;
     imageStudio: string;
+    imageFallback: string;
     imageLite: string;
     videoStandard: string;
     videoQuality: string;
@@ -157,13 +158,13 @@ export const MODELS = {
     fallback: MODEL_POLICY.models.textFast,
   },
   // ---- Image editing (multimodal: input image + prompt → image) ----
-  // Standard creation starts on Flash Image. The single Settings preference
-  // opts into Studio, where Pro Image leads the same bounded fallback ladder.
+  // Both customer-facing tiers start on Pro Image for reliable typography.
+  // Studio uses the same bounded fallback ladder but requests 4K from Pro.
   image: {
     primary: MODEL_POLICY.models.imageStandard,
     standard: MODEL_POLICY.models.imageStandard,
     studio: MODEL_POLICY.models.imageStudio,
-    fallback: MODEL_POLICY.models.imageStudio,
+    fallback: MODEL_POLICY.models.imageFallback,
     emergency: MODEL_POLICY.models.imageLite,
   },
   // ---- Video (Veo through the Gemini API) ----

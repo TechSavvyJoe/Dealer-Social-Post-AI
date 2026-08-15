@@ -475,6 +475,21 @@ function hasValidLinkedReleaseWithDao(dao, post) {
       { post: post.id, dealer: recordString(post, "dealer") },
     );
     if (rows.length !== 1) return false;
+    const releaseCustomerIdentity = recordString(rows[0], "customer_name")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+    const postCustomerIdentity = recordString(post, "customer_name")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+    if (
+      !releaseCustomerIdentity ||
+      !postCustomerIdentity ||
+      releaseCustomerIdentity !== postCustomerIdentity
+    ) {
+      return false;
+    }
     const signature = recordString(rows[0], "signature_png");
     if (!signature) return false;
     const fsys = $app.newFilesystem();
@@ -516,6 +531,23 @@ function resolveWebsiteMappingForPost(post) {
   return resolveWebsiteMappingForPostWithDao($app.dao(), post);
 }
 
+/**
+ * The interactive routes gate this through requestPolicies directly. The
+ * outbox repeats the same current-policy check so a pre-policy queued item
+ * cannot slip through after a deploy. `__hooks` is absent only in the pure
+ * Node harness used for this module's deterministic contract tests.
+ */
+function postNeedsCurrentImageReview(post) {
+  if (typeof __hooks === "undefined") return false;
+  try {
+    const policies = require(__hooks + "/requestPolicies.js");
+    return policies.postImageReviewRequired(post, policies.geminiModelPolicySnapshot());
+  } catch (_e) {
+    // A runtime policy lookup failure must stop new outbound media delivery.
+    return true;
+  }
+}
+
 function postReadinessWithDao(dao, post) {
   const parsedDraft = parseWebsiteDraft(recordString(post, "website_draft"));
   if (!parsedDraft.ok || !parsedDraft.value || !parsedDraft.value.enabled) {
@@ -541,6 +573,9 @@ function postReadinessWithDao(dao, post) {
   }
   if (!recordString(post, "creative_image")) {
     return { ready: false, terminal: false, code: "creative_pending" };
+  }
+  if (postNeedsCurrentImageReview(post)) {
+    return { ready: false, terminal: true, code: "image_review_required" };
   }
   return { ready: true, terminal: false, code: "ready" };
 }
@@ -890,17 +925,243 @@ function isAutomotiveBrandToken(token) {
 }
 
 function publicCustomerLabel(value) {
-  const normalized = (value || "").toString().trim().replace(/\s+/g, " ");
+  let normalized = (value || "")
+    .toString()
+    .trim()
+    .replace(/[\r\n<>]+/g, " ")
+    .replace(/\s+/g, " ")
+    .slice(0, 80);
   if (!normalized) return "";
+  if (/\bfamil(?:y|ies)$/i.test(normalized) || /^our\b/i.test(normalized)) {
+    return normalized;
+  }
+  if (/\s(?:&|and)\s/i.test(normalized)) return "our customers";
   const tokens = normalized.split(" ").filter(Boolean);
+  const honorifics = { mr: true, mrs: true, ms: true, miss: true, dr: true, mx: true };
+  while (
+    tokens.length > 1 &&
+    honorifics[(tokens[0] || "").replace(/\./g, "").toLowerCase()]
+  ) {
+    tokens.shift();
+  }
   const clean = function (token) {
     return token.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ'’-]/g, "");
   };
   const first = clean(tokens[0]).slice(0, 40);
   if (!first) return "Customer";
-  if (tokens.length < 2) return first;
-  const last = clean(tokens[tokens.length - 1]);
-  return last ? first + " " + last.charAt(0).toUpperCase() + "." : first;
+  return first;
+}
+
+function replaceAllowedCustomerPhrase(text, phrase) {
+  const normalized = (phrase || "").toString().trim().replace(/\s+/g, " ");
+  if (!normalized) return text;
+  return text.replace(
+    new RegExp(
+      "(^|[^A-Za-zÀ-ÖØ-öø-ÿ0-9])" +
+        escapeRegExp(normalized) +
+        "(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ0-9])",
+      "gi",
+    ),
+    "$1 Customer ",
+  );
+}
+
+function containsUnexpectedCustomerIdentity(text, expectedCustomer, allowedPhrases) {
+  const expected = publicCustomerLabel(expectedCustomer);
+  const rawScan = (text || "").toString().trim().replace(/\s+/g, " ");
+  const allowed = allowedPhrases || [];
+  if (
+    expected &&
+    new RegExp(
+      "(^|[^A-Za-zÀ-ÖØ-öø-ÿ0-9])" +
+        escapeRegExp(expected) +
+        "[A-Za-zÀ-ÖØ-öø-ÿ]+(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ0-9])",
+      "i",
+    ).test(rawScan)
+  ) {
+    return true;
+  }
+  const name = "[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{1,39}";
+  const separator = "(?:\\s+and\\s+|\\s*(?:&|\\+|/)\\s*)";
+  const names = name + "(?:" + separator + name + ")*";
+  const directAction =
+    "drove|drives|found|chose|chooses|picked|purchased|bought|is|are|has|have|loves|love|celebrated|celebrates|celebrate|shared|shares|takes|took|starts|started|received|receives|standing|stands|posing|pose|smiling|smiles";
+  const action = directAction + "|just\\s+(?:" + directAction + ")";
+  const nonCustomerWords = {
+    customer: true,
+    customers: true,
+    family: true,
+    families: true,
+    they: true,
+    we: true,
+    he: true,
+    she: true,
+    it: true,
+    this: true,
+    that: true,
+    these: true,
+    those: true,
+    everyone: true,
+    someone: true,
+    nobody: true,
+    who: true,
+    what: true,
+  };
+  const hasIdentityMatch = function (scan, patterns) {
+    for (let i = 0; i < patterns.length; i++) {
+      let match = null;
+      while ((match = patterns[i].exec(scan)) !== null) {
+        const candidates = (match[1] || "").split(/\s+and\s+|\s*(?:&|\+|\/)\s*/i);
+        for (let j = 0; j < candidates.length; j++) {
+          const candidate = candidates[j].trim().toLowerCase();
+          if (candidate && !nonCustomerWords[candidate]) return true;
+        }
+      }
+    }
+    return false;
+  };
+  const strictCustomerTargetPatterns = [
+    new RegExp(
+      "\\b(?:[Cc]ongratulations|[Cc]ongrats|[Cc]heers|[Ss]hout(?:-?out)?)(?:\\s+to)?[,:!]?\\s+(" +
+        names +
+        ")",
+      "g",
+    ),
+    new RegExp(
+      "\\b(?:[Mm]eet|[Ww]elcoming|[Cc]elebrate(?:\\s+with)?|[Ww]elcome(?!\\s+to\\b))[,:!]?\\s+(" +
+        names +
+        ")",
+      "g",
+    ),
+    new RegExp(
+      "\\b(?:[Ff]or|[Ww]ith|[Ff]rom)\\s+(" +
+        names +
+        ")(?=$|[,!.?]|\\s+(?:at|during|today|this|on|after|before|who)\\b)",
+      "g",
+    ),
+    new RegExp(
+      "\\b(?:[Hh]elping|[Ww]elcoming|[Tt]hanking|[Cc]ongratulating)\\s+(" + names + ")",
+      "g",
+    ),
+    new RegExp(
+      "\\b(?:[Ww]elcome\\s+home|[Ww]elcome\\s+to\\s+the\\s+family|[Nn]ew\\s+car\\s+day|[Dd]elivered)[,:!\\s–—-]+(" +
+        names +
+        ")(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ])",
+      "g",
+    ),
+    new RegExp(
+      "\\b(" +
+        names +
+        ")\\s*(?:[,!]|[–—-])\\s*(?:[Ww]elcome\\s+home|[Ww]elcome\\s+to\\s+the\\s+family|[Nn]ew\\s+car\\s+day|[Dd]elivered)\\b",
+      "g",
+    ),
+  ];
+
+  // A salesperson name may be grounded elsewhere in a post, but must never be
+  // accepted as the congratulated/welcomed customer. Only dealer/vehicle
+  // phrases with an authoritative automotive grounding are masked here.
+  let strictScan = rawScan;
+  if (expected) strictScan = replaceAllowedCustomerPhrase(strictScan, expected);
+  for (let i = 0; i < allowed.length; i++) {
+    const grounded = groundedVehicleIdentityPhrase(allowed[i]);
+    if (!grounded) continue;
+    strictScan = replaceAllowedCustomerPhrase(strictScan, grounded);
+    const groundedTokens = grounded.split(/[^A-Za-zÀ-ÖØ-öø-ÿ0-9'’-]+/);
+    for (let j = 0; j < groundedTokens.length; j++) {
+      if (groundedTokens[j].length > 1) {
+        strictScan = replaceAllowedCustomerPhrase(strictScan, groundedTokens[j]);
+      }
+    }
+  }
+  if (hasIdentityMatch(strictScan, strictCustomerTargetPatterns)) return true;
+
+  let scan = rawScan;
+  if (expected) scan = replaceAllowedCustomerPhrase(scan, expected);
+  for (let i = 0; i < allowed.length; i++) {
+    scan = replaceAllowedCustomerPhrase(scan, allowed[i]);
+  }
+  if (
+    /\bCustomer\s+(?:[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{1,39}|[A-ZÀ-ÖØ-Þ]\.)(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ])/g.test(
+      scan,
+    )
+  ) {
+    return true;
+  }
+  return hasIdentityMatch(
+    scan,
+    strictCustomerTargetPatterns.concat([
+      new RegExp("\\b(" + names + ")(?=\\s+(?:" + action + ")\\b)", "g"),
+    ]),
+  );
+}
+
+function releaseAuthorizesPublicCustomerLabel(protectedName, proposedLabel) {
+  const expected = publicCustomerLabel(protectedName);
+  const proposed = (proposedLabel || "").toString().trim().replace(/\s+/g, " ");
+  return !!expected && !!proposed && expected.toLowerCase() === proposed.toLowerCase();
+}
+
+function projectProtectedCustomerNamePreservingAllowed(
+  value,
+  protectedName,
+  allowedPhrases,
+) {
+  let protectedValue = (value || "").toString();
+  const restorations = [];
+  const allowed = allowedPhrases || [];
+  for (let i = 0; i < allowed.length; i++) {
+    const phrase = (allowed[i] || "").toString().trim().replace(/\s+/g, " ");
+    if (!phrase) continue;
+    protectedValue = protectedValue.replace(
+      new RegExp(
+        "(^|[^A-Za-zÀ-ÖØ-öø-ÿ0-9])" +
+          escapeRegExp(phrase) +
+          "(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ0-9])",
+        "gi",
+      ),
+      function (match, prefix) {
+        const token = "__GROUNDED_PHRASE_" + restorations.length + "__";
+        restorations.push(match.slice((prefix || "").length));
+        return (prefix || "") + token;
+      },
+    );
+  }
+  let projected = replaceProtectedCustomerName(protectedValue, protectedName);
+  for (let i = 0; i < restorations.length; i++) {
+    projected = projected.replace("__GROUNDED_PHRASE_" + i + "__", restorations[i]);
+  }
+  return projected;
+}
+
+function reviewPostCustomerIdentity(
+  protectedName,
+  values,
+  allowedPhrases,
+  rejectUnnamed,
+) {
+  const publicLabel = publicCustomerLabel(protectedName);
+  const sourceValues = Array.isArray(values) ? values : [];
+  const projectedValues = sourceValues.map(function (value) {
+    return projectProtectedCustomerNamePreservingAllowed(
+      value,
+      protectedName,
+      allowedPhrases || [],
+    );
+  });
+  const projectionApplied = projectedValues.some(function (value, index) {
+    return value !== (sourceValues[index] || "").toString();
+  });
+  const unexpectedIdentity = projectedValues.some(function (value) {
+    if (!publicLabel && !rejectUnnamed) return false;
+    return containsUnexpectedCustomerIdentity(value, publicLabel, allowedPhrases || []);
+  });
+  return {
+    publicLabel: publicLabel,
+    projectedValues: projectedValues,
+    projectionApplied: projectionApplied,
+    reviewRequired: unexpectedIdentity || projectionApplied,
+    unexpectedIdentity: unexpectedIdentity,
+  };
 }
 
 function replaceProtectedCustomerName(text, protectedName) {
@@ -1019,6 +1280,66 @@ function containsProtectedNonFirstNameToken(text, protectedName) {
   return false;
 }
 
+function groundedVehicleIdentityPhrase(value) {
+  const normalized = (value || "").toString().trim().replace(/\s+/g, " ");
+  if (!normalized) return "";
+  if (/^(?:the vehicle they chose|customer experience)$/i.test(normalized)) {
+    return normalized;
+  }
+  if (/\b(?:19|20)\d{2}\b/.test(normalized)) return normalized;
+  const tokens = normalized.split(/[^A-Za-z]+/).filter(Boolean);
+  for (let i = 0; i < tokens.length; i++) {
+    if (isAutomotiveBrandToken(tokens[i])) return normalized;
+  }
+  return "";
+}
+
+function publicWebsiteDraftForPost(post, dealerName) {
+  const parsed = parseWebsiteDraft(recordString(post, "website_draft"));
+  if (!parsed.ok || !parsed.value || !parsed.value.enabled) {
+    return { websiteDraft: null, identityReviewRequired: false };
+  }
+  const draft = parsed.value;
+  const protectedName = recordString(post, "customer_name");
+  const publicLabel = publicCustomerLabel(protectedName);
+  const salespersonName = recordString(post, "salesperson_name");
+  const vehicleDescription = groundedVehicleIdentityPhrase(
+    draft.vehicleDescription || "",
+  );
+  const review = reviewPostCustomerIdentity(
+    protectedName,
+    [draft.title || "", draft.body || "", draft.altText || ""],
+    [
+      dealerName || "",
+      salespersonName,
+      publicCustomerLabel(salespersonName),
+      vehicleDescription,
+    ],
+    (recordBool(post, "release_required") || draft.kind === "customer_story") &&
+      !publicLabel,
+  );
+  const labelConflict =
+    !!draft.customerDisplayName &&
+    !releaseAuthorizesPublicCustomerLabel(protectedName, draft.customerDisplayName);
+  if (review.unexpectedIdentity || labelConflict) {
+    return { websiteDraft: null, identityReviewRequired: true };
+  }
+  const publicDraft = Object.assign({}, draft, {
+    title: review.projectedValues[0] || "",
+    body: review.projectedValues[1] || "",
+    altText: review.projectedValues[2] || "",
+  });
+  if (draft.kind === "customer_story" && publicLabel) {
+    publicDraft.customerDisplayName = publicLabel;
+  } else {
+    delete publicDraft.customerDisplayName;
+  }
+  return {
+    websiteDraft: publicDraft,
+    identityReviewRequired: review.reviewRequired,
+  };
+}
+
 function buildOutboundContent(post, draft, media, dao) {
   const mapping = dao
     ? resolveWebsiteMappingForPostWithDao(dao, post)
@@ -1027,18 +1348,25 @@ function buildOutboundContent(post, draft, media, dao) {
     throw new Error("website_mapping_conflict");
   }
   const protectedName = recordString(post, "customer_name");
-  const sanitizeMarketing = function (value) {
-    return replaceProtectedCustomerName((value || "").toString(), protectedName);
-  };
-  const title = sanitizeMarketing(draft.title);
-  const body = sanitizeMarketing(draft.body);
-  const altText = sanitizeMarketing(draft.altText);
-  const disclosures = recordString(post, "disclosures");
+  const expectedCustomerLabel = publicCustomerLabel(protectedName);
   let customerDisplayName = "";
   if (draft.customerDisplayName) {
-    customerDisplayName = protectedName
-      ? publicCustomerLabel(protectedName)
-      : publicCustomerLabel(draft.customerDisplayName);
+    const proposedCustomerLabel = draft.customerDisplayName
+      .toString()
+      .trim()
+      .replace(/\s+/g, " ");
+    const canonicalProposedLabel = publicCustomerLabel(proposedCustomerLabel);
+    if (
+      !expectedCustomerLabel ||
+      !canonicalProposedLabel ||
+      proposedCustomerLabel.toLowerCase() !== canonicalProposedLabel.toLowerCase() ||
+      proposedCustomerLabel.toLowerCase() !== expectedCustomerLabel.toLowerCase()
+    ) {
+      throw new Error("customer_identity_conflict");
+    }
+    customerDisplayName = expectedCustomerLabel;
+  } else if (draft.kind === "customer_story" && expectedCustomerLabel) {
+    customerDisplayName = expectedCustomerLabel;
   }
   // This value is grounded from decoded vehicle data. Do not turn a vehicle
   // make such as Ford into "the customer" when it is also a surname.
@@ -1049,20 +1377,100 @@ function buildOutboundContent(post, draft, media, dao) {
         ? "Customer experience"
         : "the vehicle they chose";
   }
+  const groundedVehicleDescription = groundedVehicleIdentityPhrase(vehicleDescription);
+  if (vehicleDescription && !groundedVehicleDescription) {
+    throw new Error("customer_identity_conflict");
+  }
+  vehicleDescription = groundedVehicleDescription;
+  let dealerName = "";
+  const effectiveDao =
+    dao || (typeof $app !== "undefined" && $app && $app.dao ? $app.dao() : null);
+  if (effectiveDao) {
+    try {
+      dealerName = recordString(
+        effectiveDao.findRecordById("dealers", recordString(post, "dealer")),
+        "name",
+      );
+    } catch (_e) {}
+  }
+  const groundedIdentityPhrases = [
+    dealerName,
+    vehicleDescription,
+    mapping.scenarioLabel,
+  ];
+  const sanitizeMarketing = function (value) {
+    return projectProtectedCustomerNamePreservingAllowed(
+      (value || "").toString(),
+      protectedName,
+      groundedIdentityPhrases,
+    );
+  };
+  const title = sanitizeMarketing(draft.title);
+  const body = sanitizeMarketing(draft.body);
+  const altText = sanitizeMarketing(draft.altText);
+  // Disclosures are legal copy, not editable marketing text. Legacy protected
+  // identity in this field must block delivery instead of being rewritten.
+  const disclosures = recordString(post, "disclosures");
+  const protectedIdentifierScan = function (value) {
+    let scan = (value || "").toString();
+    for (let i = 0; i < groundedIdentityPhrases.length; i++) {
+      scan = replaceAllowedCustomerPhrase(scan, groundedIdentityPhrases[i]);
+    }
+    return scan;
+  };
+
+  if (
+    draft.kind === "customer_story" &&
+    (containsUnexpectedCustomerIdentity(title, customerDisplayName, [
+      vehicleDescription,
+      mapping.scenarioLabel,
+      dealerName,
+    ]) ||
+      containsUnexpectedCustomerIdentity(body, customerDisplayName, [
+        vehicleDescription,
+        mapping.scenarioLabel,
+        dealerName,
+      ]) ||
+      containsUnexpectedCustomerIdentity(altText, customerDisplayName, [
+        vehicleDescription,
+        mapping.scenarioLabel,
+        dealerName,
+      ]))
+  ) {
+    throw new Error("customer_identity_conflict");
+  }
 
   if (disclosures.length > 2000)
     throw new Error("disclosures_exceed_destination_limit");
   if (
-    containsProtectedName(disclosures, protectedName) ||
-    containsProtectedFamilyReference(disclosures, protectedName) ||
-    containsProtectedNonFirstNameToken(disclosures, protectedName) ||
-    containsProtectedNonFirstNameToken(title, protectedName) ||
-    containsProtectedNonFirstNameToken(body, protectedName) ||
-    containsProtectedNonFirstNameToken(altText, protectedName) ||
-    containsProtectedNonFirstNameToken(customerDisplayName, protectedName) ||
-    containsProtectedNonFirstNameToken(vehicleDescription, protectedName) ||
-    containsProtectedName(vehicleDescription, protectedName) ||
-    containsProtectedFamilyReference(vehicleDescription, protectedName) ||
+    containsProtectedName(protectedIdentifierScan(disclosures), protectedName) ||
+    containsProtectedFamilyReference(
+      protectedIdentifierScan(disclosures),
+      protectedName,
+    ) ||
+    containsProtectedNonFirstNameToken(
+      protectedIdentifierScan(disclosures),
+      protectedName,
+    ) ||
+    containsProtectedNonFirstNameToken(protectedIdentifierScan(title), protectedName) ||
+    containsProtectedNonFirstNameToken(protectedIdentifierScan(body), protectedName) ||
+    containsProtectedNonFirstNameToken(
+      protectedIdentifierScan(altText),
+      protectedName,
+    ) ||
+    containsProtectedNonFirstNameToken(
+      protectedIdentifierScan(customerDisplayName),
+      protectedName,
+    ) ||
+    containsProtectedNonFirstNameToken(
+      protectedIdentifierScan(vehicleDescription),
+      protectedName,
+    ) ||
+    containsProtectedName(protectedIdentifierScan(vehicleDescription), protectedName) ||
+    containsProtectedFamilyReference(
+      protectedIdentifierScan(vehicleDescription),
+      protectedName,
+    ) ||
     containsVinLike(disclosures) ||
     containsVinLike(title) ||
     containsVinLike(body) ||
@@ -1438,6 +1846,7 @@ function statusReplayErrorIsPermanent(code) {
     code === "creative_media_too_large" ||
     code === "creative_media_missing" ||
     code === "creative_media_type_unsupported" ||
+    code === "image_review_required" ||
     code === "disclosures_exceed_destination_limit" ||
     code === "private_identifier_in_website_copy" ||
     code === "private_contact_in_website_copy" ||
@@ -1461,6 +1870,7 @@ function safeDeliveryErrorCode(err) {
     "creative_media_read_failed",
     "creative_media_missing",
     "creative_media_type_unsupported",
+    "image_review_required",
     "disclosures_exceed_destination_limit",
     "private_identifier_in_website_copy",
     "private_contact_in_website_copy",
@@ -1648,7 +2058,8 @@ function deliverClaimedPublication(publication) {
       code === "website_mapping_conflict" ||
       code === "disclosures_exceed_destination_limit" ||
       code === "creative_media_too_large" ||
-      code === "creative_media_type_unsupported";
+      code === "creative_media_type_unsupported" ||
+      code === "image_review_required";
     if (permanent) {
       return savePublicationState(publication, {
         status: "failed",
@@ -1834,6 +2245,7 @@ module.exports = {
   findPublicationForPostWithDao,
   findPublicationForPostWithDaoStrict,
   postReadiness,
+  hasValidLinkedRelease,
   claimPublicationForPost,
   publicationEventIdForPostRevision,
   publicationEventRevisionMatches,
@@ -1843,9 +2255,14 @@ module.exports = {
   processDuePublications,
   retryPublication,
   publicCustomerLabel,
+  releaseAuthorizesPublicCustomerLabel,
+  reviewPostCustomerIdentity,
+  groundedVehicleIdentityPhrase,
+  publicWebsiteDraftForPost,
   replaceProtectedCustomerName,
   containsVinLike,
   containsSensitiveContactText,
+  containsUnexpectedCustomerIdentity,
   buildOutboundContent,
   base64EncodeBytes,
   hmacHeaders,

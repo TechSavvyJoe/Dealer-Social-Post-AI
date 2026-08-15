@@ -26,6 +26,17 @@ function recordBool(record, fieldName) {
   return false;
 }
 
+function recordString(record, fieldName) {
+  if (!record) return "";
+  if (typeof record.getString === "function") {
+    return (record.getString(fieldName) || "").toString();
+  }
+  if (typeof record.get === "function") {
+    return (record.get(fieldName) || "").toString();
+  }
+  return "";
+}
+
 function initialApprovalStatus(dealer) {
   return recordBool(dealer, "requires_approval") ? "pending" : "n_a";
 }
@@ -273,13 +284,14 @@ const SERVER_SAFETY_SETTINGS = [
 // Language-neutral contract mirrored from config/gemini-model-policy.json.
 // `scripts/check-model-policy.mjs` and Vitest fail if this snapshot drifts.
 const GEMINI_MODEL_POLICY_SNAPSHOT = {
-  version: 4,
-  verifiedAt: "2026-07-29",
+  version: 5,
+  verifiedAt: "2026-08-14",
   models: {
     textQuality: "gemini-3.6-flash",
     textFast: "gemini-3.5-flash-lite",
-    imageStandard: "gemini-3.1-flash-image",
+    imageStandard: "gemini-3-pro-image",
     imageStudio: "gemini-3-pro-image",
+    imageFallback: "gemini-3.1-flash-image",
     imageLite: "gemini-3.1-flash-lite-image",
     videoStandard: "veo-3.1-fast-generate-preview",
     videoQuality: "veo-3.1-generate-preview",
@@ -307,8 +319,8 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
       kind: "image",
       tier: "standard",
       models: [
-        "gemini-3.1-flash-image",
         "gemini-3-pro-image",
+        "gemini-3.1-flash-image",
         "gemini-3.1-flash-lite-image",
       ],
       maxOutputTokens: 4096,
@@ -328,7 +340,7 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
       ],
       maxOutputTokens: 4096,
       imageSizes: {
-        "gemini-3-pro-image": "2K",
+        "gemini-3-pro-image": "4K",
         "gemini-3.1-flash-image": "2K",
         "gemini-3.1-flash-lite-image": "1K",
       },
@@ -377,7 +389,7 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
     maxPromptChars: 20000,
     maxInlineImageChars: 16 * 1024 * 1024,
     maxTotalInlineImageChars: 20 * 1024 * 1024,
-    maxTextImages: 1,
+    maxTextImages: 3,
     maxImageTaskImages: 2,
   },
   safetySettings: SERVER_SAFETY_SETTINGS,
@@ -385,6 +397,23 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
 
 function geminiModelPolicySnapshot() {
   return JSON.parse(JSON.stringify(GEMINI_MODEL_POLICY_SNAPSHOT));
+}
+
+/**
+ * A stored creative is reopenable/deliverable only when it was archived under
+ * the current server policy. Version 5 introduced the required on-pixel
+ * personal-name, source-fidelity, logo, and campaign-quality review. The
+ * stored version is server-derived from same-session generation events; the
+ * multipart client's model_policy_version field is never trusted.
+ */
+function postImageReviewRequired(record, currentPolicy) {
+  if (!recordString(record, "creative_image")) return false;
+  const currentVersion =
+    currentPolicy && typeof currentPolicy === "object"
+      ? (currentPolicy.version || "").toString()
+      : (currentPolicy || "").toString();
+  if (!currentVersion) return true;
+  return recordString(record, "model_policy_version") !== currentVersion;
 }
 
 function uniqueModelsForTasks(taskNames) {
@@ -762,7 +791,7 @@ function sanitizeGenerateContentContents(input, minImages, maxImages) {
   return [{ parts: parts }];
 }
 
-function buildGenerateContentRequest(model, input) {
+function buildGenerateContentRequest(model, input, requestedTaskName) {
   const fields = GEMINI_REQUEST_FIELDS.generateContent;
   // Deliberately omit `safetySettings` from the accepted client keys. The
   // canonical server policy below is the only safety configuration forwarded.
@@ -817,9 +846,20 @@ function buildGenerateContentRequest(model, input) {
   // Legacy clients sent responseFormat.image.imageSize; Google now treats that
   // nested field as a protobuf enum and rejects bare "2K". Always rewrite to
   // imageConfig before proxying.
-  const requiredSize =
-    GEMINI_MODEL_POLICY_SNAPSHOT.tasks.image_standard.imageSizes[model] ||
-    GEMINI_MODEL_POLICY_SNAPSHOT.tasks.image_studio.imageSizes[model];
+  const requestedTask = GEMINI_MODEL_POLICY_SNAPSHOT.tasks[requestedTaskName];
+  const requestedImageTask =
+    requestedTask &&
+    requestedTask.kind === "image" &&
+    requestedTask.models.indexOf(model) !== -1
+      ? requestedTask
+      : null;
+  // Headerless legacy clients remain on the standard size contract. This is
+  // important when Standard and Studio share a model ID but authorize a
+  // different output size (2K versus 4K).
+  const requiredSize = requestedImageTask
+    ? requestedImageTask.imageSizes[model]
+    : GEMINI_MODEL_POLICY_SNAPSHOT.tasks.image_standard.imageSizes[model] ||
+      GEMINI_MODEL_POLICY_SNAPSHOT.tasks.image_studio.imageSizes[model];
   if (!requiredSize) return null;
   let requestedSize = "";
   let requestedAspectRatio = "";
@@ -992,13 +1032,13 @@ function buildVeoRequest(model, input) {
   };
 }
 
-function buildGeminiProxyRequest(path, input) {
+function buildGeminiProxyRequest(path, input, requestedTaskName) {
   const normalized = (path || "").toString();
   const contentMatch = normalized.match(
     /^v1beta\/models\/([a-z0-9._-]+):generateContent$/i,
   );
   if (contentMatch && ALLOWED_GENERATE_CONTENT_MODELS.indexOf(contentMatch[1]) !== -1) {
-    return buildGenerateContentRequest(contentMatch[1], input);
+    return buildGenerateContentRequest(contentMatch[1], input, requestedTaskName);
   }
 
   const veoMatch = normalized.match(
@@ -1213,4 +1253,5 @@ module.exports = {
   isAllowedImageProxyUrl,
   imageProxyHostPatterns,
   geminiModelPolicySnapshot,
+  postImageReviewRequired,
 };

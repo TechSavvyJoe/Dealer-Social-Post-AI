@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   editSocialPostImage: vi.fn(),
   generateSocialPostText: vi.fn(),
   generateSocialPostTextDetailed: vi.fn(),
+  generatePlatformCaptionPack: vi.fn(),
   generateWebsiteDraftMetadata: vi.fn(),
   editSocialPostText: vi.fn(),
   editSocialPostTextDetailed: vi.fn(),
@@ -145,6 +146,8 @@ describe("useGeneration model-tier and provenance wiring", () => {
         style: StyleOption.Modern,
         tone: ToneOption.Professional,
         customerName: "Alex",
+        creativeBrief:
+          "Post scenario: Service Promotion. Target platforms (dealership priority): Instagram Story.",
         platformIds: [],
       },
       preferredTone: ToneOption.Professional,
@@ -165,6 +168,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       editSocialPostImage: mocks.editSocialPostImage,
       generateSocialPostText: mocks.generateSocialPostText,
       generateSocialPostTextDetailed: mocks.generateSocialPostTextDetailed,
+      generatePlatformCaptionPack: mocks.generatePlatformCaptionPack,
       generateWebsiteDraftMetadata: mocks.generateWebsiteDraftMetadata,
       editSocialPostText: mocks.editSocialPostText,
       editSocialPostTextDetailed: mocks.editSocialPostTextDetailed,
@@ -187,12 +191,15 @@ describe("useGeneration model-tier and provenance wiring", () => {
     });
 
     expect(mocks.generateSocialPost).toHaveBeenCalledTimes(2);
-    expect(mocks.generateSocialPost.mock.calls[0].at(-2)).toBe("studio");
-    expect(mocks.generateSocialPost.mock.calls[1].at(-2)).toBe("studio");
-    expect(mocks.generateSocialPost.mock.calls[0].at(-1)).toBe("1:1");
-    expect(mocks.generateSocialPost.mock.calls[1].at(-1)).toBe("1:1");
-    expect(mocks.generateFunSocialPostImage.mock.calls[0].at(-2)).toBe("studio");
-    expect(mocks.generateFunSocialPostImage.mock.calls[0].at(-1)).toBe("1:1");
+    expect(mocks.generateSocialPost.mock.calls[0].at(-3)).toBe("studio");
+    expect(mocks.generateSocialPost.mock.calls[1].at(-3)).toBe("studio");
+    expect(mocks.generateSocialPost.mock.calls[0].at(-2)).toBe("1:1");
+    expect(mocks.generateSocialPost.mock.calls[1].at(-2)).toBe("1:1");
+    expect(mocks.generateFunSocialPostImage.mock.calls[0].slice(4)).toEqual([
+      "studio",
+      "1:1",
+      "Post scenario: Service Promotion. Target platforms (dealership priority): Instagram Story.",
+    ]);
     expect(mocks.editSocialPostImage.mock.calls[0].at(-2)).toBe("studio");
     expect(mocks.editSocialPostImage.mock.calls[0].at(-1)).toBe("1:1");
     expect(mocks.renderFormat).toHaveBeenCalledTimes(4);
@@ -210,12 +217,12 @@ describe("useGeneration model-tier and provenance wiring", () => {
         "Alex",
         undefined,
         undefined,
-        undefined,
+        { customerIdentityRequired: true },
         ["gbp"],
       );
     });
 
-    expect(mocks.generateSocialPost.mock.calls[0].at(-1)).toBe("4:3");
+    expect(mocks.generateSocialPost.mock.calls[0].at(-2)).toBe("4:3");
     expect(mocks.setGenerationParams).toHaveBeenCalledWith(
       expect.objectContaining({
         platformIds: ["gbp"],
@@ -252,7 +259,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       );
     });
 
-    expect(mocks.generateSocialPost.mock.calls[0].at(-1)).toBe("16:9");
+    expect(mocks.generateSocialPost.mock.calls[0].at(-2)).toBe("16:9");
     expect(mocks.setGenerationParams).toHaveBeenCalledWith(
       expect.objectContaining({
         platformIds: ["facebook_feed", "gbp"],
@@ -273,7 +280,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
   });
 
   it("persists disclosures triggered only by a platform caption variant", async () => {
-    mocks.generateSocialPostText.mockResolvedValue(
+    mocks.generatePlatformCaptionPack.mockResolvedValue(
       JSON.stringify({
         facebook_feed: "Lease for $299/mo with approved credit.",
         instagram_feed: "A great delivery day at Example Motors.",
@@ -305,6 +312,63 @@ describe("useGeneration model-tier and provenance wiring", () => {
       }),
       1,
     );
+    expect(mocks.generatePlatformCaptionPack).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringContaining("CAPTION PACK"),
+      "Alex",
+      true,
+    );
+
+    cleanup();
+  });
+
+  it("threads the customer-identity requirement into generated caption variants", async () => {
+    mocks.store.generatedPost = {
+      ...existingPost,
+      customerDisplayName: "Alex",
+      customerIdentityRequired: true,
+    };
+    mocks.store.generationParams = {
+      ...(mocks.store.generationParams as Record<string, unknown>),
+      customerName: "Alex Example",
+      customerIdentityRequired: true,
+    };
+    mocks.generateSocialPostText.mockResolvedValue(
+      "Congratulations to Alex on a wonderful delivery day at Example Motors.",
+    );
+    const { result, cleanup } = renderGeneration();
+
+    await expect(result.current.generateCaptionVariant()).resolves.toContain(
+      "Congratulations to Alex",
+    );
+    expect(mocks.generateSocialPostText.mock.calls[0].at(-1)).toBe(true);
+
+    cleanup();
+  });
+
+  it("fails legacy missing identity flags closed and preserves explicit non-customer false", async () => {
+    mocks.generateSocialPostText.mockResolvedValue(
+      "A polished update from Example Motors for the community.",
+    );
+    const { result, cleanup } = renderGeneration();
+
+    await expect(result.current.generateCaptionVariant()).resolves.toContain(
+      "Example Motors",
+    );
+    expect(mocks.generateSocialPostText.mock.calls.at(-1)?.at(-1)).toBe(true);
+
+    mocks.store.generatedPost = {
+      ...existingPost,
+      customerIdentityRequired: false,
+    };
+    mocks.store.generationParams = {
+      ...(mocks.store.generationParams as Record<string, unknown>),
+      customerIdentityRequired: undefined,
+    };
+    await expect(result.current.generateCaptionVariant()).resolves.toContain(
+      "Example Motors",
+    );
+    expect(mocks.generateSocialPostText.mock.calls.at(-1)?.at(-1)).toBe(false);
 
     cleanup();
   });
@@ -336,17 +400,14 @@ describe("useGeneration model-tier and provenance wiring", () => {
       );
     });
 
-    expect(mocks.generateWebsiteDraftMetadata).toHaveBeenCalledWith(
-      generatedResult.image,
-      expect.stringContaining("Website content kind (fixed): customer_story"),
-    );
+    expect(mocks.generateWebsiteDraftMetadata).not.toHaveBeenCalled();
     expect(mocks.logPost).toHaveBeenCalledWith(
       expect.objectContaining({
         websiteDraft: expect.objectContaining({
           enabled: true,
           kind: "customer_story",
           category: "deliveries",
-          customerDisplayName: "Alex M.",
+          customerDisplayName: "Alex",
           vehicleDescription: "2025 Ford Explorer ST",
           schemaVersion: 1,
         }),
@@ -390,7 +451,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
     cleanup();
   });
 
-  it("warns when malformed final website metadata selects safe placeholders", async () => {
+  it("uses deterministic first-name-only metadata for a final customer story", async () => {
     mocks.generateWebsiteDraftMetadata.mockResolvedValueOnce("not valid json");
     const { result, cleanup } = renderGeneration();
 
@@ -404,18 +465,16 @@ describe("useGeneration model-tier and provenance wiring", () => {
         title: "Stale initial title",
         body: "Stale initial body.",
         altText: "Stale description for an earlier image.",
-        customerDisplayName: "Alex M.",
+        customerDisplayName: "Alex",
         schemaVersion: 1,
       },
     });
 
     expect(prepared).toMatchObject({
-      title: "Welcome, Alex M.",
+      title: "Welcome, Alex",
       body: "The final delivery caption after editing.",
     });
-    expect(mocks.toastWarning).toHaveBeenCalledWith(
-      expect.stringContaining("safe review placeholders"),
-    );
+    expect(mocks.generateWebsiteDraftMetadata).not.toHaveBeenCalled();
 
     cleanup();
   });
@@ -532,7 +591,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
 
     expect(mocks.editSocialPostTextDetailed).toHaveBeenCalledWith(
       "The salesperson's current manual caption.",
-      "Make it warmer and add a thank-you.",
+      expect.stringContaining('the only customer label allowed is exactly "Alex"'),
       ToneOption.Professional,
     );
     expect(replacement).toContain("A warmer thank-you for a wonderful delivery day.");
@@ -546,6 +605,34 @@ describe("useGeneration model-tier and provenance wiring", () => {
         },
       },
     });
+
+    cleanup();
+  });
+
+  it("keeps the current caption when an AI edit adds a second customer", async () => {
+    mocks.editSocialPostTextDetailed.mockResolvedValue({
+      text: "Congratulations to Alex and Jordan! Alex and Jordan just celebrated a delivery day.",
+      captionSource: "ai",
+      aiMeta: {
+        task: "caption_edit",
+        tier: "fast",
+        provider: "gemini",
+        model: "gemini-3.5-flash-lite",
+        fallbackCount: 0,
+        lastSuccessAt: "2026-08-14T12:00:00.000Z",
+      },
+    });
+    const { result, cleanup } = renderGeneration();
+
+    await expect(
+      act(async () =>
+        result.current.handleEditText(
+          "Make this warmer.",
+          "Alex is celebrating a wonderful delivery day.",
+        ),
+      ),
+    ).rejects.toThrow("not authorized");
+    expect(mocks.setGeneratedPost).not.toHaveBeenCalled();
 
     cleanup();
   });

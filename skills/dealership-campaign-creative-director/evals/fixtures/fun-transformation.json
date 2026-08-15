@@ -1,0 +1,33 @@
+{
+  "fixture_id": "fun-transformation",
+  "expected_validator_pass": true,
+  "source": "A real delivery photo shows a couple beside their blue SUV; a genuine Northstar Ford logo asset is supplied.",
+  "request": "Fun mode is explicit: use a playful poster transformation with controlled confetti and sticker energy while preserving the people and SUV.",
+  "candidate_review": {
+    "schema_version": 1,
+    "mode": "fun",
+    "source_is_real_photo": true,
+    "people_identity_preserved": true,
+    "vehicle_identity_preserved": true,
+    "scene_identity_preserved": true,
+    "expected_headline": "KEYS DAY",
+    "detected_headlines": ["KEYS DAY"],
+    "expected_dealer_name": "Northstar Ford",
+    "detected_dealer_name": "",
+    "dealer_identity_mode": "supplied_logo",
+    "logo_supplied": true,
+    "logo_status": "supplied_asset",
+    "personal_names_detected": [],
+    "prompt_leak_detected": false,
+    "social_ui_chrome_detected": false,
+    "contact_details_detected": false,
+    "hashtag_detected": false,
+    "typography_clean": true,
+    "style_signature_present": true,
+    "overlay_integrated": true,
+    "visual_quality_score": 5,
+    "artistic_transformation_requested": true,
+    "unrequested_transformation_detected": false,
+    "environmental_depth_integrated": false
+  }
+}

@@ -19,14 +19,14 @@ The active text, image, and video workloads all use the Gemini API at `generativ
 | `caption`            | quality  | `gemini-3.6-flash` → `gemini-3.5-flash-lite`                                    | 2,048 tokens               |
 | `caption_regenerate` | quality  | `gemini-3.6-flash` → `gemini-3.5-flash-lite`                                    | 2,048 tokens               |
 | `caption_edit`       | fast     | `gemini-3.5-flash-lite` → `gemini-3.6-flash`                                    | 2,048 tokens               |
-| `image_standard`     | standard | `gemini-3.1-flash-image` → `gemini-3-pro-image` → `gemini-3.1-flash-lite-image` | 2K → 2K → 1K; 4,096 tokens |
-| `image_studio`       | studio   | `gemini-3-pro-image` → `gemini-3.1-flash-image` → `gemini-3.1-flash-lite-image` | 2K → 2K → 1K; 4,096 tokens |
+| `image_standard`     | standard | `gemini-3-pro-image` → `gemini-3.1-flash-image` → `gemini-3.1-flash-lite-image` | 2K → 2K → 1K; 4,096 tokens |
+| `image_studio`       | studio   | `gemini-3-pro-image` → `gemini-3.1-flash-image` → `gemini-3.1-flash-lite-image` | 4K → 2K → 1K; 4,096 tokens |
 | `video_standard`     | standard | `veo-3.1-fast-generate-preview`                                                 | 720p                       |
 | `video_quality`      | quality  | `veo-3.1-generate-preview`                                                      | 1080p                      |
 
-The canonical configuration is `config/gemini-model-policy.json`; `services/modelConfig.ts` consumes it and PocketBase enforces the same policy. The standard image route starts with Flash, while only the explicit Studio preference starts with Pro. Standard and quality video are separate one-model routes. The Veo IDs above are Gemini API identifiers; Vertex-hosted `-001` model IDs are not interchangeable with them.
+The canonical configuration is `config/gemini-model-policy.json`; `services/modelConfig.ts` consumes it and PocketBase enforces the same policy. Both image routes start with Pro; Standard requests 2K and Studio requests 4K from Pro for hero creative before the shared Flash/Lite fallbacks. Standard and quality video are separate one-model routes. The Veo IDs above are Gemini API identifiers; Vertex-hosted `-001` model IDs are not interchangeable with them.
 
-Both image tiers request 2K from Flash and Pro, then 1K from the Lite image fallback. Run `npm run model-policy:check` to reject policy drift before deployment.
+Standard requests 2K from Pro and Flash. Studio requests 4K from Pro, then falls back to 2K Flash; both tiers use 1K Lite as the final image fallback. Run `npm run model-policy:check` to reject policy drift before deployment.
 
 ## Vertex status
 

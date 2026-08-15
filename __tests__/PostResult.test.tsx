@@ -754,6 +754,38 @@ describe("PostResult job-first flow", () => {
     ).toBeDisabled();
   });
 
+  it("gates every delivery path for a server-quarantined legacy image", () => {
+    renderResult({
+      post: {
+        image: "data:image/png;base64,aGVsbG8=",
+        text: "A saved legacy caption.",
+        postId: "legacy-image-post",
+        approvalStatus: "n_a",
+        imageReviewRequired: true,
+      },
+      isDesktopLayout: true,
+    });
+    const delivery = screen.getByLabelText("Post delivery actions");
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Image safety review required");
+    expect(
+      within(delivery).getByRole("button", {
+        name: "Copy caption (image review required)",
+      }),
+    ).toBeDisabled();
+    expect(
+      screen
+        .getAllByRole("button", { name: /^Share .* image/ })
+        .every((button) => button.hasAttribute("disabled")),
+    ).toBe(true);
+    expect(
+      screen
+        .getAllByRole("button", { name: /^Save .* image/ })
+        .every((button) => button.hasAttribute("disabled")),
+    ).toBe(true);
+    expect(screen.getByRole("button", { name: "Schedule" })).toBeDisabled();
+  });
+
   it("keeps teammate History view-only while allowing its unchanged copy to be shared", async () => {
     useAppStore.setState({ selectedImage: null });
     renderResult({
@@ -856,6 +888,126 @@ describe("PostResult job-first flow", () => {
     });
 
     expect(screen.queryByText("Caption claim blocked")).not.toBeInTheDocument();
+    expect(
+      within(delivery).getByRole("button", { name: "Copy caption" }),
+    ).toBeEnabled();
+  });
+
+  it("blocks a manual caption that adds a different customer until corrected", () => {
+    renderResult({
+      post: {
+        image: "data:image/png;base64,aGVsbG8=",
+        text: "Lisa is celebrating a wonderful delivery day.",
+        customerDisplayName: "Lisa",
+      },
+      isDesktopLayout: true,
+    });
+    const delivery = screen.getByLabelText("Post delivery actions");
+    const caption = screen.getByRole("textbox", { name: "Full caption text" });
+
+    fireEvent.change(caption, {
+      target: {
+        value:
+          "Congratulations to Lisa and Jordan! Lisa and Jordan just celebrated a delivery day.",
+      },
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Customer name blocked");
+    expect(caption).toHaveAttribute("aria-invalid", "true");
+    expect(
+      within(delivery).getByRole("button", {
+        name: "Copy caption (customer blocked)",
+      }),
+    ).toBeDisabled();
+    expect(
+      screen
+        .getAllByRole("button", { name: /^Share .* image/ })
+        .every((button) => button.hasAttribute("disabled")),
+    ).toBe(true);
+
+    fireEvent.change(caption, {
+      target: { value: "Lisa is celebrating a wonderful delivery day." },
+    });
+    expect(screen.queryByText("Customer name blocked")).not.toBeInTheDocument();
+    expect(
+      within(delivery).getByRole("button", { name: "Copy caption" }),
+    ).toBeEnabled();
+  });
+
+  it("blocks a wrong customer in a destination-specific manual caption", async () => {
+    const user = userEvent.setup();
+    renderResult({
+      post: {
+        image: "data:image/png;base64,aGVsbG8=",
+        text: "Lisa is celebrating a wonderful delivery day.",
+        customerDisplayName: "Lisa",
+        platformIds: ["facebook_feed"],
+        platformCaptions: {
+          facebook_feed: "Lisa is ready for the road ahead.",
+        },
+      },
+      isDesktopLayout: true,
+    });
+
+    await user.click(screen.getByRole("tab", { name: /Facebook/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Full caption text" }), {
+      target: { value: "Lisa and Jordan are ready for the road ahead." },
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Customer name blocked");
+    expect(
+      within(screen.getByLabelText("Post delivery actions")).getByRole("button", {
+        name: "Copy caption (customer blocked)",
+      }),
+    ).toBeDisabled();
+  });
+
+  it("blocks a customer name when the post has no approved public label", () => {
+    renderResult({
+      post: {
+        image: "data:image/png;base64,aGVsbG8=",
+        text: "A polished delivery-day caption.",
+        customerIdentityRequired: true,
+      },
+      isDesktopLayout: true,
+    });
+    const delivery = screen.getByLabelText("Post delivery actions");
+    const caption = screen.getByRole("textbox", { name: "Full caption text" });
+
+    fireEvent.change(caption, {
+      target: {
+        value:
+          "Meet Jordan! A memorable delivery day is underway, and the whole team is excited to celebrate.",
+      },
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Customer name blocked");
+    expect(caption).toHaveAttribute("aria-invalid", "true");
+    expect(
+      within(delivery).getByRole("button", {
+        name: "Copy caption (customer blocked)",
+      }),
+    ).toBeDisabled();
+    expect(
+      screen
+        .getAllByRole("button", { name: /^Share .* image/ })
+        .every((button) => button.hasAttribute("disabled")),
+    ).toBe(true);
+  });
+
+  it("does not treat a grounded inventory model as an unnamed customer", () => {
+    renderResult({ isDesktopLayout: true });
+    const delivery = screen.getByLabelText("Post delivery actions");
+    const caption = screen.getByRole("textbox", { name: "Full caption text" });
+
+    fireEvent.change(caption, {
+      target: {
+        value:
+          "Bronco just arrived at the dealership, and the showroom team is ready to share the details.",
+      },
+    });
+
+    expect(screen.queryByText("Customer name blocked")).not.toBeInTheDocument();
     expect(
       within(delivery).getByRole("button", { name: "Copy caption" }),
     ).toBeEnabled();

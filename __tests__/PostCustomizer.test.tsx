@@ -1,10 +1,59 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { vi } from "vitest";
-import { PostCustomizer } from "../components/PostCustomizer";
+import {
+  composeGenerationCreativeBrief,
+  PostCustomizer,
+} from "../components/PostCustomizer";
 import { StyleOption, ToneOption } from "../types";
 
 Object.assign(global.navigator, { vibrate: vi.fn() });
+
+describe("composeGenerationCreativeBrief", () => {
+  it("keeps dealer, scenario, vehicle, and OEM grounding ahead of verbose platform copy", () => {
+    const brief = composeGenerationCreativeBrief({
+      dealershipName: "Bob Maxey Ford of Howell",
+      scenarioBlock: "Scenario: New arrival announcement.",
+      vehicleBlock:
+        "Vehicle facts (do not contradict): 2025 Ford Explorer ST, four-door SUV.",
+      oemBlock: "OEM affiliation: Ford. Follow Ford advertising standards.",
+      designBlock: "Design DNA: premium high-end campaign composition.",
+      supportingBlocks: [
+        `Brand voice: ${"warm, factual, polished ".repeat(30)}`,
+        `Dealership facts: ${"Howell showroom; ".repeat(30)}`,
+      ],
+      platformBlock: `Platform guidance: ${"destination-specific detail ".repeat(100)}`,
+    });
+
+    expect(brief.length).toBeLessThanOrEqual(1400);
+    expect(brief).toContain(
+      'Dealership identity (use this exact name): "Bob Maxey Ford of Howell"',
+    );
+    expect(brief).toContain("Scenario: New arrival announcement");
+    expect(brief).toContain("2025 Ford Explorer ST");
+    expect(brief).toContain("OEM affiliation: Ford");
+  });
+
+  it("keeps every essential block inside the live 900-character caption window", () => {
+    const brief = composeGenerationCreativeBrief({
+      dealershipName: "D".repeat(140),
+      scenarioBlock: `Post scenario: Pre-Owned Spotlight. ${"scenario ".repeat(80)}`,
+      vehicleBlock: `Vehicle facts (do not contradict): Vehicle: 2025 Ford Explorer ST. ${"vehicle ".repeat(80)}`,
+      oemBlock: `OEM affiliation: Ford. ${"oem guidance ".repeat(40)}`,
+      designBlock: `Design DNA: premium environmental campaign. ${"design ".repeat(40)}`,
+      supportingBlocks: [`Brand voice: ${"warm and polished ".repeat(80)}`],
+      platformBlock: `Platform guidance: ${"destination detail ".repeat(80)}`,
+    });
+    const liveCaptionWindow = brief.slice(0, 900);
+
+    expect(liveCaptionWindow).toContain("Dealership identity");
+    expect(liveCaptionWindow).toContain("Post scenario: Pre-Owned Spotlight");
+    expect(liveCaptionWindow).toContain("Vehicle: 2025 Ford Explorer ST");
+    expect(liveCaptionWindow).toContain("OEM affiliation: Ford");
+    expect(liveCaptionWindow).toContain("Design DNA: premium environmental campaign");
+    expect(brief.length).toBeLessThanOrEqual(1400);
+  });
+});
 
 describe("PostCustomizer", () => {
   const baseProps = {
@@ -169,6 +218,142 @@ describe("PostCustomizer", () => {
         "photo",
       ),
     );
+  });
+
+  it("quarantines a restored caption that adds a different customer", async () => {
+    const onGenerate =
+      vi.fn<React.ComponentProps<typeof PostCustomizer>["onGenerate"]>();
+    render(
+      <PostCustomizer
+        {...baseProps}
+        onGenerate={onGenerate}
+        initialGenerationParams={{
+          style: StyleOption.Modern,
+          tone: ToneOption.Excited,
+          customerName: "Lisa Marie Sample",
+          customText:
+            "Congratulations to Lisa and Jordan! Lisa and Jordan just found the perfect new ride.",
+          scenarioId: "preowned_spotlight",
+          platformIds: ["instagram_feed"],
+          mediaOutputMode: "photo",
+          primaryFormatId: "feed_square",
+          imageAspectRatio: "1:1",
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText("Customer's name (optional)")).toHaveValue("Lisa");
+    expect(screen.getByRole("alert")).toHaveTextContent("was quarantined");
+    expect(screen.getByRole("button", { name: "AI Caption" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Generate Post/i }));
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(1));
+    expect(onGenerate.mock.calls[0]?.[2]).toBe("Lisa");
+    expect(onGenerate.mock.calls[0]?.[3]).toBeUndefined();
+  });
+
+  it("keeps grounded no-customer inventory copy editable", async () => {
+    const onGenerate =
+      vi.fn<React.ComponentProps<typeof PostCustomizer>["onGenerate"]>();
+    render(
+      <PostCustomizer
+        {...baseProps}
+        onGenerate={onGenerate}
+        initialGenerationParams={{
+          style: StyleOption.Modern,
+          tone: ToneOption.Excited,
+          customerName: "",
+          customText:
+            "Bronco just arrived at Test Motors, and the team is ready to share the details.",
+          scenarioId: "preowned_spotlight",
+          platformIds: ["instagram_feed"],
+          mediaOutputMode: "photo",
+          primaryFormatId: "feed_square",
+          imageAspectRatio: "1:1",
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText("Your caption")).toHaveValue(
+      "Bronco just arrived at Test Motors, and the team is ready to share the details.",
+    );
+    expect(screen.queryByText(/was quarantined/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Generate Post/i }));
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(1));
+    expect(onGenerate.mock.calls[0]?.[5]).toEqual(
+      expect.objectContaining({ customerIdentityRequired: false }),
+    );
+  });
+
+  it("quarantines an unnamed person in restored customer-delivery copy", () => {
+    render(
+      <PostCustomizer
+        {...baseProps}
+        initialGenerationParams={{
+          style: StyleOption.Modern,
+          tone: ToneOption.Excited,
+          customerName: "",
+          customText:
+            "Meet Jordan! A memorable delivery day is underway at Test Motors.",
+          scenarioId: "customer_delivery",
+          platformIds: ["instagram_feed"],
+          mediaOutputMode: "photo",
+          primaryFormatId: "feed_square",
+          imageAspectRatio: "1:1",
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("was quarantined");
+    expect(screen.getByRole("button", { name: "AI Caption" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("rebinds a selected template when the customer changes", async () => {
+    const onGenerate =
+      vi.fn<React.ComponentProps<typeof PostCustomizer>["onGenerate"]>();
+    render(
+      <PostCustomizer
+        {...baseProps}
+        onGenerate={onGenerate}
+        initialGenerationParams={{
+          style: StyleOption.Friendly,
+          tone: ToneOption.Excited,
+          customerName: "Alex",
+          scenarioId: "preowned_spotlight",
+          platformIds: ["instagram_feed"],
+          mediaOutputMode: "photo",
+          primaryFormatId: "feed_square",
+          imageAspectRatio: "1:1",
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/i }));
+    fireEvent.change(screen.getByLabelText("Select template"), {
+      target: { value: "t1" },
+    });
+    expect(
+      (screen.getByLabelText("Your caption") as HTMLTextAreaElement).value,
+    ).toContain("Alex");
+
+    fireEvent.change(screen.getByLabelText("Customer's name (optional)"), {
+      target: { value: "Beth" },
+    });
+    const reboundCaption = screen.getByLabelText("Your caption") as HTMLTextAreaElement;
+    expect(reboundCaption.value).toContain("Beth");
+    expect(reboundCaption.value).not.toContain("Alex");
+
+    fireEvent.click(screen.getByRole("button", { name: /Generate Post/i }));
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(1));
+    expect(onGenerate.mock.calls[0]?.[2]).toBe("Beth");
+    expect(onGenerate.mock.calls[0]?.[3]).toContain("Beth");
+    expect(onGenerate.mock.calls[0]?.[3]).not.toContain("Alex");
   });
 
   it("keeps clean new-post delivery defaults when no remix seed is supplied", () => {

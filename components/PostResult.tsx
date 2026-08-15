@@ -64,6 +64,8 @@ import {
   analyzeCaptionSetForDelivery,
   prohibitedClaimsMessage,
 } from "../utils/complianceDisclosures";
+import { captionUsesOnlyExpectedCustomer } from "../utils/captionQuality";
+import { toPublicCustomerLabel } from "../utils/customerIdentity";
 import {
   preferredExportFormatIds,
   resolvePrimaryImageProfile,
@@ -498,6 +500,9 @@ export const PostResult: React.FC<PostResultProps> = ({
       (requiresApproval ? (post.postId ? "pending" : "submission_failed") : "n_a"),
   );
   const [approvalCheckError, setApprovalCheckError] = useState<string | null>(null);
+  const [imageReviewRequired, setImageReviewRequired] = useState(
+    Boolean(post.imageReviewRequired),
+  );
   const [websitePublication, setWebsitePublication] = useState<
     WebsitePublication | undefined
   >(
@@ -813,6 +818,38 @@ export const PostResult: React.FC<PostResultProps> = ({
       bannedPhrases,
     );
   }, [activeCaptionPlatform, bannedPhrases, editedText, effectivePack, primaryCaption]);
+  const customerIdentityIsSafe = useCallback(
+    (caption: string): boolean =>
+      captionUsesOnlyExpectedCustomer(caption, post.customerDisplayName, {
+        allowedPhrases: [currentDealer?.name, websiteDraft?.vehicleDescription],
+        rejectAnyCustomerIdentity: Boolean(
+          (post.customerIdentityRequired || websiteDraft?.kind === "customer_story") &&
+          !toPublicCustomerLabel(post.customerDisplayName),
+        ),
+      }),
+    [
+      currentDealer?.name,
+      post.customerDisplayName,
+      post.customerIdentityRequired,
+      websiteDraft?.kind,
+      websiteDraft?.vehicleDescription,
+    ],
+  );
+  const identityLocked = useMemo(() => {
+    const currentPrimaryCaption = activeCaptionPlatform ? primaryCaption : editedText;
+    const variants = { ...(effectivePack || {}) };
+    if (activeCaptionPlatform) variants[activeCaptionPlatform] = editedText;
+    return [currentPrimaryCaption, ...Object.values(variants)].some(
+      (caption) => !customerIdentityIsSafe(caption),
+    );
+  }, [
+    activeCaptionPlatform,
+    customerIdentityIsSafe,
+    editedText,
+    effectivePack,
+    post.customerDisplayName,
+    primaryCaption,
+  ]);
   const imageBusy = isImageLoading || isVideoLoading;
   const textBusy = isTextLoading;
   const reviewRequired =
@@ -822,7 +859,12 @@ export const PostResult: React.FC<PostResultProps> = ({
   const approvalLocked = reviewRequired && approvalStatus !== "approved";
   const releaseLocked = post.releaseStatus === "save_failed";
   const claimLocked = captionSetAnalysis.prohibited.length > 0;
-  const deliveryLocked = approvalLocked || releaseLocked || claimLocked;
+  const deliveryLocked =
+    imageReviewRequired ||
+    approvalLocked ||
+    releaseLocked ||
+    claimLocked ||
+    identityLocked;
   const persistWebsiteState = useCallback(
     (
       nextDraft: WebsiteDraft | undefined,
@@ -909,7 +951,8 @@ export const PostResult: React.FC<PostResultProps> = ({
     if (
       !historyCaption.trim() ||
       historyAnalysis.compliance.prohibited.length > 0 ||
-      captionSetAnalysis.prohibited.length > 0
+      captionSetAnalysis.prohibited.length > 0 ||
+      identityLocked
     ) {
       return;
     }
@@ -950,6 +993,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     post.postId,
     primaryCaption,
     editableDraft,
+    identityLocked,
   ]);
 
   useEffect(() => {
@@ -979,16 +1023,32 @@ export const PostResult: React.FC<PostResultProps> = ({
   const claimGateMessage = claimLocked
     ? prohibitedClaimsMessage(captionSetAnalysis.prohibited)
     : "";
-  const deliveryGateMessage = claimLocked
-    ? claimGateMessage
-    : releaseLocked
-      ? releaseGateMessage
-      : approvalGateMessage;
-  const deliveryLockLabel = claimLocked
-    ? "Claim blocked"
-    : releaseLocked
-      ? "Release not saved"
-      : "Approval pending";
+  const identityGateMessage = identityLocked
+    ? post.customerDisplayName
+      ? `This copy appears to name someone other than ${post.customerDisplayName}. Correct every caption before saving, copying, scheduling, sharing, or sending it to the website.`
+      : "This customer-required copy includes a name without an approved public customer label. Remove the name or add the approved customer first name before delivery."
+    : "";
+  const imageReviewGateMessage = imageReviewRequired
+    ? "This saved image predates the current on-pixel customer-name, logo, and source-fidelity review. It cannot be copied, saved, shared, scheduled, approved, or sent to the website. Create a new post from the original photo."
+    : "";
+  const deliveryGateMessage = imageReviewRequired
+    ? imageReviewGateMessage
+    : identityLocked
+      ? identityGateMessage
+      : claimLocked
+        ? claimGateMessage
+        : releaseLocked
+          ? releaseGateMessage
+          : approvalGateMessage;
+  const deliveryLockLabel = imageReviewRequired
+    ? "Image review required"
+    : identityLocked
+      ? "Customer blocked"
+      : claimLocked
+        ? "Claim blocked"
+        : releaseLocked
+          ? "Release not saved"
+          : "Approval pending";
   const websiteStatusCopy = websitePublicationCopy(
     websitePublication,
     Boolean(post.postId),
@@ -1004,7 +1064,8 @@ export const PostResult: React.FC<PostResultProps> = ({
         (requiresApproval ? (post.postId ? "pending" : "submission_failed") : "n_a"),
     );
     setApprovalCheckError(null);
-  }, [post.postId, post.approvalStatus, requiresApproval]);
+    setImageReviewRequired(Boolean(post.imageReviewRequired));
+  }, [post.postId, post.approvalStatus, post.imageReviewRequired, requiresApproval]);
 
   useEffect(() => {
     if (!reviewRequired || approvalStatus !== "pending" || !post.postId) {
@@ -1031,6 +1092,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         );
         if (!active) return;
         setApprovalCheckError(null);
+        setImageReviewRequired(Boolean(result.image_review_required));
         setApprovalStatus(result.approval_status);
         if (result.approval_status === "approved") {
           toast.success("Manager approved this post. Delivery is unlocked.");
@@ -1756,11 +1818,13 @@ export const PostResult: React.FC<PostResultProps> = ({
       if (!base) continue;
       const attributed = appendDealershipMention(base, id, currentDealer);
       const prepared = analyzeCaptionForDelivery(attributed, bannedPhrases);
+      const identitySafe = customerIdentityIsSafe(prepared.caption);
       out[id] = {
         text: prepared.caption,
         disclosures: prepared.disclosures || undefined,
-        blockedReason:
-          prepared.compliance.prohibited.length > 0
+        blockedReason: !identitySafe
+          ? identityGateMessage
+          : prepared.compliance.prohibited.length > 0
             ? prohibitedClaimsMessage(prepared.compliance.prohibited)
             : undefined,
       };
@@ -1769,7 +1833,15 @@ export const PostResult: React.FC<PostResultProps> = ({
       out.instagram_reel = out.instagram_feed;
     }
     return Object.keys(out).length > 0 ? out : undefined;
-  }, [activeCaptionPlatform, bannedPhrases, currentDealer, editedText, effectivePack]);
+  }, [
+    activeCaptionPlatform,
+    bannedPhrases,
+    currentDealer,
+    customerIdentityIsSafe,
+    editedText,
+    effectivePack,
+    identityGateMessage,
+  ]);
 
   const selectCaptionPlatform = useCallback(
     (platformId: string | null, withHaptic = true) => {
@@ -2585,17 +2657,21 @@ export const PostResult: React.FC<PostResultProps> = ({
             : activePublishOutput.status === "pending"
               ? "Create this video to continue"
               : "Preparing platform file";
-  const publishTitle = claimLocked
-    ? "Caption claim needs attention"
-    : releaseLocked
-      ? "Photo release needs attention"
-      : reviewRequired
-        ? approvalStatus === "rejected"
-          ? "Manager requested changes"
-          : approvalStatus === "approved"
-            ? selectedFileTitle
-            : "Ready for manager review"
-        : selectedFileTitle;
+  const publishTitle = imageReviewRequired
+    ? "Image review required"
+    : identityLocked
+      ? "Customer name needs attention"
+      : claimLocked
+        ? "Caption claim needs attention"
+        : releaseLocked
+          ? "Photo release needs attention"
+          : reviewRequired
+            ? approvalStatus === "rejected"
+              ? "Manager requested changes"
+              : approvalStatus === "approved"
+                ? selectedFileTitle
+                : "Ready for manager review"
+            : selectedFileTitle;
   const websiteMobileActionLabel =
     !post.postId && websiteDraft?.enabled
       ? "Not saved"
@@ -3310,6 +3386,55 @@ export const PostResult: React.FC<PostResultProps> = ({
             </Button>
           </motion.div>
         ) : null}
+        {imageReviewRequired && (
+          <motion.div
+            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10"
+            initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
+            role="alert"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-current/20 bg-black/10">
+              <AlertCircle className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-semibold">Image safety review required</p>
+                <Badge variant="error" uppercase={false}>
+                  Delivery locked
+                </Badge>
+              </div>
+              <p className="mt-1 text-sm leading-relaxed opacity-80">
+                {imageReviewGateMessage}
+              </p>
+            </div>
+          </motion.div>
+        )}
+        {identityLocked && (
+          <motion.div
+            id="caption-identity-alert"
+            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10"
+            initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
+            role="alert"
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-current/20 bg-black/10">
+              <AlertCircle className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-semibold">Customer name blocked</p>
+                <Badge variant="error" uppercase={false}>
+                  Delivery locked
+                </Badge>
+              </div>
+              <p className="mt-1 text-sm leading-relaxed opacity-80">
+                {identityGateMessage}
+              </p>
+            </div>
+          </motion.div>
+        )}
         {claimLocked && (
           <motion.div
             id="caption-compliance-alert"
@@ -4649,7 +4774,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     onChange={handleTextChange}
                     disabled={isTextLoading || contentEditingLocked || historyReadOnly}
                     platformId={activeCaptionPlatform}
-                    claimLocked={claimLocked}
+                    claimLocked={claimLocked || identityLocked}
                     compact={isDesktopLayout}
                   />
                 </div>

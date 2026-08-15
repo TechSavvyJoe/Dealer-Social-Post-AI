@@ -89,8 +89,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div>
               <p className="font-semibold text-surface-50">Image quality</p>
               <p className="mt-1 text-sm leading-relaxed text-surface-400">
-                Standard is fast and polished. Studio starts with the premium Pro image
-                model for hero creative.
+                Standard uses premium Pro rendering at 2K. Studio renders Pro at 4K for
+                final hero creative.
               </p>
             </div>
           </div>

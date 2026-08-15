@@ -43,6 +43,8 @@ import {
   type WebsitePublication,
 } from "../services/websitePublishing";
 import { resolveHistoryPlatformIds } from "../services/platformCopy";
+import { toPublicCustomerLabel } from "../utils/customerIdentity";
+import { captionUsesOnlyExpectedCustomer } from "../utils/captionQuality";
 
 const STATUS_FILTERS: Array<{ key: ApprovalStatus | "all"; label: string }> = [
   { key: "all", label: "All" },
@@ -52,6 +54,32 @@ const STATUS_FILTERS: Array<{ key: ApprovalStatus | "all"; label: string }> = [
   { key: "n_a", label: "No review" },
 ];
 const HISTORY_PAGE_SIZE = 50;
+
+const savedPostIdentityIsSafe = (post: PostRecord, dealerName?: string): boolean => {
+  if (post.identity_review_required) return false;
+  const publicCustomer = toPublicCustomerLabel(post.customer_name);
+  const allowedPhrases = [dealerName, post.website_draft?.vehicleDescription];
+  const copy = [
+    post.caption,
+    ...Object.values(post.platform_captions || {}),
+    post.website_draft?.title,
+    post.website_draft?.body,
+    post.website_draft?.altText,
+  ].filter((value): value is string => Boolean(value?.trim()));
+  if (
+    post.website_draft?.customerDisplayName &&
+    post.website_draft.customerDisplayName.normalize("NFKC").trim().toLowerCase() !==
+      publicCustomer.toLowerCase()
+  ) {
+    return false;
+  }
+  return copy.every((caption) =>
+    captionUsesOnlyExpectedCustomer(caption, publicCustomer, {
+      allowedPhrases,
+      rejectAnyCustomerIdentity: Boolean(post.release_required && !publicCustomer),
+    }),
+  );
+};
 
 const formatWhen = (iso: string): string => {
   try {
@@ -154,6 +182,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
   const currentPersonId = useAppStore((s) => s.currentPerson?.id || "");
   const setGeneratedPost = useAppStore((s) => s.setGeneratedPost);
   const setSelectedImage = useAppStore((s) => s.setSelectedImage);
+  const setGenerationParams = useAppStore((s) => s.setGenerationParams);
   const setStep = useAppStore((s) => s.setStep);
   const { success: toastSuccess, error: toastError } = useToast();
   const [items, setItems] = useState<PostRecord[]>([]);
@@ -273,24 +302,36 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
     return items.filter((p) => {
       const haystack = [
         p.salesperson_name,
-        p.customer_name,
+        toPublicCustomerLabel(p.customer_name),
         p.vin,
         p.style,
         p.tone,
         p.approved_by,
-        p.caption,
+        savedPostIdentityIsSafe(p, dealer?.name) ? p.caption : undefined,
       ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [items, query]);
+  }, [dealer?.name, items, query]);
 
   const openCreative = useCallback(
     async (post: PostRecord) => {
       if (!post.creative_image_url) {
         toastError("No stored image for this post — only caption logs exist.");
+        return;
+      }
+      if (post.image_review_required) {
+        toastError(
+          "This saved image is quarantined because it predates the current on-pixel safety review. Create a new post from the original photo before sharing it.",
+        );
+        return;
+      }
+      if (!savedPostIdentityIsSafe(post, dealer?.name)) {
+        toastError(
+          "This saved post is quarantined because its copy may name a different customer. Create a corrected caption before sharing it.",
+        );
         return;
       }
       setOpeningId(post.id);
@@ -301,6 +342,8 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
         const generated: GeneratedPost = {
           image,
           text: (post.caption || "").trim() || "—",
+          customerDisplayName: toPublicCustomerLabel(post.customer_name),
+          customerIdentityRequired: Boolean(post.release_required),
           captionSource: post.caption_source || undefined,
           isBasicFallback: post.caption_source === "basic_fallback",
           disclosures: post.disclosures || undefined,
@@ -327,11 +370,17 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
           imageAspectRatio: post.image_aspect_ratio || undefined,
           websiteDraft: post.website_draft,
           websitePublication: post.website_publication,
+          // `image_review_required` is computed by the backend against the
+          // current model policy. Persist the explicit safe result so a direct
+          // private-session restore does not mistake this reviewed record for
+          // an unversioned legacy creative.
+          imageReviewRequired: false,
         };
         // A stored creative may come from another device/session, so it does
         // not have the original capture needed for a true same-photo remix.
         // Clear any stale capture and expose only safe share/export actions.
         setSelectedImage(null);
+        setGenerationParams(null);
         setGeneratedPost(generated);
         setStep(AppStep.RESULT);
         onOpenCreative?.();
@@ -347,8 +396,10 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
     [
       onOpenCreative,
       currentPersonId,
+      dealer?.name,
       role,
       setGeneratedPost,
+      setGenerationParams,
       setSelectedImage,
       setStep,
       toastError,
@@ -413,7 +464,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
       ...filtered.map((p) => [
         p.generated_at || "",
         p.salesperson_name || "",
-        p.customer_name || "",
+        toPublicCustomerLabel(p.customer_name),
         p.vin || "",
         p.style || "",
         p.tone || "",
@@ -589,7 +640,9 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
           >
             <div className="space-y-2 md:hidden">
               {filtered.map((post) => {
-                const canOpen = Boolean(post.creative_image_url);
+                const canOpen = Boolean(
+                  post.creative_image_url && !post.image_review_required,
+                );
                 const isOpening = openingId === post.id;
                 return (
                   <article
@@ -614,7 +667,11 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                     ) : (
                       <div
                         className="flex h-20 w-16 shrink-0 items-center justify-center rounded-lg border border-hairline bg-surface-950/80 text-surface-600"
-                        aria-label="No stored image"
+                        aria-label={
+                          post.image_review_required
+                            ? "Saved image held for safety review"
+                            : "No stored image"
+                        }
                       >
                         <ImageIcon className="h-5 w-5" />
                       </div>
@@ -623,7 +680,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                       <div className="flex min-w-0 items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-surface-50">
-                            {post.customer_name ||
+                            {toPublicCustomerLabel(post.customer_name) ||
                               post.salesperson_name ||
                               "Social post"}
                           </p>
@@ -642,7 +699,12 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                         {statusBadge(post.approval_status)}
                       </div>
                       <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-surface-300">
-                        {post.caption || `${post.style || "Post"} · ${post.tone || ""}`}
+                        {post.image_review_required
+                          ? "Image held for current on-pixel safety review"
+                          : savedPostIdentityIsSafe(post, dealer?.name)
+                            ? post.caption ||
+                              `${post.style || "Post"} · ${post.tone || ""}`
+                            : "Caption held for customer-name review"}
                       </p>
                       <div className="mt-2 flex items-center justify-between gap-2">
                         <div className="flex min-w-0 items-center gap-2 text-[10px] text-surface-400">
@@ -659,7 +721,8 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                           {websiteStatusBadge(post.website_publication)}
                         </div>
                         <div className="flex flex-wrap justify-end gap-1.5">
-                          {safeWebsiteReviewUrl(post.website_publication?.reviewUrl) ? (
+                          {!post.image_review_required &&
+                          safeWebsiteReviewUrl(post.website_publication?.reviewUrl) ? (
                             <a
                               href={safeWebsiteReviewUrl(
                                 post.website_publication?.reviewUrl,
@@ -671,9 +734,10 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                               <Globe2 className="h-3 w-3" /> Site draft
                             </a>
                           ) : null}
-                          {post.website_publication?.status === "failed" ||
-                          (post.website_publication?.status === "draft_ready" &&
-                            post.website_publication.lastError) ? (
+                          {!post.image_review_required &&
+                          (post.website_publication?.status === "failed" ||
+                            (post.website_publication?.status === "draft_ready" &&
+                              post.website_publication.lastError)) ? (
                             <button
                               type="button"
                               disabled={Boolean(websiteRetryingId)}
@@ -730,7 +794,9 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                 </thead>
                 <tbody>
                   {filtered.map((p) => {
-                    const canOpen = Boolean(p.creative_image_url);
+                    const canOpen = Boolean(
+                      p.creative_image_url && !p.image_review_required,
+                    );
                     const isOpening = openingId === p.id;
                     return (
                       <tr
@@ -738,7 +804,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                         className="border-t border-hairline hover:bg-fill-subtle transition-colors"
                       >
                         <td className="py-2 px-2">
-                          {p.creative_image_url ? (
+                          {canOpen ? (
                             <button
                               type="button"
                               onClick={() => void openCreative(p)}
@@ -756,7 +822,11 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                           ) : (
                             <div
                               className="flex h-12 w-12 items-center justify-center rounded-lg border border-hairline bg-surface-950/80 text-surface-600"
-                              title="No image stored (older log)"
+                              title={
+                                p.image_review_required
+                                  ? "Image held for current on-pixel safety review"
+                                  : "No image stored (older log)"
+                              }
                             >
                               <ImageIcon className="h-4 w-4" />
                             </div>
@@ -778,7 +848,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                           ) : null}
                         </td>
                         <td className="py-2 px-2 text-surface-200">
-                          {p.customer_name || "—"}
+                          {toPublicCustomerLabel(p.customer_name) || "—"}
                         </td>
                         <td className="py-2 px-2 text-surface-300">
                           <span className="text-[11px]">
@@ -824,7 +894,8 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                         </td>
                         <td className="py-2 px-2 text-right">
                           <div className="flex justify-end gap-1.5">
-                            {safeWebsiteReviewUrl(p.website_publication?.reviewUrl) ? (
+                            {!p.image_review_required &&
+                            safeWebsiteReviewUrl(p.website_publication?.reviewUrl) ? (
                               <a
                                 href={safeWebsiteReviewUrl(
                                   p.website_publication?.reviewUrl,
@@ -837,9 +908,10 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                                 <Globe2 className="h-3 w-3" /> Site
                               </a>
                             ) : null}
-                            {p.website_publication?.status === "failed" ||
-                            (p.website_publication?.status === "draft_ready" &&
-                              p.website_publication.lastError) ? (
+                            {!p.image_review_required &&
+                            (p.website_publication?.status === "failed" ||
+                              (p.website_publication?.status === "draft_ready" &&
+                                p.website_publication.lastError)) ? (
                               <button
                                 type="button"
                                 disabled={Boolean(websiteRetryingId)}
@@ -873,7 +945,9 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                               title={
                                 canOpen
                                   ? "Open for share / export"
-                                  : "No creative image on this older log"
+                                  : p.image_review_required
+                                    ? "Image held for current on-pixel safety review"
+                                    : "No creative image on this older log"
                               }
                             >
                               {isOpening ? "Opening…" : "Open"}

@@ -223,8 +223,12 @@ export const generateTextPrompt = (
   isRegeneration = false,
   creativeBrief?: string,
   style?: StyleOption,
+  customerIdentityRequired = true,
 ): string => {
-  if (FLAGS.useV2Prompts) {
+  // The legacy prompt is delivery-only. Non-customer scenarios must always use
+  // the scenario-aware prompt so inventory, service, team, and community posts
+  // cannot be mislabeled as customer handoffs when the feature flag is off.
+  if (FLAGS.useV2Prompts || !customerIdentityRequired) {
     return generateTextPromptV2(
       tone,
       dealershipName,
@@ -232,6 +236,7 @@ export const generateTextPrompt = (
       isRegeneration,
       creativeBrief,
       style,
+      customerIdentityRequired,
     );
   }
   const nameInfo = customerName
@@ -323,7 +328,7 @@ ${creativeBriefInstruction}
 REMEMBER: Shorter is better! Write the caption now.`;
 };
 
-export const funStyles = [
+const funStyleSourceCatalog = [
   {
     id: "superhero",
     name: "Superhero Comic Book",
@@ -884,6 +889,75 @@ export const funStyles = [
   },
 ];
 
+/**
+ * Public Fun Mode labels and runtime directions must be safe to show in the
+ * product and safe to place in a model prompt. Source descriptions above are
+ * retained only as a migration catalog for stable ids; they are never copied
+ * into runtime prompts.
+ */
+const FUN_STYLE_NAME_OVERRIDES: Readonly<Record<string, string>> = {
+  pixar: "Premium 3D Family Animation",
+  gta: "Graphic Novel Poster",
+  lego: "Toy-Brick Miniature",
+  popart: "Pop-Screen Print",
+  impressionist: "Luminous Impressionist Painting",
+  fantasy: "Hand-Drawn Fantasy Journey Map",
+  surrealist: "Dreamlike Surreal Painting",
+  cubist: "Geometric Multi-View Painting",
+  timburton: "Gothic Whimsical Animation",
+  simpsons: "Bright Prime-Time Cartoon",
+  southpark: "Paper-Cutout Comedy Style",
+  "80strapper": "1980s Airbrushed Binder Art",
+  etchasketch: "Single-Line Mechanical Screen Drawing",
+  claymation: "Clay Stop-Motion",
+  risograph: "Two-Color Stencil Print",
+  rorschach: "Mirrored Inkblot Art",
+};
+
+const FEATURED_FUN_RUNTIME_DIRECTIONS: Readonly<Record<string, string>> = {
+  superhero:
+    "Use heroic graphic-novel inks, bold halftone shading, and energetic panel composition while keeping everyday clothing, recognizable faces, the exact car, and the real location.",
+  anime:
+    "Use premium cel-animation linework, controlled expressive color, and cinematic light while keeping natural recognizable facial traits, the exact car, poses, and location.",
+  action:
+    "Use cinematic poster lighting, controlled atmosphere, and diagonal graphic energy around the same recognizable people, exact car, and real location; create action only through light and designed graphics.",
+  pixar:
+    "Use premium 3D family-animation materials, warm cinematic lighting, appealing rounded rendering, and polished depth while keeping the same recognizable people, exact car, poses, and location story.",
+  gta: "Use a sophisticated graphic-novel poster treatment with strong contour lines, semi-realistic painted shading, bold color blocks, and the same people, exact car, poses, and location.",
+  lego: "Use an interlocking toy-brick miniature treatment with tactile studio lighting; the same recognizable subjects, exact vehicle silhouette and color, relative poses, and location geometry remain clear.",
+  popart:
+    "Use bold pop-screen-print color separations, crisp halftone texture, and a single coherent poster composition while preserving the same people, exact car, pose, and location story.",
+  cyberpunk:
+    "Use neon-noir color, rain-light reflections, and futuristic graphic atmosphere on the same subjects, exact car, and recognizable real location; keep people and vehicle free of cybernetic modifications.",
+  filmnoir:
+    "Use elegant black-and-white cinema lighting, deep controlled shadows, and subtle film texture while preserving recognizable faces, the exact car, pose, and real location.",
+  vaporwave:
+    "Use a polished pink-teal-violet palette, soft retro-digital glow, and restrained geometric atmosphere around the same subjects, exact car, and location.",
+  blueprint:
+    "Use blueprint-inspired linework, grids, and technical texture as an artistic medium while keeping people dignified and the exact car recognizable; add no fake measurements, callouts, specifications, or UI.",
+  graffiti:
+    "Use premium mural color, spray texture, and bold abstract lettering shapes around the same recognizable people, exact car, poses, and location; add no tags, signatures, or fake logos.",
+};
+
+const BLOCKED_FUN_STYLE_IDS = new Set(["tribal", "xray"]);
+
+const productSafeFunDirection = (id: string, name: string): string =>
+  FEATURED_FUN_RUNTIME_DIRECTIONS[id] ||
+  "Apply a polished " +
+    name +
+    " full-scene treatment. Use only the medium's palette, texture, lighting, geometry, and mark-making. Keep the same recognizable people, subject count, relative poses, exact vehicle identity/color/silhouette, and basic location geometry. Add no fake logos, platform UI, prompt text, contact details, or unsupported claims.";
+
+export const funStyles = funStyleSourceCatalog
+  .filter((style) => !BLOCKED_FUN_STYLE_IDS.has(style.id))
+  .map((style) => {
+    const name = FUN_STYLE_NAME_OVERRIDES[style.id] || style.name;
+    return {
+      id: style.id,
+      name,
+      prompt: productSafeFunDirection(style.id, name),
+    };
+  });
+
 export type FunStyleMeta = {
   id: string;
   name: string;
@@ -1052,21 +1126,21 @@ export const generateFunPrompt = (
   dealershipName: string,
   logoBase64Url?: string,
   requestedStyle?: string,
+  creativeBrief?: string,
 ): string => {
   if (FLAGS.useV2Prompts) {
     const matched = funStyleCatalog.find(
       (s) => s.id === requestedStyle || s.name === requestedStyle,
     );
-    // Use the style's full Veo/Imagen prompt as the artistic-direction summary,
-    // truncated so the V2 wrapper stays under model context budgets.
     const summary = matched
-      ? `${matched.name}: ${matched.prompt.slice(0, 1200)}`
+      ? matched.prompt
       : "Surprise me with a bold artistic transformation.";
     return generateFunPromptV2(
       summary,
       dealershipName,
       !!logoBase64Url,
-      matched?.name || requestedStyle,
+      matched?.name,
+      creativeBrief,
     );
   }
   const criticalRules = `

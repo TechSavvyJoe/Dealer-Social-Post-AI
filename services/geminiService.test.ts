@@ -1,16 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   createVideoBlobUrl,
   editSocialPostTextDetailed,
   fetchVideoThroughProxy,
   generateFunSocialPostImage,
+  generatePlatformCaptionPack,
   generateSocialPost,
   generatePostVideo,
   generateWebsiteDraftMetadata,
+  reviewGeneratedImageText,
   type GeneratedImageTextReview,
 } from "./geminiService";
+import { parsePlatformCaptionPack } from "./platformCopy";
 import { StyleOption, ToneOption, VideoStyle } from "../types";
-import { MODEL_POLICY_VERSION, MODELS, TASKS } from "./modelConfig";
+import { MODEL_POLICY, MODEL_POLICY_VERSION, MODELS, TASKS } from "./modelConfig";
 
 // Hoist the mocks so they can be used in the mock factory
 const { mockGenerateContent, mockGenerateVideos, mockGetVideosOperation } = vi.hoisted(
@@ -22,6 +27,24 @@ const { mockGenerateContent, mockGenerateVideos, mockGetVideosOperation } = vi.h
     };
   },
 );
+
+type ProxyPolicies = {
+  buildGeminiProxyRequest: (
+    path: string,
+    input: unknown,
+    requestedTaskName?: string,
+  ) => Record<string, unknown> | null;
+};
+
+const loadPocketBaseRequestPolicies = (): ProxyPolicies => {
+  const source = readFileSync(
+    resolve(process.cwd(), "pb_hooks/requestPolicies.js"),
+    "utf8",
+  );
+  const commonJsModule = { exports: {} as ProxyPolicies };
+  new Function("module", "exports", source)(commonJsModule, commonJsModule.exports);
+  return commonJsModule.exports;
+};
 
 // Mock dependencies
 vi.mock("./geminiClient", () => ({
@@ -38,7 +61,11 @@ vi.mock("./geminiClient", () => ({
 }));
 
 vi.mock("../utils/imageUtils", () => ({
-  parseDataUrl: () => ({ mimeType: "image/jpeg", data: "fake-data" }),
+  parseDataUrl: (source: string) => {
+    const match = /^data:([^;,]+);base64,([\s\S]+)$/.exec(source);
+    if (!match) throw new Error("Invalid data URL");
+    return { mimeType: match[1], data: match[2].replace(/\s/g, "") };
+  },
   urlToDataUrl: () => Promise.resolve("data:image/jpeg;base64,fake-data"),
   letterboxImageForVideo: (dataUrl: string) => Promise.resolve(dataUrl),
   resolveVeoAspect: () => "9:16" as const,
@@ -82,6 +109,24 @@ const compliantImageTextReview: GeneratedImageTextReview = {
   hasFullSentence: false,
   hasHashtag: false,
   hasUrlOrPhone: false,
+  logoPresent: false,
+  logoMatchesSuppliedAsset: true,
+  hasUnexpectedPersonalName: false,
+  detectedPersonalNames: [],
+  dealershipNamePresent: true,
+  dealershipNameCorrect: true,
+  hasFabricatedBrandMark: false,
+  hasInstructionText: false,
+  hasSocialUiChrome: false,
+  isIllustrationOrCharacterRender: false,
+  preservesSourceSubjects: true,
+  preservesVehicleIdentity: true,
+  preservesSourceComposition: true,
+  isRespectfulAndFlattering: true,
+  isPlatformAppropriate: true,
+  visualQualityScore: 4,
+  hasDistinctStyleSignature: true,
+  hasCleanTypography: true,
   violations: [],
 };
 
@@ -163,7 +208,7 @@ describe("GeminiService model routing", () => {
     expect(textCall?.[0].generationConfig).not.toHaveProperty("topP");
   });
 
-  it("routes standard image generation through Flash Image first", async () => {
+  it("routes standard image generation through Pro Image first", async () => {
     await generateSocialPost(
       "data:image/jpeg;base64,fake",
       StyleOption.Modern,
@@ -260,6 +305,22 @@ describe("GeminiService model routing", () => {
     ).toBe(false);
   });
 
+  it("fails before the provider call when source and output cannot fit the proxy review budget", async () => {
+    vi.stubGlobal("createImageBitmap", undefined);
+    const perImageBudget = Math.floor(
+      MODEL_POLICY.requestLimits.maxTotalInlineImageChars / 2,
+    );
+    const oversizedLength = Math.ceil((perImageBudget + 1) / 4) * 4;
+    const oversized = `data:image/png;base64,${"A".repeat(oversizedLength)}`;
+
+    await expect(
+      reviewGeneratedImageText(oversized, "Payload Test Dealer", {
+        sourceImageBase64Url: oversized,
+      }),
+    ).rejects.toThrow("secure proxy payload budget");
+    expect(mockGenerateContent).not.toHaveBeenCalled();
+  });
+
   it("re-renders a noncompliant image with tighter copy before reducing text", async () => {
     let imageCalls = 0;
     let reviewCalls = 0;
@@ -312,7 +373,118 @@ describe("GeminiService model routing", () => {
     expect(retryCall).toBeDefined();
   });
 
-  it("runs the full ladder for repeat craft violations but still ships a render", async () => {
+  it("rejects a personal name burned into regular image pixels", async () => {
+    let imageCalls = 0;
+    let reviewCalls = 0;
+    const wrongNameReview: GeneratedImageTextReview = {
+      ...compliantImageTextReview,
+      compliant: false,
+      detectedMarketingText: ["WELCOME HOME, LISA"],
+      marketingWordCount: 3,
+      marketingCharacterCount: 18,
+      hasUnexpectedPersonalName: true,
+      detectedPersonalNames: ["Lisa"],
+      violations: ["unexpected_personal_name"],
+    };
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        reviewCalls += 1;
+        return imageTextReviewResponse(
+          reviewCalls === 1 ? wrongNameReview : compliantImageTextReview,
+        );
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        imageCalls += 1;
+        return Promise.resolve(
+          generatedImageResponse(
+            imageCalls === 1 ? "wrong-name-image" : "name-free-rerender",
+          ),
+        );
+      }
+      return Promise.resolve({
+        text: () => "A clean customer delivery caption for Test Dealer this week.",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,original-photo",
+      StyleOption.Friendly,
+      ToneOption.Professional,
+      "Test Dealer",
+      "Beth",
+    );
+
+    expect(result.image).toBe("data:image/png;base64,name-free-rerender");
+    expect(imageCalls).toBe(2);
+    const reviewPrompt = mockGenerateContent.mock.calls
+      .filter(([request]) => isImageTextReviewRequest(request))
+      .at(0)?.[0]
+      .contents?.parts?.find((part: { text?: string }) =>
+        part.text?.includes("strict visual quality-control inspector"),
+      )?.text;
+    expect(reviewPrompt).toContain("Customer or personal names are forbidden");
+    expect(reviewPrompt).toContain("regular photo-overlay style");
+  });
+
+  it("allows Fun Mode illustration while still reviewing names and fake marks", async () => {
+    let imageCalls = 0;
+    const creativeBrief = [
+      "Post scenario: Service Promotion.",
+      "Scenario: Service department promotion.",
+      "Target platforms (dealership priority):",
+      "- Instagram Story (≤400 chars recommended for the hook): Prefer 9:16.",
+      "Always name the store exactly as Test Dealer.",
+    ].join(" ");
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        return imageTextReviewResponse({
+          ...compliantImageTextReview,
+          isIllustrationOrCharacterRender: true,
+          visualQualityScore: 4,
+          hasDistinctStyleSignature: true,
+          hasCleanTypography: true,
+        });
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        imageCalls += 1;
+        return Promise.resolve(generatedImageResponse("fun-character-image"));
+      }
+      return Promise.resolve({ text: () => "unused" });
+    });
+
+    const image = await generateFunSocialPostImage(
+      "data:image/jpeg;base64,original-photo",
+      "Test Dealer",
+      undefined,
+      "pixar",
+      "standard",
+      undefined,
+      creativeBrief,
+    );
+
+    expect(image).toBe("data:image/png;base64,fun-character-image");
+    expect(imageCalls).toBe(1);
+    const reviewPrompt = mockGenerateContent.mock.calls
+      .find(([request]) => isImageTextReviewRequest(request))?.[0]
+      .contents?.parts?.find((part: { text?: string }) =>
+        part.text?.includes("strict visual quality-control inspector"),
+      )?.text;
+    expect(reviewPrompt).toContain("This is Fun Mode");
+    expect(reviewPrompt).toContain("Any added dealership badge");
+    expect(reviewPrompt).toContain("Premium 3D Family Animation");
+    expect(reviewPrompt?.toLocaleLowerCase()).not.toContain("pixar");
+    const generationPrompt = mockGenerateContent.mock.calls
+      .find(
+        ([request]) =>
+          request.generationConfig?.responseModalities?.includes("IMAGE") &&
+          !isImageTextReviewRequest(request),
+      )?.[0]
+      .contents?.parts?.find((part: { text?: string }) => part.text)?.text;
+    expect(generationPrompt).toContain("Scenario class: Service promotion");
+    expect(generationPrompt).toContain("Compose for 9:16");
+  });
+
+  it("fails closed after every correction remains over the image-text budget", async () => {
     let imageCalls = 0;
     let reviewCalls = 0;
     const noncompliantReview: GeneratedImageTextReview = {
@@ -345,14 +517,8 @@ describe("GeminiService model routing", () => {
       "Test Dealer",
     );
 
-    // Ladder still runs in full: initial render, tighter-copy re-render, then
-    // the text-reduction edit. But an overlay that is merely too wordy is a
-    // craft problem, not an unsafe one, so the last render ships instead of
-    // the untouched photo — losing the whole creative reads to the user as the
-    // app having done nothing. Unsafe overlays (phone/link/hashtag) still fall
-    // back; that is covered by its own test below.
-    expect(result.image).toBe("data:image/png;base64,still-long-3");
-    expect(result.aiMeta.image.provider).not.toBe("original");
+    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
+    expect(result.aiMeta.image.provider).toBe("original");
     expect(imageCalls).toBe(3);
     expect(reviewCalls).toBe(3);
     const reductionCall = mockGenerateContent.mock.calls.find(([request]) =>
@@ -363,7 +529,55 @@ describe("GeminiService model routing", () => {
     expect(reductionCall).toBeDefined();
   });
 
-  it("passes the image through when the vision review itself fails", async () => {
+  it("rejects a text-correction render that introduces a blocking craft defect", async () => {
+    let imageCalls = 0;
+    let reviewCalls = 0;
+    const lengthReview: GeneratedImageTextReview = {
+      ...compliantImageTextReview,
+      compliant: false,
+      detectedMarketingText: ["YOUR NEW ADVENTURE STARTS HERE TODAY"],
+      marketingWordCount: 6,
+      marketingCharacterCount: 36,
+      hasFullSentence: true,
+      violations: ["full_sentence"],
+    };
+    const blandCorrectionReview: GeneratedImageTextReview = {
+      ...compliantImageTextReview,
+      compliant: false,
+      visualQualityScore: 2,
+      hasDistinctStyleSignature: false,
+      violations: ["bland_or_unstyled"],
+    };
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        reviewCalls += 1;
+        return imageTextReviewResponse(
+          reviewCalls < 3 ? lengthReview : blandCorrectionReview,
+        );
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        imageCalls += 1;
+        return Promise.resolve(generatedImageResponse(`craft-${imageCalls}`));
+      }
+      return Promise.resolve({
+        text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,original-photo",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Test Dealer",
+    );
+
+    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
+    expect(result.aiMeta.image.provider).toBe("original");
+    expect(imageCalls).toBe(3);
+    expect(reviewCalls).toBe(3);
+  });
+
+  it("fails closed to the original photo when vision safety review fails", async () => {
     let imageCalls = 0;
     mockGenerateContent.mockImplementation((request) => {
       if (isImageTextReviewRequest(request)) {
@@ -387,9 +601,184 @@ describe("GeminiService model routing", () => {
       "Test Dealer",
     );
 
-    // A broken reviewer must never destroy a finished creative.
-    expect(result.image).toBe("data:image/png;base64,styled-overlay-image");
+    // A generated image cannot ship when names and branding were not verified.
+    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
+    expect(result.aiMeta.image.provider).toBe("original");
     expect(imageCalls).toBe(1);
+  });
+
+  it("does not accept a reviewer response that omits identity and brand checks", async () => {
+    let imageCalls = 0;
+    const incompleteReview: GeneratedImageTextReview = {
+      compliant: true,
+      uncertain: false,
+      detectedMarketingText: ["WELCOME HOME"],
+      marketingWordCount: 2,
+      marketingCharacterCount: 12,
+      hasFullSentence: false,
+      hasHashtag: false,
+      hasUrlOrPhone: false,
+      violations: [],
+    };
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        return imageTextReviewResponse(incompleteReview);
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        imageCalls += 1;
+        return Promise.resolve(generatedImageResponse(`unverified-${imageCalls}`));
+      }
+      return Promise.resolve({
+        text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,original-photo",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Test Dealer",
+    );
+
+    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
+    expect(result.aiMeta.image.provider).toBe("original");
+    expect(imageCalls).toBeGreaterThan(1);
+  });
+
+  it("never returns a known substandard render when a retry review is unavailable", async () => {
+    let imageCalls = 0;
+    let reviewCalls = 0;
+    const missingDealerReview: GeneratedImageTextReview = {
+      ...compliantImageTextReview,
+      compliant: false,
+      dealershipNamePresent: false,
+      violations: ["missing_dealership_identity"],
+    };
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        reviewCalls += 1;
+        return reviewCalls === 1
+          ? imageTextReviewResponse(missingDealerReview)
+          : Promise.resolve({ text: () => "review unavailable" });
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        imageCalls += 1;
+        return Promise.resolve(
+          generatedImageResponse(`unverified-retry-${imageCalls}`),
+        );
+      }
+      return Promise.resolve({
+        text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,original-photo",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Test Dealer",
+    );
+
+    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
+    expect(result.aiMeta.image.provider).toBe("original");
+    expect(imageCalls).toBe(3);
+    expect(reviewCalls).toBeGreaterThanOrEqual(3);
+  });
+
+  it("compares the source and regenerates when a customer subject changes", async () => {
+    let imageCalls = 0;
+    let reviewCalls = 0;
+    const changedSubjectReview: GeneratedImageTextReview = {
+      ...compliantImageTextReview,
+      compliant: false,
+      preservesSourceSubjects: false,
+      violations: ["subject_identity_changed"],
+    };
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        reviewCalls += 1;
+        return imageTextReviewResponse(
+          reviewCalls === 1 ? changedSubjectReview : compliantImageTextReview,
+        );
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        imageCalls += 1;
+        return Promise.resolve(
+          generatedImageResponse(imageCalls === 1 ? "changed-face" : "faithful-face"),
+        );
+      }
+      return Promise.resolve({
+        text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,original-photo",
+      StyleOption.Friendly,
+      ToneOption.Professional,
+      "Test Dealer",
+    );
+
+    expect(result.image).toBe("data:image/png;base64,faithful-face");
+    const reviewParts = mockGenerateContent.mock.calls.find(([request]) =>
+      isImageTextReviewRequest(request),
+    )?.[0].contents.parts;
+    const reviewTextParts = reviewParts?.filter(
+      (part: { text?: string }) => typeof part.text === "string",
+    );
+    expect(reviewTextParts).toHaveLength(1);
+    expect(reviewTextParts?.[0]?.text).toContain("IMAGE 1: REFERENCE SOURCE IMAGE");
+    expect(reviewTextParts?.[0]?.text).toContain("IMAGE 2: GENERATED OUTPUT IMAGE");
+    expect(
+      reviewParts?.filter((part: { inlineData?: unknown }) => part.inlineData),
+    ).toHaveLength(2);
+  });
+
+  it("requires environmental 3D integration for Depth Pop", async () => {
+    let imageCalls = 0;
+    let reviewCalls = 0;
+    const flatDepthReview: GeneratedImageTextReview = {
+      ...compliantImageTextReview,
+      compliant: false,
+      hasEnvironmentalDepthIntegration: false,
+      violations: ["unintegrated_3d_graphics"],
+    };
+    const integratedDepthReview: GeneratedImageTextReview = {
+      ...compliantImageTextReview,
+      hasEnvironmentalDepthIntegration: true,
+    };
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        reviewCalls += 1;
+        return imageTextReviewResponse(
+          reviewCalls < 3 ? flatDepthReview : integratedDepthReview,
+        );
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        imageCalls += 1;
+        return Promise.resolve(generatedImageResponse(`depth-${imageCalls}`));
+      }
+      return Promise.resolve({
+        text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,original-photo",
+      StyleOption.DepthPop,
+      ToneOption.Professional,
+      "Test Dealer",
+    );
+
+    expect(result.image).toBe("data:image/png;base64,depth-3");
+    expect(imageCalls).toBe(3);
+    expect(
+      mockGenerateContent.mock.calls.some(([request]) =>
+        request.contents?.parts?.some((part: { text?: string }) =>
+          part.text?.includes("<final_creative_recovery>"),
+        ),
+      ),
+    ).toBe(true);
   });
 
   it("reports an original-photo fallback at error level so the server sees it", async () => {
@@ -428,25 +817,17 @@ describe("GeminiService model routing", () => {
     errorSpy.mockRestore();
   });
 
-  it("keeps the rendered creative when every rung is flagged only on craft grounds", async () => {
-    // The reviewer stays unhappy through regeneration and correction, but only
-    // ever reports word-count/sentence findings. Discarding the render here
-    // drops the salesperson back to their raw camera photo, which is the exact
-    // "it did nothing to my image" failure this ladder exists to prevent.
+  it("retries and then rejects a merely usable score-three creative", async () => {
     let imageCalls = 0;
+    let reviewCalls = 0;
     mockGenerateContent.mockImplementation((request) => {
       if (isImageTextReviewRequest(request)) {
+        reviewCalls += 1;
         return imageTextReviewResponse({
           ...compliantImageTextReview,
-          compliant: false,
-          uncertain: false,
-          detectedMarketingText: ["YOUR NEW ADVENTURE STARTS HERE TODAY"],
-          marketingWordCount: 6,
-          marketingCharacterCount: 36,
-          hasFullSentence: true,
-          hasHashtag: false,
-          hasUrlOrPhone: false,
-          violations: ["full_sentence"],
+          compliant: true,
+          visualQualityScore: 3,
+          violations: [],
         });
       }
       if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
@@ -465,8 +846,17 @@ describe("GeminiService model routing", () => {
       "Test Dealer",
     );
 
-    expect(result.image).not.toBe("data:image/jpeg;base64,original-photo");
-    expect(result.image).toMatch(/^data:image\/png;base64,render-/);
+    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
+    expect(result.aiMeta.image.provider).toBe("original");
+    expect(imageCalls).toBe(3);
+    expect(reviewCalls).toBe(3);
+    expect(
+      mockGenerateContent.mock.calls.some(([request]) =>
+        request.contents?.parts?.some((part: { text?: string }) =>
+          part.text?.includes("<final_creative_recovery>"),
+        ),
+      ),
+    ).toBe(true);
   });
 
   it("still refuses an overlay carrying a phone number or link", async () => {
@@ -531,7 +921,7 @@ describe("GeminiService model routing", () => {
     expect(imageCalls).toBe(1);
   });
 
-  it("passes an uncertain-only review through without correction", async () => {
+  it("fails closed when repeated visual review remains uncertain", async () => {
     let imageCalls = 0;
     const uncertainReview: GeneratedImageTextReview = {
       ...compliantImageTextReview,
@@ -562,8 +952,9 @@ describe("GeminiService model routing", () => {
       "Test Dealer",
     );
 
-    expect(result.image).toBe("data:image/png;base64,stylized-type-image");
-    expect(imageCalls).toBe(1);
+    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
+    expect(result.aiMeta.image.provider).toBe("original");
+    expect(imageCalls).toBeGreaterThan(1);
   });
 
   it("accepts a headline with display punctuation and a badge as separate blocks", async () => {
@@ -600,9 +991,16 @@ describe("GeminiService model routing", () => {
 
   it("restores a missing dealership logo with one bounded retry", async () => {
     let imageCalls = 0;
+    let reviewCalls = 0;
     const logoMissingReview: GeneratedImageTextReview = {
       ...compliantImageTextReview,
       logoPresent: false,
+      logoMatchesSuppliedAsset: false,
+    };
+    const exactLogoReview: GeneratedImageTextReview = {
+      ...compliantImageTextReview,
+      logoPresent: true,
+      logoMatchesSuppliedAsset: true,
     };
     const bytes = new Uint8Array([1, 2, 3]);
     vi.stubGlobal(
@@ -618,15 +1016,123 @@ describe("GeminiService model routing", () => {
     );
     mockGenerateContent.mockImplementation((request) => {
       if (isImageTextReviewRequest(request)) {
-        return imageTextReviewResponse(logoMissingReview);
+        reviewCalls += 1;
+        return imageTextReviewResponse(
+          reviewCalls === 1 ? logoMissingReview : exactLogoReview,
+        );
       }
       if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
         imageCalls += 1;
         return Promise.resolve(
           generatedImageResponse(
-            imageCalls === 1 ? "logo-missing-image" : "logo-restored-image",
+            imageCalls === 1
+              ? "bG9nby1taXNzaW5nLWltYWdl"
+              : "bG9nby1yZXN0b3JlZC1pbWFnZQ==",
           ),
         );
+      }
+      return Promise.resolve({
+        text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,b3JpZ2luYWwtcGhvdG8=",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Test Dealer",
+      undefined,
+      "/api/files/dealers/dealer-id/logo.png",
+    );
+
+    expect(result.image).toBe("data:image/png;base64,bG9nby1yZXN0b3JlZC1pbWFnZQ==");
+    expect(imageCalls).toBe(2);
+    const restoreCall = mockGenerateContent.mock.calls.find(([request]) =>
+      request.contents?.parts?.some((part: { text?: string }) =>
+        part.text?.includes("Use the supplied dealership logo"),
+      ),
+    );
+    expect(restoreCall).toBeDefined();
+    const logoReviewCall = mockGenerateContent.mock.calls.find(
+      ([request]) =>
+        isImageTextReviewRequest(request) &&
+        request.contents?.parts?.some((part: { text?: string }) =>
+          part.text?.includes("IMAGE 3: APPROVED DEALERSHIP LOGO"),
+        ),
+    );
+    expect(logoReviewCall).toBeDefined();
+    expect(
+      logoReviewCall?.[0].contents.parts.filter(
+        (part: { inlineData?: unknown }) => part.inlineData,
+      ),
+    ).toHaveLength(3);
+    expect(
+      logoReviewCall?.[0].contents.parts.filter(
+        (part: { text?: string }) => typeof part.text === "string",
+      ),
+    ).toHaveLength(1);
+    const reviewImageChars = logoReviewCall?.[0].contents.parts
+      .filter((part: { inlineData?: { data?: string } }) => part.inlineData)
+      .reduce(
+        (total: number, part: { inlineData?: { data?: string } }) =>
+          total + (part.inlineData?.data?.length || 0),
+        0,
+      );
+    expect(reviewImageChars).toBeLessThanOrEqual(
+      MODEL_POLICY.requestLimits.maxTotalInlineImageChars,
+    );
+    expect(
+      logoReviewCall?.[0].contents.parts.find(
+        (part: { text?: string }) => typeof part.text === "string",
+      )?.text.length,
+    ).toBeLessThanOrEqual(MODEL_POLICY.requestLimits.maxPromptChars);
+    const exactReviewRequest = logoReviewCall?.[0];
+    if (!exactReviewRequest)
+      throw new Error("Expected a captured vision review request.");
+    expect(
+      loadPocketBaseRequestPolicies().buildGeminiProxyRequest(
+        `v1beta/models/${exactReviewRequest.model}:generateContent`,
+        {
+          contents: [exactReviewRequest.contents],
+          generationConfig: exactReviewRequest.generationConfig,
+        },
+        exactReviewRequest.task,
+      ),
+    ).not.toBeNull();
+  });
+
+  it("fails closed when a supplied logo is still missing after repair", async () => {
+    let imageCalls = 0;
+    let reviewCalls = 0;
+    const logoStillMissing: GeneratedImageTextReview = {
+      ...compliantImageTextReview,
+      compliant: true,
+      logoPresent: false,
+      // Deliberately inconsistent provider output: missing must fail even when
+      // the model claims the unseen asset matches.
+      logoMatchesSuppliedAsset: true,
+      violations: [],
+    };
+    const bytes = new Uint8Array([1, 2, 3]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        blob: async () => ({
+          type: "image/png",
+          arrayBuffer: async () => bytes.buffer,
+        }),
+      })),
+    );
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        reviewCalls += 1;
+        return imageTextReviewResponse(logoStillMissing);
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        imageCalls += 1;
+        return Promise.resolve(generatedImageResponse(`missing-logo-${imageCalls}`));
       }
       return Promise.resolve({
         text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
@@ -642,14 +1148,10 @@ describe("GeminiService model routing", () => {
       "/api/files/dealers/dealer-id/logo.png",
     );
 
-    expect(result.image).toBe("data:image/png;base64,logo-restored-image");
+    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
+    expect(result.aiMeta.image.provider).toBe("original");
     expect(imageCalls).toBe(2);
-    const restoreCall = mockGenerateContent.mock.calls.find(([request]) =>
-      request.contents?.parts?.some((part: { text?: string }) =>
-        part.text?.includes("missing from the design"),
-      ),
-    );
-    expect(restoreCall).toBeDefined();
+    expect(reviewCalls).toBe(2);
   });
 
   it("keeps website metadata requests inside the server text-policy contract", async () => {
@@ -667,6 +1169,33 @@ describe("GeminiService model routing", () => {
     expect(mockGenerateContent.mock.calls[0]?.[0].generationConfig).toEqual({
       maxOutputTokens: 2048,
     });
+  });
+
+  it("preserves structured caption-pack JSON and binds it to the public customer label", async () => {
+    const structured = JSON.stringify({
+      facebook_feed: "Congratulations to Lisa at Test Dealer.",
+      instagram_feed: "Lisa's delivery day at Test Dealer. #TestDealer",
+    });
+    mockGenerateContent.mockResolvedValueOnce({ text: () => structured });
+
+    const raw = await generatePlatformCaptionPack(
+      "data:image/jpeg;base64,source-photo",
+      'Return JSON with keys ["facebook_feed","instagram_feed"].',
+      "Lisa Marie Sample",
+      true,
+    );
+
+    expect(raw).toBe(structured);
+    expect(parsePlatformCaptionPack(raw, ["facebook_feed", "instagram_feed"])).toEqual({
+      facebook_feed: "Congratulations to Lisa at Test Dealer.",
+      instagram_feed: "Lisa's delivery day at Test Dealer. #TestDealer",
+    });
+    const requestPrompt = mockGenerateContent.mock.calls[0]?.[0].contents.parts[1]
+      .text as string;
+    expect(requestPrompt).toContain(
+      'the only customer label allowed in any value is exactly "Lisa"',
+    );
+    expect(requestPrompt).not.toContain("Lisa Marie Sample");
   });
 
   it("forwards the selected primary canvas as a Gemini image aspect ratio", async () => {
@@ -724,6 +1253,21 @@ describe("GeminiService model routing", () => {
     expect(imageCall?.[0].contents.parts).toHaveLength(3);
   });
 
+  it("fails closed before any provider call when a configured logo cannot be decoded", async () => {
+    await expect(
+      generateSocialPost(
+        "data:image/jpeg;base64,fake",
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Test Dealer",
+        undefined,
+        "data:text/plain;base64,bm90LWFuLWltYWdl",
+      ),
+    ).rejects.toThrow("configured dealership logo could not be loaded");
+
+    expect(mockGenerateContent).not.toHaveBeenCalled();
+  });
+
   it("routes the single studio preference through Pro Image first", async () => {
     await generateSocialPost(
       "data:image/jpeg;base64,fake",
@@ -741,6 +1285,7 @@ describe("GeminiService model routing", () => {
       call[0].generationConfig?.responseModalities?.includes("IMAGE"),
     );
     expect(firstImageCall?.[0].model).toBe(TASKS.image_studio.primary);
+    expect(firstImageCall?.[0].generationConfig.imageConfig.imageSize).toBe("4K");
   });
 
   it("keeps the Lite image fallback on its supported 1K output", async () => {
@@ -766,9 +1311,9 @@ describe("GeminiService model routing", () => {
   it("uses production-stable Google model identifiers", () => {
     expect(MODELS.text.primary).toBe("gemini-3.6-flash");
     expect(MODELS.text.fallback).toBe("gemini-3.5-flash-lite");
-    expect(MODELS.image.primary).toBe("gemini-3.1-flash-image");
+    expect(MODELS.image.primary).toBe("gemini-3-pro-image");
     expect(MODELS.image.studio).toBe("gemini-3-pro-image");
-    expect(MODELS.image.fallback).toBe("gemini-3-pro-image");
+    expect(MODELS.image.fallback).toBe("gemini-3.1-flash-image");
     expect(MODELS.image.emergency).toBe("gemini-3.1-flash-lite-image");
     expect(MODELS.video.primary).toBe("veo-3.1-fast-generate-preview");
     expect(MODELS.video.fallback).toBe("veo-3.1-generate-preview");

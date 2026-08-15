@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dealership Campaign Creative Director"
+  short_description: "Direct polished, identity-safe dealership creatives"
+  default_prompt: "Use $dealership-campaign-creative-director to direct and validate a polished, identity-safe campaign creative from my dealership photo."

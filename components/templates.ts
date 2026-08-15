@@ -1,4 +1,49 @@
 import { TemplateOption } from "../types";
+import { formatHashtag } from "../utils/hashtags";
+
+interface TemplateIdentity {
+  customerName?: string;
+  dealershipName: string;
+}
+
+const fallbackCustomer = "our amazing customer";
+
+/**
+ * Resolve a saved template from the current form identity at the last possible
+ * moment. Keeping placeholders in the source template prevents a caption from
+ * retaining the previous customer when the form or signed release changes.
+ */
+export const renderPostTemplate = (
+  content: string,
+  { customerName, dealershipName }: TemplateIdentity,
+): string =>
+  content
+    .replace(/#\[Dealership Name\]/g, formatHashtag(dealershipName))
+    .replace(/\[Customer Name\]/g, customerName?.trim() || fallbackCustomer)
+    .replace(/\[Dealership Name\]/g, dealershipName.trim());
+
+const escapeRegExp = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Keep manually edited copy tied to the live customer field without touching
+ * partial words (for example, changing "Ann" must not alter "announcement").
+ */
+export const replaceCustomerIdentity = (
+  caption: string,
+  previousCustomerName: string,
+  nextCustomerName: string,
+): string => {
+  const previous = previousCustomerName.trim();
+  if (!previous) return caption;
+
+  const next = nextCustomerName.trim() || fallbackCustomer;
+  const exactIdentity = new RegExp(
+    `(^|[^\\p{L}\\p{N}])${escapeRegExp(previous)}(?=$|[^\\p{L}\\p{N}])`,
+    "giu",
+  );
+  return caption.replace(exactIdentity, (_match, prefix: string) => `${prefix}${next}`);
+};
 
 export const POST_TEMPLATES: TemplateOption[] = [
   {

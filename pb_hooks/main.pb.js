@@ -202,7 +202,18 @@ const proxyHandler = (c) => {
     // Polling and file-download GETs intentionally keep an empty body.
     let sanitizedProxyBody = "";
     if ((requestInfo.method || "").toString().toUpperCase() === "POST") {
-      const upstreamRequest = policies.buildGeminiProxyRequest(path, requestInfo.data);
+      const proxyHeaders = requestInfo.headers || {};
+      const requestedGenerationTask = String(
+        proxyHeaders["x-generation-task"] ||
+          proxyHeaders["x_generation_task"] ||
+          proxyHeaders["X-Generation-Task"] ||
+          "",
+      ).trim();
+      const upstreamRequest = policies.buildGeminiProxyRequest(
+        path,
+        requestInfo.data,
+        requestedGenerationTask,
+      );
       if (!upstreamRequest) {
         return c.json(400, {
           error: "Invalid or unsupported generation request",
@@ -2324,6 +2335,10 @@ routerAdd("POST", "/api/app/posts", (c) => {
     const form = new RecordUpsertForm($app, record);
     form.setFullManageAccess(true);
     const body = $apis.requestInfo(c).data || {};
+    const protectedCustomerName = helpers.assertString(
+      (body.customer_name || "").toString().trim(),
+      120,
+    );
     const websitePublications = require(__hooks + "/websitePublications.js");
     const parsedWebsiteDraft = websitePublications.parseWebsiteDraft(
       body.website_draft,
@@ -2331,12 +2346,10 @@ routerAdd("POST", "/api/app/posts", (c) => {
     if (!parsedWebsiteDraft.ok) {
       return c.json(400, { error: parsedWebsiteDraft.error });
     }
-    const websiteDraft = parsedWebsiteDraft.value;
+    let websiteDraft = parsedWebsiteDraft.value;
+    let websiteDraftSerialized = parsedWebsiteDraft.serialized;
     if (websiteDraft && websiteDraft.enabled) {
-      if (
-        websiteDraft.customerDisplayName &&
-        !(body.customer_name || "").toString().trim()
-      ) {
+      if (websiteDraft.customerDisplayName && !protectedCustomerName) {
         return c.json(400, {
           error: "A customer identity is required before using a public customer label",
         });
@@ -2349,7 +2362,7 @@ routerAdd("POST", "/api/app/posts", (c) => {
     const scenarioPolicy = helpers.resolvePostScenarioPolicy(
       scenarioId,
       dealer.getString("custom_scenarios"),
-      (body.customer_name || "").toString().trim() ||
+      protectedCustomerName ||
         (websiteDraft && websiteDraft.enabled
           ? websiteDraft.customerDisplayName || ""
           : ""),
@@ -2469,13 +2482,86 @@ routerAdd("POST", "/api/app/posts", (c) => {
       : "System Admin";
 
     const approvalStatus = policies.initialApprovalStatus(dealer);
-    const caption = helpers.assertString((body.caption || "").toString().trim(), 12000);
-    const disclosures = helpers.assertString(
+    let caption = helpers.assertString((body.caption || "").toString().trim(), 12000);
+    let disclosures = helpers.assertString(
       (body.disclosures || "").toString().trim(),
       12000,
     );
     if (approvalStatus === "pending" && !caption) {
       return c.json(400, { error: "Review caption is required" });
+    }
+    const publicCustomerName =
+      websitePublications.publicCustomerLabel(protectedCustomerName);
+    if (
+      websiteDraft &&
+      websiteDraft.enabled &&
+      websiteDraft.customerDisplayName &&
+      !websitePublications.releaseAuthorizesPublicCustomerLabel(
+        protectedCustomerName,
+        websiteDraft.customerDisplayName,
+      )
+    ) {
+      return c.json(400, {
+        error:
+          "The website customer label must be the exact approved public first name",
+        code: "CUSTOMER_IDENTITY_CONFLICT",
+      });
+    }
+    const platformCaptionIds = Object.keys(parsedPlatformCaptions.value);
+    const identityValues = [caption, disclosures].concat(
+      platformCaptionIds.map(function (platformId) {
+        return parsedPlatformCaptions.value[platformId];
+      }),
+    );
+    const websiteIdentityOffset = identityValues.length;
+    if (websiteDraft && websiteDraft.enabled) {
+      identityValues.push(
+        websiteDraft.title || "",
+        websiteDraft.body || "",
+        websiteDraft.altText || "",
+      );
+    }
+    const identityReview = websitePublications.reviewPostCustomerIdentity(
+      protectedCustomerName,
+      identityValues,
+      [
+        dealer.getString("name"),
+        salespersonName,
+        websitePublications.publicCustomerLabel(salespersonName),
+        websiteDraft && websiteDraft.enabled
+          ? websitePublications.groundedVehicleIdentityPhrase(
+              websiteDraft.vehicleDescription || "",
+            )
+          : "",
+      ],
+      scenarioPolicy.releaseRequired && !publicCustomerName,
+    );
+    if (identityReview.unexpectedIdentity) {
+      return c.json(400, {
+        error:
+          "Customer-name review required. Remove any unapproved customer name and try again.",
+        code: "CUSTOMER_IDENTITY_CONFLICT",
+      });
+    }
+    caption = identityReview.projectedValues[0] || "";
+    disclosures = identityReview.projectedValues[1] || "";
+    const projectedPlatformCaptions = {};
+    for (let i = 0; i < platformCaptionIds.length; i++) {
+      projectedPlatformCaptions[platformCaptionIds[i]] =
+        identityReview.projectedValues[i + 2] || "";
+    }
+    parsedPlatformCaptions.value = projectedPlatformCaptions;
+    parsedPlatformCaptions.serialized = JSON.stringify(projectedPlatformCaptions);
+    if (websiteDraft && websiteDraft.enabled) {
+      websiteDraft = Object.assign({}, websiteDraft, {
+        title: identityReview.projectedValues[websiteIdentityOffset] || "",
+        body: identityReview.projectedValues[websiteIdentityOffset + 1] || "",
+        altText: identityReview.projectedValues[websiteIdentityOffset + 2] || "",
+      });
+      if (websiteDraft.kind === "customer_story" && publicCustomerName) {
+        websiteDraft.customerDisplayName = publicCustomerName;
+      }
+      websiteDraftSerialized = JSON.stringify(websiteDraft);
     }
     {
       const compliance = policies.validatePostComplianceSet(
@@ -2688,7 +2774,7 @@ routerAdd("POST", "/api/app/posts", (c) => {
       generated_at: new Date().toISOString(),
       style: helpers.assertString((body.style || "").toString(), 60),
       tone: helpers.assertString((body.tone || "").toString(), 60),
-      customer_name: helpers.assertString((body.customer_name || "").toString(), 120),
+      customer_name: protectedCustomerName,
       scenario_id: scenarioId,
       vin: helpers.assertString((body.vin || "").toString(), 17),
       scheduled_for: helpers.assertString((body.scheduled_for || "").toString(), 40),
@@ -2716,7 +2802,7 @@ routerAdd("POST", "/api/app/posts", (c) => {
       generation_fallback_count: generationFallbackCount,
       generation_last_success_at: generationLastSuccessAt,
       model_policy_version: modelPolicyVersion,
-      website_draft: parsedWebsiteDraft.serialized,
+      website_draft: websiteDraftSerialized,
       // Every derived artifact (approval polling, protected creative, video
       // completion) is bound to the opaque browser session that logged it.
       owner_session_hash: ownerSessionHash,
@@ -2764,6 +2850,7 @@ routerAdd("POST", "/api/app/posts", (c) => {
       id: record.id,
       dealer: dealer.id,
       generated_at: record.getString("generated_at"),
+      customer_name: publicCustomerName,
       approval_status: record.getString("approval_status"),
       release_required: record.getBool
         ? record.getBool("release_required")
@@ -2774,6 +2861,8 @@ routerAdd("POST", "/api/app/posts", (c) => {
       platform_captions: parsedPlatformCaptions.value,
       primary_format_id: primaryFormatId,
       image_aspect_ratio: imageAspectRatio,
+      image_review_required:
+        policies.postImageReviewRequired(record, modelPolicy) || undefined,
       website_draft: websiteDraft && websiteDraft.enabled ? websiteDraft : null,
       website_publication: websitePublications.publicationSummaryForPost(record, null),
     });
@@ -2839,8 +2928,8 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
     }
 
     const body = $apis.requestInfo(c).data || {};
-    const caption = helpers.assertString((body.caption || "").toString().trim(), 12000);
-    const disclosures = helpers.assertString(
+    let caption = helpers.assertString((body.caption || "").toString().trim(), 12000);
+    let disclosures = helpers.assertString(
       (body.disclosures || "").toString().trim(),
       12000,
     );
@@ -2879,6 +2968,54 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
         return c.json(400, { error: parsedPlatformCaptions.error });
       }
     }
+    const storedWebsiteDraft = websitePublications.parseWebsiteDraft(
+      record.getString("website_draft"),
+    );
+    const websiteVehicleDescription =
+      storedWebsiteDraft.ok &&
+      storedWebsiteDraft.value &&
+      storedWebsiteDraft.value.enabled
+        ? websitePublications.groundedVehicleIdentityPhrase(
+            storedWebsiteDraft.value.vehicleDescription || "",
+          )
+        : "";
+    const platformCaptionIds = Object.keys(parsedPlatformCaptions.value);
+    const identityReview = websitePublications.reviewPostCustomerIdentity(
+      record.getString("customer_name"),
+      [caption, disclosures].concat(
+        platformCaptionIds.map(function (platformId) {
+          return parsedPlatformCaptions.value[platformId];
+        }),
+      ),
+      [
+        context.dealer.getString("name"),
+        context.person ? context.person.getString("name") : "System Admin",
+        websitePublications.publicCustomerLabel(
+          context.person ? context.person.getString("name") : "System Admin",
+        ),
+        websiteVehicleDescription,
+      ],
+      (record.getBool
+        ? record.getBool("release_required")
+        : !!record.get("release_required")) &&
+        !websitePublications.publicCustomerLabel(record.getString("customer_name")),
+    );
+    if (identityReview.unexpectedIdentity) {
+      return c.json(400, {
+        error:
+          "Customer-name review required. Remove any unapproved customer name and try again.",
+        code: "CUSTOMER_IDENTITY_CONFLICT",
+      });
+    }
+    caption = identityReview.projectedValues[0] || "";
+    disclosures = identityReview.projectedValues[1] || "";
+    const projectedPlatformCaptions = {};
+    for (let i = 0; i < platformCaptionIds.length; i++) {
+      projectedPlatformCaptions[platformCaptionIds[i]] =
+        identityReview.projectedValues[i + 2] || "";
+    }
+    parsedPlatformCaptions.value = projectedPlatformCaptions;
+    parsedPlatformCaptions.serialized = JSON.stringify(projectedPlatformCaptions);
     const compliance = policies.validatePostComplianceSet(
       [caption].concat(Object.values(parsedPlatformCaptions.value)),
       disclosures,
@@ -3018,6 +3155,7 @@ routerAdd("POST", "/api/app/posts/:id/video-generated", (c) => {
 
 routerAdd("POST", "/api/app/posts/:id/schedule", (c) => {
   const helpers = require(__hooks + "/helpers.js");
+  const policies = require(__hooks + "/requestPolicies.js");
   const context = helpers.sessionContext(c);
   if (!context) return c.json(401, { error: "No active session" });
   const dealer = context.dealer;
@@ -3041,6 +3179,14 @@ routerAdd("POST", "/api/app/posts/:id/schedule", (c) => {
   if (!isOwner && !isSamePerson) {
     return c.json(403, { error: "Post belongs to another session" });
   }
+  if (policies.postImageReviewRequired(record, policies.geminiModelPolicySnapshot())) {
+    return c.json(409, {
+      error: "IMAGE_REVIEW_REQUIRED",
+      code: "IMAGE_REVIEW_REQUIRED",
+      message:
+        "This saved image predates the current on-pixel safety review. Create a new post before scheduling it.",
+    });
+  }
 
   try {
     const body = $apis.requestInfo(c).data || {};
@@ -3062,6 +3208,7 @@ routerAdd("POST", "/api/app/posts/:id/schedule", (c) => {
 // opaque session token, and the dealer relationship is checked independently.
 routerAdd("GET", "/api/app/posts/:id/status", (c) => {
   const helpers = require(__hooks + "/helpers.js");
+  const policies = require(__hooks + "/requestPolicies.js");
   const context = helpers.sessionContext(c);
   if (!context) return c.json(401, { error: "No active session" });
   const dealer = context.dealer;
@@ -3094,6 +3241,11 @@ routerAdd("GET", "/api/app/posts/:id/status", (c) => {
       approval_status: record.getString("approval_status"),
       approved_by: record.getString("approved_by"),
       approved_at: record.getString("approved_at"),
+      image_review_required:
+        policies.postImageReviewRequired(
+          record,
+          policies.geminiModelPolicySnapshot(),
+        ) || undefined,
       website_publication: websitePublications.publicationSummaryForPost(
         record,
         websitePublication,
@@ -3106,6 +3258,7 @@ routerAdd("GET", "/api/app/posts/:id/status", (c) => {
 
 routerAdd("GET", "/api/app/posts/:id/website-publication", (c) => {
   const helpers = require(__hooks + "/helpers.js");
+  const policies = require(__hooks + "/requestPolicies.js");
   const context = helpers.sessionContext(c);
   if (!context) return c.json(401, { error: "No active session" });
   try {
@@ -3125,11 +3278,25 @@ routerAdd("GET", "/api/app/posts/:id/website-publication", (c) => {
     const publication = websitePublications.findPublicationForPost(post.id, "");
     c.response().header().set("Cache-Control", "private, no-store");
     const summary = websitePublications.publicationSummaryForPost(post, publication);
-    const storedDraft = websitePublications.parseWebsiteDraft(
-      post.getString("website_draft"),
+    const publicDraft = websitePublications.publicWebsiteDraftForPost(
+      post,
+      context.dealer.getString("name"),
     );
-    if (storedDraft.ok && storedDraft.value && storedDraft.value.enabled) {
-      summary.websiteDraft = storedDraft.value;
+    if (publicDraft.websiteDraft) {
+      summary.websiteDraft = publicDraft.websiteDraft;
+    }
+    summary.identity_review_required = publicDraft.identityReviewRequired;
+    const imageReviewRequired = policies.postImageReviewRequired(
+      post,
+      policies.geminiModelPolicySnapshot(),
+    );
+    summary.image_review_required = imageReviewRequired || undefined;
+    if (imageReviewRequired) {
+      // Never hand a legacy creative's remote review link back to the app.
+      // The private destination may already hold an older draft, but this UI
+      // cannot become the path that publishes it.
+      summary.reviewUrl = "";
+      summary.lastError = "image_review_required";
     }
     return c.json(200, summary);
   } catch (_e) {
@@ -3139,6 +3306,7 @@ routerAdd("GET", "/api/app/posts/:id/website-publication", (c) => {
 
 routerAdd("POST", "/api/app/posts/:id/website-publication", (c) => {
   const helpers = require(__hooks + "/helpers.js");
+  const policies = require(__hooks + "/requestPolicies.js");
   const context = helpers.sessionContext(c);
   if (!context) return c.json(401, { error: "No active session" });
   try {
@@ -3153,6 +3321,14 @@ routerAdd("POST", "/api/app/posts/:id/website-publication", (c) => {
     const isSamePerson = helpers.isAuthoritativePostPerson(context, post);
     if (!isManager && !isOwner && !isSamePerson) {
       return c.json(403, { error: "Post belongs to another person" });
+    }
+    if (policies.postImageReviewRequired(post, policies.geminiModelPolicySnapshot())) {
+      return c.json(409, {
+        error: "IMAGE_REVIEW_REQUIRED",
+        code: "IMAGE_REVIEW_REQUIRED",
+        message:
+          "This saved image predates the current on-pixel safety review. Create a new post before sending it to the website.",
+      });
     }
     const websitePublications = require(__hooks + "/websitePublications.js");
     if (!websitePublications.destinationConfiguration(context.dealer.id).enabled) {
@@ -3202,12 +3378,19 @@ routerAdd("POST", "/api/app/posts/:id/website-publication", (c) => {
       claim.post,
       claim.publication,
     );
-    const storedDraft = websitePublications.parseWebsiteDraft(
-      claim.post.getString("website_draft"),
+    const publicDraft = websitePublications.publicWebsiteDraftForPost(
+      claim.post,
+      context.dealer.getString("name"),
     );
-    if (storedDraft.ok && storedDraft.value && storedDraft.value.enabled) {
-      summary.websiteDraft = storedDraft.value;
+    if (publicDraft.websiteDraft) {
+      summary.websiteDraft = publicDraft.websiteDraft;
     }
+    summary.identity_review_required = publicDraft.identityReviewRequired;
+    summary.image_review_required =
+      policies.postImageReviewRequired(
+        claim.post,
+        policies.geminiModelPolicySnapshot(),
+      ) || undefined;
     summary.post_revision = claim.postRevision;
     summary.idempotent_replay = claim.idempotentReplay;
     return c.json(200, summary);
@@ -3255,6 +3438,7 @@ routerAdd("POST", "/api/app/posts/:id/website-publication", (c) => {
 
 routerAdd("POST", "/api/app/posts/:id/website-publication/retry", (c) => {
   const helpers = require(__hooks + "/helpers.js");
+  const policies = require(__hooks + "/requestPolicies.js");
   const context = helpers.sessionContext(c);
   if (!context) return c.json(401, { error: "No active session" });
   try {
@@ -3270,6 +3454,14 @@ routerAdd("POST", "/api/app/posts/:id/website-publication/retry", (c) => {
     if (!isManager && !isOwner && !isSamePerson) {
       return c.json(403, { error: "Post belongs to another person" });
     }
+    if (policies.postImageReviewRequired(post, policies.geminiModelPolicySnapshot())) {
+      return c.json(409, {
+        error: "IMAGE_REVIEW_REQUIRED",
+        code: "IMAGE_REVIEW_REQUIRED",
+        message:
+          "This saved image predates the current on-pixel safety review. Create a new post before retrying website delivery.",
+      });
+    }
     const websitePublications = require(__hooks + "/websitePublications.js");
     if (!websitePublications.destinationConfiguration(context.dealer.id).enabled) {
       return c.json(409, {
@@ -3281,12 +3473,17 @@ routerAdd("POST", "/api/app/posts/:id/website-publication/retry", (c) => {
     }
     const publication = websitePublications.retryPublication(post);
     const summary = websitePublications.publicationSummaryForPost(post, publication);
-    const storedDraft = websitePublications.parseWebsiteDraft(
-      post.getString("website_draft"),
+    const publicDraft = websitePublications.publicWebsiteDraftForPost(
+      post,
+      context.dealer.getString("name"),
     );
-    if (storedDraft.ok && storedDraft.value && storedDraft.value.enabled) {
-      summary.websiteDraft = storedDraft.value;
+    if (publicDraft.websiteDraft) {
+      summary.websiteDraft = publicDraft.websiteDraft;
     }
+    summary.identity_review_required = publicDraft.identityReviewRequired;
+    summary.image_review_required =
+      policies.postImageReviewRequired(post, policies.geminiModelPolicySnapshot()) ||
+      undefined;
     c.response().header().set("Cache-Control", "private, no-store");
     return c.json(200, summary);
   } catch (err) {
@@ -3365,6 +3562,7 @@ routerAdd("GET", "/api/app/posts/:id/creative-image", (c) => {
 
 routerAdd("GET", "/api/app/posts", (c) => {
   const helpers = require(__hooks + "/helpers.js");
+  const policies = require(__hooks + "/requestPolicies.js");
   const context = helpers.sessionContext(c);
   if (!context) return c.json(401, { error: "No active session" });
   const dealer = context.dealer;
@@ -3528,6 +3726,7 @@ routerAdd("GET", "/api/app/posts", (c) => {
       gbp: "4:3",
     };
     const websitePublications = require(__hooks + "/websitePublications.js");
+    const currentModelPolicy = policies.geminiModelPolicySnapshot();
     const websitePublicationByPost = websitePublications.publicationSummariesForDealer(
       dealer.id,
     );
@@ -3560,6 +3759,123 @@ routerAdd("GET", "/api/app/posts", (c) => {
       const storedWebsiteDraft = websitePublications.parseWebsiteDraft(
         r.getString("website_draft"),
       );
+      const protectedCustomerName = r.getString("customer_name");
+      const publicCustomerName =
+        websitePublications.publicCustomerLabel(protectedCustomerName);
+      const rawPlatformCaptions = parsedPlatformCaptions.ok
+        ? parsedPlatformCaptions.value
+        : {};
+      const platformCaptionIds = Object.keys(rawPlatformCaptions);
+      const rawWebsiteDraft =
+        storedWebsiteDraft.ok &&
+        storedWebsiteDraft.value &&
+        storedWebsiteDraft.value.enabled
+          ? storedWebsiteDraft.value
+          : null;
+      const allowedIdentityPhrases = [
+        dealer.getString("name"),
+        r.getString("salesperson_name"),
+        websitePublications.publicCustomerLabel(r.getString("salesperson_name")),
+        rawWebsiteDraft
+          ? websitePublications.groundedVehicleIdentityPhrase(
+              rawWebsiteDraft.vehicleDescription || "",
+            )
+          : "",
+      ];
+      const reviewValue = function (value) {
+        return websitePublications.reviewPostCustomerIdentity(
+          protectedCustomerName,
+          [(value || "").toString()],
+          allowedIdentityPhrases,
+          (r.getBool ? r.getBool("release_required") : !!r.get("release_required")) &&
+            !publicCustomerName,
+        );
+      };
+      let identityReviewRequired = false;
+      const captionReview = reviewValue(r.getString("caption"));
+      if (captionReview.reviewRequired) identityReviewRequired = true;
+      const publicCaption = captionReview.unexpectedIdentity
+        ? "Caption held for customer-name review."
+        : captionReview.projectedValues[0] || "";
+      const disclosureReview = reviewValue(r.getString("disclosures"));
+      if (disclosureReview.reviewRequired) identityReviewRequired = true;
+      const publicDisclosures = disclosureReview.unexpectedIdentity
+        ? "Disclosure held for customer-name review."
+        : disclosureReview.projectedValues[0] || "";
+      const publicPlatformCaptions = {};
+      for (let i = 0; i < platformCaptionIds.length; i++) {
+        const platformReview = reviewValue(rawPlatformCaptions[platformCaptionIds[i]]);
+        if (platformReview.reviewRequired) {
+          identityReviewRequired = true;
+        }
+        if (platformReview.unexpectedIdentity) {
+          continue;
+        }
+        publicPlatformCaptions[platformCaptionIds[i]] =
+          platformReview.projectedValues[0] || "";
+      }
+      let publicWebsiteDraft = null;
+      if (rawWebsiteDraft) {
+        const normalizedWebsiteLabel = (rawWebsiteDraft.customerDisplayName || "")
+          .toString()
+          .trim()
+          .replace(/\s+/g, " ")
+          .toLowerCase();
+        const normalizedProtectedName = protectedCustomerName
+          .trim()
+          .replace(/\s+/g, " ")
+          .toLowerCase();
+        const websiteLabelSafe = rawWebsiteDraft.customerDisplayName
+          ? websitePublications.releaseAuthorizesPublicCustomerLabel(
+              protectedCustomerName,
+              rawWebsiteDraft.customerDisplayName,
+            ) ||
+            (!!protectedCustomerName &&
+              normalizedWebsiteLabel === normalizedProtectedName)
+          : rawWebsiteDraft.kind !== "customer_story" || !!publicCustomerName;
+        const websiteLabelNeedsProjection =
+          !!rawWebsiteDraft.customerDisplayName &&
+          !!protectedCustomerName &&
+          normalizedWebsiteLabel === normalizedProtectedName &&
+          normalizedWebsiteLabel !== publicCustomerName.toLowerCase();
+        const titleReview = reviewValue(rawWebsiteDraft.title);
+        const bodyReview = reviewValue(rawWebsiteDraft.body);
+        const altReview = reviewValue(rawWebsiteDraft.altText);
+        if (
+          !websiteLabelSafe ||
+          websiteLabelNeedsProjection ||
+          titleReview.reviewRequired ||
+          bodyReview.reviewRequired ||
+          altReview.reviewRequired ||
+          titleReview.unexpectedIdentity ||
+          bodyReview.unexpectedIdentity ||
+          altReview.unexpectedIdentity
+        ) {
+          identityReviewRequired = true;
+        } else {
+          publicWebsiteDraft = Object.assign({}, rawWebsiteDraft, {
+            title: titleReview.projectedValues[0] || "",
+            body: bodyReview.projectedValues[0] || "",
+            altText: altReview.projectedValues[0] || "",
+          });
+          if (rawWebsiteDraft.kind === "customer_story" && publicCustomerName) {
+            publicWebsiteDraft.customerDisplayName = publicCustomerName;
+          } else {
+            delete publicWebsiteDraft.customerDisplayName;
+          }
+        }
+      }
+      const imageReviewRequired = policies.postImageReviewRequired(
+        r,
+        currentModelPolicy,
+      );
+      const websitePublication = websitePublicationByPost[r.id]
+        ? websitePublicationByPost[r.id]
+        : websitePublications.publicationSummaryForPost(r, null);
+      if (imageReviewRequired) {
+        websitePublication.reviewUrl = "";
+        websitePublication.lastError = "image_review_required";
+      }
       return {
         id: r.id,
         dealer: r.getString("dealer"),
@@ -3571,7 +3887,7 @@ routerAdd("GET", "/api/app/posts", (c) => {
         generated_at: r.getString("generated_at"),
         style: r.getString("style"),
         tone: r.getString("tone"),
-        customer_name: r.getString("customer_name"),
+        customer_name: publicCustomerName,
         scenario_id: r.getString("scenario_id"),
         vin: r.getString("vin"),
         has_release: r.getBool ? r.getBool("has_release") : !!r.get("has_release"),
@@ -3583,13 +3899,13 @@ routerAdd("GET", "/api/app/posts", (c) => {
         approval_status: r.getString("approval_status"),
         approved_by: r.getString("approved_by"),
         approved_at: r.getString("approved_at"),
-        caption: r.getString("caption"),
+        caption: publicCaption,
         caption_source:
           ["ai", "custom", "basic_fallback"].indexOf(r.getString("caption_source")) !==
           -1
             ? r.getString("caption_source")
             : null,
-        disclosures: r.getString("disclosures"),
+        disclosures: publicDisclosures,
         // Blank is a legacy unknown selection; explicit stored `[]` is the
         // intentional Website-only choice and must survive History restore.
         platform_ids: storedPlatformIdsRaw.trim() ? platformIds : undefined,
@@ -3597,24 +3913,17 @@ routerAdd("GET", "/api/app/posts", (c) => {
           ["photo", "video", "both"].indexOf(r.getString("media_output_mode")) !== -1
             ? r.getString("media_output_mode")
             : "photo",
-        platform_captions: parsedPlatformCaptions.ok
-          ? parsedPlatformCaptions.value
-          : {},
+        platform_captions: publicPlatformCaptions,
         primary_format_id: primaryFormatId,
         image_aspect_ratio: imageAspectRatio,
         scheduled_for: r.getString("scheduled_for"),
         creative_image_url: r.getString("creative_image")
           ? `/api/app/posts/${r.id}/creative-image`
           : "",
-        website_draft:
-          storedWebsiteDraft.ok &&
-          storedWebsiteDraft.value &&
-          storedWebsiteDraft.value.enabled
-            ? storedWebsiteDraft.value
-            : null,
-        website_publication: websitePublicationByPost[r.id]
-          ? websitePublicationByPost[r.id]
-          : websitePublications.publicationSummaryForPost(r, null),
+        website_draft: publicWebsiteDraft,
+        identity_review_required: identityReviewRequired || undefined,
+        image_review_required: imageReviewRequired || undefined,
+        website_publication: websitePublication,
       };
     });
 
@@ -3648,6 +3957,7 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
     const id = c.pathParam("id");
     const body = $apis.requestInfo(c).data || {};
     const record = $app.dao().findRecordById("posts", id);
+    const websitePublications = require(__hooks + "/websitePublications.js");
 
     // Approval authority matches the manager's list/view scope. There is no
     // audited tenant-selection mechanism, so even a global super-admin session
@@ -3677,8 +3987,18 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
     }
     if (
       decision === "approved" &&
+      policies.postImageReviewRequired(record, policies.geminiModelPolicySnapshot())
+    ) {
+      return c.json(409, {
+        error:
+          "Image review required; reject and resubmit under the current creative policy.",
+        code: "IMAGE_REVIEW_REQUIRED",
+      });
+    }
+    if (
+      decision === "approved" &&
       record.getBool("release_required") &&
-      (!record.getBool("has_release") || record.getString("release_status") !== "saved")
+      !websitePublications.hasValidLinkedRelease(record)
     ) {
       return c.json(409, {
         error: "A verified customer photo release is required before approval",
@@ -3710,6 +4030,62 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
       if (!platformCaptions.ok) {
         return c.json(409, {
           error: "Stored platform captions are invalid; reject and resubmit",
+        });
+      }
+      const storedWebsiteDraft = websitePublications.parseWebsiteDraft(
+        record.getString("website_draft"),
+      );
+      const websiteDraft =
+        storedWebsiteDraft.ok &&
+        storedWebsiteDraft.value &&
+        storedWebsiteDraft.value.enabled
+          ? storedWebsiteDraft.value
+          : null;
+      const platformCaptionIds = Object.keys(platformCaptions.value);
+      const identityValues = [
+        record.getString("caption"),
+        record.getString("disclosures"),
+      ].concat(
+        platformCaptionIds.map(function (platformId) {
+          return platformCaptions.value[platformId];
+        }),
+      );
+      if (websiteDraft) {
+        identityValues.push(
+          websiteDraft.title || "",
+          websiteDraft.body || "",
+          websiteDraft.altText || "",
+        );
+      }
+      const identityReview = websitePublications.reviewPostCustomerIdentity(
+        record.getString("customer_name"),
+        identityValues,
+        [
+          dealer.getString("name"),
+          record.getString("salesperson_name"),
+          websitePublications.publicCustomerLabel(record.getString("salesperson_name")),
+          websiteDraft
+            ? websitePublications.groundedVehicleIdentityPhrase(
+                websiteDraft.vehicleDescription || "",
+              )
+            : "",
+        ],
+        (record.getBool
+          ? record.getBool("release_required")
+          : !!record.get("release_required")) &&
+          !websitePublications.publicCustomerLabel(record.getString("customer_name")),
+      );
+      const websiteLabelConflict =
+        !!websiteDraft &&
+        !!websiteDraft.customerDisplayName &&
+        !websitePublications.releaseAuthorizesPublicCustomerLabel(
+          record.getString("customer_name"),
+          websiteDraft.customerDisplayName,
+        );
+      if (identityReview.reviewRequired || websiteLabelConflict) {
+        return c.json(409, {
+          error: "Customer-name review required; reject and resubmit.",
+          code: "CUSTOMER_IDENTITY_REVIEW_REQUIRED",
         });
       }
       const compliance = policies.validatePostComplianceSet(

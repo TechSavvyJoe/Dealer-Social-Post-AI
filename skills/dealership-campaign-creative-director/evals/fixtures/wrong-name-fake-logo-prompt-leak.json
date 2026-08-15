@@ -1,0 +1,33 @@
+{
+  "fixture_id": "wrong-name-fake-logo-prompt-leak",
+  "expected_validator_pass": false,
+  "source": "A real customer delivery photo at Northstar Ford. No logo asset was supplied and customer names are forbidden in image pixels.",
+  "request": "Create a regular premium delivery overlay with only WELCOME HOME and exact dealership-name text.",
+  "candidate_review": {
+    "schema_version": 1,
+    "mode": "regular",
+    "source_is_real_photo": true,
+    "people_identity_preserved": true,
+    "vehicle_identity_preserved": true,
+    "scene_identity_preserved": true,
+    "expected_headline": "WELCOME HOME",
+    "detected_headlines": ["WELCOME HOME", "Jordan's Big Day"],
+    "expected_dealer_name": "Northstar Ford",
+    "detected_dealer_name": "Northstar Frod",
+    "dealer_identity_mode": "text",
+    "logo_supplied": false,
+    "logo_status": "fabricated",
+    "personal_names_detected": ["Jordan"],
+    "prompt_leak_detected": true,
+    "social_ui_chrome_detected": true,
+    "contact_details_detected": false,
+    "hashtag_detected": false,
+    "typography_clean": false,
+    "style_signature_present": true,
+    "overlay_integrated": false,
+    "visual_quality_score": 2,
+    "artistic_transformation_requested": false,
+    "unrequested_transformation_detected": false,
+    "environmental_depth_integrated": false
+  }
+}

@@ -13,7 +13,17 @@ import { dataUrlToBlob } from "../utils/imageUtils";
 import { assertAuthEpoch, captureAuthEpoch } from "../utils/authBoundary";
 import type { ImageAspectRatio, MediaOutputMode, PrimaryImageFormatId } from "../types";
 import { readApiError } from "./apiErrors";
-import type { WebsiteDraft, WebsitePublication } from "./websitePublishing";
+import {
+  replaceFullCustomerName,
+  type WebsiteDraft,
+  type WebsitePublication,
+} from "./websitePublishing";
+import {
+  normalizeCustomerIdentity,
+  releaseAuthorizesPublicLabel,
+  toPublicCustomerLabel,
+} from "../utils/customerIdentity";
+import { captionUsesOnlyExpectedCustomer } from "../utils/captionQuality";
 
 export type ApprovalStatus = "n_a" | "pending" | "approved" | "rejected";
 
@@ -26,6 +36,7 @@ export interface LogPostInput {
   style?: string;
   tone?: string;
   customerName?: string;
+  customerIdentityRequired?: boolean;
   scenarioId?: string;
   vin?: string;
   hasRelease?: boolean;
@@ -94,6 +105,10 @@ export interface PostRecord {
   scheduled_for?: string;
   website_draft?: WebsiteDraft;
   website_publication?: WebsitePublication;
+  /** Client projection quarantined copy that may name an unauthorized customer. */
+  identity_review_required?: boolean;
+  /** Server-derived quarantine for creative pixels archived under an older policy. */
+  image_review_required?: boolean;
 }
 
 export interface PostApprovalStatus {
@@ -101,12 +116,189 @@ export interface PostApprovalStatus {
   approval_status: ApprovalStatus;
   approved_by?: string;
   approved_at?: string;
+  image_review_required?: boolean;
 }
 
 export interface PostVideoStatus {
   id: string;
   has_video: true;
 }
+
+const publicCustomerByPostId = new Map<string, string>();
+const customerIdentityRequiredByPostId = new Map<string, boolean>();
+
+const assertCustomerCopyIsSafe = (input: {
+  customerName?: string;
+  caption?: string;
+  disclosures?: string;
+  platformCaptions?: Record<string, string>;
+  websiteDraft?: WebsiteDraft;
+  customerIdentityRequired?: boolean;
+}): void => {
+  const publicCustomer = toPublicCustomerLabel(input.customerName);
+  const customerIdentityRequired = Boolean(
+    input.customerIdentityRequired || input.websiteDraft?.kind === "customer_story",
+  );
+  const copy = [
+    input.caption,
+    input.disclosures,
+    ...Object.values(input.platformCaptions || {}),
+  ].filter((value): value is string => Boolean(value?.trim()));
+  if (
+    copy.some(
+      (caption) =>
+        !captionUsesOnlyExpectedCustomer(caption, publicCustomer, {
+          allowedPhrases: [input.websiteDraft?.vehicleDescription],
+          rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
+        }),
+    )
+  ) {
+    throw new Error(
+      "The saved caption contains a customer name that is not authorized for this post.",
+    );
+  }
+  if (input.websiteDraft?.kind === "customer_story") {
+    if (
+      publicCustomer
+        ? !releaseAuthorizesPublicLabel(
+            publicCustomer,
+            input.websiteDraft.customerDisplayName,
+          )
+        : Boolean(input.websiteDraft.customerDisplayName?.trim())
+    ) {
+      throw new Error(
+        "The website draft customer label does not match this post's authorized first name.",
+      );
+    }
+    const websiteCopy = [
+      input.websiteDraft.title,
+      input.websiteDraft.body,
+      input.websiteDraft.altText,
+    ];
+    if (
+      websiteCopy.some(
+        (caption) =>
+          !captionUsesOnlyExpectedCustomer(caption, publicCustomer, {
+            allowedPhrases: [input.websiteDraft?.vehicleDescription],
+            rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
+          }),
+      )
+    ) {
+      throw new Error(
+        "The website draft contains a customer name that is not authorized for this post.",
+      );
+    }
+  }
+};
+
+/**
+ * The server retains the exact release signer for consent linkage. List and
+ * approval screens receive a public projection so legal names cannot leak
+ * through History cards, search, CSV, approval copy, or reopened drafts.
+ */
+export const projectPostRecordForUi = (record: PostRecord): PostRecord => {
+  const protectedName = record.customer_name || "";
+  const publicCustomer = toPublicCustomerLabel(protectedName);
+  if (record.id) {
+    if (publicCustomer) publicCustomerByPostId.set(record.id, publicCustomer);
+    else publicCustomerByPostId.delete(record.id);
+    customerIdentityRequiredByPostId.set(
+      record.id,
+      Boolean(
+        record.release_required || record.website_draft?.kind === "customer_story",
+      ),
+    );
+  }
+  const customerIdentityRequired = Boolean(
+    record.release_required || record.website_draft?.kind === "customer_story",
+  );
+  const sanitize = (value?: string): string | undefined =>
+    value === undefined
+      ? undefined
+      : replaceFullCustomerName(value, protectedName, publicCustomer || undefined);
+  const caption = sanitize(record.caption);
+  const disclosures = sanitize(record.disclosures);
+  const captionIdentitySafe =
+    !caption ||
+    captionUsesOnlyExpectedCustomer(caption, publicCustomer, {
+      allowedPhrases: [record.website_draft?.vehicleDescription],
+      rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
+    });
+  const disclosureIdentitySafe =
+    !disclosures ||
+    captionUsesOnlyExpectedCustomer(disclosures, publicCustomer, {
+      allowedPhrases: [record.website_draft?.vehicleDescription],
+      rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
+    });
+  let identityReviewRequired = Boolean(record.identity_review_required);
+  if (!captionIdentitySafe) identityReviewRequired = true;
+  if (!disclosureIdentitySafe) identityReviewRequired = true;
+
+  const platformCaptions = record.platform_captions
+    ? Object.fromEntries(
+        Object.entries(record.platform_captions).flatMap(([platform, rawCaption]) => {
+          const projectedCaption = sanitize(rawCaption) || "";
+          const safe = captionUsesOnlyExpectedCustomer(
+            projectedCaption,
+            publicCustomer,
+            {
+              allowedPhrases: [record.website_draft?.vehicleDescription],
+              rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
+            },
+          );
+          if (!safe) {
+            identityReviewRequired = true;
+            return [];
+          }
+          return [[platform, projectedCaption]];
+        }),
+      )
+    : undefined;
+
+  let websiteDraft: WebsiteDraft | undefined;
+  if (record.website_draft) {
+    const projectedDraft = {
+      ...record.website_draft,
+      title: sanitize(record.website_draft.title) || record.website_draft.title,
+      body: sanitize(record.website_draft.body) || record.website_draft.body,
+      altText: sanitize(record.website_draft.altText) || record.website_draft.altText,
+      ...(publicCustomer ? { customerDisplayName: publicCustomer } : {}),
+    };
+    const websiteLabelSafe =
+      record.website_draft.kind !== "customer_story" ||
+      (publicCustomer
+        ? releaseAuthorizesPublicLabel(
+            publicCustomer,
+            record.website_draft.customerDisplayName,
+          ) ||
+          normalizeCustomerIdentity(record.website_draft.customerDisplayName) ===
+            normalizeCustomerIdentity(protectedName)
+        : !record.website_draft.customerDisplayName?.trim());
+    const websiteIdentitySafe =
+      websiteLabelSafe &&
+      [projectedDraft.title, projectedDraft.body, projectedDraft.altText].every(
+        (copy) =>
+          captionUsesOnlyExpectedCustomer(copy, publicCustomer, {
+            allowedPhrases: [projectedDraft.vehicleDescription],
+            rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
+          }),
+      );
+    if (websiteIdentitySafe) websiteDraft = projectedDraft;
+    else identityReviewRequired = true;
+  }
+
+  return {
+    ...record,
+    customer_name: publicCustomer || undefined,
+    caption: captionIdentitySafe ? caption : "Caption held for customer-name review.",
+    disclosures: disclosureIdentitySafe
+      ? disclosures
+      : "Disclosure held for customer-name review.",
+    platform_captions: platformCaptions,
+    website_draft: websiteDraft,
+    identity_review_required: identityReviewRequired || undefined,
+  };
+};
 
 export interface UpdatePostDraftInput {
   caption: string;
@@ -138,6 +330,14 @@ export const logPost = async (
   input: LogPostInput,
   requestAuthEpoch: number = captureAuthEpoch(),
 ): Promise<PostRecord | null> => {
+  assertCustomerCopyIsSafe({
+    customerName: input.customerName,
+    customerIdentityRequired: input.customerIdentityRequired,
+    caption: input.caption,
+    disclosures: input.disclosures,
+    platformCaptions: input.platformCaptions,
+    websiteDraft: input.websiteDraft,
+  });
   assertAuthEpoch(requestAuthEpoch);
   try {
     const form = new FormData();
@@ -232,7 +432,7 @@ export const logPost = async (
     }
     const post = (await res.json()) as PostRecord;
     assertAuthEpoch(requestAuthEpoch);
-    return post;
+    return projectPostRecordForUi(post);
   } catch (err) {
     // For approval-gated posts, a failed persist means the manager has nothing
     // to review — the caller MUST know so it can lock share/save and alert.
@@ -275,6 +475,13 @@ export const updatePostDraft = async (
   postId: string,
   input: UpdatePostDraftInput,
 ): Promise<{ id: string; updated: true; post_revision: string }> => {
+  assertCustomerCopyIsSafe({
+    customerName: publicCustomerByPostId.get(postId),
+    customerIdentityRequired: customerIdentityRequiredByPostId.get(postId),
+    caption: input.caption,
+    disclosures: input.disclosures,
+    platformCaptions: input.platformCaptions,
+  });
   const requestAuthEpoch = captureAuthEpoch();
   const form = new FormData();
   form.append("caption", input.caption.trim());
@@ -377,7 +584,7 @@ export const listPendingPosts = async (
   const res = await jsonRequest<{ items: PostRecord[] }>(
     `/api/app/posts?${qs.toString()}`,
   );
-  return res.items || [];
+  return (res.items || []).map(projectPostRecordForUi);
 };
 
 export interface PostListPage {
@@ -403,7 +610,7 @@ export const listPostsPage = async (
   }
   const res = await jsonRequest<PostListPage>(`/api/app/posts?${qs.toString()}`);
   return {
-    items: res.items || [],
+    items: (res.items || []).map(projectPostRecordForUi),
     nextCursor: res.nextCursor || undefined,
   };
 };

@@ -11,6 +11,7 @@ type Policies = {
   buildGeminiProxyRequest: (
     path: string,
     input: unknown,
+    requestedTaskName?: string,
   ) => Record<string, unknown> | null;
   buildOpenAIImageRequest: (
     input: Record<string, unknown>,
@@ -22,6 +23,7 @@ type Policies = {
     path: string,
   ) => { bucket: string; maxRequests: number; windowMs: number } | null;
   geminiModelPolicySnapshot: () => Record<string, unknown>;
+  postImageReviewRequired: (record: unknown, currentPolicy: unknown) => boolean;
 };
 
 type Helpers = {
@@ -271,6 +273,34 @@ describe("PocketBase request policies", () => {
     expect(policies.geminiModelPolicySnapshot()).toEqual(canonicalModelPolicy);
   });
 
+  it("quarantines stored creatives without current server image-review provenance", () => {
+    const post = (fields: Record<string, string>) => ({
+      getString: (name: string) => fields[name] || "",
+    });
+
+    expect(
+      policies.postImageReviewRequired(
+        post({ creative_image: "creative.jpg", model_policy_version: "4" }),
+        canonicalModelPolicy,
+      ),
+    ).toBe(true);
+    expect(
+      policies.postImageReviewRequired(
+        post({
+          creative_image: "creative.jpg",
+          model_policy_version: String(canonicalModelPolicy.version),
+        }),
+        canonicalModelPolicy,
+      ),
+    ).toBe(false);
+    expect(
+      policies.postImageReviewRequired(
+        post({ model_policy_version: "4" }),
+        canonicalModelPolicy,
+      ),
+    ).toBe(false);
+  });
+
   it("accepts every canonical task/model request combination", () => {
     for (const [taskName, taskValue] of Object.entries(canonicalModelPolicy.tasks)) {
       const task = taskValue as {
@@ -302,7 +332,7 @@ describe("PocketBase request policies", () => {
               ? imageRequest(task.imageSizes?.[model] ?? "2K")
               : veoRequest(task.resolution === "1080p" ? 8 : 6, task.resolution);
 
-        const sanitized = policies.buildGeminiProxyRequest(path, request);
+        const sanitized = policies.buildGeminiProxyRequest(path, request, taskName);
         expect(sanitized, `${taskName} should allow ${model}`).not.toBeNull();
         if (task.kind !== "video") {
           expect(sanitized?.safetySettings).toEqual(
@@ -422,6 +452,53 @@ describe("PocketBase request policies", () => {
     expect(policies.buildGeminiProxyRequest(textPath, request2048)).toEqual(
       withServerSafety(request2048),
     );
+    const threeImageVisionReview = {
+      ...request2048,
+      contents: [
+        {
+          parts: [
+            {
+              text: `IMAGE 1: REFERENCE SOURCE IMAGE
+IMAGE 2: GENERATED OUTPUT IMAGE
+IMAGE 3: APPROVED DEALERSHIP LOGO
+
+You are a strict visual quality-control inspector for an automotive dealership image.`,
+            },
+            inlineImage,
+            inlineImage,
+            inlineImage,
+          ],
+        },
+      ],
+    };
+    expect(
+      policies.buildGeminiProxyRequest(
+        textPath,
+        threeImageVisionReview,
+        "caption_regenerate",
+      ),
+    ).toEqual(withServerSafety(threeImageVisionReview));
+    const splitLabelVisionReview = {
+      ...threeImageVisionReview,
+      contents: [
+        {
+          parts: [
+            { text: "REFERENCE SOURCE IMAGE" },
+            inlineImage,
+            { text: "GENERATED OUTPUT IMAGE" },
+            inlineImage,
+            { text: "Review these images" },
+          ],
+        },
+      ],
+    };
+    expect(
+      policies.buildGeminiProxyRequest(
+        textPath,
+        splitLabelVisionReview,
+        "caption_regenerate",
+      ),
+    ).toBeNull();
 
     const invalidRequests = [
       { ...request2048, tools: [{ googleSearch: {} }] },
@@ -438,7 +515,13 @@ describe("PocketBase request policies", () => {
         ...request2048,
         contents: [
           {
-            parts: [inlineImage, inlineImage, { text: "Too many images" }],
+            parts: [
+              inlineImage,
+              inlineImage,
+              inlineImage,
+              inlineImage,
+              { text: "Too many images" },
+            ],
           },
         ],
       },
@@ -506,6 +589,20 @@ describe("PocketBase request policies", () => {
 
     expect(
       policies.buildGeminiProxyRequest(proImagePath, imageRequest("4K")),
+    ).toBeNull();
+    expect(
+      policies.buildGeminiProxyRequest(
+        proImagePath,
+        imageRequest("4K"),
+        "image_studio",
+      ),
+    ).toEqual(withServerSafety(imageRequest("4K")));
+    expect(
+      policies.buildGeminiProxyRequest(
+        proImagePath,
+        imageRequest("2K"),
+        "image_studio",
+      ),
     ).toBeNull();
     expect(
       policies.buildGeminiProxyRequest(liteImagePath, imageRequest("2K")),
@@ -669,7 +766,8 @@ describe("PocketBase request policies", () => {
     const hookPath = resolve(process.cwd(), "pb_hooks/main.pb.js");
     const hook = readFileSync(hookPath, "utf8");
 
-    expect(hook).toContain("policies.buildGeminiProxyRequest(path, requestInfo.data)");
+    expect(hook).toContain("policies.buildGeminiProxyRequest(");
+    expect(hook).toContain("requestedGenerationTask");
     expect(hook).toContain("policies.isAllowedProxyRequest(path, requestInfo.method)");
     expect(hook).toContain("sanitizedProxyBody");
     expect(hook).toContain('body: isGet ? "" : sanitizedProxyBody');

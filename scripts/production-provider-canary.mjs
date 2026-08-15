@@ -37,7 +37,7 @@ const CONFIRMATION = "caption-image-video-synthetic-only";
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 const PRODUCTION_FLY_ORIGIN = "https://dealer-social-post-ai-production.fly.dev";
 const EXACT_STANDARD_IMAGE = Object.freeze({
-  model: "gemini-3.1-flash-image",
+  model: "gemini-3-pro-image",
   aspectRatio: "4:5",
   imageSize: "2K",
   width: 1856,
@@ -359,6 +359,20 @@ async function loadPolicy() {
 }
 
 async function contractCheck() {
+  try {
+    await execFileAsync(
+      process.execPath,
+      [resolve(root, "scripts/check-model-policy.mjs")],
+      {
+        cwd: root,
+      },
+    );
+  } catch {
+    throw new CanaryError(
+      "POLICY_INVALID",
+      "Browser and PocketBase model policies must be synchronized before the provider canary can pass.",
+    );
+  }
   const policy = await loadPolicy();
   const requiredTasks = [
     "caption",

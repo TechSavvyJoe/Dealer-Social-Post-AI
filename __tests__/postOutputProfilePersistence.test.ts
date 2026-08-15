@@ -213,12 +213,24 @@ describe("post output-profile persistence", () => {
     expect(listRoute).toContain(
       "platform_ids: storedPlatformIdsRaw.trim() ? platformIds : undefined",
     );
-    expect(listRoute).toContain("platform_captions: parsedPlatformCaptions.ok");
+    expect(listRoute).toContain("platform_captions: publicPlatformCaptions");
+    expect(listRoute).toContain("customer_name: publicCustomerName");
+    expect(listRoute).not.toContain('customer_name: r.getString("customer_name")');
+    expect(listRoute).toContain("identity_review_required:");
+    expect(listRoute).toContain("image_review_required:");
+    expect(listRoute).toContain("policies.postImageReviewRequired(");
     expect(listRoute).toContain("caption_source:");
     expect(listRoute).toContain("media_output_mode:");
     expect(listRoute).toContain("primary_format_id: primaryFormatId");
     expect(listRoute).toContain("image_aspect_ratio: imageAspectRatio");
     expect(listRoute).toContain('"Cache-Control", "private, no-store"');
+
+    const history = readFileSync(
+      resolve(process.cwd(), "components/PostHistory.tsx"),
+      "utf8",
+    );
+    expect(history).toContain("post.image_review_required");
+    expect(history).toContain("!post.image_review_required");
   });
 
   it("returns History output metadata only when format and ratio form an approved pair", () => {

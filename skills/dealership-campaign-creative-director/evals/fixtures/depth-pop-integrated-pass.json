@@ -1,0 +1,33 @@
+{
+  "fixture_id": "depth-pop-integrated-pass",
+  "expected_validator_pass": true,
+  "source": "A real photo shows two customers and a black crossover in front of the showroom.",
+  "request": "Depth Pop mode should place dimensional campaign graphics into the photographed environment.",
+  "candidate_review": {
+    "schema_version": 1,
+    "mode": "depth-pop",
+    "source_is_real_photo": true,
+    "people_identity_preserved": true,
+    "vehicle_identity_preserved": true,
+    "scene_identity_preserved": true,
+    "expected_headline": "JUST DELIVERED",
+    "detected_headlines": ["JUST DELIVERED"],
+    "expected_dealer_name": "Northstar Ford",
+    "detected_dealer_name": "Northstar Ford",
+    "dealer_identity_mode": "text",
+    "logo_supplied": false,
+    "logo_status": "none",
+    "personal_names_detected": [],
+    "prompt_leak_detected": false,
+    "social_ui_chrome_detected": false,
+    "contact_details_detected": false,
+    "hashtag_detected": false,
+    "typography_clean": true,
+    "style_signature_present": true,
+    "overlay_integrated": true,
+    "visual_quality_score": 4,
+    "artistic_transformation_requested": false,
+    "unrequested_transformation_detected": false,
+    "environmental_depth_integrated": true
+  }
+}

@@ -28,6 +28,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run security:secrets
       - run: npm run model-policy:check
+      - run: npm run skill:creative-director:check
       - run: npm run release:provider-canary:contract
       - run: npm run vercel-config:check
       - run: npm run format:check

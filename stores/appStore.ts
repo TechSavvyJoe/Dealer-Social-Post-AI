@@ -10,6 +10,7 @@ import {
   ImageQualityTier,
 } from "../types";
 import { loadSession, saveSession, clearSession } from "../utils/persistence";
+import { MODEL_POLICY_VERSION } from "../services/modelConfig";
 // Removed duplicate import
 import { logEvent, logError } from "../utils/telemetry";
 import {
@@ -138,6 +139,22 @@ const stepForRole = (role: UserRole): AppStep => {
 };
 
 const SESSION_REQUEST_TIMEOUT_MS = 8_000;
+
+export const resolveRestoredCustomerIdentityRequired = (
+  generatedPostValue?: boolean,
+  generationParamsValue?: boolean,
+): boolean => generatedPostValue ?? generationParamsValue ?? true;
+
+/**
+ * Creatives recovered directly from private browser storage do not pass back
+ * through History. Treat missing/older on-pixel provenance as quarantined,
+ * while preserving an explicit server-derived review result saved by the
+ * current client.
+ */
+export const resolveRestoredImageReviewRequired = (
+  savedReviewRequired: boolean | undefined,
+  savedModelPolicyVersion: string | undefined,
+): boolean => savedReviewRequired ?? savedModelPolicyVersion !== MODEL_POLICY_VERSION;
 const AUTH_BOUNDARY_STORAGE_KEY = "__dsp_auth_boundary_v1";
 const AUTH_BOUNDARY_CHANNEL = "dealer-social-auth-boundary";
 const authBoundaryChannel =
@@ -617,12 +634,32 @@ export const useAppStore = create<AppState>((set, get) => ({
             ? persistedGeneratedPost.image ||
               (await loadDealerCreative(dealer.id, "generated"))
             : null;
+          const restoredCustomerIdentityRequired =
+            resolveRestoredCustomerIdentityRequired(
+              persistedGeneratedPost?.customerIdentityRequired,
+              session?.generationParams?.customerIdentityRequired,
+            );
           const restoredGeneratedPost =
             persistedGeneratedPost && restoredGeneratedImage
               ? ({
                   ...persistedGeneratedPost,
                   image: restoredGeneratedImage,
+                  customerIdentityRequired: restoredCustomerIdentityRequired,
+                  imageReviewRequired: resolveRestoredImageReviewRequired(
+                    persistedGeneratedPost.imageReviewRequired,
+                    persistedGeneratedPost.aiMeta?.modelPolicyVersion,
+                  ),
                 } as GeneratedPost)
+              : null;
+          const restoredGenerationParams =
+            matchesPersistedDealer && session?.generationParams
+              ? ({
+                  ...session.generationParams,
+                  customerIdentityRequired: resolveRestoredCustomerIdentityRequired(
+                    session.generationParams.customerIdentityRequired,
+                    persistedGeneratedPost?.customerIdentityRequired,
+                  ),
+                } as GenerationParams)
               : null;
           const restoredStep = resolveRestoredStep(
             serverRole,
@@ -638,9 +675,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             isImpersonating: !!body.is_impersonation,
             selectedImage: restoredSelectedImage,
             generatedPost: restoredGeneratedPost,
-            generationParams: (matchesPersistedDealer
-              ? session?.generationParams || null
-              : null) as GenerationParams | null,
+            generationParams: restoredGenerationParams,
             step: restoredStep,
             imageQualityTier: session?.imageQualityTier ?? "standard",
             ...(session?.theme

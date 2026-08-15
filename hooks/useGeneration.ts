@@ -39,6 +39,8 @@ import type { Dealer } from "../types";
 import type { CaptionGenerationResult } from "../services/modelConfig";
 import { MODEL_POLICY_VERSION } from "../services/modelConfig";
 import { EXPORT_FORMATS, renderFormat } from "../utils/multiFormatExport";
+import { toPublicCustomerLabel } from "../utils/customerIdentity";
+import { captionUsesOnlyExpectedCustomer } from "../utils/captionQuality";
 import {
   buildFinalWebsiteDraftFallback,
   buildFinalWebsiteDraftPrompt,
@@ -59,6 +61,35 @@ const brandKitFromDealer = (dealer?: Dealer | null): DealerBrandKit | null => {
     default_footer: dealer.default_footer,
   };
 };
+
+const customerIdentityIsSafe = (input: {
+  caption: string;
+  customerName?: string;
+  dealerName?: string;
+  vehicleDescription?: string;
+  requireExpected?: boolean;
+  identityRequired?: boolean;
+}): boolean => {
+  const publicCustomer = toPublicCustomerLabel(input.customerName);
+  return captionUsesOnlyExpectedCustomer(input.caption, publicCustomer, {
+    allowedPhrases: [input.dealerName, input.vehicleDescription],
+    requireExpected: Boolean(publicCustomer && input.requireExpected),
+    rejectAnyCustomerIdentity: Boolean(input.identityRequired && !publicCustomer),
+  });
+};
+
+const customerIdentityError =
+  "The caption introduced a customer name that is not authorized for this post. The previous caption was kept.";
+
+/**
+ * Legacy persisted posts predate this flag. Treat an absent value as a
+ * customer-bound post so old work cannot silently lose identity protection;
+ * preserve an explicit false for inventory, service, team, and community copy.
+ */
+const resolveCustomerIdentityRequired = (
+  primary?: boolean,
+  fallback?: boolean,
+): boolean => primary ?? fallback ?? true;
 
 const latestSuccessfulAt = (
   ...values: Array<string | null | undefined>
@@ -135,6 +166,7 @@ export interface GenerationMeta {
   salespersonId?: string;
   vin?: string;
   scenarioId?: string;
+  customerIdentityRequired?: boolean;
   hasRelease?: boolean;
   /** Signed-but-unsaved release captured before generation. Saved linked to the post on success so we never create orphan release records. */
   capturedRelease?: CapturedRelease;
@@ -255,6 +287,7 @@ export const useGeneration = () => {
               params.creativeBrief,
               imageQualityTier,
               params.imageAspectRatio,
+              params.meta?.customerIdentityRequired ?? true,
             );
           });
         },
@@ -288,6 +321,7 @@ export const useGeneration = () => {
         creativeBrief: variables.creativeBrief,
         platformIds: variables.platformIds,
         scenarioId: variables.meta?.scenarioId,
+        customerIdentityRequired: variables.meta?.customerIdentityRequired ?? true,
         mediaOutputMode: variables.mediaOutputMode,
         primaryFormatId: variables.primaryFormatId,
         imageAspectRatio: variables.imageAspectRatio,
@@ -344,6 +378,21 @@ export const useGeneration = () => {
       const result = gatedResult.result;
       const releaseId = gatedResult.releaseId;
 
+      if (
+        !customerIdentityIsSafe({
+          caption: result.text,
+          customerName: variables.customerName,
+          dealerName: currentDealer?.name,
+          vehicleDescription: variables.meta?.websiteVehicleDescription,
+          identityRequired: variables.meta?.customerIdentityRequired ?? true,
+        })
+      ) {
+        setError(customerIdentityError);
+        toastError(customerIdentityError);
+        setStep(AppStep.CUSTOMIZE);
+        return;
+      }
+
       if (result.aiMeta.image.provider === "original") {
         toastWarning(
           "AI styling couldn't be applied this time — showing your original photo with the generated caption.",
@@ -383,6 +432,8 @@ export const useGeneration = () => {
       const finalPost: GeneratedPost = {
         ...result,
         text: preparedCaption.caption,
+        customerDisplayName: toPublicCustomerLabel(variables.customerName),
+        customerIdentityRequired: variables.meta?.customerIdentityRequired ?? true,
         isBasicFallback: result.captionSource === "basic_fallback",
         disclosures: preparedCaption.disclosures,
         disclosureCategories: preparedCaption.disclosureCategories,
@@ -417,18 +468,15 @@ export const useGeneration = () => {
             preparedCaption.caption,
           );
           assertOperationAuthEpoch(variables.authEpoch);
-          const { generateSocialPostText } = await loadGeminiService();
+          const { generatePlatformCaptionPack } = await loadGeminiService();
           assertOperationAuthEpoch(variables.authEpoch);
           const rawPack = await runGeminiTask("ai.caption.pack", () => {
             assertOperationAuthEpoch(variables.authEpoch);
-            return generateSocialPostText(
+            return generatePlatformCaptionPack(
               selectedImage,
-              variables.tone,
-              currentDealer.name,
-              variables.customerName,
-              true,
               packBrief,
-              variables.style,
+              variables.customerName,
+              variables.meta?.customerIdentityRequired ?? true,
             );
           });
           assertOperationAuthEpoch(variables.authEpoch);
@@ -441,6 +489,17 @@ export const useGeneration = () => {
                 currentDealer.banned_phrases,
                 brandKitFromDealer(currentDealer),
               );
+              if (
+                !customerIdentityIsSafe({
+                  caption: prepared.caption,
+                  customerName: finalPost.customerDisplayName,
+                  dealerName: currentDealer.name,
+                  vehicleDescription: variables.meta?.websiteVehicleDescription,
+                  identityRequired: finalPost.customerIdentityRequired,
+                })
+              ) {
+                continue;
+              }
               cleaned[id] = prepared.caption;
             } catch {
               // Skip prohibited variants; primary caption remains usable.
@@ -465,10 +524,14 @@ export const useGeneration = () => {
           customScenariosJson: currentDealer.custom_scenarios,
           dealerName: currentDealer.name,
           caption: preparedCaption.caption,
-          customerDisplayName: variables.customerName,
+          customerDisplayName: finalPost.customerDisplayName,
           vehicleDescription: variables.meta?.websiteVehicleDescription,
         };
         const fallback = buildFallbackWebsiteDraft(source);
+        // Customer stories carry release-bound identity. Their website copy is
+        // derived deterministically from the validated caption so a metadata
+        // model can never introduce a second customer.
+        if (fallback.kind === "customer_story") return fallback;
         try {
           assertOperationAuthEpoch(variables.authEpoch);
           const { generateWebsiteDraftMetadata } = await loadGeminiService();
@@ -531,7 +594,10 @@ export const useGeneration = () => {
               dealerId: currentDealer.id,
               style: variables.style,
               tone: variables.tone,
-              customerName: variables.customerName,
+              // Release linking uses the protected exact signer name. Public
+              // copy uses finalPost.customerDisplayName and never this value.
+              customerName: captured?.customerName || variables.customerName,
+              customerIdentityRequired: variables.meta?.customerIdentityRequired,
               scenarioId: variables.meta?.scenarioId,
               vin: variables.meta?.vin,
               // The release route flips this true only after its protected
@@ -599,6 +665,7 @@ export const useGeneration = () => {
         finalPost.releaseStatus = persisted.releaseStatus;
         if (post) {
           finalPost.postId = post.id;
+          finalPost.imageReviewRequired = Boolean(post.image_review_required);
           if (post.website_draft) finalPost.websiteDraft = post.website_draft;
           finalPost.websitePublication =
             post.website_publication ||
@@ -617,6 +684,12 @@ export const useGeneration = () => {
         if (persisted.releaseStatus === "save_failed") {
           toastError(
             "The signed photo release could not be stored. Copy, share, save, and export are locked; check your connection and create another post to retry.",
+          );
+        }
+
+        if (finalPost.imageReviewRequired) {
+          toastError(
+            "This image could not be tied to the current on-pixel safety review. Copy, share, save, scheduling, approval, and website delivery are locked; create a new post to retry.",
           );
         }
 
@@ -712,6 +785,10 @@ export const useGeneration = () => {
           imageQualityTier,
           generationParams.imageAspectRatio ??
             resolvePrimaryImageProfile(generationParams.platformIds).imageAspectRatio,
+          resolveCustomerIdentityRequired(
+            sourcePost.customerIdentityRequired,
+            generationParams.customerIdentityRequired,
+          ),
         );
       });
       assertOperationAuthEpoch(operationAuthEpoch);
@@ -777,6 +854,7 @@ export const useGeneration = () => {
             resolvePrimaryImageProfile(
               generationParams?.platformIds ?? generatedPost?.platformIds,
             ).imageAspectRatio,
+          generationParams?.creativeBrief,
         );
       });
       assertOperationAuthEpoch(operationAuthEpoch);
@@ -908,24 +986,27 @@ export const useGeneration = () => {
           currentDealer.name,
           primaryCaption,
         );
-        const { generateSocialPostText } = await loadGeminiService();
+        const { generatePlatformCaptionPack } = await loadGeminiService();
         assertOperationAuthEpoch(operationAuthEpoch);
         const rawPack = await runGeminiTask("ai.caption.pack", () => {
           assertOperationAuthEpoch(operationAuthEpoch);
-          return generateSocialPostText(
+          return generatePlatformCaptionPack(
             selectedImage,
-            generationParams?.tone || preferredTone,
-            currentDealer.name,
-            generationParams?.customerName,
-            true,
             packBrief,
-            generationParams?.style,
+            generationParams?.customerName,
+            resolveCustomerIdentityRequired(
+              useAppStore.getState().generatedPost?.customerIdentityRequired,
+              generationParams?.customerIdentityRequired,
+            ),
           );
         });
         assertOperationAuthEpoch(operationAuthEpoch);
         const parsed = parsePlatformCaptionPack(rawPack, platformIds);
         const cleaned: Record<string, string> = {};
         const kit = brandKitFromDealer(currentDealer);
+        const publicCustomer =
+          useAppStore.getState().generatedPost?.customerDisplayName ||
+          toPublicCustomerLabel(generationParams?.customerName);
         for (const [id, caption] of Object.entries(parsed)) {
           try {
             const prepared = prepareCaptionForDelivery(
@@ -933,6 +1014,20 @@ export const useGeneration = () => {
               currentDealer.banned_phrases,
               kit,
             );
+            if (
+              !customerIdentityIsSafe({
+                caption: prepared.caption,
+                customerName: publicCustomer,
+                dealerName: currentDealer.name,
+                vehicleDescription: generationParams?.websiteVehicleDescription,
+                identityRequired: resolveCustomerIdentityRequired(
+                  useAppStore.getState().generatedPost?.customerIdentityRequired,
+                  generationParams?.customerIdentityRequired,
+                ),
+              })
+            ) {
+              continue;
+            }
             cleaned[id] = prepared.caption;
           } catch {
             /* skip prohibited variant */
@@ -986,6 +1081,10 @@ export const useGeneration = () => {
           true,
           generationParams.creativeBrief,
           generationParams.style,
+          resolveCustomerIdentityRequired(
+            sourcePost.customerIdentityRequired,
+            generationParams.customerIdentityRequired,
+          ),
         );
       });
       assertOperationAuthEpoch(operationAuthEpoch);
@@ -994,6 +1093,20 @@ export const useGeneration = () => {
         currentDealer.banned_phrases,
         brandKitFromDealer(currentDealer),
       );
+      if (
+        !customerIdentityIsSafe({
+          caption: prepared.caption,
+          customerName: sourcePost.customerDisplayName || generationParams.customerName,
+          dealerName: currentDealer.name,
+          vehicleDescription: generationParams.websiteVehicleDescription,
+          identityRequired: resolveCustomerIdentityRequired(
+            sourcePost.customerIdentityRequired,
+            generationParams.customerIdentityRequired,
+          ),
+        })
+      ) {
+        throw new Error(customerIdentityError);
+      }
       const platformIds = generationParams.platformIds ?? sourcePost.platformIds ?? [];
       const pack = await rebuildCaptionPack(
         prepared.caption,
@@ -1076,6 +1189,10 @@ export const useGeneration = () => {
         true, // regeneration mode — higher temperature, guaranteed variation
         generationParams.creativeBrief,
         generationParams.style,
+        resolveCustomerIdentityRequired(
+          useAppStore.getState().generatedPost?.customerIdentityRequired,
+          generationParams.customerIdentityRequired,
+        ),
       );
     });
     assertOperationAuthEpoch(operationAuthEpoch);
@@ -1084,6 +1201,22 @@ export const useGeneration = () => {
       currentDealer.banned_phrases,
       brandKitFromDealer(currentDealer),
     );
+    if (
+      !customerIdentityIsSafe({
+        caption: prepared.caption,
+        customerName:
+          useAppStore.getState().generatedPost?.customerDisplayName ||
+          generationParams.customerName,
+        dealerName: currentDealer.name,
+        vehicleDescription: generationParams.websiteVehicleDescription,
+        identityRequired: resolveCustomerIdentityRequired(
+          useAppStore.getState().generatedPost?.customerIdentityRequired,
+          generationParams.customerIdentityRequired,
+        ),
+      })
+    ) {
+      throw new Error(customerIdentityError);
+    }
     if (operationAuthEpoch !== useAppStore.getState().authEpoch) {
       throw new Error("Your signed-in workspace changed during caption generation.");
     }
@@ -1112,13 +1245,36 @@ export const useGeneration = () => {
       const sourceText = originalText?.trim() || sourcePost?.text || "";
       if (!sourcePost || !sourceText || !editPrompt.trim())
         throw new Error("Missing required data");
+      const publicCustomer =
+        sourcePost.customerDisplayName ||
+        toPublicCustomerLabel(generationParams?.customerName);
+      if (
+        !customerIdentityIsSafe({
+          caption: sourceText,
+          customerName: publicCustomer,
+          dealerName: currentDealer?.name,
+          vehicleDescription: generationParams?.websiteVehicleDescription,
+          identityRequired: resolveCustomerIdentityRequired(
+            sourcePost.customerIdentityRequired,
+            generationParams?.customerIdentityRequired,
+          ),
+        })
+      ) {
+        throw new Error(
+          "This caption contains an unapproved customer name. Start from a corrected caption before using AI edits.",
+        );
+      }
       assertOperationAuthEpoch(operationAuthEpoch);
       const { editSocialPostTextDetailed } = await loadGeminiService();
       assertOperationAuthEpoch(operationAuthEpoch);
       const tone = generationParams?.tone || preferredTone;
+      const identityInstruction = publicCustomer
+        ? `Customer identity rule: the only customer label allowed is exactly "${publicCustomer}". Do not add, replace, or infer another person's name.`
+        : "Customer identity rule: do not introduce any customer or personal name.";
+      const identityBoundEditPrompt = `${editPrompt.trim()}\n\n${identityInstruction}`;
       const captionResult = await runGeminiTask("ai.edit.text", () => {
         assertOperationAuthEpoch(operationAuthEpoch);
-        return editSocialPostTextDetailed(sourceText, editPrompt, tone);
+        return editSocialPostTextDetailed(sourceText, identityBoundEditPrompt, tone);
       });
       assertOperationAuthEpoch(operationAuthEpoch);
       const prepared = prepareCaptionForDelivery(
@@ -1126,6 +1282,34 @@ export const useGeneration = () => {
         currentDealer?.banned_phrases,
         brandKitFromDealer(currentDealer),
       );
+      if (
+        !customerIdentityIsSafe({
+          caption: prepared.caption,
+          customerName: publicCustomer,
+          dealerName: currentDealer?.name,
+          vehicleDescription: generationParams?.websiteVehicleDescription,
+          identityRequired: resolveCustomerIdentityRequired(
+            sourcePost.customerIdentityRequired,
+            generationParams?.customerIdentityRequired,
+          ),
+          requireExpected: Boolean(
+            publicCustomer &&
+            customerIdentityIsSafe({
+              caption: sourceText,
+              customerName: publicCustomer,
+              dealerName: currentDealer?.name,
+              vehicleDescription: generationParams?.websiteVehicleDescription,
+              identityRequired: resolveCustomerIdentityRequired(
+                sourcePost.customerIdentityRequired,
+                generationParams?.customerIdentityRequired,
+              ),
+              requireExpected: true,
+            }),
+          ),
+        })
+      ) {
+        throw new Error(customerIdentityError);
+      }
       const platformIds = sourcePost.platformIds ?? [];
       const pack = platformId
         ? undefined
@@ -1227,9 +1411,12 @@ export const useGeneration = () => {
         currentDraft: input.currentDraft,
         dealerName: dealer.name,
         caption: input.caption,
-        customerName: state.generationParams?.customerName,
+        customerName:
+          state.generatedPost?.customerDisplayName ||
+          toPublicCustomerLabel(state.generationParams?.customerName),
       };
       const fallback = buildFinalWebsiteDraftFallback(source);
+      if (fallback.kind === "customer_story") return fallback;
       try {
         const { generateWebsiteDraftMetadata } = await loadGeminiService();
         assertOperationAuthEpoch(operationAuthEpoch);

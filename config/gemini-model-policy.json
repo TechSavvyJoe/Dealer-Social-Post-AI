@@ -1,11 +1,12 @@
 {
-  "version": 4,
-  "verifiedAt": "2026-07-29",
+  "version": 5,
+  "verifiedAt": "2026-08-14",
   "models": {
     "textQuality": "gemini-3.6-flash",
     "textFast": "gemini-3.5-flash-lite",
-    "imageStandard": "gemini-3.1-flash-image",
+    "imageStandard": "gemini-3-pro-image",
     "imageStudio": "gemini-3-pro-image",
+    "imageFallback": "gemini-3.1-flash-image",
     "imageLite": "gemini-3.1-flash-lite-image",
     "videoStandard": "veo-3.1-fast-generate-preview",
     "videoQuality": "veo-3.1-generate-preview"
@@ -33,8 +34,8 @@
       "kind": "image",
       "tier": "standard",
       "models": [
-        "gemini-3.1-flash-image",
         "gemini-3-pro-image",
+        "gemini-3.1-flash-image",
         "gemini-3.1-flash-lite-image"
       ],
       "maxOutputTokens": 4096,
@@ -54,7 +55,7 @@
       ],
       "maxOutputTokens": 4096,
       "imageSizes": {
-        "gemini-3-pro-image": "2K",
+        "gemini-3-pro-image": "4K",
         "gemini-3.1-flash-image": "2K",
         "gemini-3.1-flash-lite-image": "1K"
       }
@@ -103,7 +104,7 @@
     "maxPromptChars": 20000,
     "maxInlineImageChars": 16777216,
     "maxTotalInlineImageChars": 20971520,
-    "maxTextImages": 1,
+    "maxTextImages": 3,
     "maxImageTaskImages": 2
   },
   "safetySettings": [

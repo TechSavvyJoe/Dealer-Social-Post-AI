@@ -80,6 +80,10 @@ export interface ImageSelection {
 export interface GeneratedPost {
   image: string; // base64 data URL
   text: string;
+  /** Public-safe first name/family label; never the protected full release name. */
+  customerDisplayName?: string;
+  /** True only when the selected post type requires a release-bound customer identity. */
+  customerIdentityRequired?: boolean;
   /** Server record used for owner-scoped approval status polling. */
   postId?: string;
   /** `submission_failed` is client-only and keeps delivery locked safely. */
@@ -92,6 +96,8 @@ export interface GeneratedPost {
   releaseStatus?: "not_required" | "saved" | "save_failed";
   /** Manager/super-admin History view of another salesperson's immutable work. */
   historyReadOnly?: boolean;
+  /** Server policy quarantine for legacy/unreviewed creative pixels. */
+  imageReviewRequired?: boolean;
   /**
    * Required compliance disclosure footer, stored separately from `text` so
    * a salesperson can't silently delete it while editing the caption.
@@ -249,6 +255,8 @@ export interface GenerationParams {
   platformIds?: string[];
   /** Post scenario restored after a failed generation attempt or same-photo remix. */
   scenarioId?: string;
+  /** Trusted scenario decision used to fail closed only for customer-required copy. */
+  customerIdentityRequired?: boolean;
   /** Requested destination deliverables; defaults to photo for legacy sessions. */
   mediaOutputMode?: MediaOutputMode;
   /** Exact export canvas selected from the destination mix. */

@@ -21,8 +21,8 @@ describe("canonical Gemini model policy", () => {
       "gemini-3.6-flash",
     ]);
     expect(MODEL_POLICY.tasks.image_standard.models).toEqual([
-      "gemini-3.1-flash-image",
       "gemini-3-pro-image",
+      "gemini-3.1-flash-image",
       "gemini-3.1-flash-lite-image",
     ]);
     expect(MODEL_POLICY.tasks.image_studio.models).toEqual([
@@ -30,6 +30,12 @@ describe("canonical Gemini model policy", () => {
       "gemini-3.1-flash-image",
       "gemini-3.1-flash-lite-image",
     ]);
+    expect(MODEL_POLICY.tasks.image_standard.imageSizes).toMatchObject({
+      "gemini-3-pro-image": "2K",
+    });
+    expect(MODEL_POLICY.tasks.image_studio.imageSizes).toMatchObject({
+      "gemini-3-pro-image": "4K",
+    });
     expect(MODEL_POLICY.tasks.video_standard).toMatchObject({
       models: ["veo-3.1-fast-generate-preview"],
       resolution: "720p",

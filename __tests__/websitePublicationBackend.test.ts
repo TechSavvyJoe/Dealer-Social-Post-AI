@@ -29,9 +29,38 @@ type WebsiteModule = {
     draft: Record<string, unknown>,
   ): boolean;
   publicCustomerLabel(value: string): string;
+  releaseAuthorizesPublicCustomerLabel(
+    protectedName: string,
+    proposedLabel: string,
+  ): boolean;
+  groundedVehicleIdentityPhrase(value: string): string;
+  publicWebsiteDraftForPost(
+    post: unknown,
+    dealerName: string,
+  ): {
+    websiteDraft: Record<string, unknown> | null;
+    identityReviewRequired: boolean;
+  };
+  reviewPostCustomerIdentity(
+    protectedName: string,
+    values: string[],
+    allowedPhrases: string[],
+    rejectUnnamed: boolean,
+  ): {
+    publicLabel: string;
+    projectedValues: string[];
+    projectionApplied: boolean;
+    reviewRequired: boolean;
+    unexpectedIdentity: boolean;
+  };
   replaceProtectedCustomerName(value: string, protectedName: string): string;
   containsVinLike(value: string): boolean;
   containsSensitiveContactText(value: string): boolean;
+  containsUnexpectedCustomerIdentity(
+    value: string,
+    expectedCustomer?: string,
+    allowedPhrases?: string[],
+  ): boolean;
   base64EncodeBytes(value: number[]): string;
   hmacHeaders(
     rawBody: string,
@@ -47,6 +76,7 @@ type WebsiteModule = {
     post: unknown,
     draft: Record<string, unknown>,
     media: Record<string, string>,
+    dao?: unknown,
   ): Record<string, unknown>;
   payloadSentAtForFirstQueue(publication: unknown, now: string): string;
   acceptedDestinationState(
@@ -756,7 +786,7 @@ describe("Customer Hub website publication contract", () => {
         title: "Congratulations, Mary Jane Smith!",
         body: "Mary Jane Smith and the Smith family picked up a wonderful vehicle.",
         altText: "Mary Jane Smith standing next to the vehicle",
-        customerDisplayName: "Mary Jane Smith",
+        customerDisplayName: "Mary",
         vehicleDescription: "",
         privacyFlags: ["faces_visible", "license_plate_visible"],
       },
@@ -764,15 +794,13 @@ describe("Customer Hub website publication contract", () => {
     );
 
     expect(content).toMatchObject({
-      customerDisplayName: "Mary S.",
+      customerDisplayName: "Mary",
       vehicleDescription: "the vehicle they chose",
       disclosures: "Final sale terms are available from the dealership.",
       privacyFlags: ["faces_visible", "license_plate_visible"],
     });
     expect(JSON.stringify(content)).not.toContain("Mary Jane Smith");
-    expect(content.body).toBe(
-      "Mary S. and Mary S.'s family picked up a wonderful vehicle.",
-    );
+    expect(content.body).toBe("Mary and Mary's family picked up a wonderful vehicle.");
     expect(content).not.toHaveProperty("vin");
   });
 
@@ -787,16 +815,299 @@ describe("Customer Hub website publication contract", () => {
       {
         kind: "customer_story",
         category: "deliveries",
-        title: "What Alex M. had to say",
-        body: "Alex M. shared a thoughtful note about the dealership experience.",
+        title: "What Alex had to say",
+        body: "Alex shared a thoughtful note about the dealership experience.",
         altText: "Customer testimonial shared with the dealership",
-        customerDisplayName: "Alex M.",
+        customerDisplayName: "Alex",
         vehicleDescription: "",
       },
       { mimeType: "image/jpeg", filename: "testimonial.jpg", base64: "AA==" },
     );
 
     expect(content.vehicleDescription).toBe("Customer experience");
+  });
+
+  it("rejects a second customer name even when the approved first name is present", () => {
+    const post = postRecord({
+      scenario_id: "customer_delivery",
+      customer_name: "Lisa Marie Sample",
+      disclosures: "",
+    });
+    expect(() =>
+      website.buildOutboundContent(
+        post,
+        {
+          kind: "customer_story",
+          category: "deliveries",
+          title: "Welcome, Lisa and Jordan!",
+          body: "Lisa and Jordan just celebrated a special delivery day.",
+          altText: "Lisa and Jordan standing beside the vehicle",
+          customerDisplayName: "Lisa",
+          vehicleDescription: "the vehicle they chose",
+        },
+        { mimeType: "image/jpeg", filename: "delivery.jpg", base64: "AA==" },
+      ),
+    ).toThrow("customer_identity_conflict");
+  });
+
+  it.each([
+    "Congratulations to Lisa + Jordan!",
+    "Congratulations to Lisa/Jordan!",
+    "Welcome home, Jordan!",
+    "Jordan, welcome home!",
+    "Jordan — new car day!",
+    "A special moment for Jordan at Bob Maxey Ford.",
+    "Lisa is celebrating with Jordan at Bob Maxey Ford.",
+    "We loved helping Jordan at Bob Maxey Ford.",
+    "Congratulations to Joe!",
+  ])("rejects adversarial customer-list separators: %s", (caption) => {
+    expect(
+      website.containsUnexpectedCustomerIdentity(caption, "Lisa", [
+        "Bob Maxey Ford",
+        "Joe Gallant",
+        "Joe",
+        "2025 Ford Explorer",
+      ]),
+    ).toBe(true);
+  });
+
+  it("keeps a grounded salesperson helper and vehicle/dealer nouns out of customer review", () => {
+    expect(
+      website.containsUnexpectedCustomerIdentity(
+        "Joe just helped Lisa find a 2025 Ford Explorer at Bob Maxey Ford.",
+        "Lisa",
+        ["Bob Maxey Ford", "Joe Gallant", "Joe", "2025 Ford Explorer"],
+      ),
+    ).toBe(false);
+    expect(
+      website.containsUnexpectedCustomerIdentity(
+        "Bronco just arrived at Bob Maxey Ford.",
+        "",
+        ["Bob Maxey Ford", "2025 Ford Bronco"],
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a customer-like name when no public customer label is authorized", () => {
+    expect(
+      website.containsUnexpectedCustomerIdentity("Meet Jordan!", "", [
+        "Bob Maxey Ford",
+      ]),
+    ).toBe(true);
+    expect(
+      website.containsUnexpectedCustomerIdentity(
+        "A showroom update from Bob Maxey Ford.",
+        "",
+        ["Bob Maxey Ford"],
+      ),
+    ).toBe(false);
+  });
+
+  it("only trusts grounded vehicle descriptions as identity-safe phrases", () => {
+    expect(website.groundedVehicleIdentityPhrase("Jordan")).toBe("");
+    expect(website.groundedVehicleIdentityPhrase("2025 Ford Explorer")).toBe(
+      "2025 Ford Explorer",
+    );
+    expect(website.groundedVehicleIdentityPhrase("the vehicle they chose")).toBe(
+      "the vehicle they chose",
+    );
+  });
+
+  it("projects a legacy full signer name before returning a website draft", () => {
+    const result = website.publicWebsiteDraftForPost(
+      postRecord({
+        customer_name: "Lisa Marie Sample",
+        salesperson_name: "Joe Gallant",
+        release_required: true,
+        website_draft: JSON.stringify({
+          schemaVersion: 1,
+          enabled: true,
+          kind: "customer_story",
+          category: "deliveries",
+          title: "Welcome, Lisa Marie Sample",
+          body: "Lisa Marie Sample is celebrating at Bob Maxey Ford.",
+          altText: "Lisa Marie Sample beside the vehicle",
+          customerDisplayName: "Lisa",
+          vehicleDescription: "the vehicle they chose",
+        }),
+      }),
+      "Bob Maxey Ford",
+    );
+
+    expect(result.identityReviewRequired).toBe(true);
+    expect(result.websiteDraft).toMatchObject({
+      title: "Welcome, Lisa",
+      body: "Lisa is celebrating at Bob Maxey Ford.",
+      altText: "Lisa beside the vehicle",
+      customerDisplayName: "Lisa",
+    });
+    expect(JSON.stringify(result.websiteDraft)).not.toContain("Marie Sample");
+  });
+
+  it("quarantines a legacy website draft containing a different customer", () => {
+    const result = website.publicWebsiteDraftForPost(
+      postRecord({
+        customer_name: "Lisa Marie Sample",
+        salesperson_name: "Joe Gallant",
+        release_required: true,
+        website_draft: JSON.stringify({
+          schemaVersion: 1,
+          enabled: true,
+          kind: "customer_story",
+          category: "deliveries",
+          title: "Welcome home, Jordan!",
+          body: "We loved helping Jordan at Bob Maxey Ford.",
+          altText: "Jordan beside the vehicle",
+          customerDisplayName: "Lisa",
+          vehicleDescription: "the vehicle they chose",
+        }),
+      }),
+      "Bob Maxey Ford",
+    );
+
+    expect(result).toEqual({
+      websiteDraft: null,
+      identityReviewRequired: true,
+    });
+  });
+
+  it("projects a protected signer to the exact public first name and rejects expansions", () => {
+    expect(
+      website.releaseAuthorizesPublicCustomerLabel("Lisa Marie Sample", "Lisa"),
+    ).toBe(true);
+    expect(
+      website.releaseAuthorizesPublicCustomerLabel("Lisa Marie Sample", "Lisa S."),
+    ).toBe(false);
+    expect(
+      website.releaseAuthorizesPublicCustomerLabel(
+        "Lisa Marie Sample",
+        "Lisa Marie Sample",
+      ),
+    ).toBe(false);
+
+    const safe = website.reviewPostCustomerIdentity(
+      "Lisa Marie Sample",
+      ["Congratulations to Lisa Marie Sample!"],
+      [],
+      true,
+    );
+    expect(safe).toMatchObject({
+      publicLabel: "Lisa",
+      projectedValues: ["Congratulations to Lisa!"],
+      projectionApplied: true,
+      reviewRequired: true,
+    });
+
+    for (const caption of [
+      "Congratulations to Lisa and Jordan!",
+      "Congratulations to Lisa + Jordan!",
+      "Congratulations to Lisa/Jordan!",
+      "Welcome Lisa S.!",
+      "Welcome Lisa Jordan!",
+      "Lisa and Jordan just celebrated a special delivery day.",
+    ]) {
+      expect(
+        website.reviewPostCustomerIdentity("Lisa Marie Sample", [caption], [], true)
+          .unexpectedIdentity,
+      ).toBe(true);
+    }
+  });
+
+  it("does not redact a signer surname inside an exact grounded dealer phrase", () => {
+    const review = website.reviewPostCustomerIdentity(
+      "Lisa Maxey",
+      ["Visit Bob Maxey Ford for a friendly showroom experience."],
+      ["Bob Maxey Ford"],
+      true,
+    );
+    expect(review.projectedValues[0]).toBe(
+      "Visit Bob Maxey Ford for a friendly showroom experience.",
+    );
+    expect(review).toMatchObject({
+      projectionApplied: false,
+      reviewRequired: false,
+      unexpectedIdentity: false,
+    });
+  });
+
+  it("rejects an ungrounded public customer label when the post has no signer", () => {
+    expect(() =>
+      website.buildOutboundContent(
+        postRecord({
+          dealer: "dealer_joe",
+          scenario_id: "new_arrival",
+          customer_name: "",
+          disclosures: "",
+        }),
+        {
+          kind: "site_update",
+          category: "inventory",
+          title: "New arrival",
+          body: "A new vehicle is ready for a closer look at the dealership.",
+          altText: "Vehicle displayed at the dealership",
+          customerDisplayName: "Jordan",
+          vehicleDescription: "2025 Ford Explorer",
+        },
+        { mimeType: "image/jpeg", filename: "arrival.jpg", base64: "AA==" },
+      ),
+    ).toThrow("customer_identity_conflict");
+  });
+
+  it("preserves an authoritative dealership name that overlaps the signer surname", () => {
+    const dealerRecord = {
+      getString(field: string) {
+        return field === "name" ? "Bob Maxey Ford" : "";
+      },
+    };
+    const content = website.buildOutboundContent(
+      postRecord({
+        dealer: "dealer_joe",
+        scenario_id: "new_arrival",
+        customer_name: "Lisa Maxey",
+        disclosures: "Visit Bob Maxey Ford for complete details.",
+      }),
+      {
+        kind: "site_update",
+        category: "inventory",
+        title: "Now at Bob Maxey Ford",
+        body: "Visit Bob Maxey Ford for a closer look at this 2025 Ford Explorer.",
+        altText: "2025 Ford Explorer at Bob Maxey Ford",
+        vehicleDescription: "2025 Ford Explorer",
+      },
+      { mimeType: "image/jpeg", filename: "arrival.jpg", base64: "AA==" },
+      {
+        findRecordById(collection: string, id: string) {
+          expect(collection).toBe("dealers");
+          expect(id).toBe("dealer_joe");
+          return dealerRecord;
+        },
+      },
+    );
+    expect(JSON.stringify(content)).toContain("Bob Maxey Ford");
+    expect(JSON.stringify(content)).not.toContain("Bob the customer Ford");
+  });
+
+  it("requires the exact first-name-only public label", () => {
+    const post = postRecord({
+      scenario_id: "customer_delivery",
+      customer_name: "Lisa Marie Sample",
+      disclosures: "",
+    });
+    expect(() =>
+      website.buildOutboundContent(
+        post,
+        {
+          kind: "customer_story",
+          category: "deliveries",
+          title: "Welcome, Lisa",
+          body: "Lisa is celebrating a special delivery day.",
+          altText: "Customer standing beside the vehicle",
+          customerDisplayName: "Lisa S.",
+          vehicleDescription: "the vehicle they chose",
+        },
+        { mimeType: "image/jpeg", filename: "delivery.jpg", base64: "AA==" },
+      ),
+    ).toThrow("customer_identity_conflict");
   });
 
   it("neutralizes every protected non-first name token, including possessives", () => {
@@ -813,7 +1124,7 @@ describe("Customer Hub website publication contract", () => {
         "Michael and Smith joined Jordan Michael Smith for delivery.",
         "Jordan Michael Smith",
       ),
-    ).toBe("the customer and the customer joined Jordan S. for delivery.");
+    ).toBe("the customer and the customer joined Jordan for delivery.");
   });
 
   it("preserves automotive makes that match a surname without exposing the customer", () => {
@@ -823,7 +1134,7 @@ describe("Customer Hub website publication contract", () => {
         "Jane Ford",
       ),
     ).toBe(
-      "Jane F. chose a 2025 Ford Explorer. Jane F.'s family loves the customer's new SUV.",
+      "Jane chose a 2025 Ford Explorer. Jane's family loves the customer's new SUV.",
     );
 
     const content = website.buildOutboundContent(
@@ -838,7 +1149,7 @@ describe("Customer Hub website publication contract", () => {
         title: "A special delivery day",
         body: "Jane Ford is ready for a new chapter.",
         altText: "Customer standing beside a Ford Explorer",
-        customerDisplayName: "Jane Ford",
+        customerDisplayName: "Jane",
         vehicleDescription: "2025 Ford Explorer",
       },
       { mimeType: "image/jpeg", filename: "ford-delivery.jpg", base64: "AA==" },
@@ -866,7 +1177,7 @@ describe("Customer Hub website publication contract", () => {
           title: "A special delivery day",
           body: "Jane Smith chose a wonderful new vehicle.",
           altText: "Jane Smith beside the vehicle",
-          customerDisplayName: "Jane Smith",
+          customerDisplayName: "Jane",
           vehicleDescription: "the vehicle they chose",
         },
         {
@@ -965,21 +1276,31 @@ describe("Customer Hub website publication contract", () => {
     expect(explicitHandoffRoute).toContain("body.website_draft");
     expect(explicitHandoffRoute).toContain("body.expected_post_revision");
     expect(explicitHandoffRoute).toContain("claimPublicationForPost(");
-    expect(explicitHandoffRoute).toContain("summary.websiteDraft = storedDraft.value");
+    expect(explicitHandoffRoute).toContain("publicWebsiteDraftForPost");
+    expect(explicitHandoffRoute).toContain(
+      "summary.websiteDraft = publicDraft.websiteDraft",
+    );
+    expect(explicitHandoffRoute).toContain(
+      "summary.identity_review_required = publicDraft.identityReviewRequired",
+    );
     expect(explicitHandoffRoute).toContain("WEBSITE_POST_REVISION_CONFLICT");
     expect(explicitHandoffRoute).toContain("WEBSITE_DRAFT_ALREADY_SENT");
+    expect(explicitHandoffRoute).toContain("IMAGE_REVIEW_REQUIRED");
+    expect(explicitHandoffRoute).toContain("policies.postImageReviewRequired(");
     const publicationStatusRoute = hook.slice(
       hook.indexOf('routerAdd("GET", "/api/app/posts/:id/website-publication"'),
       hook.indexOf('routerAdd("POST", "/api/app/posts/:id/website-publication"'),
     );
     expect(publicationStatusRoute).toContain(
-      "summary.websiteDraft = storedDraft.value",
+      "summary.websiteDraft = publicDraft.websiteDraft",
     );
     const publicationRetryRoute = hook.slice(
       hook.indexOf('routerAdd("POST", "/api/app/posts/:id/website-publication/retry"'),
       hook.indexOf('cronAdd("deliver-private-website-drafts"'),
     );
-    expect(publicationRetryRoute).toContain("summary.websiteDraft = storedDraft.value");
+    expect(publicationRetryRoute).toContain(
+      "summary.websiteDraft = publicDraft.websiteDraft",
+    );
     expect(publicationRetryRoute).toContain(
       'c.response().header().set("Cache-Control", "private, no-store")',
     );
@@ -1004,6 +1325,8 @@ describe("Customer Hub website publication contract", () => {
     expect(worker).toContain("acquirePostWriteFence(txDao, postId)");
     expect(worker).toContain("publicationSourceSnapshotHash");
     expect(worker).toContain("verifyPublicationSourceSnapshot");
+    expect(worker).toContain("postNeedsCurrentImageReview");
+    expect(worker).toContain('code: "image_review_required"');
     expect(worker).toContain(
       'if (!publication) throw new Error("website_request_not_sent")',
     );

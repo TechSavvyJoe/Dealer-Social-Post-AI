@@ -44,7 +44,11 @@ import { Button } from "./ui/Button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { Input, Textarea, Select } from "./ui/Input";
-import { POST_TEMPLATES } from "./templates";
+import {
+  POST_TEMPLATES,
+  renderPostTemplate,
+  replaceCustomerIdentity,
+} from "./templates";
 import { cn } from "../utils/classNames";
 import { VinScanner } from "./VinScanner";
 import { DecodedVehicle, vehicleToCreativeBrief } from "../services/vinDecoder";
@@ -72,6 +76,11 @@ import {
 } from "../services/platformCopy";
 import { brandHashtagFromName, formatHashtag } from "../utils/hashtags";
 import {
+  releaseAuthorizesPublicLabel,
+  toPublicCustomerLabel,
+} from "../utils/customerIdentity";
+import { captionUsesOnlyExpectedCustomer } from "../utils/captionQuality";
+import {
   listWebsiteDestinations,
   type WebsiteDestination,
 } from "../services/websitePublishing";
@@ -89,6 +98,7 @@ interface PostCustomizerProps {
       salespersonId?: string;
       vin?: string;
       scenarioId?: string;
+      customerIdentityRequired?: boolean;
       hasRelease?: boolean;
       capturedRelease?: CapturedRelease;
       websiteEnabled?: boolean;
@@ -111,9 +121,6 @@ interface PostCustomizerProps {
    */
   initialGenerationParams?: GenerationParams | null;
 }
-
-const normalizeReleaseCustomer = (value: string | undefined): string =>
-  (value || "").normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " ").trim();
 
 const normalizeReleaseVin = (value: string | undefined): string =>
   (value || "").trim().toUpperCase();
@@ -225,6 +232,48 @@ const isToneOption = (value: unknown): value is ToneOption =>
 const isPrimaryImageFormatId = (value: unknown): value is PrimaryImageFormatId =>
   OUTPUT_FORMAT_CHOICES.some((format) => format.id === value);
 
+interface CreativeBriefSections {
+  dealershipName: string;
+  scenarioBlock?: string;
+  vehicleBlock?: string;
+  oemBlock?: string;
+  designBlock: string;
+  supportingBlocks: string[];
+  platformBlock?: string;
+}
+
+/** Keep immutable grounding facts ahead of verbose destination guidance. */
+export const composeGenerationCreativeBrief = ({
+  dealershipName,
+  scenarioBlock,
+  vehicleBlock,
+  oemBlock,
+  designBlock,
+  supportingBlocks,
+  platformBlock,
+}: CreativeBriefSections): string => {
+  const bounded = (value: string | undefined, limit: number) =>
+    (value || "").trim().slice(0, limit);
+  // The caption model intentionally reads only the first 900 characters of
+  // this shared brief. Keep every immutable grounding block inside an 850-char
+  // worst-case envelope so a verbose custom scenario cannot push vehicle, OEM,
+  // or design facts out of the live caption prompt. The remaining budget is
+  // still available to the image model for dealer and destination guidance.
+  const essential = [
+    `Dealership identity (use this exact name): "${bounded(dealershipName, 100)}".`,
+    bounded(scenarioBlock, 240),
+    bounded(vehicleBlock, 220),
+    bounded(oemBlock, 120),
+    bounded(designBlock, 120),
+  ].filter(Boolean);
+  const supporting = supportingBlocks.map((part) => bounded(part, 220)).filter(Boolean);
+  const platform = bounded(platformBlock, 500);
+  return [...essential, ...supporting, platform]
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 1400);
+};
+
 export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   imageSrc,
   onGenerate,
@@ -239,14 +288,31 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 }) => {
   const currentDealer = useAppStore((s) => s.currentDealer);
   const currentPerson = useAppStore((s) => s.currentPerson);
-  const restoredCustomerName =
+  const restoredCustomerName = toPublicCustomerLabel(
     typeof initialGenerationParams?.customerName === "string"
       ? initialGenerationParams.customerName
-      : "";
+      : "",
+  );
   const restoredCustomText =
     typeof initialGenerationParams?.customText === "string"
       ? initialGenerationParams.customText
       : "";
+  const restoredScenario =
+    getScenariosForDealer(currentDealer?.custom_scenarios).find(
+      (scenario) => scenario.id === initialGenerationParams?.scenarioId,
+    ) || POST_SCENARIOS[0];
+  const restoredScenarioNeedsCustomerRelease =
+    restoredScenario.requiresCustomer || restoredScenario.category === "delivery";
+  const restoredCustomTextIsSafe = captionUsesOnlyExpectedCustomer(
+    restoredCustomText,
+    restoredCustomerName,
+    {
+      allowedPhrases: [dealershipName],
+      rejectAnyCustomerIdentity:
+        restoredScenarioNeedsCustomerRelease && !restoredCustomerName,
+    },
+  );
+  const safeRestoredCustomText = restoredCustomTextIsSafe ? restoredCustomText : "";
   const [customerName, setCustomerName] = useState(restoredCustomerName);
   const [style, setStyle] = useState<StyleOption>(() =>
     isStyleOption(initialGenerationParams?.style)
@@ -334,9 +400,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
       ? initialGenerationParams.tone
       : defaultTone,
   );
-  const [customMessage, setCustomMessage] = useState(restoredCustomText);
+  const [customMessage, setCustomMessage] = useState(safeRestoredCustomText);
   const [captionSource, setCaptionSource] = useState<CaptionSource>(() =>
-    restoredCustomText.trim() ? "custom" : "ai",
+    safeRestoredCustomText.trim() ? "custom" : "ai",
   );
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -345,6 +411,11 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   const [decodedVehicle, setDecodedVehicle] = useState<DecodedVehicle | null>(null);
   const [releaseModalOpen, setReleaseModalOpen] = useState(false);
   const [releaseValidationError, setReleaseValidationError] = useState(false);
+  const [captionIdentityError, setCaptionIdentityError] = useState(
+    restoredCustomText && !restoredCustomTextIsSafe
+      ? "A saved caption contained a different customer name, so it was quarantined. Generate a fresh caption or write a corrected one."
+      : "",
+  );
   // Captured signature stays local until Generate. useGeneration durably saves
   // it before the customer photo is sent to an AI provider, then links that
   // same protected record to the created post.
@@ -475,11 +546,34 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
   const templateOptions = useMemo(() => POST_TEMPLATES, []);
 
-  useEffect(() => {
-    if (templateOptions.length > 0 && !selectedTemplateId) {
-      setSelectedTemplateId(templateOptions[0].id);
-    }
-  }, [templateOptions, selectedTemplateId]);
+  const handleCustomerNameChange = useCallback(
+    (nextCustomerName: string) => {
+      const previousCustomerName = customerName;
+      const publicCustomerName = toPublicCustomerLabel(nextCustomerName);
+      setCustomerName(publicCustomerName);
+      setCaptionIdentityError("");
+
+      const selectedTemplate = templateOptions.find(
+        (template) => template.id === selectedTemplateId,
+      );
+      if (selectedTemplate) {
+        setCustomMessage(
+          renderPostTemplate(selectedTemplate.content, {
+            customerName: publicCustomerName,
+            dealershipName,
+          }),
+        );
+        return;
+      }
+
+      if (captionSource === "custom" && previousCustomerName.trim()) {
+        setCustomMessage((current) =>
+          replaceCustomerIdentity(current, previousCustomerName, publicCustomerName),
+        );
+      }
+    },
+    [captionSource, customerName, dealershipName, selectedTemplateId, templateOptions],
+  );
 
   const handleGenerate = useCallback(async () => {
     triggerHapticFeedback();
@@ -491,8 +585,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     }
     if (
       capturedRelease &&
-      (normalizeReleaseCustomer(capturedRelease.customerName) !==
-        normalizeReleaseCustomer(customerName) ||
+      (!releaseAuthorizesPublicLabel(capturedRelease.customerName, customerName) ||
         normalizeReleaseVin(capturedRelease.vin) !==
           normalizeReleaseVin(decodedVehicle?.vin))
     ) {
@@ -508,7 +601,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     let preparedText: string | undefined;
 
     const styleInfo = STYLE_INFO[style];
-    const briefParts: string[] = [`Design DNA: ${styleInfo.aiHint}`];
+    const supportingBriefParts: string[] = [];
 
     // Scenario context (Customer Delivery / Pre-Owned Spotlight / Service
     // Promo / etc). This goes near the top of the brief so it dominates the
@@ -518,30 +611,28 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
       scenarioId,
       currentDealer?.custom_scenarios,
     );
-    if (scenarioBlock) {
-      briefParts.push(scenarioBlock);
-    }
-
     const platformBrief = platformsToCreativeBrief(selectedPlatforms, dealershipName);
-    if (platformBrief) {
-      briefParts.push(platformBrief);
-    }
 
     // Inject decoded vehicle context if a VIN was scanned. This grounds the
     // model in concrete facts (year/make/model/trim/powertrain) so the caption
     // stops hallucinating equipment that isn't on the car.
+    let vehicleBlock = "";
     if (decodedVehicle && !decodedVehicle.empty) {
       const vehicleBrief = vehicleToCreativeBrief(decodedVehicle);
       if (vehicleBrief) {
-        briefParts.push(`Vehicle facts (do not contradict): ${vehicleBrief}`);
+        vehicleBlock = `Vehicle facts (do not contradict): ${vehicleBrief}`;
       }
     }
+
+    const oemBlock = currentDealer?.oem_affiliation?.trim()
+      ? `OEM affiliation: ${currentDealer.oem_affiliation.trim()}. Respect that manufacturer's brand-guideline tone and avoid claims that conflict with their advertising standards.`
+      : "";
 
     // Per-dealer brand voice / banned phrases / OEM affiliation. These come
     // from the dealers PocketBase record so each dealership can tune voice
     // without a code change.
     if (currentDealer?.brand_voice?.trim()) {
-      briefParts.push(
+      supportingBriefParts.push(
         `Brand voice (match this exactly): ${currentDealer.brand_voice.trim()}`,
       );
     }
@@ -551,17 +642,12 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         .map((p) => p.trim())
         .filter(Boolean);
       if (banned.length > 0) {
-        briefParts.push(
+        supportingBriefParts.push(
           `Forbidden phrases (do not use, even as a near-match): ${banned
             .map((p) => `"${p}"`)
             .join(", ")}.`,
         );
       }
-    }
-    if (currentDealer?.oem_affiliation?.trim()) {
-      briefParts.push(
-        `OEM affiliation: ${currentDealer.oem_affiliation.trim()}. Respect that manufacturer's brand-guideline tone and avoid claims that conflict with their advertising standards.`,
-      );
     }
 
     // Identity context — tagline, website, address, hours give the model
@@ -578,7 +664,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     if (currentDealer?.phone?.trim())
       identityFacts.push(`Phone: ${currentDealer.phone.trim()}`);
     if (identityFacts.length > 0) {
-      briefParts.push(
+      supportingBriefParts.push(
         `Dealership facts (may be referenced, never contradicted): ${identityFacts.join(
           "; ",
         )}.`,
@@ -600,7 +686,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
       new Set([brandTag, ...dealerHashtags].filter(Boolean)),
     );
     if (requiredTags.length > 0) {
-      briefParts.push(
+      supportingBriefParts.push(
         `Required hashtags (each is one continuous #PascalCase token, space-separated on the last line): ${requiredTags.join(
           " ",
         )}.`,
@@ -608,15 +694,49 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     }
     const dealerFooter = (currentDealer?.default_footer || "").trim();
     if (dealerFooter) {
-      briefParts.push(
+      supportingBriefParts.push(
         `Required footer (append verbatim AFTER the caption, BEFORE the hashtags): "${dealerFooter}"`,
       );
     }
 
-    // Keep brief short — long instruction dumps make models emit gibberish.
-    const creativeBrief = briefParts.join(" ").slice(0, 1400);
+    // Immutable scenario, dealer, vehicle, and OEM facts lead. Destination
+    // guidance is useful but expendable when the prompt budget is full.
+    const creativeBrief = composeGenerationCreativeBrief({
+      dealershipName,
+      scenarioBlock,
+      vehicleBlock,
+      oemBlock,
+      designBlock: `Design DNA: ${styleInfo.aiHint}`,
+      supportingBlocks: supportingBriefParts,
+      platformBlock: platformBrief,
+    });
 
     if (captionSource === "custom" && customMessage.trim()) {
+      const vehiclePhrase =
+        decodedVehicle && !decodedVehicle.empty
+          ? [
+              decodedVehicle.year,
+              decodedVehicle.make,
+              decodedVehicle.model,
+              decodedVehicle.trim,
+            ]
+              .filter(Boolean)
+              .join(" ")
+          : undefined;
+      if (
+        !captionUsesOnlyExpectedCustomer(customMessage, customerName, {
+          allowedPhrases: [dealershipName, vehiclePhrase],
+          rejectAnyCustomerIdentity: scenarioNeedsCustomerRelease && !customerName,
+        })
+      ) {
+        setCaptionIdentityError(
+          customerName
+            ? `This caption appears to name someone other than ${customerName}. Correct the caption before generating.`
+            : "This caption names a customer, but no approved customer name is attached to this post. Remove the name or add the approved customer first name.",
+        );
+        return;
+      }
+      setCaptionIdentityError("");
       preparedText = customMessage.trim();
     }
 
@@ -631,6 +751,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         {
           vin: decodedVehicle?.vin,
           scenarioId,
+          customerIdentityRequired: scenarioNeedsCustomerRelease,
           hasRelease: !!capturedRelease,
           capturedRelease: capturedRelease || undefined,
           websiteEnabled: websiteSelected,
@@ -784,7 +905,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             <Input
               label={`Customer's name (${scenarioNeedsCustomerRelease ? "required" : "optional"})`}
               value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
+              onChange={(e) => handleCustomerNameChange(e.target.value)}
               placeholder="First name"
               disabled={Boolean(capturedRelease)}
               helperText={
@@ -866,7 +987,10 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   <ShieldCheck className="h-4 w-4 text-success-300 flex-shrink-0 mt-0.5" />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-semibold text-success-100">
-                      Release captured for {capturedRelease.customerName}
+                      Release captured for
+                      {toPublicCustomerLabel(capturedRelease.customerName)
+                        ? ` ${toPublicCustomerLabel(capturedRelease.customerName)}`
+                        : " this customer"}
                     </div>
                     <div className="text-[10px] text-success-300/80">
                       Identity and vehicle are locked to this signature.
@@ -1415,6 +1539,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   onClick={() => {
                     triggerHapticFeedback();
                     setCaptionSource("ai");
+                    setCaptionIdentityError("");
                   }}
                   className={cn(
                     "flex-1 rounded-lg",
@@ -1455,15 +1580,32 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   <Textarea
                     label="Your caption"
                     value={customMessage}
-                    onChange={(e) => setCustomMessage(e.target.value)}
+                    onChange={(e) => {
+                      // A manual edit intentionally detaches this copy from the
+                      // template selector. Subsequent name changes still replace
+                      // the exact prior identity through handleCustomerNameChange.
+                      setSelectedTemplateId("");
+                      setCustomMessage(e.target.value);
+                      setCaptionIdentityError("");
+                    }}
                     rows={3}
                     placeholder="Write your caption here..."
                     fullWidth
                     className="bg-fill-subtle border-hairline focus:border-primary-400"
                   />
+                  {captionIdentityError ? (
+                    <p className="mt-2 text-xs font-medium text-error-200" role="alert">
+                      {captionIdentityError}
+                    </p>
+                  ) : null}
                 </motion.div>
               )}
             </AnimatePresence>
+            {captionSource !== "custom" && captionIdentityError ? (
+              <p className="text-xs font-medium text-error-200" role="alert">
+                {captionIdentityError}
+              </p>
+            ) : null}
 
             {/* Advanced Options - Collapsible */}
             <div className="border-t border-hairline pt-3">
@@ -1505,20 +1647,20 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         aria-label="Select template"
                         value={selectedTemplateId}
                         onChange={(e) => {
-                          setSelectedTemplateId(e.target.value);
+                          const nextTemplateId = e.target.value;
+                          setSelectedTemplateId(nextTemplateId);
                           const template = templateOptions.find(
-                            (t) => t.id === e.target.value,
+                            (t) => t.id === nextTemplateId,
                           );
                           if (template) {
                             setCustomMessage(
-                              template.content
-                                .replace(
-                                  /\[Customer Name\]/g,
-                                  customerName.trim() || "our amazing customer",
-                                )
-                                .replace(/\[Dealership Name\]/g, dealershipName),
+                              renderPostTemplate(template.content, {
+                                customerName,
+                                dealershipName,
+                              }),
                             );
                             setCaptionSource("custom");
+                            setCaptionIdentityError("");
                           }
                         }}
                       >
@@ -1645,7 +1787,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           defaultCustomerName={customerName}
           onCaptured={(release) => {
             setCapturedRelease(release);
-            setCustomerName(release.customerName);
+            // The full legal name remains only on the protected release. Social
+            // copy receives the least-identifying public first-name label.
+            handleCustomerNameChange(toPublicCustomerLabel(release.customerName));
             setReleaseValidationError(false);
           }}
         />

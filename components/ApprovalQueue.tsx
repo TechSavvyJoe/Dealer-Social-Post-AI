@@ -18,6 +18,7 @@ import { ErrorBanner } from "./ui/ErrorBanner";
 import { listPendingPosts, setApprovalStatus, PostRecord } from "../services/posts";
 import { useAppStore } from "../stores/appStore";
 import { PUBLISH_TARGETS } from "../services/publishTargets";
+import { toPublicCustomerLabel } from "../utils/customerIdentity";
 
 const PLATFORM_LABELS = new Map(
   PUBLISH_TARGETS.map((target) => [target.id, target.label]),
@@ -70,6 +71,18 @@ export const ApprovalQueue: React.FC = () => {
   }, [load]);
 
   const handleAction = async (post: PostRecord, status: "approved" | "rejected") => {
+    if (status === "approved" && post.image_review_required) {
+      setError(
+        "This post is quarantined because its image predates the current on-pixel safety review. Reject it and have the salesperson create a new post from the original photo.",
+      );
+      return;
+    }
+    if (status === "approved" && post.identity_review_required) {
+      setError(
+        "This post is quarantined for customer-name review. Reject it and have the salesperson submit corrected copy.",
+      );
+      return;
+    }
     if (!approver.trim()) {
       setError("Enter your manager name first so the approval is logged.");
       return;
@@ -173,7 +186,13 @@ export const ApprovalQueue: React.FC = () => {
               const releaseReady =
                 !post.release_required ||
                 (post.has_release && post.release_status === "saved");
-              const canApprove = hasReviewCreative && releaseReady;
+              const identityReviewRequired = Boolean(post.identity_review_required);
+              const imageReviewRequired = Boolean(post.image_review_required);
+              const canApprove =
+                hasReviewCreative &&
+                releaseReady &&
+                !identityReviewRequired &&
+                !imageReviewRequired;
               return (
                 <motion.li
                   key={post.id}
@@ -186,10 +205,10 @@ export const ApprovalQueue: React.FC = () => {
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-semibold text-surface-50">
                       {post.salesperson_name || "Unattributed"}
-                      {post.customer_name && (
+                      {toPublicCustomerLabel(post.customer_name) && (
                         <span className="text-surface-400 font-normal">
                           {" "}
-                          · {post.customer_name}
+                          · {toPublicCustomerLabel(post.customer_name)}
                         </span>
                       )}
                     </div>
@@ -219,7 +238,7 @@ export const ApprovalQueue: React.FC = () => {
                     {post.creative_image_url ? (
                       <img
                         src={post.creative_image_url}
-                        alt={`Creative awaiting approval for ${post.customer_name || "customer delivery"}`}
+                        alt={`Creative awaiting approval for ${toPublicCustomerLabel(post.customer_name) || "customer delivery"}`}
                         loading="lazy"
                         className="aspect-square w-full rounded-lg border border-hairline bg-surface-950 object-contain"
                       />
@@ -286,6 +305,26 @@ export const ApprovalQueue: React.FC = () => {
                           salesperson recapture consent if it does not recover.
                         </p>
                       ) : null}
+                      {identityReviewRequired ? (
+                        <p
+                          className="rounded-lg border border-error-500/25 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100"
+                          role="alert"
+                        >
+                          Customer-name review required. This legacy copy was
+                          quarantined and cannot be approved or shared. Reject it and
+                          have the salesperson submit corrected copy.
+                        </p>
+                      ) : null}
+                      {imageReviewRequired ? (
+                        <p
+                          className="rounded-lg border border-error-500/25 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100"
+                          role="alert"
+                        >
+                          Image safety review required. This creative predates the
+                          current on-pixel customer-name, logo, and source-fidelity
+                          checks. Reject it and have the salesperson create a new post.
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -319,9 +358,13 @@ export const ApprovalQueue: React.FC = () => {
                       title={
                         canApprove
                           ? "Approve this exact creative"
-                          : !hasReviewCreative
-                            ? "Creative is unavailable; reject and resubmit"
-                            : "Verified customer consent is required before approval"
+                          : imageReviewRequired
+                            ? "Image safety review required; reject and resubmit"
+                            : identityReviewRequired
+                              ? "Customer-name review required; reject and resubmit"
+                              : !hasReviewCreative
+                                ? "Creative is unavailable; reject and resubmit"
+                                : "Verified customer consent is required before approval"
                       }
                     >
                       Approve

@@ -82,7 +82,7 @@ describe("private website draft parser and privacy boundary", () => {
     vehicleDescription: "2025 Ford Explorer ST",
   };
 
-  it("strictly parses AI JSON, strips contact lines, and replaces the full name", () => {
+  it("keeps customer-story metadata deterministic and first-name-only", () => {
     const result = parseWebsiteDraftResponse(
       JSON.stringify({
         title: "Jane Smith Starts a New Chapter",
@@ -94,18 +94,18 @@ describe("private website draft parser and privacy boundary", () => {
       customerSource,
     );
 
-    expect(result.source).toBe("ai");
+    expect(result.source).toBe("deterministic_fallback");
     expect(result.draft).toMatchObject({
       enabled: true,
       kind: "customer_story",
       category: "deliveries",
-      customerDisplayName: "Jane S.",
+      customerDisplayName: "Jane",
       vehicleDescription: "2025 Ford Explorer ST",
       schemaVersion: 1,
     });
-    expect(result.draft.title).toContain("Jane S.");
-    expect(result.draft.body).toContain("Jane S.");
-    expect(result.draft.altText).toContain("Jane S.");
+    expect(result.draft.title).toContain("Jane");
+    expect(result.draft.body).toContain("Jane");
+    expect(result.draft.altText).not.toContain("Jane Smith");
     expect(JSON.stringify(result.draft)).not.toContain("Jane Smith");
     expect(JSON.stringify(result.draft)).not.toContain("examplemotors.com");
     expect(JSON.stringify(result.draft)).not.toContain("555");
@@ -132,6 +132,29 @@ describe("private website draft parser and privacy boundary", () => {
     expect(malformed.draft.body).not.toMatch(/#HappyCustomer/);
   });
 
+  it("removes an invented second customer from website metadata and fallback body", () => {
+    const mixedIdentitySource = {
+      ...customerSource,
+      caption:
+        "Congratulations to Jane and Jordan! Jane and Jordan just celebrated a special delivery day.",
+    };
+    const result = parseWebsiteDraftResponse(
+      JSON.stringify({
+        title: "Welcome, Jane and Jordan",
+        body: "Jane and Jordan are ready for the road ahead.",
+        altText: "Jane and Jordan standing beside the vehicle.",
+        category: "deliveries",
+        privacyFlags: [],
+      }),
+      mixedIdentitySource,
+    );
+
+    expect(result.source).toBe("deterministic_fallback");
+    expect(result.draft.customerDisplayName).toBe("Jane");
+    expect(JSON.stringify(result.draft)).not.toContain("Jordan");
+    expect(result.draft.body).toContain("Jane");
+  });
+
   it("keeps kind-specific limits without inventing a testimonial vehicle", () => {
     const longCopy = Array.from({ length: 300 }, () => "update").join(" ");
     const story = buildFallbackWebsiteDraft({
@@ -154,7 +177,7 @@ describe("private website draft parser and privacy boundary", () => {
 
   it("does not expose full names or contact/identity data in the AI prompt", () => {
     const prompt = buildWebsiteDraftPrompt(customerSource);
-    expect(prompt).toContain("Jane S.");
+    expect(prompt).toContain("Jane");
     expect(prompt).not.toContain("Jane Smith");
     expect(prompt).not.toContain("examplemotors.com");
     expect(prompt).not.toContain("555");
@@ -162,7 +185,7 @@ describe("private website draft parser and privacy boundary", () => {
   });
 
   it("normalizes safe public labels and rejects VIN-bearing vehicle labels", () => {
-    expect(toSafeCustomerDisplayName("  Jane   Marie Smith ")).toBe("Jane S.");
+    expect(toSafeCustomerDisplayName("  Jane   Marie Smith ")).toBe("Jane");
     expect(toSafeCustomerDisplayName("jane@example.com")).toBeUndefined();
     expect(toSafeVehicleDescription("2025 Ford Explorer ST")).toBe(
       "2025 Ford Explorer ST",
@@ -170,8 +193,8 @@ describe("private website draft parser and privacy boundary", () => {
     expect(
       toSafeVehicleDescription("2025 Ford Explorer 1FM5K8GC4SGB12345"),
     ).toBeUndefined();
-    expect(replaceFullCustomerName("Thanks Jane Smith!", "Jane Smith", "Jane S.")).toBe(
-      "Thanks Jane S.!",
+    expect(replaceFullCustomerName("Thanks Jane Smith!", "Jane Smith", "Jane")).toBe(
+      "Thanks Jane!",
     );
   });
 
@@ -229,14 +252,14 @@ describe("private website draft parser and privacy boundary", () => {
       replaceFullCustomerName(
         "The Smith family is celebrating today.",
         "Jordan Smith",
-        "Jordan S.",
+        "Jordan",
       ),
     ).toBe("the customer’s family is celebrating today.");
     expect(
       replaceFullCustomerName(
         "Congratulations to Smith on Smith’s new SUV.",
         "Jordan Smith",
-        "Jordan S.",
+        "Jordan",
       ),
     ).toBe("Congratulations to the customer on the customer’s new SUV.");
   });
@@ -246,18 +269,14 @@ describe("private website draft parser and privacy boundary", () => {
       replaceFullCustomerName(
         "Jane Ford chose a 2025 Ford Explorer. The Ford family loves Ford’s new SUV.",
         "Jane Ford",
-        "Jane F.",
+        "Jane",
       ),
     ).toBe(
-      "Jane F. chose a 2025 Ford Explorer. the customer’s family loves the customer’s new SUV.",
+      "Jane chose a 2025 Ford Explorer. the customer’s family loves the customer’s new SUV.",
     );
     expect(
-      replaceFullCustomerName(
-        "Mrs. Ford visited Bob Maxey Ford.",
-        "Jane Ford",
-        "Jane F.",
-      ),
-    ).toBe("Jane F. visited Bob Maxey Ford.");
+      replaceFullCustomerName("Mrs. Ford visited Bob Maxey Ford.", "Jane Ford", "Jane"),
+    ).toBe("Jane visited Bob Maxey Ford.");
   });
 
   it("quietly refreshes a ready draft until the Hub reports a final state", () => {
@@ -278,17 +297,17 @@ describe("private website draft parser and privacy boundary", () => {
         enabled: true,
         kind: "customer_story",
         category: "deliveries",
-        title: "Welcome, Jane S.",
+        title: "Welcome, Jane",
         body: "Old first-generation wording.",
         altText: "Customer delivery creative.",
-        customerDisplayName: "Jane S.",
+        customerDisplayName: "Jane",
         schemaVersion: 1,
       },
     });
 
     expect(final.kind).toBe("customer_story");
     expect(final.category).toBe("deliveries");
-    expect(final.title).toBe("Welcome, Jane S.");
+    expect(final.title).toBe("Welcome, Jane");
     expect(final.body).toBe("The final edited wording for this delivery.");
     expect(final.body).not.toContain("Old first-generation wording");
     expect(final.altText).toContain("review the final image");
@@ -356,6 +375,8 @@ describe("website draft post-log contract", () => {
     );
 
     await logPost({
+      customerName: "Jane",
+      customerIdentityRequired: true,
       caption: "Delivery day",
       disclosures: "Offer subject to approved credit.",
       imageDataUrl: "data:image/png;base64,AQID",
@@ -363,10 +384,10 @@ describe("website draft post-log contract", () => {
         enabled: true,
         kind: "customer_story",
         category: "deliveries",
-        title: "Welcome, Jane S.",
-        body: "Jane S. is ready for the road ahead.",
+        title: "Welcome, Jane",
+        body: "Jane is ready for the road ahead.",
         altText: "Customer delivery creative from Example Motors.",
-        customerDisplayName: "Jane S.",
+        customerDisplayName: "Jane",
         vehicleDescription: "the vehicle they chose",
         schemaVersion: 1,
       },
@@ -374,7 +395,7 @@ describe("website draft post-log contract", () => {
 
     const form = request?.body as FormData;
     const draft = JSON.parse(String(form.get("website_draft")));
-    expect(draft.body).toBe("Jane S. is ready for the road ahead.");
+    expect(draft.body).toBe("Jane is ready for the road ahead.");
     expect(draft.body).not.toContain("approved credit");
     expect(form.get("disclosures")).toBe("Offer subject to approved credit.");
   });

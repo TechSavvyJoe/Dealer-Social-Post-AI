@@ -162,14 +162,14 @@ The active production routing is defined in `config/gemini-model-policy.json`:
 | `caption`            | quality  | `gemini-3.6-flash` → `gemini-3.5-flash-lite`                                    | 2,048 tokens               |
 | `caption_regenerate` | quality  | `gemini-3.6-flash` → `gemini-3.5-flash-lite`                                    | 2,048 tokens               |
 | `caption_edit`       | fast     | `gemini-3.5-flash-lite` → `gemini-3.6-flash`                                    | 2,048 tokens               |
-| `image_standard`     | standard | `gemini-3.1-flash-image` → `gemini-3-pro-image` → `gemini-3.1-flash-lite-image` | 2K → 2K → 1K; 4,096 tokens |
-| `image_studio`       | studio   | `gemini-3-pro-image` → `gemini-3.1-flash-image` → `gemini-3.1-flash-lite-image` | 2K → 2K → 1K; 4,096 tokens |
+| `image_standard`     | standard | `gemini-3-pro-image` → `gemini-3.1-flash-image` → `gemini-3.1-flash-lite-image` | 2K → 2K → 1K; 4,096 tokens |
+| `image_studio`       | studio   | `gemini-3-pro-image` → `gemini-3.1-flash-image` → `gemini-3.1-flash-lite-image` | 4K → 2K → 1K; 4,096 tokens |
 | `video_standard`     | standard | `veo-3.1-fast-generate-preview`                                                 | 720p                       |
 | `video_quality`      | quality  | `veo-3.1-generate-preview`                                                      | 1080p                      |
 
 The active video client uses Gemini API model IDs. Vertex `-001` model IDs are not valid substitutes on the Gemini API path, and generic Vertex proxy routes are intentionally denied by the server allowlist.
 
-The standard image route starts with `gemini-3.1-flash-image`; only the explicit Studio preference starts with `gemini-3-pro-image`. Both request 2K from Flash and Pro, then 1K from the Lite image fallback. Standard and quality video are separate one-model routes rather than a primary/fallback chain. `services/modelConfig.ts` consumes the canonical artifact, PocketBase enforces it, and `npm run model-policy:check` rejects drift.
+Both standard and Studio image routes start with `gemini-3-pro-image` for reliable customer-facing typography, then fall back to Flash and Lite. Standard requests 2K from Pro; Studio requests 4K from Pro for final hero creative. Both fall back to 2K Flash and 1K Lite. Standard and quality video are separate one-model routes rather than a primary/fallback chain. `services/modelConfig.ts` consumes the canonical artifact, PocketBase enforces it, and `npm run model-policy:check` rejects drift.
 
 ## Project structure
 
