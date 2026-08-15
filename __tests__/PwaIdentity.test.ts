@@ -52,17 +52,17 @@ describe("installable product identity", () => {
     expect(manifest.icons).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          src: "/icon-512.png",
+          src: "/dealer-social-icon-v2-512.png",
           sizes: "512x512",
           purpose: "any",
         }),
         expect.objectContaining({
-          src: "/icon-maskable-512.png",
+          src: "/dealer-social-icon-v2-maskable-512.png",
           sizes: "512x512",
           purpose: "maskable",
         }),
         expect.objectContaining({
-          src: "/icon-maskable-1024.png",
+          src: "/dealer-social-icon-v2-maskable-1024.png",
           sizes: "1024x1024",
           purpose: "maskable",
         }),
@@ -94,24 +94,31 @@ describe("installable product identity", () => {
   it("ships correctly sized browser, Apple, and desktop app artwork", () => {
     for (const [path, size] of [
       ["public/favicon-32.png", 32],
-      ["public/apple-touch-icon.png", 180],
-      ["public/icon-192.png", 192],
-      ["public/icon-512.png", 512],
-      ["public/icon-1024.png", 1024],
-      ["public/icon-maskable-192.png", 192],
-      ["public/icon-maskable-512.png", 512],
-      ["public/icon-maskable-1024.png", 1024],
+      ["public/dealer-social-icon-v2-180.png", 180],
+      ["public/dealer-social-icon-v2-192.png", 192],
+      ["public/dealer-social-icon-v2-512.png", 512],
+      ["public/dealer-social-icon-v2-1024.png", 1024],
+      ["public/dealer-social-icon-v2-maskable-192.png", 192],
+      ["public/dealer-social-icon-v2-maskable-512.png", 512],
+      ["public/dealer-social-icon-v2-maskable-1024.png", 1024],
     ] as const) {
       expect(existsSync(resolve(process.cwd(), path))).toBe(true);
       expect(pngSize(path)).toEqual({ width: size, height: size });
     }
     for (const path of [
-      "public/apple-touch-icon.png",
-      "public/icon-maskable-192.png",
-      "public/icon-maskable-512.png",
-      "public/icon-maskable-1024.png",
+      "public/dealer-social-icon-v2-180.png",
+      "public/dealer-social-icon-v2-maskable-192.png",
+      "public/dealer-social-icon-v2-maskable-512.png",
+      "public/dealer-social-icon-v2-maskable-1024.png",
     ]) {
       expect(pngIsOpaque(path)).toBe(true);
+    }
+    for (const size of [192, 512, 1024]) {
+      expect(
+        read(`public/dealer-social-icon-v2-${size}.png`).equals(
+          read(`public/dealer-social-icon-v2-maskable-${size}.png`),
+        ),
+      ).toBe(false);
     }
   });
 
@@ -120,18 +127,40 @@ describe("installable product identity", () => {
     expect(html).toContain('name="application-name" content="Dealer Social Post AI"');
     expect(html).toContain('name="apple-mobile-web-app-title" content="Dealer Social"');
     expect(html).toContain('rel="icon" type="image/svg+xml" href="/brand-mark.svg"');
-    expect(html).toContain('rel="apple-touch-icon" sizes="180x180"');
+    expect(html).toContain('href="/dealer-social-icon-v2-180.png"');
     expect(html).toContain('rel="manifest" href="/manifest.webmanifest"');
     expect(html).toContain("viewport-fit=cover");
   });
 
   it("keeps vector identity self-contained and structurally scalable", () => {
-    for (const path of ["public/brand-mark.svg", "public/brand-mark-monochrome.svg"]) {
+    for (const path of [
+      "public/brand-mark.svg",
+      "public/brand-mark-maskable.svg",
+      "public/brand-mark-monochrome.svg",
+    ]) {
       const svg = read(path).toString("utf8");
       expect(svg).toMatch(/viewBox="0 0 120 120"/);
       expect(svg).not.toMatch(/(?:href|src)=["'](?:https?:|\/\/|data:)/i);
       expect(svg).not.toMatch(/@import|url\(\s*(?:https?:|\/\/)/i);
     }
+    expect(read("public/brand-mark-maskable.svg").toString("utf8")).toContain(
+      'transform="translate(13.2 13.2) scale(0.78)"',
+    );
+  });
+
+  it("stacks the real update prompt inside mobile shell chrome", () => {
+    const app = read("App.tsx").toString("utf8");
+    const entrypoint = read("index.tsx").toString("utf8");
+    const styles = read("styles/globals.css").toString("utf8");
+    const impersonation = app.indexOf("<ImpersonationBanner />");
+    const updatePrompt = app.indexOf("<PwaUpdatePrompt />");
+    const header = app.indexOf("<Header");
+
+    expect(impersonation).toBeGreaterThan(-1);
+    expect(updatePrompt).toBeGreaterThan(impersonation);
+    expect(header).toBeGreaterThan(updatePrompt);
+    expect(entrypoint).not.toContain("<PwaUpdatePrompt />");
+    expect(styles).toContain("@media (min-width: 1200px) and (min-height: 600px)");
   });
 
   it("fails service-worker installation when the required offline shell is missing", () => {
@@ -144,5 +173,6 @@ describe("installable product identity", () => {
     expect(installHandler).toContain("cache.addAll(APP_SHELL)");
     expect(installHandler).not.toContain(".catch(");
     expect(worker).toContain('url.pathname.startsWith("/api/")');
+    expect(worker).toContain('url.pathname === "/manifest.webmanifest"');
   });
 });

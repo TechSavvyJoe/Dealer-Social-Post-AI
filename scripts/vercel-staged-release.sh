@@ -442,12 +442,16 @@ if (
   manifest.name !== "Dealer Social Post AI" ||
   manifest.display !== "standalone" ||
   !Array.isArray(manifest.icons) ||
-  !manifest.icons.some((icon) => icon?.src === "/icon-192.png") ||
-  !manifest.icons.some((icon) => icon?.src === "/icon-512.png")
+  !manifest.icons.some((icon) => icon?.src === "/dealer-social-icon-v2-192.png") ||
+  !manifest.icons.some((icon) => icon?.src === "/dealer-social-icon-v2-512.png")
 ) {
   throw new Error(`${label} web app manifest is incomplete.`);
 }
-for (const icon of ["/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"]) {
+for (const icon of [
+  "/dealer-social-icon-v2-192.png",
+  "/dealer-social-icon-v2-512.png",
+  "/dealer-social-icon-v2-180.png",
+]) {
   const { response, bytes } = await fetchBytes(icon);
   if (
     !response.headers.get("content-type")?.startsWith("image/png") ||

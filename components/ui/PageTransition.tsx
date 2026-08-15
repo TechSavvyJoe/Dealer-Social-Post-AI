@@ -5,6 +5,7 @@ interface PageTransitionProps {
   children: React.ReactNode;
   pageKey: string;
   direction?: "forward" | "backward";
+  layout?: "viewport" | "content";
 }
 
 // iOS-style ease curves
@@ -19,32 +20,50 @@ export const PageTransition: React.FC<PageTransitionProps> = ({
   children,
   pageKey,
   direction = "forward",
+  layout = "viewport",
 }) => {
-  const variants = {
-    initial: {
-      opacity: 0,
-      x: direction === "forward" ? 20 : -20,
-      scale: 0.98,
-    },
-    animate: {
-      opacity: 1,
-      x: 0,
-      scale: 1,
-      transition: {
-        duration: 0.35,
-        ease: easeSmooth, // iOS smooth ease
-      },
-    },
-    exit: {
-      opacity: 0,
-      x: direction === "forward" ? -20 : 20,
-      scale: 0.98,
-      transition: {
-        duration: 0.25,
-        ease: easeOut,
-      },
-    },
-  };
+  // Long pages live inside #main-content, the app's one scrollport. Safari can
+  // clip or blank overflowing descendants while an ancestor is transformed,
+  // so content-sized pages use an opacity-only transition. Viewport-owned
+  // screens remain bounded and can safely keep the spatial transition.
+  const variants =
+    layout === "content"
+      ? {
+          initial: { opacity: 0 },
+          animate: {
+            opacity: 1,
+            transition: { duration: 0.25, ease: easeSmooth },
+          },
+          exit: {
+            opacity: 0,
+            transition: { duration: 0.18, ease: easeOut },
+          },
+        }
+      : {
+          initial: {
+            opacity: 0,
+            x: direction === "forward" ? 20 : -20,
+            scale: 0.98,
+          },
+          animate: {
+            opacity: 1,
+            x: 0,
+            scale: 1,
+            transition: {
+              duration: 0.35,
+              ease: easeSmooth,
+            },
+          },
+          exit: {
+            opacity: 0,
+            x: direction === "forward" ? -20 : 20,
+            scale: 0.98,
+            transition: {
+              duration: 0.25,
+              ease: easeOut,
+            },
+          },
+        };
 
   return (
     <AnimatePresence mode="wait">
@@ -54,7 +73,12 @@ export const PageTransition: React.FC<PageTransitionProps> = ({
         initial="initial"
         animate="animate"
         exit="exit"
-        className="flex h-full min-h-0 w-full flex-1 flex-col"
+        className={
+          layout === "viewport"
+            ? "flex h-full min-h-0 w-full flex-1 flex-col"
+            : "flex min-h-full w-full flex-none flex-col"
+        }
+        data-page-transition-layout={layout}
       >
         {children}
       </motion.div>

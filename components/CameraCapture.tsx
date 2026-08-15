@@ -202,7 +202,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
         aria-label="Take photo using device camera"
       />
 
-      <div className="capture-intro mb-6 flex flex-col gap-4 lg:mb-8 lg:flex-row lg:items-end lg:justify-between">
+      <div className="capture-intro mb-5 flex flex-col gap-4 lg:mb-8 lg:flex-row lg:items-end lg:justify-between">
         <div className="max-w-2xl">
           <div className="mb-3 flex items-center gap-3 text-xs font-semibold tracking-[0.14em] text-primary-300">
             <span className="h-px w-10 bg-primary-400" aria-hidden="true" />
@@ -216,24 +216,59 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
             caption, and channel-ready creative next.
           </p>
         </div>
-        <ol
-          className="flex items-center gap-1 text-xs text-surface-400 sm:gap-2"
-          aria-label="Post creation progress"
-        >
-          <li
-            className="rounded-full border border-primary-400/40 bg-primary-400/10 px-3 py-1.5 font-semibold text-primary-200"
-            aria-current="step"
-          >
-            01 Photo
-          </li>
-          <li className="px-2 py-1.5">02 Details</li>
-          <li className="px-2 py-1.5">03 Generate</li>
-        </ol>
       </div>
 
       <div className="capture-studio-grid grid min-h-0 overflow-hidden rounded-[1.5rem] border border-hairline bg-surface-900 shadow-2xl shadow-black/25 sm:min-h-[480px] sm:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.65fr)] lg:min-h-[540px] lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.7fr)] lg:rounded-[1.75rem]">
+        <aside className="capture-studio-sidebar flex flex-col justify-between bg-surface-900 p-4 sm:col-start-2 sm:row-start-1 sm:p-6 lg:p-10">
+          <div>
+            <span className="text-xs font-semibold tracking-[0.14em] text-primary-300">
+              PHOTO SOURCE
+            </span>
+            <h2 className="mt-3 text-2xl font-semibold tracking-tight text-surface-50">
+              Add a photo
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-surface-300">
+              Use the rear camera for a new handoff, or select an existing photo.
+            </p>
+
+            <div className="mt-7 space-y-3">
+              <Button
+                onClick={handleOpenCamera}
+                disabled={isProcessing}
+                fullWidth
+                size="lg"
+                leftIcon={<Camera className="h-5 w-5" />}
+              >
+                Take photo
+              </Button>
+              <Button
+                onClick={handleUploadPhoto}
+                disabled={isProcessing}
+                variant="outline"
+                fullWidth
+                size="lg"
+                leftIcon={<Upload className="h-5 w-5" />}
+              >
+                Choose from device
+              </Button>
+            </div>
+          </div>
+
+          <div className="capture-studio-tips mt-8 hidden border-t border-hairline pt-6 sm:block">
+            <p className="text-xs font-semibold text-surface-200">
+              For the cleanest result
+            </p>
+            <ul className="mt-3 space-y-2 text-sm text-surface-400">
+              <li>Keep faces and the vehicle fully in frame.</li>
+              <li>Avoid harsh backlight and visible paperwork.</li>
+              <li>You’ll review the photo before anything is generated.</li>
+              <li>* HEIC opens when the current device/browser supports it.</li>
+            </ul>
+          </div>
+        </aside>
+
         <section
-          className={`capture-studio-preview relative flex min-h-[300px] items-center justify-center overflow-hidden border-b border-hairline bg-surface-950 p-4 transition-colors sm:min-h-[480px] sm:border-b-0 sm:border-r sm:p-5 lg:min-h-[640px] lg:p-6 ${
+          className={`capture-studio-preview relative flex min-h-[260px] items-center justify-center overflow-hidden border-t border-hairline bg-surface-950 p-4 transition-colors sm:col-start-1 sm:row-start-1 sm:min-h-[480px] sm:border-r sm:border-t-0 sm:p-5 lg:min-h-[640px] lg:p-6 ${
             isDraggingOver ? "border-primary-400 bg-primary-950/30" : ""
           }`}
           aria-label="Photo drop zone"
@@ -283,54 +318,6 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
             </p>
           </div>
         </section>
-
-        <aside className="capture-studio-sidebar flex flex-col justify-between bg-surface-900 p-4 sm:p-6 lg:p-10">
-          <div>
-            <span className="text-xs font-semibold tracking-[0.14em] text-primary-300">
-              PHOTO SOURCE
-            </span>
-            <h2 className="mt-3 text-2xl font-semibold tracking-tight text-surface-50">
-              Add a photo
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-surface-300">
-              Use the rear camera for a new handoff, or select an existing photo.
-            </p>
-
-            <div className="mt-7 space-y-3">
-              <Button
-                onClick={handleOpenCamera}
-                disabled={isProcessing}
-                fullWidth
-                size="lg"
-                leftIcon={<Camera className="h-5 w-5" />}
-              >
-                Take photo
-              </Button>
-              <Button
-                onClick={handleUploadPhoto}
-                disabled={isProcessing}
-                variant="outline"
-                fullWidth
-                size="lg"
-                leftIcon={<Upload className="h-5 w-5" />}
-              >
-                Choose from device
-              </Button>
-            </div>
-          </div>
-
-          <div className="capture-studio-tips mt-8 border-t border-hairline pt-6">
-            <p className="text-xs font-semibold text-surface-200">
-              For the cleanest result
-            </p>
-            <ul className="mt-3 space-y-2 text-sm text-surface-400">
-              <li>Keep faces and the vehicle fully in frame.</li>
-              <li>Avoid harsh backlight and visible paperwork.</li>
-              <li>You’ll review the photo before anything is generated.</li>
-              <li>* HEIC opens when the current device/browser supports it.</li>
-            </ul>
-          </div>
-        </aside>
       </div>
       {dealerId ? (
         <RecentCaptureShelf dealerId={dealerId} onSelect={onImageSelected} />

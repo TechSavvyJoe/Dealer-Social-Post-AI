@@ -523,6 +523,168 @@ test.describe("Dealer Social Post AI Flow", () => {
     await expectNoHorizontalOverflow(page);
   });
 
+  test("keeps the authenticated capture studio reachable on a changing phone viewport", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      !testInfo.project.name.endsWith("phone-390"),
+      "The representative 390px Chromium and WebKit phones cover the capture scrollport.",
+    );
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.route("**/api/app/session", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          role: "salesperson",
+          dealer: {
+            id: "qa-capture-dealer",
+            name: "Capture QA Motors",
+            requires_approval: false,
+          },
+          person: {
+            id: "qa-capture-person",
+            dealer: "qa-capture-dealer",
+            name: "Capture QA",
+            role: "salesperson",
+            active: true,
+          },
+        }),
+      });
+    });
+    await page.route("**/api/telemetry", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true }),
+      });
+    });
+
+    await page.goto("/#/capture");
+    await expect(
+      page.getByRole("heading", { name: "Capture the handoff." }),
+    ).toBeVisible();
+
+    const mainContent = page.locator("#main-content");
+    const transitionWrapper = mainContent.locator(":scope > div").first();
+    const contentWrapper = transitionWrapper.locator(":scope > div").first();
+    const captureGrid = page.locator(".capture-studio-grid");
+    const captureSidebar = page.locator(".capture-studio-sidebar");
+    const takePhoto = page.getByRole("button", { name: "Take photo" });
+    const chooseFromDevice = page.getByRole("button", {
+      name: "Choose from device",
+    });
+
+    await expect(transitionWrapper.locator(".capture-studio-grid")).toHaveCount(1);
+    await expect(contentWrapper.locator(".capture-studio-grid")).toHaveCount(1);
+    await expect(captureGrid).toBeVisible();
+    await expect(captureSidebar).toBeVisible();
+    expect(
+      await captureSidebar.evaluate((sidebar) => {
+        const preview = document.querySelector(".capture-studio-preview");
+        return Boolean(
+          preview &&
+          (sidebar.compareDocumentPosition(preview) &
+            Node.DOCUMENT_POSITION_FOLLOWING) !==
+            0,
+        );
+      }),
+    ).toBe(true);
+
+    const expectDocumentLockedToViewport = async () => {
+      const geometry = await page.evaluate(() => ({
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        htmlClientHeight: document.documentElement.clientHeight,
+        htmlScrollHeight: document.documentElement.scrollHeight,
+        bodyClientHeight: document.body.clientHeight,
+        bodyScrollHeight: document.body.scrollHeight,
+      }));
+      expect(geometry.viewportWidth).toBe(390);
+      expect(geometry.htmlScrollHeight).toBe(geometry.htmlClientHeight);
+      expect(geometry.bodyScrollHeight).toBe(geometry.bodyClientHeight);
+      expect(geometry.htmlClientHeight).toBe(geometry.viewportHeight);
+    };
+
+    const expectCaptureEndReachable = async () => {
+      const scrollContract = await mainContent.evaluate((element) => ({
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+        overflowY: getComputedStyle(element).overflowY,
+      }));
+      expect(scrollContract.clientHeight).toBeGreaterThan(0);
+      expect(scrollContract.scrollHeight).toBeGreaterThan(scrollContract.clientHeight);
+      expect(["auto", "scroll"]).toContain(scrollContract.overflowY);
+
+      await mainContent.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      await expect
+        .poll(() =>
+          mainContent.evaluate(
+            (element) =>
+              element.scrollHeight - element.clientHeight - element.scrollTop,
+          ),
+        )
+        .toBeLessThanOrEqual(1);
+
+      const [
+        mainBounds,
+        transitionBounds,
+        contentBounds,
+        gridBounds,
+        sidebarBounds,
+        chooseBounds,
+      ] = await Promise.all([
+        mainContent.boundingBox(),
+        transitionWrapper.boundingBox(),
+        contentWrapper.boundingBox(),
+        captureGrid.boundingBox(),
+        captureSidebar.boundingBox(),
+        chooseFromDevice.boundingBox(),
+      ]);
+      expect(mainBounds).not.toBeNull();
+      expect(transitionBounds).not.toBeNull();
+      expect(contentBounds).not.toBeNull();
+      expect(gridBounds).not.toBeNull();
+      expect(sidebarBounds).not.toBeNull();
+      expect(chooseBounds).not.toBeNull();
+      const mainBottom = (mainBounds?.y || 0) + (mainBounds?.height || 0);
+      const transitionBottom =
+        (transitionBounds?.y || 0) + (transitionBounds?.height || 0);
+      const contentBottom = (contentBounds?.y || 0) + (contentBounds?.height || 0);
+      const gridBottom = (gridBounds?.y || 0) + (gridBounds?.height || 0);
+      const mainBottomPadding = await mainContent.evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).paddingBottom),
+      );
+      expect(transitionBottom).toBeGreaterThanOrEqual(gridBottom - 1);
+      expect(contentBottom).toBeGreaterThanOrEqual(gridBottom - 1);
+      expect(gridBottom).toBeLessThanOrEqual(mainBottom - mainBottomPadding + 1);
+      expect(
+        (sidebarBounds?.y || 0) + (sidebarBounds?.height || 0),
+      ).toBeLessThanOrEqual(mainBottom + 1);
+      expect((chooseBounds?.y || 0) + (chooseBounds?.height || 0)).toBeLessThanOrEqual(
+        mainBottom + 1,
+      );
+      await expect(chooseFromDevice).toBeVisible();
+    };
+
+    await expectDocumentLockedToViewport();
+    await expect(takePhoto).toBeVisible();
+    await expect(chooseFromDevice).toBeVisible();
+    await expectControlsInsideViewport(
+      page,
+      page.getByRole("button", { name: /^(Take photo|Choose from device)$/ }),
+    );
+    await expectCaptureEndReachable();
+
+    await page.setViewportSize({ width: 390, height: 600 });
+    await expect.poll(() => page.evaluate(() => window.innerHeight)).toBe(600);
+    await expectDocumentLockedToViewport();
+    await expectCaptureEndReachable();
+  });
+
   test("keeps the responsive result workspace job-first", async ({
     page,
   }, testInfo) => {
@@ -1142,7 +1304,20 @@ test.describe("Dealer Social Post AI Flow", () => {
     page,
     context,
   }) => {
+    // Keep this banner contract independent from a developer's active local
+    // session and wait for the login route's lazy chunk before disconnecting.
+    // Otherwise a very small/slow phone can go offline while Vite is still
+    // fetching the authenticated Capture chunk, turning a banner test into a
+    // nondeterministic module-load failure.
+    await page.route("**/api/app/session", async (route) => {
+      await route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "No active session" }),
+      });
+    });
     await page.goto("/");
+    await expect(page.getByRole("heading", { name: /^sign in$/i })).toBeVisible();
     await expect(page.getByText("You're offline", { exact: false })).toHaveCount(0);
 
     await context.setOffline(true);
