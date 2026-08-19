@@ -1,27 +1,163 @@
 {
+  "identity_version": "v3",
   "brand_name": "Dealer Social Post AI",
   "canonical_wordmark": "Dealer Social Post AI",
+  "required_initials": "DSP",
   "artwork_status": "production-candidate",
+  "selected_territory": "Campaign Aperture DSP",
+  "architecture": "responsive combination mark",
   "editable_wordmark_source": "source/dealer-social-post-ai-editable-wordmark.svg",
-  "selected_territory": "Key Moment Post",
+  "canonical_geometry_sources": [
+    {
+      "role": "brand symbol",
+      "public_path": "public/dsp-brand-mark-v3.svg",
+      "package_path": "master/symbol.svg",
+      "sha256": "2e421d239774a96c7302b3b3d6d1edfa01a9420b036f33b041f4b902b92c8805"
+    },
+    {
+      "role": "full-bleed app icon",
+      "public_path": "public/dsp-brand-mark-v3-app.svg",
+      "package_path": "master/app-icon.svg",
+      "sha256": "153186d27ddb08a300bbb94e5168d5c4c3d990733571300078d3ccc3ba10ad7e"
+    },
+    {
+      "role": "maskable app icon",
+      "public_path": "public/dsp-brand-mark-v3-maskable.svg",
+      "package_path": "master/maskable.svg",
+      "sha256": "45c3c084ba10344edd46e3353d43d85fc16cc09ac3e0e5430b60d81d73425ac2"
+    },
+    {
+      "role": "monochrome geometry",
+      "public_path": "public/dsp-brand-mark-v3-monochrome.svg",
+      "package_path": "monochrome/black.svg",
+      "sha256": "3dad45e550081664614ccedb576f510a3862a3dab2d759530aa21bb030b0762e"
+    },
+    {
+      "role": "16 px responsive micro",
+      "public_path": "public/dsp-brand-mark-v3-micro.svg",
+      "package_path": "master/micro.svg",
+      "sha256": "5226c5852f7adde25d38cc03efc05eb2bb71b88ac0d1ac3ea1cda365fd560af1"
+    }
+  ],
   "font": {
     "family": "Inter",
     "weight": 800,
+    "style": "normal",
     "package": "@fontsource/inter",
-    "license": "OFL-1.1"
+    "package_version": "5.2.8",
+    "license": "OFL-1.1",
+    "editable": true,
+    "outlined_master_status": "pending client approval"
   },
   "variants": [
-    { "role": "horizontal", "path": "master/horizontal.svg" },
-    { "role": "stacked", "path": "master/stacked.svg" },
-    { "role": "symbol", "path": "master/symbol.svg" },
-    { "role": "micro", "path": "master/micro.svg" },
-    { "role": "black", "path": "monochrome/black.svg" },
-    { "role": "reverse", "path": "monochrome/white.svg" }
+    {
+      "role": "horizontal",
+      "path": "master/horizontal.svg",
+      "wordmark_state": "live text"
+    },
+    {
+      "role": "horizontal reverse",
+      "path": "master/horizontal-reverse.svg",
+      "wordmark_state": "live text"
+    },
+    { "role": "stacked", "path": "master/stacked.svg", "wordmark_state": "live text" },
+    {
+      "role": "symbol",
+      "path": "master/symbol.svg",
+      "geometry": "canonical exact copy"
+    },
+    {
+      "role": "app icon",
+      "path": "master/app-icon.svg",
+      "geometry": "canonical exact copy"
+    },
+    {
+      "role": "maskable",
+      "path": "master/maskable.svg",
+      "geometry": "canonical exact copy"
+    },
+    {
+      "role": "micro",
+      "path": "master/micro.svg",
+      "geometry": "canonical exact copy; isolated flat glyphs for 16 px only"
+    },
+    {
+      "role": "black",
+      "path": "monochrome/black.svg",
+      "geometry": "canonical exact copy"
+    },
+    {
+      "role": "white",
+      "path": "monochrome/white.svg",
+      "geometry": "canonical color inversion"
+    }
   ],
+  "exports": [
+    { "role": "app icon 1024", "path": "exports/app-icon-1024.png" },
+    { "role": "app icon 512", "path": "exports/app-icon-512.png" },
+    { "role": "Apple touch icon", "path": "exports/app-icon-180.png" },
+    { "role": "PWA icon 192", "path": "exports/app-icon-192.png" },
+    {
+      "role": "16 px responsive micro alias",
+      "path": "exports/app-icon-16.png",
+      "sha256": "56607527a8e8f884f1b0a819ce8ec9df82649806a40f10296ab75ddff2672ddf"
+    },
+    {
+      "role": "symbol transparent 1024",
+      "path": "exports/symbol-1024-transparent.png"
+    },
+    {
+      "role": "horizontal transparent 1600",
+      "path": "exports/horizontal-1600-transparent.png"
+    },
+    {
+      "role": "favicon 16",
+      "path": "exports/favicon-16.png",
+      "sha256": "56607527a8e8f884f1b0a819ce8ec9df82649806a40f10296ab75ddff2672ddf"
+    },
+    { "role": "favicon 32", "path": "exports/favicon-32.png" },
+    { "role": "favicon 48", "path": "exports/favicon-48.png" }
+  ],
+  "proofs": [
+    {
+      "role": "v3 presentation board",
+      "path": "validation/presentation-board-v3.png",
+      "size": "1600x1000"
+    },
+    { "role": "light horizontal lockup", "path": "validation/wordmark-light-100.png" },
+    { "role": "dark horizontal lockup", "path": "validation/wordmark-dark-100.png" },
+    { "role": "small mobile lockup", "path": "validation/wordmark-small-mobile.png" },
+    { "role": "stacked light lockup", "path": "validation/stacked-light.png" },
+    { "role": "16 px responsive micro", "path": "validation/symbol-16.png" },
+    { "role": "24 px standard symbol", "path": "validation/symbol-24.png" },
+    { "role": "32 px standard symbol", "path": "validation/symbol-32.png" },
+    { "role": "maskable safe-zone proof", "path": "validation/maskable-safe-zone.png" }
+  ],
+  "responsive_substitution": {
+    "at_16_px": "master/micro.svg",
+    "at_24_px_and_above": "master/app-icon.svg",
+    "rule": "Do not shrink the dimensional overlapping launcher to 16 px.",
+    "required_identical_16_px_rasters": [
+      "exports/app-icon-16.png",
+      "exports/favicon-16.png",
+      "validation/symbol-16.png"
+    ],
+    "required_raster_sha256": "56607527a8e8f884f1b0a819ce8ec9df82649806a40f10296ab75ddff2672ddf"
+  },
+  "decision_record": {
+    "rejected": [
+      "generic arrow or publish-route symbol",
+      "aperture and highway combination",
+      "literal people, vehicle, key, post-card, and sparkle illustration"
+    ],
+    "retired_identity": "v2 Key Moment Post people-and-car mark",
+    "archive": "archive/v2"
+  },
   "approval_gates": [
-    "client symbol approval",
-    "name and trademark clearance",
-    "verified outlined wordmark",
-    "outlined versus live-text render comparison"
+    "client approval of v3 symbol and lockups",
+    "professional name and trademark clearance",
+    "verified outlined wordmark derived from approved Inter source",
+    "outlined versus live-text render comparison",
+    "print and fabrication proof if used outside digital media"
   ]
 }

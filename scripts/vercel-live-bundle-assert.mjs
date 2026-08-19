@@ -29,6 +29,76 @@ const REQUEST_TIMEOUT_MS = 20_000;
 // CDN update must not fail a release that actually succeeded.
 const DEFAULT_PROPAGATION_ATTEMPTS = 10;
 const DEFAULT_PROPAGATION_DELAY_MS = 10_000;
+// These root-level files are copied into both production artifacts without a
+// Vite content hash. Their v3 names are therefore the cache key: proving the
+// live bytes match the build prevents a stale alias/CDN response from silently
+// mixing a new JavaScript graph with an older installed-app identity.
+export const V3_IDENTITY_ASSETS = [
+  {
+    path: "/manifest.webmanifest",
+    contentType: "application/manifest+json",
+    immutable: false,
+  },
+  { path: "/dsp-brand-mark-v3.svg", contentType: "image/svg+xml", immutable: true },
+  {
+    path: "/dsp-brand-mark-v3-micro.svg",
+    contentType: "image/svg+xml",
+    immutable: true,
+  },
+  {
+    path: "/dsp-brand-mark-v3-app.svg",
+    contentType: "image/svg+xml",
+    immutable: true,
+  },
+  {
+    path: "/dsp-brand-mark-v3-maskable.svg",
+    contentType: "image/svg+xml",
+    immutable: true,
+  },
+  {
+    path: "/dsp-brand-mark-v3-monochrome.svg",
+    contentType: "image/svg+xml",
+    immutable: true,
+  },
+  { path: "/dealer-social-dsp-v3-180.png", contentType: "image/png", immutable: true },
+  { path: "/dealer-social-dsp-v3-192.png", contentType: "image/png", immutable: true },
+  { path: "/dealer-social-dsp-v3-512.png", contentType: "image/png", immutable: true },
+  {
+    path: "/dealer-social-dsp-v3-1024.png",
+    contentType: "image/png",
+    immutable: true,
+  },
+  {
+    path: "/dealer-social-dsp-v3-maskable-192.png",
+    contentType: "image/png",
+    immutable: true,
+  },
+  {
+    path: "/dealer-social-dsp-v3-maskable-512.png",
+    contentType: "image/png",
+    immutable: true,
+  },
+  {
+    path: "/dealer-social-dsp-v3-maskable-1024.png",
+    contentType: "image/png",
+    immutable: true,
+  },
+  {
+    path: "/dealer-social-favicon-v3-16.png",
+    contentType: "image/png",
+    immutable: true,
+  },
+  {
+    path: "/dealer-social-favicon-v3-32.png",
+    contentType: "image/png",
+    immutable: true,
+  },
+  {
+    path: "/dealer-social-favicon-v3-48.png",
+    contentType: "image/png",
+    immutable: true,
+  },
+];
 
 const fail = (message) => {
   console.error(`Live bundle assertion failed: ${message}`);
@@ -116,7 +186,71 @@ const createFetcher = (origin) => async (path) => {
     throw new Error(`${requestedUrl.pathname} returned HTTP ${response.status}.`);
   }
   const bytes = Buffer.from(await response.arrayBuffer());
-  return { bytes, text: bytes.toString("utf8") };
+  return { bytes, text: bytes.toString("utf8"), headers: response.headers };
+};
+
+const headerValue = (headers, name) => {
+  if (!headers) return "";
+  if (typeof headers.get === "function") return headers.get(name) || "";
+  const expected = name.toLowerCase();
+  const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === expected);
+  return entry ? String(entry[1] || "") : "";
+};
+
+/**
+ * Byte-compares every v3 install/brand asset against the selected build.
+ *
+ * Unlike hashed Vite chunks these files live at root-level semantic paths, so
+ * checking only that they return 200 would allow a stale Home Screen icon or
+ * manifest to pass the same release gate as the correct JavaScript bundle.
+ */
+export const assertLiveIdentityMatchesBuild = async ({
+  staticDirectory,
+  fetchPath,
+  assets = V3_IDENTITY_ASSETS,
+}) => {
+  const verified = [];
+  for (const asset of assets) {
+    let builtBytes;
+    try {
+      builtBytes = readFileSync(join(staticDirectory, asset.path.slice(1)));
+    } catch {
+      throw new Error(`the built static directory is missing ${asset.path}.`);
+    }
+
+    const live = await fetchPath(asset.path);
+    const liveDigest = sha256(live.bytes);
+    const builtDigest = sha256(builtBytes);
+    if (liveDigest !== builtDigest) {
+      throw new Error(
+        `${asset.path} served stale identity bytes (${liveDigest}), not this build (${builtDigest}).`,
+      );
+    }
+
+    const contentType = headerValue(live.headers, "content-type").toLowerCase();
+    if (!contentType.includes(asset.contentType)) {
+      throw new Error(
+        `${asset.path} returned content-type ${contentType || "<missing>"}, expected ${asset.contentType}.`,
+      );
+    }
+
+    const cacheControl = headerValue(live.headers, "cache-control").toLowerCase();
+    if (asset.immutable) {
+      if (
+        !cacheControl.includes("max-age=31536000") ||
+        !cacheControl.includes("immutable")
+      ) {
+        throw new Error(
+          `${asset.path} is versioned but not immutable (${cacheControl || "<missing>"}).`,
+        );
+      }
+    } else if (cacheControl.includes("immutable")) {
+      throw new Error(`${asset.path} must remain revalidated, not immutable.`);
+    }
+
+    verified.push({ path: asset.path, digest: builtDigest });
+  }
+  return verified;
 };
 
 /**
@@ -259,14 +393,15 @@ export const assertLiveBundleMatchesBuild = async ({
   origin,
   staticDirectory,
   releaseSha,
-  fetchPath = createFetcher(origin),
+  fetchPath,
 }) => {
   if (!isExactSha(releaseSha)) {
     throw new Error("a full 40-character lowercase release SHA is required.");
   }
+  const fetchLivePath = fetchPath || createFetcher(origin);
   const builtChunks = collectBuiltChunks(staticDirectory);
 
-  const { text: html } = await fetchPath("/");
+  const { text: html } = await fetchLivePath("/");
   const entryScripts = parseEntryScripts(html);
 
   // A stale alias almost always shows up here first: the shell still points at
@@ -281,7 +416,11 @@ export const assertLiveBundleMatchesBuild = async ({
     }
   }
 
-  const result = await walkLiveGraph({ entryScripts, builtChunks, fetchPath });
+  const result = await walkLiveGraph({
+    entryScripts,
+    builtChunks,
+    fetchPath: fetchLivePath,
+  });
   const problems = evaluateGraphResult(result);
   if (problems.length > 0) {
     throw new Error(problems.join("; "));
@@ -296,6 +435,11 @@ export const assertLiveBundleMatchesBuild = async ({
     throw new Error(`no verified live chunk carries release ${releaseSha}.`);
   }
 
+  const verifiedIdentity = await assertLiveIdentityMatchesBuild({
+    staticDirectory,
+    fetchPath: fetchLivePath,
+  });
+
   return {
     origin,
     releaseSha,
@@ -304,6 +448,7 @@ export const assertLiveBundleMatchesBuild = async ({
     requiredChunks: [...result.matched]
       .filter((name) => REQUIRED_CHUNK_PREFIXES.some((p) => name.startsWith(p)))
       .sort(),
+    verifiedIdentityAssets: verifiedIdentity.map(({ path }) => path),
   };
 };
 

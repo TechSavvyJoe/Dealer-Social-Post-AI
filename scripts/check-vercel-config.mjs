@@ -9,6 +9,7 @@ const requiredPatterns = [
   /["']https:\/\/dealer-social-post-ai-production\.fly\.dev\/api\/\$1["']/,
   /apiProxyRoute/,
   /continuingHeaderRoute\(["']\^\/assets\/\(\.\*\)\$["']/,
+  /dsp-brand-mark-v3/,
   /continuingHeaderRoute\(["']\^\/sw\\\\\.js\$["']/,
   /continuingHeaderRoute\(["']\^\/\(\.\*\)\$["'],\s*securityHeaders\)/,
 ];
@@ -26,8 +27,8 @@ if (/x-dealer-proxy-secret['"]?\s*:\s*['"][^$]/i.test(source)) {
 const { config, contentSecurityPolicy } = await import(
   new URL("../vercel.ts", import.meta.url)
 );
-if (!Array.isArray(config.routes) || config.routes.length !== 4) {
-  throw new Error("Vercel config must compile the proxy and three header routes.");
+if (!Array.isArray(config.routes) || config.routes.length !== 5) {
+  throw new Error("Vercel config must compile the proxy and four header routes.");
 }
 if ("rewrites" in config || "headers" in config || "redirects" in config) {
   throw new Error(
@@ -69,6 +70,14 @@ const assetRoute = headerRule("^/assets/(.*)$");
 const assetHeaders = headerMap(assetRoute);
 if (assetHeaders.get("cache-control") !== "public, max-age=31536000, immutable") {
   throw new Error("Hashed Vite assets must receive one-year immutable caching.");
+}
+
+const identityRoute = config.routes.find((route) =>
+  String(route?.src || "").includes("dsp-brand-mark-v3"),
+);
+const identityHeaders = headerMap(identityRoute);
+if (identityHeaders.get("cache-control") !== "public, max-age=31536000, immutable") {
+  throw new Error("Versioned v3 identity assets must receive immutable caching.");
 }
 
 const workerRoute = headerRule("^/sw\\.js$");
@@ -135,7 +144,7 @@ if (
 ) {
   throw new Error("Production CSP must deny plugins and framing.");
 }
-for (const route of [assetRoute, workerRoute, securityRoute]) {
+for (const route of [assetRoute, identityRoute, workerRoute, securityRoute]) {
   if (route?.continue !== true || Array.isArray(route?.transforms)) {
     throw new Error(
       "Static response headers must use native continuing route headers, not transforms.",

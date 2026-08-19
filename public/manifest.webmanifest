@@ -34,43 +34,43 @@
   ],
   "icons": [
     {
-      "src": "/brand-mark-monochrome.svg",
+      "src": "/dsp-brand-mark-v3-monochrome.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "monochrome"
     },
     {
-      "src": "/dealer-social-icon-v2-192.png",
+      "src": "/dealer-social-dsp-v3-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/dealer-social-icon-v2-512.png",
+      "src": "/dealer-social-dsp-v3-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/dealer-social-icon-v2-1024.png",
+      "src": "/dealer-social-dsp-v3-1024.png",
       "sizes": "1024x1024",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/dealer-social-icon-v2-maskable-192.png",
+      "src": "/dealer-social-dsp-v3-maskable-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "/dealer-social-icon-v2-maskable-512.png",
+      "src": "/dealer-social-dsp-v3-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "/dealer-social-icon-v2-maskable-1024.png",
+      "src": "/dealer-social-dsp-v3-maskable-1024.png",
       "sizes": "1024x1024",
       "type": "image/png",
       "purpose": "maskable"

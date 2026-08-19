@@ -1,13 +1,21 @@
-# Misuse
+# Misuse — v3
 
 Do not:
 
-- Reintroduce an aperture, roadway, arrow, or letterform.
-- Add gradients, glow, shadows, outlines, bevels, or 3D treatments.
-- Add faces, clothing detail, vehicle branding, confetti, or more AI sparkles.
-- Put the dark source tile on a dark field; use the reverse artwork.
-- Stretch, rotate, skew, crop, or place the symbol inside another badge.
-- Typeset the wordmark in an unavailable 750 weight.
-- Combine the product mark with a dealer logo without the documented clear
-  space.
-- Treat exploratory AI raster images as master artwork.
+- Use anything in `archive/v2/` as an active or alternate identity.
+- Reintroduce the retired people/car/key scene or the rejected generic arrow.
+- Add a car silhouette, road, camera shutter, play triangle, share arrow,
+  speech bubble, network node, shield, speed line, or platform logo.
+- Re-typeset `DSP` in a generic condensed font; use the canonical paths.
+- Alter the D/P counters or redraw the S into an arrowhead.
+- Stretch, shear, rotate, mirror, crop, or change the letter order.
+- Add an inset border or another badge around the app tile.
+- Apply the app gradient, glow, or shadow to the monochrome or micro mark.
+- Place the standard symbol where the full-bleed maskable asset is required.
+- Change the coral S without an approved palette revision and contrast review.
+- Substitute a font for the exact Inter 800 wordmark.
+- Put `AI` inside the icon; it belongs in the full wordmark only.
+- Combine this product mark with dealer or OEM marks without documented clear
+  space and hierarchy.
+- Claim the package is trademark-safe, production-ready, or print-ready solely
+  because automated validators pass.

@@ -114,7 +114,7 @@ export const Header: React.FC<HeaderProps> = ({
             {studioMode ? (
               <>
                 <img
-                  src="/brand-mark.svg"
+                  src="/dsp-brand-mark-v3.svg"
                   alt=""
                   className="h-9 w-9 shrink-0 rounded-xl sm:hidden"
                   aria-hidden="true"

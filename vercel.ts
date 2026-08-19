@@ -88,6 +88,15 @@ export const config: VercelConfig = {
         value: "public, max-age=31536000, immutable",
       },
     ]),
+    continuingHeaderRoute(
+      "^/(?:dsp-brand-mark-v3(?:-app|-maskable|-micro|-monochrome)?\\.svg|dealer-social-(?:dsp|favicon)-v3(?:-maskable)?-[0-9]+\\.png)$",
+      [
+        {
+          key: "Cache-Control",
+          value: "public, max-age=31536000, immutable",
+        },
+      ],
+    ),
     continuingHeaderRoute("^/sw\\.js$", [
       {
         key: "Cache-Control",

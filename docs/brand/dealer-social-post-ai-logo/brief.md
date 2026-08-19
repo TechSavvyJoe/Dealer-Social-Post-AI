@@ -1,45 +1,61 @@
-# Identity brief
+# Identity brief — v3
 
 ## Canonical name
 
 Dealer Social Post AI
 
+## Required initials
+
+DSP
+
 ## Product
 
-A focused dealership workflow where a salesperson captures a customer and
-vehicle moment, then AI turns it into polished, compliant, channel-ready social
-content.
+A focused dealership workflow in which a salesperson captures a real customer
+and vehicle moment, then AI helps prepare polished, respectful, channel-ready
+social content for review and sharing.
 
-## Audience and context
+## Audience and decision context
 
-- Salespeople using the product quickly on a phone on the showroom floor.
-- Dealership managers reviewing content, people, and performance.
+- Salespeople working quickly on a phone at delivery or on the showroom floor.
+- Managers reviewing content, staff access, drafts, destinations, and results.
 - Dealer groups evaluating a credible operational SaaS product.
-- App icons, browser tabs, sign-in screens, administrative views, and generated
-  content attribution.
+- Customers who may be visible or tagged in dealership social content.
+- App icons, browser tabs, installed PWAs, saved desktop apps, sign-in screens,
+  headers, administrative views, and formal product attribution.
 
-## Desired attributes
+## Position and personality
 
-Fast without looking frantic; premium without looking precious; automotive
-without using a car; creative without looking like a generic design editor;
-trustworthy enough for dealership operations.
+- Precise, but not sterile.
+- Progressive, but not trend-chasing.
+- Energetic, but not loud or juvenile.
+- Automotive-aware, without literal vehicle clip art.
+- Creative, without looking like a generic social scheduler or design editor.
+- Trustworthy enough for customer-facing dealership operations.
 
-## Measurable criteria
+## Approval test
 
-- Full product name remains readable at the 188 px mobile lockup.
-- Symbol retains its silhouette at 16, 24, 32, 48, 180, and 512 px.
-- Symbol works in one color and survives Android circle, squircle, and rounded
-  square masks.
-- The full symbol must visibly connect salesperson, customer, vehicle,
-  dealership handoff, social post, and AI polish.
-- No aperture, road, speedometer, arrow, shield, speech bubble, social-node
-  network, or letter monogram.
-- All essential app-icon geometry stays inside the maskable 40% radius safe
-  circle.
-- Editable wordmark contains the exact literal `Dealer Social Post AI`.
+Make Dealer Social Post AI recognizable to dealership staff as a premium,
+purpose-built content workflow by using a compact campaign-aperture `DSP`
+monogram, while avoiding literal cars, people scenes, navigation arrows,
+roadways, camera shutters, and generic social-sharing symbols.
 
-## High-risk usage
+## Observable success criteria
 
-The icon is used for installable PWA identity and the wordmark may represent a
-commercial software service. Preliminary category and trademark research is not
-legal clearance.
+- `DSP` reads in that order at Home Screen and desktop-icon sizes.
+- The mark retains a coherent silhouette in one color.
+- Essential maskable geometry remains inside the guaranteed central safe area.
+- The responsive icon system remains identifiable at 16, 24, and 32 px:
+  use the flat micro only at 16 px and the standard geometry at 24 px or larger.
+- The horizontal wordmark contains the exact literal `Dealer Social Post AI`.
+- The full lockup remains readable at 220 px wide.
+- The symbol uses no car, person, road, speedometer, camera aperture, arrow,
+  shield, speech bubble, social-node network, or platform trademark.
+- Color supports recognition but is not required to understand the initials.
+- The visual system works on light, dark, and wallpaper-like backgrounds.
+
+## High-risk contexts
+
+The smallest/highest-risk applications are the 16 px favicon and aggressive
+launcher masks. The commercial-name risk is that `DSP` is already a common
+technology abbreviation. Visual design and preliminary searches cannot replace
+professional trademark clearance.

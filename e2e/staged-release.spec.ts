@@ -215,26 +215,51 @@ test.describe("Hosted staged release", () => {
       expect(manifest.description).toContain("dealership-ready social posts");
       expect(manifest.icons).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({
-            src: "/dealer-social-icon-v2-192.png",
+          {
+            src: "/dealer-social-dsp-v3-192.png",
             sizes: "192x192",
-          }),
-          expect.objectContaining({
-            src: "/dealer-social-icon-v2-512.png",
+            type: "image/png",
+            purpose: "any",
+          },
+          {
+            src: "/dealer-social-dsp-v3-512.png",
             sizes: "512x512",
-          }),
+            type: "image/png",
+            purpose: "any",
+          },
+          {
+            src: "/dealer-social-dsp-v3-maskable-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
+          },
+          {
+            src: "/dsp-brand-mark-v3-monochrome.svg",
+            sizes: "any",
+            type: "image/svg+xml",
+            purpose: "monochrome",
+          },
         ]),
       );
       for (const asset of [
-        "/dealer-social-icon-v2-192.png",
-        "/dealer-social-icon-v2-512.png",
-        "/dealer-social-icon-v2-180.png",
-        "/brand-mark.svg",
+        "/dealer-social-dsp-v3-180.png",
+        "/dealer-social-dsp-v3-192.png",
+        "/dealer-social-dsp-v3-512.png",
+        "/dealer-social-dsp-v3-1024.png",
+        "/dealer-social-dsp-v3-maskable-192.png",
+        "/dealer-social-dsp-v3-maskable-512.png",
+        "/dealer-social-dsp-v3-maskable-1024.png",
+        "/dealer-social-favicon-v3-32.png",
+        "/dsp-brand-mark-v3.svg",
+        "/dsp-brand-mark-v3-micro.svg",
+        "/dsp-brand-mark-v3-maskable.svg",
+        "/dsp-brand-mark-v3-monochrome.svg",
       ]) {
         const response = await getSameOrigin(asset);
         expect(response.ok()).toBe(true);
         const body = await response.body();
         expect(body.byteLength).toBeGreaterThan(100);
+        expect(response.headers()["cache-control"]).toContain("immutable");
         if (asset.endsWith(".png")) {
           expect(response.headers()["content-type"]).toContain("image/png");
           expect(body.subarray(0, 8)).toEqual(Buffer.from("89504e470d0a1a0a", "hex"));

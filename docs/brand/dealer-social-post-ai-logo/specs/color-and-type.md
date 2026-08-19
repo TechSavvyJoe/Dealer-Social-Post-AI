@@ -1,24 +1,44 @@
-# Color and type
+# Color and type — v3
 
 ## Core palette
 
-| Token | Hex | Use |
-| --- | --- | --- |
-| Ink | `#07101F` | App tile and dark identity field |
-| Cobalt | `#4F7CFF` | Social-post frame and vehicle lights |
-| Cyan | `#67E8F9` | Vehicle key and single AI polish point |
-| Cloud | `#F8FAFC` | Salesperson and reverse wordmark |
-| Mist | `#CBDCFF` | Customer |
+| Token           | Hex       | RGB           | Role                           |
+| --------------- | --------- | ------------- | ------------------------------ |
+| Campaign Ink    | `#07182B` | 7, 24, 43     | Primary field and dark neutral |
+| Deep Channel    | `#0C2B50` | 12, 43, 80    | Midpoint of app-field gradient |
+| Horizon Blue    | `#123A67` | 18, 58, 103   | App-field lift                 |
+| Aperture Lift   | `#2F6DA5` | 47, 109, 165  | Restrained radial illumination |
+| Editorial Ivory | `#F5F6F0` | 245, 246, 240 | Flat D/P and reverse artwork   |
+| Highlight White | `#FFFFFF` | 255, 255, 255 | Upper D/P highlight            |
+| Soft Ivory      | `#E8EADF` | 232, 234, 223 | Lower D/P highlight            |
+| Social Coral    | `#FF6A4D` | 255, 106, 77  | Flat S accent                  |
+| Coral Light     | `#FF8A62` | 255, 138, 98  | Upper S highlight              |
+| Coral Deep      | `#FF5A44` | 255, 90, 68   | Lower S highlight              |
 
-Use solid fills. Gradients, glow, bevels, and shadows are not part of the master.
+The app treatment may use the documented gradients and restrained shadow from
+the canonical SVG. The micro and monochrome variants intentionally remove those
+effects. Meaning must not depend on color: D, S, and P remain distinguishable in
+the single-color master.
 
-## Typography
+Do not invent CMYK or spot values from the screen palette. A print vendor or
+brand-production specialist must proof conversions on the actual substrate.
 
-The wordmark uses Inter Extra Bold / 800 with slightly tightened tracking. The
-application already bundles this exact font and weight. Do not substitute a
-synthetic 750 weight.
+## Wordmark typography
 
-Editable source: `Inter`, 800, `@fontsource/inter` 5.2.8, OFL-1.1.
+- Canonical text: `Dealer Social Post AI`
+- Family: Inter
+- Weight: 800 / ExtraBold
+- Style: normal
+- Tracking in active lockups: approximately `-0.03em`
+- Package: `@fontsource/inter` 5.2.8
+- License: SIL Open Font License 1.1
 
-The wordmark is not yet approved as outlined production artwork. Retain the
-literal live-text source and create outlines only after approval.
+The application already bundles the reviewed family and weight. The active SVG
+lockups intentionally retain live text while the design remains a
+production-candidate. Do not substitute a synthetic weight or a visually
+similar system sans.
+
+After approval, derive an outlined master from this exact source in a
+trustworthy vector workflow. Retain
+`source/dealer-social-post-ai-editable-wordmark.svg` permanently for literal
+spelling and future editing.

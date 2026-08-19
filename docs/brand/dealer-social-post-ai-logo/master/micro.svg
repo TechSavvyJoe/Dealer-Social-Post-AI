@@ -1,11 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="8" fill="#07101f"/>
-  <rect x="2" y="2" width="28" height="28" rx="6.5" fill="#4f7cff"/>
-  <rect x="4" y="4" width="24" height="24" rx="4.5" fill="#07101f"/>
-  <circle cx="8" cy="13" r="2.5" fill="#f8fafc"/>
-  <circle cx="24" cy="13" r="2.5" fill="#cbdcff"/>
-  <path d="M10 24 12 17h8l2 7Z" fill="#4f7cff"/>
-  <path d="m14 17-1 4h6l-1-4Z" fill="#f8fafc"/>
-  <rect x="6" y="25" width="20" height="2" rx="1" fill="#26334a"/>
-  <circle cx="16" cy="13" r="2" fill="#67e8f9"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" role="img" aria-labelledby="dsp-micro-title dsp-micro-description">
+  <title id="dsp-micro-title">DSP</title>
+  <desc id="dsp-micro-description">Dealer Social Post AI simplified small-size monogram.</desc>
+  <rect width="16" height="16" rx="3" fill="#07182B"/>
+  <g fill="#F5F6F0" shape-rendering="crispEdges" aria-hidden="true">
+    <rect x="1" y="3" width="1" height="10"/>
+    <rect x="2" y="3" width="2" height="1"/>
+    <rect x="2" y="12" width="2" height="1"/>
+    <rect x="4" y="4" width="1" height="8"/>
+    <rect x="11" y="3" width="1" height="10"/>
+    <rect x="12" y="3" width="2" height="1"/>
+    <rect x="12" y="7" width="2" height="1"/>
+    <rect x="14" y="4" width="1" height="3"/>
+  </g>
+  <g fill="#FF6A4D" shape-rendering="crispEdges" aria-hidden="true">
+    <rect x="6" y="3" width="4" height="1"/>
+    <rect x="6" y="4" width="1" height="4"/>
+    <rect x="7" y="7" width="3" height="1"/>
+    <rect x="9" y="8" width="1" height="4"/>
+    <rect x="6" y="12" width="4" height="1"/>
+  </g>
 </svg>
