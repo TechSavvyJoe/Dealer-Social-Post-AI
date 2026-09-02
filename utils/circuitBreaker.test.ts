@@ -66,6 +66,23 @@ describe("circuit breaker", () => {
     expect(circuitBreaker.getState(SERVICE)).toBe("CLOSED");
   });
 
+  it("releases the HALF_OPEN probe slot when the probe is aborted", async () => {
+    for (let i = 0; i < 5; i += 1) await fail();
+    vi.advanceTimersByTime(31_000);
+    // A cancelled probe (queue timeout, auth-epoch change) says nothing about
+    // provider health — but it must not leave the single probe slot occupied,
+    // or every later caller is refused for the life of the page.
+    await expect(
+      withCircuitBreaker(SERVICE, async () => {
+        throw new DOMException("cancelled", "AbortError");
+      }),
+    ).rejects.toThrow("cancelled");
+    expect(circuitBreaker.getState(SERVICE)).toBe("HALF_OPEN");
+    await expect(succeed()).resolves.toBe("ok");
+    await expect(succeed()).resolves.toBe("ok");
+    expect(circuitBreaker.getState(SERVICE)).toBe("CLOSED");
+  });
+
   it("reopens immediately when the half-open probe fails", async () => {
     for (let i = 0; i < 5; i += 1) await fail();
     vi.advanceTimersByTime(31_000);

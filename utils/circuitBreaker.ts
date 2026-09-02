@@ -143,6 +143,17 @@ class CircuitBreaker {
   }
 
   /**
+   * Release the single HALF_OPEN probe slot without judging provider health.
+   * An aborted probe (queue timeout, user cancel, auth-epoch change) says
+   * nothing about the service, but leaving `halfOpenInFlight` set would refuse
+   * every later caller until a page reload — a permanent, silent outage.
+   */
+  releaseProbe(service: string): void {
+    const stats = this.getStats(service);
+    stats.halfOpenInFlight = false;
+  }
+
+  /**
    * Reset circuit breaker
    */
   reset(service: string): void {
@@ -179,7 +190,9 @@ export async function withCircuitBreaker<T>(
       typeof error === "object" &&
       "name" in error &&
       error.name === "AbortError";
-    if (!wasAborted) {
+    if (wasAborted) {
+      circuitBreaker.releaseProbe(service);
+    } else {
       circuitBreaker.recordFailure(service);
     }
     throw error;

@@ -240,7 +240,10 @@ const blobToDataUrl = async (blob: Blob): Promise<string> => {
   return `data:${mime};base64,${btoa(binary)}`;
 };
 
-const normaliseDataUrl = async (source?: string): Promise<string> => {
+const normaliseDataUrl = async (
+  source?: string,
+  signal?: AbortSignal,
+): Promise<string> => {
   if (!source) {
     throw new Error("No image data provided.");
   }
@@ -248,10 +251,10 @@ const normaliseDataUrl = async (source?: string): Promise<string> => {
     return source;
   }
   if (source.startsWith("http")) {
-    return await urlToDataUrl(source);
+    return await urlToDataUrl(source, signal);
   }
   if (source.startsWith("/")) {
-    const response = await fetch(source, { credentials: "include" });
+    const response = await fetch(source, { credentials: "include", signal });
     if (!response.ok) {
       throw new Error(`Could not load same-origin image (${response.status}).`);
     }
@@ -262,7 +265,7 @@ const normaliseDataUrl = async (source?: string): Promise<string> => {
     return await blobToDataUrl(blob);
   }
   if (source.startsWith("blob:")) {
-    const response = await fetch(source);
+    const response = await fetch(source, { signal });
     if (!response.ok) {
       throw new Error(`Could not read blob url: ${response.statusText}`);
     }
@@ -281,16 +284,18 @@ const SUPPORTED_PROVIDER_IMAGE_TYPES = new Set([
   "image/heif",
 ]);
 
-const optionalLogoImagePart = async (source?: string) => {
+const optionalLogoImagePart = async (source?: string, signal?: AbortSignal) => {
   if (!source) return null;
   try {
-    const normalisedLogo = await normaliseDataUrl(source);
+    const normalisedLogo = await normaliseDataUrl(source, signal);
     const { mimeType, data } = parseDataUrl(normalisedLogo);
     if (!SUPPORTED_PROVIDER_IMAGE_TYPES.has(mimeType.toLowerCase())) {
       throw new Error(`Unsupported logo format: ${mimeType}`);
     }
     return { inlineData: { mimeType: mimeType.toLowerCase(), data } };
-  } catch {
+  } catch (error) {
+    // Cancellation is not a broken logo — let the queue/caller see it.
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
     // A configured asset is an explicit brand contract. Silently dropping it
     // changes the requested creative and also disables exact-logo vision QC.
     // Keep the underlying transport/URL out of the user-facing error.
@@ -750,7 +755,7 @@ export const reviewGeneratedImageText = async (
   }
 
   const normalisedImage = await prepareVisionReviewCopy(
-    await normaliseDataUrl(imageBase64Url),
+    await normaliseDataUrl(imageBase64Url, signal),
     perComparisonImageBudget,
   );
   assertAuthEpoch(requestAuthEpoch);
@@ -759,7 +764,7 @@ export const reviewGeneratedImageText = async (
   let sourceImagePart: { inlineData: { mimeType: string; data: string } } | null = null;
   if (context.sourceImageBase64Url) {
     const normalisedSource = await prepareVisionReviewCopy(
-      await normaliseDataUrl(context.sourceImageBase64Url),
+      await normaliseDataUrl(context.sourceImageBase64Url, signal),
       perComparisonImageBudget,
     );
     assertAuthEpoch(requestAuthEpoch);
@@ -1130,8 +1135,9 @@ const generatedImageReviewScore = (review: GeneratedImageTextReview): number => 
 const imagePartFromDataUrl = async (
   dataUrl: string,
   requestAuthEpoch: number,
+  signal?: AbortSignal,
 ): Promise<{ inlineData: { mimeType: string; data: string } }> => {
-  const normalised = await normaliseDataUrl(dataUrl);
+  const normalised = await normaliseDataUrl(dataUrl, signal);
   assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data } = parseDataUrl(normalised);
   return { inlineData: { mimeType, data } };
@@ -1476,12 +1482,12 @@ export const generateFunSocialPostImage = async (
   signal?: AbortSignal,
 ): Promise<string> => {
   const requestAuthEpoch = captureAuthEpoch();
-  const normalisedOriginal = await normaliseDataUrl(originalImageBase64Url);
+  const normalisedOriginal = await normaliseDataUrl(originalImageBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedOriginal);
   const originalImagePart = { inlineData: { mimeType, data: base64Data } };
 
-  const logoImagePart = await optionalLogoImagePart(logoBase64Url);
+  const logoImagePart = await optionalLogoImagePart(logoBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
 
   const funPrompt = generateFunPrompt(
@@ -1536,12 +1542,12 @@ export const editSocialPostImage = async (
   signal?: AbortSignal,
 ): Promise<string> => {
   const requestAuthEpoch = captureAuthEpoch();
-  const normalisedPrevious = await normaliseDataUrl(previousImageBase64Url);
+  const normalisedPrevious = await normaliseDataUrl(previousImageBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedPrevious);
   const previousImagePart = { inlineData: { mimeType, data: base64Data } };
 
-  const logoImagePart = await optionalLogoImagePart(logoBase64Url);
+  const logoImagePart = await optionalLogoImagePart(logoBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
 
   const editInstruction = editImagePrompt(
@@ -1591,7 +1597,7 @@ export const generateSocialPostTextDetailed = async (
   signal?: AbortSignal,
 ): Promise<CaptionGenerationResult> => {
   const requestAuthEpoch = captureAuthEpoch();
-  const normalisedImage = await normaliseDataUrl(imageBase64Url);
+  const normalisedImage = await normaliseDataUrl(imageBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
   const imagePart = { inlineData: { mimeType, data: base64Data } };
@@ -1809,7 +1815,7 @@ const generateRawStructuredImageText = async (
   signal?: AbortSignal,
 ): Promise<string> => {
   const requestAuthEpoch = captureAuthEpoch();
-  const normalisedImage = await normaliseDataUrl(imageBase64Url);
+  const normalisedImage = await normaliseDataUrl(imageBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
   const imagePart = { inlineData: { mimeType, data: base64Data } };
@@ -1995,7 +2001,7 @@ export const generateSocialPost = async (
   signal?: AbortSignal,
 ): Promise<SocialPostGenerationResult> => {
   const requestAuthEpoch = captureAuthEpoch();
-  const normalisedImage = await normaliseDataUrl(imageBase64Url);
+  const normalisedImage = await normaliseDataUrl(imageBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
 
@@ -2006,7 +2012,7 @@ export const generateSocialPost = async (
     },
   };
 
-  const logoImagePart = await optionalLogoImagePart(logoBase64Url);
+  const logoImagePart = await optionalLogoImagePart(logoBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
 
   // Generate text (or use provided template/custom text) and the final image in parallel.
@@ -2364,7 +2370,7 @@ export const generatePostVideo = async (
   const videoModels = getFallbackChain(videoTask);
   const resolvedResolution = TASKS[videoTask].resolution ?? "720p";
 
-  const normalisedImage = await normaliseDataUrl(imageBase64Url);
+  const normalisedImage = await normaliseDataUrl(imageBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
 
   // Resolve final Veo params FIRST so the prompt matches the wire body.
