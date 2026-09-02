@@ -1068,6 +1068,7 @@ export const AdminDashboard: React.FC = () => {
         allowRoleEdit
         allowPinReveal
         allowManagerLoginEdit
+        allowManagerScopeEdit
         onClose={() => setEditingPerson(null)}
         onCommitted={handlePersonCommitted}
         onCredentialIssued={handleCredentialIssued}

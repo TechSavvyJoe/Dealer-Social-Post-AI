@@ -1343,6 +1343,12 @@ function serializePersonSummary(record) {
     name: record.getString("name"),
     role: record.getString("role") || "salesperson",
     active: recordBool(record, "active"),
+    // Brand-consistent creative system (phase 1): the salesperson's own
+    // session needs these defaults; they are settings, never credentials.
+    managerScope: recordBool(record, "manager_scope"),
+    signatureLine: record.getString("signature_line"),
+    defaultCategory: record.getString("default_category"),
+    playfulDefault: recordBool(record, "playful_default"),
   };
 }
 
@@ -1363,6 +1369,86 @@ function serializePerson(record) {
     managerUsername: isValidManagerUsername(managerUsername)
       ? managerUsername
       : undefined,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Person profile fields (brand-consistent creative system, phase 1)
+// ---------------------------------------------------------------------------
+
+const PERSON_TEXT_FIELD_LIMITS = {
+  signature_line: 140,
+  default_category: 40,
+};
+const PERSON_BOOL_FIELDS = ["playful_default"];
+/** Session roles that may grant the sales-manager permission subset. */
+const MANAGER_SCOPE_ROLES = ["dealer_admin", "super_admin"];
+
+/** Collapse control characters and runs of whitespace into single spaces. */
+function collapseWhitespace(value) {
+  return (value === null || value === undefined ? "" : value)
+    .toString()
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Allowlisted personal-profile fields on a salespeople record (spec §5
+ * "Personal" rows plus the sales-manager scope flag). manager_scope is a
+ * permission grant, so only a manager-or-above session may set it even if a
+ * future self-service route reuses this helper; routes map the
+ * MANAGER_SCOPE_FORBIDDEN error to 403 via personProfileErrorPayload.
+ */
+function personProfileMutationData(body, actorRole) {
+  const source = body || {};
+  const data = {};
+  const textFields = Object.keys(PERSON_TEXT_FIELD_LIMITS);
+  for (let i = 0; i < textFields.length; i++) {
+    const field = textFields[i];
+    if (source[field] === undefined) continue;
+    const value = collapseWhitespace(source[field]);
+    if (value.length > PERSON_TEXT_FIELD_LIMITS[field]) {
+      throw new Error(
+        field + " must be " + PERSON_TEXT_FIELD_LIMITS[field] + " characters or fewer",
+      );
+    }
+    data[field] = value;
+  }
+  for (let i = 0; i < PERSON_BOOL_FIELDS.length; i++) {
+    const field = PERSON_BOOL_FIELDS[i];
+    if (source[field] === undefined) continue;
+    data[field] = assertBooleanInput(field, source[field]);
+  }
+  if (source.manager_scope !== undefined) {
+    if (MANAGER_SCOPE_ROLES.indexOf(actorRole) === -1) {
+      throw new Error("MANAGER_SCOPE_FORBIDDEN");
+    }
+    data.manager_scope = assertBooleanInput("manager_scope", source.manager_scope);
+  }
+  return data;
+}
+
+/** Map a personProfileMutationData failure to a safe HTTP status + body. */
+function personProfileErrorPayload(err) {
+  const message = mutationErrorText(err);
+  if (message === "MANAGER_SCOPE_FORBIDDEN") {
+    return {
+      status: 403,
+      body: {
+        error: "MANAGER_SCOPE_FORBIDDEN",
+        code: "MANAGER_SCOPE_FORBIDDEN",
+        message: "Only a manager can change manager scope.",
+      },
+    };
+  }
+  return {
+    status: 400,
+    body: {
+      error: "PERSON_PROFILE_INVALID",
+      code: "PERSON_PROFILE_INVALID",
+      message: safeDealerMutationError(err),
+    },
   };
 }
 
@@ -1592,6 +1678,17 @@ function proxyRequestHeader(requestInfo, name) {
       return value.toString().trim();
     }
   }
+  // HTTP header names are case-insensitive and real clients send mixed case
+  // ("X-Generation-Purpose"). Fall back to a case-insensitive scan so a header
+  // is never silently dropped because its casing was not guessed above.
+  const keys = Object.keys(headers);
+  for (let i = 0; i < keys.length; i += 1) {
+    const key = keys[i].toLowerCase().replace(/_/g, "-");
+    if (key === normalized) {
+      const value = headers[keys[i]];
+      if (value !== undefined && value !== null) return value.toString().trim();
+    }
+  }
   return "";
 }
 
@@ -1674,6 +1771,266 @@ function proxyGenerationIdentity(path, requestInfo, policies, provider, modelOve
   };
 }
 
+/**
+ * `X-Generation-Purpose` names what the browser was doing with a request, so
+ * a vision-QC review or a caption pack stops being counted as a caption in
+ * the usage ledger. It is accounting metadata only: it never changes which
+ * model, policy, rate limit, or body validation applies. Values outside the
+ * kind's allowlist (or a missing header) fall back to the task kind.
+ */
+const GENERATION_PURPOSES_BY_KIND = {
+  text: ["caption", "vision_review", "caption_pack", "website_draft"],
+  image: ["image"],
+  video: ["video"],
+};
+const GENERATION_PURPOSES = [
+  "caption",
+  "vision_review",
+  "caption_pack",
+  "website_draft",
+  "image",
+  "video",
+];
+
+function proxyGenerationPurpose(requestInfo, kind) {
+  const allowed = GENERATION_PURPOSES_BY_KIND[kind] || GENERATION_PURPOSES_BY_KIND.text;
+  // Header values arrive with incidental whitespace from some clients; trim
+  // before matching so a valid label is never silently demoted to the default.
+  const requested = proxyRequestHeader(requestInfo, "x-generation-purpose")
+    .trim()
+    .toLowerCase()
+    .slice(0, 40);
+  if (requested && allowed.indexOf(requested) !== -1) return requested;
+  return allowed[0];
+}
+
+/**
+ * A stale installed PWA keeps announcing the model-policy version it was
+ * built against. Detecting that before body validation lets the proxy answer
+ * with a distinct 409 so the app prompts for an update instead of the generic
+ * "check your inputs" 400. Requests without the header are legacy clients and
+ * keep their existing best-effort handling. The requested value is never
+ * echoed back: only the current version is safe to disclose.
+ */
+function proxyPolicyVersionMismatch(requestInfo, policies) {
+  const currentVersion = String(policies.geminiModelPolicySnapshot().version);
+  const requested = proxyRequestHeader(requestInfo, "x-model-policy-version");
+  return {
+    mismatch: !!requested && requested !== currentVersion,
+    currentVersion: currentVersion,
+  };
+}
+
+const GENERATION_USAGE_MAX_TOKENS = 100000000;
+const GENERATION_USAGE_MAX_LATENCY_MS = 60 * 60 * 1000;
+const GENERATION_USAGE_MAX_VIDEO_SECONDS = 600;
+
+function usageCounter(value, max) {
+  const numeric = typeof value === "string" ? Number(value.trim()) : Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return Math.min(max, Math.floor(numeric));
+}
+
+function usageToken(value, max) {
+  return String(value === undefined || value === null ? "" : value)
+    .replace(/[^A-Za-z0-9_]/g, "")
+    .slice(0, max);
+}
+
+/**
+ * Derive the usage ledger columns for one proxied generation. Everything is
+ * optional and coerced: a malformed or missing provider body yields zeros and
+ * empty tokens rather than an exception, because losing the base event over
+ * accounting would hide the very failures the ledger exists to show. Only
+ * counters and short enum-like tokens are extracted; no prompt, caption, or
+ * media content is read.
+ */
+function proxyGenerationUsage(identity, requestInfo, responsePayload, usage) {
+  const kind = identity && identity.kind ? identity.kind : "text";
+  const payload =
+    responsePayload &&
+    typeof responsePayload === "object" &&
+    !Array.isArray(responsePayload)
+      ? responsePayload
+      : {};
+  const meta =
+    payload.usageMetadata && typeof payload.usageMetadata === "object"
+      ? payload.usageMetadata
+      : {};
+  const candidate =
+    Array.isArray(payload.candidates) &&
+    payload.candidates[0] &&
+    typeof payload.candidates[0] === "object"
+      ? payload.candidates[0]
+      : {};
+  const extra = usage && typeof usage === "object" ? usage : {};
+  return {
+    prompt_tokens: usageCounter(meta.promptTokenCount, GENERATION_USAGE_MAX_TOKENS),
+    candidate_tokens: usageCounter(
+      meta.candidatesTokenCount,
+      GENERATION_USAGE_MAX_TOKENS,
+    ),
+    thoughts_tokens: usageCounter(meta.thoughtsTokenCount, GENERATION_USAGE_MAX_TOKENS),
+    cached_tokens: usageCounter(
+      meta.cachedContentTokenCount,
+      GENERATION_USAGE_MAX_TOKENS,
+    ),
+    finish_reason: usageToken(candidate.finishReason, 40),
+    latency_ms: usageCounter(extra.latencyMs, GENERATION_USAGE_MAX_LATENCY_MS),
+    purpose: proxyGenerationPurpose(requestInfo, kind),
+    image_size: kind === "image" ? usageToken(extra.imageSize, 8) : "",
+    video_seconds:
+      kind === "video"
+        ? usageCounter(extra.videoSeconds, GENERATION_USAGE_MAX_VIDEO_SECONDS)
+        : 0,
+  };
+}
+
+const GENERATION_USAGE_SUMMARY_MAX_DEALERS = 50;
+const GENERATION_USAGE_SUMMARY_MAX_SIZE_ROWS = 400;
+const GENERATION_USAGE_SUMMARY_MAX_LATENCY_ROWS = 5000;
+
+function nearestRankPercentile(sortedAscending, fraction) {
+  if (!sortedAscending.length) return 0;
+  const rank = Math.ceil(fraction * sortedAscending.length) - 1;
+  return sortedAscending[Math.min(sortedAscending.length - 1, Math.max(0, rank))];
+}
+
+/**
+ * Per-dealer usage totals for the admin health view: event and token counts,
+ * image counts by size, video seconds, and nearest-rank p50/p95 upstream
+ * latency over the trailing window. Three bounded DAO queries; the latency
+ * percentiles are computed in-process from at most
+ * GENERATION_USAGE_SUMMARY_MAX_LATENCY_ROWS samples, and `truncated` tells
+ * the reader when a bound was hit. Callers wrap this in try/catch: health
+ * must never fail because of accounting.
+ */
+function generationUsageSummary(windowDays) {
+  const days = Math.max(1, Math.min(30, Number(windowDays) || 7));
+  const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const since = databaseTimestamp(sinceIso);
+  const summary = { windowDays: days, since: sinceIso, dealers: [], truncated: false };
+  const byDealer = {};
+
+  const totals = arrayOf(
+    new DynamicModel({
+      dealer: "",
+      name: "",
+      events: 0,
+      succeeded: 0,
+      promptTokens: 0,
+      candidateTokens: 0,
+      thoughtsTokens: 0,
+      cachedTokens: 0,
+      videoSeconds: 0,
+    }),
+  );
+  $app
+    .dao()
+    .db()
+    .newQuery(
+      "SELECT e.dealer AS dealer, COALESCE(d.name, '') AS name, COUNT(*) AS events, " +
+        "COALESCE(SUM(CASE WHEN e.succeeded = 1 THEN 1 ELSE 0 END), 0) AS succeeded, " +
+        "COALESCE(SUM(e.prompt_tokens), 0) AS promptTokens, " +
+        "COALESCE(SUM(e.candidate_tokens), 0) AS candidateTokens, " +
+        "COALESCE(SUM(e.thoughts_tokens), 0) AS thoughtsTokens, " +
+        "COALESCE(SUM(e.cached_tokens), 0) AS cachedTokens, " +
+        "COALESCE(SUM(e.video_seconds), 0) AS videoSeconds " +
+        "FROM generation_events e LEFT JOIN dealers d ON d.id = e.dealer " +
+        "WHERE e.occurred_at >= {:since} " +
+        "GROUP BY e.dealer ORDER BY events DESC, e.dealer ASC LIMIT " +
+        String(GENERATION_USAGE_SUMMARY_MAX_DEALERS + 1),
+    )
+    .bind({ since: since })
+    .all(totals);
+  if (totals.length > GENERATION_USAGE_SUMMARY_MAX_DEALERS) {
+    summary.truncated = true;
+    totals.length = GENERATION_USAGE_SUMMARY_MAX_DEALERS;
+  }
+  totals.forEach(function (row) {
+    const dealerId = (row.dealer || "").toString();
+    if (!dealerId) return;
+    const prompt = Number(row.promptTokens) || 0;
+    const candidate = Number(row.candidateTokens) || 0;
+    const thoughts = Number(row.thoughtsTokens) || 0;
+    const cached = Number(row.cachedTokens) || 0;
+    const entry = {
+      dealer: dealerId,
+      name: (row.name || "").toString().slice(0, 120),
+      events: Number(row.events) || 0,
+      succeeded: Number(row.succeeded) || 0,
+      tokens: {
+        prompt: prompt,
+        candidate: candidate,
+        thoughts: thoughts,
+        cached: cached,
+        total: prompt + candidate + thoughts + cached,
+      },
+      images: {},
+      videoSeconds: Number(row.videoSeconds) || 0,
+      latencyMs: { p50: 0, p95: 0, samples: 0 },
+    };
+    byDealer[dealerId] = entry;
+    summary.dealers.push(entry);
+  });
+  if (!summary.dealers.length) return summary;
+
+  const sizes = arrayOf(new DynamicModel({ dealer: "", size: "", count: 0 }));
+  $app
+    .dao()
+    .db()
+    .newQuery(
+      "SELECT dealer, image_size AS size, COUNT(*) AS count FROM generation_events " +
+        "WHERE occurred_at >= {:since} AND image_size != '' " +
+        "GROUP BY dealer, image_size ORDER BY dealer ASC, image_size ASC LIMIT " +
+        String(GENERATION_USAGE_SUMMARY_MAX_SIZE_ROWS),
+    )
+    .bind({ since: since })
+    .all(sizes);
+  if (sizes.length >= GENERATION_USAGE_SUMMARY_MAX_SIZE_ROWS) summary.truncated = true;
+  sizes.forEach(function (row) {
+    const entry = byDealer[(row.dealer || "").toString()];
+    const size = usageToken(row.size, 8);
+    if (!entry || !size) return;
+    entry.images[size] = (entry.images[size] || 0) + (Number(row.count) || 0);
+  });
+
+  const latencies = arrayOf(new DynamicModel({ dealer: "", latency: 0 }));
+  $app
+    .dao()
+    .db()
+    .newQuery(
+      "SELECT dealer, latency_ms AS latency FROM generation_events " +
+        "WHERE occurred_at >= {:since} AND latency_ms > 0 " +
+        "ORDER BY dealer ASC, latency_ms ASC LIMIT " +
+        String(GENERATION_USAGE_SUMMARY_MAX_LATENCY_ROWS),
+    )
+    .bind({ since: since })
+    .all(latencies);
+  if (latencies.length >= GENERATION_USAGE_SUMMARY_MAX_LATENCY_ROWS) {
+    summary.truncated = true;
+  }
+  const samplesByDealer = {};
+  latencies.forEach(function (row) {
+    const dealerId = (row.dealer || "").toString();
+    if (!byDealer[dealerId]) return;
+    const latency = Number(row.latency);
+    if (!Number.isFinite(latency) || latency <= 0) return;
+    (samplesByDealer[dealerId] = samplesByDealer[dealerId] || []).push(latency);
+  });
+  Object.keys(samplesByDealer).forEach(function (dealerId) {
+    const sorted = samplesByDealer[dealerId].sort(function (a, b) {
+      return a - b;
+    });
+    byDealer[dealerId].latencyMs = {
+      p50: nearestRankPercentile(sorted, 0.5),
+      p95: nearestRankPercentile(sorted, 0.95),
+      samples: sorted.length,
+    };
+  });
+  return summary;
+}
+
 function proxyGenerationResponseSucceeded(identity, statusCode, payload) {
   if (!identity || statusCode < 200 || statusCode >= 300 || !payload) {
     return false;
@@ -1727,6 +2084,7 @@ function recordProxyGenerationEvent(
   provider,
   modelOverride,
   responsePayload,
+  usage,
 ) {
   let generationEventStage = "start";
   try {
@@ -1750,10 +2108,20 @@ function recordProxyGenerationEvent(
     if (!/^[A-Za-z0-9_-]{16,80}$/.test(attemptId)) {
       attemptId = secureRandomString(32, "0123456789abcdef");
     }
+    // Usage columns are best-effort: a malformed provider body or a proxy
+    // that predates the accounting migration must still record the event.
+    generationEventStage = "usage";
+    let usageFields = null;
+    try {
+      usageFields = proxyGenerationUsage(identity, requestInfo, responsePayload, usage);
+    } catch (_usageErr) {
+      usageFields = null;
+    }
     generationEventStage = "collection";
     const collection = $app.dao().findCollectionByNameOrId("generation_events");
     generationEventStage = "record";
     const record = new Record(collection, {
+      ...(usageFields || {}),
       dealer: dealer.id,
       owner_session_hash: ownerSessionHash,
       attempt_id: attemptId,
@@ -2643,6 +3011,8 @@ const DEALER_TEXT_FIELD_LIMITS = {
   default_style: 60,
   enabled_fun_styles: 2000,
   custom_scenarios: 32000,
+  default_tone: 40,
+  playful_style: 80,
 };
 
 const DEALER_SOCIAL_USERNAME_RULES = {
@@ -2709,6 +3079,346 @@ function normalizeDealerSocialField(field, rawValue) {
   return value;
 }
 
+// ---------------------------------------------------------------------------
+// Dealer brand-consistency fields (spec 2026-09-02 §6; phase 1 ships dark)
+// ---------------------------------------------------------------------------
+
+const SIGNATURE_LOOK_VALUES = ["showroom", "hometown", "turbo"];
+const IMAGE_QUALITY_TIER_VALUES = ["standard", "studio"];
+/** The six Customer Hub categories the destination table (§4.4) keys off. */
+const BRAND_CATEGORY_IDS = [
+  "deliveries",
+  "inventory",
+  "service",
+  "promotions",
+  "community",
+  "team",
+];
+/** Mirrors EXPORT_FORMATS ids in utils/multiFormatExport.ts. */
+const EXPORT_FORMAT_IDS = [
+  "story_vertical",
+  "feed_portrait",
+  "feed_square",
+  "social_landscape",
+  "marketplace",
+  "gbp",
+];
+const MOTION_ASPECT_VALUES = ["9:16", "16:9"];
+/** Mirrors VideoRequestOptions.soundtrack in types.ts. */
+const MOTION_AUDIO_VALUES = ["none", "celebration", "cinematic", "anthemic", "funk"];
+const LOGO_CORNER_VALUES = ["top_left", "top_right", "bottom_left", "bottom_right"];
+const LOGO_SCALE_MIN = 0.04;
+const LOGO_SCALE_MAX = 0.5;
+const APPROVAL_POLICY_MODES = ["none", "first_n", "always", "per_category"];
+const APPROVAL_FIRST_N_MAX = 100;
+const FEATURE_PERMISSION_KEYS = ["playful", "video", "freeTextEdit"];
+const FEATURE_PERMISSION_MAX_PEOPLE = 200;
+const BRAND_VOICE_MAX_ITEMS = 3;
+const BRAND_VOICE_MAX_CHARS = 60;
+
+const DEALER_SELECT_FIELD_VALUES = {
+  signature_look: SIGNATURE_LOOK_VALUES,
+  alternate_look: SIGNATURE_LOOK_VALUES,
+  image_quality_tier: IMAGE_QUALITY_TIER_VALUES,
+};
+const DEALER_BOOL_FIELDS = ["requires_approval", "required_hashtags_locked"];
+/** Byte caps; must match the json field maxSize in migration 1751500000. */
+const DEALER_JSON_FIELD_LIMITS = {
+  motion_signature: 2000,
+  logo_placement: 1000,
+  brand_voice_do: 1000,
+  brand_voice_dont: 1000,
+  category_destinations: 8000,
+  approval_policy: 2000,
+  feature_permissions: 8000,
+};
+
+function assertBooleanInput(field, value) {
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
+  throw new Error(field + " must be true or false");
+}
+
+/** Empty clears a select; anything else must be one of the allowed ids. */
+function assertSelectInput(field, value, allowed) {
+  const normalized = collapseWhitespace(value);
+  if (!normalized) return "";
+  if (allowed.indexOf(normalized) === -1) {
+    throw new Error(field + " must be one of " + allowed.join(", "));
+  }
+  return normalized;
+}
+
+function isPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Accept a structured field as either a decoded value (JSON bodies) or its
+ * JSON text (multipart bodies). null/empty clears the field.
+ */
+function parseJsonInput(field, value, maxSize) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") {
+    const raw = value.trim();
+    if (!raw || raw === "null") return null;
+    if (raw.length > maxSize) throw new Error(field + " is too large");
+    try {
+      return JSON.parse(raw);
+    } catch (_e) {
+      throw new Error(field + " must be valid JSON");
+    }
+  }
+  if (typeof value !== "object") throw new Error(field + " must be valid JSON");
+  return value;
+}
+
+/** Deduplicated list whose every entry comes from an allowlist. */
+function allowedIdList(field, value, allowed) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new Error(field + " must be a list");
+  const result = [];
+  for (let i = 0; i < value.length; i++) {
+    const item = collapseWhitespace(value[i]);
+    if (allowed.indexOf(item) === -1) {
+      throw new Error(field + " contains an unsupported value");
+    }
+    if (result.indexOf(item) === -1) result.push(item);
+  }
+  return result;
+}
+
+function validateBrandVoiceList(field, value) {
+  if (!Array.isArray(value)) throw new Error(field + " must be a list of phrases");
+  if (value.length > BRAND_VOICE_MAX_ITEMS) {
+    throw new Error(field + " may list at most " + BRAND_VOICE_MAX_ITEMS + " phrases");
+  }
+  const result = [];
+  for (let i = 0; i < value.length; i++) {
+    if (typeof value[i] !== "string") {
+      throw new Error(field + " must be a list of phrases");
+    }
+    const phrase = collapseWhitespace(value[i]);
+    if (!phrase) continue;
+    if (phrase.length > BRAND_VOICE_MAX_CHARS) {
+      throw new Error(
+        field + " phrases must be " + BRAND_VOICE_MAX_CHARS + " characters or fewer",
+      );
+    }
+    result.push(phrase);
+  }
+  return result;
+}
+
+/** { style, aspects[], audio } — the fixed VideoRequestOptions for a Look. */
+function validateMotionSignature(value) {
+  if (!isPlainObject(value)) throw new Error("motion_signature has an invalid shape");
+  const style = collapseWhitespace(value.style);
+  if (!style || style.length > 40) {
+    throw new Error("motion_signature style must be 1-40 characters");
+  }
+  const aspects = allowedIdList(
+    "motion_signature aspects",
+    value.aspects,
+    MOTION_ASPECT_VALUES,
+  );
+  const audio = collapseWhitespace(value.audio) || "none";
+  if (MOTION_AUDIO_VALUES.indexOf(audio) === -1) {
+    throw new Error(
+      "motion_signature audio must be one of " + MOTION_AUDIO_VALUES.join(", "),
+    );
+  }
+  return { style: style, aspects: aspects, audio: audio };
+}
+
+/** { corner, scale } — logo anchor and width as a fraction of the canvas. */
+function validateLogoPlacement(value) {
+  if (!isPlainObject(value)) throw new Error("logo_placement has an invalid shape");
+  const corner = collapseWhitespace(value.corner);
+  if (LOGO_CORNER_VALUES.indexOf(corner) === -1) {
+    throw new Error(
+      "logo_placement corner must be one of " + LOGO_CORNER_VALUES.join(", "),
+    );
+  }
+  const scale = typeof value.scale === "number" ? value.scale : Number(value.scale);
+  if (!Number.isFinite(scale) || scale < LOGO_SCALE_MIN || scale > LOGO_SCALE_MAX) {
+    throw new Error(
+      "logo_placement scale must be between " +
+        LOGO_SCALE_MIN +
+        " and " +
+        LOGO_SCALE_MAX,
+    );
+  }
+  return { corner: corner, scale: Math.round(scale * 1000) / 1000 };
+}
+
+/** category → { platformIds[], formatIds[], video } (§4.4). */
+function validateCategoryDestinations(value) {
+  if (!isPlainObject(value)) {
+    throw new Error("category_destinations has an invalid shape");
+  }
+  const result = {};
+  const platformIds = allowedPostPlatformIds();
+  const categories = Object.keys(value);
+  for (let i = 0; i < categories.length; i++) {
+    const category = categories[i];
+    if (BRAND_CATEGORY_IDS.indexOf(category) === -1) {
+      throw new Error("category_destinations contains an unknown category");
+    }
+    const entry = value[category];
+    if (!isPlainObject(entry)) {
+      throw new Error("category_destinations has an invalid shape");
+    }
+    result[category] = {
+      platformIds: allowedIdList(
+        "category_destinations platformIds",
+        entry.platformIds,
+        platformIds,
+      ),
+      formatIds: allowedIdList(
+        "category_destinations formatIds",
+        entry.formatIds,
+        EXPORT_FORMAT_IDS,
+      ),
+      video:
+        entry.video === undefined
+          ? false
+          : assertBooleanInput("category_destinations video", entry.video),
+    };
+  }
+  return result;
+}
+
+/** { mode, firstN?, categories[]? } — extends dealers.requires_approval. */
+function validateApprovalPolicy(value) {
+  if (!isPlainObject(value)) throw new Error("approval_policy has an invalid shape");
+  const mode = collapseWhitespace(value.mode);
+  if (APPROVAL_POLICY_MODES.indexOf(mode) === -1) {
+    throw new Error(
+      "approval_policy mode must be one of " + APPROVAL_POLICY_MODES.join(", "),
+    );
+  }
+  const result = { mode: mode };
+  if (mode === "first_n") {
+    const firstN =
+      typeof value.firstN === "number" ? value.firstN : Number(value.firstN);
+    if (!Number.isInteger(firstN) || firstN < 1 || firstN > APPROVAL_FIRST_N_MAX) {
+      throw new Error(
+        "approval_policy firstN must be a whole number from 1 to " +
+          APPROVAL_FIRST_N_MAX,
+      );
+    }
+    result.firstN = firstN;
+  }
+  if (mode === "per_category") {
+    result.categories = allowedIdList(
+      "approval_policy categories",
+      value.categories,
+      BRAND_CATEGORY_IDS,
+    );
+  }
+  return result;
+}
+
+/** feature → { team, people: { [personId]: bool } } for playful/video/freeTextEdit. */
+function validateFeaturePermissions(value) {
+  if (!isPlainObject(value))
+    throw new Error("feature_permissions has an invalid shape");
+  const result = {};
+  const features = Object.keys(value);
+  for (let i = 0; i < features.length; i++) {
+    const feature = features[i];
+    if (FEATURE_PERMISSION_KEYS.indexOf(feature) === -1) {
+      throw new Error("feature_permissions contains an unknown feature");
+    }
+    const entry = value[feature];
+    if (!isPlainObject(entry))
+      throw new Error("feature_permissions has an invalid shape");
+    const people = {};
+    if (entry.people !== undefined && entry.people !== null) {
+      if (!isPlainObject(entry.people)) {
+        throw new Error("feature_permissions has an invalid shape");
+      }
+      const personIds = Object.keys(entry.people);
+      if (personIds.length > FEATURE_PERMISSION_MAX_PEOPLE) {
+        throw new Error("feature_permissions lists too many people");
+      }
+      for (let j = 0; j < personIds.length; j++) {
+        if (!/^[A-Za-z0-9_-]{1,32}$/.test(personIds[j])) {
+          throw new Error("feature_permissions has an invalid person id");
+        }
+        people[personIds[j]] = assertBooleanInput(
+          "feature_permissions people",
+          entry.people[personIds[j]],
+        );
+      }
+    }
+    result[feature] = {
+      team:
+        entry.team === undefined
+          ? false
+          : assertBooleanInput("feature_permissions team", entry.team),
+      people: people,
+    };
+  }
+  return result;
+}
+
+const DEALER_JSON_FIELD_VALIDATORS = {
+  motion_signature: validateMotionSignature,
+  logo_placement: validateLogoPlacement,
+  brand_voice_do: function (value) {
+    return validateBrandVoiceList("brand_voice_do", value);
+  },
+  brand_voice_dont: function (value) {
+    return validateBrandVoiceList("brand_voice_dont", value);
+  },
+  category_destinations: validateCategoryDestinations,
+  approval_policy: validateApprovalPolicy,
+  feature_permissions: validateFeaturePermissions,
+};
+
+/**
+ * Validate one structured dealer field and return the canonical JSON text to
+ * store (PocketBase json fields accept raw JSON strings), or null to clear.
+ */
+function dealerJsonFieldValue(field, rawValue) {
+  const limit = DEALER_JSON_FIELD_LIMITS[field];
+  const validator = DEALER_JSON_FIELD_VALIDATORS[field];
+  if (!limit || !validator) throw new Error("Unknown dealer field");
+  const parsed = parseJsonInput(field, rawValue, limit);
+  if (parsed === null) return null;
+  const serialized = JSON.stringify(validator(parsed));
+  if (serialized.length > limit) throw new Error(field + " is too large");
+  return serialized;
+}
+
+/** Read a json field back as a decoded object, or null when unset/invalid. */
+function readDealerJsonField(record, field) {
+  let raw = "";
+  try {
+    raw = (record.getString(field) || "").toString().trim();
+  } catch (_e) {
+    return null;
+  }
+  if (!raw || raw === "null") return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+/** Brand-voice chip lists always serialize as string arrays. */
+function readDealerStringList(record, field) {
+  const parsed = readDealerJsonField(record, field);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(function (item) {
+    return typeof item === "string";
+  });
+}
+
 /**
  * Build the allowlisted mutable dealers fields for the custom multipart
  * routes. Credential switches are passed by the authorized route so a
@@ -2721,7 +3431,9 @@ function dealerMutationData(body, allowCode, allowAdminCode) {
     const field = fields[i];
     if (body[field] === undefined) continue;
     let value = (body[field] || "").toString();
-    if (field === "name") value = value.trim();
+    if (field === "name" || field === "default_tone" || field === "playful_style") {
+      value = value.trim();
+    }
     if (
       field === "facebook_page_tag" ||
       field === "instagram_handle" ||
@@ -2753,14 +3465,28 @@ function dealerMutationData(body, allowCode, allowAdminCode) {
     data.admin_code = adminCode;
   }
 
-  if (body.requires_approval !== undefined) {
-    if (body.requires_approval === true || body.requires_approval === "true") {
-      data.requires_approval = true;
-    } else if (body.requires_approval === false || body.requires_approval === "false") {
-      data.requires_approval = false;
-    } else {
-      throw new Error("requires_approval must be true or false");
-    }
+  for (let i = 0; i < DEALER_BOOL_FIELDS.length; i++) {
+    const field = DEALER_BOOL_FIELDS[i];
+    if (body[field] === undefined) continue;
+    data[field] = assertBooleanInput(field, body[field]);
+  }
+
+  const selectFields = Object.keys(DEALER_SELECT_FIELD_VALUES);
+  for (let i = 0; i < selectFields.length; i++) {
+    const field = selectFields[i];
+    if (body[field] === undefined) continue;
+    data[field] = assertSelectInput(
+      field,
+      body[field],
+      DEALER_SELECT_FIELD_VALUES[field],
+    );
+  }
+
+  const jsonFields = Object.keys(DEALER_JSON_FIELD_LIMITS);
+  for (let i = 0; i < jsonFields.length; i++) {
+    const field = jsonFields[i];
+    if (body[field] === undefined) continue;
+    data[field] = dealerJsonFieldValue(field, body[field]);
   }
 
   return data;
@@ -2834,6 +3560,13 @@ function mutationErrorText(err) {
   }
 }
 
+const SAFE_FIELD_MESSAGE_PREFIXES = Object.keys(DEALER_SELECT_FIELD_VALUES)
+  .concat(DEALER_BOOL_FIELDS)
+  .concat(Object.keys(DEALER_JSON_FIELD_LIMITS))
+  .concat(Object.keys(PERSON_TEXT_FIELD_LIMITS))
+  .concat(PERSON_BOOL_FIELDS)
+  .concat(["manager_scope"]);
+
 function safeDealerMutationError(err) {
   const message = mutationErrorText(err);
   const known = [
@@ -2853,6 +3586,11 @@ function safeDealerMutationError(err) {
   ];
   for (let i = 0; i < known.length; i++) {
     if (message.indexOf(known[i]) !== -1) return known[i];
+  }
+  // Brand-consistency validators emit "<field> <reason>" messages that never
+  // echo client input, so they are safe to surface verbatim.
+  for (let i = 0; i < SAFE_FIELD_MESSAGE_PREFIXES.length; i++) {
+    if (message.indexOf(SAFE_FIELD_MESSAGE_PREFIXES[i] + " ") === 0) return message;
   }
   if (message.indexOf("Value must be unique") !== -1) {
     return "Access code is already in use";
@@ -3078,6 +3816,21 @@ function serializeDealer(record) {
     default_style: record.getString("default_style"),
     enabled_fun_styles: record.getString("enabled_fun_styles"),
     custom_scenarios: record.getString("custom_scenarios"),
+    // Brand-consistent creative system (phase 1). Structured fields arrive
+    // decoded so the client never parses JSON text out of the session.
+    signature_look: record.getString("signature_look"),
+    alternate_look: record.getString("alternate_look"),
+    default_tone: record.getString("default_tone"),
+    playful_style: record.getString("playful_style"),
+    motion_signature: readDealerJsonField(record, "motion_signature"),
+    logo_placement: readDealerJsonField(record, "logo_placement"),
+    brand_voice_do: readDealerStringList(record, "brand_voice_do"),
+    brand_voice_dont: readDealerStringList(record, "brand_voice_dont"),
+    required_hashtags_locked: recordBool(record, "required_hashtags_locked"),
+    category_destinations: readDealerJsonField(record, "category_destinations"),
+    approval_policy: readDealerJsonField(record, "approval_policy"),
+    feature_permissions: readDealerJsonField(record, "feature_permissions"),
+    image_quality_tier: record.getString("image_quality_tier"),
   };
 }
 
@@ -3297,6 +4050,12 @@ module.exports = {
   userAgent,
   legacyClientCompatibilityEnabled,
   recordProxyGenerationEvent,
+  proxyGenerationIdentity,
+  proxyGenerationPurpose,
+  proxyGenerationUsage,
+  proxyPolicyVersionMismatch,
+  generationUsageSummary,
+  GENERATION_PURPOSES,
   proxyGenerationResponseSucceeded,
   claimGenerationEvents,
   finalizeGenerationEventClaims,
@@ -3330,6 +4089,11 @@ module.exports = {
   assertEnum,
   normalizeDealerSocialField,
   dealerMutationData,
+  dealerJsonFieldValue,
+  SIGNATURE_LOOK_VALUES,
+  IMAGE_QUALITY_TIER_VALUES,
+  BRAND_CATEGORY_IDS,
+  DEALER_JSON_FIELD_LIMITS,
   restrictDealerLogoSchema,
   dealerLogoFile,
   assertDealerCredentialAvailable,
@@ -3355,6 +4119,8 @@ module.exports = {
   personRoleToSessionRole,
   serializePerson,
   serializePersonSummary,
+  personProfileMutationData,
+  personProfileErrorPayload,
   isAuthoritativePostPerson,
   generateUniquePersonPin,
   generateUniquePersonPinWithDao,

@@ -1,6 +1,6 @@
 {
   "version": 5,
-  "verifiedAt": "2026-08-14",
+  "verifiedAt": "2026-09-02",
   "models": {
     "textQuality": "gemini-3.6-flash",
     "textFast": "gemini-3.5-flash-lite",
@@ -11,24 +11,31 @@
     "videoStandard": "veo-3.1-fast-generate-preview",
     "videoQuality": "veo-3.1-generate-preview"
   },
+  "thinkingLevels": {
+    "gemini-3.6-flash": ["minimal", "low", "medium", "high"],
+    "gemini-3.5-flash-lite": ["minimal", "low", "medium", "high"]
+  },
   "tasks": {
     "caption": {
       "kind": "text",
       "tier": "quality",
       "models": ["gemini-3.6-flash", "gemini-3.5-flash-lite"],
-      "maxOutputTokens": 2048
+      "maxOutputTokens": 2048,
+      "thinkingLevel": "low"
     },
     "caption_regenerate": {
       "kind": "text",
       "tier": "quality",
       "models": ["gemini-3.6-flash", "gemini-3.5-flash-lite"],
-      "maxOutputTokens": 2048
+      "maxOutputTokens": 2048,
+      "thinkingLevel": "low"
     },
     "caption_edit": {
       "kind": "text",
       "tier": "fast",
       "models": ["gemini-3.5-flash-lite", "gemini-3.6-flash"],
-      "maxOutputTokens": 2048
+      "maxOutputTokens": 2048,
+      "thinkingLevel": "minimal"
     },
     "image_standard": {
       "kind": "image",
@@ -81,7 +88,8 @@
       "textPart": ["text"],
       "imagePart": ["inlineData"],
       "inlineData": ["mimeType", "data"],
-      "textGenerationConfig": ["maxOutputTokens"],
+      "textGenerationConfig": ["maxOutputTokens", "thinkingConfig"],
+      "thinkingConfig": ["thinkingLevel"],
       "imageGenerationConfig": ["responseModalities", "imageConfig", "maxOutputTokens"],
       "imageConfig": ["imageSize", "aspectRatio"],
       "legacyImageGenerationConfig": [

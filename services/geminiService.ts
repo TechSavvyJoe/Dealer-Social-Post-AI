@@ -21,8 +21,14 @@ import {
   funStyleCatalog,
   generateVideoPrompt,
 } from "./promptConfig";
-import { normalizeError, recoveryHint } from "../utils/errorHandler";
+import {
+  isBlockedContentError,
+  isOutdatedClientError,
+  normalizeError,
+  recoveryHint,
+} from "../utils/errorHandler";
 import { getGeminiClient } from "./geminiClient";
+import { outdatedClientErrorFromResponse, type GenerationPurpose } from "./geminiProxy";
 import { GeminiVideoOperationSchema } from "../utils/schemas";
 import {
   type CaptionGenerationResult,
@@ -46,7 +52,11 @@ import {
   captureAuthEpoch,
   notifySessionRejected,
 } from "../utils/authBoundary";
-import { generateTextViaClaude, shouldFallbackToClaude } from "./claudeAdapter";
+import {
+  claudeAcceptsImage,
+  generateTextViaClaude,
+  shouldFallbackToClaude,
+} from "./claudeAdapter";
 import { generateImageViaOpenAI, shouldFallbackToOpenAI } from "./openaiAdapter";
 import { requestCache } from "../utils/requestCache";
 import {
@@ -157,6 +167,16 @@ async function withFallbackChain<T>(
       // to another provider/model after the queue has aborted the active task.
       if (isAbortError(err)) throw err;
       lastErr = err;
+      // A content refusal is a verdict on the photo/wording, not on the model:
+      // the next model would be shown the same input and answer the same way.
+      if (isBlockedContentError(err)) {
+        throw new ModelChainFailure(task, attemptedModels, err);
+      }
+      // A stale installed app is rejected before the model is even chosen;
+      // every model in the chain would answer with the same 409.
+      if (isOutdatedClientError(err)) {
+        throw new ModelChainFailure(task, attemptedModels, err);
+      }
       const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
       // Authentication and malformed requests will fail identically across
       // models, so stop. A 404 can be model-specific (regional rollout or a
@@ -347,9 +367,12 @@ const imageFailureReason = (response: unknown): string => {
 
 /**
  * Run image generation across the model ladder. Treats "HTTP 200 but no
- * image bytes" (IMAGE_RECITATION, SAFETY, empty parts) as a failure so the
- * next model is tried — previously that silent empty success aborted the
- * whole post with a generic error.
+ * image bytes" (empty parts, NO_IMAGE, IMAGE_OTHER) as a failure so the next
+ * model is tried — previously that silent empty success aborted the whole
+ * post with a generic error. Content refusals (SAFETY, IMAGE_SAFETY, empty
+ * IMAGE_RECITATION) arrive from the client as a typed `blocked` error: the
+ * ladder stops and `shouldFallbackToOpenAI` declines, so callers ship the
+ * original photo instead of a fabricated one.
  */
 const generateImageWithFallback = async (
   task: "image_standard" | "image_studio",
@@ -794,6 +817,9 @@ export const reviewGeneratedImageText = async (
       model: modelId,
       task,
       attemptId,
+      // Runs under the caption_regenerate policy but is a QC review, not a
+      // caption; the ledger must not count it as one.
+      purpose: "vision_review",
       contents: {
         parts: [
           { text: reviewPrompt },
@@ -1501,7 +1527,7 @@ export const generateFunSocialPostImage = async (
       (style) => style.id === requestedStyle || style.name === requestedStyle,
     )?.name || "Fun Mode";
 
-  const imageParts: any[] = [originalImagePart, { text: funPrompt }];
+  const imageParts: any[] = [{ text: funPrompt }, originalImagePart];
   if (logoImagePart) {
     imageParts.push(logoImagePart);
   }
@@ -1556,7 +1582,7 @@ export const editSocialPostImage = async (
     logoBase64Url,
   );
 
-  const imageParts: any[] = [previousImagePart, { text: editInstruction }];
+  const imageParts: any[] = [{ text: editInstruction }, previousImagePart];
   if (logoImagePart) {
     imageParts.push(logoImagePart);
   }
@@ -1648,7 +1674,9 @@ export const generateSocialPostTextDetailed = async (
         model: modelId,
         task,
         attemptId,
-        contents: { parts: [imagePart, { text: textPrompt }] },
+        // Text first: the shared prompt prefix precedes the per-post image
+        // bytes so Gemini's implicit cache can match across requests.
+        contents: { parts: [{ text: textPrompt }, imagePart] },
         generationConfig: taskConfig.params,
         requestAuthEpoch,
         signal,
@@ -1684,6 +1712,10 @@ export const generateSocialPostTextDetailed = async (
     fallbackCount = generated.aiMeta.fallbackCount;
   } catch (err) {
     if (isAbortError(err)) throw err;
+    // Terminal: the photo or wording was refused. A template caption would
+    // hide that from the salesperson, and Claude would be handed the same
+    // input, so surface the typed error for the curated toast instead.
+    if (isBlockedContentError(err)) throw err;
     fallbackCount = attemptedModelsFromError(err);
     fallbackReason =
       err instanceof Error && err.message.toLowerCase().includes("quality gate")
@@ -1695,8 +1727,12 @@ export const generateSocialPostTextDetailed = async (
         err,
       );
       try {
-        // Claude doesn't see the image, so include a one-liner that frames it.
-        const claudePrompt = `${textPrompt}\n\n(Note: image was not transmitted to fallback model. Use the creative brief above to infer scene; do not invent specific visual details you cannot verify.)`;
+        // Claude sees the same photo when its media type is supported;
+        // otherwise a one-liner frames the missing image.
+        const claudeImage = { mimeType, data: base64Data };
+        const claudePrompt = claudeAcceptsImage(claudeImage)
+          ? textPrompt
+          : `${textPrompt}\n\n(Note: image was not transmitted to fallback model. Use the creative brief above to infer scene; do not invent specific visual details you cannot verify.)`;
         text = cleanGeneratedText(
           await generateTextViaClaude(claudePrompt, {
             task,
@@ -1704,6 +1740,7 @@ export const generateSocialPostTextDetailed = async (
             model: taskConfig.claudeFallback,
             temperature: taskConfig.claudeTemperature,
             maxTokens: taskConfig.params.maxOutputTokens,
+            image: claudeImage,
             requestAuthEpoch,
             signal,
           }),
@@ -1812,6 +1849,7 @@ const generateRawStructuredImageText = async (
   imageBase64Url: string,
   prompt: string,
   emptyResponseMessage: string,
+  purpose: GenerationPurpose,
   signal?: AbortSignal,
 ): Promise<string> => {
   const requestAuthEpoch = captureAuthEpoch();
@@ -1830,7 +1868,8 @@ const generateRawStructuredImageText = async (
       model: modelId,
       task,
       attemptId,
-      contents: { parts: [imagePart, { text: prompt }] },
+      purpose,
+      contents: { parts: [{ text: prompt }, imagePart] },
       generationConfig: taskConfig.params,
       requestAuthEpoch,
       signal,
@@ -1866,6 +1905,7 @@ export const generatePlatformCaptionPack = async (
     imageBase64Url,
     `${prompt}\n\n${identityRule}`,
     "Caption-pack AI returned no structured copy.",
+    "caption_pack",
     signal,
   );
 };
@@ -1879,6 +1919,7 @@ export const generateWebsiteDraftMetadata = async (
     imageBase64Url,
     prompt,
     "Website draft AI returned no metadata.",
+    "website_draft",
     signal,
   );
 
@@ -2036,10 +2077,13 @@ export const generateSocialPost = async (
         )
   ).catch((error) => {
     if (isAbortError(error)) throw error;
+    // Keep the typed provider failure reachable so a blocked-content verdict
+    // still classifies as `blocked` for the toast instead of "unknown".
     throw new Error(
       `Failed to generate text content: ${
         error instanceof Error ? error.message : String(error)
       }`,
+      { cause: error },
     );
   });
 
@@ -2050,16 +2094,20 @@ export const generateSocialPost = async (
     initialText,
     creativeBrief,
   );
+  // Text first: the shared style prompt precedes the per-post image bytes so
+  // Gemini's implicit cache can match across requests.
   const imageParts: (typeof imagePart | { text: string })[] = [
-    imagePart,
     { text: imagePrompt },
+    imagePart,
   ];
   if (logoImagePart) {
     imageParts.push(logoImagePart);
   }
 
   // Image ladder → OpenAI → original photo. Never hard-fail a delivery post
-  // just because the retoucher model blocked/recited the image.
+  // just because the retoucher model blocked/recited the image. A content
+  // block skips OpenAI (it would fabricate a photo without the customer) and
+  // ships the original photo directly.
   const imagePromise = (async () => {
     try {
       const generated = await generateImageWithFallback(
@@ -2467,6 +2515,7 @@ export const generatePostVideo = async (
           "X-Generation-Task": videoTask,
           "X-Model-Policy-Version": MODEL_POLICY_VERSION,
           "X-Generation-Attempt-ID": generationAttemptId,
+          "X-Generation-Purpose": "video",
         },
         body: JSON.stringify(body),
         signal,
@@ -2492,6 +2541,14 @@ export const generatePostVideo = async (
         text = await response.text();
       } catch (_error) {
         // The status is still useful even if its response body cannot be read.
+      }
+      // The proxy rejected a stale installed app before validating the body;
+      // no model in the chain would be treated differently.
+      const outdated = outdatedClientErrorFromResponse(response.status, text);
+      if (outdated) {
+        lastError = outdated;
+        console.error("[VideoGen] The installed app is behind the server policy.");
+        break;
       }
       // 5xx carries no normalizeError token, so spell out "unavailable" to
       // classify as a temporary outage; other statuses classify off their
@@ -2601,11 +2658,15 @@ export const generatePostVideo = async (
   }
 
   const normalized = normalizeError(lastError);
-  throw new Error(
+  const startFailure = new Error(
     `Video generation did not start safely: ${normalized.message} ${recoveryHint(
       normalized,
     )} The start request was not retried to prevent a duplicate paid video job.`,
   );
+  // Keep the typed provider failure reachable so a terminal classification
+  // (blocked, outdated) survives the wrapper instead of degrading to unknown.
+  Object.defineProperty(startFailure, "cause", { value: lastError, enumerable: false });
+  throw startFailure;
 };
 
 /**

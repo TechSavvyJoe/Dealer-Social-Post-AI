@@ -3,6 +3,7 @@ import { act, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StyleOption, ToneOption, type GeneratedPost } from "../types";
+import { createBlockedContentError } from "../utils/errorHandler";
 import { useGeneration } from "./useGeneration";
 
 const mocks = vi.hoisted(() => ({
@@ -643,6 +644,31 @@ describe("useGeneration model-tier and provenance wiring", () => {
         ),
       ),
     ).rejects.toThrow("not authorized");
+    expect(mocks.setGeneratedPost).not.toHaveBeenCalled();
+
+    cleanup();
+  });
+
+  it("shows the curated blocked-content copy when the provider refuses the post", async () => {
+    mocks.generateSocialPost.mockRejectedValueOnce(
+      createBlockedContentError("finishReason=SAFETY"),
+    );
+    const { result, cleanup } = renderGeneration();
+
+    await expect(
+      act(async () =>
+        result.current.handleGenerate(
+          StyleOption.Modern,
+          ToneOption.Professional,
+          "Alex",
+        ),
+      ),
+    ).rejects.toThrow("This photo or wording can't be used for an AI post.");
+
+    const expectedMessage =
+      "Failed to generate your post. This photo or wording can't be used for an AI post. Try a different photo or adjust the details.";
+    expect(mocks.toastError).toHaveBeenCalledWith(expectedMessage);
+    expect(mocks.setError).toHaveBeenCalledWith(expectedMessage);
     expect(mocks.setGeneratedPost).not.toHaveBeenCalled();
 
     cleanup();

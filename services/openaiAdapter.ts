@@ -16,6 +16,7 @@ import {
   captureAuthEpoch,
   notifySessionRejected,
 } from "../utils/authBoundary";
+import { isBlockedContentError } from "../utils/errorHandler";
 
 const PROXY_PATH = "/api/proxy/openai/v1/images/generations";
 
@@ -116,10 +117,13 @@ export const generateImageViaOpenAI = async (
 
 /**
  * Detects whether an error from Gemini image generation is severe enough to
- * try the OpenAI fallback. Mirrors the Claude fallback heuristic.
+ * try the OpenAI fallback. Mirrors the Claude fallback heuristic. A typed
+ * content refusal never qualifies: text-to-image would fabricate a scene
+ * without the customer's actual photo, so the caller ships the original.
  */
 export const shouldFallbackToOpenAI = (err: unknown): boolean => {
   if (!FLAGS.enableOpenAIFallback) return false;
+  if (isBlockedContentError(err)) return false;
   const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
   if (
     msg.includes("quota") ||

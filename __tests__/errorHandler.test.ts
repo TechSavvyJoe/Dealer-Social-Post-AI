@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
+  createBlockedContentError,
+  createOutdatedClientError,
+  isBlockedContentError,
+  isOutdatedClientError,
   normalizeError,
   recoveryHint,
   formatErrorForToast,
@@ -176,6 +180,156 @@ describe("Error Handler Utils", () => {
       expect(result.retryable).toBe(true);
       expect(result.message).toBe("The AI model is temporarily unavailable.");
       expect(result.original).toBe(exhausted);
+    });
+  });
+
+  describe("blocked content", () => {
+    it("creates a terminal blocked error with curated copy and the technical reason", () => {
+      const blocked = createBlockedContentError("finishReason=SAFETY");
+
+      expect(blocked.kind).toBe("blocked");
+      expect(blocked.retryable).toBe(false);
+      expect(blocked.message).toBe(
+        "This photo or wording can't be used for an AI post.",
+      );
+      expect(blocked.message).not.toContain("SAFETY");
+      expect(String((blocked.original as Error).message)).toContain(
+        "finishReason=SAFETY",
+      );
+      expect(isBlockedContentError(blocked)).toBe(true);
+    });
+
+    it("passes a blocked error through normalizeError unchanged", () => {
+      const normalized = normalizeError(
+        createBlockedContentError("finishReason=SAFETY"),
+      );
+
+      expect(normalized.kind).toBe("blocked");
+      expect(normalized.retryable).toBe(false);
+      expect(normalized.message).toBe(
+        "This photo or wording can't be used for an AI post.",
+      );
+    });
+
+    it("keeps the blocked classification through plain wrappers that carry it as cause", () => {
+      const blocked = createBlockedContentError("finishReason=PROHIBITED_CONTENT");
+      const ladderFailure = new Error(blocked.message);
+      Object.defineProperty(ladderFailure, "cause", {
+        value: blocked,
+        enumerable: false,
+      });
+      const wrapped = new Error(`Failed to generate text content: ${blocked.message}`, {
+        cause: ladderFailure,
+      });
+
+      const normalized = normalizeError(wrapped);
+
+      expect(normalized.kind).toBe("blocked");
+      expect(normalized.retryable).toBe(false);
+      expect(normalized.message).toBe(
+        "This photo or wording can't be used for an AI post.",
+      );
+      expect(normalized.original).toBe(wrapped);
+      expect(isBlockedContentError(wrapped)).toBe(true);
+    });
+
+    it("adopts any typed cause, not only blocked ones", () => {
+      const quota = new Error(
+        "Too many requests — try again in a minute.",
+      ) as NormalizedError;
+      quota.kind = "quota";
+      quota.retryable = false;
+      const wrapped = new Error(quota.message, { cause: quota });
+
+      const normalized = normalizeError(wrapped);
+
+      expect(normalized.kind).toBe("quota");
+      expect(normalized.retryable).toBe(false);
+    });
+
+    it("does not treat a quality-gate 'blocked' message as a content block", () => {
+      const normalized = normalizeError(
+        new Error("AI caption blocked by quality gate"),
+      );
+
+      expect(normalized.kind).toBe("unknown");
+      expect(normalized.retryable).toBe(true);
+      expect(isBlockedContentError(normalized)).toBe(false);
+    });
+
+    it("provides the blocked recovery hint and toast copy", () => {
+      const blocked = normalizeError(
+        createBlockedContentError("finishReason=IMAGE_SAFETY"),
+      );
+
+      expect(recoveryHint(blocked)).toBe(
+        "Try a different photo or adjust the details.",
+      );
+      expect(formatErrorForToast(blocked)).toBe(
+        "This photo or wording can't be used for an AI post. Try a different photo or adjust the details.",
+      );
+    });
+  });
+
+  describe("outdated client", () => {
+    it("creates a terminal outdated error with curated copy and the version pair on original", () => {
+      const outdated = createOutdatedClientError("5", "6");
+
+      expect(outdated.kind).toBe("outdated");
+      expect(outdated.retryable).toBe(false);
+      expect(outdated.message).toBe("This version of the app is out of date.");
+      expect(outdated.message).not.toContain("409");
+      expect(String((outdated.original as Error).message)).toContain(
+        "client 5, server 6",
+      );
+      expect(isOutdatedClientError(outdated)).toBe(true);
+      expect(isBlockedContentError(outdated)).toBe(false);
+    });
+
+    it("survives normalizeError and plain wrappers that carry it as cause", () => {
+      const outdated = createOutdatedClientError("5", "6");
+      expect(normalizeError(outdated)).toMatchObject({
+        kind: "outdated",
+        retryable: false,
+        message: "This version of the app is out of date.",
+      });
+
+      const ladderFailure = new Error(outdated.message);
+      Object.defineProperty(ladderFailure, "cause", {
+        value: outdated,
+        enumerable: false,
+      });
+      const wrapped = new Error(
+        `Failed to generate text content: ${outdated.message}`,
+        {
+          cause: ladderFailure,
+        },
+      );
+      expect(normalizeError(wrapped).kind).toBe("outdated");
+      expect(isOutdatedClientError(wrapped)).toBe(true);
+    });
+
+    it("never classifies by substring, so copy that mentions versions stays retryable", () => {
+      for (const message of [
+        "This version of the app is out of date.",
+        "POLICY_VERSION_MISMATCH",
+        "outdated model policy",
+      ]) {
+        const normalized = normalizeError(new Error(message));
+        expect(normalized.kind).toBe("unknown");
+        expect(normalized.retryable).toBe(true);
+      }
+    });
+
+    it("provides the update hint and toast copy", () => {
+      const outdated = normalizeError(createOutdatedClientError("5", "6"));
+
+      expect(recoveryHint(outdated)).toBe(
+        "Update the app from your Home Screen, then try again.",
+      );
+      expect(formatErrorForToast(outdated)).toBe(
+        "This version of the app is out of date. Update the app from your Home Screen, then try again.",
+      );
     });
   });
 

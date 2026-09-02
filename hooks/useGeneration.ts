@@ -45,6 +45,7 @@ const brandKitFromDealer = (dealer?: Dealer | null): DealerBrandKit | null => {
     name: dealer.name,
     default_hashtags: dealer.default_hashtags,
     default_footer: dealer.default_footer,
+    required_hashtags_locked: dealer.required_hashtags_locked === true,
   };
 };
 

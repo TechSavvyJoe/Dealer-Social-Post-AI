@@ -5,6 +5,7 @@
 
 import { readApiError } from "./apiErrors";
 import { assertAuthEpoch, captureAuthEpoch } from "../utils/authBoundary";
+import type { BrandCategoryId } from "../types";
 
 export type PersonRole = "manager" | "salesperson";
 
@@ -14,6 +15,15 @@ export interface PersonSummary {
   name: string;
   role: PersonRole;
   active: boolean;
+  // ---- Brand-consistent creative system (phase 1; optional, ships dark) ----
+  /** Sales-manager permission subset (approve, curate, enable). Set by dealer_admin/super_admin only. */
+  managerScope?: boolean;
+  /** Personal line (<= 140 chars) appended after the caption footer. */
+  signatureLine?: string;
+  /** Pre-selected post category (a BrandCategoryId or custom scenario category, <= 40 chars). */
+  defaultCategory?: string;
+  /** Pre-selects the Playful second image when the dealership allows it. */
+  playfulDefault?: boolean;
 }
 
 export interface RosterPerson extends PersonSummary {
@@ -43,12 +53,50 @@ export interface PeoplePage {
 
 export const API_CONTRACT_VERSION = "2026-07-31.v4";
 
+const optionalText = (...candidates: unknown[]): string | undefined => {
+  for (const candidate of candidates) {
+    if (typeof candidate === "string") return candidate;
+  }
+  return undefined;
+};
+
+const optionalFlag = (...candidates: unknown[]): boolean | undefined => {
+  for (const candidate of candidates) {
+    if (typeof candidate === "boolean") return candidate;
+  }
+  return undefined;
+};
+
+/** Six Customer Hub categories a salesperson may pre-select (spec §4.4). */
+export const BRAND_CATEGORY_OPTIONS: ReadonlyArray<{
+  id: BrandCategoryId;
+  label: string;
+}> = [
+  { id: "deliveries", label: "Deliveries" },
+  { id: "inventory", label: "Inventory" },
+  { id: "service", label: "Service" },
+  { id: "promotions", label: "Promotions" },
+  { id: "community", label: "Community" },
+  { id: "team", label: "Team" },
+];
+
+/** Server limit for signature_line (pb_hooks PERSON_TEXT_FIELD_LIMITS). */
+export const SIGNATURE_LINE_MAX_LENGTH = 140;
+/** Server limit for default_category (pb_hooks PERSON_TEXT_FIELD_LIMITS). */
+export const DEFAULT_CATEGORY_MAX_LENGTH = 40;
+
 const normalizePerson = (person: Record<string, unknown>): RosterPerson => ({
   id: String(person.id || ""),
   dealer: String(person.dealer || ""),
   name: String(person.name || ""),
   role: person.role === "manager" ? "manager" : "salesperson",
   active: person.active !== false,
+  // Brand-consistent creative system (phase 1): the server serializes these
+  // in camelCase; the snake_case fallbacks cover a raw record shape.
+  managerScope: optionalFlag(person.managerScope, person.manager_scope),
+  signatureLine: optionalText(person.signatureLine, person.signature_line),
+  defaultCategory: optionalText(person.defaultCategory, person.default_category),
+  playfulDefault: optionalFlag(person.playfulDefault, person.playful_default),
   hasPin: Boolean(person.hasPin ?? person.has_pin),
   pinNeedsDistribution: Boolean(
     person.pinNeedsDistribution ?? person.pin_needs_distribution,
@@ -190,13 +238,42 @@ export const addPerson = async (input: {
 
 export const addSalesperson = addPerson;
 
+export type PersonUpdateFields = Partial<
+  Pick<
+    RosterPerson,
+    | "name"
+    | "active"
+    | "role"
+    | "managerScope"
+    | "signatureLine"
+    | "defaultCategory"
+    | "playfulDefault"
+  >
+>;
+
+/** Wire keys accepted by PATCH /api/app/salespeople/:id for the profile fields. */
+const PERSON_PROFILE_WIRE_KEYS = {
+  managerScope: "manager_scope",
+  signatureLine: "signature_line",
+  defaultCategory: "default_category",
+  playfulDefault: "playful_default",
+} as const;
+
 export const updatePerson = async (
   id: string,
-  fields: Partial<Pick<RosterPerson, "name" | "active" | "role">>,
+  fields: PersonUpdateFields,
 ): Promise<RosterPerson> => {
+  const { managerScope, signatureLine, defaultCategory, playfulDefault, ...rest } =
+    fields;
+  const payload: Record<string, unknown> = { ...rest };
+  const profile = { managerScope, signatureLine, defaultCategory, playfulDefault };
+  for (const [key, wireKey] of Object.entries(PERSON_PROFILE_WIRE_KEYS)) {
+    const value = profile[key as keyof typeof profile];
+    if (value !== undefined) payload[wireKey] = value;
+  }
   const body = await json<Record<string, unknown>>(
     `/api/app/salespeople/${encodeURIComponent(id)}`,
-    { method: "PATCH", body: JSON.stringify(fields) },
+    { method: "PATCH", body: JSON.stringify(payload) },
   );
   return normalizePerson(body);
 };

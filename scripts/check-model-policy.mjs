@@ -55,6 +55,29 @@ assert.deepEqual(
 );
 
 const configuredModels = new Set(Object.values(canonical.models));
+
+const THINKING_LEVELS = ["minimal", "low", "medium", "high"];
+assert.ok(
+  canonical.thinkingLevels && typeof canonical.thinkingLevels === "object",
+  "Canonical Gemini policy must declare per-model thinkingLevels",
+);
+for (const [model, levels] of Object.entries(canonical.thinkingLevels)) {
+  assert.ok(
+    configuredModels.has(model),
+    `thinkingLevels references undeclared model ${model}`,
+  );
+  assert.ok(
+    Array.isArray(levels) && levels.length > 0,
+    `${model} must list at least one supported thinking level`,
+  );
+  for (const level of levels) {
+    assert.ok(
+      THINKING_LEVELS.includes(level),
+      `${model} lists unknown thinking level ${level}`,
+    );
+  }
+}
+
 for (const [taskName, task] of Object.entries(canonical.tasks)) {
   assert.ok(task.models.length > 0, `${taskName} must have at least one model`);
   assert.equal(
@@ -78,6 +101,21 @@ for (const [taskName, task] of Object.entries(canonical.tasks)) {
       task.maxOutputTokens,
       2048,
       `${taskName} must preserve the 2048-token caption contract`,
+    );
+    assert.ok(
+      THINKING_LEVELS.includes(task.thinkingLevel),
+      `${taskName} must pin a thinkingLevel from ${THINKING_LEVELS.join("|")}`,
+    );
+    for (const model of task.models) {
+      assert.ok(
+        canonical.thinkingLevels[model]?.includes(task.thinkingLevel),
+        `${taskName} pins thinkingLevel "${task.thinkingLevel}" which ${model} does not support`,
+      );
+    }
+  } else {
+    assert.ok(
+      !("thinkingLevel" in task),
+      `${taskName} is not a text task and must not carry a thinkingLevel`,
     );
   }
   if (task.kind === "image") {
@@ -109,6 +147,16 @@ assert.deepEqual(canonical.tasks.video_quality, {
 
 const generateFields = canonical.allowedRequestFields.generateContent;
 assert.deepEqual(generateFields.topLevel, ["contents", "generationConfig"]);
+assert.deepEqual(
+  generateFields.textGenerationConfig,
+  ["maxOutputTokens", "thinkingConfig"],
+  "Text generationConfig allowlist drifted",
+);
+assert.deepEqual(
+  generateFields.thinkingConfig,
+  ["thinkingLevel"],
+  "thinkingConfig must admit only thinkingLevel (never thinkingBudget or includeThoughts)",
+);
 assert.ok(
   !generateFields.topLevel.includes("safetySettings"),
   "Clients must not be allowed to submit safetySettings",

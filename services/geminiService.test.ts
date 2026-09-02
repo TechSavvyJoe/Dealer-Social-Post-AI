@@ -8,6 +8,7 @@ import {
   generateFunSocialPostImage,
   generatePlatformCaptionPack,
   generateSocialPost,
+  generateSocialPostTextDetailed,
   generatePostVideo,
   generateWebsiteDraftMetadata,
   reviewGeneratedImageText,
@@ -15,7 +16,16 @@ import {
 } from "./geminiService";
 import { parsePlatformCaptionPack } from "./platformCopy";
 import { StyleOption, ToneOption, VideoStyle } from "../types";
-import { MODEL_POLICY, MODEL_POLICY_VERSION, MODELS, TASKS } from "./modelConfig";
+import {
+  FLAGS,
+  MODEL_POLICY,
+  MODEL_POLICY_VERSION,
+  MODELS,
+  TASKS,
+} from "./modelConfig";
+import { generateTextViaClaude } from "./claudeAdapter";
+import { generateImageViaOpenAI } from "./openaiAdapter";
+import { createBlockedContentError, normalizeError } from "../utils/errorHandler";
 
 // Hoist the mocks so they can be used in the mock factory
 const { mockGenerateContent, mockGenerateVideos, mockGetVideosOperation } = vi.hoisted(
@@ -59,6 +69,18 @@ vi.mock("./geminiClient", () => ({
   }),
   requireGeminiApiKey: () => "fake-api-key",
 }));
+
+// Keep the real `shouldFallbackTo*` predicates; only the network calls are
+// stubbed so the fallback decision itself is what gets exercised.
+vi.mock("./claudeAdapter", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./claudeAdapter")>();
+  return { ...actual, generateTextViaClaude: vi.fn() };
+});
+
+vi.mock("./openaiAdapter", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./openaiAdapter")>();
+  return { ...actual, generateImageViaOpenAI: vi.fn() };
+});
 
 vi.mock("../utils/imageUtils", () => ({
   parseDataUrl: (source: string) => {
@@ -202,6 +224,7 @@ describe("GeminiService model routing", () => {
     expect(textCall, `expected a call with model=${expected}`).toBeDefined();
     expect(textCall?.[0].generationConfig).toEqual({
       maxOutputTokens: 2048,
+      thinkingConfig: { thinkingLevel: "low" },
     });
     expect(textCall?.[0].generationConfig).not.toHaveProperty("temperature");
     expect(textCall?.[0].generationConfig).not.toHaveProperty("topK");
@@ -291,7 +314,10 @@ describe("GeminiService model routing", () => {
     const reviewRequest = mockGenerateContent.mock.calls.find(([request]) =>
       isImageTextReviewRequest(request),
     )?.[0];
-    expect(reviewRequest?.generationConfig).toEqual({ maxOutputTokens: 2048 });
+    expect(reviewRequest?.generationConfig).toEqual({
+      maxOutputTokens: 2048,
+      thinkingConfig: { thinkingLevel: "low" },
+    });
     expect(reviewRequest?.generationConfig).not.toHaveProperty("responseMimeType");
     expect(reviewRequest?.generationConfig).not.toHaveProperty("responseSchema");
     expect(
@@ -1166,8 +1192,10 @@ describe("GeminiService model routing", () => {
     );
 
     expect(mockGenerateContent).toHaveBeenCalledTimes(1);
+    // Website metadata runs under the caption_regenerate text task.
     expect(mockGenerateContent.mock.calls[0]?.[0].generationConfig).toEqual({
       maxOutputTokens: 2048,
+      thinkingConfig: { thinkingLevel: "low" },
     });
   });
 
@@ -1190,8 +1218,15 @@ describe("GeminiService model routing", () => {
       facebook_feed: "Congratulations to Lisa at Test Dealer.",
       instagram_feed: "Lisa's delivery day at Test Dealer. #TestDealer",
     });
-    const requestPrompt = mockGenerateContent.mock.calls[0]?.[0].contents.parts[1]
-      .text as string;
+    const requestParts = mockGenerateContent.mock.calls[0]?.[0].contents
+      .parts as Array<{
+      text?: string;
+      inlineData?: unknown;
+    }>;
+    // Text-first ordering: the shared prompt precedes the per-post image bytes.
+    expect(requestParts[0]).toHaveProperty("text");
+    expect(requestParts[1]).toHaveProperty("inlineData");
+    const requestPrompt = requestParts[0].text as string;
     expect(requestPrompt).toContain(
       'the only customer label allowed in any value is exactly "Lisa"',
     );
@@ -1877,4 +1912,208 @@ describe("GeminiService model routing", () => {
       ).rejects.toThrow("Video proxy returned invalid MP4 media.");
     },
   );
+
+  describe("blocked-content handling", () => {
+    const originalClaudeFlag = FLAGS.enableClaudeFallback;
+    const originalOpenAIFlag = FLAGS.enableOpenAIFallback;
+    const usableCaption =
+      "A fresh set of keys and a picture-perfect delivery day at Test Dealer. Congratulations on the new ride! #TestDealer";
+    const vendorOutage = () =>
+      new Error("The AI service could not complete this request (error 503).");
+    const isImageRequest = (request: {
+      generationConfig?: { responseModalities?: string[] };
+    }) => request.generationConfig?.responseModalities?.includes("IMAGE") === true;
+
+    beforeEach(() => {
+      vi.mocked(generateTextViaClaude).mockReset();
+      vi.mocked(generateImageViaOpenAI).mockReset();
+    });
+
+    afterEach(() => {
+      FLAGS.enableClaudeFallback = originalClaudeFlag;
+      FLAGS.enableOpenAIFallback = originalOpenAIFlag;
+    });
+
+    it("stops the caption ladder on a SAFETY block and never routes it to Claude", async () => {
+      FLAGS.enableClaudeFallback = true;
+      mockGenerateContent.mockImplementation(() =>
+        Promise.reject(createBlockedContentError("finishReason=SAFETY")),
+      );
+
+      const error: unknown = await generateSocialPostTextDetailed(
+        "data:image/jpeg;base64,blocked-caption-photo",
+        ToneOption.Professional,
+        "Test Dealer",
+      ).catch((err) => err);
+
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe(
+        "This photo or wording can't be used for an AI post.",
+      );
+      expect(normalizeError(error)).toMatchObject({
+        kind: "blocked",
+        retryable: false,
+      });
+      // One model only: the second model would be shown the same photo.
+      expect(mockGenerateContent).toHaveBeenCalledTimes(1);
+      expect(generateTextViaClaude).not.toHaveBeenCalled();
+    });
+
+    it("surfaces a blocked caption from generateSocialPost as a typed blocked error", async () => {
+      FLAGS.enableClaudeFallback = true;
+      mockGenerateContent.mockImplementation((request) => {
+        if (isImageTextReviewRequest(request)) return imageTextReviewResponse();
+        if (isImageRequest(request)) return Promise.resolve(generatedImageResponse());
+        return Promise.reject(
+          createBlockedContentError("finishReason=PROHIBITED_CONTENT"),
+        );
+      });
+
+      const error: unknown = await generateSocialPost(
+        "data:image/jpeg;base64,blocked-post-photo",
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Test Dealer",
+      ).catch((err) => err);
+
+      expect((error as Error).message).toContain("Failed to generate text content");
+      const normalized = normalizeError(error);
+      expect(normalized.kind).toBe("blocked");
+      expect(normalized.retryable).toBe(false);
+      expect(normalized.message).toBe(
+        "This photo or wording can't be used for an AI post.",
+      );
+      expect(generateTextViaClaude).not.toHaveBeenCalled();
+      const captionCalls = mockGenerateContent.mock.calls.filter(
+        ([request]) => request.task === "caption",
+      );
+      expect(captionCalls).toHaveLength(1);
+    });
+
+    it("advances the ladder after a MAX_TOKENS reasoning-only response", async () => {
+      const maxTokensError = new Error(
+        "Gemini stopped at MAX_TOKENS before producing any output (only reasoning parts were returned).",
+      );
+      expect(normalizeError(maxTokensError).retryable).toBe(true);
+      expect(normalizeError(maxTokensError).kind).not.toBe("blocked");
+      mockGenerateContent
+        .mockImplementationOnce(() => Promise.reject(maxTokensError))
+        .mockImplementationOnce(() => Promise.resolve({ text: () => usableCaption }));
+
+      const result = await generateSocialPostTextDetailed(
+        "data:image/jpeg;base64,max-tokens-photo",
+        ToneOption.Professional,
+        "Test Dealer",
+      );
+
+      expect(result.captionSource).toBe("ai");
+      expect(result.aiMeta.provider).toBe("gemini");
+      expect(result.aiMeta.model).toBe(TASKS.caption.fallback);
+      expect(result.aiMeta.fallbackCount).toBe(1);
+      expect(mockGenerateContent).toHaveBeenCalledTimes(2);
+    });
+
+    it("still routes a vendor outage to Claude and sends the source photo", async () => {
+      FLAGS.enableClaudeFallback = true;
+      mockGenerateContent.mockImplementation(() => Promise.reject(vendorOutage()));
+      vi.mocked(generateTextViaClaude).mockResolvedValue(usableCaption);
+
+      const result = await generateSocialPostTextDetailed(
+        "data:image/jpeg;base64,claude-fallback-photo",
+        ToneOption.Professional,
+        "Test Dealer",
+      );
+
+      expect(mockGenerateContent).toHaveBeenCalledTimes(TASKS.caption.models.length);
+      expect(result.captionSource).toBe("ai");
+      expect(result.aiMeta.provider).toBe("anthropic");
+      expect(result.aiMeta.model).toBe(TASKS.caption.claudeFallback);
+      expect(generateTextViaClaude).toHaveBeenCalledTimes(1);
+      const [prompt, options] = vi.mocked(generateTextViaClaude).mock.calls[0];
+      expect(prompt).not.toContain("image was not transmitted");
+      expect(options).toMatchObject({
+        task: "caption",
+        model: TASKS.caption.claudeFallback,
+        temperature: TASKS.caption.claudeTemperature,
+        maxTokens: TASKS.caption.params.maxOutputTokens,
+        image: { mimeType: "image/jpeg", data: "claude-fallback-photo" },
+      });
+    });
+
+    it("ships the original photo on an image block without calling OpenAI", async () => {
+      FLAGS.enableOpenAIFallback = true;
+      let imageCalls = 0;
+      mockGenerateContent.mockImplementation((request) => {
+        if (isImageTextReviewRequest(request)) return imageTextReviewResponse();
+        if (isImageRequest(request)) {
+          imageCalls += 1;
+          return Promise.reject(createBlockedContentError("finishReason=IMAGE_SAFETY"));
+        }
+        return Promise.resolve({ text: () => usableCaption });
+      });
+
+      const result = await generateSocialPost(
+        "data:image/jpeg;base64,blocked-image-photo",
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Test Dealer",
+      );
+
+      expect(result.image).toBe("data:image/jpeg;base64,blocked-image-photo");
+      expect(result.aiMeta.image.provider).toBe("original");
+      expect(result.text).toBe(usableCaption);
+      expect(imageCalls).toBe(1);
+      expect(generateImageViaOpenAI).not.toHaveBeenCalled();
+    });
+
+    it("still falls back to OpenAI for a vendor outage on the image ladder", async () => {
+      FLAGS.enableOpenAIFallback = true;
+      let imageCalls = 0;
+      mockGenerateContent.mockImplementation((request) => {
+        if (isImageTextReviewRequest(request)) return imageTextReviewResponse();
+        if (isImageRequest(request)) {
+          imageCalls += 1;
+          return Promise.reject(vendorOutage());
+        }
+        return Promise.resolve({ text: () => usableCaption });
+      });
+      vi.mocked(generateImageViaOpenAI).mockResolvedValue(
+        "data:image/png;base64,openai-fallback-image",
+      );
+
+      const result = await generateSocialPost(
+        "data:image/jpeg;base64,openai-fallback-photo",
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Test Dealer",
+      );
+
+      expect(imageCalls).toBe(TASKS.image_standard.models.length);
+      expect(generateImageViaOpenAI).toHaveBeenCalledTimes(1);
+      expect(result.image).toBe("data:image/png;base64,openai-fallback-image");
+      expect(result.aiMeta.image.provider).toBe("openai");
+    });
+
+    it("sends the prompt text before the image bytes on caption and image requests", async () => {
+      await generateSocialPost(
+        "data:image/jpeg;base64,text-first-photo",
+        StyleOption.Modern,
+        ToneOption.Professional,
+        "Test Dealer",
+      );
+
+      const orderedCalls = mockGenerateContent.mock.calls.filter(
+        ([request]) => request.task === "caption" || isImageRequest(request),
+      );
+      expect(orderedCalls.length).toBeGreaterThanOrEqual(2);
+      for (const [request] of orderedCalls) {
+        const parts = request.contents.parts as Array<{
+          text?: string;
+          inlineData?: unknown;
+        }>;
+        expect(parts[0]).toHaveProperty("text");
+        expect(parts[1]).toHaveProperty("inlineData");
+      }
+    });
+  });
 });

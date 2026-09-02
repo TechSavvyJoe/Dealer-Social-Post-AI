@@ -59,6 +59,11 @@ const proxyHandler = (c) => {
   let path = null;
   let generationAudit = null;
   let generationAuditRecorded = false;
+  // Billable facts for the usage ledger. Image size and video seconds come
+  // from the sanitized upstream body (never the raw client body); latency is
+  // the timed provider call. Token counts and finishReason are read from the
+  // provider response inside recordProxyGenerationEvent.
+  const generationUsage = { latencyMs: 0, imageSize: "", videoSeconds: 0 };
 
   // Multiple methods to extract path for PocketBase JSVM compatibility
   try {
@@ -202,6 +207,21 @@ const proxyHandler = (c) => {
     // Polling and file-download GETs intentionally keep an empty body.
     let sanitizedProxyBody = "";
     if ((requestInfo.method || "").toString().toUpperCase() === "POST") {
+      // A stale installed client announces the policy version it was built
+      // against. Answer it before body validation with a distinct status so
+      // the app can prompt for an update instead of blaming the inputs.
+      // Requests without the header keep the legacy best-effort handling.
+      const policyVersionCheck = helpers.proxyPolicyVersionMismatch(
+        requestInfo,
+        policies,
+      );
+      if (policyVersionCheck.mismatch) {
+        return c.json(409, {
+          error: "POLICY_VERSION_MISMATCH",
+          code: "POLICY_VERSION_MISMATCH",
+          currentVersion: policyVersionCheck.currentVersion,
+        });
+      }
       const proxyHeaders = requestInfo.headers || {};
       const requestedGenerationTask = String(
         proxyHeaders["x-generation-task"] ||
@@ -220,6 +240,20 @@ const proxyHandler = (c) => {
         });
       }
       sanitizedProxyBody = JSON.stringify(upstreamRequest);
+      try {
+        const imageConfig =
+          upstreamRequest.generationConfig &&
+          upstreamRequest.generationConfig.imageConfig;
+        if (imageConfig && imageConfig.imageSize) {
+          generationUsage.imageSize = String(imageConfig.imageSize);
+        }
+        const videoParameters = upstreamRequest.parameters;
+        if (videoParameters && videoParameters.durationSeconds) {
+          generationUsage.videoSeconds = Number(videoParameters.durationSeconds) || 0;
+        }
+      } catch (_usageErr) {
+        /* accounting never blocks a validated request */
+      }
     }
 
     const costPolicy = policies.proxyCostPolicy(path);
@@ -338,6 +372,7 @@ const proxyHandler = (c) => {
       return c.json(429, { error: "Too many concurrent provider requests" });
     }
 
+    const upstreamStartedAt = Date.now();
     const res = (function () {
       try {
         return $http.send({
@@ -348,6 +383,7 @@ const proxyHandler = (c) => {
           timeout: 300, // PocketBase 0.22 uses seconds; allow 5 minutes for Veo.
         });
       } finally {
+        generationUsage.latencyMs = Math.max(0, Date.now() - upstreamStartedAt);
         dealerProviderSlot.release();
         globalProviderSlot.release();
       }
@@ -432,6 +468,7 @@ const proxyHandler = (c) => {
           "gemini",
           "",
           null,
+          generationUsage,
         );
         generationAuditRecorded = true;
       }
@@ -470,6 +507,7 @@ const proxyHandler = (c) => {
           "gemini",
           "",
           jsonBody,
+          generationUsage,
         );
         generationAuditRecorded = true;
         return c.json(502, { error: "Invalid provider operation response" });
@@ -490,6 +528,7 @@ const proxyHandler = (c) => {
           "gemini",
           "",
           jsonBody,
+          generationUsage,
         );
         generationAuditRecorded = true;
         return c.json(502, { error: "Could not secure provider resource" });
@@ -506,6 +545,7 @@ const proxyHandler = (c) => {
         "gemini",
         "",
         jsonBody,
+        generationUsage,
       );
       generationAuditRecorded = true;
     }
@@ -522,6 +562,7 @@ const proxyHandler = (c) => {
         "gemini",
         "",
         null,
+        generationUsage,
       );
     }
     console.error(
@@ -1029,6 +1070,12 @@ routerAdd("GET", "/api/app/health", (c) => {
       total24h: 0,
       topActions: [],
     };
+    result.usage = {
+      windowDays: 7,
+      since: null,
+      dealers: [],
+      truncated: false,
+    };
   }
 
   try {
@@ -1175,6 +1222,14 @@ routerAdd("GET", "/api/app/health", (c) => {
       });
     } catch (_e) {
       /* client_error_events may not exist until the forward migration */
+    }
+    try {
+      // Per-dealer 7-day usage (events, tokens, image sizes, video seconds,
+      // p50/p95 upstream latency). Bounded queries; accounting must never
+      // turn a healthy deployment into a failed health probe.
+      result.usage = helpers.generationUsageSummary(7);
+    } catch (_e) {
+      /* usage columns may not exist until the forward migration */
     }
   }
 
@@ -4320,6 +4375,14 @@ routerAdd("POST", "/api/app/salespeople", (c) => {
     }
     if (context.role === "dealer_admin") personRole = "salesperson";
 
+    let profile = {};
+    try {
+      profile = helpers.personProfileMutationData(body, context.role);
+    } catch (profileErr) {
+      const failure = helpers.personProfileErrorPayload(profileErr);
+      return c.json(failure.status, failure.body);
+    }
+
     let targetDealer = context.dealer;
     if (context.role === "super_admin") {
       const targetDealerId = (body.dealer || "").toString().trim();
@@ -4362,6 +4425,10 @@ routerAdd("POST", "/api/app/salespeople", (c) => {
       active: body.active === false ? false : true,
       created_at: new Date().toISOString(),
     });
+    const profileFields = Object.keys(profile);
+    for (let i = 0; i < profileFields.length; i++) {
+      record.set(profileFields[i], profile[profileFields[i]]);
+    }
     const createAudit = {
       dealerId: record.getString("dealer"),
       credentialPresent: true,
@@ -4431,6 +4498,15 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
       }
     }
 
+    let profile = {};
+    try {
+      profile = helpers.personProfileMutationData(body, context.role);
+    } catch (profileErr) {
+      const failure = helpers.personProfileErrorPayload(profileErr);
+      return c.json(failure.status, failure.body);
+    }
+    const profileFields = Object.keys(profile);
+
     const auditOptions = {
       dealerId: "",
       credentialPresent: hasPinUpdate,
@@ -4484,6 +4560,9 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
           }
         }
         if (hasNameUpdate) txPerson.set("name", requestedName);
+        for (let i = 0; i < profileFields.length; i++) {
+          txPerson.set(profileFields[i], profile[profileFields[i]]);
+        }
         if (hasActiveUpdate) {
           nextActive = requestedActive;
           if (!wasActive && nextActive) {
@@ -4531,6 +4610,8 @@ routerAdd("PATCH", "/api/app/salespeople/:id", (c) => {
           roleChanged +
           " active_changed=" +
           activeChanged +
+          " profile_changed=" +
+          (profileFields.length > 0) +
           (pinChanged ? " action=legacy_patch" : "");
         return {
           person: txPerson,

@@ -285,7 +285,7 @@ const SERVER_SAFETY_SETTINGS = [
 // `scripts/check-model-policy.mjs` and Vitest fail if this snapshot drifts.
 const GEMINI_MODEL_POLICY_SNAPSHOT = {
   version: 5,
-  verifiedAt: "2026-08-14",
+  verifiedAt: "2026-09-02",
   models: {
     textQuality: "gemini-3.6-flash",
     textFast: "gemini-3.5-flash-lite",
@@ -296,24 +296,31 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
     videoStandard: "veo-3.1-fast-generate-preview",
     videoQuality: "veo-3.1-generate-preview",
   },
+  thinkingLevels: {
+    "gemini-3.6-flash": ["minimal", "low", "medium", "high"],
+    "gemini-3.5-flash-lite": ["minimal", "low", "medium", "high"],
+  },
   tasks: {
     caption: {
       kind: "text",
       tier: "quality",
       models: ["gemini-3.6-flash", "gemini-3.5-flash-lite"],
       maxOutputTokens: 2048,
+      thinkingLevel: "low",
     },
     caption_regenerate: {
       kind: "text",
       tier: "quality",
       models: ["gemini-3.6-flash", "gemini-3.5-flash-lite"],
       maxOutputTokens: 2048,
+      thinkingLevel: "low",
     },
     caption_edit: {
       kind: "text",
       tier: "fast",
       models: ["gemini-3.5-flash-lite", "gemini-3.6-flash"],
       maxOutputTokens: 2048,
+      thinkingLevel: "minimal",
     },
     image_standard: {
       kind: "image",
@@ -366,7 +373,8 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
       textPart: ["text"],
       imagePart: ["inlineData"],
       inlineData: ["mimeType", "data"],
-      textGenerationConfig: ["maxOutputTokens"],
+      textGenerationConfig: ["maxOutputTokens", "thinkingConfig"],
+      thinkingConfig: ["thinkingLevel"],
       imageGenerationConfig: ["responseModalities", "imageConfig", "maxOutputTokens"],
       imageConfig: ["imageSize", "aspectRatio"],
       legacyImageGenerationConfig: [
@@ -791,6 +799,33 @@ function sanitizeGenerateContentContents(input, minImages, maxImages) {
   return [{ parts: parts }];
 }
 
+/**
+ * Optional Gemini 3.x thinking control for text tasks. Only `thinkingLevel`
+ * from the pinned model's supported enum is admitted; the deprecated
+ * `thinkingBudget` and `includeThoughts` are never forwarded. Returns
+ * `undefined` when the client sent no thinkingConfig, the sanitized object
+ * when it is valid, and `null` on any violation.
+ */
+function sanitizeTextThinkingConfig(model, generationConfig) {
+  if (!Object.prototype.hasOwnProperty.call(generationConfig, "thinkingConfig")) {
+    return undefined;
+  }
+  const fields = GEMINI_REQUEST_FIELDS.generateContent;
+  const thinkingConfig = generationConfig.thinkingConfig;
+  if (!hasOnlyKeys(thinkingConfig, fields.thinkingConfig, fields.thinkingConfig)) {
+    return null;
+  }
+  const supportedLevels = GEMINI_MODEL_POLICY_SNAPSHOT.thinkingLevels[model];
+  if (
+    !Array.isArray(supportedLevels) ||
+    typeof thinkingConfig.thinkingLevel !== "string" ||
+    supportedLevels.indexOf(thinkingConfig.thinkingLevel) === -1
+  ) {
+    return null;
+  }
+  return { thinkingLevel: thinkingConfig.thinkingLevel };
+}
+
 function buildGenerateContentRequest(model, input, requestedTaskName) {
   const fields = GEMINI_REQUEST_FIELDS.generateContent;
   // Deliberately omit `safetySettings` from the accepted client keys. The
@@ -803,16 +838,18 @@ function buildGenerateContentRequest(model, input, requestedTaskName) {
   if (TEXT_GENERATE_CONTENT_MODELS.indexOf(model) !== -1) {
     const requiredMaxOutputTokens =
       GEMINI_MODEL_POLICY_SNAPSHOT.tasks.caption.maxOutputTokens;
+    // `maxOutputTokens` stays mandatory; `thinkingConfig` is the only optional
+    // extra key and is enum-checked by sanitizeTextThinkingConfig.
     if (
-      !hasOnlyKeys(
-        generationConfig,
-        fields.textGenerationConfig,
-        fields.textGenerationConfig,
-      ) ||
+      !hasOnlyKeys(generationConfig, fields.textGenerationConfig, [
+        "maxOutputTokens",
+      ]) ||
       generationConfig.maxOutputTokens !== requiredMaxOutputTokens
     ) {
       return null;
     }
+    const thinkingConfig = sanitizeTextThinkingConfig(model, generationConfig);
+    if (thinkingConfig === null) return null;
 
     const contents = sanitizeGenerateContentContents(
       input.contents,
@@ -820,11 +857,13 @@ function buildGenerateContentRequest(model, input, requestedTaskName) {
       GEMINI_REQUEST_LIMITS.maxTextImages,
     );
     if (!contents) return null;
+    const sanitizedGenerationConfig = {
+      maxOutputTokens: generationConfig.maxOutputTokens,
+    };
+    if (thinkingConfig) sanitizedGenerationConfig.thinkingConfig = thinkingConfig;
     return {
       contents: contents,
-      generationConfig: {
-        maxOutputTokens: generationConfig.maxOutputTokens,
-      },
+      generationConfig: sanitizedGenerationConfig,
       safetySettings: SERVER_SAFETY_SETTINGS,
     };
   }
@@ -1078,10 +1117,58 @@ function buildOpenAIImageRequest(input) {
   };
 }
 
+// The proxy accepts exactly one Claude id. `services/modelConfig.ts`
+// CLAUDE_MODELS must advertise only ids listed here.
+const ANTHROPIC_FALLBACK_MODEL = "claude-haiku-4-5-20251001";
+// The fallback replaces a Gemini text task, so it carries the same output
+// budget the text contract already authorizes (2048 tokens).
+const ANTHROPIC_FALLBACK_MAX_TOKENS =
+  GEMINI_MODEL_POLICY_SNAPSHOT.tasks.caption.maxOutputTokens;
+// Claude ingests JPEG, PNG, GIF, and WebP up to 5 MB per image; base64
+// expands bytes by 4/3, so the encoded payload is bounded by the tighter of
+// that and the proxy's existing inline-image limit. The caption fallback
+// sends at most the one customer photo.
+const ANTHROPIC_IMAGE_MEDIA_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+];
+const ANTHROPIC_MAX_IMAGE_CHARS = Math.min(
+  MAX_INLINE_IMAGE_CHARS,
+  Math.ceil((5 * 1024 * 1024) / 3) * 4,
+);
+const ANTHROPIC_MAX_IMAGE_BLOCKS = 1;
+
+function sanitizeAnthropicImageBlock(block) {
+  if (!hasOnlyKeys(block, ["type", "source"], ["type", "source"])) return null;
+  const source = block.source;
+  const sourceKeys = ["type", "media_type", "data"];
+  if (!hasOnlyKeys(source, sourceKeys, sourceKeys)) return null;
+
+  const mediaType = (source.media_type || "").toString().toLowerCase();
+  const data = source.data;
+  if (
+    source.type !== "base64" ||
+    ANTHROPIC_IMAGE_MEDIA_TYPES.indexOf(mediaType) === -1 ||
+    typeof data !== "string" ||
+    data.length < 4 ||
+    data.length > ANTHROPIC_MAX_IMAGE_CHARS ||
+    data.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(data)
+  ) {
+    return null;
+  }
+  return {
+    type: "image",
+    source: { type: "base64", media_type: mediaType, data: data },
+  };
+}
+
 function buildAnthropicMessageRequest(input) {
   const data = input && typeof input === "object" ? input : {};
   if (
-    (data.model && data.model !== "claude-haiku-4-5-20251001") ||
+    (data.model && data.model !== ANTHROPIC_FALLBACK_MODEL) ||
     !Array.isArray(data.messages) ||
     data.messages.length !== 1
   ) {
@@ -1092,28 +1179,40 @@ function buildAnthropicMessageRequest(input) {
   if (message.role !== "user" || !Array.isArray(message.content)) return null;
 
   let totalTextLength = 0;
+  let textBlocks = 0;
+  let imageBlocks = 0;
   const content = [];
   for (let i = 0; i < message.content.length; i++) {
     const block = message.content[i] || {};
+    if (block.type === "image") {
+      const imageBlock = sanitizeAnthropicImageBlock(block);
+      imageBlocks += 1;
+      if (!imageBlock || imageBlocks > ANTHROPIC_MAX_IMAGE_BLOCKS) return null;
+      content.push(imageBlock);
+      continue;
+    }
     if (block.type !== "text" || typeof block.text !== "string") return null;
     totalTextLength += block.text.length;
+    textBlocks += 1;
     content.push({ type: "text", text: block.text });
   }
-  if (!content.length || totalTextLength > 20000) return null;
+  if (!textBlocks || totalTextLength > 20000) return null;
 
   const system = typeof data.system === "string" ? data.system : "";
   if (system.length > 5000) return null;
 
   const requestedTokens =
     typeof data.max_tokens === "number" ? Math.floor(data.max_tokens) : 800;
-  if (requestedTokens < 1 || requestedTokens > 1200) return null;
+  if (requestedTokens < 1 || requestedTokens > ANTHROPIC_FALLBACK_MAX_TOKENS) {
+    return null;
+  }
 
   const requestedTemperature =
     typeof data.temperature === "number" ? data.temperature : 0.8;
   if (requestedTemperature < 0 || requestedTemperature > 1) return null;
 
   const request = {
-    model: "claude-haiku-4-5-20251001",
+    model: ANTHROPIC_FALLBACK_MODEL,
     max_tokens: requestedTokens,
     temperature: requestedTemperature,
     messages: [{ role: "user", content: content }],
