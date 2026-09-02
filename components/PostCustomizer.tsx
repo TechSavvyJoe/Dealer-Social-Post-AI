@@ -238,6 +238,8 @@ interface CreativeBriefSections {
   vehicleBlock?: string;
   oemBlock?: string;
   designBlock: string;
+  /** Dealer brand voice — a brand contract, so it rides inside the caption window. */
+  voiceBlock?: string;
   supportingBlocks: string[];
   platformBlock?: string;
 }
@@ -249,6 +251,7 @@ export const composeGenerationCreativeBrief = ({
   vehicleBlock,
   oemBlock,
   designBlock,
+  voiceBlock,
   supportingBlocks,
   platformBlock,
 }: CreativeBriefSections): string => {
@@ -259,8 +262,13 @@ export const composeGenerationCreativeBrief = ({
   // worst-case envelope so a verbose custom scenario cannot push vehicle, OEM,
   // or design facts out of the live caption prompt. The remaining budget is
   // still available to the image model for dealer and destination guidance.
+  // Brand voice sits second: identity + voice never exceed 320 chars, so the
+  // dealership's voice can no longer be pushed out of the caption window by a
+  // verbose scenario or VIN block. Design DNA is last because the caption
+  // model also receives style guidance through its own styleHint.
   const essential = [
     `Dealership identity (use this exact name): "${bounded(dealershipName, 100)}".`,
+    bounded(voiceBlock, 220),
     bounded(scenarioBlock, 240),
     bounded(vehicleBlock, 220),
     bounded(oemBlock, 120),
@@ -631,11 +639,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     // Per-dealer brand voice / banned phrases / OEM affiliation. These come
     // from the dealers PocketBase record so each dealership can tune voice
     // without a code change.
-    if (currentDealer?.brand_voice?.trim()) {
-      supportingBriefParts.push(
-        `Brand voice (match this exactly): ${currentDealer.brand_voice.trim()}`,
-      );
-    }
+    const voiceBlock = currentDealer?.brand_voice?.trim()
+      ? `Brand voice (match this exactly): ${currentDealer.brand_voice.trim()}`
+      : "";
     if (currentDealer?.banned_phrases?.trim()) {
       const banned = currentDealer.banned_phrases
         .split(/[\n,]+/)
@@ -707,6 +713,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
       vehicleBlock,
       oemBlock,
       designBlock: `Design DNA: ${styleInfo.aiHint}`,
+      voiceBlock,
       supportingBlocks: supportingBriefParts,
       platformBlock: platformBrief,
     });

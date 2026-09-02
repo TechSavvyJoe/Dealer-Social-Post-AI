@@ -10,6 +10,23 @@ import { StyleOption, ToneOption } from "../types";
 Object.assign(global.navigator, { vibrate: vi.fn() });
 
 describe("composeGenerationCreativeBrief", () => {
+  it("keeps the dealer brand voice inside the 900-character caption window", () => {
+    const voice = `Brand voice (match this exactly): ${"warm, factual, polished, never salesy ".repeat(5)}`;
+    const brief = composeGenerationCreativeBrief({
+      dealershipName: "Bob Maxey Ford of Howell",
+      scenarioBlock: `Post scenario: ${"custom scenario prose ".repeat(20)}`,
+      vehicleBlock: `Vehicle facts (do not contradict): ${"2026 Ford F-150 Lariat ".repeat(12)}`,
+      oemBlock: `OEM affiliation: Ford. ${"Respect brand tone. ".repeat(6)}`,
+      designBlock: "Design DNA: editorial spotlight",
+      voiceBlock: voice,
+      supportingBlocks: ["Required footer: Visit us today."],
+      platformBlock: "Target platforms: Instagram Feed.",
+    });
+    const window = brief.slice(0, 900);
+    expect(window).toContain("Brand voice (match this exactly)");
+    expect(brief.indexOf("Brand voice")).toBeLessThan(brief.indexOf("Post scenario"));
+  });
+
   it("keeps dealer, scenario, vehicle, and OEM grounding ahead of verbose platform copy", () => {
     const brief = composeGenerationCreativeBrief({
       dealershipName: "Bob Maxey Ford of Howell",
