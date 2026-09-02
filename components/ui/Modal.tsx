@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
+import { m, AnimatePresence, useReducedMotion } from "framer-motion";
 import { X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { cn } from "../../utils/classNames";
@@ -121,7 +121,7 @@ export const Modal: React.FC<ModalProps> = ({
       {isOpen && (
         <div className="modal-viewport fixed inset-0 z-[100] flex items-end justify-center sm:items-center">
           {/* Backdrop */}
-          <motion.div
+          <m.div
             initial={shouldReduceMotion ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -132,7 +132,7 @@ export const Modal: React.FC<ModalProps> = ({
           />
 
           {/* Modal Content */}
-          <motion.div
+          <m.div
             ref={contentRef}
             role="dialog"
             aria-modal="true"
@@ -216,7 +216,7 @@ export const Modal: React.FC<ModalProps> = ({
                 {footer}
               </div>
             )}
-          </motion.div>
+          </m.div>
         </div>
       )}
     </AnimatePresence>,

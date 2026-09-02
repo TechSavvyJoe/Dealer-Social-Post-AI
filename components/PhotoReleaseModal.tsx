@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import { ShieldCheck, AlertCircle, Check } from "lucide-react";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
@@ -118,7 +118,7 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
       <div className="space-y-4">
         <AnimatePresence mode="wait">
           {captured ? (
-            <motion.div
+            <m.div
               key="success"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -134,9 +134,9 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
                 Generate will securely store it before AI processing and link it to this
                 exact customer and vehicle.
               </div>
-            </motion.div>
+            </m.div>
           ) : (
-            <motion.div
+            <m.div
               key="form"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -181,7 +181,7 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
 
               <AnimatePresence>
                 {error && (
-                  <motion.div
+                  <m.div
                     initial={{ opacity: 0, y: -8 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}
@@ -190,7 +190,7 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
                   >
                     <AlertCircle className="h-4 w-4 text-error-400 flex-shrink-0 mt-0.5" />
                     {error}
-                  </motion.div>
+                  </m.div>
                 )}
               </AnimatePresence>
 
@@ -226,7 +226,7 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
                   </p>
                 </div>
               </div>
-            </motion.div>
+            </m.div>
           )}
         </AnimatePresence>
       </div>

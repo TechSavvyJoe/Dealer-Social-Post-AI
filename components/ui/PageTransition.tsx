@@ -1,5 +1,5 @@
 import React from "react";
-import { motion, AnimatePresence, Easing } from "framer-motion";
+import { m, AnimatePresence, Easing } from "framer-motion";
 
 interface PageTransitionProps {
   children: React.ReactNode;
@@ -67,7 +67,7 @@ export const PageTransition: React.FC<PageTransitionProps> = ({
 
   return (
     <AnimatePresence mode="wait">
-      <motion.div
+      <m.div
         key={pageKey}
         variants={variants}
         initial="initial"
@@ -81,7 +81,7 @@ export const PageTransition: React.FC<PageTransitionProps> = ({
         data-page-transition-layout={layout}
       >
         {children}
-      </motion.div>
+      </m.div>
     </AnimatePresence>
   );
 };
@@ -103,14 +103,14 @@ export const FadeTransition: React.FC<FadeTransitionProps> = ({
   return (
     <AnimatePresence>
       {show && (
-        <motion.div
+        <m.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration }}
         >
           {children}
-        </motion.div>
+        </m.div>
       )}
     </AnimatePresence>
   );
@@ -133,14 +133,14 @@ export const ScaleTransition: React.FC<ScaleTransitionProps> = ({
   return (
     <AnimatePresence>
       {show && (
-        <motion.div
+        <m.div
           initial={{ opacity: 0, scale: 0.95, y: origin === "top" ? -10 : 10 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: origin === "top" ? -10 : 10 }}
           transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
         >
           {children}
-        </motion.div>
+        </m.div>
       )}
     </AnimatePresence>
   );

@@ -8,7 +8,10 @@ export const WALKAROUND_LIMITS = {
   chunkBytes: 8 * 1024 * 1024,
 } as const;
 
-export const isWalkaroundStudioEnabled = (value: unknown): boolean => value === "true";
+// Re-exported for existing importers; the definition lives in
+// ./walkaroundFlags so eager shell code can read the flag without pulling
+// this whole service into the entry chunk.
+export { isWalkaroundStudioEnabled } from "./walkaroundFlags";
 
 export type WalkaroundAudience = "customer" | "inventory";
 export type WalkaroundCaptureMode = "one_take" | "multi_clip";

@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import { Loader2, Check, RefreshCw, Sparkles } from "lucide-react";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { prepareCaptionForDelivery } from "../utils/complianceDisclosures";
 import { cn } from "../utils/classNames";
+import { toUiMessage } from "../utils/errorMessages";
 
 interface CaptionAlternativesModalProps {
   isOpen: boolean;
@@ -50,6 +51,12 @@ export const CaptionAlternativesModal: React.FC<CaptionAlternativesModalProps> =
   const [variants, setVariants] = useState<Variant[]>([]);
   const [picked, setPicked] = useState<number | null>(null);
 
+  // The 3 parallel generations resolve independently, so the announcement is
+  // keyed off an any-loading boolean: the live-region text stays constant
+  // while work is in flight and changes exactly once at completion.
+  const anyLoading = variants.some((v) => v.loading);
+  const failedCount = variants.filter((v) => v.error).length;
+
   const runOne = async (id: number): Promise<Variant> => {
     try {
       const raw = await generateOne();
@@ -68,7 +75,7 @@ export const CaptionAlternativesModal: React.FC<CaptionAlternativesModalProps> =
         id,
         text: "",
         loading: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: toUiMessage(err, "Could not generate this caption."),
       };
     }
   };
@@ -135,11 +142,20 @@ export const CaptionAlternativesModal: React.FC<CaptionAlternativesModalProps> =
       size="xl"
     >
       <div className="space-y-3">
+        <div className="sr-only" role="status" aria-live="polite">
+          {variants.length === 0
+            ? ""
+            : anyLoading
+              ? "Generating caption alternatives…"
+              : failedCount > 0
+                ? `${variants.length - failedCount} of ${variants.length} caption alternatives ready, ${failedCount} failed.`
+                : `${variants.length} caption alternatives ready.`}
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {variants.map((v) => {
             const isPicked = picked === v.id;
             return (
-              <motion.button
+              <m.button
                 key={v.id}
                 type="button"
                 onClick={() => handlePick(v)}
@@ -175,7 +191,7 @@ export const CaptionAlternativesModal: React.FC<CaptionAlternativesModalProps> =
                     Failed: {v.error}
                   </div>
                 ) : v.loading ? (
-                  <div className="flex-1 flex items-center justify-center text-xs text-surface-500">
+                  <div className="flex-1 flex items-center justify-center text-xs text-surface-400">
                     Generating…
                   </div>
                 ) : (
@@ -188,13 +204,13 @@ export const CaptionAlternativesModal: React.FC<CaptionAlternativesModalProps> =
                     + compliance footer ({v.disclosureCategories?.join(", ") || "auto"})
                   </div>
                 )}
-              </motion.button>
+              </m.button>
             );
           })}
         </div>
 
         <div className="flex items-center justify-between gap-2 pt-2 border-t border-hairline">
-          <div className="text-[11px] text-surface-500 flex items-center gap-1">
+          <div className="text-[11px] text-surface-400 flex items-center gap-1">
             <Sparkles className="w-3 h-3" />
             Tap any variant to use it. Compliance disclosures stay attached.
           </div>

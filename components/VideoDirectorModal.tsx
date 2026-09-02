@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, memo } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { VideoStyle, VideoRequestOptions } from "../types";
 import { Icon } from "./Icons";
 import { triggerHapticFeedback } from "../utils/haptics";
@@ -282,7 +282,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
               </div>
               <p
                 aria-live="polite"
-                className="text-[10px] leading-relaxed text-surface-500"
+                className="text-[10px] leading-relaxed text-surface-400"
               >
                 {resolution === "1080p"
                   ? "Quality mode uses the premium 1080p model and requires an 8-second video."
@@ -316,7 +316,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
                   </button>
                 ))}
               </div>
-              <p className="text-[10px] text-surface-500">
+              <p className="text-[10px] text-surface-400">
                 Veo renders <strong className="text-surface-300">9:16</strong>{" "}
                 (vertical) or <strong className="text-surface-300">16:9</strong> (wide).
                 The file and label always use the same ratio.
@@ -429,7 +429,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
 
             <AnimatePresence>
               {showMore && (
-                <motion.div
+                <m.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: "auto", opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
@@ -453,7 +453,7 @@ export const VideoDirectorModal: React.FC<VideoDirectorModalProps> = memo(
                       />
                     ))}
                   </div>
-                </motion.div>
+                </m.div>
               )}
             </AnimatePresence>
           </div>

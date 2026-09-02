@@ -120,6 +120,12 @@ export class ErrorBoundary extends Component<Props, State> {
 
   private handleCopyDetails = async () => {
     if (!this.state.error) return;
+    // Same fallback chain the telemetry envelope stamps on every event
+    // (utils/telemetry.ts) — lets support match the crash to a deploy.
+    const releaseSha =
+      import.meta.env.VITE_RELEASE_SHA ||
+      import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA ||
+      "development";
     const text = [
       `Error: ${this.state.error.message}`,
       "",
@@ -131,6 +137,7 @@ export class ErrorBoundary extends Component<Props, State> {
       "",
       `URL: ${window.location.href}`,
       `User-Agent: ${navigator.userAgent}`,
+      `Release: ${releaseSha}`,
       `When: ${new Date().toISOString()}`,
     ].join("\n");
     try {

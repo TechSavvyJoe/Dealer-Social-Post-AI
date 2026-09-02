@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import { Trophy, Film, ShieldCheck, Loader2, RefreshCw, Download } from "lucide-react";
 import { Button } from "./ui/Button";
 import { EmptyState } from "./ui/EmptyState";
 import { ErrorBanner } from "./ui/ErrorBanner";
 import { Skeleton } from "./ui/Skeleton";
 import { cn } from "../utils/classNames";
+import { toUiMessage } from "../utils/errorMessages";
 import { getLeaderboard, LeaderboardEntry } from "../services/posts";
 import { useAppStore } from "../stores/appStore";
 
@@ -98,7 +99,7 @@ export const Leaderboard: React.FC = () => {
       if (reqIdRef.current === myId) setEntries(data);
     } catch (err) {
       if (reqIdRef.current === myId)
-        setError(err instanceof Error ? err.message : String(err));
+        setError(toUiMessage(err, "Could not load the leaderboard."));
     } finally {
       if (reqIdRef.current === myId) setLoading(false);
     }
@@ -155,7 +156,7 @@ export const Leaderboard: React.FC = () => {
   }, [entries, currentDealer?.name, range]);
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       className="rounded-lg border border-hairline bg-surface-overlay p-4 sm:p-6 space-y-4"
@@ -226,7 +227,7 @@ export const Leaderboard: React.FC = () => {
 
       <AnimatePresence mode="wait">
         {loading && entries.length === 0 ? (
-          <motion.div
+          <m.div
             key="loading"
             className="space-y-2"
             initial={{ opacity: 0 }}
@@ -247,9 +248,9 @@ export const Leaderboard: React.FC = () => {
                 <Skeleton width={32} height={24} />
               </div>
             ))}
-          </motion.div>
+          </m.div>
         ) : entries.length === 0 ? (
-          <motion.div
+          <m.div
             key="empty"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -260,9 +261,9 @@ export const Leaderboard: React.FC = () => {
               title="No posts yet in this window"
               description="Tell your team — first one on the board gets bragging rights."
             />
-          </motion.div>
+          </m.div>
         ) : (
-          <motion.ul
+          <m.ul
             key="entries"
             className="space-y-2"
             initial={{ opacity: 0 }}
@@ -270,7 +271,7 @@ export const Leaderboard: React.FC = () => {
             exit={{ opacity: 0 }}
           >
             {entries.map((entry, idx) => (
-              <motion.li
+              <m.li
                 key={entry.salesperson}
                 initial={{ opacity: 0, x: -8 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -300,7 +301,7 @@ export const Leaderboard: React.FC = () => {
                   <div className="text-sm font-semibold text-surface-50 truncate">
                     {entry.salesperson}
                   </div>
-                  <div className="text-[11px] text-surface-500 flex items-center gap-3 mt-0.5">
+                  <div className="text-[11px] text-surface-400 flex items-center gap-3 mt-0.5">
                     {entry.videoCount > 0 && (
                       <span
                         className="flex items-center gap-1 text-primary-300/80"
@@ -338,15 +339,15 @@ export const Leaderboard: React.FC = () => {
                   >
                     {entry.count}
                   </div>
-                  <div className="text-[10px] uppercase tracking-wider text-surface-500 mt-0.5">
+                  <div className="text-[10px] uppercase tracking-wider text-surface-400 mt-0.5">
                     {entry.count === 1 ? "post" : "posts"}
                   </div>
                 </div>
-              </motion.li>
+              </m.li>
             ))}
-          </motion.ul>
+          </m.ul>
         )}
       </AnimatePresence>
-    </motion.div>
+    </m.div>
   );
 };

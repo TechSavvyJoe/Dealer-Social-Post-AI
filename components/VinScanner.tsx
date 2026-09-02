@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
+import { m, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Loader2, ScanLine, AlertCircle, Check, X, Camera } from "lucide-react";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
@@ -11,6 +11,7 @@ import {
   DecodedVehicle,
 } from "../services/vinDecoder";
 import { logEvent, logError } from "../utils/telemetry";
+import { toUiMessage } from "../utils/errorMessages";
 import { triggerHapticFeedback } from "../utils/haptics";
 
 interface VinScannerProps {
@@ -146,9 +147,11 @@ export const VinScanner: React.FC<VinScannerProps> = ({
         }
       } catch (err) {
         if (cancelledRef.current) return;
-        const msg = err instanceof Error ? err.message : String(err);
-        setError(`Decode failed: ${msg}`);
-        logError("vin.decode.error", { vinPresent: true, message: msg });
+        // Telemetry keeps the raw message; the on-screen copy is mapped to
+        // friendly text so transport errors never render verbatim.
+        const raw = err instanceof Error ? err.message : String(err);
+        setError(`Decode failed: ${toUiMessage(err, "Could not decode this VIN.")}`);
+        logError("vin.decode.error", { vinPresent: true, message: raw });
       } finally {
         isDecodingRef.current = false;
         if (!cancelledRef.current) setIsDecoding(false);
@@ -335,7 +338,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
         {/* Scanner viewport */}
         <AnimatePresence mode="wait">
           {mode === "scanner" && (
-            <motion.div
+            <m.div
               key="scanner-view"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -355,7 +358,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
                   <div className="w-4/5 h-1/4 border-2 border-primary-400/80 rounded-lg shadow-[0_0_24px_rgba(56,189,248,0.4)]" />
                 </div>
                 {/* Scan line */}
-                <motion.div
+                <m.div
                   className="absolute left-[10%] right-[10%] h-[2px] bg-primary-400 shadow-[0_0_12px_rgba(56,189,248,0.8)]"
                   animate={
                     reduceMotion ? { top: "50%" } : { top: ["38%", "62%", "38%"] }
@@ -378,15 +381,15 @@ export const VinScanner: React.FC<VinScannerProps> = ({
               >
                 {scanStatus}
               </p>
-              <p className="text-[10px] text-surface-500 text-center leading-relaxed">
+              <p className="text-[10px] text-surface-400 text-center leading-relaxed">
                 Tip: the VIN barcode is usually on the driver-side door jamb or
                 lower-left corner of the windshield. Hold steady, fill the frame.
               </p>
-            </motion.div>
+            </m.div>
           )}
 
           {mode === "manual" && (
-            <motion.div
+            <m.div
               key="manual-view"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -418,14 +421,14 @@ export const VinScanner: React.FC<VinScannerProps> = ({
               >
                 {isDecoding ? "Decoding…" : "Decode VIN"}
               </Button>
-            </motion.div>
+            </m.div>
           )}
         </AnimatePresence>
 
         {/* Success preview */}
         <AnimatePresence>
           {lastDecoded && !lastDecoded.empty && (
-            <motion.div
+            <m.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               role="status"
@@ -440,14 +443,14 @@ export const VinScanner: React.FC<VinScannerProps> = ({
                   {lastDecoded.vin}
                 </div>
               </div>
-            </motion.div>
+            </m.div>
           )}
         </AnimatePresence>
 
         {/* Error */}
         <AnimatePresence>
           {error && (
-            <motion.div
+            <m.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
@@ -464,7 +467,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
               >
                 <X className="h-4 w-4" />
               </button>
-            </motion.div>
+            </m.div>
           )}
         </AnimatePresence>
       </div>

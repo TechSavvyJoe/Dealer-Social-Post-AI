@@ -1,5 +1,5 @@
 import React from "react";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { cn } from "../../utils/classNames";
 
@@ -21,17 +21,19 @@ export const ErrorBanner: React.FC<ErrorBannerProps> = ({
   onRetry,
   className,
 }) => (
-  <motion.div
+  <m.div
     role="alert"
     initial={{ opacity: 0, y: -4 }}
     animate={{ opacity: 1, y: 0 }}
     className={cn(
       "flex items-start gap-2.5 rounded-xl border border-error-500/30 bg-error-500/10",
-      "px-3.5 py-2.5 text-xs text-error-200",
+      // The error scale is static hex, not theme-inverted; light ink needs the
+      // deep ramp in Sunlight Mode.
+      "px-3.5 py-2.5 text-xs text-error-200 [.theme-light_&]:text-error-800",
       className,
     )}
   >
-    <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-error-400" />
+    <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-error-400 [.theme-light_&]:text-error-600" />
     <span className="flex-1 leading-relaxed">{message}</span>
     {onRetry && (
       <button
@@ -39,6 +41,7 @@ export const ErrorBanner: React.FC<ErrorBannerProps> = ({
         onClick={onRetry}
         className={cn(
           "flex-shrink-0 inline-flex items-center gap-1 font-semibold text-error-100",
+          "[.theme-light_&]:text-error-800",
           "hover:text-content-primary transition-colors",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-400/70 rounded",
         )}
@@ -47,5 +50,5 @@ export const ErrorBanner: React.FC<ErrorBannerProps> = ({
         Try again
       </button>
     )}
-  </motion.div>
+  </m.div>
 );

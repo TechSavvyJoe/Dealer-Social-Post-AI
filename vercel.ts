@@ -34,6 +34,14 @@ const securityHeaders = [
   },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
+  {
+    // "same-origin" is safe here: every window.open in the app passes
+    // "noopener,noreferrer", and the YouTube OAuth hop is a noopener anchor
+    // whose return path is a pasted one-time code, so no flow ever relies on
+    // a cross-origin opener handle that COOP would sever.
+    key: "Cross-Origin-Opener-Policy",
+    value: "same-origin",
+  },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   {
     key: "Permissions-Policy",

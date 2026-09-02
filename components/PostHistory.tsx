@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import {
   Search,
   Loader2,
@@ -31,6 +31,7 @@ import {
 import { useAppStore } from "../stores/appStore";
 import { AppStep, GeneratedPost } from "../types";
 import { cn } from "../utils/classNames";
+import { toUiMessage } from "../utils/errorMessages";
 import { useToast } from "./ui/Toast";
 import { LocalMediaArchive } from "./LocalMediaArchive";
 import {
@@ -227,7 +228,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
         }
       } catch (err) {
         if (reqIdRef.current === myId)
-          setError(err instanceof Error ? err.message : String(err));
+          setError(toUiMessage(err, "Could not load your posts."));
       } finally {
         if (reqIdRef.current === myId) {
           setLoading(false);
@@ -502,7 +503,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
   }, [filtered, dealer?.name]);
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       className="rounded-lg border border-hairline bg-surface-overlay p-4 sm:p-6 space-y-4"
@@ -583,7 +584,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
 
       <AnimatePresence mode="wait">
         {loading && items.length === 0 ? (
-          <motion.div
+          <m.div
             key="loading"
             className="space-y-2"
             initial={{ opacity: 0 }}
@@ -604,9 +605,9 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                 <Skeleton width={72} height={28} />
               </div>
             ))}
-          </motion.div>
+          </m.div>
         ) : filtered.length === 0 ? (
-          <motion.div
+          <m.div
             key="empty"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -629,9 +630,9 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                 description={`Nothing matches “${query}”. Try a different name, VIN, or style.`}
               />
             )}
-          </motion.div>
+          </m.div>
         ) : (
-          <motion.div
+          <m.div
             key="rows"
             className="space-y-2"
             initial={{ opacity: 0 }}
@@ -837,7 +838,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                         </td>
                         <td className="py-2 px-2 text-surface-50 font-semibold">
                           {p.salesperson_name || (
-                            <span className="text-surface-500 italic">
+                            <span className="text-surface-400 italic">
                               unattributed
                             </span>
                           )}
@@ -877,7 +878,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                         <td className="py-2 px-2">
                           {statusBadge(p.approval_status)}
                           {p.approved_by && (
-                            <div className="text-[10px] text-surface-500">
+                            <div className="text-[10px] text-surface-400">
                               by {p.approved_by}
                             </div>
                           )}
@@ -979,16 +980,16 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                 </Button>
               </div>
             ) : null}
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
 
-      <p className="text-[11px] text-surface-500 leading-relaxed flex items-start gap-1.5">
+      <p className="text-[11px] text-surface-400 leading-relaxed flex items-start gap-1.5">
         <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
         Open loads the stored creative into the post studio for copy, share, and
         multi-size export — no AI regeneration. Older rows without an image cannot be
         reopened.
       </p>
-    </motion.div>
+    </m.div>
   );
 };

@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback, memo } from "react";
-import { AlertTriangle, Camera, Upload } from "lucide-react";
+import { Camera, Upload } from "lucide-react";
 import { fileToNormalizedDataUrl } from "../utils/imageUtils";
 import { WebcamCapture } from "./WebcamCapture";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Button } from "./ui/Button";
+import { ErrorBanner } from "./ui/ErrorBanner";
 import { useAppStore } from "../stores/appStore";
 import { RecentCaptureShelf } from "./RecentCaptureShelf";
 import type { ImageSelection } from "../types";
@@ -145,25 +146,6 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
     };
   }, [processFile]);
 
-  if (error) {
-    return (
-      <div className="w-full h-full flex flex-col items-center justify-center bg-error-900/25 border border-error-700/50 text-error-200 p-8 text-center rounded-2xl">
-        <AlertTriangle className="w-16 h-16 text-error-300 mb-4" />
-        <p className="text-error-100 text-lg">{error}</p>
-        <Button
-          variant="primary"
-          onClick={() => {
-            triggerHapticFeedback();
-            setError(null);
-          }}
-          className="mt-6"
-        >
-          Try again
-        </Button>
-      </div>
-    );
-  }
-
   if (showWebcam) {
     return (
       <WebcamCapture
@@ -217,6 +199,20 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
           </p>
         </div>
       </div>
+
+      {/* Recoverable problems (wrong file type, oversized photo) surface here
+          without unmounting the studio — the capture buttons stay reachable
+          and picking another file clears the message via processFile. */}
+      {error && (
+        <ErrorBanner
+          message={error}
+          onRetry={() => {
+            triggerHapticFeedback();
+            setError(null);
+          }}
+          className="mb-4 text-sm"
+        />
+      )}
 
       <div className="capture-studio-grid grid min-h-0 overflow-hidden rounded-[1.5rem] border border-hairline bg-surface-900 shadow-2xl shadow-black/25 sm:min-h-[480px] sm:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.65fr)] lg:min-h-[540px] lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.7fr)] lg:rounded-[1.75rem]">
         <aside className="capture-studio-sidebar flex flex-col justify-between bg-surface-900 p-4 sm:col-start-2 sm:row-start-1 sm:p-6 lg:p-10">
@@ -297,7 +293,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
             </div>
           )}
 
-          <div className="absolute left-6 right-6 top-6 flex items-center justify-between text-[11px] font-medium tracking-[0.12em] text-surface-500">
+          <div className="absolute left-6 right-6 top-6 flex items-center justify-between text-[11px] font-medium tracking-[0.12em] text-surface-400">
             <span>MEDIA BAY 01</span>
             <span>JPG · PNG · WEBP · HEIC*</span>
           </div>

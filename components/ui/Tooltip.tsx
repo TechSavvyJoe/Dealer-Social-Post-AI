@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useId, useState } from "react";
 import { cn } from "../../utils/classNames";
 
 interface TooltipProps {
@@ -9,10 +9,39 @@ interface TooltipProps {
 
 export const Tooltip: React.FC<TooltipProps> = ({ label, children, side = "top" }) => {
   const [open, setOpen] = useState(false);
+  const descriptionId = useId();
   const [isTouchDevice] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.matchMedia("(hover: none)").matches;
   });
+
+  // WCAG 1.4.13 — hover/focus content must be dismissible without moving the
+  // pointer or focus.
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
+  // The label doubles as the trigger's accessible description so screen
+  // readers announce it even when the visual tooltip is closed, suppressed
+  // (touch devices), or unreachable (native-disabled triggers never fire
+  // focus/hover). aria-describedby must sit on the trigger element itself —
+  // a wrapper would not be announced.
+  const trigger = React.isValidElement(children)
+    ? React.cloneElement(children as React.ReactElement<Record<string, unknown>>, {
+        "aria-describedby": descriptionId,
+      })
+    : children;
+
+  const description = (
+    <span id={descriptionId} className="sr-only">
+      {label}
+    </span>
+  );
 
   const positionClasses: Record<typeof side, string> = {
     top: "bottom-full left-1/2 -translate-x-1/2 -translate-y-2",
@@ -21,9 +50,14 @@ export const Tooltip: React.FC<TooltipProps> = ({ label, children, side = "top" 
     right: "left-full top-1/2 -translate-y-1/2 translate-x-2",
   };
 
-  // Don't render tooltip content on touch devices
+  // No visual tooltip on touch devices — the sr-only description still ships.
   if (isTouchDevice) {
-    return <>{children}</>;
+    return (
+      <>
+        {trigger}
+        {description}
+      </>
+    );
   }
 
   return (
@@ -34,7 +68,8 @@ export const Tooltip: React.FC<TooltipProps> = ({ label, children, side = "top" 
       onFocus={() => setOpen(true)}
       onBlur={() => setOpen(false)}
     >
-      {children}
+      {trigger}
+      {description}
       {open ? (
         <div
           className={cn(
@@ -42,6 +77,7 @@ export const Tooltip: React.FC<TooltipProps> = ({ label, children, side = "top" 
             positionClasses[side],
           )}
           role="tooltip"
+          aria-hidden="true"
         >
           {label}
         </div>

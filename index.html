@@ -46,6 +46,27 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Dealer Social" />
+    <!-- Link previews. The og:image must be an absolute URL on the canonical
+         production origin; the 1024px v3 launcher artwork is opaque and served
+         immutable, so scrapers always get stable brand bytes. -->
+    <meta property="og:title" content="Dealer Social Post AI" />
+    <meta
+      property="og:description"
+      content="Create dealership-ready social posts with AI-assisted captions, branded images, video, compliance controls, and fast multi-format sharing."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://dealer-social-post-ai.vercel.app/" />
+    <meta
+      property="og:image"
+      content="https://dealer-social-post-ai.vercel.app/dealer-social-dsp-v3-1024.png"
+    />
+    <meta property="og:image:width" content="1024" />
+    <meta property="og:image:height" content="1024" />
+    <meta
+      property="og:image:alt"
+      content="Dealer Social Post AI brand mark on a deep navy background"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" type="image/svg+xml" href="/dsp-brand-mark-v3-micro.svg" />
     <link
       rel="icon"
@@ -226,6 +247,11 @@
       Skip to main content
     </a>
     <div class="app-container">
+      <noscript>
+        <p style="margin: auto; padding: 2rem; text-align: center; color: #e2e8f0">
+          Dealer Social Post AI needs JavaScript. Please enable it and reload.
+        </p>
+      </noscript>
       <div id="root"></div>
     </div>
     <script type="module" src="/index.tsx"></script>

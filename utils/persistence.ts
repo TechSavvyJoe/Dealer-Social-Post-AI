@@ -83,11 +83,14 @@ export const saveSession = (state: PersistedState) => {
 
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(sessionWithTimestamp));
-    } catch (err) {
-      // Retry with workflow-heavy metadata removed, while images remain IndexedDB-only.
-      const slimmed = withoutImageBytes({
+    } catch {
+      // Quota retry: drop the workflow-heavy fields (images are already
+      // IndexedDB-only) so dealerId/step/preferences still persist.
+      const slimmed: PersistedState = {
         ...sessionWithTimestamp,
-      });
+        generatedPost: undefined,
+        generationParams: undefined,
+      };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(slimmed));
     }
   } catch {

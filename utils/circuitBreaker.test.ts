@@ -43,6 +43,19 @@ describe("circuit breaker", () => {
     expect(circuitBreaker.getState(SERVICE)).toBe("CLOSED");
   });
 
+  it("does not count caller cancellation as provider failure", async () => {
+    for (let i = 0; i < 5; i += 1) {
+      await expect(
+        withCircuitBreaker(SERVICE, async () => {
+          throw new DOMException("cancelled", "AbortError");
+        }),
+      ).rejects.toMatchObject({ name: "AbortError" });
+    }
+
+    expect(circuitBreaker.getState(SERVICE)).toBe("CLOSED");
+    await expect(succeed()).resolves.toBe("ok");
+  });
+
   it("recovers through HALF_OPEN after the cooldown", async () => {
     for (let i = 0; i < 5; i += 1) await fail();
     expect(circuitBreaker.getState(SERVICE)).toBe("OPEN");

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, m, useReducedMotion } from "framer-motion";
 import {
   ArrowRight,
   Camera,
@@ -408,7 +408,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     : { duration: 0.35, ease: [0.16, 1, 0.3, 1] as const };
 
   return (
-    <motion.section
+    <m.section
       className="relative mx-auto flex h-full min-h-0 w-full max-w-6xl flex-1 flex-col"
       initial={{ opacity: 0, y: shouldReduceMotion ? 0 : 6 }}
       animate={{ opacity: 1, y: 0 }}
@@ -490,7 +490,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
           <AnimatePresence mode="wait">
             {isSuccess ? (
-              <motion.div
+              <m.div
                 key="success"
                 className="flex min-h-0 flex-col items-center justify-center text-center"
                 initial={{ opacity: 0, scale: shouldReduceMotion ? 1 : 0.96 }}
@@ -512,9 +512,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 <p className="mt-2 text-sm text-surface-400">
                   Opening your dealership workspace.
                 </p>
-              </motion.div>
+              </m.div>
             ) : isLoading ? (
-              <motion.div
+              <m.div
                 key="loading"
                 className="flex min-h-0 flex-col items-center justify-center text-center"
                 initial={{ opacity: 0 }}
@@ -535,9 +535,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 <p className="mt-1 text-sm text-surface-400">
                   Connecting to your dealership workspace.
                 </p>
-              </motion.div>
+              </m.div>
             ) : (
-              <motion.div
+              <m.div
                 key="login-form"
                 className="login-form grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 sm:gap-4"
                 initial={{ opacity: 0 }}
@@ -670,6 +670,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       role="status"
                       aria-label={`${dealerCode.length} of ${PERSON_CODE_LENGTH} digits entered`}
                     >
+                      {/* Live regions announce text-content changes, not attribute
+                          changes — this hidden text gives VoiceOver per-digit feedback
+                          while aria-label keeps the region's accessible name stable. */}
+                      <span className="sr-only">
+                        {`${dealerCode.length} of ${PERSON_CODE_LENGTH} digits entered`}
+                      </span>
                       {Array.from({ length: PERSON_CODE_LENGTH }, (_, index) => (
                         <span
                           key={index}
@@ -982,11 +988,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     </div>
                   </form>
                 )}
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
         </div>
       </div>
-    </motion.section>
+    </m.section>
   );
 };

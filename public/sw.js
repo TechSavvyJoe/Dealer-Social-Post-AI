@@ -2,9 +2,10 @@
  * Dealer Social Post AI service worker.
  *
  * Network-first for everything (because AI responses can't be cached safely
- * and the app shell is small enough that revalidate-on-fetch is fine), with a
- * stale-while-revalidate cache for static assets so the install-to-homescreen
- * experience boots fast on slow LTE.
+ * and the app shell is small enough that revalidate-on-fetch is fine), with
+ * cache-first for immutable content-hashed /assets/ files and a
+ * stale-while-revalidate cache for other static assets so the
+ * install-to-homescreen experience boots fast on slow LTE.
  *
  * Critical: we never cache `/api/*` endpoints. Those carry session cookies,
  * proxy tokens, and credential responses; caching them would be a security bug.
@@ -61,8 +62,12 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(STATIC_CACHE).then((cache) => cache.put(req, copy));
+          // Only cache good responses; a cached error page would replace the
+          // offline app shell for every future offline navigation.
+          if (res && res.status === 200 && res.type === "basic") {
+            const copy = res.clone();
+            caches.open(STATIC_CACHE).then((cache) => cache.put(req, copy));
+          }
           return res;
         })
         .catch(() =>
@@ -92,7 +97,31 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Stale-while-revalidate for static assets.
+  // Content-hashed build assets are immutable by construction: Vite renames a
+  // file whenever its bytes change, and the activate handler purges old
+  // caches on release rollover, so a cached copy can never be stale. Serve
+  // them cache-first — stale-while-revalidate here would re-fetch every
+  // JS/CSS/font file on every boot for bytes guaranteed identical. Mirrors
+  // the "public, max-age=31536000, immutable" rule vercel.ts applies to
+  // the same paths.
+  if (url.pathname.startsWith("/assets/")) {
+    event.respondWith(
+      caches.match(req).then(
+        (cached) =>
+          cached ||
+          fetch(req).then((res) => {
+            if (res && res.status === 200 && res.type === "basic") {
+              const copy = res.clone();
+              caches.open(STATIC_CACHE).then((cache) => cache.put(req, copy));
+            }
+            return res;
+          }),
+      ),
+    );
+    return;
+  }
+
+  // Stale-while-revalidate for other static assets (root-level icons, svgs).
   event.respondWith(
     caches.match(req).then((cached) => {
       const networkFetch = fetch(req)

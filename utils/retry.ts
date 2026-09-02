@@ -16,6 +16,8 @@ interface RetryOptions {
    * duplicate side effects (e.g. double image generations / double charges).
    */
   shouldRetry?: (error: Error) => boolean;
+  /** Cancels both the active attempt (when the operation observes it) and backoff. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -49,6 +51,41 @@ export class RetryError extends Error {
   }
 }
 
+const abortReason = (signal: AbortSignal): unknown =>
+  signal.reason ?? new DOMException("Operation cancelled", "AbortError");
+
+const waitForRetry = (delay: number, signal?: AbortSignal): Promise<void> => {
+  if (!signal) {
+    return new Promise((resolve) => setTimeout(resolve, delay));
+  }
+
+  return new Promise((resolve, reject) => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      signal.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(abortReason(signal));
+    };
+
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+
+    timeoutId = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, delay);
+    signal.addEventListener("abort", onAbort, { once: true });
+
+    // Close the small race between the first aborted check and listener setup.
+    if (signal.aborted) onAbort();
+  });
+};
+
 /**
  * Retry an async operation with exponential backoff
  */
@@ -63,14 +100,25 @@ export async function retryWithBackoff<T>(
     backoffMultiplier = 2,
     onRetry,
     shouldRetry = (e: Error) => !isPermanentError(e),
+    signal,
   } = options;
 
   let lastError: Error = new Error("Unknown error");
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (signal?.aborted) throw abortReason(signal);
+
     try {
       return await operation();
     } catch (error) {
+      if (
+        error !== null &&
+        typeof error === "object" &&
+        "name" in error &&
+        error.name === "AbortError"
+      ) {
+        throw error;
+      }
       lastError = error instanceof Error ? error : new Error(String(error));
 
       // Fail fast on errors that can't succeed on retry — surface the real
@@ -96,7 +144,7 @@ export async function retryWithBackoff<T>(
       onRetry?.(attempt, lastError);
 
       // Wait before retrying
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      await waitForRetry(delay, signal);
     }
   }
 

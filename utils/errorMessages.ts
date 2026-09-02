@@ -130,3 +130,68 @@ export function formatErrorForDisplay(
     description: errorMessage.description,
   };
 }
+
+/**
+ * Raw transport/SDK boilerplate that should never reach the UI verbatim.
+ * Matched case-insensitively as substrings. Covers browser fetch failures
+ * ("Failed to fetch", iOS Safari's "Load failed"), HTTP statusText fallbacks
+ * ("Request failed", "Internal Server Error"), and PocketBase's generic
+ * server error.
+ */
+const RAW_TRANSPORT_SIGNATURES = [
+  "fetch",
+  "network",
+  "timeout",
+  "401",
+  "429",
+  "load failed",
+  "request failed",
+  "internal server error",
+  "something went wrong while processing your request",
+];
+
+/**
+ * Turn a caught error into copy that is safe to render to salespeople and
+ * managers.
+ *
+ * - Curated NormalizedError copy (utils/errorHandler) passes through.
+ * - Server ApiError copy passes through (duck-typed on `name`/`code` to avoid
+ *   a utils -> services import) — except its statusText fallbacks, which are
+ *   transport boilerplate and get mapped instead.
+ * - Errors whose message looks like raw transport/SDK text get the friendly
+ *   mapped description.
+ * - Any other Error message is curated app copy and passes through.
+ * - Non-Error values fall back to the caller's copy.
+ */
+export function toUiMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error) {
+    // NormalizedError: message is curated product copy by construction.
+    if ("kind" in err) {
+      return err.message;
+    }
+
+    const lower = err.message.toLowerCase();
+    const looksRaw = RAW_TRANSPORT_SIGNATURES.some((signature) =>
+      lower.includes(signature),
+    );
+
+    // ApiError with a server-assigned code: payload messages are product copy.
+    if (err.name === "ApiError" && (err as { code?: unknown }).code && !looksRaw) {
+      return err.message;
+    }
+
+    if (looksRaw) {
+      // iOS Safari reports offline fetches as "Load failed", which
+      // getErrorMessage cannot classify — treat it as a network failure.
+      if (lower.includes("load failed")) {
+        return ERROR_MESSAGES.NETWORK_ERROR.description;
+      }
+      return getErrorMessage(err).description;
+    }
+
+    // Remaining Error messages are curated app copy (internal throws).
+    return err.message.trim() ? err.message : fallback;
+  }
+
+  return fallback;
+}

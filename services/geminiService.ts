@@ -120,6 +120,12 @@ const attemptIdFromError = (error: unknown): string | undefined =>
       undefined
     : undefined;
 
+const isAbortError = (error: unknown): boolean =>
+  error !== null &&
+  typeof error === "object" &&
+  "name" in error &&
+  error.name === "AbortError";
+
 const latestSuccessfulGenerationAt = (
   ...executions: ModelExecutionMetadata[]
 ): string | undefined => {
@@ -147,6 +153,9 @@ async function withFallbackChain<T>(
         aiMeta: recordExecution(task, "gemini", modelId, index, true, attemptId),
       };
     } catch (err) {
+      // Cancellation is a caller decision, not a model failure. Never advance
+      // to another provider/model after the queue has aborted the active task.
+      if (isAbortError(err)) throw err;
       lastErr = err;
       const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
       // Authentication and malformed requests will fail identically across
@@ -189,6 +198,33 @@ async function hashString(input: string): Promise<string> {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const sleepWithSignal = (ms: number, signal?: AbortSignal): Promise<void> => {
+  if (!signal) return sleep(ms).then(() => undefined);
+  if (signal.aborted) {
+    return Promise.reject(
+      signal.reason instanceof Error
+        ? signal.reason
+        : new DOMException("Operation cancelled", "AbortError"),
+    );
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      signal.removeEventListener("abort", handleAbort);
+      resolve();
+    }, ms);
+    const handleAbort = () => {
+      clearTimeout(timeoutId);
+      reject(
+        signal.reason instanceof Error
+          ? signal.reason
+          : new DOMException("Operation cancelled", "AbortError"),
+      );
+    };
+    signal.addEventListener("abort", handleAbort, { once: true });
+  });
+};
 
 const blobToDataUrl = async (blob: Blob): Promise<string> => {
   // Use arrayBuffer() + btoa rather than FileReader so the conversion is
@@ -316,6 +352,7 @@ const generateImageWithFallback = async (
   imagePromptForOpenAI?: string,
   imageAspectRatio?: ImageAspectRatio,
   requestAuthEpoch: number = captureAuthEpoch(),
+  signal?: AbortSignal,
 ): Promise<ModelRun<string>> => {
   assertAuthEpoch(requestAuthEpoch);
   const client = getGeminiClient();
@@ -335,6 +372,7 @@ const generateImageWithFallback = async (
           imageAspectRatio,
         ),
         requestAuthEpoch,
+        signal,
       } as any);
       assertAuthEpoch(requestAuthEpoch);
       const dataUrl = extractGeneratedImageDataUrl(res);
@@ -371,6 +409,7 @@ const generateImageWithFallback = async (
           size: openAIImageSize,
           quality: "high",
           requestAuthEpoch,
+          signal,
         });
         assertAuthEpoch(requestAuthEpoch);
         return {
@@ -385,6 +424,7 @@ const generateImageWithFallback = async (
           ),
         };
       } catch (openaiErr) {
+        if (isAbortError(openaiErr)) throw openaiErr;
         console.warn(`[${task}] OpenAI image fallback also failed`, openaiErr);
         terminalError = new ModelChainFailure(
           task,
@@ -688,6 +728,7 @@ export const reviewGeneratedImageText = async (
   dealershipName: string,
   context: GeneratedImageReviewContext = {},
   requestAuthEpoch: number = captureAuthEpoch(),
+  signal?: AbortSignal,
 ): Promise<GeneratedImageTextReview> => {
   const logoReferenceImagePart = context.logoReferenceImagePart || null;
   const logoChars = logoReferenceImagePart?.inlineData.data.length || 0;
@@ -761,6 +802,7 @@ export const reviewGeneratedImageText = async (
       // prompt plus the Zod boundary below, not extra browser-supplied knobs.
       generationConfig: taskConfig.params,
       requestAuthEpoch,
+      signal,
     } as any);
     assertAuthEpoch(requestAuthEpoch);
     const rawText = typeof response.text === "function" ? response.text() : "";
@@ -982,6 +1024,7 @@ interface ImageTextComplianceInput {
   imageTier: ImageGenerationTier;
   imageAspectRatio?: ImageAspectRatio;
   requestAuthEpoch: number;
+  signal?: AbortSignal;
   /** Original photo + prompt parts, enabling a styled compliant re-render. */
   regenerationParts?: unknown[];
   regenerationPrompt?: string;
@@ -1114,6 +1157,7 @@ const enforceGeneratedImageTextCompliance = async ({
   requestedStyle,
   allowArtisticTransformation,
   sourceImageBase64Url,
+  signal,
 }: ImageTextComplianceInput): Promise<ModelRun<string>> => {
   const reviewOrNull = async (
     image: string,
@@ -1131,8 +1175,10 @@ const enforceGeneratedImageTextCompliance = async ({
           sourceImageBase64Url,
         },
         requestAuthEpoch,
+        signal,
       );
     } catch (error) {
+      if (isAbortError(error)) throw error;
       logTelemetry("image.text_compliance.review_failed", {
         stage,
         reason: error instanceof Error ? error.message : String(error),
@@ -1159,8 +1205,10 @@ const enforceGeneratedImageTextCompliance = async ({
         undefined,
         imageAspectRatio,
         requestAuthEpoch,
+        signal,
       );
     } catch (error) {
+      if (isAbortError(error)) throw error;
       logTelemetry("image.text_compliance.logo_restore_failed", {
         reason: error instanceof Error ? error.message : String(error),
       });
@@ -1232,6 +1280,7 @@ const enforceGeneratedImageTextCompliance = async ({
         undefined,
         imageAspectRatio,
         requestAuthEpoch,
+        signal,
       );
       const regeneratedReview = await reviewOrNull(regenerated.value, "regenerated");
       if (regeneratedReview?.compliant) {
@@ -1256,6 +1305,7 @@ const enforceGeneratedImageTextCompliance = async ({
         bestReview = regeneratedReview;
       }
     } catch (error) {
+      if (isAbortError(error)) throw error;
       logTelemetry("image.text_compliance.regeneration_failed", {
         reason: error instanceof Error ? error.message : String(error),
       });
@@ -1290,6 +1340,7 @@ The previous attempt still failed campaign review. Build a visibly different, se
         undefined,
         imageAspectRatio,
         requestAuthEpoch,
+        signal,
       );
       const finalRetryReview = await reviewOrNull(
         finalRetry.value,
@@ -1307,6 +1358,7 @@ The previous attempt still failed campaign review. Build a visibly different, se
         bestReview = finalRetryReview;
       }
     } catch (error) {
+      if (isAbortError(error)) throw error;
       logTelemetry("image.text_compliance.creative_recovery_failed", {
         reason: error instanceof Error ? error.message : String(error),
       });
@@ -1349,6 +1401,7 @@ The previous attempt still failed campaign review. Build a visibly different, se
     undefined,
     imageAspectRatio,
     requestAuthEpoch,
+    signal,
   );
 
   const correctedReview = await reviewOrNull(corrected.value, "corrected");
@@ -1420,6 +1473,7 @@ export const generateFunSocialPostImage = async (
   imageTier: ImageGenerationTier = "standard",
   imageAspectRatio?: ImageAspectRatio,
   creativeBrief?: string,
+  signal?: AbortSignal,
 ): Promise<string> => {
   const requestAuthEpoch = captureAuthEpoch();
   const normalisedOriginal = await normaliseDataUrl(originalImageBase64Url);
@@ -1452,6 +1506,7 @@ export const generateFunSocialPostImage = async (
     funPrompt,
     imageAspectRatio,
     requestAuthEpoch,
+    signal,
   );
   return (
     await enforceGeneratedImageTextCompliance({
@@ -1466,6 +1521,7 @@ export const generateFunSocialPostImage = async (
       requestedStyle: reviewedStyleName,
       allowArtisticTransformation: true,
       sourceImageBase64Url: normalisedOriginal,
+      signal,
     })
   ).value;
 };
@@ -1477,6 +1533,7 @@ export const editSocialPostImage = async (
   logoBase64Url?: string,
   imageTier: ImageGenerationTier = "standard",
   imageAspectRatio?: ImageAspectRatio,
+  signal?: AbortSignal,
 ): Promise<string> => {
   const requestAuthEpoch = captureAuthEpoch();
   const normalisedPrevious = await normaliseDataUrl(previousImageBase64Url);
@@ -1504,6 +1561,7 @@ export const editSocialPostImage = async (
     editInstruction,
     imageAspectRatio,
     requestAuthEpoch,
+    signal,
   );
   return (
     await enforceGeneratedImageTextCompliance({
@@ -1516,6 +1574,7 @@ export const editSocialPostImage = async (
       regenerationParts: imageParts,
       regenerationPrompt: editInstruction,
       sourceImageBase64Url: normalisedPrevious,
+      signal,
     })
   ).value;
 };
@@ -1529,6 +1588,7 @@ export const generateSocialPostTextDetailed = async (
   creativeBrief?: string,
   style?: StyleOption,
   customerIdentityRequired = true,
+  signal?: AbortSignal,
 ): Promise<CaptionGenerationResult> => {
   const requestAuthEpoch = captureAuthEpoch();
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
@@ -1585,6 +1645,7 @@ export const generateSocialPostTextDetailed = async (
         contents: { parts: [imagePart, { text: textPrompt }] },
         generationConfig: taskConfig.params,
         requestAuthEpoch,
+        signal,
       } as any);
       assertAuthEpoch(requestAuthEpoch);
       let rawText = "";
@@ -1616,6 +1677,7 @@ export const generateSocialPostTextDetailed = async (
     aiMeta = generated.aiMeta;
     fallbackCount = generated.aiMeta.fallbackCount;
   } catch (err) {
+    if (isAbortError(err)) throw err;
     fallbackCount = attemptedModelsFromError(err);
     fallbackReason =
       err instanceof Error && err.message.toLowerCase().includes("quality gate")
@@ -1637,6 +1699,7 @@ export const generateSocialPostTextDetailed = async (
             temperature: taskConfig.claudeTemperature,
             maxTokens: taskConfig.params.maxOutputTokens,
             requestAuthEpoch,
+            signal,
           }),
         );
         assertAuthEpoch(requestAuthEpoch);
@@ -1649,6 +1712,7 @@ export const generateSocialPostTextDetailed = async (
           attemptId,
         );
       } catch (claudeErr) {
+        if (isAbortError(claudeErr)) throw claudeErr;
         console.warn(
           "[generateSocialPostText] Claude fallback failed; using safe template",
           claudeErr,
@@ -1719,8 +1783,10 @@ export const generateSocialPostTextDetailed = async (
       aiMeta ??
       recordExecution(task, "basic_fallback", null, fallbackCount, false, attemptId),
   };
-  if (cacheKey) {
-    // 5 minute cache — captions are pretty hot when iterating styles.
+  if (cacheKey && captionSource === "ai") {
+    // 5 minute cache — captions are pretty hot when iterating styles. Only
+    // real AI results are cached: re-serving a template fallback would make
+    // "Generate" useless for 5 minutes after a transient provider outage.
     requestCache.set(cacheKey, result, 5 * 60 * 1000);
   }
   return result;
@@ -1740,6 +1806,7 @@ const generateRawStructuredImageText = async (
   imageBase64Url: string,
   prompt: string,
   emptyResponseMessage: string,
+  signal?: AbortSignal,
 ): Promise<string> => {
   const requestAuthEpoch = captureAuthEpoch();
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
@@ -1760,6 +1827,7 @@ const generateRawStructuredImageText = async (
       contents: { parts: [imagePart, { text: prompt }] },
       generationConfig: taskConfig.params,
       requestAuthEpoch,
+      signal,
     } as any);
     assertAuthEpoch(requestAuthEpoch);
     const rawText = typeof response.text === "function" ? response.text() : "";
@@ -1780,6 +1848,7 @@ export const generatePlatformCaptionPack = async (
   prompt: string,
   customerName?: string,
   customerIdentityRequired = true,
+  signal?: AbortSignal,
 ): Promise<string> => {
   const publicCustomer = toPublicCustomerLabel(customerName);
   const identityRule = publicCustomer
@@ -1791,23 +1860,27 @@ export const generatePlatformCaptionPack = async (
     imageBase64Url,
     `${prompt}\n\n${identityRule}`,
     "Caption-pack AI returned no structured copy.",
+    signal,
   );
 };
 
 export const generateWebsiteDraftMetadata = async (
   imageBase64Url: string,
   prompt: string,
+  signal?: AbortSignal,
 ): Promise<string> =>
   generateRawStructuredImageText(
     imageBase64Url,
     prompt,
     "Website draft AI returned no metadata.",
+    signal,
   );
 
 export const editSocialPostTextDetailed = async (
   originalText: string,
   editPromptString: string,
   tone: ToneOption,
+  signal?: AbortSignal,
 ): Promise<CaptionGenerationResult> => {
   const requestAuthEpoch = captureAuthEpoch();
   assertAuthEpoch(requestAuthEpoch);
@@ -1826,6 +1899,7 @@ export const editSocialPostTextDetailed = async (
         contents: { parts: [{ text: prompt }] },
         generationConfig: taskConfig.params,
         requestAuthEpoch,
+        signal,
       } as any);
       assertAuthEpoch(requestAuthEpoch);
       let rawText = "";
@@ -1853,6 +1927,7 @@ export const editSocialPostTextDetailed = async (
     text = generated.value;
     aiMeta = generated.aiMeta;
   } catch (err) {
+    if (isAbortError(err)) throw err;
     if (shouldFallbackToClaude(err) && taskConfig.claudeFallback) {
       console.warn(
         "[editSocialPostText] Gemini exhausted; falling back to Claude",
@@ -1866,6 +1941,7 @@ export const editSocialPostTextDetailed = async (
           temperature: taskConfig.claudeTemperature,
           maxTokens: taskConfig.params.maxOutputTokens,
           requestAuthEpoch,
+          signal,
         }),
       );
       assertAuthEpoch(requestAuthEpoch);
@@ -1916,6 +1992,7 @@ export const generateSocialPost = async (
   imageTier: ImageGenerationTier = "standard",
   imageAspectRatio?: ImageAspectRatio,
   customerIdentityRequired = true,
+  signal?: AbortSignal,
 ): Promise<SocialPostGenerationResult> => {
   const requestAuthEpoch = captureAuthEpoch();
   const normalisedImage = await normaliseDataUrl(imageBase64Url);
@@ -1949,8 +2026,10 @@ export const generateSocialPost = async (
           creativeBrief,
           style,
           customerIdentityRequired,
+          signal,
         )
   ).catch((error) => {
+    if (isAbortError(error)) throw error;
     throw new Error(
       `Failed to generate text content: ${
         error instanceof Error ? error.message : String(error)
@@ -1983,6 +2062,7 @@ export const generateSocialPost = async (
         imagePrompt,
         imageAspectRatio,
         requestAuthEpoch,
+        signal,
       );
       return await enforceGeneratedImageTextCompliance({
         candidate: generated,
@@ -1996,8 +2076,10 @@ export const generateSocialPost = async (
         requestedStyle: style,
         allowArtisticTransformation: false,
         sourceImageBase64Url: normalisedImage,
+        signal,
       });
     } catch (err) {
+      if (isAbortError(err)) throw err;
       console.warn(
         "[generateSocialPost] AI image failed; shipping original photo with caption",
         err,
@@ -2125,6 +2207,7 @@ const readBlobSlice = async (blob: Blob): Promise<Uint8Array> => {
 export const fetchVideoThroughProxy = async (
   videoUri: string,
   requestAuthEpoch: number,
+  signal?: AbortSignal,
 ): Promise<string> => {
   const normalizedUri = videoUri.trim();
   if (normalizedUri.startsWith("blob:")) {
@@ -2167,9 +2250,11 @@ export const fetchVideoThroughProxy = async (
           headers: {
             Accept: "video/mp4, application/octet-stream;q=0.9",
           },
+          signal,
         });
         lastTransportError = null;
       } catch (error) {
+        if (isAbortError(error)) throw error;
         lastTransportError = error;
         response = null;
       }
@@ -2187,7 +2272,7 @@ export const fetchVideoThroughProxy = async (
       if (response) {
         await response.body?.cancel().catch(() => undefined);
       }
-      await sleep(VIDEO_DOWNLOAD_RETRY_DELAYS_MS[attempt]);
+      await sleepWithSignal(VIDEO_DOWNLOAD_RETRY_DELAYS_MS[attempt], signal);
       assertAuthEpoch(requestAuthEpoch);
     }
 
@@ -2244,6 +2329,7 @@ export const fetchVideoThroughProxy = async (
     assertAuthEpoch(requestAuthEpoch);
     return URL.createObjectURL(typed);
   } catch (error) {
+    if (isAbortError(error)) throw error;
     console.error("[VideoGen] Secure video download failed.", error);
     throw new Error(
       error instanceof Error
@@ -2384,9 +2470,11 @@ export const generatePostVideo = async (
         throw error;
       }
       lastError = error;
+      // Log the raw error: normalizeError's message is curated for toasts and
+      // no longer carries the technical detail this diagnostic needs.
       console.error(
         `[VideoGen] ${veoModel} start failed; not retrying an ambiguous request.`,
-        normalizeError(error).message,
+        error,
       );
       break;
     }
@@ -2399,10 +2487,15 @@ export const generatePostVideo = async (
       } catch (_error) {
         // The status is still useful even if its response body cannot be read.
       }
+      // 5xx carries no normalizeError token, so spell out "unavailable" to
+      // classify as a temporary outage; other statuses classify off their
+      // number (401/404/429/400). Raw provider text stays in the console.
       lastError = new Error(
-        `Video generation failed (${response.status}): ${
-          text || response.statusText || "request rejected"
-        }`,
+        response.status >= 500
+          ? `Video generation failed (${response.status}): the service is temporarily unavailable.`
+          : `Video generation failed (${response.status}): ${
+              text || response.statusText || "request rejected"
+            }`,
       );
       console.error("[VideoGen] Request failed:", text || response.statusText);
 
@@ -2444,7 +2537,9 @@ export const generatePostVideo = async (
 
     // Check for immediate response (unlikely but handle it)
     if (json?.generatedVideos?.[0]) {
-      return finishVideo(await extractVideoFromResponse(json, requestAuthEpoch));
+      return finishVideo(
+        await extractVideoFromResponse(json, requestAuthEpoch, signal),
+      );
     }
 
     // Try to extract video from response
@@ -2462,7 +2557,7 @@ export const generatePostVideo = async (
           const partFileUri = providerVideoUri(part.fileData);
           if (partFileUri) {
             return finishVideo(
-              await fetchVideoThroughProxy(partFileUri, requestAuthEpoch),
+              await fetchVideoThroughProxy(partFileUri, requestAuthEpoch, signal),
             );
           }
           // Check for video URI directly
@@ -2470,7 +2565,7 @@ export const generatePostVideo = async (
             providerVideoUri(part.videoMetadata) || providerVideoUri(part);
           if (partVideoUri) {
             return finishVideo(
-              await fetchVideoThroughProxy(partVideoUri, requestAuthEpoch),
+              await fetchVideoThroughProxy(partVideoUri, requestAuthEpoch, signal),
             );
           }
         }
@@ -2479,13 +2574,15 @@ export const generatePostVideo = async (
 
     // Check for generatedVideos format
     if (json?.generatedVideos || json?.videos) {
-      return finishVideo(await extractVideoFromResponse(json, requestAuthEpoch));
+      return finishVideo(
+        await extractVideoFromResponse(json, requestAuthEpoch, signal),
+      );
     }
 
     // Check predictions format (fallback)
     if (json?.predictions?.[0]) {
       return finishVideo(
-        await extractVideoFromPrediction(json.predictions[0], requestAuthEpoch),
+        await extractVideoFromPrediction(json.predictions[0], requestAuthEpoch, signal),
       );
     }
 
@@ -2554,13 +2651,14 @@ const pollGeminiVideoOperation = async (
         headers: {
           "Content-Type": "application/json",
         },
+        signal,
       });
 
       if (!response.ok) {
         if (response.status === 401) notifySessionRejected(requestAuthEpoch);
         const text = await response.text();
         console.error(`[VideoGen] Poll failed:`, text);
-        await sleep(pollInterval);
+        await sleepWithSignal(pollInterval, signal);
         pollInterval = Math.min(pollInterval * 1.5, maxPollInterval);
         continue;
       }
@@ -2589,7 +2687,11 @@ const pollGeminiVideoOperation = async (
           );
           if (officialVideoUri) {
             // Download video through proxy to handle auth
-            return await fetchVideoThroughProxy(officialVideoUri, requestAuthEpoch);
+            return await fetchVideoThroughProxy(
+              officialVideoUri,
+              requestAuthEpoch,
+              signal,
+            );
           }
 
           // Alternative format: direct generatedSamples
@@ -2597,7 +2699,11 @@ const pollGeminiVideoOperation = async (
             resp.generatedSamples?.[0]?.video,
           );
           if (generatedSampleUri) {
-            return await fetchVideoThroughProxy(generatedSampleUri, requestAuthEpoch);
+            return await fetchVideoThroughProxy(
+              generatedSampleUri,
+              requestAuthEpoch,
+              signal,
+            );
           }
 
           // Check candidates
@@ -2608,14 +2714,18 @@ const pollGeminiVideoOperation = async (
               }
               const partFileUri = providerVideoUri(part.fileData);
               if (partFileUri) {
-                return await fetchVideoThroughProxy(partFileUri, requestAuthEpoch);
+                return await fetchVideoThroughProxy(
+                  partFileUri,
+                  requestAuthEpoch,
+                  signal,
+                );
               }
             }
           }
 
           // Check generatedVideos
           if (resp.generatedVideos) {
-            return extractVideoFromResponse(resp, requestAuthEpoch);
+            return extractVideoFromResponse(resp, requestAuthEpoch, signal);
           }
         }
 
@@ -2626,7 +2736,7 @@ const pollGeminiVideoOperation = async (
       console.log(
         `[VideoGen] Still processing... (${elapsed}s elapsed). Next poll in ${pollInterval / 1000}s`,
       );
-      await sleep(pollInterval);
+      await sleepWithSignal(pollInterval, signal);
       pollInterval = Math.min(pollInterval * 1.5, maxPollInterval);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
@@ -2653,7 +2763,7 @@ const pollGeminiVideoOperation = async (
         `[VideoGen] Poll error (will retry in ${pollInterval / 1000}s):`,
         error,
       );
-      await sleep(pollInterval);
+      await sleepWithSignal(pollInterval, signal);
       pollInterval = Math.min(pollInterval * 1.5, maxPollInterval);
     }
   }
@@ -2667,6 +2777,7 @@ const pollGeminiVideoOperation = async (
 const extractVideoFromResponse = async (
   response: any,
   requestAuthEpoch: number,
+  signal?: AbortSignal,
 ): Promise<string> => {
   // Check for generated videos array (common Veo response format)
   const generatedVideos = response?.generatedVideos || response?.videos;
@@ -2676,7 +2787,7 @@ const extractVideoFromResponse = async (
     // Check for video URI
     const uri = providerVideoUri(video?.video) || providerVideoUri(video);
     if (uri) {
-      return await fetchVideoThroughProxy(uri, requestAuthEpoch);
+      return await fetchVideoThroughProxy(uri, requestAuthEpoch, signal);
     }
 
     // Check for base64 video data
@@ -2688,7 +2799,11 @@ const extractVideoFromResponse = async (
 
   // Check for predictions format
   if (response?.predictions) {
-    return await extractVideoFromPrediction(response.predictions[0], requestAuthEpoch);
+    return await extractVideoFromPrediction(
+      response.predictions[0],
+      requestAuthEpoch,
+      signal,
+    );
   }
 
   throw new Error("Could not extract video from response.");
@@ -2700,6 +2815,7 @@ const extractVideoFromResponse = async (
 const extractVideoFromPrediction = async (
   prediction: any,
   requestAuthEpoch: number,
+  signal?: AbortSignal,
 ): Promise<string> => {
   if (!prediction) {
     throw new Error("No prediction data available.");
@@ -2723,7 +2839,7 @@ const extractVideoFromPrediction = async (
     (typeof prediction.mediaUri === "string" ? prediction.mediaUri : null);
 
   if (uri) {
-    return await fetchVideoThroughProxy(uri, requestAuthEpoch);
+    return await fetchVideoThroughProxy(uri, requestAuthEpoch, signal);
   }
 
   throw new Error("No video content found in prediction.");

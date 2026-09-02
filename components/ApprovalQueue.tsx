@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import {
   Check,
   X,
@@ -19,6 +19,7 @@ import { listPendingPosts, setApprovalStatus, PostRecord } from "../services/pos
 import { useAppStore } from "../stores/appStore";
 import { PUBLISH_TARGETS } from "../services/publishTargets";
 import { toPublicCustomerLabel } from "../utils/customerIdentity";
+import { toUiMessage } from "../utils/errorMessages";
 
 const PLATFORM_LABELS = new Map(
   PUBLISH_TARGETS.map((target) => [target.id, target.label]),
@@ -60,7 +61,7 @@ export const ApprovalQueue: React.FC = () => {
       if (reqIdRef.current === myId) setPending(items);
     } catch (err) {
       if (reqIdRef.current === myId)
-        setError(err instanceof Error ? err.message : String(err));
+        setError(toUiMessage(err, "Could not load pending posts."));
     } finally {
       if (reqIdRef.current === myId) setLoading(false);
     }
@@ -105,7 +106,7 @@ export const ApprovalQueue: React.FC = () => {
   }
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       className="rounded-lg border border-hairline bg-surface-overlay p-4 sm:p-6 space-y-4"
@@ -160,7 +161,7 @@ export const ApprovalQueue: React.FC = () => {
 
       <AnimatePresence>
         {loading && pending.length === 0 ? (
-          <motion.div
+          <m.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="flex min-h-32 items-center justify-center gap-2 text-sm text-surface-300"
@@ -168,15 +169,15 @@ export const ApprovalQueue: React.FC = () => {
           >
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
             Loading approval queue…
-          </motion.div>
+          </m.div>
         ) : pending.length === 0 ? (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+          <m.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <EmptyState
               icon={CheckCircle2}
               title="All caught up"
               description="Nothing pending — your team's clear. New posts that need approval will appear here."
             />
-          </motion.div>
+          </m.div>
         ) : (
           <ul className="space-y-2">
             {pending.map((post) => {
@@ -194,9 +195,8 @@ export const ApprovalQueue: React.FC = () => {
                 !identityReviewRequired &&
                 !imageReviewRequired;
               return (
-                <motion.li
+                <m.li
                   key={post.id}
-                  layout
                   initial={{ opacity: 0, scale: 0.98 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
@@ -370,12 +370,12 @@ export const ApprovalQueue: React.FC = () => {
                       Approve
                     </Button>
                   </div>
-                </motion.li>
+                </m.li>
               );
             })}
           </ul>
         )}
       </AnimatePresence>
-    </motion.div>
+    </m.div>
   );
 };

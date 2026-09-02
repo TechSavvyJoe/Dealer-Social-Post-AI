@@ -7,7 +7,7 @@ import React, {
   Suspense,
 } from "react";
 import { createPortal } from "react-dom";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
+import { m, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
   RefreshCw,
   Edit3,
@@ -276,7 +276,7 @@ const ActionTile: React.FC<{
 }) => {
   const shouldReduceMotion = useReducedMotion();
   const button = (
-    <motion.button
+    <m.button
       type="button"
       onClick={() => {
         triggerHapticFeedback();
@@ -301,7 +301,7 @@ const ActionTile: React.FC<{
         <Icon className={cn("w-4 h-4 shrink-0", iconClassName)} />
       )}
       <span className="truncate">{label}</span>
-    </motion.button>
+    </m.button>
   );
   return tooltip ? (
     <Tooltip label={tooltip} side="top">
@@ -413,7 +413,7 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [isImageEditing, setIsImageEditing] = useState(false);
   const [imageEditPrompt, setImageEditPrompt] = useState("");
   const [isImageLoading, setIsImageLoading] = useState(false);
-  const [imageLoadingMessage, setImageLoadingMessage] = useState("Updating Image...");
+  const [imageLoadingMessage, setImageLoadingMessage] = useState("Updating image…");
   const [imageLoadingProgress, setImageLoadingProgress] = useState(0);
 
   const [editedText, setEditedText] = useState(post.text);
@@ -1993,11 +1993,7 @@ export const PostResult: React.FC<PostResultProps> = ({
 
   const handleImageAction = async (
     action: () => Promise<void>,
-    messages: string[] = [
-      "Updating image...",
-      "Polishing details...",
-      "Almost there...",
-    ],
+    messages: string[] = ["Updating image…", "Polishing details…", "Almost there…"],
   ) => {
     if (contentEditingLocked) {
       toast.warning(
@@ -2008,13 +2004,13 @@ export const PostResult: React.FC<PostResultProps> = ({
       return;
     }
     setIsImageLoading(true);
-    setImageLoadingMessage(messages[0] || "Updating Image...");
+    setImageLoadingMessage(messages[0] || "Updating image…");
     setImageLoadingProgress(8);
 
     let messageIndex = 0;
     const intervalId = setInterval(() => {
       messageIndex = (messageIndex + 1) % messages.length;
-      setImageLoadingMessage(messages[messageIndex] || "Working...");
+      setImageLoadingMessage(messages[messageIndex] || "Working…");
       setImageLoadingProgress((prev) => Math.min(prev + 12, 90));
     }, 1200);
 
@@ -2028,7 +2024,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       clearInterval(intervalId);
       setIsImageLoading(false);
       setImageLoadingProgress(0);
-      setImageLoadingMessage("Updating Image...");
+      setImageLoadingMessage("Updating image…");
     }
   };
 
@@ -2751,7 +2747,7 @@ export const PostResult: React.FC<PostResultProps> = ({
             >
               {desktop ? "Media history" : "Media tray"}
             </p>
-            <p className="text-[10px] leading-relaxed text-surface-500">
+            <p className="text-[10px] leading-relaxed text-surface-400">
               {desktop
                 ? "Return to any photo or finished video."
                 : "Photos and completed videos stay available while you work."}
@@ -2852,7 +2848,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 <span className="line-clamp-1 text-[9px] font-semibold leading-tight text-surface-100">
                   {job.style}
                 </span>
-                <span className="text-[8px] uppercase tracking-wide text-surface-500">
+                <span className="text-[8px] uppercase tracking-wide text-surface-400">
                   Video {index + 1}
                 </span>
               </button>
@@ -3218,15 +3214,15 @@ export const PostResult: React.FC<PostResultProps> = ({
             handleImageAction(
               () => onFunMode(styleName),
               [
-                "Queuing fun mode style...",
-                "Illustrating with your photo reference...",
-                "Polishing colors and details...",
+                "Queuing fun mode style…",
+                "Illustrating with your photo reference…",
+                "Polishing colors and details…",
               ],
             );
           }}
         />
       </Suspense>
-      <motion.section
+      <m.section
         className={cn(
           "mx-auto w-full max-w-screen-2xl flex-1 space-y-4 px-0 py-3 sm:space-y-5 sm:px-2 sm:py-5 md:px-4 md:py-6",
           !isDesktopLayout && "pb-20",
@@ -3311,7 +3307,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                         >
                           {step.label}
                         </span>
-                        <span className="mt-0.5 block truncate text-[10px] text-surface-500">
+                        <span className="mt-0.5 block truncate text-[10px] text-surface-400">
                           {step.detail}
                         </span>
                       </span>
@@ -3346,7 +3342,7 @@ export const PostResult: React.FC<PostResultProps> = ({
           </nav>
         ) : null}
         {post.isBasicFallback || post.captionSource === "basic_fallback" ? (
-          <motion.div
+          <m.div
             className="mx-auto flex max-w-3xl flex-col gap-3 rounded-2xl border border-warning-500/30 bg-warning-500/10 px-4 py-4 text-warning-100 shadow-lg shadow-black/10 sm:flex-row sm:items-center"
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
@@ -3384,10 +3380,10 @@ export const PostResult: React.FC<PostResultProps> = ({
             >
               Try AI again
             </Button>
-          </motion.div>
+          </m.div>
         ) : null}
         {imageReviewRequired && (
-          <motion.div
+          <m.div
             className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10"
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
@@ -3408,10 +3404,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                 {imageReviewGateMessage}
               </p>
             </div>
-          </motion.div>
+          </m.div>
         )}
         {identityLocked && (
-          <motion.div
+          <m.div
             id="caption-identity-alert"
             className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10"
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
@@ -3433,10 +3429,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                 {identityGateMessage}
               </p>
             </div>
-          </motion.div>
+          </m.div>
         )}
         {claimLocked && (
-          <motion.div
+          <m.div
             id="caption-compliance-alert"
             className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10"
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
@@ -3458,10 +3454,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                 {claimGateMessage}
               </p>
             </div>
-          </motion.div>
+          </m.div>
         )}
         {releaseLocked && (
-          <motion.div
+          <m.div
             className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10"
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
@@ -3482,10 +3478,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                 {releaseGateMessage}
               </p>
             </div>
-          </motion.div>
+          </m.div>
         )}
         {reviewRequired && (
-          <motion.div
+          <m.div
             className={cn(
               "mx-auto flex max-w-3xl flex-col gap-3 rounded-2xl px-4 py-4 shadow-lg shadow-black/10 sm:flex-row sm:items-start",
               approvalStatus === "approved"
@@ -3541,10 +3537,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                 </p>
               ) : null}
             </div>
-          </motion.div>
+          </m.div>
         )}
         {websiteDraft?.enabled ? (
-          <motion.div
+          <m.div
             className={cn(
               "relative mx-auto flex min-h-14 w-full max-w-3xl items-center gap-2 rounded-xl border px-2.5 py-2 shadow-lg shadow-black/10 sm:px-3",
               websiteStatusCopy.tone === "success"
@@ -3673,10 +3669,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                 </Button>
               ) : null}
             </div>
-          </motion.div>
+          </m.div>
         ) : null}
         {error && (
-          <motion.div
+          <m.div
             className="mb-4 bg-error-900/50 border border-error-700 text-error-300 px-4 py-3 rounded-xl flex items-center justify-center gap-2 backdrop-blur-sm"
             initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -3685,7 +3681,7 @@ export const PostResult: React.FC<PostResultProps> = ({
           >
             <AlertCircle className="w-5 h-5" aria-hidden="true" />
             <span>{error}</span>
-          </motion.div>
+          </m.div>
         )}
         {!isDesktopLayout ? (
           <MobilePublishStudio
@@ -4312,7 +4308,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                       !hasOriginalCapture
                     }
                     busy={imageBusy}
-                    label={imageBusy ? "Wait..." : "Regen image"}
+                    label={imageBusy ? "Working…" : "Regenerate image"}
                     onClick={() => {
                       void handleImageAction(onRegenerateImage, [
                         "Refreshing with your chosen style...",
@@ -4335,7 +4331,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     }
                     busy={imageBusy}
                     label={
-                      imageBusy ? "Wait..." : isImageEditing ? "Cancel" : "Edit image"
+                      imageBusy ? "Working…" : isImageEditing ? "Cancel" : "Edit image"
                     }
                     onClick={() => setIsImageEditing(!isImageEditing)}
                   />
@@ -4356,7 +4352,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                       !hasOriginalCapture
                     }
                     busy={textBusy}
-                    label={textBusy ? "Wait..." : "Regen text"}
+                    label={textBusy ? "Working…" : "Regenerate caption"}
                     onClick={() => {
                       void handleTextAction(onRegenerateText).catch(() => undefined);
                     }}
@@ -4372,7 +4368,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     }
                     disabled={textBusy || contentEditingLocked || historyReadOnly}
                     busy={textBusy}
-                    label={textBusy ? "Wait..." : "Edit text"}
+                    label={textBusy ? "Working…" : "Edit text"}
                     onClick={() => setIsTextEditing(true)}
                   />
 
@@ -4398,7 +4394,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 </div>
                 <AnimatePresence>
                   {isToolsOpen && isImageEditing && (
-                    <motion.div
+                    <m.div
                       className="space-y-2 rounded-xl border border-white/10 bg-surface-800/50 p-3"
                       initial={shouldReduceMotion ? false : { opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: "auto" }}
@@ -4441,11 +4437,11 @@ export const PostResult: React.FC<PostResultProps> = ({
                       >
                         Apply image edit
                       </Button>
-                    </motion.div>
+                    </m.div>
                   )}
                 </AnimatePresence>
                 {isToolsOpen && videoJobs.length > 0 && (
-                  <motion.div
+                  <m.div
                     className="space-y-3 rounded-xl border border-white/10 bg-white/5 p-3"
                     initial={shouldReduceMotion ? false : { opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -4466,7 +4462,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     </div>
                     <ul className="space-y-2" role="list" aria-label="Video queue list">
                       {videoJobs.map((job) => (
-                        <motion.li
+                        <m.li
                           key={job.id}
                           className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-surface-900/40 px-3 py-2 text-xs"
                           initial={
@@ -4546,16 +4542,16 @@ export const PostResult: React.FC<PostResultProps> = ({
                               })}
                             </span>
                           </div>
-                        </motion.li>
+                        </m.li>
                       ))}
                     </ul>
-                  </motion.div>
+                  </m.div>
                 )}
               </div>
             </section>
 
             {isDesktopLayout ? (
-              <motion.section
+              <m.section
                 className="flex flex-col rounded-2xl border border-white/10 bg-surface-900/70 p-4 backdrop-blur-lg lg:p-4"
                 initial={shouldReduceMotion ? false : { opacity: 0, x: 12 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -4762,7 +4758,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                   }
                   className={cn("relative mb-4", isDesktopLayout && "lg:mb-3")}
                 >
-                  {isTextLoading && <BusyOverlay message="Updating caption..." />}
+                  {isTextLoading && <BusyOverlay message="Updating caption…" />}
                   {captionWasEdited && (
                     <div className="mb-2 flex items-center gap-2 text-xs text-warning-300">
                       <Edit3 className="w-3 h-3" />
@@ -4838,7 +4834,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 can't silently delete it. Bundled with the caption automatically
                 on copy/share. Media downloads remain media-only. */}
                 {activeDisclosures && (
-                  <motion.div
+                  <m.div
                     initial={shouldReduceMotion ? false : { opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: shouldReduceMotion ? 0 : 0.2 }}
@@ -4860,14 +4856,14 @@ export const PostResult: React.FC<PostResultProps> = ({
                       Included automatically when you copy or share. Saving media
                       downloads only the image or video, so copy the caption too.
                     </div>
-                  </motion.div>
+                  </m.div>
                 )}
-              </motion.section>
+              </m.section>
             ) : null}
           </div>
         </div>
         {isDesktopLayout ? renderMediaHistoryRail(true) : null}
-      </motion.section>
+      </m.section>
 
       {/* Mobile/narrow: sticky bottom delivery bar (Save · Share · Copy).
           Creative tools stay collapsed above; desktop keeps in-panel CTAs. */}

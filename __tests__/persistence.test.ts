@@ -247,6 +247,38 @@ describe("Persistence Utils", () => {
       expect(savedData.generatedPost).toBeUndefined();
       expect(savedData.generationParams).toBeUndefined();
     });
+
+    it("retries without workflow fields when the storage quota is exceeded", () => {
+      localStorageMock.setItem.mockImplementationOnce(() => {
+        throw new DOMException("Quota exceeded", "QuotaExceededError");
+      });
+
+      saveSession({
+        dealerId: "dealer123",
+        step: 3,
+        theme: "midnight",
+        preferredStyle: "Modern & Bold",
+        preferredTone: "Excited",
+        generatedPost: {
+          text: "Huge caption",
+        },
+        generationParams: {
+          style: "Modern & Bold",
+          tone: "Excited",
+          customerName: "Alex",
+        },
+      });
+
+      expect(localStorageMock.setItem).toHaveBeenCalledTimes(2);
+      const savedData = JSON.parse(localStorageMock.store[STORAGE_KEY]);
+      expect(savedData.dealerId).toBe("dealer123");
+      expect(savedData.step).toBe(3);
+      expect(savedData.theme).toBe("midnight");
+      expect(savedData.preferredStyle).toBe("Modern & Bold");
+      expect(savedData.preferredTone).toBe("Excited");
+      expect(savedData.generatedPost).toBeUndefined();
+      expect(savedData.generationParams).toBeUndefined();
+    });
   });
 
   describe("clearSession", () => {

@@ -25,6 +25,12 @@ export const PwaUpdatePrompt: React.FC<PwaUpdatePromptProps> = ({
   const [updateError, setUpdateError] = useState<string | null>(null);
   const titleId = useId();
   const updateCleanupRef = useRef<(() => void) | null>(null);
+  // The worker the user dismissed with "Update later". Foreground re-checks
+  // keep running (a newer release must still surface), but the same waiting
+  // worker must not re-nag every 60s for the rest of the session. A ServiceWorker
+  // maps to one stable object per realm, so identity comparison is sound; a
+  // genuinely new release installs a new worker object and re-offers.
+  const dismissedWorkerRef = useRef<ServiceWorker | null>(null);
 
   useEffect(() => {
     if (!enabled || !("serviceWorker" in navigator)) return;
@@ -34,7 +40,12 @@ export const PwaUpdatePrompt: React.FC<PwaUpdatePromptProps> = ({
     let installingWorker: ServiceWorker | null = null;
 
     const offerUpdate = (worker: ServiceWorker | null) => {
-      if (!disposed && worker && navigator.serviceWorker.controller) {
+      if (
+        !disposed &&
+        worker &&
+        worker !== dismissedWorkerRef.current &&
+        navigator.serviceWorker.controller
+      ) {
         setWaitingWorker((current) => current || worker);
       }
     };
@@ -172,6 +183,7 @@ export const PwaUpdatePrompt: React.FC<PwaUpdatePromptProps> = ({
           type="button"
           onClick={() => {
             updateCleanupRef.current?.();
+            dismissedWorkerRef.current = waitingWorker;
             setWaitingWorker(null);
             setIsUpdating(false);
             setUpdateError(null);

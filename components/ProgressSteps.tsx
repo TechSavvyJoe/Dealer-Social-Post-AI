@@ -1,5 +1,5 @@
 import React from "react";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { Check } from "lucide-react";
 import { AppStep } from "../types";
 import { cn } from "../utils/classNames";
@@ -31,10 +31,14 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
           const isUpcoming = index > activeIndex;
 
           return (
-            <li key={label} className="flex items-center gap-2">
+            <li
+              key={label}
+              className="flex items-center gap-2"
+              aria-current={isActive ? "step" : undefined}
+            >
               {/* Step Circle */}
               <div className="flex flex-col items-center gap-1.5">
-                <motion.div
+                <m.div
                   className={cn(
                     "relative flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full",
                     "border transition-all duration-300",
@@ -55,7 +59,7 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
                   transition={{ type: "spring", stiffness: 400, damping: 25 }}
                 >
                   {isComplete ? (
-                    <motion.div
+                    <m.div
                       initial={{ scale: 0, rotate: -180 }}
                       animate={{ scale: 1, rotate: 0 }}
                       transition={{
@@ -65,14 +69,14 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
                       }}
                     >
                       <Check className="h-4 w-4 sm:h-5 sm:w-5" />
-                    </motion.div>
+                    </m.div>
                   ) : (
                     <span>{index + 1}</span>
                   )}
-                </motion.div>
+                </m.div>
 
                 {/* Label */}
-                <motion.span
+                <m.span
                   className={cn(
                     "text-[10px] sm:text-xs tracking-wide font-medium whitespace-nowrap",
                     "transition-all duration-300",
@@ -86,7 +90,7 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
                   }}
                 >
                   {label}
-                </motion.span>
+                </m.span>
               </div>
 
               {/* Connector Line */}
@@ -97,7 +101,7 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
                     <div className="absolute inset-0 bg-fill-hover" />
 
                     {/* Progress line */}
-                    <motion.div
+                    <m.div
                       className={cn(
                         "absolute inset-0 origin-left",
                         isComplete ? "bg-success-400" : "bg-primary-400",

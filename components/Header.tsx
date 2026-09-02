@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { m } from "framer-motion";
 import { History, Settings, LogOut } from "lucide-react";
 import { Dealer } from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
@@ -32,7 +32,6 @@ export const Header: React.FC<HeaderProps> = ({
   studioMode = false,
 }) => {
   const [isScrolled, setIsScrolled] = useState(false);
-  const [showTooltip, setShowTooltip] = useState<string | null>(null);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
 
   // Track scroll position for the blur/shadow treatment. On mobile the body
@@ -88,7 +87,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <>
-      <motion.header
+      <m.header
         className={cn(
           "w-full z-40 sticky top-0",
           studioMode && "max-sm:hidden",
@@ -105,7 +104,7 @@ export const Header: React.FC<HeaderProps> = ({
       >
         <div className="mx-auto flex w-full max-w-screen-2xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6 sm:py-3 lg:px-10">
           {/* Product/dealer identity */}
-          <motion.div
+          <m.div
             className="flex min-w-0 items-center gap-3"
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -133,7 +132,7 @@ export const Header: React.FC<HeaderProps> = ({
               </>
             ) : (
               <>
-                <motion.div
+                <m.div
                   className="relative group shrink-0"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.98 }}
@@ -158,7 +157,7 @@ export const Header: React.FC<HeaderProps> = ({
                       {dealer.name.charAt(0)}
                     </div>
                   )}
-                </motion.div>
+                </m.div>
 
                 <div className="flex min-w-0 flex-col">
                   <div className="flex min-w-0 items-center gap-2">
@@ -183,10 +182,10 @@ export const Header: React.FC<HeaderProps> = ({
                 </div>
               </>
             )}
-          </motion.div>
+          </m.div>
 
           {/* Actions */}
-          <motion.div
+          <m.div
             className="flex items-center gap-2 sm:gap-3"
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -217,11 +216,7 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             ) : null}
             {onShowHistory && (
-              <div
-                className={cn("relative", studioMode && "lg:hidden")}
-                onMouseEnter={() => setShowTooltip("history")}
-                onMouseLeave={() => setShowTooltip(null)}
-              >
+              <div className={cn("relative", studioMode && "lg:hidden")}>
                 <Button
                   variant="tinted"
                   size="sm"
@@ -231,28 +226,11 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                   <span className="hidden sm:inline">My work</span>
                 </Button>
-
-                <AnimatePresence>
-                  {showTooltip === "history" && (
-                    <motion.div
-                      className="absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-lg border border-hairline bg-surface-950/95 px-2 py-1 text-xs text-surface-200 shadow-lg sm:hidden"
-                      initial={{ opacity: 0, y: -5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -5 }}
-                    >
-                      My work
-                    </motion.div>
-                  )}
-                </AnimatePresence>
               </div>
             )}
 
-            {/* Settings Button with tooltip */}
-            <div
-              className={cn("relative", studioMode && "lg:hidden")}
-              onMouseEnter={() => setShowTooltip("settings")}
-              onMouseLeave={() => setShowTooltip(null)}
-            >
+            {/* Settings Button */}
+            <div className={cn("relative", studioMode && "lg:hidden")}>
               <Button
                 variant="tinted"
                 size="sm"
@@ -263,28 +241,10 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <span className="hidden sm:inline">Settings</span>
               </Button>
-
-              {/* Tooltip for mobile */}
-              <AnimatePresence>
-                {showTooltip === "settings" && (
-                  <motion.div
-                    className="absolute top-full left-1/2 -translate-x-1/2 mt-2 rounded-lg border border-hairline bg-surface-950/95 px-2 py-1 text-xs text-surface-200 shadow-lg whitespace-nowrap sm:hidden z-50"
-                    initial={{ opacity: 0, y: -5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -5 }}
-                  >
-                    Settings
-                  </motion.div>
-                )}
-              </AnimatePresence>
             </div>
 
             {/* Logout Button with enhanced hover */}
-            <div
-              className="relative"
-              onMouseEnter={() => setShowTooltip("logout")}
-              onMouseLeave={() => setShowTooltip(null)}
-            >
+            <div className="relative">
               <Button
                 variant="outline"
                 size="sm"
@@ -299,24 +259,10 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <span className="hidden sm:inline">Log out</span>
               </Button>
-
-              {/* Tooltip for mobile */}
-              <AnimatePresence>
-                {showTooltip === "logout" && (
-                  <motion.div
-                    className="absolute top-full left-1/2 -translate-x-1/2 mt-2 rounded-lg border border-hairline bg-surface-950/95 px-2 py-1 text-xs text-surface-200 shadow-lg whitespace-nowrap sm:hidden z-50"
-                    initial={{ opacity: 0, y: -5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -5 }}
-                  >
-                    Log out
-                  </motion.div>
-                )}
-              </AnimatePresence>
             </div>
-          </motion.div>
+          </m.div>
         </div>
-      </motion.header>
+      </m.header>
       <Modal
         isOpen={isLogoutConfirmOpen}
         onClose={() => setIsLogoutConfirmOpen(false)}

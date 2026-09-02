@@ -3,9 +3,10 @@ import React, {
   useContext,
   useState,
   useCallback,
+  useMemo,
   ReactNode,
 } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import { CheckCircle2, XCircle, AlertCircle, Info, X } from "lucide-react";
 import { cn } from "../../utils/classNames";
 import { fadeInUp, ANIMATION_DURATIONS } from "../../utils/animations";
@@ -205,8 +206,15 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
     [showToast],
   );
 
+  // Memoized so toast state changes (show/auto-dismiss) don't hand every
+  // useToast consumer a fresh context value and re-render the whole app.
+  const contextValue = useMemo(
+    () => ({ showToast, success, error, warning, info }),
+    [showToast, success, error, warning, info],
+  );
+
   return (
-    <ToastContext.Provider value={{ showToast, success, error, warning, info }}>
+    <ToastContext.Provider value={contextValue}>
       {children}
       <ToastContainer
         toasts={toasts}
@@ -285,11 +293,10 @@ const ToastItem: React.FC<ToastItemProps> = ({
   };
 
   return (
-    <motion.div
+    <m.div
       {...fadeInUp}
       exit={{ opacity: 0, scale: 0.95, y: -10 }}
       transition={{ duration: ANIMATION_DURATIONS.standard }}
-      layout
       onMouseEnter={() => onPause(toast.id)}
       onMouseLeave={() => onResume(toast.id)}
       onFocusCapture={() => onPause(toast.id)}
@@ -324,6 +331,6 @@ const ToastItem: React.FC<ToastItemProps> = ({
       >
         <X className="w-4 h-4" />
       </button>
-    </motion.div>
+    </m.div>
   );
 };

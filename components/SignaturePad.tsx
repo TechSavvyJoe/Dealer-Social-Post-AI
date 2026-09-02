@@ -7,7 +7,7 @@ import React, {
   forwardRef,
   useState,
 } from "react";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { Eraser, PenLine } from "lucide-react";
 
 export interface SignaturePadHandle {
@@ -270,16 +270,16 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
                 style={{ touchAction: "none" }}
               />
               {!hasStrokes && (
-                <motion.div
+                <m.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   className="pointer-events-none absolute inset-0 flex items-center justify-center"
                 >
-                  <div className="flex items-center gap-2 text-xs text-surface-500">
+                  <div className="flex items-center gap-2 text-xs text-surface-400">
                     <PenLine className="h-3.5 w-3.5" />
                     Sign with finger or stylus
                   </div>
-                </motion.div>
+                </m.div>
               )}
             </div>
             <div className="mt-2 flex items-center justify-between text-[10px] text-surface-400">
@@ -339,7 +339,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
               className={
                 typedSignatureComplete
                   ? "text-xs text-success-400"
-                  : "text-xs text-surface-500"
+                  : "text-xs text-surface-400"
               }
             >
               {typedSignatureComplete

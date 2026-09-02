@@ -33,6 +33,20 @@ export const normalizeError = (error: unknown): NormalizedError => {
     return normalized;
   }
 
+  // RetryError intentionally carries the last provider failure separately
+  // from its generic "failed after N attempts" wrapper. Classify that terminal
+  // failure so a real outage does not get downgraded to an unknown error.
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "lastError" in error &&
+    (error as { lastError?: unknown }).lastError !== error
+  ) {
+    const terminal = normalizeError((error as { lastError?: unknown }).lastError);
+    terminal.original = error;
+    return terminal;
+  }
+
   const message =
     error instanceof Error
       ? error.message
@@ -85,8 +99,9 @@ export const normalizeError = (error: unknown): NormalizedError => {
     retryable = false;
   }
 
-  const friendly = `${baseMessageForKind[kind]} ${message}`;
-  const normalized = new Error(friendly) as NormalizedError;
+  // User-facing message stays curated; the raw technical text rides along on
+  // `original` for telemetry and console diagnostics only.
+  const normalized = new Error(baseMessageForKind[kind]) as NormalizedError;
   normalized.kind = kind;
   normalized.retryable = retryable;
   normalized.original = error;
@@ -100,13 +115,13 @@ export const recoveryHint = (error: NormalizedError): string => {
     case "timeout":
       return "The AI took too long to respond. Try again in a moment.";
     case "quota":
-      return "Try again later or reduce concurrent requests.";
+      return "The studio is busy right now — try again in a few minutes.";
     case "unauthorized":
-      return "Verify your API credentials or login status.";
+      return "Your session may have ended — sign in again.";
     case "model_unavailable":
       return "The model is busy. Retrying usually fixes this.";
     case "validation":
-      return "Adjust the request parameters and retry.";
+      return "Adjust your photo or details and try again.";
     default:
       return "Please try again.";
   }

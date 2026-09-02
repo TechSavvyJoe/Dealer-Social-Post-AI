@@ -417,7 +417,7 @@ export const MobilePublishStudio: React.FC<MobilePublishStudioProps> = ({
                   : "Post caption"}
               </p>
               {captionNote ? (
-                <p className="mt-0.5 truncate text-[10px] text-surface-500">
+                <p className="mt-0.5 truncate text-[10px] text-surface-400">
                   {captionNote}
                 </p>
               ) : null}

@@ -1,5 +1,5 @@
 import React from "react";
-import { motion, type HTMLMotionProps } from "framer-motion";
+import { m, type HTMLMotionProps } from "framer-motion";
 import { Loader2 } from "lucide-react";
 import { cn } from "../../utils/classNames";
 import { triggerHapticFeedback } from "../../utils/haptics";
@@ -161,7 +161,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     };
 
     return (
-      <motion.button
+      <m.button
         ref={ref}
         className={cn(
           baseStyles,
@@ -171,6 +171,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           className,
         )}
         disabled={disabled || loading}
+        aria-busy={loading || undefined}
         onClick={handleClick}
         whileTap={
           !disabled && !loading && !shouldReduceMotion() ? { scale: 0.98 } : undefined
@@ -210,7 +211,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         )}
 
         {/* Button text */}
-        <motion.span className={cn(loading && "opacity-0")}>{children}</motion.span>
+        <m.span className={cn(loading && "opacity-0")}>{children}</m.span>
 
         {/* Right icon */}
         {!loading && rightIcon && (
@@ -226,7 +227,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             {rightIcon}
           </span>
         )}
-      </motion.button>
+      </m.button>
     );
   },
 );

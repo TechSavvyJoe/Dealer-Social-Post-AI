@@ -23,14 +23,22 @@ interface GenerateContentParams {
   >;
   attemptId?: string;
   requestAuthEpoch?: number;
+  signal?: AbortSignal;
 }
 
 class ProxiedGeminiClient {
   get models() {
     return {
       generateContent: async (params: GenerateContentParams) => {
-        const { model, contents, generationConfig, task, attemptId, requestAuthEpoch } =
-          params;
+        const {
+          model,
+          contents,
+          generationConfig,
+          task,
+          attemptId,
+          requestAuthEpoch,
+          signal,
+        } = params;
         if (!/^[a-z0-9][a-z0-9._-]{0,127}$/i.test(model)) {
           throw new Error("Gemini model identifier is invalid.");
         }
@@ -51,6 +59,7 @@ class ProxiedGeminiClient {
           task,
           attemptId,
           requestAuthEpoch,
+          signal,
         );
         if (!rawResponse || typeof rawResponse !== "object") {
           throw new Error("Gemini returned an invalid response.");

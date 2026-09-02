@@ -62,6 +62,20 @@ export const motion = new Proxy(motionFactory, {
     settledComponent(String(element) as React.ElementType),
 });
 
+export const m = motion;
+
+type MotionProviderProps = {
+  children?: React.ReactNode;
+};
+
+export const LazyMotion = ({ children }: MotionProviderProps) =>
+  React.createElement(React.Fragment, null, children);
+
+export const MotionConfig = ({ children }: MotionProviderProps) =>
+  React.createElement(React.Fragment, null, children);
+
+export const domAnimation = {};
+
 export const AnimatePresence = ({ children }: { children?: React.ReactNode }) =>
   React.createElement(React.Fragment, null, children);
 

@@ -8,25 +8,10 @@ const CURRENT_TEST_MODEL_POLICY_VERSION = "5";
 
 async function expectNoSeriousAxeViolations(page: import("@playwright/test").Page) {
   const results = await new AxeBuilder({ page }).analyze();
-  // Contrast runs log-only while the token migration settles: violations are
-  // printed for triage but do not fail the gate yet. Flip to enforcing by
-  // removing this filter once the log stays clean.
-  const contrastViolations = results.violations.filter(
-    (violation) => violation.id === "color-contrast",
-  );
-  if (contrastViolations.length > 0) {
-    console.warn(
-      "[axe][log-only] color-contrast violations:",
-      JSON.stringify(
-        contrastViolations.map((violation) => ({
-          impact: violation.impact,
-          nodes: violation.nodes.slice(0, 5).map((node) => node.target.join(" ")),
-        })),
-      ),
-    );
-  }
+  // Contrast is ENFORCING as of the 2026-08-30 text-surface-500 → 400
+  // migration (the full matrix ran clean with zero log-only warnings).
+  // Regressions below WCAG AA now fail the gate like any other serious issue.
   const violations = results.violations
-    .filter((violation) => violation.id !== "color-contrast")
     .filter(
       (violation) => violation.impact === "serious" || violation.impact === "critical",
     )

@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useAppStore, type SessionLoginRequest } from "../stores/appStore";
 import { useShallow } from "zustand/react/shallow";
 import { useLayoutMode } from "./useLayoutMode";
-import { useGemini } from "./useGemini";
+import { loadGeminiService, useGemini } from "./useGemini";
+import { loadPublishPipeline } from "../services/publishPipeline";
 import { useGeneration } from "./useGeneration";
 import { useDealerTheme } from "./useDealerTheme";
 import { AppStep, StyleOption, ToneOption, type ImageSelection } from "../types";
@@ -91,6 +92,28 @@ export const useAppController = () => {
     logEvent("app.boot");
     restoreSession();
   }, [restoreSession]);
+
+  // Warm the AI-service chunk (~63 kB gzip) while the user is still picking
+  // style and tone, so the first Generate spends its time on the model call
+  // instead of a chunk download over lot LTE. loadGeminiService memoizes and
+  // un-caches failed imports, so a lost race here costs nothing.
+  useEffect(() => {
+    if (step === AppStep.CUSTOMIZE) {
+      void loadGeminiService().catch(() => {});
+    }
+  }, [step]);
+
+  // Warm the publish-pipeline chunk (consent gating, caption compliance,
+  // platform copy, export rendering, post persistence) as soon as the user
+  // reaches Capture — everything after the Generate tap awaits this module.
+  // CUSTOMIZE is included for sessions restored straight into the editor.
+  // loadPublishPipeline memoizes and un-caches failed imports, so a lost race
+  // here costs nothing.
+  useEffect(() => {
+    if (step === AppStep.CAPTURE || step === AppStep.CUSTOMIZE) {
+      void loadPublishPipeline().catch(() => {});
+    }
+  }, [step]);
 
   useEffect(() => {
     const authIdentity = currentDealer

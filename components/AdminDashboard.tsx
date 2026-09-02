@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dealer } from "../types";
 import * as db from "../services/database";
 import { logError } from "../utils/telemetry";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { Button } from "./ui/Button";
 import { Skeleton } from "./ui/Skeleton";
 import {
@@ -52,7 +52,7 @@ type HubTab = "dealers" | "admins" | "users";
 const PEOPLE_PAGE_SIZE = 50;
 
 const fieldClassName =
-  "mt-1 block w-full rounded-xl border border-surface-700 bg-surface-900/70 px-4 py-3 text-surface-50 placeholder:text-surface-500 transition-colors focus:border-primary-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
+  "mt-1 block w-full rounded-xl border border-surface-700 bg-surface-900/70 px-4 py-3 text-surface-50 placeholder:text-surface-400 transition-colors focus:border-primary-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
 const labelClassName = "block text-sm font-medium text-surface-300";
 
 const isSystemDealer = (dealer: Dealer, sessionDealerId?: string) =>
@@ -524,7 +524,7 @@ export const AdminDashboard: React.FC = () => {
           </div>
 
           {showDealerForm && (
-            <motion.div
+            <m.div
               initial={{ opacity: 0, y: -12 }}
               animate={{ opacity: 1, y: 0 }}
               className="rounded-2xl border border-hairline bg-surface-900/70 p-5 shadow-elevation-3 backdrop-blur-xl sm:p-6"
@@ -613,7 +613,7 @@ export const AdminDashboard: React.FC = () => {
                   </Button>
                 </div>
               </form>
-            </motion.div>
+            </m.div>
           )}
 
           {isPending && (
@@ -632,9 +632,8 @@ export const AdminDashboard: React.FC = () => {
             {storeDealers.map((dealer) => {
               const isSelected = dealer.id === selectedDealerId;
               return (
-                <motion.div
+                <m.div
                   key={dealer.id}
-                  layout
                   className={cn(
                     "rounded-2xl border p-4 shadow-elevation-1 backdrop-blur-xl sm:p-5",
                     isSelected
@@ -670,7 +669,7 @@ export const AdminDashboard: React.FC = () => {
                             </span>
                           )}
                         </h3>
-                        <p className="mt-0.5 text-xs text-surface-500">
+                        <p className="mt-0.5 text-xs text-surface-400">
                           {dealer.hours?.trim() || "Hours not set"}
                         </p>
                       </div>
@@ -711,7 +710,7 @@ export const AdminDashboard: React.FC = () => {
                       </Button>
                     </div>
                   </div>
-                </motion.div>
+                </m.div>
               );
             })}
             {!isPending && storeDealers.length === 0 && (
@@ -733,7 +732,7 @@ export const AdminDashboard: React.FC = () => {
         >
           <div className="grid gap-2 sm:grid-cols-3">
             <div className="rounded-xl border border-hairline bg-surface-900/55 p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-400">
                 Scope
               </p>
               <p className="mt-1 truncate text-sm font-semibold text-surface-100">
@@ -741,7 +740,7 @@ export const AdminDashboard: React.FC = () => {
               </p>
             </div>
             <div className="rounded-xl border border-hairline bg-surface-900/55 p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-400">
                 Showing
               </p>
               <p className="mt-1 text-sm font-semibold text-surface-100">
@@ -749,7 +748,7 @@ export const AdminDashboard: React.FC = () => {
               </p>
             </div>
             <div className="rounded-xl border border-hairline bg-surface-900/55 p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-500">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-400">
                 People
               </p>
               <p className="mt-1 text-sm font-semibold tabular-nums text-surface-100">
@@ -774,7 +773,7 @@ export const AdminDashboard: React.FC = () => {
                   onChange={(event) =>
                     setPeopleSearch(event.target.value.slice(0, 120))
                   }
-                  className="w-full rounded-xl border border-surface-700 bg-surface-900/80 py-2.5 pl-10 pr-3 text-sm text-surface-100 placeholder:text-surface-500 focus:border-primary-500 focus:outline-none"
+                  className="w-full rounded-xl border border-surface-700 bg-surface-900/80 py-2.5 pl-10 pr-3 text-sm text-surface-100 placeholder:text-surface-400 focus:border-primary-500 focus:outline-none"
                   placeholder={`Search ${tab === "admins" ? "managers" : "salespeople"}…`}
                 />
               </label>
@@ -931,7 +930,7 @@ export const AdminDashboard: React.FC = () => {
                   <div className="font-semibold text-surface-50">
                     {person.name}
                     {!person.active && (
-                      <span className="ml-2 text-xs font-medium text-surface-500">
+                      <span className="ml-2 text-xs font-medium text-surface-400">
                         inactive
                       </span>
                     )}
@@ -945,7 +944,7 @@ export const AdminDashboard: React.FC = () => {
                           ? "bg-warning-500/10 text-warning-200 ring-1 ring-warning-500/20"
                           : person.hasPin
                             ? "bg-success-500/10 text-success-300 ring-1 ring-success-500/20"
-                            : "bg-surface-800 text-surface-500 ring-1 ring-hairline",
+                            : "bg-surface-800 text-surface-400 ring-1 ring-hairline",
                       )}
                     >
                       {person.pinNeedsDistribution
@@ -1030,7 +1029,7 @@ export const AdminDashboard: React.FC = () => {
               >
                 Previous
               </Button>
-              <span className="text-xs text-surface-500">
+              <span className="text-xs text-surface-400">
                 {PEOPLE_PAGE_SIZE} per page
               </span>
               <Button

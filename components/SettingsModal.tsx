@@ -5,6 +5,15 @@ import { Button } from "./ui/Button";
 import { Modal } from "./ui/Modal";
 import type { ImageQualityTier } from "../types";
 
+// Client bundle identity — same fallback chain the telemetry envelope stamps
+// on every event (utils/telemetry.ts). The SystemHealthPanel shows the
+// SERVER's SHA; this is the salesperson-facing answer to "am I on the new
+// build?" for the bundle actually running on their phone.
+const releaseSha =
+  import.meta.env.VITE_RELEASE_SHA ||
+  import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA ||
+  "development";
+
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -35,9 +44,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       description="Tune the workspace for your sales floor."
       size="lg"
       footer={
-        <Button variant="outline" onClick={handleClose}>
-          Close
-        </Button>
+        <>
+          <span className="mr-auto self-center text-xs text-surface-400">
+            Build {releaseSha.slice(0, 7)}
+          </span>
+          <Button variant="outline" onClick={handleClose}>
+            Close
+          </Button>
+        </>
       }
     >
       <div className="space-y-5">
@@ -89,8 +103,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div>
               <p className="font-semibold text-surface-50">Image quality</p>
               <p className="mt-1 text-sm leading-relaxed text-surface-400">
-                Standard uses premium Pro rendering at 2K. Studio renders Pro at 4K for
-                final hero creative.
+                Standard (2K) is quicker and looks sharp on social feeds. Studio (4K)
+                takes longer to generate — use it when you need maximum detail.
               </p>
             </div>
           </div>

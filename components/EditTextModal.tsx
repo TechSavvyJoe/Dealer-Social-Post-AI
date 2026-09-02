@@ -100,7 +100,7 @@ export const EditTextModal: React.FC<EditTextModalProps> = ({
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="e.g., Make it funnier, or add a question at the end..."
-            className="w-full bg-surface-800/50 text-surface-50 border-2 border-strong rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary-400 focus:border-primary-400 outline-none transition h-32 resize-none placeholder:text-surface-500"
+            className="w-full bg-surface-800/50 text-surface-50 border-2 border-strong rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary-400 focus:border-primary-400 outline-none transition h-32 resize-none placeholder:text-surface-400"
           />
           {submitError ? (
             <p

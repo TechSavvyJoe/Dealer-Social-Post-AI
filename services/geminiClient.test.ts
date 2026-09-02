@@ -43,6 +43,7 @@ describe("proxied Gemini client", () => {
       "caption",
       undefined,
       undefined,
+      undefined,
     );
     expect(response.text()).toBe("First second");
   });
@@ -67,6 +68,29 @@ describe("proxied Gemini client", () => {
       "caption_regenerate",
       undefined,
       undefined,
+      undefined,
+    );
+  });
+
+  it("forwards cancellation to the authenticated proxy request", async () => {
+    vi.mocked(fetchFromProxy).mockResolvedValue({ candidates: [] });
+    const controller = new AbortController();
+
+    await getGeminiClient().models.generateContent({
+      model: "gemini-3.6-flash",
+      task: "caption",
+      contents: { parts: [{ text: "Write a caption" }] },
+      signal: controller.signal,
+    });
+
+    expect(fetchFromProxy).toHaveBeenCalledWith(
+      "POST",
+      "v1beta/models/gemini-3.6-flash:generateContent",
+      { contents: [{ parts: [{ text: "Write a caption" }] }] },
+      "caption",
+      undefined,
+      undefined,
+      controller.signal,
     );
   });
 

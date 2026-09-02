@@ -1,8 +1,9 @@
 import React, { useId, useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import { Plus, Trash2, Save, X, Pencil, Loader2 } from "lucide-react";
 import { Input, Textarea } from "./ui/Input";
 import { Button } from "./ui/Button";
+import { Modal } from "./ui/Modal";
 import {
   PostScenario,
   ScenarioCategory,
@@ -13,6 +14,7 @@ import {
 } from "../services/postScenarios";
 import { StyleOption, ToneOption } from "../types";
 import { cn } from "../utils/classNames";
+import { toUiMessage } from "../utils/errorMessages";
 
 interface CustomScenarioManagerProps {
   /** Current value of dealer.custom_scenarios (JSON string). */
@@ -68,6 +70,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
   const [hashtagsInput, setHashtagsInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const categoryId = useId();
   const defaultStyleId = useId();
   const defaultToneId = useId();
@@ -109,7 +112,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
     try {
       await onSave(serializeCustomScenarios(next));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(toUiMessage(err, "Could not save your scenarios."));
       throw err;
     } finally {
       setSaving(false);
@@ -155,17 +158,16 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm("Delete this scenario? This cannot be undone.")
-    ) {
-      return;
-    }
+  const confirmDelete = async () => {
+    if (!pendingDeleteId) return;
     try {
-      await persist(scenarios.filter((s) => s.id !== id));
+      await persist(scenarios.filter((s) => s.id !== pendingDeleteId));
     } catch {
-      /* surfaced */
+      /* error surfaced by persist */
+    } finally {
+      // Always close, even on failure — the error banner renders behind the
+      // modal overlay and would otherwise stay hidden.
+      setPendingDeleteId(null);
     }
   };
 
@@ -186,10 +188,6 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
             leftIcon={<Plus className="w-3.5 h-3.5" />}
             onClick={startNew}
             disabled={saving}
-            style={{
-              background:
-                "linear-gradient(135deg, var(--brand-primary-500), var(--brand-primary))",
-            }}
           >
             Add scenario
           </Button>
@@ -204,7 +202,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
 
       <AnimatePresence>
         {editing && (
-          <motion.div
+          <m.div
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
@@ -406,15 +404,11 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                 }
                 onClick={handleSubmit}
                 disabled={saving}
-                style={{
-                  background:
-                    "linear-gradient(135deg, var(--brand-primary-500), var(--brand-primary))",
-                }}
               >
                 {saving ? "Saving…" : "Save scenario"}
               </Button>
             </div>
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
 
@@ -441,7 +435,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                 <div className="min-w-0">
                   <div className="text-sm font-semibold text-surface-50 truncate">
                     {s.label}
-                    <span className="ml-2 text-[10px] uppercase tracking-wide text-surface-500">
+                    <span className="ml-2 text-[10px] uppercase tracking-wide text-surface-400">
                       {SCENARIO_CATEGORY_LABELS[s.category]}
                     </span>
                   </div>
@@ -466,7 +460,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleDelete(s.id)}
+                  onClick={() => setPendingDeleteId(s.id)}
                   className={cn(
                     "text-[11px] px-2 py-1 rounded-md transition-colors",
                     "bg-error-500/10 hover:bg-error-500/20 text-error-200",
@@ -481,6 +475,44 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
           ))}
         </ul>
       )}
+
+      <Modal
+        isOpen={pendingDeleteId !== null}
+        onClose={() => setPendingDeleteId(null)}
+        size="sm"
+        title="Delete this scenario?"
+        description="This can't be undone."
+        disableClose={saving}
+        footer={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => setPendingDeleteId(null)}
+              disabled={saving}
+              fullWidth
+            >
+              Keep scenario
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => void confirmDelete()}
+              disabled={saving}
+              fullWidth
+            >
+              {saving ? "Deleting…" : "Delete scenario"}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm leading-relaxed text-surface-300">
+          {(() => {
+            const pending = scenarios.find((s) => s.id === pendingDeleteId);
+            return pending
+              ? `Removing “${pending.label}” takes it out of the showroom picker for your whole team.`
+              : "Removing this scenario takes it out of the showroom picker for your whole team.";
+          })()}
+        </p>
+      </Modal>
     </section>
   );
 };

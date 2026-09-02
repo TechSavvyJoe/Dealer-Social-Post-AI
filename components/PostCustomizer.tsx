@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
   Edit3,
@@ -806,7 +806,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
   return (
     <div className="flex flex-1 items-start justify-center px-0 py-2 sm:px-2 sm:py-4">
-      <motion.div
+      <m.div
         className={cn(
           "mx-auto w-full",
           isDesktopLayout
@@ -854,7 +854,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           <CardHeader className="relative pb-3">
             <div className="flex items-center gap-3">
               {/* Compact image preview */}
-              <motion.div
+              <m.div
                 className={cn(
                   "h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-strong shadow-lg sm:h-20 sm:w-20",
                   isDesktopLayout && "hidden",
@@ -866,7 +866,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   alt="Preview"
                   className="h-full w-full object-cover"
                 />
-              </motion.div>
+              </m.div>
               <div className="min-w-0 flex-1">
                 <CardTitle className="text-lg sm:text-xl">Create your post</CardTitle>
                 <CardDescription className="text-xs sm:text-sm">
@@ -923,7 +923,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 Vehicle
               </label>
               {decodedVehicle && !decodedVehicle.empty ? (
-                <motion.div
+                <m.div
                   initial={{ opacity: 0, scale: 0.98 }}
                   animate={{ opacity: 1, scale: 1 }}
                   className="flex items-start gap-3 rounded-xl border border-success-500/40 bg-success-500/10 px-3 py-2.5"
@@ -954,7 +954,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
-                </motion.div>
+                </m.div>
               ) : (
                 <Button
                   variant="outline"
@@ -979,7 +979,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 Photo release · {scenarioNeedsCustomerRelease ? "required" : "optional"}
               </label>
               {capturedRelease ? (
-                <motion.div
+                <m.div
                   initial={{ opacity: 0, scale: 0.98 }}
                   animate={{ opacity: 1, scale: 1 }}
                   className="flex items-start gap-3 rounded-xl border border-success-500/40 bg-success-500/10 px-3 py-2.5"
@@ -1017,7 +1017,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>
                   </div>
-                </motion.div>
+                </m.div>
               ) : (
                 <Button
                   variant="outline"
@@ -1060,7 +1060,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   const info = STYLE_INFO[option];
                   const isActive = option === style;
                   return (
-                    <motion.button
+                    <m.button
                       key={option}
                       type="button"
                       aria-pressed={isActive}
@@ -1093,11 +1093,11 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       whileTap={{ scale: 0.98 }}
                     >
                       {isActive && (
-                        <motion.div
-                          layoutId="activeStyleGlow"
+                        <m.div
                           className="absolute inset-0 bg-primary-400/10"
-                          initial={false}
-                          transition={{ duration: 0.3 }}
+                          initial={{ opacity: 0, scale: 0.98 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ duration: 0.2 }}
                         />
                       )}
                       <info.icon
@@ -1117,9 +1117,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                             {option.split(" ")[0]}
                           </span>
                           {isActive && (
-                            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}>
+                            <m.div initial={{ scale: 0 }} animate={{ scale: 1 }}>
                               <Check className="h-3.5 w-3.5 text-primary-400 flex-shrink-0" />
-                            </motion.div>
+                            </m.div>
                           )}
                         </div>
                         <span
@@ -1133,13 +1133,13 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         <span
                           className={cn(
                             "mt-0.5 text-[10px] block leading-snug transition-colors",
-                            isActive ? "text-primary-200/60" : "text-surface-500",
+                            isActive ? "text-primary-200/60" : "text-surface-400",
                           )}
                         >
                           {info.detail}
                         </span>
                       </div>
-                    </motion.button>
+                    </m.button>
                   );
                 })}
               </div>
@@ -1151,7 +1151,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
                   Share to
                 </label>
-                <span className="text-[10px] text-surface-500">
+                <span className="text-[10px] text-surface-400">
                   Pick all that apply
                 </span>
               </div>
@@ -1302,7 +1302,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 </button>
                 <AnimatePresence initial={false}>
                   {showMorePlatforms ? (
-                    <motion.div
+                    <m.div
                       id="secondary-platform-options"
                       initial={{ height: 0, opacity: 0 }}
                       animate={{ height: "auto", opacity: 1 }}
@@ -1344,7 +1344,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                           );
                         })}
                       </div>
-                    </motion.div>
+                    </m.div>
                   ) : null}
                 </AnimatePresence>
               </div>
@@ -1489,7 +1489,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   const info = TONE_INFO[option];
                   const isActive = option === tone;
                   return (
-                    <motion.button
+                    <m.button
                       key={option}
                       type="button"
                       aria-pressed={isActive}
@@ -1519,7 +1519,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       >
                         {option}
                       </span>
-                    </motion.button>
+                    </m.button>
                   );
                 })}
               </div>
@@ -1571,7 +1571,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             {/* Custom Message Input */}
             <AnimatePresence mode="wait">
               {captionSource === "custom" && (
-                <motion.div
+                <m.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
@@ -1598,7 +1598,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       {captionIdentityError}
                     </p>
                   ) : null}
-                </motion.div>
+                </m.div>
               )}
             </AnimatePresence>
             {captionSource !== "custom" && captionIdentityError ? (
@@ -1632,7 +1632,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
               <AnimatePresence>
                 {showAdvanced && (
-                  <motion.div
+                  <m.div
                     id="advanced-post-options"
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: "auto" }}
@@ -1685,7 +1685,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         <TypewriterText text={STYLE_INFO[style].aiHint} />
                       </p>
                     </div>
-                  </motion.div>
+                  </m.div>
                 )}
               </AnimatePresence>
             </div>
@@ -1710,14 +1710,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 }`}
                 fullWidth
                 className="relative overflow-hidden h-14 text-base"
-                style={{
-                  background:
-                    "linear-gradient(135deg, var(--brand-primary-500), var(--brand-primary))",
-                  boxShadow: "0 14px 30px -12px var(--brand-primary, #1d4ed8)",
-                }}
               >
                 {isBusy && (
-                  <motion.div
+                  <m.div
                     className="absolute inset-0 bg-white/20"
                     initial={{ x: "-100%" }}
                     animate={{ x: "100%" }}
@@ -1768,7 +1763,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             </div>
           </CardContent>
         </Card>
-      </motion.div>
+      </m.div>
 
       <VinScanner
         isOpen={vinScannerOpen}

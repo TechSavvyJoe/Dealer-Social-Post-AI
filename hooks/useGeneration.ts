@@ -15,42 +15,28 @@ import {
 } from "../types";
 import { useToast } from "../components/ui/Toast";
 import { normalizeError, recoveryHint } from "../utils/errorHandler";
-import { logPost } from "../services/posts";
+// The publish/compliance pipeline (posts, photo releases, platform copy,
+// export rendering, caption compliance, website drafting) is loaded lazily so
+// the login screen's entry chunk never carries it. Only type-level imports of
+// those modules remain below — they are erased at build time.
 import {
-  analyzeCaptionSetForDelivery,
-  prepareCaptionForDelivery,
-} from "../utils/complianceDisclosures";
+  loadPublishPipeline,
+  type PublishPipelineModule,
+} from "../services/publishPipeline";
 import type { DealerBrandKit } from "../utils/brandKit";
 import { logEvent, logError } from "../utils/telemetry";
-import {
-  CapturedRelease,
-  linkReleaseToPost,
-  runWithPersistedPhotoRelease,
-} from "../services/photoReleases";
-import {
-  parsePlatformCaptionPack,
-  platformsToCaptionPackBrief,
-  resolvePrimaryImageProfile,
-  shouldGenerateCaptionPack,
-  type PrimaryImageProfile,
-  type PlatformId,
-} from "../services/platformCopy";
+import type { CapturedRelease } from "../services/photoReleases";
+import type { PlatformId, PrimaryImageProfile } from "../services/platformCopy";
 import type { Dealer } from "../types";
 import type { CaptionGenerationResult } from "../services/modelConfig";
+// Kept static deliberately: stores/appStore.ts already imports this constant
+// eagerly, so modelConfig rides the entry chunk either way and
+// mergeCaptionProvenance can stay synchronous.
 import { MODEL_POLICY_VERSION } from "../services/modelConfig";
-import { EXPORT_FORMATS, renderFormat } from "../utils/multiFormatExport";
-import { toPublicCustomerLabel } from "../utils/customerIdentity";
-import { captionUsesOnlyExpectedCustomer } from "../utils/captionQuality";
-import {
-  buildFinalWebsiteDraftFallback,
-  buildFinalWebsiteDraftPrompt,
-  buildFallbackWebsiteDraft,
-  buildWebsiteDraftPrompt,
-  parseFinalWebsiteDraftResponse,
-  parseWebsiteDraftResponse,
-  type FinalWebsiteDraftSource,
-  type WebsiteDraft,
-  type WebsiteDraftSource,
+import type {
+  FinalWebsiteDraftSource,
+  WebsiteDraft,
+  WebsiteDraftSource,
 } from "../services/websitePublishing";
 
 const brandKitFromDealer = (dealer?: Dealer | null): DealerBrandKit | null => {
@@ -62,16 +48,27 @@ const brandKitFromDealer = (dealer?: Dealer | null): DealerBrandKit | null => {
   };
 };
 
-const customerIdentityIsSafe = (input: {
-  caption: string;
-  customerName?: string;
-  dealerName?: string;
-  vehicleDescription?: string;
-  requireExpected?: boolean;
-  identityRequired?: boolean;
-}): boolean => {
-  const publicCustomer = toPublicCustomerLabel(input.customerName);
-  return captionUsesOnlyExpectedCustomer(input.caption, publicCustomer, {
+/**
+ * Identity-safety check over the lazily loaded compliance helpers. Callers run
+ * inside async flows that have already awaited loadPublishPipeline(), so
+ * passing the resolved module keeps this helper synchronous.
+ */
+const customerIdentityIsSafe = (
+  pipeline: Pick<
+    PublishPipelineModule,
+    "toPublicCustomerLabel" | "captionUsesOnlyExpectedCustomer"
+  >,
+  input: {
+    caption: string;
+    customerName?: string;
+    dealerName?: string;
+    vehicleDescription?: string;
+    requireExpected?: boolean;
+    identityRequired?: boolean;
+  },
+): boolean => {
+  const publicCustomer = pipeline.toPublicCustomerLabel(input.customerName);
+  return pipeline.captionUsesOnlyExpectedCustomer(input.caption, publicCustomer, {
     allowedPhrases: [input.dealerName, input.vehicleDescription],
     requireExpected: Boolean(publicCustomer && input.requireExpected),
     rejectAnyCustomerIdentity: Boolean(input.identityRequired && !publicCustomer),
@@ -119,6 +116,9 @@ const renderExactPrimaryImage = async (
   image: string,
   formatId: PrimaryImageProfile["primaryFormatId"],
 ): Promise<string> => {
+  // Resolves from the memoized pipeline promise the calling mutation already
+  // awaited, so this never adds a download to the render step.
+  const { EXPORT_FORMATS, renderFormat } = await loadPublishPipeline();
   const format = EXPORT_FORMATS.find((candidate) => candidate.id === formatId);
   if (!format) throw new Error("Selected output format is unavailable.");
   return renderFormat(image, format);
@@ -267,6 +267,13 @@ export const useGeneration = () => {
       assertOperationAuthEpoch(params.authEpoch);
       if (!selectedImage || !currentDealer) throw new Error("Missing required data");
 
+      // The consent gate implementation itself lives in the lazily loaded
+      // pipeline chunk. Fetching that module is not a provider call, so it may
+      // run before the gate — but the Gemini module load AND its execution stay
+      // wrapped inside the gate callback below, which
+      // services/photoReleases.test.ts enforces against this source text.
+      const { runWithPersistedPhotoRelease } = await loadPublishPipeline();
+      assertOperationAuthEpoch(params.authEpoch);
       const gated = await runWithPersistedPhotoRelease(
         params.meta?.capturedRelease,
         currentDealer.name,
@@ -274,7 +281,7 @@ export const useGeneration = () => {
           assertOperationAuthEpoch(params.authEpoch);
           const { generateSocialPost } = await loadGeminiService();
           assertOperationAuthEpoch(params.authEpoch);
-          return runGeminiTask("ai.generate", () => {
+          return runGeminiTask("ai.generate", (signal) => {
             assertOperationAuthEpoch(params.authEpoch);
             return generateSocialPost(
               selectedImage,
@@ -288,6 +295,7 @@ export const useGeneration = () => {
               imageQualityTier,
               params.imageAspectRatio,
               params.meta?.customerIdentityRequired ?? true,
+              signal,
             );
           });
         },
@@ -378,8 +386,25 @@ export const useGeneration = () => {
       const result = gatedResult.result;
       const releaseId = gatedResult.releaseId;
 
+      // The mutation already awaited this loader, so the memoized promise
+      // resolves without another network fetch.
+      const pipeline = await loadPublishPipeline();
+      const {
+        analyzeCaptionSetForDelivery,
+        buildFallbackWebsiteDraft,
+        buildWebsiteDraftPrompt,
+        linkReleaseToPost,
+        logPost,
+        parsePlatformCaptionPack,
+        parseWebsiteDraftResponse,
+        platformsToCaptionPackBrief,
+        prepareCaptionForDelivery,
+        shouldGenerateCaptionPack,
+        toPublicCustomerLabel,
+      } = pipeline;
+
       if (
-        !customerIdentityIsSafe({
+        !customerIdentityIsSafe(pipeline, {
           caption: result.text,
           customerName: variables.customerName,
           dealerName: currentDealer?.name,
@@ -470,13 +495,14 @@ export const useGeneration = () => {
           assertOperationAuthEpoch(variables.authEpoch);
           const { generatePlatformCaptionPack } = await loadGeminiService();
           assertOperationAuthEpoch(variables.authEpoch);
-          const rawPack = await runGeminiTask("ai.caption.pack", () => {
+          const rawPack = await runGeminiTask("ai.caption.pack", (signal) => {
             assertOperationAuthEpoch(variables.authEpoch);
             return generatePlatformCaptionPack(
               selectedImage,
               packBrief,
               variables.customerName,
               variables.meta?.customerIdentityRequired ?? true,
+              signal,
             );
           });
           assertOperationAuthEpoch(variables.authEpoch);
@@ -490,7 +516,7 @@ export const useGeneration = () => {
                 brandKitFromDealer(currentDealer),
               );
               if (
-                !customerIdentityIsSafe({
+                !customerIdentityIsSafe(pipeline, {
                   caption: prepared.caption,
                   customerName: finalPost.customerDisplayName,
                   dealerName: currentDealer.name,
@@ -743,6 +769,9 @@ export const useGeneration = () => {
       outputProfile?: PrimaryImageProfile,
       mediaOutputMode: MediaOutputMode = "photo",
     ) => {
+      // Warmed on CAPTURE by useAppController, so this usually resolves from
+      // the memoized promise instead of downloading at the Generate tap.
+      const { resolvePrimaryImageProfile } = await loadPublishPipeline();
       const resolvedProfile = outputProfile ?? resolvePrimaryImageProfile(platformIds);
       await generateMutation.mutateAsync({
         style,
@@ -769,9 +798,10 @@ export const useGeneration = () => {
       if (!selectedImage || !generationParams || !currentDealer || !sourcePost)
         throw new Error("Missing required data");
       assertOperationAuthEpoch(operationAuthEpoch);
-      const { generateSocialPost } = await loadGeminiService();
+      const [{ resolvePrimaryImageProfile }, { generateSocialPost }] =
+        await Promise.all([loadPublishPipeline(), loadGeminiService()]);
       assertOperationAuthEpoch(operationAuthEpoch);
-      const result = await runGeminiTask("ai.regenerate.image", () => {
+      const result = await runGeminiTask("ai.regenerate.image", (signal) => {
         assertOperationAuthEpoch(operationAuthEpoch);
         return generateSocialPost(
           selectedImage,
@@ -789,6 +819,7 @@ export const useGeneration = () => {
             sourcePost.customerIdentityRequired,
             generationParams.customerIdentityRequired,
           ),
+          signal,
         );
       });
       assertOperationAuthEpoch(operationAuthEpoch);
@@ -839,9 +870,10 @@ export const useGeneration = () => {
       if (!selectedImage || !currentDealer || !sourcePost)
         throw new Error("Missing required data");
       assertOperationAuthEpoch(operationAuthEpoch);
-      const { generateFunSocialPostImage } = await loadGeminiService();
+      const [{ resolvePrimaryImageProfile }, { generateFunSocialPostImage }] =
+        await Promise.all([loadPublishPipeline(), loadGeminiService()]);
       assertOperationAuthEpoch(operationAuthEpoch);
-      const generatedImage = await runGeminiTask("ai.fun", () => {
+      const generatedImage = await runGeminiTask("ai.fun", (signal) => {
         assertOperationAuthEpoch(operationAuthEpoch);
         return generateFunSocialPostImage(
           selectedImage,
@@ -855,6 +887,7 @@ export const useGeneration = () => {
               generationParams?.platformIds ?? generatedPost?.platformIds,
             ).imageAspectRatio,
           generationParams?.creativeBrief,
+          signal,
         );
       });
       assertOperationAuthEpoch(operationAuthEpoch);
@@ -905,9 +938,10 @@ export const useGeneration = () => {
       if (!sourcePost?.image || !editPrompt.trim() || !currentDealer)
         throw new Error("Missing required data");
       assertOperationAuthEpoch(operationAuthEpoch);
-      const { editSocialPostImage } = await loadGeminiService();
+      const [{ resolvePrimaryImageProfile }, { editSocialPostImage }] =
+        await Promise.all([loadPublishPipeline(), loadGeminiService()]);
       assertOperationAuthEpoch(operationAuthEpoch);
-      const generatedImage = await runGeminiTask("ai.edit.image", () => {
+      const generatedImage = await runGeminiTask("ai.edit.image", (signal) => {
         assertOperationAuthEpoch(operationAuthEpoch);
         return editSocialPostImage(
           sourcePost.image,
@@ -920,6 +954,7 @@ export const useGeneration = () => {
             resolvePrimaryImageProfile(
               sourcePost.platformIds ?? generationParams?.platformIds,
             ).imageAspectRatio,
+          signal,
         );
       });
       assertOperationAuthEpoch(operationAuthEpoch);
@@ -976,6 +1011,17 @@ export const useGeneration = () => {
         }
       | undefined
     > => {
+      // Callers reach this from mutations that already loaded the pipeline,
+      // so this await resolves from the memoized promise.
+      const pipeline = await loadPublishPipeline();
+      const {
+        analyzeCaptionSetForDelivery,
+        parsePlatformCaptionPack,
+        platformsToCaptionPackBrief,
+        prepareCaptionForDelivery,
+        shouldGenerateCaptionPack,
+        toPublicCustomerLabel,
+      } = pipeline;
       if (!shouldGenerateCaptionPack(platformIds) || !selectedImage || !currentDealer) {
         return undefined;
       }
@@ -988,7 +1034,7 @@ export const useGeneration = () => {
         );
         const { generatePlatformCaptionPack } = await loadGeminiService();
         assertOperationAuthEpoch(operationAuthEpoch);
-        const rawPack = await runGeminiTask("ai.caption.pack", () => {
+        const rawPack = await runGeminiTask("ai.caption.pack", (signal) => {
           assertOperationAuthEpoch(operationAuthEpoch);
           return generatePlatformCaptionPack(
             selectedImage,
@@ -998,6 +1044,7 @@ export const useGeneration = () => {
               useAppStore.getState().generatedPost?.customerIdentityRequired,
               generationParams?.customerIdentityRequired,
             ),
+            signal,
           );
         });
         assertOperationAuthEpoch(operationAuthEpoch);
@@ -1015,7 +1062,7 @@ export const useGeneration = () => {
               kit,
             );
             if (
-              !customerIdentityIsSafe({
+              !customerIdentityIsSafe(pipeline, {
                 caption: prepared.caption,
                 customerName: publicCustomer,
                 dealerName: currentDealer.name,
@@ -1069,9 +1116,13 @@ export const useGeneration = () => {
       if (!selectedImage || !generationParams || !currentDealer || !sourcePost)
         throw new Error("Missing required data");
       assertOperationAuthEpoch(operationAuthEpoch);
-      const { generateSocialPostTextDetailed } = await loadGeminiService();
+      const [pipeline, { generateSocialPostTextDetailed }] = await Promise.all([
+        loadPublishPipeline(),
+        loadGeminiService(),
+      ]);
+      const { prepareCaptionForDelivery } = pipeline;
       assertOperationAuthEpoch(operationAuthEpoch);
-      const captionResult = await runGeminiTask("ai.regenerate.text", () => {
+      const captionResult = await runGeminiTask("ai.regenerate.text", (signal) => {
         assertOperationAuthEpoch(operationAuthEpoch);
         return generateSocialPostTextDetailed(
           selectedImage,
@@ -1085,6 +1136,7 @@ export const useGeneration = () => {
             sourcePost.customerIdentityRequired,
             generationParams.customerIdentityRequired,
           ),
+          signal,
         );
       });
       assertOperationAuthEpoch(operationAuthEpoch);
@@ -1094,7 +1146,7 @@ export const useGeneration = () => {
         brandKitFromDealer(currentDealer),
       );
       if (
-        !customerIdentityIsSafe({
+        !customerIdentityIsSafe(pipeline, {
           caption: prepared.caption,
           customerName: sourcePost.customerDisplayName || generationParams.customerName,
           dealerName: currentDealer.name,
@@ -1177,9 +1229,13 @@ export const useGeneration = () => {
       throw new Error("Missing required data for caption variant");
     }
     assertOperationAuthEpoch(operationAuthEpoch);
-    const { generateSocialPostText } = await loadGeminiService();
+    const [pipeline, { generateSocialPostText }] = await Promise.all([
+      loadPublishPipeline(),
+      loadGeminiService(),
+    ]);
+    const { prepareCaptionForDelivery } = pipeline;
     assertOperationAuthEpoch(operationAuthEpoch);
-    const variant = await runGeminiTask("ai.caption.variant", () => {
+    const variant = await runGeminiTask("ai.caption.variant", (signal) => {
       assertOperationAuthEpoch(operationAuthEpoch);
       return generateSocialPostText(
         selectedImage,
@@ -1193,6 +1249,7 @@ export const useGeneration = () => {
           useAppStore.getState().generatedPost?.customerIdentityRequired,
           generationParams.customerIdentityRequired,
         ),
+        signal,
       );
     });
     assertOperationAuthEpoch(operationAuthEpoch);
@@ -1202,7 +1259,7 @@ export const useGeneration = () => {
       brandKitFromDealer(currentDealer),
     );
     if (
-      !customerIdentityIsSafe({
+      !customerIdentityIsSafe(pipeline, {
         caption: prepared.caption,
         customerName:
           useAppStore.getState().generatedPost?.customerDisplayName ||
@@ -1245,11 +1302,13 @@ export const useGeneration = () => {
       const sourceText = originalText?.trim() || sourcePost?.text || "";
       if (!sourcePost || !sourceText || !editPrompt.trim())
         throw new Error("Missing required data");
+      const pipeline = await loadPublishPipeline();
+      const { prepareCaptionForDelivery, toPublicCustomerLabel } = pipeline;
       const publicCustomer =
         sourcePost.customerDisplayName ||
         toPublicCustomerLabel(generationParams?.customerName);
       if (
-        !customerIdentityIsSafe({
+        !customerIdentityIsSafe(pipeline, {
           caption: sourceText,
           customerName: publicCustomer,
           dealerName: currentDealer?.name,
@@ -1272,9 +1331,14 @@ export const useGeneration = () => {
         ? `Customer identity rule: the only customer label allowed is exactly "${publicCustomer}". Do not add, replace, or infer another person's name.`
         : "Customer identity rule: do not introduce any customer or personal name.";
       const identityBoundEditPrompt = `${editPrompt.trim()}\n\n${identityInstruction}`;
-      const captionResult = await runGeminiTask("ai.edit.text", () => {
+      const captionResult = await runGeminiTask("ai.edit.text", (signal) => {
         assertOperationAuthEpoch(operationAuthEpoch);
-        return editSocialPostTextDetailed(sourceText, identityBoundEditPrompt, tone);
+        return editSocialPostTextDetailed(
+          sourceText,
+          identityBoundEditPrompt,
+          tone,
+          signal,
+        );
       });
       assertOperationAuthEpoch(operationAuthEpoch);
       const prepared = prepareCaptionForDelivery(
@@ -1283,7 +1347,7 @@ export const useGeneration = () => {
         brandKitFromDealer(currentDealer),
       );
       if (
-        !customerIdentityIsSafe({
+        !customerIdentityIsSafe(pipeline, {
           caption: prepared.caption,
           customerName: publicCustomer,
           dealerName: currentDealer?.name,
@@ -1294,7 +1358,7 @@ export const useGeneration = () => {
           ),
           requireExpected: Boolean(
             publicCustomer &&
-            customerIdentityIsSafe({
+            customerIdentityIsSafe(pipeline, {
               caption: sourceText,
               customerName: publicCustomer,
               dealerName: currentDealer?.name,
@@ -1325,7 +1389,7 @@ export const useGeneration = () => {
       };
     },
     onMutate: () => setError(null),
-    onSuccess: ({
+    onSuccess: async ({
       workspaceKey,
       operationAuthEpoch,
       platformId,
@@ -1345,6 +1409,8 @@ export const useGeneration = () => {
           ...(currentPost.platformCaptions || {}),
           [platformId]: prepared.caption,
         };
+        // Resolves from the memoized promise the mutation already awaited.
+        const { analyzeCaptionSetForDelivery } = await loadPublishPipeline();
         const disclosureUnion = analyzeCaptionSetForDelivery(
           [currentPost.text, ...Object.values(platformCaptions)],
           currentDealer?.banned_phrases,
@@ -1374,7 +1440,8 @@ export const useGeneration = () => {
       });
     },
     onError: (err) => {
-      const msg = `Failed to apply text edits. ${err instanceof Error ? err.message : String(err)}`;
+      const normalized = normalizeError(err);
+      const msg = `Failed to apply text edits. ${normalized.message} ${recoveryHint(normalized)}`;
       setError(msg);
       toastError(msg);
     },
@@ -1406,6 +1473,13 @@ export const useGeneration = () => {
       const operationAuthEpoch = state.authEpoch;
       const dealer = state.currentDealer;
       if (!dealer) throw new Error("The dealership workspace is unavailable.");
+      assertOperationAuthEpoch(operationAuthEpoch);
+      const {
+        buildFinalWebsiteDraftFallback,
+        buildFinalWebsiteDraftPrompt,
+        parseFinalWebsiteDraftResponse,
+        toPublicCustomerLabel,
+      } = await loadPublishPipeline();
       assertOperationAuthEpoch(operationAuthEpoch);
       const source: FinalWebsiteDraftSource = {
         currentDraft: input.currentDraft,
@@ -1478,10 +1552,15 @@ export const useGeneration = () => {
       const controller = new AbortController();
       videoAbortControllersRef.current.add(controller);
       try {
-        const url = await runGeminiTask("ai.generate.video", () => {
-          assertOperationAuthEpoch(operationAuthEpoch);
-          return generatePostVideo(sourcePost.image, style, options, controller.signal);
-        });
+        const url = await runGeminiTask(
+          "ai.generate.video",
+          (signal) => {
+            assertOperationAuthEpoch(operationAuthEpoch);
+            return generatePostVideo(sourcePost.image, style, options, signal);
+          },
+          undefined,
+          controller.signal,
+        );
         assertOperationAuthEpoch(operationAuthEpoch);
         if (!workspaceIsCurrent(workspaceKey)) {
           if (url.startsWith("blob:")) URL.revokeObjectURL(url);

@@ -16,6 +16,7 @@ import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
 import { cn } from "../utils/classNames";
+import { toUiMessage } from "../utils/errorMessages";
 import type { CredentialResult, Person, PersonRole } from "../services/salespeople";
 import {
   acknowledgePinDistribution,
@@ -139,7 +140,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
       onCommitted?.(result.person);
       onCredentialIssued?.(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not rotate the code.");
+      setError(toUiMessage(err, "Could not rotate the code."));
     } finally {
       setCredentialBusy(false);
     }
@@ -156,9 +157,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
       setShowCredentialPin(false);
       onCommitted?.(updated);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Could not mark the code as shared.",
-      );
+      setError(toUiMessage(err, "Could not mark the code as shared."));
     } finally {
       setCredentialBusy(false);
     }
@@ -230,8 +229,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
     } catch (err) {
       setManagerLoginMessage({
         kind: "error",
-        text:
-          err instanceof Error ? err.message : "Could not configure manager sign-in.",
+        text: toUiMessage(err, "Could not configure manager sign-in."),
       });
     } finally {
       setManagerLoginBusy(false);
@@ -266,7 +264,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
     } catch (err) {
       setManagerLoginMessage({
         kind: "error",
-        text: err instanceof Error ? err.message : "Could not disable manager sign-in.",
+        text: toUiMessage(err, "Could not disable manager sign-in."),
       });
     } finally {
       setManagerLoginBusy(false);
@@ -300,7 +298,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
       });
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save profile.");
+      setError(toUiMessage(err, "Could not save profile."));
     } finally {
       setSaving(false);
     }
@@ -378,7 +376,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
 
         {/* Profile */}
         <section className="space-y-3">
-          <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-surface-500">
+          <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-surface-400">
             Profile
           </h3>
           <Input
@@ -416,7 +414,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
         <section className="space-y-3">
           <div className="flex items-center gap-2">
             <Shield className="h-3.5 w-3.5 text-primary-300" />
-            <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-surface-500">
+            <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-surface-400">
               Security
             </h3>
           </div>
@@ -796,7 +794,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                       : "Generate code"}
                 </Button>
                 {allowPinReveal && hasExistingCode ? (
-                  <p className="flex-1 self-center text-xs text-surface-500">
+                  <p className="flex-1 self-center text-xs text-surface-400">
                     Codes are stored securely and can't be shown again — generate a new
                     one if it was lost.
                   </p>
@@ -816,7 +814,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
               <span className="block text-sm font-medium text-surface-100">
                 Account active
               </span>
-              <span className="block text-xs text-surface-500">
+              <span className="block text-xs text-surface-400">
                 When off, this person can’t sign in. Their active sessions end
                 immediately; past posts stay intact.
               </span>

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { Download, Loader2, Check, Image as ImageIcon } from "lucide-react";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
@@ -12,6 +12,7 @@ import {
 import { orderExportFormatsByPreference } from "../services/platformCopy";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { logEvent } from "../utils/telemetry";
+import { toUiMessage } from "../utils/errorMessages";
 
 interface MultiFormatExportModalProps {
   isOpen: boolean;
@@ -69,7 +70,7 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
         }
       } catch (err) {
         if (!cancelled) {
-          setRenderError(err instanceof Error ? err.message : String(err));
+          setRenderError(toUiMessage(err, "Could not prepare the export previews."));
         }
       }
     })();
@@ -118,7 +119,7 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
       });
       logEvent("export.multiformat.matched", { count: matchedIds.length });
     } catch (err) {
-      setRenderError(err instanceof Error ? err.message : String(err));
+      setRenderError(toUiMessage(err, "Could not download the files."));
     } finally {
       setIsDownloadingAll(false);
     }
@@ -133,7 +134,7 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
       setIndividuallyDownloaded(new Set(EXPORT_FORMATS.map((f) => f.id)));
       logEvent("export.multiformat.all");
     } catch (err) {
-      setRenderError(err instanceof Error ? err.message : String(err));
+      setRenderError(toUiMessage(err, "Could not download the files."));
     } finally {
       setIsDownloadingAll(false);
     }
@@ -165,7 +166,7 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
             const isPreferred =
               !!priorityFormatIds?.length && priorityFormatIds.includes(fmt.id);
             return (
-              <motion.div
+              <m.div
                 key={fmt.id}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -227,7 +228,7 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
                     {downloaded ? "Saved" : "Save"}
                   </Button>
                 </div>
-              </motion.div>
+              </m.div>
             );
           })}
         </div>
@@ -267,7 +268,7 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
           </Button>
         </div>
 
-        <p className="text-[11px] text-surface-500 leading-relaxed">
+        <p className="text-[11px] text-surface-400 leading-relaxed">
           Tip: your browser may ask to allow multiple downloads — click "Allow" once and
           files save to your Downloads folder.
         </p>

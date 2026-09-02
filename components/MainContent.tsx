@@ -1,5 +1,5 @@
 import React, { Suspense } from "react";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { Camera, Video } from "lucide-react";
 import {
   AppStep,
@@ -22,7 +22,7 @@ import type { LoginResult, SessionLoginRequest } from "../stores/appStore";
 import { useAppStore } from "../stores/appStore";
 import type { PrimaryImageProfile, PlatformId } from "../services/platformCopy";
 import type { WebsiteDraft } from "../services/websitePublishing";
-import { isWalkaroundStudioEnabled } from "../services/walkarounds";
+import { isWalkaroundStudioEnabled } from "../services/walkaroundFlags";
 
 const WALKAROUND_STUDIO_ENABLED = isWalkaroundStudioEnabled(
   import.meta.env.VITE_WALKAROUND_STUDIO_ENABLED,
@@ -173,6 +173,16 @@ export const MainContent: React.FC<MainContentProps> = ({
       setCustomizerSeed(null);
     }
   }, [displayedStep]);
+
+  // Warm the PostResult chunk (the app's largest route, ~48 kB gzip) during
+  // the multi-second generation wait so the reveal is instant instead of a
+  // shimmer at the payoff moment. Keyed on `step` (not displayedStep, which
+  // lags behind through PageTransition).
+  React.useEffect(() => {
+    if (step === AppStep.GENERATING) {
+      void import("./PostResult").catch(() => {});
+    }
+  }, [step]);
 
   const handleCustomizerGenerate = React.useCallback(
     async (
@@ -395,7 +405,7 @@ export const MainContent: React.FC<MainContentProps> = ({
         return selectedImage ? (
           <div className="mx-auto w-full max-w-screen-2xl space-y-4">
             {error ? (
-              <motion.div
+              <m.div
                 initial={{ opacity: 0, y: -8 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="mx-auto flex max-w-3xl flex-col gap-3 rounded-xl border border-error-500/30 bg-error-500/10 p-4 text-error-100 sm:flex-row sm:items-center sm:justify-between"
@@ -413,7 +423,7 @@ export const MainContent: React.FC<MainContentProps> = ({
                 >
                   Back to editor
                 </Button>
-              </motion.div>
+              </m.div>
             ) : null}
             <Suspense fallback={suspenseFallback("Loading editor")}>
               <LazyPostCustomizer {...customizerProps} />

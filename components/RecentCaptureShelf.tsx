@@ -158,7 +158,7 @@ export const RecentCaptureShelf: React.FC<RecentCaptureShelfProps> = ({
               >
                 <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
-              <p className="mt-1 truncate text-[10px] text-surface-500">
+              <p className="mt-1 truncate text-[10px] text-surface-400">
                 {formatCaptureTime(record.createdAt)}
               </p>
             </article>

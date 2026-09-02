@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import {
   Globe,
   Music,
@@ -599,7 +599,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
           <details className="group rounded-xl border border-hairline bg-surface-950/40">
             <summary className="cursor-pointer list-none px-3 py-2.5 text-sm font-semibold text-surface-200 marker:content-none [&::-webkit-details-marker]:hidden">
               More options
-              <span className="ml-2 text-xs font-normal text-surface-500 group-open:hidden">
+              <span className="ml-2 text-xs font-normal text-surface-400 group-open:hidden">
                 (Google, Marketplace, …)
               </span>
             </summary>
@@ -623,7 +623,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         {selectedPrepared ? (
           <div className="rounded-2xl border border-primary-400/25 bg-primary-500/[0.08] p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
+              <div role="status">
                 <p className="text-sm font-semibold text-surface-50">
                   {selectedPrepared.target.label} is ready
                 </p>
@@ -740,7 +740,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
 
         <AnimatePresence>
           {(msg || showMetaChecklist) && status && (
-            <motion.div
+            <m.div
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
@@ -847,7 +847,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                   {queueActionLabel}
                 </Button>
               ) : null}
-            </motion.div>
+            </m.div>
           )}
         </AnimatePresence>
       </div>

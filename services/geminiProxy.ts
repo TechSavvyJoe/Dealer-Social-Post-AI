@@ -1,4 +1,4 @@
-import { normalizeError } from "../utils/errorHandler";
+import { normalizeError, type NormalizedError } from "../utils/errorHandler";
 import { retryWithBackoff } from "../utils/retry";
 import { performanceMonitor } from "../utils/performanceMonitor";
 import { withCircuitBreaker } from "../utils/circuitBreaker";
@@ -11,6 +11,22 @@ import {
 
 // Request tracking for debugging
 let requestCounter = 0;
+
+// Errors thrown to the UI must read like product copy, but the retry/toast
+// machinery still routes on `kind`. Building the NormalizedError here keeps
+// classification exact without leaking status codes into the message.
+const normalizedProxyError = (
+  message: string,
+  kind: NormalizedError["kind"],
+  retryable: boolean,
+  original: unknown,
+): NormalizedError => {
+  const err = new Error(message) as NormalizedError;
+  err.kind = kind;
+  err.retryable = retryable;
+  err.original = original;
+  return err;
+};
 
 /**
  * A wrapper for the fetch API to communicate with our backend proxy for Gemini.
@@ -27,6 +43,7 @@ export async function fetchFromProxy(
   task?: ModelTaskName,
   attemptId?: string,
   requestAuthEpoch: number = captureAuthEpoch(),
+  externalSignal?: AbortSignal,
 ) {
   assertAuthEpoch(requestAuthEpoch);
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
@@ -38,7 +55,14 @@ export async function fetchFromProxy(
   performanceMonitor.mark(`${markName}-start`);
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 300000); // 300 second timeout (5 minutes)
+  let didTimeout = false;
+  const timeoutId = setTimeout(() => {
+    didTimeout = true;
+    controller.abort();
+  }, 300000); // 300 second timeout (5 minutes)
+  const relayExternalAbort = () => controller.abort();
+  if (externalSignal?.aborted) relayExternalAbort();
+  else externalSignal?.addEventListener("abort", relayExternalAbort, { once: true });
 
   try {
     console.log(`[GeminiProxy] [${requestId}] Requesting ${method} ${path}`);
@@ -74,7 +98,12 @@ export async function fetchFromProxy(
           });
 
           if (res.status >= 500) {
-            throw new Error(`Server error ${res.status} - retrying...`);
+            throw normalizedProxyError(
+              "The AI service is temporarily unavailable.",
+              "model_unavailable",
+              true,
+              { status: res.status },
+            );
           }
 
           return res;
@@ -82,6 +111,8 @@ export async function fetchFromProxy(
         {
           maxAttempts: 3,
           initialDelay: 1000,
+          signal: controller.signal,
+          shouldRetry: (error) => error.name !== "AbortError",
           onRetry: (attempt, error) => {
             console.warn(
               `[GeminiProxy] [${requestId}] Retry ${attempt}:`,
@@ -100,23 +131,39 @@ export async function fetchFromProxy(
     if (!response.ok) {
       if (response.status === 401) notifySessionRejected(requestAuthEpoch);
       // Prefer Google's structured error message when the body is JSON; fall
-      // back to the raw text. (Parsing is isolated so the parse-failure catch
-      // doesn't swallow the message we want to surface.)
-      let message: string;
+      // back to the raw text. The technical detail stays in the console — the
+      // thrown message is what a salesperson reads in the toast.
+      let detail: string;
       try {
         const errorJson = JSON.parse(responseText);
-        message = errorJson?.error?.message || JSON.stringify(errorJson);
+        detail = errorJson?.error?.message || JSON.stringify(errorJson);
       } catch {
-        message =
-          responseText ||
-          `Proxy request to ${path} failed with status ${response.status}`;
+        detail = responseText || `status ${response.status}`;
       }
+      console.error(
+        `[GeminiProxy] [${requestId}] ${method} ${path} failed (${response.status}): ${detail}`,
+      );
       if (response.status === 401) {
-        message = "Session expired or missing — please log in again.";
-      } else if (response.status === 429) {
-        message = "Too many requests — try again in a minute.";
+        throw normalizedProxyError(
+          "Session expired — please sign in again.",
+          "unauthorized",
+          false,
+          detail,
+        );
       }
-      throw new Error(`Proxy request failed (${response.status}): ${message}`);
+      if (response.status === 429) {
+        throw normalizedProxyError(
+          "Too many requests — try again in a minute.",
+          "quota",
+          false,
+          detail,
+        );
+      }
+      // The numeric status doubles as normalizeError's classification token
+      // (400 → validation, 404 → model_unavailable).
+      throw new Error(
+        `The AI service could not complete this request (error ${response.status}).`,
+      );
     }
 
     // Log performance
@@ -138,14 +185,25 @@ export async function fetchFromProxy(
     performanceMonitor.measure(`${markName}-error`, `${markName}-start`);
 
     if (
-      error instanceof Error &&
+      error !== null &&
+      typeof error === "object" &&
+      "name" in error &&
       error.name === "AbortError" &&
       controller.signal.aborted
     ) {
-      throw new Error(`Request to ${path} timed out after 300 seconds.`);
+      if (!didTimeout && externalSignal?.aborted) {
+        throw externalSignal.reason instanceof Error
+          ? externalSignal.reason
+          : new DOMException("Request cancelled", "AbortError");
+      }
+      console.error(
+        `[GeminiProxy] [${requestId}] ${method} ${path} timed out after 300 seconds.`,
+      );
+      throw new Error("The request timed out. Please try again.");
     }
     throw normalizeError(error);
   } finally {
     clearTimeout(timeoutId);
+    externalSignal?.removeEventListener("abort", relayExternalAbort);
   }
 }

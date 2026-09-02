@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import { ChevronDown, Check, Sparkles } from "lucide-react";
 import {
   POST_SCENARIOS,
@@ -214,7 +214,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
 
       <AnimatePresence>
         {open && (
-          <motion.div
+          <m.div
             id={listboxId}
             role="listbox"
             aria-labelledby={labelId}
@@ -227,7 +227,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
           >
             {grouped.map(([category, list]) => (
               <div key={category} role="presentation" className="mb-2 last:mb-0">
-                <div className="text-[10px] uppercase tracking-wide text-surface-500 px-2 pb-1 pt-1.5">
+                <div className="text-[10px] uppercase tracking-wide text-surface-400 px-2 pb-1 pt-1.5">
                   {SCENARIO_CATEGORY_LABELS[category]}
                 </div>
                 <div role="presentation" className="space-y-0.5">
@@ -286,11 +286,11 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
                 </div>
               </div>
             ))}
-            <div className="border-t border-hairline mt-1 pt-2 px-2 pb-1 text-[10px] text-surface-500 flex items-center gap-1">
+            <div className="border-t border-hairline mt-1 pt-2 px-2 pb-1 text-[10px] text-surface-400 flex items-center gap-1">
               <Sparkles className="w-3 h-3" />
               Picking a scenario tunes the prompt + defaults. Override anything below.
             </div>
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
     </div>

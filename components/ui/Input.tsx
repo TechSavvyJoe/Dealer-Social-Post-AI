@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import { AlertCircle } from "lucide-react";
 import { cn } from "../../utils/classNames";
 
@@ -104,7 +104,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
               "bg-surface-900/60 border-2",
               "px-4 py-3",
               "text-base text-surface-50",
-              "placeholder:text-surface-500",
+              "placeholder:text-surface-400",
               "transition-all duration-200 ease-apple",
 
               // Focus state
@@ -175,7 +175,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         {/* Helper text or error message */}
         <AnimatePresence mode="wait">
           {(error || helperText) && (
-            <motion.p
+            <m.p
               id={messageId}
               role={error ? "alert" : undefined}
               initial={{ opacity: 0, y: -4 }}
@@ -188,7 +188,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
               )}
             >
               {error || helperText}
-            </motion.p>
+            </m.p>
           )}
         </AnimatePresence>
       </div>
@@ -283,7 +283,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
               "bg-surface-900/60 border-2",
               "px-4 py-3",
               "text-base text-surface-50",
-              "placeholder:text-surface-500",
+              "placeholder:text-surface-400",
               "transition-all duration-200 ease-apple",
               "resize-none",
 
@@ -342,7 +342,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         {/* Helper text or error message */}
         <AnimatePresence mode="wait">
           {(error || helperText) && (
-            <motion.p
+            <m.p
               id={messageId}
               role={error ? "alert" : undefined}
               initial={{ opacity: 0, y: -4 }}
@@ -355,7 +355,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
               )}
             >
               {error || helperText}
-            </motion.p>
+            </m.p>
           )}
         </AnimatePresence>
       </div>
@@ -496,7 +496,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
         {/* Helper text or error message */}
         <AnimatePresence mode="wait">
           {(error || helperText) && (
-            <motion.p
+            <m.p
               id={messageId}
               role={error ? "alert" : undefined}
               initial={{ opacity: 0, y: -4 }}
@@ -509,7 +509,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
               )}
             >
               {error || helperText}
-            </motion.p>
+            </m.p>
           )}
         </AnimatePresence>
       </div>

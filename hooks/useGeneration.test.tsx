@@ -37,7 +37,10 @@ vi.mock("../stores/appStore", () => ({
 
 vi.mock("./useGemini", () => ({
   useGemini: () => ({
-    runGeminiTask: async (_name: string, task: () => Promise<unknown>) => task(),
+    runGeminiTask: async (
+      _name: string,
+      task: (signal: AbortSignal) => Promise<unknown>,
+    ) => task(new AbortController().signal),
     loadGeminiService: mocks.loadGeminiService,
   }),
 }));
@@ -191,17 +194,20 @@ describe("useGeneration model-tier and provenance wiring", () => {
     });
 
     expect(mocks.generateSocialPost).toHaveBeenCalledTimes(2);
-    expect(mocks.generateSocialPost.mock.calls[0].at(-3)).toBe("studio");
-    expect(mocks.generateSocialPost.mock.calls[1].at(-3)).toBe("studio");
-    expect(mocks.generateSocialPost.mock.calls[0].at(-2)).toBe("1:1");
-    expect(mocks.generateSocialPost.mock.calls[1].at(-2)).toBe("1:1");
+    expect(mocks.generateSocialPost.mock.calls[0].at(-4)).toBe("studio");
+    expect(mocks.generateSocialPost.mock.calls[1].at(-4)).toBe("studio");
+    expect(mocks.generateSocialPost.mock.calls[0].at(-3)).toBe("1:1");
+    expect(mocks.generateSocialPost.mock.calls[1].at(-3)).toBe("1:1");
+    expect(mocks.generateSocialPost.mock.calls[0].at(-1)).toBeInstanceOf(AbortSignal);
     expect(mocks.generateFunSocialPostImage.mock.calls[0].slice(4)).toEqual([
       "studio",
       "1:1",
       "Post scenario: Service Promotion. Target platforms (dealership priority): Instagram Story.",
+      expect.any(AbortSignal),
     ]);
-    expect(mocks.editSocialPostImage.mock.calls[0].at(-2)).toBe("studio");
-    expect(mocks.editSocialPostImage.mock.calls[0].at(-1)).toBe("1:1");
+    expect(mocks.editSocialPostImage.mock.calls[0].at(-3)).toBe("studio");
+    expect(mocks.editSocialPostImage.mock.calls[0].at(-2)).toBe("1:1");
+    expect(mocks.editSocialPostImage.mock.calls[0].at(-1)).toBeInstanceOf(AbortSignal);
     expect(mocks.renderFormat).toHaveBeenCalledTimes(4);
 
     cleanup();
@@ -222,7 +228,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       );
     });
 
-    expect(mocks.generateSocialPost.mock.calls[0].at(-2)).toBe("4:3");
+    expect(mocks.generateSocialPost.mock.calls[0].at(-3)).toBe("4:3");
     expect(mocks.setGenerationParams).toHaveBeenCalledWith(
       expect.objectContaining({
         platformIds: ["gbp"],
@@ -259,7 +265,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       );
     });
 
-    expect(mocks.generateSocialPost.mock.calls[0].at(-2)).toBe("16:9");
+    expect(mocks.generateSocialPost.mock.calls[0].at(-3)).toBe("16:9");
     expect(mocks.setGenerationParams).toHaveBeenCalledWith(
       expect.objectContaining({
         platformIds: ["facebook_feed", "gbp"],
@@ -317,6 +323,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       expect.stringContaining("CAPTION PACK"),
       "Alex",
       true,
+      expect.any(AbortSignal),
     );
 
     cleanup();
@@ -341,7 +348,10 @@ describe("useGeneration model-tier and provenance wiring", () => {
     await expect(result.current.generateCaptionVariant()).resolves.toContain(
       "Congratulations to Alex",
     );
-    expect(mocks.generateSocialPostText.mock.calls[0].at(-1)).toBe(true);
+    expect(mocks.generateSocialPostText.mock.calls[0].at(-2)).toBe(true);
+    expect(mocks.generateSocialPostText.mock.calls[0].at(-1)).toBeInstanceOf(
+      AbortSignal,
+    );
 
     cleanup();
   });
@@ -355,7 +365,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
     await expect(result.current.generateCaptionVariant()).resolves.toContain(
       "Example Motors",
     );
-    expect(mocks.generateSocialPostText.mock.calls.at(-1)?.at(-1)).toBe(true);
+    expect(mocks.generateSocialPostText.mock.calls.at(-1)?.at(-2)).toBe(true);
 
     mocks.store.generatedPost = {
       ...existingPost,
@@ -368,7 +378,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
     await expect(result.current.generateCaptionVariant()).resolves.toContain(
       "Example Motors",
     );
-    expect(mocks.generateSocialPostText.mock.calls.at(-1)?.at(-1)).toBe(false);
+    expect(mocks.generateSocialPostText.mock.calls.at(-1)?.at(-2)).toBe(false);
 
     cleanup();
   });
@@ -593,6 +603,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       "The salesperson's current manual caption.",
       expect.stringContaining('the only customer label allowed is exactly "Alex"'),
       ToneOption.Professional,
+      expect.any(AbortSignal),
     );
     expect(replacement).toContain("A warmer thank-you for a wonderful delivery day.");
     expect(mocks.setGeneratedPost.mock.calls.at(-1)?.[0]).toMatchObject({

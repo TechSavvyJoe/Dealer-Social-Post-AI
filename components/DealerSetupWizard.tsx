@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
   Palette,
@@ -20,6 +20,7 @@ import { Input, Textarea } from "./ui/Input";
 import { Dealer, StyleOption } from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { cn } from "../utils/classNames";
+import { toUiMessage } from "../utils/errorMessages";
 import { HoursPicker } from "./HoursPicker";
 import {
   defaultWeekHours,
@@ -227,7 +228,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
       triggerHapticFeedback();
       setStepIdx(STEPS.length - 1); // "done"
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(toUiMessage(err, "Could not save your setup."));
     } finally {
       setSaving(false);
     }
@@ -242,7 +243,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
   }, [step.id, onDismiss]);
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       className="bg-fill-subtle border border-primary-500/30 rounded-2xl p-4 sm:p-6 space-y-4"
@@ -311,7 +312,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
       </div>
 
       <AnimatePresence mode="wait">
-        <motion.div
+        <m.div
           key={step.id}
           initial={{ opacity: 0, x: 8 }}
           animate={{ opacity: 1, x: 0 }}
@@ -524,7 +525,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                   );
                 })}
               </div>
-              <p className="text-[11px] text-surface-500">
+              <p className="text-[11px] text-surface-400">
                 Fun Mode artistic transforms (cartoon / vintage / neon / superhero,
                 etc.) can be tuned later from the settings panel.
               </p>
@@ -546,7 +547,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 fullWidth
                 className="bg-fill-subtle border-hairline focus:border-primary-400"
               />
-              <p className="text-[11px] text-surface-500">
+              <p className="text-[11px] text-surface-400">
                 Examples that work: tone words ("warm, no hype"), forbidden clichés
                 ("don't say 'amazing deal'"), local color ("we're a Detroit shop —
                 Tigers, Lions, never Buckeyes").
@@ -568,7 +569,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                 fullWidth
                 className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono text-sm"
               />
-              <p className="text-[11px] text-surface-500">
+              <p className="text-[11px] text-surface-400">
                 FTC + most OEM brand standards prohibit "guaranteed approval", "no
                 credit check", "lowest price guaranteed". Pre-filled suggestions above —
                 keep them or replace.
@@ -664,7 +665,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
               </div>
             </div>
           )}
-        </motion.div>
+        </m.div>
       </AnimatePresence>
 
       {error && (
@@ -691,10 +692,6 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
               rightIcon={<ChevronRight className="h-3.5 w-3.5" />}
               onClick={next}
               disabled={saving}
-              style={{
-                background:
-                  "linear-gradient(135deg, var(--brand-primary-500), var(--brand-primary))",
-              }}
             >
               Next
             </Button>
@@ -711,16 +708,12 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
               }
               onClick={handleFinish}
               disabled={saving}
-              style={{
-                background:
-                  "linear-gradient(135deg, var(--brand-primary-500), var(--brand-primary))",
-              }}
             >
               {saving ? "Saving…" : "Finish setup"}
             </Button>
           )}
         </div>
       )}
-    </motion.div>
+    </m.div>
   );
 };

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import { Sparkles, Shuffle, Star, Search, Clock3 } from "lucide-react";
 import { triggerHapticFeedback } from "../utils/haptics";
 import {
@@ -244,7 +244,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
           const promptPreview = style.prompt.split(". ")[0];
           const isFavorite = favorites.includes(style.id);
           return (
-            <motion.div
+            <m.div
               key={style.id}
               className={`relative px-3 py-2.5 rounded-lg border transition-all text-left group ${
                 selectedStyle === style.id
@@ -298,7 +298,7 @@ export const FunModeDirectorModal: React.FC<FunModeDirectorModalProps> = ({
               <p className="pointer-events-none relative text-white/60 text-[11px] leading-tight truncate">
                 {promptPreview}
               </p>
-            </motion.div>
+            </m.div>
           );
         })}
         {filteredStyles.length === 0 && (

@@ -1,5 +1,5 @@
 import React from "react";
-import { motion, useReducedMotion } from "framer-motion";
+import { m, useReducedMotion } from "framer-motion";
 import { Check, Sparkles } from "lucide-react";
 import { ProgressBar } from "./ui/ProgressBar";
 import { cn } from "../utils/classNames";
@@ -48,21 +48,21 @@ export const LoadingOverlay: React.FC<LoadingOverlayProps> = ({
       aria-atomic="true"
       aria-busy="true"
     >
-      <motion.div
+      <m.div
         className="w-full max-w-lg rounded-2xl border border-hairline bg-surface-900/75 p-5 shadow-2xl shadow-black/20 backdrop-blur-lg sm:p-7"
         initial={shouldReduceMotion ? false : { opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: shouldReduceMotion ? 0 : 0.3 }}
       >
         <div className="mb-6 flex items-start gap-4">
-          <motion.div
+          <m.div
             className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-primary-400/20 bg-primary-500/10 text-primary-300"
             animate={shouldReduceMotion ? undefined : { scale: [1, 1.04, 1] }}
             transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
             aria-hidden="true"
           >
             <Sparkles className="h-5 w-5" />
-          </motion.div>
+          </m.div>
           <div className="min-w-0 flex-1">
             <div className="mb-1 flex items-center justify-between gap-3">
               <span className="text-xs font-semibold uppercase tracking-[0.16em] text-primary-300">
@@ -85,6 +85,7 @@ export const LoadingOverlay: React.FC<LoadingOverlayProps> = ({
           value={clampedProgress}
           className="w-full"
           showShimmer={!shouldReduceMotion}
+          showPercentage={false}
           loadingLabel={statusMessage}
         />
 
@@ -115,10 +116,10 @@ export const LoadingOverlay: React.FC<LoadingOverlayProps> = ({
           })}
         </ol>
 
-        <p className="mt-5 text-center text-xs text-surface-500">
+        <p className="mt-5 text-center text-xs text-surface-400">
           Keep this screen open while the image and caption finish.
         </p>
-      </motion.div>
+      </m.div>
     </div>
   );
 };

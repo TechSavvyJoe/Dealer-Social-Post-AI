@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import {
   Settings,
   Users,
@@ -27,6 +27,7 @@ import { DealerSetupWizard } from "./DealerSetupWizard";
 import { useAppStore } from "../stores/appStore";
 import * as db from "../services/database";
 import { cn } from "../utils/classNames";
+import { toUiMessage } from "../utils/errorMessages";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { StyleOption } from "../types";
 import { CustomScenarioManager } from "./CustomScenarioManager";
@@ -156,7 +157,7 @@ export const DealerAdminDashboard: React.FC = () => {
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4 p-0 sm:space-y-6 sm:p-2 lg:p-4">
       {/* Header with dealership identity + role chip */}
-      <motion.div
+      <m.div
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         className="flex flex-wrap items-center justify-between gap-2 sm:gap-3"
@@ -171,10 +172,7 @@ export const DealerAdminDashboard: React.FC = () => {
           ) : (
             <div
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg font-bold text-white shadow-lg sm:h-12 sm:w-12 sm:text-xl"
-              style={{
-                background:
-                  "linear-gradient(135deg, var(--brand-primary-500), var(--brand-primary))",
-              }}
+              style={{ background: "var(--brand-primary)" }}
             >
               {dealer.name.charAt(0)}
             </div>
@@ -189,7 +187,7 @@ export const DealerAdminDashboard: React.FC = () => {
             </div>
           </div>
         </div>
-      </motion.div>
+      </m.div>
 
       {showWizard && (
         <DealerSetupWizard
@@ -478,14 +476,14 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
       await onSaved(fields);
       setSavedAt(new Date());
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(toUiMessage(err, "Could not save these settings."));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       className="rounded-lg border border-hairline bg-surface-overlay p-4 sm:p-6 space-y-6"
@@ -851,7 +849,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
       )}
 
       <div className="sticky bottom-2 z-10 flex items-center justify-between rounded-xl border border-hairline bg-surface-950/95 px-3 py-3 shadow-elevation-3 backdrop-blur-xl">
-        <div className="text-[11px] text-surface-500">
+        <div className="text-[11px] text-surface-400">
           {savedAt
             ? `Saved ${savedAt.toLocaleTimeString([], {
                 hour: "2-digit",
@@ -873,15 +871,11 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             )
           }
           onClick={handleSave}
-          style={{
-            background:
-              "linear-gradient(135deg, var(--brand-primary-500), var(--brand-primary))",
-          }}
         >
           {saving ? "Saving…" : "Save changes"}
         </Button>
       </div>
-    </motion.div>
+    </m.div>
   );
 };
 
@@ -967,7 +961,7 @@ export const DealerTeamCard: React.FC = () => {
       const combined = [...rosterRows, ...looseRows].sort((a, b) => b.count - a.count);
       setRoster(combined);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(toUiMessage(err, "Could not load the team roster."));
     } finally {
       setLoading(false);
     }
@@ -999,7 +993,7 @@ export const DealerTeamCard: React.FC = () => {
       }
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(toUiMessage(err, "Could not add this teammate."));
     } finally {
       setSaving(false);
     }
@@ -1011,7 +1005,7 @@ export const DealerTeamCard: React.FC = () => {
       await m.updateSalesperson(id, { active: !active });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(toUiMessage(err, "Could not update this teammate."));
     }
   };
 
@@ -1028,7 +1022,7 @@ export const DealerTeamCard: React.FC = () => {
       });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(toUiMessage(err, "Could not add this teammate."));
     } finally {
       setSaving(false);
     }
@@ -1094,7 +1088,7 @@ export const DealerTeamCard: React.FC = () => {
   };
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       className="rounded-lg border border-hairline bg-surface-overlay p-4 sm:p-6 space-y-4"
@@ -1147,10 +1141,6 @@ export const DealerTeamCard: React.FC = () => {
             )
           }
           onClick={handleAdd}
-          style={{
-            background:
-              "linear-gradient(135deg, var(--brand-primary-500), var(--brand-primary))",
-          }}
         >
           Add
         </Button>
@@ -1258,7 +1248,7 @@ export const DealerTeamCard: React.FC = () => {
                           ? "bg-warning-500/15 text-warning-200"
                           : p.hasPin
                             ? "bg-success-500/10 text-success-300"
-                            : "bg-surface-800 text-surface-500",
+                            : "bg-surface-800 text-surface-400",
                       )}
                     >
                       {p.pinNeedsDistribution
@@ -1350,6 +1340,6 @@ export const DealerTeamCard: React.FC = () => {
           void load();
         }}
       />
-    </motion.div>
+    </m.div>
   );
 };

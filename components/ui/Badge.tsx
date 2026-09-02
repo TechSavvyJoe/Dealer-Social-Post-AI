@@ -1,5 +1,5 @@
 import React from "react";
-import { motion, HTMLMotionProps } from "framer-motion";
+import { m, HTMLMotionProps } from "framer-motion";
 import { cn } from "../../utils/classNames";
 
 type Variant = "primary" | "success" | "warning" | "error" | "info" | "neutral";
@@ -65,7 +65,7 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
     },
     ref,
   ) => (
-    <motion.span
+    <m.span
       ref={ref}
       className={cn(
         "inline-flex items-center",
@@ -96,7 +96,7 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
         />
       )}
       {children as React.ReactNode}
-    </motion.span>
+    </m.span>
   ),
 );
 

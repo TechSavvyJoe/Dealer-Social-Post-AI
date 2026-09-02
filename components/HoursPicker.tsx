@@ -180,7 +180,7 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
                   </select>
                 </div>
               ) : (
-                <p className="text-xs text-surface-500">
+                <p className="text-xs text-surface-400">
                   Tap the day to mark it open and set hours
                 </p>
               )}

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import {
   Activity,
   CheckCircle2,
@@ -380,7 +380,7 @@ export const SystemHealthPanel: React.FC = () => {
           : "All systems operational";
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       className="rounded-lg border border-hairline bg-surface-overlay"
@@ -665,7 +665,7 @@ export const SystemHealthPanel: React.FC = () => {
           ) : null}
         </div>
       )}
-    </motion.div>
+    </m.div>
   );
 };
 

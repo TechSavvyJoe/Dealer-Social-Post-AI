@@ -99,6 +99,14 @@ const AppContent: React.FC = () => {
       } else {
         document.documentElement.classList.remove("theme-light");
       }
+      // Keep the browser chrome tint in sync with the runtime theme. The
+      // index.html pre-paint script only sets this once at boot; without this
+      // write the Safari 15+ tab bar / Android status bar goes stale on
+      // Settings theme changes, system-scheme flips, and the always-dark
+      // RESULT publish studio. Colors mirror index.html's pre-paint script.
+      document
+        .querySelector('meta[name="theme-color"]')
+        ?.setAttribute("content", isDark ? "#090d17" : "#f8fafc");
     };
 
     updateTheme();
@@ -118,7 +126,7 @@ const AppContent: React.FC = () => {
   useUrlStepSync({
     onBlockedResultBack: () =>
       toast.info(
-        "Unsaved creative in progress. Click 'Start Over' or 'Remix' to exit.",
+        "Unsaved creative in progress. Use 'New photo' or 'Remix' to leave this screen.",
       ),
   });
 
@@ -151,7 +159,7 @@ const AppContent: React.FC = () => {
         // confirmation dialog. A global Escape must never bypass that guard
         // and discard an expensive unsaved creative.
         toast.info(
-          "Unsaved creative in progress. Click 'Start Over' or 'Remix' to exit.",
+          "Unsaved creative in progress. Use 'New photo' or 'Remix' to leave this screen.",
         );
         return;
       }

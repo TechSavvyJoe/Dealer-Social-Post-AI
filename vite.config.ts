@@ -80,14 +80,24 @@ export default defineConfig(() => {
         output: {
           manualChunks(id) {
             if (id.includes("node_modules")) {
-              if (id.includes("react") || id.includes("zustand")) return "vendor";
-              if (id.includes("framer-motion") || id.includes("lucide-react"))
-                return "ui";
+              // Match the react runtime precisely — a bare `includes("react")`
+              // also captured lucide-react (and any future *react* package),
+              // dragging every icon in the app into the boot-critical vendor
+              // chunk. Left unassigned, lucide icons chunk by usage so
+              // admin-only icons ride the lazy admin chunks instead.
+              if (
+                /node_modules\/(react|react-dom|scheduler)\//.test(id) ||
+                id.includes("@tanstack/react-query") ||
+                id.includes("zustand")
+              )
+                return "vendor";
+              if (id.includes("framer-motion")) return "ui";
             }
           },
         },
       },
-      // Keep warnings useful without flagging the intentionally grouped UI vendor chunk.
+      // Keep warnings useful without flagging the intentionally grouped
+      // framer-motion UI chunk.
       chunkSizeWarningLimit: 1000,
       // Enable minification
       minify: "esbuild" as const,

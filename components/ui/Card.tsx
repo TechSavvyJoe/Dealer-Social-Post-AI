@@ -1,5 +1,5 @@
 import React from "react";
-import { motion, type HTMLMotionProps } from "framer-motion";
+import { m, type HTMLMotionProps } from "framer-motion";
 import { cn } from "../../utils/classNames";
 
 /**
@@ -29,7 +29,7 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(
     ref,
   ) => {
     return (
-      <motion.div
+      <m.div
         ref={ref}
         className={cn(
           // Base styles — solid surface, hairline border, token radius
@@ -53,7 +53,7 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(
         {...props}
       >
         {children}
-      </motion.div>
+      </m.div>
     );
   },
 );

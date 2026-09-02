@@ -5,6 +5,7 @@ import {
   formatErrorForToast,
   NormalizedError,
 } from "../utils/errorHandler";
+import { RetryError } from "../utils/retry";
 
 describe("Error Handler Utils", () => {
   describe("normalizeError", () => {
@@ -129,14 +130,18 @@ describe("Error Handler Utils", () => {
       const normalized = normalizeError("Network failure");
 
       expect(normalized.kind).toBe("network");
-      expect(normalized.message).toContain("Network failure");
+      expect(normalized.message).toContain("lost connection");
+      // Raw technical text is kept off the user-facing message …
+      expect(normalized.message).not.toContain("Network failure");
+      // … but preserved for telemetry/diagnostics.
+      expect(normalized.original).toBe("Network failure");
     });
 
     it("handles non-Error objects", () => {
       const normalized = normalizeError({ code: 500 });
 
       expect(normalized.kind).toBe("unknown");
-      expect(normalized.message).toContain("Unknown error");
+      expect(normalized.message).toContain("Something went wrong");
     });
 
     it("preserves original error reference", () => {
@@ -155,6 +160,22 @@ describe("Error Handler Utils", () => {
 
       expect(result.kind).toBe("quota");
       expect(result.retryable).toBe(false);
+    });
+
+    it("classifies the terminal failure inside an exhausted retry", () => {
+      const terminal = new Error("The service is temporarily unavailable");
+      const exhausted = new RetryError(
+        "Operation failed after 3 attempts",
+        terminal,
+        3,
+      );
+
+      const result = normalizeError(exhausted);
+
+      expect(result.kind).toBe("model_unavailable");
+      expect(result.retryable).toBe(true);
+      expect(result.message).toBe("The AI model is temporarily unavailable.");
+      expect(result.original).toBe(exhausted);
     });
   });
 
@@ -177,14 +198,14 @@ describe("Error Handler Utils", () => {
       const error = normalizeError(new Error("Quota exceeded (429)"));
       const hint = recoveryHint(error);
 
-      expect(hint).toContain("later");
+      expect(hint).toContain("busy");
     });
 
     it("provides unauthorized recovery hint", () => {
       const error = normalizeError(new Error("Unauthorized (401)"));
       const hint = recoveryHint(error);
 
-      expect(hint).toContain("credentials");
+      expect(hint).toContain("sign in");
     });
 
     it("provides model_unavailable recovery hint", () => {
@@ -198,7 +219,7 @@ describe("Error Handler Utils", () => {
       const error = normalizeError(new Error("Invalid request (400)"));
       const hint = recoveryHint(error);
 
-      expect(hint).toContain("parameters");
+      expect(hint).toContain("photo");
     });
 
     it("provides generic recovery hint for unknown errors", () => {

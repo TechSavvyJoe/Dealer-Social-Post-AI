@@ -29,6 +29,7 @@ interface OpenAIImageOptions {
   quality?: "low" | "medium" | "high";
   /** Originating authenticated workspace for cross-provider failover. */
   requestAuthEpoch?: number;
+  signal?: AbortSignal;
 }
 
 interface OpenAIImageResponse {
@@ -85,6 +86,7 @@ export const generateImageViaOpenAI = async (
     credentials: "include",
     headers: proxyHeaders(options.task, options.attemptId),
     body: JSON.stringify(body),
+    signal: options.signal,
   });
 
   if (!res.ok) {

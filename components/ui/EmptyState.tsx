@@ -1,5 +1,5 @@
 import React from "react";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { LucideIcon } from "lucide-react";
 import { Button } from "./Button";
 import { cn } from "../../utils/classNames";
@@ -26,7 +26,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   className,
 }) => {
   return (
-    <motion.div
+    <m.div
       className={cn(
         "flex flex-col items-center justify-center text-center py-12 px-6",
         className,
@@ -36,7 +36,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
       transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
     >
       {/* Icon with glow effect */}
-      <motion.div
+      <m.div
         className="relative mb-6"
         initial={{ scale: 0.8 }}
         animate={{ scale: 1 }}
@@ -46,31 +46,31 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
         <div className="relative w-20 h-20 rounded-2xl bg-surface-800/50 backdrop-blur-sm border border-hairline flex items-center justify-center">
           <Icon className="h-10 w-10 text-primary-400" strokeWidth={1.5} />
         </div>
-      </motion.div>
+      </m.div>
 
       {/* Title */}
-      <motion.h3
+      <m.h3
         className="text-xl font-semibold text-surface-50 mb-2"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.2 }}
       >
         {title}
-      </motion.h3>
+      </m.h3>
 
       {/* Description */}
-      <motion.p
+      <m.p
         className="text-sm text-surface-400 max-w-md mb-6"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.3 }}
       >
         {description}
-      </motion.p>
+      </m.p>
 
       {/* Action button */}
       {actionLabel && onAction && (
-        <motion.div
+        <m.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
@@ -78,8 +78,8 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
           <Button variant="filled" onClick={onAction}>
             {actionLabel}
           </Button>
-        </motion.div>
+        </m.div>
       )}
-    </motion.div>
+    </m.div>
   );
 };

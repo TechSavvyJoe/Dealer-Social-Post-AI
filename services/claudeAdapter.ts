@@ -29,6 +29,7 @@ interface ClaudeMessageOptions {
   attemptId?: string;
   /** Originating authenticated workspace for cross-provider failover. */
   requestAuthEpoch?: number;
+  signal?: AbortSignal;
 }
 
 interface ClaudeMessageResponse {
@@ -92,6 +93,7 @@ export const generateTextViaClaude = async (
     credentials: "include",
     headers: proxyHeaders(options.task, options.attemptId),
     body: JSON.stringify(body),
+    signal: options.signal,
   });
 
   if (!res.ok) {

@@ -1563,7 +1563,11 @@ describe("GeminiService model routing", () => {
           soundtrack: "none",
           pacing: "snappy",
         }),
-      ).rejects.toThrow(`Video generation failed (${status})`);
+      ).rejects.toThrow(
+        // Users get the curated outage copy; the raw provider text stays in
+        // the console. The load-bearing assertion is the single start call.
+        /Video generation did not start safely: The AI model is temporarily unavailable\./,
+      );
 
       const startCalls = fetchMock.mock.calls.filter(
         ([url, init]) =>

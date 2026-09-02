@@ -172,7 +172,16 @@ export async function withCircuitBreaker<T>(
     circuitBreaker.recordSuccess(service);
     return result;
   } catch (error) {
-    circuitBreaker.recordFailure(service);
+    // User/queue cancellation says nothing about provider health. Counting it
+    // would open the circuit after a handful of navigation or timeout aborts.
+    const wasAborted =
+      error !== null &&
+      typeof error === "object" &&
+      "name" in error &&
+      error.name === "AbortError";
+    if (!wasAborted) {
+      circuitBreaker.recordFailure(service);
+    }
     throw error;
   }
 }

@@ -208,7 +208,7 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
               >
                 Post body
               </label>
-              <span className="text-[10px] font-mono tabular-nums text-surface-500">
+              <span className="text-[10px] font-mono tabular-nums text-surface-400">
                 {bodyChars} chars
               </span>
             </div>
@@ -249,7 +249,7 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
                     ? "text-error-300"
                     : tagStatus === "low"
                       ? "text-warning-300"
-                      : "text-surface-500",
+                      : "text-surface-400",
                 )}
               >
                 {tagCount}
@@ -282,7 +282,7 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
                 ))}
               </ul>
             ) : (
-              <p className="text-[11px] text-surface-500">
+              <p className="text-[11px] text-surface-400">
                 Hashtags appear automatically with each AI caption. Add more only if you
                 want a custom tag.
               </p>
@@ -324,7 +324,7 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
                 <Plus className="h-4 w-4" />
               </button>
             </div>
-            <p className="text-[10px] leading-relaxed text-surface-500">
+            <p className="text-[10px] leading-relaxed text-surface-400">
               AI ships 4–5 discovery tags plus your store brand tag. Optional: type a
               phrase and press Enter to add. Tap a chip to remove.
             </p>
