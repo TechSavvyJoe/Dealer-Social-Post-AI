@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { m } from "framer-motion";
 import {
   Settings,
@@ -521,6 +521,29 @@ export const DealerAdminDashboard: React.FC = () => {
 // ----------------------------------------------------------------------------
 // Settings card — inline editing of voice / color / banned / approval gate
 // ----------------------------------------------------------------------------
+/**
+ * Hours and enabled styles both have a derived default when the dealer has
+ * never saved them: a full default week, and every overlay style. The dirty
+ * baseline has to run the SAME derivation as the initial state — comparing the
+ * derived form value against a raw empty column made an untouched card report
+ * itself dirty on mount, which enabled Save, raised "Discard unsaved
+ * settings?" on tab switch, and armed the beforeunload prompt.
+ */
+const deriveHoursWeek = (raw?: string): WeekHours =>
+  parseHoursString(raw) || defaultWeekHours();
+
+const deriveEnabledStyles = (raw?: string): Set<string> => {
+  const trimmed = (raw || "").trim();
+  return trimmed
+    ? new Set(
+        trimmed
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      )
+    : new Set<string>(Object.values(StyleOption));
+};
+
 interface DealerSettingsProps {
   dealer: NonNullable<ReturnType<typeof useAppStore.getState>["currentDealer"]>;
   onSaved: (fields: Record<string, string | boolean>) => Promise<unknown>;
@@ -594,10 +617,14 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
   const [website, setWebsite] = useState(dealer.website || "");
   const [phone, setPhone] = useState(dealer.phone || "");
   const [address, setAddress] = useState(dealer.address || "");
-  const [hoursWeek, setHoursWeek] = useState<WeekHours>(
-    () => parseHoursString(dealer.hours) || defaultWeekHours(),
+  const [hoursWeek, setHoursWeek] = useState<WeekHours>(() =>
+    deriveHoursWeek(dealer.hours),
   );
   const hoursSerialized = serializeHours(hoursWeek);
+  const savedHoursSerialized = useMemo(
+    () => serializeHours(deriveHoursWeek(dealer.hours)),
+    [dealer.hours],
+  );
   const [tagline, setTagline] = useState(dealer.tagline || "");
 
   // Social
@@ -618,17 +645,9 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
   const [defaultFooter, setDefaultFooter] = useState(dealer.default_footer || "");
 
   // Overlay preferences
-  const [enabledStyles, setEnabledStyles] = useState<Set<string>>(() => {
-    const raw = (dealer.enabled_styles || "").trim();
-    return raw
-      ? new Set(
-          raw
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-        )
-      : new Set(Object.values(StyleOption));
-  });
+  const [enabledStyles, setEnabledStyles] = useState<Set<string>>(() =>
+    deriveEnabledStyles(dealer.enabled_styles),
+  );
   const [defaultStyle, setDefaultStyle] = useState(dealer.default_style || "");
 
   const [saving, setSaving] = useState(false);
@@ -638,6 +657,10 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
   const approvalRequiredRef = useRef<HTMLButtonElement>(null);
 
   const enabledStylesStr = Array.from(enabledStyles).join(",");
+  const savedEnabledStylesStr = useMemo(
+    () => Array.from(deriveEnabledStyles(dealer.enabled_styles)).join(","),
+    [dealer.enabled_styles],
+  );
 
   // Structured brand fields compare by their canonical JSON so an untouched
   // form (including "not set" → null) never reads as dirty.
@@ -676,7 +699,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
     website !== (dealer.website || "") ||
     phone !== (dealer.phone || "") ||
     address !== (dealer.address || "") ||
-    hoursSerialized !== (dealer.hours || "") ||
+    hoursSerialized !== savedHoursSerialized ||
     tagline !== (dealer.tagline || "") ||
     facebookUrl !== (dealer.facebook_url || "") ||
     facebookPageTag !== (dealer.facebook_page_tag || "") ||
@@ -687,7 +710,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
     gbpUrl !== (dealer.gbp_url || "") ||
     defaultHashtags !== (dealer.default_hashtags || "") ||
     defaultFooter !== (dealer.default_footer || "") ||
-    enabledStylesStr !== (dealer.enabled_styles || "") ||
+    enabledStylesStr !== savedEnabledStylesStr ||
     defaultStyle !== (dealer.default_style || "");
 
   useEffect(() => {

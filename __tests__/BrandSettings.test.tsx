@@ -25,18 +25,17 @@ vi.mock("../components/HoursPicker", () => ({
   HoursPicker: ({ preview }: { preview: string }) => <div>{preview}</div>,
 }));
 
-/**
- * The card also derives hours and enabled styles from defaults when a dealer
- * has never saved them, so a fixture pins both to their serialized defaults
- * and the dirty assertions below isolate the brand fields.
- */
 const baseDealer: Dealer = {
   id: "dealer-1",
   name: "Northside Motors",
   brand_voice: "Warm and direct.",
   brand_color: "#1d4ed8",
-  hours: serializeHours(defaultWeekHours()),
-  enabled_styles: Object.values(StyleOption).join(","),
+};
+
+/** A dealership that has never opened settings: every column is unset. */
+const unsavedDealer: Dealer = {
+  id: "dealer-2",
+  name: "Southside Motors",
 };
 
 type SavedFields = Record<string, string | boolean>;
@@ -349,6 +348,28 @@ const salesperson: Person = {
 const playfulDefault = () => screen.getByRole("checkbox", { name: /^Playful default/ });
 const managerScope = () =>
   screen.queryByRole("checkbox", { name: /^Sales manager scope/ });
+
+describe("dealer settings dirty tracking", () => {
+  it("stays clean on mount when hours and overlay styles have never been saved", () => {
+    const { onDirtyChange } = renderSettings(unsavedDealer);
+
+    // Both fields derive a non-empty default (a full week, every style), so a
+    // baseline read straight from the empty column reported a phantom edit.
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(screen.getByText("Up to date")).toBeInTheDocument();
+  });
+
+  it("still persists the derived hours and overlay styles on the next real save", async () => {
+    const { onSaved } = renderSettings(unsavedDealer);
+
+    fireEvent.click(hashtagLock());
+    const fields = await save(onSaved);
+
+    expect(fields.hours).toBe(serializeHours(defaultWeekHours()));
+    expect(fields.enabled_styles).toBe(Object.values(StyleOption).join(","));
+  });
+});
 
 describe("person profile fields", () => {
   beforeEach(() => {
