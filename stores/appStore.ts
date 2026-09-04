@@ -623,6 +623,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       const res = await fetchSession({ method: "GET" });
       if (res.ok) {
         const body = await res.json();
+        // The cookie-restore path applies the session directly (no
+        // applyAuthPayload), so it must forward the advertisement itself or
+        // every reopened PWA would silently lose the optional Veo fields.
+        setProxyCapabilities((body as { capabilities?: unknown }).capabilities);
         const dealer = body.dealer;
         const serverRole: UserRole = (body.role as UserRole) || "salesperson";
         if (dealer) {
