@@ -1,5 +1,6 @@
 {
   "version": 5,
+  "versionPinNote": "Deliberately pinned at 5. Reopen/deliver gates compare a stored post's model_policy_version against this number by exact equality (postImageReviewRequired in pb_hooks/requestPolicies.js), so bumping it would strand every already-archived creative behind a forced re-review. The v6 request capabilities (systemInstruction, responseMimeType plus the server-side responseJsonSchema registry) are purely additive and backward compatible with clients that never send them, so they ship under version 5.",
   "verifiedAt": "2026-09-02",
   "models": {
     "textQuality": "gemini-3.6-flash",
@@ -88,14 +89,23 @@
     }
   },
   "allowedImageAspectRatios": ["1:1", "4:5", "9:16", "16:9", "4:3"],
+  "allowedResponseMimeTypes": ["application/json"],
+  "responseSchemaIds": ["vision_review_v1", "caption_pack_v1", "website_draft_v1"],
   "allowedRequestFields": {
     "generateContent": {
-      "topLevel": ["contents", "generationConfig"],
+      "topLevel": ["contents", "generationConfig", "systemInstruction"],
+      "requiredTopLevel": ["contents", "generationConfig"],
+      "systemInstruction": ["parts"],
       "content": ["parts"],
       "textPart": ["text"],
       "imagePart": ["inlineData"],
       "inlineData": ["mimeType", "data"],
-      "textGenerationConfig": ["maxOutputTokens", "thinkingConfig"],
+      "textGenerationConfig": [
+        "maxOutputTokens",
+        "thinkingConfig",
+        "responseMimeType",
+        "schemaId"
+      ],
       "thinkingConfig": ["thinkingLevel"],
       "imageGenerationConfig": ["responseModalities", "imageConfig", "maxOutputTokens"],
       "imageConfig": ["imageSize", "aspectRatio"],
@@ -117,6 +127,7 @@
   },
   "requestLimits": {
     "maxPromptChars": 20000,
+    "maxSystemInstructionChars": 8000,
     "maxInlineImageChars": 16777216,
     "maxTotalInlineImageChars": 20971520,
     "maxTextImages": 3,

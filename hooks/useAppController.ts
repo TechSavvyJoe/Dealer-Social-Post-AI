@@ -7,6 +7,7 @@ import { loadPublishPipeline } from "../services/publishPipeline";
 import { useGeneration } from "./useGeneration";
 import { useDealerTheme } from "./useDealerTheme";
 import { AppStep, StyleOption, ToneOption, type ImageSelection } from "../types";
+import { isCreativeSystemEnabled } from "../services/creativeSystem";
 import { logEvent } from "../utils/telemetry";
 import { archiveDealerMedia } from "../utils/creativeStorage";
 
@@ -152,11 +153,17 @@ export const useAppController = () => {
     return login(credentials, turnstileToken);
   };
 
+  // Per-device style/tone memory is one of the three authorities that fight
+  // over the same two values today (spec §4.1). Under the creative system the
+  // dealership Look is the only authority, so the memory is retired: nothing
+  // is written, and therefore nothing stale can seed a later post. Every
+  // dealership that has not opted in keeps today's persistence untouched.
   const handleStyleToneChange = useCallback(
     (style: StyleOption, tone: ToneOption) => {
+      if (isCreativeSystemEnabled(currentDealer)) return;
       setPreferences({ preferredStyle: style, preferredTone: tone });
     },
-    [setPreferences],
+    [currentDealer, setPreferences],
   );
 
   const handleImageSelected = useCallback(

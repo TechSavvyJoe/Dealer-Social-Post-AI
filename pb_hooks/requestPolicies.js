@@ -283,8 +283,22 @@ const SERVER_SAFETY_SETTINGS = [
 
 // Language-neutral contract mirrored from config/gemini-model-policy.json.
 // `scripts/check-model-policy.mjs` and Vitest fail if this snapshot drifts.
+//
+// WHY `version` STAYS 5 EVEN THOUGH THIS IS THE "v6" REQUEST SHAPE:
+// `postImageReviewRequired` below compares a stored post's
+// `model_policy_version` against this number by EXACT EQUALITY, and the
+// reopen/deliver gates use that answer. Incrementing the number would mark
+// every already-archived creative as reviewed-under-an-old-policy and force a
+// re-review before it can be reopened or delivered — stranding real posts for
+// a change that only *widens* what a request may carry. `systemInstruction`,
+// `responseMimeType` and the server-side `responseJsonSchema` registry are
+// additive: a client that never sends them is still valid, so no stored post
+// needs revalidating. Bump the number only for a change that invalidates
+// previously generated output.
 const GEMINI_MODEL_POLICY_SNAPSHOT = {
   version: 5,
+  versionPinNote:
+    "Deliberately pinned at 5. Reopen/deliver gates compare a stored post's model_policy_version against this number by exact equality (postImageReviewRequired in pb_hooks/requestPolicies.js), so bumping it would strand every already-archived creative behind a forced re-review. The v6 request capabilities (systemInstruction, responseMimeType plus the server-side responseJsonSchema registry) are purely additive and backward compatible with clients that never send them, so they ship under version 5.",
   verifiedAt: "2026-09-02",
   models: {
     textQuality: "gemini-3.6-flash",
@@ -378,14 +392,33 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
     },
   },
   allowedImageAspectRatios: ["1:1", "4:5", "9:16", "16:9", "4:3"],
+  allowedResponseMimeTypes: ["application/json"],
+  // Ids the browser may reference. The schema bodies live only in
+  // GEMINI_RESPONSE_SCHEMAS below — never in the request.
+  responseSchemaIds: ["vision_review_v1", "caption_pack_v1", "website_draft_v1"],
   allowedRequestFields: {
+    // NOTE: `temperature`, `topP`, `topK` and `candidateCount` are absent on
+    // purpose and must stay absent. Google deprecated them on Gemini 3.x on
+    // 2026-07-21 and documents a 400 on the pinned 3.6-flash / 3.5-flash-lite
+    // ids. Style and variation belong in `systemInstruction`, not in sampling
+    // knobs the models no longer accept.
     generateContent: {
-      topLevel: ["contents", "generationConfig"],
+      topLevel: ["contents", "generationConfig", "systemInstruction"],
+      // `topLevel` is the accepted set; only these are mandatory, so a client
+      // that predates systemInstruction stays valid.
+      requiredTopLevel: ["contents", "generationConfig"],
+      systemInstruction: ["parts"],
       content: ["parts"],
       textPart: ["text"],
       imagePart: ["inlineData"],
       inlineData: ["mimeType", "data"],
-      textGenerationConfig: ["maxOutputTokens", "thinkingConfig"],
+      // `schemaId` is an id into the server registry, never a schema body.
+      textGenerationConfig: [
+        "maxOutputTokens",
+        "thinkingConfig",
+        "responseMimeType",
+        "schemaId",
+      ],
       thinkingConfig: ["thinkingLevel"],
       imageGenerationConfig: ["responseModalities", "imageConfig", "maxOutputTokens"],
       imageConfig: ["imageSize", "aspectRatio"],
@@ -407,6 +440,7 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
   },
   requestLimits: {
     maxPromptChars: 20000,
+    maxSystemInstructionChars: 8000,
     maxInlineImageChars: 16 * 1024 * 1024,
     maxTotalInlineImageChars: 20 * 1024 * 1024,
     maxTextImages: 3,
@@ -417,6 +451,189 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
 
 function geminiModelPolicySnapshot() {
   return JSON.parse(JSON.stringify(GEMINI_MODEL_POLICY_SNAPSHOT));
+}
+
+/**
+ * Server-side JSON response-schema registry.
+ *
+ * The browser sends only `generationConfig.schemaId`; the proxy looks the id
+ * up here and injects the matching `responseJsonSchema`. A schema body is
+ * never accepted from the client, so a tampered PWA cannot widen, replace, or
+ * smuggle instructions through the response contract, and the shapes stay
+ * reviewable in one server-owned place.
+ *
+ * Each entry mirrors the Zod schema that validates the parsed result in the
+ * browser:
+ *  - vision_review_v1  → GeneratedImageTextReviewSchema (services/geminiService.ts)
+ *  - caption_pack_v1   → parsePlatformCaptionPack       (services/platformCopy.ts)
+ *  - website_draft_v1  → WebsiteDraftAiSchema           (services/websitePublishing.ts)
+ *
+ * Ids are versioned (`_v1`). Changing a shape means adding a new id, never
+ * editing one in place — an installed PWA may still be sending the old id.
+ */
+const VISION_REVIEW_VIOLATIONS = [
+  "too_many_words",
+  "too_many_characters",
+  "full_sentence",
+  "hashtag",
+  "url_or_phone",
+  "multiple_marketing_blocks",
+  "unexpected_personal_name",
+  "missing_dealership_identity",
+  "incorrect_dealership_name",
+  "fabricated_brand_mark",
+  "supplied_logo_altered_or_replaced",
+  "instruction_text",
+  "social_ui_chrome",
+  "unrequested_illustration",
+  "subject_identity_changed",
+  "vehicle_identity_changed",
+  "source_composition_changed",
+  "unflattering_or_disrespectful",
+  "overdone_or_platform_inappropriate",
+  "bland_or_unstyled",
+  "below_campaign_quality",
+  "unintegrated_3d_graphics",
+  "malformed_or_misspelled_text",
+  "unreadable_or_uncertain",
+];
+
+const WEBSITE_DRAFT_CATEGORIES = [
+  "deliveries",
+  "inventory",
+  "service",
+  "promotions",
+  "community",
+  "team",
+];
+
+const WEBSITE_DRAFT_PRIVACY_FLAGS = [
+  "faces_visible",
+  "license_plate_visible",
+  "personal_information_visible",
+  "minor_may_be_visible",
+  "review_visual_privacy",
+];
+
+function booleanFields(names) {
+  const fields = {};
+  for (let i = 0; i < names.length; i++) {
+    fields[names[i]] = { type: "boolean" };
+  }
+  return fields;
+}
+
+const GEMINI_RESPONSE_SCHEMAS = {
+  vision_review_v1: {
+    type: "object",
+    properties: Object.assign(
+      booleanFields([
+        "compliant",
+        "uncertain",
+        "hasFullSentence",
+        "hasHashtag",
+        "hasUrlOrPhone",
+        "logoPresent",
+        "logoMatchesSuppliedAsset",
+        "hasUnexpectedPersonalName",
+        "dealershipNamePresent",
+        "dealershipNameCorrect",
+        "hasFabricatedBrandMark",
+        "hasInstructionText",
+        "hasSocialUiChrome",
+        "isIllustrationOrCharacterRender",
+        "preservesSourceSubjects",
+        "preservesVehicleIdentity",
+        "preservesSourceComposition",
+        "isRespectfulAndFlattering",
+        "isPlatformAppropriate",
+        "hasDistinctStyleSignature",
+        "hasEnvironmentalDepthIntegration",
+        "hasCleanTypography",
+      ]),
+      {
+        detectedMarketingText: { type: "array", items: { type: "string" } },
+        detectedPersonalNames: { type: "array", items: { type: "string" } },
+        marketingWordCount: { type: "integer", minimum: 0 },
+        marketingCharacterCount: { type: "integer", minimum: 0 },
+        visualQualityScore: { type: "integer", minimum: 1, maximum: 5 },
+        violations: {
+          type: "array",
+          items: { type: "string", enum: VISION_REVIEW_VIOLATIONS },
+        },
+      },
+    ),
+    // Only the always-answerable fields are required. The conditional ones
+    // (source comparison, logo, depth) must stay optional: the prompt tells
+    // the reviewer to omit them when they do not apply, and forcing a value
+    // would make it invent one.
+    required: [
+      "compliant",
+      "uncertain",
+      "detectedMarketingText",
+      "marketingWordCount",
+      "marketingCharacterCount",
+      "hasFullSentence",
+      "hasHashtag",
+      "hasUrlOrPhone",
+      "violations",
+    ],
+    additionalProperties: false,
+  },
+  caption_pack_v1: {
+    type: "object",
+    properties: {
+      captions: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            platformId: { type: "string" },
+            caption: { type: "string" },
+          },
+          required: ["platformId", "caption"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["captions"],
+    additionalProperties: false,
+  },
+  website_draft_v1: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      body: { type: "string" },
+      altText: { type: "string" },
+      category: { type: "string", enum: WEBSITE_DRAFT_CATEGORIES },
+      privacyFlags: {
+        type: "array",
+        items: { type: "string", enum: WEBSITE_DRAFT_PRIVACY_FLAGS },
+      },
+    },
+    required: ["title", "body", "altText", "category", "privacyFlags"],
+    additionalProperties: false,
+  },
+};
+
+/**
+ * Registry ids in declaration order. `scripts/check-model-policy.mjs` compares
+ * this against `responseSchemaIds` in the canonical policy JSON so the client
+ * can never reference an id the server does not implement.
+ */
+function geminiResponseSchemaIds() {
+  return Object.keys(GEMINI_RESPONSE_SCHEMAS);
+}
+
+function geminiResponseSchema(schemaId) {
+  if (typeof schemaId !== "string" || !schemaId) return null;
+  if (!Object.prototype.hasOwnProperty.call(GEMINI_RESPONSE_SCHEMAS, schemaId)) {
+    return null;
+  }
+  if (GEMINI_MODEL_POLICY_SNAPSHOT.responseSchemaIds.indexOf(schemaId) === -1) {
+    return null;
+  }
+  return JSON.parse(JSON.stringify(GEMINI_RESPONSE_SCHEMAS[schemaId]));
 }
 
 /**
@@ -714,6 +931,7 @@ function providerResourcesFromResponse(path, responseBody) {
 const GEMINI_REQUEST_FIELDS = GEMINI_MODEL_POLICY_SNAPSHOT.allowedRequestFields;
 const GEMINI_REQUEST_LIMITS = GEMINI_MODEL_POLICY_SNAPSHOT.requestLimits;
 const MAX_PROMPT_CHARS = GEMINI_REQUEST_LIMITS.maxPromptChars;
+const MAX_SYSTEM_INSTRUCTION_CHARS = GEMINI_REQUEST_LIMITS.maxSystemInstructionChars;
 const MAX_INLINE_IMAGE_CHARS = GEMINI_REQUEST_LIMITS.maxInlineImageChars;
 const MAX_TOTAL_INLINE_IMAGE_CHARS = GEMINI_REQUEST_LIMITS.maxTotalInlineImageChars;
 const ALLOWED_INLINE_IMAGE_TYPES = [
@@ -839,13 +1057,91 @@ function sanitizeTextThinkingConfig(model, generationConfig) {
   return { thinkingLevel: thinkingConfig.thinkingLevel };
 }
 
+/**
+ * Optional top-level `systemInstruction` for text tasks. The static, per-task
+ * invariant rules (compliance, identity, output shape) ride here instead of
+ * being concatenated into the user turn. Accepts only `{ parts: [{ text }] }`
+ * with the same text-part contract as `contents`, bounded by
+ * `requestLimits.maxSystemInstructionChars`. Returns `undefined` when absent,
+ * the sanitized object when valid, and `null` on any violation.
+ */
+function sanitizeSystemInstruction(input) {
+  if (!Object.prototype.hasOwnProperty.call(input, "systemInstruction")) {
+    return undefined;
+  }
+  const fields = GEMINI_REQUEST_FIELDS.generateContent;
+  const systemInstruction = input.systemInstruction;
+  if (
+    !hasOnlyKeys(systemInstruction, fields.systemInstruction, fields.systemInstruction)
+  ) {
+    return null;
+  }
+  const rawParts = systemInstruction.parts;
+  if (!Array.isArray(rawParts) || !rawParts.length) return null;
+
+  const parts = [];
+  let totalChars = 0;
+  for (let i = 0; i < rawParts.length; i++) {
+    const part = rawParts[i];
+    // Text only: a system instruction never carries image bytes here.
+    if (!hasOnlyKeys(part, fields.textPart, fields.textPart)) return null;
+    if (typeof part.text !== "string" || !part.text.trim()) return null;
+    totalChars += part.text.length;
+    if (totalChars > MAX_SYSTEM_INSTRUCTION_CHARS) return null;
+    parts.push({ text: part.text });
+  }
+  return { parts: parts };
+}
+
+/**
+ * Optional structured-output contract for text tasks.
+ *
+ * The client sends `responseMimeType` plus a `schemaId`; the server resolves
+ * the id against its own registry and injects `responseJsonSchema`. A schema
+ * body from the browser is rejected outright — `responseSchema` and
+ * `responseJsonSchema` are not in `textGenerationConfig`, so `hasOnlyKeys`
+ * already refuses them, and an unknown id fails here. Returns `undefined`
+ * when the client asked for no structured output, the sanitized fields when
+ * valid, and `null` on any violation.
+ */
+function sanitizeTextResponseFormat(generationConfig) {
+  const hasMimeType = Object.prototype.hasOwnProperty.call(
+    generationConfig,
+    "responseMimeType",
+  );
+  const hasSchemaId = Object.prototype.hasOwnProperty.call(
+    generationConfig,
+    "schemaId",
+  );
+  if (!hasMimeType && !hasSchemaId) return undefined;
+  // Both or neither: a mime type without a server schema is an unbounded JSON
+  // request, and a schema id without the mime type would be silently ignored.
+  if (!hasMimeType || !hasSchemaId) return null;
+  const responseMimeType = generationConfig.responseMimeType;
+  if (
+    typeof responseMimeType !== "string" ||
+    GEMINI_MODEL_POLICY_SNAPSHOT.allowedResponseMimeTypes.indexOf(responseMimeType) ===
+      -1
+  ) {
+    return null;
+  }
+  const responseJsonSchema = geminiResponseSchema(generationConfig.schemaId);
+  if (!responseJsonSchema) return null;
+  return {
+    responseMimeType: responseMimeType,
+    responseJsonSchema: responseJsonSchema,
+  };
+}
+
 function buildGenerateContentRequest(model, input, requestedTaskName) {
   const fields = GEMINI_REQUEST_FIELDS.generateContent;
   // Deliberately omit `safetySettings` from the accepted client keys. The
   // canonical server policy below is the only safety configuration forwarded.
-  if (!hasOnlyKeys(input, fields.topLevel, fields.topLevel)) {
+  if (!hasOnlyKeys(input, fields.topLevel, fields.requiredTopLevel)) {
     return null;
   }
+  const systemInstruction = sanitizeSystemInstruction(input);
+  if (systemInstruction === null) return null;
 
   const generationConfig = input.generationConfig;
   if (TEXT_GENERATE_CONTENT_MODELS.indexOf(model) !== -1) {
@@ -863,6 +1159,8 @@ function buildGenerateContentRequest(model, input, requestedTaskName) {
     }
     const thinkingConfig = sanitizeTextThinkingConfig(model, generationConfig);
     if (thinkingConfig === null) return null;
+    const responseFormat = sanitizeTextResponseFormat(generationConfig);
+    if (responseFormat === null) return null;
 
     const contents = sanitizeGenerateContentContents(
       input.contents,
@@ -874,14 +1172,25 @@ function buildGenerateContentRequest(model, input, requestedTaskName) {
       maxOutputTokens: generationConfig.maxOutputTokens,
     };
     if (thinkingConfig) sanitizedGenerationConfig.thinkingConfig = thinkingConfig;
-    return {
+    if (responseFormat) {
+      sanitizedGenerationConfig.responseMimeType = responseFormat.responseMimeType;
+      // Server-owned schema body, resolved from the client's id.
+      sanitizedGenerationConfig.responseJsonSchema = responseFormat.responseJsonSchema;
+    }
+    const sanitized = {
       contents: contents,
       generationConfig: sanitizedGenerationConfig,
       safetySettings: SERVER_SAFETY_SETTINGS,
     };
+    if (systemInstruction) sanitized.systemInstruction = systemInstruction;
+    return sanitized;
   }
 
   if (IMAGE_GENERATE_CONTENT_MODELS.indexOf(model) === -1) return null;
+  // Image models run without a system instruction under this policy: nothing
+  // in the product sends one, and admitting it would widen the image request
+  // surface for no caller.
+  if (systemInstruction) return null;
   const requiredMaxOutputTokens =
     GEMINI_MODEL_POLICY_SNAPSHOT.tasks.image_standard.maxOutputTokens;
   if (
@@ -1365,5 +1674,7 @@ module.exports = {
   isAllowedImageProxyUrl,
   imageProxyHostPatterns,
   geminiModelPolicySnapshot,
+  geminiResponseSchemaIds,
+  geminiResponseSchema,
   postImageReviewRequired,
 };

@@ -3121,7 +3121,16 @@ const DEALER_SELECT_FIELD_VALUES = {
   alternate_look: SIGNATURE_LOOK_VALUES,
   image_quality_tier: IMAGE_QUALITY_TIER_VALUES,
 };
-const DEALER_BOOL_FIELDS = ["requires_approval", "required_hashtags_locked"];
+/**
+ * `creative_system_v2` is the phase-2 resolver flag (migration 1751800000).
+ * It is written like any other dealer switch; while it is false the client
+ * resolver keeps every pre-Look default, so flipping it is the only opt-in.
+ */
+const DEALER_BOOL_FIELDS = [
+  "requires_approval",
+  "required_hashtags_locked",
+  "creative_system_v2",
+];
 /** Byte caps; must match the json field maxSize in migration 1751500000. */
 const DEALER_JSON_FIELD_LIMITS = {
   motion_signature: 2000,
@@ -3831,6 +3840,8 @@ function serializeDealer(record) {
     approval_policy: readDealerJsonField(record, "approval_policy"),
     feature_permissions: readDealerJsonField(record, "feature_permissions"),
     image_quality_tier: record.getString("image_quality_tier"),
+    // Phase 2 resolver flag. False/unset keeps every legacy creative default.
+    creative_system_v2: recordBool(record, "creative_system_v2"),
   };
 }
 

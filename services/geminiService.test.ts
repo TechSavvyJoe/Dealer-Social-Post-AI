@@ -11,6 +11,7 @@ import {
   generateSocialPostTextDetailed,
   generatePostVideo,
   generateWebsiteDraftMetadata,
+  resetStructuredJsonSupport,
   reviewGeneratedImageText,
   type GeneratedImageTextReview,
 } from "./geminiService";
@@ -189,6 +190,9 @@ const generatedImageResponse = (data = "generated-image-data") => ({
 describe("GeminiService model routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The structured-output latch is per session, not per call: reset it so a
+    // test that proves the old-server fallback cannot disarm later tests.
+    resetStructuredJsonSupport();
 
     mockGenerateContent.mockImplementation((request) => {
       if (isImageTextReviewRequest(request)) return imageTextReviewResponse();
@@ -235,6 +239,41 @@ describe("GeminiService model routing", () => {
     expect(textCall?.[0].generationConfig).not.toHaveProperty("temperature");
     expect(textCall?.[0].generationConfig).not.toHaveProperty("topK");
     expect(textCall?.[0].generationConfig).not.toHaveProperty("topP");
+
+    // P1-1: the invariant compliance and identity rules ride in the system
+    // instruction; only per-post facts stay in the user turn.
+    const systemText = (
+      textCall?.[0].systemInstruction?.parts as Array<{ text: string }> | undefined
+    )
+      ?.map((part) => part.text)
+      .join("\n");
+    expect(systemText).toContain(
+      "Never invent prices, APR, availability, condition, ownership history, service work, quotes, or outcomes.",
+    );
+    expect(systemText).toContain(
+      "Do not use: guaranteed, lowest price, no credit check, 0% APR, best deal.",
+    );
+    expect(systemText).toContain(
+      "The customer identity must obey the Identity rule exactly.",
+    );
+    const userText = (
+      textCall?.[0].contents?.parts as Array<{ text?: string }> | undefined
+    )?.[0]?.text;
+    expect(userText).toContain("Store: Test Dealer");
+    expect(userText).not.toContain("Never invent prices");
+
+    // The split request must still satisfy the server allowlist verbatim.
+    expect(
+      loadPocketBaseRequestPolicies().buildGeminiProxyRequest(
+        `v1beta/models/${textCall?.[0].model}:generateContent`,
+        {
+          contents: [textCall?.[0].contents],
+          generationConfig: textCall?.[0].generationConfig,
+          systemInstruction: textCall?.[0].systemInstruction,
+        },
+        textCall?.[0].task,
+      ),
+    ).not.toBeNull();
   });
 
   it("routes standard image generation through Pro Image first", async () => {
@@ -325,19 +364,25 @@ describe("GeminiService model routing", () => {
     // stay at "low" because thinking tokens bill as output.
     expect(reviewRequest?.task).toBe("vision_review");
     expect(reviewRequest?.purpose).toBe("vision_review");
+    // The QC verdict is schema-bound JSON: the browser sends only the
+    // registry id and the proxy injects the schema body.
     expect(reviewRequest?.generationConfig).toEqual({
       maxOutputTokens: 2048,
       thinkingConfig: { thinkingLevel: "medium" },
+      responseMimeType: "application/json",
+      schemaId: "vision_review_v1",
     });
     const captionRequest = mockGenerateContent.mock.calls.find(
       ([request]) => request.task === "caption",
     )?.[0];
+    // Captions stay prose; only the JSON-shaped calls opt into a schema.
     expect(captionRequest?.generationConfig).toEqual({
       maxOutputTokens: 2048,
       thinkingConfig: { thinkingLevel: "low" },
     });
-    expect(reviewRequest?.generationConfig).not.toHaveProperty("responseMimeType");
+    // A schema BODY must never leave the browser — only the id.
     expect(reviewRequest?.generationConfig).not.toHaveProperty("responseSchema");
+    expect(reviewRequest?.generationConfig).not.toHaveProperty("responseJsonSchema");
     expect(
       mockGenerateContent.mock.calls.some(([request]) =>
         request.contents?.parts?.some(
@@ -1210,11 +1255,63 @@ describe("GeminiService model routing", () => {
     );
 
     expect(mockGenerateContent).toHaveBeenCalledTimes(1);
-    // Website metadata runs under the caption_regenerate text task.
+    // Website metadata runs under the caption_regenerate text task, bound to
+    // the server-side `website_draft_v1` response schema.
     expect(mockGenerateContent.mock.calls[0]?.[0].generationConfig).toEqual({
       maxOutputTokens: 2048,
       thinkingConfig: { thinkingLevel: "low" },
+      responseMimeType: "application/json",
+      schemaId: "website_draft_v1",
     });
+  });
+
+  it("retries in prose mode when the proxy predates the schema registry", async () => {
+    // A server without the response-schema registry sees `responseMimeType`
+    // and `schemaId` as unknown generationConfig keys and answers 400. The
+    // retry must reuse the same model and prompt, and the kept heuristic
+    // parser must still recover the pack.
+    const proseAnswer =
+      '```json\n{"captions":[{"platformId":"tiktok","caption":"TikTok body"}]}\n```';
+    mockGenerateContent.mockImplementation((request) => {
+      if (request.generationConfig?.schemaId) {
+        return Promise.reject(
+          new Error("The AI service could not complete this request (error 400)."),
+        );
+      }
+      return Promise.resolve({ text: () => proseAnswer });
+    });
+
+    const raw = await generatePlatformCaptionPack(
+      "data:image/jpeg;base64,source-photo",
+      "Return the caption pack.",
+      undefined,
+      false,
+    );
+
+    expect(raw).toBe(proseAnswer);
+    expect(parsePlatformCaptionPack(raw, ["tiktok"])).toEqual({
+      tiktok: "TikTok body",
+    });
+    const calls = mockGenerateContent.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.[0].generationConfig.schemaId).toBe("caption_pack_v1");
+    // Same model: the structured retry is not a fallback-chain step.
+    expect(calls[1]?.[0].model).toBe(calls[0]?.[0].model);
+    expect(calls[1]?.[0].generationConfig).not.toHaveProperty("schemaId");
+    expect(calls[1]?.[0].generationConfig).not.toHaveProperty("responseMimeType");
+    expect(calls[1]?.[0].contents).toEqual(calls[0]?.[0].contents);
+
+    // The latch is per session: the next structured call skips the doomed
+    // structured attempt entirely.
+    mockGenerateContent.mockClear();
+    await generateWebsiteDraftMetadata(
+      "data:image/jpeg;base64,source-photo",
+      "Return the website metadata JSON.",
+    );
+    expect(mockGenerateContent).toHaveBeenCalledTimes(1);
+    expect(mockGenerateContent.mock.calls[0]?.[0].generationConfig).not.toHaveProperty(
+      "schemaId",
+    );
   });
 
   it("preserves structured caption-pack JSON and binds it to the public customer label", async () => {

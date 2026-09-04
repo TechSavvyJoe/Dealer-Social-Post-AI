@@ -5,7 +5,8 @@ import {
   composeGenerationCreativeBrief,
   PostCustomizer,
 } from "../components/PostCustomizer";
-import { StyleOption, ToneOption } from "../types";
+import { useAppStore } from "../stores/appStore";
+import { StyleOption, ToneOption, type Dealer } from "../types";
 
 Object.assign(global.navigator, { vibrate: vi.fn() });
 
@@ -86,6 +87,7 @@ describe("PostCustomizer", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    useAppStore.setState({ currentDealer: null });
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -110,6 +112,7 @@ describe("PostCustomizer", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    useAppStore.setState({ currentDealer: null });
   });
 
   it("announces each customizer section as a named group", () => {
@@ -519,4 +522,311 @@ describe("PostCustomizer", () => {
    * Note: The test for a disabled generate button was removed as it is now obsolete.
    * The API key is configured on the server, so the button will never be in this disabled state.
    */
+});
+
+// ---------------------------------------------------------------------------
+// Brand-consistent creative system (spec 2026-09-02 §4, §8)
+// ---------------------------------------------------------------------------
+
+const LEGACY_DEALER = {
+  id: "dealer-legacy",
+  name: "Test Motors",
+} as Dealer;
+
+/** Hometown Look = Fun & Friendly image treatment + Family caption voice. */
+const CREATIVE_DEALER = {
+  id: "dealer-brand",
+  name: "Test Motors",
+  creative_system_v2: true,
+  signature_look: "hometown",
+  playful_style: "pixar",
+} as Dealer;
+
+describe("PostCustomizer creative system", () => {
+  const baseProps = {
+    imageSrc: "data:image/png;base64,xyz",
+    dealershipName: "Test Motors",
+    onBack: vi.fn(),
+    onGenerate: vi.fn(),
+    onStyleToneChange: vi.fn(),
+    // Deliberately conflicting per-device memory: an enabled dealership must
+    // ignore it and use the Look instead.
+    defaultStyle: StyleOption.DepthPop,
+    defaultTone: ToneOption.Humorous,
+    isDesktopLayout: true,
+  };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    useAppStore.setState({ currentDealer: null });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ items: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useAppStore.setState({ currentDealer: null });
+  });
+
+  const renderCustomizer = (
+    dealer: Dealer | null,
+    overrides: Partial<React.ComponentProps<typeof PostCustomizer>> = {},
+  ) => {
+    useAppStore.setState({ currentDealer: dealer });
+    const onGenerate =
+      vi.fn<React.ComponentProps<typeof PostCustomizer>["onGenerate"]>();
+    render(<PostCustomizer {...baseProps} onGenerate={onGenerate} {...overrides} />);
+    return onGenerate;
+  };
+
+  it("leaves a dealership without the flag on today's exact control set", async () => {
+    const onGenerate = renderCustomizer(LEGACY_DEALER, {
+      initialGenerationParams: {
+        style: StyleOption.Sporty,
+        tone: ToneOption.Professional,
+        customerName: "",
+        scenarioId: "preowned_spotlight",
+        platformIds: ["gbp"],
+        mediaOutputMode: "photo",
+        primaryFormatId: "gbp",
+        imageAspectRatio: "4:3",
+      },
+    });
+
+    // Every control group the creative system hides is still here.
+    for (const name of ["Design Style", "Share to", "Tone", "Caption"] as const) {
+      expect(screen.getByRole("group", { name })).toBeInTheDocument();
+    }
+    expect(
+      screen.getByRole("button", { name: "Post type Pre-Owned Spotlight" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^PhotoExact images$/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Auto$/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Advanced options/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Add a personal line/i)).not.toBeInTheDocument();
+
+    // ...and the saved generation params are byte-for-byte today's values.
+    fireEvent.click(screen.getByRole("button", { name: /Generate Post/i }));
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(1));
+    expect(onGenerate).toHaveBeenCalledWith(
+      StyleOption.Sporty,
+      ToneOption.Professional,
+      "",
+      undefined,
+      expect.any(String),
+      expect.objectContaining({ scenarioId: "preowned_spotlight" }),
+      ["gbp"],
+      expect.objectContaining({
+        primaryFormatId: "gbp",
+        imageAspectRatio: "4:3",
+      }),
+      "photo",
+    );
+  });
+
+  it("drops the customize screen to category, who/what, and one optional toggle", () => {
+    renderCustomizer(CREATIVE_DEALER);
+
+    for (const name of ["Design Style", "Tone", "Caption"] as const) {
+      expect(screen.queryByRole("group", { name })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByRole("group", { name: "Share to" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^PhotoExact images$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^BothFull campaign$/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Auto$/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Marketplace1200×628$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /More platforms/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Advanced options/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Write My Own" }),
+    ).not.toBeInTheDocument();
+
+    // What is left: the six categories, who/what, and the optional toggles.
+    for (const category of [
+      "Delivery",
+      "Inventory",
+      "Service",
+      "Promotions",
+      "Community",
+      "Team",
+    ] as const) {
+      expect(screen.getByRole("button", { name: category })).toBeInTheDocument();
+    }
+    expect(screen.getByLabelText(/Customer's name/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Add a personal line/i)).toBeInTheDocument();
+
+    // Compliance controls are untouched.
+    expect(screen.getByRole("group", { name: /^Photo release/ })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Vehicle" })).toBeInTheDocument();
+  });
+
+  it("generates with the Look style and tone and the category destinations", async () => {
+    const onGenerate = renderCustomizer(CREATIVE_DEALER);
+
+    // Inventory needs no photo release, so this exercises the whole happy path.
+    fireEvent.click(screen.getByRole("button", { name: "Inventory" }));
+    fireEvent.click(screen.getByRole("button", { name: /Generate Post/i }));
+
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(1));
+    const call = onGenerate.mock.calls[0];
+    // Hometown Look — not the DepthPop/Humorous per-device memory.
+    expect(call?.[0]).toBe(StyleOption.Friendly);
+    expect(call?.[1]).toBe(ToneOption.Family);
+    // CATEGORY_OUTPUTS.inventory, not the legacy "Share to" defaults.
+    expect(call?.[6]).toEqual(["instagram_feed", "facebook_feed", "marketplace"]);
+    expect(call?.[7]).toEqual(
+      expect.objectContaining({
+        primaryFormatId: "feed_portrait",
+        imageAspectRatio: "4:5",
+      }),
+    );
+    expect(call?.[8]).toBe("photo");
+  });
+
+  it("keeps a scenario's style and tone defaults away from the Look", async () => {
+    const onGenerate = renderCustomizer(CREATIVE_DEALER);
+
+    // Pre-Owned Spotlight declares Modern + Promotional.
+    fireEvent.click(screen.getByRole("button", { name: "Inventory" }));
+    expect(
+      screen.getByRole("button", { name: /Pre-Owned Spotlight/i }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Generate Post/i }));
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(1));
+    expect(onGenerate.mock.calls[0]?.[0]).not.toBe(StyleOption.Modern);
+    expect(onGenerate.mock.calls[0]?.[1]).not.toBe(ToneOption.Promotional);
+    expect(onGenerate.mock.calls[0]?.[0]).toBe(StyleOption.Friendly);
+    expect(onGenerate.mock.calls[0]?.[1]).toBe(ToneOption.Family);
+  });
+
+  it("still applies a scenario's style and tone defaults while the flag is off", () => {
+    renderCustomizer(LEGACY_DEALER);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Post type Customer Delivery" }),
+    );
+    fireEvent.click(screen.getByRole("option", { name: /Pre-Owned Spotlight/ }));
+
+    expect(screen.getByText("Modern").closest("button")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByText(ToneOption.Promotional).closest("button")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("offers Add video and Playful when the dealership allows them", () => {
+    renderCustomizer(CREATIVE_DEALER);
+    expect(screen.getByRole("button", { name: /^Add video/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^Make it playful/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides Add video and Playful when the dealership revokes them", () => {
+    renderCustomizer({
+      ...CREATIVE_DEALER,
+      feature_permissions: {
+        video: { team: false, people: {} },
+        playful: { team: false, people: {} },
+      },
+    } as Dealer);
+
+    expect(
+      screen.queryByRole("button", { name: /^Add video/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Make it playful/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides Add video for a category that cannot carry motion", () => {
+    renderCustomizer(CREATIVE_DEALER);
+
+    // Service is photo-only in CATEGORY_OUTPUTS.
+    fireEvent.click(screen.getByRole("button", { name: "Service" }));
+    expect(
+      screen.queryByRole("button", { name: /^Add video/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^Make it playful/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("turns Add video into the video half of the media plan", async () => {
+    const onGenerate = renderCustomizer(CREATIVE_DEALER);
+
+    fireEvent.click(screen.getByRole("button", { name: "Inventory" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Add video/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Generate Post/i }));
+
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(1));
+    expect(onGenerate.mock.calls[0]?.[8]).toBe("both");
+  });
+
+  it("appends a personal line to the caption instead of replacing it", async () => {
+    const onGenerate = renderCustomizer(CREATIVE_DEALER);
+
+    fireEvent.click(screen.getByRole("button", { name: "Inventory" }));
+    fireEvent.change(screen.getByLabelText(/Add a personal line/i), {
+      target: { value: "Stop by and say hi on the lot." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Generate Post/i }));
+
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(1));
+    // customText replaces the caption; the personal line must never use it.
+    expect(onGenerate.mock.calls[0]?.[3]).toBeUndefined();
+    expect(onGenerate.mock.calls[0]?.[4]).toContain(
+      'Personal line (append verbatim after the caption body): "Stop by and say hi on the lot."',
+    );
+  });
+
+  it("caps the personal line at 140 characters", () => {
+    renderCustomizer(CREATIVE_DEALER);
+
+    const input = screen.getByLabelText(/Add a personal line/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "x".repeat(200) } });
+    expect(input.value).toHaveLength(140);
+  });
+
+  it("holds the personal line to the same customer-identity lock", async () => {
+    const onGenerate = renderCustomizer(CREATIVE_DEALER);
+
+    fireEvent.click(screen.getByRole("button", { name: "Inventory" }));
+    fireEvent.change(screen.getByLabelText(/Customer's name/i), {
+      target: { value: "Alex" },
+    });
+    fireEvent.change(screen.getByLabelText(/Add a personal line/i), {
+      target: { value: "Congrats Jordan on the new truck!" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Generate Post/i }));
+
+    expect(onGenerate).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("personal line");
+  });
 });

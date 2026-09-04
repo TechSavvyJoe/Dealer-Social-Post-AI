@@ -10,6 +10,14 @@ import {
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
 
+/**
+ * Legacy Fun Mode catalogue (search, favorites, Surprise Me, 91 styles).
+ *
+ * PostResult only mounts this while the dealership's creative system is OFF.
+ * With `creative_system_v2` on, Playful is a single action that applies the
+ * dealership's one configured style — see `resolveCreative().playfulStyleId`
+ * and the "Playful" tile in PostResult. Nothing here changes in either mode.
+ */
 interface FunModeDirectorModalProps {
   isOpen: boolean;
   onClose: () => void;

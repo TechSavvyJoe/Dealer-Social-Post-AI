@@ -21,6 +21,13 @@ export interface CaptionStudioProps {
   claimLocked?: boolean;
   /** Keeps the editor within the desktop publishing workspace's first viewport. */
   compact?: boolean;
+  /**
+   * Suppresses the hashtag chip editor and its toggle, leaving one plain
+   * caption field. Brand mode keeps the caption on the publish surface but
+   * moves chip editing behind the "Studio tools" disclosure, so the same
+   * editor serves both places instead of mounting a second one.
+   */
+  hideHashtagEditor?: boolean;
   className?: string;
 }
 
@@ -31,6 +38,7 @@ export interface CaptionStudioProps {
 export const CaptionStudio: React.FC<CaptionStudioProps> = ({
   value,
   onChange,
+  hideHashtagEditor = false,
   disabled = false,
   platformId = null,
   claimLocked = false,
@@ -41,7 +49,9 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
   const [tags, setTags] = useState<string[]>([]);
   const [tagDraft, setTagDraft] = useState("");
   // Single text box by default — salespeople shouldn't hunt for settings.
-  const [combinedMode, setCombinedMode] = useState(true);
+  const [combinedModeState, setCombinedMode] = useState(true);
+  // Suppressed: the split view is unreachable, so stay in the plain field.
+  const combinedMode = hideHashtagEditor ? true : combinedModeState;
   const [combinedDraft, setCombinedDraft] = useState(value);
   // Track last emitted value so external resets (undo, platform tab) re-sync.
   const lastEmitted = React.useRef(value);
@@ -143,38 +153,40 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
             </span>
           )}
         </div>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => {
-            if (!combinedMode) {
-              setCombinedDraft(value);
-            } else {
-              const split = splitCaptionBodyAndTags(combinedDraft || value);
-              setBody(split.body);
-              setTags(split.tags);
-            }
-            setCombinedMode((m) => !m);
-          }}
-          className={cn(
-            "inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors",
-            "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
-            "disabled:cursor-not-allowed disabled:opacity-40",
-          )}
-        >
-          {combinedMode ? (
-            <>
-              <Hash className="h-3 w-3" />
-              Edit hashtags
-            </>
-          ) : (
-            <>
-              <AlignLeft className="h-3 w-3" />
-              Simple view
-            </>
-          )}
-        </button>
+        {!hideHashtagEditor && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              if (!combinedMode) {
+                setCombinedDraft(value);
+              } else {
+                const split = splitCaptionBodyAndTags(combinedDraft || value);
+                setBody(split.body);
+                setTags(split.tags);
+              }
+              setCombinedMode((m) => !m);
+            }}
+            className={cn(
+              "inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors",
+              "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
+              "disabled:cursor-not-allowed disabled:opacity-40",
+            )}
+          >
+            {combinedMode ? (
+              <>
+                <Hash className="h-3 w-3" />
+                Edit hashtags
+              </>
+            ) : (
+              <>
+                <AlignLeft className="h-3 w-3" />
+                Simple view
+              </>
+            )}
+          </button>
+        )}
       </div>
 
       {combinedMode ? (

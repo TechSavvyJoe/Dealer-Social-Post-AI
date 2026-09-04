@@ -3,12 +3,17 @@ import { StyleOption, ToneOption } from "../types";
 import { FLAGS } from "./modelConfig";
 import { editImagePrompt, generateImagePrompt } from "./promptConfig";
 import {
+  CAPTION_SYSTEM_INSTRUCTION,
   editImagePromptV2,
+  editTextPromptPartsV2,
+  editTextPromptV2,
   generateFunPromptV2,
   generateImagePromptV2,
+  generateTextPromptPartsV2,
   generateTextPromptV2,
   isApprovedOnImageHeadline,
   isSafeOnImageHeadline,
+  renderPromptTurn,
   sanitizeCreativeBriefForImage,
 } from "./promptsV2";
 
@@ -69,6 +74,108 @@ describe("scenario-aware caption prompts", () => {
     expect(prompt).toContain('exactly "Lisa"');
     expect(prompt).not.toContain("Lisa Marie Sample");
     expect(prompt).toContain("#NewCarDelivery #HappyCustomer #JustDelivered");
+  });
+});
+
+describe("caption prompt system/user split (Gemini P1-1)", () => {
+  const captionArgs = [
+    ToneOption.Excited,
+    "Bob Maxey Ford of Howell",
+    "Lisa Marie Sample",
+    false,
+    "Post scenario: Customer Delivery. Scenario: Customer delivery photo.",
+    StyleOption.Friendly,
+    true,
+  ] as const;
+
+  it("keeps the compliance and identity contract in the system instruction", () => {
+    const { systemInstruction } = generateTextPromptPartsV2(...captionArgs);
+
+    // Fabrication / grounding contract.
+    expect(systemInstruction).toContain(
+      "Never invent prices, APR, availability, condition, ownership history, service work, quotes, or outcomes.",
+    );
+    // Prohibited-claim contract (the FTC-sensitive wording).
+    expect(systemInstruction).toContain(
+      "Do not use: guaranteed, lowest price, no credit check, 0% APR, best deal.",
+    );
+    // Identity contract: the rule that binds the model to the per-post label.
+    expect(systemInstruction).toContain(
+      "The customer identity must obey the Identity rule exactly.",
+    );
+    expect(systemInstruction).toContain("Output ONLY the caption.");
+    expect(systemInstruction).toBe(CAPTION_SYSTEM_INSTRUCTION);
+  });
+
+  it("leaves only per-post facts in the user turn", () => {
+    const { systemInstruction, userPrompt } = generateTextPromptPartsV2(...captionArgs);
+
+    expect(userPrompt).toContain("Store: Bob Maxey Ford of Howell");
+    expect(userPrompt).toContain('exactly "Lisa"');
+    expect(userPrompt).toContain("#NewCarDelivery #HappyCustomer #JustDelivered");
+    expect(userPrompt).toContain(
+      "Delivery and ownership language is allowed only for this delivery post type.",
+    );
+    // The invariant rules are not duplicated back into the user turn.
+    expect(userPrompt).not.toContain("Never invent prices");
+    expect(userPrompt).not.toContain("Output ONLY the caption.");
+    // ...and the per-post facts never leak into the shared system turn.
+    expect(systemInstruction).not.toContain("Bob Maxey Ford of Howell");
+    expect(systemInstruction).not.toContain("Lisa");
+  });
+
+  it("is a transport split, not a prompt rewrite", () => {
+    const flattened = generateTextPromptV2(...captionArgs);
+    const split = generateTextPromptPartsV2(...captionArgs);
+    const combined = renderPromptTurn(split);
+
+    // Every line of guidance the single-turn prompt carries still reaches the
+    // model, in one turn or the other.
+    for (const line of flattened.split("\n").map((value) => value.trim())) {
+      if (!line) continue;
+      expect(combined, `missing guidance line: ${line}`).toContain(line);
+    }
+    // The system instruction stays identical across posts; only the user turn
+    // moves, which is what makes it cacheable.
+    expect(
+      generateTextPromptPartsV2(
+        ToneOption.Professional,
+        "Another Store",
+        undefined,
+        true,
+        "Post scenario: New Arrival.",
+        StyleOption.Modern,
+        false,
+      ).systemInstruction,
+    ).toBe(split.systemInstruction);
+  });
+
+  it("splits the caption-edit prompt the same way", () => {
+    const split = editTextPromptPartsV2(
+      "Keys in hand at Test Dealer. #TestDealer",
+      "make it shorter",
+      ToneOption.Professional,
+    );
+
+    expect(split.systemInstruction).toContain("<rules>");
+    expect(split.systemInstruction).toContain("<output_format>");
+    expect(split.systemInstruction).toContain(
+      `Do not introduce compliance triggers ("0% APR", "$0 down", "guaranteed", etc)`,
+    );
+    expect(split.systemInstruction).not.toContain("Test Dealer");
+    expect(split.userPrompt).toContain("<original_caption>");
+    expect(split.userPrompt).toContain("make it shorter");
+    expect(split.userPrompt).not.toContain("<rules>");
+
+    const flattened = editTextPromptV2(
+      "Keys in hand at Test Dealer. #TestDealer",
+      "make it shorter",
+      ToneOption.Professional,
+    );
+    for (const line of flattened.split("\n").map((value) => value.trim())) {
+      if (!line) continue;
+      expect(renderPromptTurn(split), `missing guidance line: ${line}`).toContain(line);
+    }
   });
 });
 

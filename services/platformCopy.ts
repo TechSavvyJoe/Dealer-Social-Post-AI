@@ -287,9 +287,14 @@ export const platformsToCaptionPackBrief = (
     guidance,
     `Always use the store name exactly as "${dealershipName}".`,
     `HASHTAGS: each is one #PascalCase token with NO spaces inside; separate with single spaces; never glue tags. Match platform counts (IG/TikTok 3–5, FB 0–3, Stories 0–2).`,
-    `OUTPUT FORMAT (strict): return ONLY a JSON object with exactly these keys: ${JSON.stringify(keys)}.`,
-    `Each value is a plain caption string (no markdown fences, no extra keys, no commentary).`,
-    `Example shape: {"${keys[0]}":"..."${keys[1] ? `,"${keys[1]}":"..."` : ""}}`,
+    // Matches the server-owned `caption_pack_v1` response schema
+    // (pb_hooks/requestPolicies.js). The two legacy grammars below stay in the
+    // brief for a proxy that predates the schema registry and therefore
+    // answers in prose.
+    `OUTPUT FORMAT (strict): return ONLY a JSON object shaped {"captions":[{"platformId":"...","caption":"..."}]}, with exactly one entry per platform id in ${JSON.stringify(keys)} and no other ids.`,
+    `Each caption is a plain string (no markdown fences, no extra keys, no commentary).`,
+    `Example shape: {"captions":[{"platformId":"${keys[0]}","caption":"..."}${keys[1] ? `,{"platformId":"${keys[1]}","caption":"..."}` : ""}]}`,
+    `A flat object keyed by platform id is also accepted: {"${keys[0]}":"..."${keys[1] ? `,"${keys[1]}":"..."` : ""}}`,
     `If you cannot emit JSON, use delimited blocks exactly like:`,
     `=== ${keys[0]} ===`,
     `caption text here`,
@@ -302,7 +307,17 @@ export const platformsToCaptionPackBrief = (
 
 /**
  * Parse model output from a caption-pack call into platformId → caption.
- * Accepts JSON objects or `=== platform_id ===` delimited blocks.
+ *
+ * Primary path: the `caption_pack_v1` structured response,
+ * `{"captions":[{"platformId","caption"}]}` — a strict `JSON.parse` of the
+ * whole payload, because the proxy pinned the schema server-side.
+ *
+ * The rest is a KEPT fallback, not dead code: a proxy that predates the
+ * schema registry passes the request through in prose mode (see
+ * `withStructuredJson` in geminiService), so a flat object keyed by platform
+ * id, a fenced/embedded JSON slice, and `=== platform_id ===` blocks must all
+ * still parse. Every path is filtered through the selected-platform
+ * allowlist, so an unexpected id can never become a caption.
  */
 export const parsePlatformCaptionPack = (
   raw: string,
@@ -319,7 +334,19 @@ export const parsePlatformCaptionPack = (
     .replace(/\s*```$/i, "")
     .trim();
 
-  // Try JSON object (full string or first {...} slice)
+  const idSet = new Set(platformIds);
+  const takeCaption = (
+    mapped: Record<string, string>,
+    id: unknown,
+    caption: unknown,
+  ) => {
+    if (typeof id !== "string" || !idSet.has(id)) return;
+    if (typeof caption !== "string" || !caption.trim()) return;
+    mapped[id] = caption.trim();
+  };
+
+  // Try JSON (full string or first {...} slice), accepting the structured
+  // `captions[]` shape first and the legacy flat object second.
   const tryJson = (candidate: string): Record<string, string> | null => {
     try {
       const parsed = JSON.parse(candidate) as unknown;
@@ -328,11 +355,14 @@ export const parsePlatformCaptionPack = (
       }
       const record = parsed as Record<string, unknown>;
       const mapped: Record<string, string> = {};
-      for (const id of platformIds) {
-        const val = record[id];
-        if (typeof val === "string" && val.trim()) {
-          mapped[id] = val.trim();
+      if (Array.isArray(record.captions)) {
+        for (const entry of record.captions) {
+          if (!entry || typeof entry !== "object") continue;
+          const item = entry as { platformId?: unknown; caption?: unknown };
+          takeCaption(mapped, item.platformId, item.caption);
         }
+      } else {
+        for (const id of platformIds) takeCaption(mapped, id, record[id]);
       }
       return Object.keys(mapped).length > 0 ? mapped : null;
     } catch {
@@ -354,7 +384,6 @@ export const parsePlatformCaptionPack = (
   if (jsonHit) return jsonHit;
 
   // Delimited: === platform_id ===
-  const idSet = new Set(platformIds);
   const delimRe = /^===\s*([a-z0-9_]+)\s*===\s*$/gim;
   const matches = [...unfenced.matchAll(delimRe)];
   if (matches.length > 0) {

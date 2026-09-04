@@ -12,20 +12,6 @@ export type VideoStyleMeta = {
   tags?: string[];
 };
 
-export type VideoPreset = {
-  label: string;
-  description: string;
-  badge?: string;
-  platform?: string;
-  values: {
-    durationSeconds: number;
-    soundtrack: VideoRequestOptions["soundtrack"];
-    aspectPreference: VideoRequestOptions["aspectPreference"];
-    resolution: VideoRequestOptions["resolution"];
-    pacing: VideoRequestOptions["pacing"];
-  };
-};
-
 export const defaultResolution: VideoRequestOptions["resolution"] = "720p";
 
 export const durations = [
@@ -81,26 +67,12 @@ export const aspectRatios: Array<{
   },
 ];
 
-export const pacingOptions: Array<{
-  value: VideoRequestOptions["pacing"];
-  label: string;
-  description: string;
-}> = [
-  {
-    value: "cinematic",
-    label: "Cinematic",
-    description: "Smooth moves and graceful easing.",
-  },
-  {
-    value: "snappy",
-    label: "Snappy",
-    description: "Quick cuts and energetic pacing.",
-  },
-];
-
 /**
  * Creator Mode — top automotive marketing motion recipes only.
  * Identity-locked living photography for real delivery photos.
+ *
+ * This array IS the exposed slate: `EXPOSED_VIDEO_STYLES` below is derived from
+ * it, and `UNEXPOSED_VIDEO_STYLES` names the enum members deliberately left out.
  */
 export const styles: VideoStyleMeta[] = [
   {
@@ -202,73 +174,30 @@ export const styles: VideoStyleMeta[] = [
   },
 ];
 
-export const styleCategories = [
-  "Cinematic",
-  "Modern",
-  "Fun",
-  "Artistic",
-  "Transitions",
-] as const;
+/**
+ * The exact `VideoStyle` members reachable from any UI surface, derived from
+ * the slate above so the two can never drift.
+ *
+ * Nine further enum members still have working motion recipes in the prompt
+ * layer and appear on posts generated before the slate was curated, so the enum
+ * keeps them. They are listed in `UNEXPOSED_VIDEO_STYLES` and are intentionally
+ * NOT offered anywhere in the product.
+ */
+export const EXPOSED_VIDEO_STYLES: readonly VideoStyle[] = styles.map((s) => s.style);
 
-export const presets: VideoPreset[] = [
-  {
-    label: "Instagram Reels",
-    platform: "IG",
-    badge: "Recommended",
-    description: "9:16 · 6s · music · vertical",
-    values: {
-      durationSeconds: 6,
-      soundtrack: "cinematic",
-      aspectPreference: "9:16",
-      resolution: defaultResolution,
-      pacing: "cinematic",
-    },
-  },
-  {
-    label: "TikTok Hype",
-    platform: "TikTok",
-    description: "9:16 · 6s · music · vertical",
-    values: {
-      durationSeconds: 6,
-      soundtrack: "celebration",
-      aspectPreference: "9:16",
-      resolution: defaultResolution,
-      pacing: "cinematic",
-    },
-  },
-  {
-    label: "Facebook / YouTube",
-    platform: "FB",
-    description: "16:9 · 6s · music · wide",
-    values: {
-      durationSeconds: 6,
-      soundtrack: "cinematic",
-      aspectPreference: "16:9",
-      resolution: defaultResolution,
-      pacing: "cinematic",
-    },
-  },
-  {
-    label: "YouTube Short",
-    platform: "YouTube",
-    description: "9:16 · 6s · music · vertical",
-    values: {
-      durationSeconds: 6,
-      soundtrack: "cinematic",
-      aspectPreference: "9:16",
-      resolution: defaultResolution,
-      pacing: "cinematic",
-    },
-  },
-  {
-    label: "Silent Story",
-    description: "9:16 · 6s · silent · vertical",
-    values: {
-      durationSeconds: 6,
-      soundtrack: "none",
-      aspectPreference: "9:16",
-      resolution: defaultResolution,
-      pacing: "cinematic",
-    },
-  },
+/**
+ * Reachable only through persisted posts and prompt code — never rendered as a
+ * choice. Removing an entry here means adding it to `styles` above; deleting it
+ * from the `VideoStyle` enum would break already-saved posts.
+ */
+export const UNEXPOSED_VIDEO_STYLES: readonly VideoStyle[] = [
+  VideoStyle.NeonPulse,
+  VideoStyle.CometStrike,
+  VideoStyle.HappyDance,
+  VideoStyle.JumpingForJoy,
+  VideoStyle.GlitchPop,
+  VideoStyle.SmokeReveal,
+  VideoStyle.FireEmbers,
+  VideoStyle.GraffitiReveal,
+  VideoStyle.HolographicScan,
 ];

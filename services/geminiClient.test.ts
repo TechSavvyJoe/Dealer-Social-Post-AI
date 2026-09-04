@@ -50,6 +50,58 @@ describe("proxied Gemini client", () => {
     expect(response.text()).toBe("First second");
   });
 
+  it("forwards a systemInstruction as its own top-level field", async () => {
+    vi.mocked(fetchFromProxy).mockResolvedValue({ candidates: [] });
+    const systemInstruction = {
+      parts: [{ text: "Hard rules:\n- Output ONLY the caption." }],
+    };
+
+    await getGeminiClient().models.generateContent({
+      model: "gemini-3.6-flash",
+      task: "caption",
+      contents: { parts: [{ text: "Store: Test Dealer" }] },
+      generationConfig: { maxOutputTokens: 2048 },
+      systemInstruction,
+    });
+
+    expect(fetchFromProxy).toHaveBeenCalledWith(
+      "POST",
+      "v1beta/models/gemini-3.6-flash:generateContent",
+      {
+        contents: [{ parts: [{ text: "Store: Test Dealer" }] }],
+        generationConfig: { maxOutputTokens: 2048 },
+        systemInstruction,
+      },
+      "caption",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    );
+  });
+
+  it("omits an empty systemInstruction instead of sending one the proxy rejects", async () => {
+    vi.mocked(fetchFromProxy).mockResolvedValue({ candidates: [] });
+
+    for (const systemInstruction of [
+      undefined,
+      { parts: [] },
+      { parts: [{ text: "   " }] },
+    ]) {
+      vi.mocked(fetchFromProxy).mockClear();
+      await getGeminiClient().models.generateContent({
+        model: "gemini-3.6-flash",
+        task: "caption",
+        contents: { parts: [{ text: "Write a caption" }] },
+        systemInstruction,
+      });
+
+      expect(vi.mocked(fetchFromProxy).mock.calls[0]?.[2]).toEqual({
+        contents: [{ parts: [{ text: "Write a caption" }] }],
+      });
+    }
+  });
+
   it("preserves an already-normalized multi-turn contents array", async () => {
     vi.mocked(fetchFromProxy).mockResolvedValue({ candidates: [] });
     const contents = [

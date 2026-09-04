@@ -29,6 +29,10 @@ import type { CapturedRelease } from "../services/photoReleases";
 import type { PlatformId, PrimaryImageProfile } from "../services/platformCopy";
 import type { Dealer } from "../types";
 import type { CaptionGenerationResult } from "../services/modelConfig";
+// Pure resolver (no React, no network). While a dealership has not opted into
+// `creative_system_v2` every call is a pass-through of the values the caller
+// already supplied, so nothing below changes for an existing dealership.
+import { resolveCreative } from "../services/creativeSystem";
 // Kept static deliberately: stores/appStore.ts already imports this constant
 // eagerly, so modelConfig rides the entry chunk either way and
 // mergeCaptionProvenance can stay synchronous.
@@ -175,6 +179,13 @@ export interface GenerationMeta {
   websiteEnabled?: boolean;
   /** Grounded year/make/model/trim from VIN decode; never the VIN. */
   websiteVehicleDescription?: string;
+  /**
+   * Dealership Playful style requested on the customize screen (spec §4.2).
+   * The playful asset is a SECOND image rendered on demand from the result
+   * screen — it never replaces the house-style master, so this value is
+   * carried, never auto-applied here.
+   */
+  playfulStyleId?: string;
 }
 
 export const useGeneration = () => {
@@ -795,14 +806,36 @@ export const useGeneration = () => {
       // Warmed on CAPTURE by useAppController, so this usually resolves from
       // the memoized promise instead of downloading at the Generate tap.
       const { resolvePrimaryImageProfile } = await loadPublishPipeline();
-      const resolvedProfile = outputProfile ?? resolvePrimaryImageProfile(platformIds);
+      // Single source of truth for this post's creative parameters. Disabled
+      // (every existing dealership): `style`/`tone` come back exactly as
+      // passed, `platformIds`/`formatIds` are empty, and both branches below
+      // fall through to today's values. Enabled: the Look owns style and tone
+      // and the category owns destinations and canvases, so a stale caller can
+      // never ship a post that contradicts the dealership's brand.
+      const resolved = resolveCreative({
+        dealer: currentDealer ?? null,
+        scenarioId: meta?.scenarioId,
+        fallbackStyle: style,
+        fallbackTone: tone,
+      });
+      const resolvedPlatformIds =
+        resolved.platformIds.length > 0 ? resolved.platformIds : platformIds;
+      // The prescribed canvas set is authoritative: a caller-supplied profile
+      // is kept only when it is one of the category's formats.
+      const profileHonorsPrescription =
+        resolved.formatIds.length === 0 ||
+        (outputProfile !== undefined &&
+          resolved.formatIds.includes(outputProfile.primaryFormatId));
+      const resolvedProfile = profileHonorsPrescription
+        ? (outputProfile ?? resolvePrimaryImageProfile(resolvedPlatformIds))
+        : resolvePrimaryImageProfile(resolvedPlatformIds);
       await generateMutation.mutateAsync({
-        style,
-        tone,
+        style: resolved.style,
+        tone: resolved.tone,
         customerName,
         customText,
         creativeBrief,
-        platformIds,
+        platformIds: resolvedPlatformIds,
         mediaOutputMode,
         primaryFormatId: resolvedProfile.primaryFormatId,
         imageAspectRatio: resolvedProfile.imageAspectRatio,
@@ -810,7 +843,7 @@ export const useGeneration = () => {
         authEpoch: useAppStore.getState().authEpoch,
       });
     },
-    [generateMutation],
+    [currentDealer, generateMutation],
   );
 
   const regenerateImageMutation = useMutation({
@@ -1349,7 +1382,17 @@ export const useGeneration = () => {
       assertOperationAuthEpoch(operationAuthEpoch);
       const { editSocialPostTextDetailed } = await loadGeminiService();
       assertOperationAuthEpoch(operationAuthEpoch);
-      const tone = generationParams?.tone || preferredTone;
+      // The per-device tone memory is retired under the creative system: when
+      // no tone is attached to this post the Look supplies it, not the last
+      // value this phone happened to store. Disabled dealerships still land on
+      // exactly `preferredTone`.
+      const tone =
+        generationParams?.tone ||
+        resolveCreative({
+          dealer: currentDealer ?? null,
+          scenarioId: generationParams?.scenarioId,
+          fallbackTone: preferredTone,
+        }).tone;
       const identityInstruction = publicCustomer
         ? `Customer identity rule: the only customer label allowed is exactly "${publicCustomer}". Do not add, replace, or infer another person's name.`
         : "Customer identity rule: do not introduce any customer or personal name.";

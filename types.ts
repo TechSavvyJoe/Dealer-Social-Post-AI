@@ -315,6 +315,12 @@ export interface Dealer {
   feature_permissions?: FeaturePermissions | null;
   /** Server-owned replacement for the client localStorage tier. */
   image_quality_tier?: ImageQualityTier | "";
+  /**
+   * Phase 2 resolver flag (spec §9). While false or unset,
+   * services/creativeSystem.ts reproduces today's style/tone precedence and
+   * prescribes no destinations, so only a piloted dealership changes behavior.
+   */
+  creative_system_v2?: boolean;
 }
 
 // FIX: Added User interface to resolve import error in UserModal.tsx.

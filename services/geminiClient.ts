@@ -10,15 +10,28 @@ import { createBlockedContentError } from "../utils/errorHandler";
  * Veo uses the Gemini API's long-running prediction protocol and is implemented
  * directly in `geminiService.ts`, so this client exposes no dead video API.
  */
+/**
+ * Static, per-task invariant guidance sent out-of-band from the user turn.
+ * Text tasks only — the proxy's policy rejects a system instruction on the
+ * image models. Shape mirrors Google's REST contract and the server
+ * allowlist: `{ parts: [{ text }] }`, text parts only.
+ */
+export interface GeminiSystemInstruction {
+  parts: Array<{ text: string }>;
+}
+
 interface GenerateContentParams {
   model: string;
   contents: unknown;
   generationConfig?: Record<string, unknown>;
+  /** Omit entirely when there is no static guidance; never send an empty one. */
+  systemInstruction?: GeminiSystemInstruction;
   task: Extract<
     ModelTaskName,
     | "caption"
     | "caption_regenerate"
     | "caption_edit"
+    | "vision_review"
     | "image_standard"
     | "image_studio"
   >;
@@ -109,6 +122,7 @@ class ProxiedGeminiClient {
           model,
           contents,
           generationConfig,
+          systemInstruction,
           task,
           attemptId,
           purpose,
@@ -124,9 +138,17 @@ class ProxiedGeminiClient {
         // SDKs accept a single Content object as shorthand; Google's raw REST
         // contract requires `contents[]`. Normalize here because every current
         // call site supplies one turn and this facade now talks raw REST.
+        // `systemInstruction` is omitted rather than sent empty: the proxy
+        // allowlist requires at least one non-blank text part, so an empty
+        // object would fail validation for every caller that has no static
+        // guidance to send.
+        const hasSystemInstruction = Boolean(
+          systemInstruction?.parts?.some((part) => part?.text?.trim()),
+        );
         const body = {
           contents: Array.isArray(contents) ? contents : [contents],
           ...(generationConfig ? { generationConfig } : {}),
+          ...(hasSystemInstruction ? { systemInstruction } : {}),
         };
         const rawResponse = (await fetchFromProxy(
           "POST",

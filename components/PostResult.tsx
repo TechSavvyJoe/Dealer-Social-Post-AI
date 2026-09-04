@@ -49,6 +49,7 @@ import {
 } from "./PlatformDeliveryBoard";
 import { MobilePublishStudio } from "./MobilePublishStudio";
 import { CaptionAlternativesModal } from "./CaptionAlternativesModal";
+import { isBrandCategoryId, resolveCreative } from "../services/creativeSystem";
 import { ProgressiveImage } from "./ui/ProgressiveImage";
 import { useToast } from "./ui/Toast";
 import { Modal } from "./ui/Modal";
@@ -404,6 +405,40 @@ export const PostResult: React.FC<PostResultProps> = ({
   const currentDealer = useAppStore((s) => s.currentDealer);
   const currentPersonName = useAppStore((s) => s.currentPerson?.name || "");
   const hasOriginalCapture = useAppStore((s) => Boolean(s.selectedImage));
+  const generationScenarioId = useAppStore((s) => s.generationParams?.scenarioId);
+  const generationStyle = useAppStore((s) => s.generationParams?.style);
+  const generationTone = useAppStore((s) => s.generationParams?.tone);
+
+  /**
+   * Phase 2 creative resolver (docs/superpowers/specs/
+   * 2026-09-02-brand-consistent-creative-system.md §4, §8).
+   *
+   * `resolveCreative` is pure, so the result screen calls it directly. Every
+   * branch below keys off `resolved.enabled`; when it is false the resolver
+   * prescribes nothing and restricts nothing, and this screen renders exactly
+   * what it renders today.
+   */
+  const resolved = useMemo(
+    () =>
+      resolveCreative({
+        dealer: currentDealer ?? null,
+        categoryId: isBrandCategoryId(post.websiteDraft?.category)
+          ? post.websiteDraft?.category
+          : undefined,
+        scenarioId: generationScenarioId,
+        fallbackStyle: generationStyle,
+        fallbackTone: generationTone,
+      }),
+    [
+      currentDealer,
+      generationScenarioId,
+      generationStyle,
+      generationTone,
+      post.websiteDraft?.category,
+    ],
+  );
+  /** Single switch for every publish-surface behavior added in phase 2. */
+  const brandModeOn = resolved.enabled;
 
   const [isImageEditing, setIsImageEditing] = useState(false);
   const [imageEditPrompt, setImageEditPrompt] = useState("");
@@ -431,6 +466,24 @@ export const PostResult: React.FC<PostResultProps> = ({
     null,
   );
   const [isFunModeDirectorOpen, setIsFunModeDirectorOpen] = useState(false);
+  /**
+   * Brand mode only. The house-style master is snapshotted before the Playful
+   * render starts so the playful frame can be shown as a SECOND image instead
+   * of replacing the master.
+   */
+  const [playfulPair, setPlayfulPair] = useState<{
+    master: string;
+    playful: string;
+  } | null>(null);
+  const playfulPendingMasterRef = useRef<string | null>(null);
+  /**
+   * Brand mode only: "Try another photo" / "Try another caption" are one shot
+   * each. The budget is deliberately mount-scoped rather than keyed on
+   * `resultIdentity` — a regenerated image mints a new attempt id, so keying on
+   * it would hand the salesperson an unlimited supply of retries.
+   */
+  const [photoRetryUsed, setPhotoRetryUsed] = useState(false);
+  const [captionRetryUsed, setCaptionRetryUsed] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   /** Legacy free-form video selection stays separate from an exact delivery row. */
   const [manualVideoSelected, setManualVideoSelected] = useState(false);
@@ -630,6 +683,22 @@ export const PostResult: React.FC<PostResultProps> = ({
       });
     }
     prevImageRef.current = post.image;
+  }, [post.image]);
+
+  // Brand mode: pair the playful render with the master it was made from, so
+  // both stay on screen and the salesperson can switch back with one tap. The
+  // pair is dropped as soon as the creative moves to an image that is neither
+  // half of it (a fresh regenerate, a restored version, a different post).
+  useEffect(() => {
+    const master = playfulPendingMasterRef.current;
+    if (master && master !== post.image) {
+      playfulPendingMasterRef.current = null;
+      setPlayfulPair({ master, playful: post.image });
+      return;
+    }
+    setPlayfulPair((pair) =>
+      pair && post.image !== pair.master && post.image !== pair.playful ? null : pair,
+    );
   }, [post.image]);
 
   const effectivePack = useMemo(() => {
@@ -985,6 +1054,9 @@ export const PostResult: React.FC<PostResultProps> = ({
   const editableDraft = !contentEditingLocked && !historyReadOnly;
   const originalRequiredMessage =
     "This tool needs the original captured photo. Reopened History keeps the finished creative, so use Edit image or start a new photo instead.";
+  /** Brand mode only: shown once a one-shot retry has been spent. */
+  const oneShotSpentMessage =
+    "Already used once on this post. A manager can regenerate it for you.";
 
   const flushPendingDraft = useCallback((): Promise<boolean> => {
     const draft = pendingDraftSyncRef.current;
@@ -2335,6 +2407,88 @@ export const PostResult: React.FC<PostResultProps> = ({
     await startVideoJob(style, options);
   };
 
+  /**
+   * Brand mode "Add video": the dealership motion signature, not an option
+   * matrix. Spec §4.3 — 9:16 · 6s · 720p · music on, style bound to the Look.
+   */
+  const houseMotionOptions = useMemo((): VideoRequestOptions | null => {
+    const motion = resolved.motion;
+    if (!motion) return null;
+    const aspect: VideoRequestOptions["aspectPreference"] =
+      motion.aspects[0] === "16:9" ? "16:9" : "9:16";
+    const soundtrack = (
+      ["none", "celebration", "cinematic", "anthemic", "funk"] as const
+    ).includes(motion.audio as VideoRequestOptions["soundtrack"])
+      ? (motion.audio as VideoRequestOptions["soundtrack"])
+      : "cinematic";
+    return {
+      durationSeconds: 6,
+      soundtrack,
+      aspectPreference: aspect,
+      resolution: "720p",
+      pacing: "cinematic",
+    };
+  }, [resolved.motion]);
+
+  const handleAddHouseVideo = async () => {
+    if (!resolved.motion || !houseMotionOptions) return;
+    await handleGenerateVideo(resolved.motion.style, houseMotionOptions);
+  };
+
+  /**
+   * Brand mode Playful: apply the one configured style with no catalogue, and
+   * keep the house-style master beside the result instead of replacing it.
+   */
+  const handleApplyHousePlayful = async () => {
+    const styleId = resolved.playfulStyleId;
+    if (!styleId) {
+      toast.warning(
+        "No playful style is set for this dealership yet. A manager can choose one in Brand settings.",
+      );
+      return;
+    }
+    playfulPendingMasterRef.current = post.image;
+    await handleImageAction(
+      () => onFunMode(styleId),
+      [
+        "Applying your dealership's playful style…",
+        "Keeping the real car and people intact…",
+        "Finishing the second version…",
+      ],
+    ).catch(() => {
+      playfulPendingMasterRef.current = null;
+    });
+  };
+
+  /** Swap between the house-style master and its playful companion. */
+  const selectPlayfulVersion = (url: string) => {
+    if (url === post.image) return;
+    triggerHapticFeedback();
+    const store = useAppStore.getState();
+    const current = store.generatedPost;
+    store.setGeneratedPost({ ...(current || post), image: url });
+  };
+
+  const handleTryAnotherPhoto = async () => {
+    if (brandModeOn) {
+      if (photoRetryUsed) return;
+      setPhotoRetryUsed(true);
+    }
+    await handleImageAction(onRegenerateImage, [
+      "Refreshing with your chosen style...",
+      "Balancing lighting and color...",
+      "Finishing touches...",
+    ]).catch(() => undefined);
+  };
+
+  const handleTryAnotherCaption = async () => {
+    if (brandModeOn) {
+      if (captionRetryUsed) return;
+      setCaptionRetryUsed(true);
+    }
+    await handleTextAction(onRegenerateText).catch(() => undefined);
+  };
+
   const handleRetryVideo = async (jobId: string) => {
     const job = videoJobs.find((j) => j.id === jobId);
     if (!job) return;
@@ -2612,6 +2766,21 @@ export const PostResult: React.FC<PostResultProps> = ({
     }
     if (delivery.profile.preparation.kind !== "veo") return;
     setSelectedDeliveryId(deliveryId);
+    // Brand mode never opens the option matrix: render this destination's exact
+    // file straight from the dealership motion signature.
+    if (brandModeOn) {
+      if (!resolved.motion || !resolved.videoAllowed) return;
+      const preparation = delivery.profile.preparation;
+      setManualVideoSelected(false);
+      await startVideoJob(resolved.motion.style, {
+        durationSeconds: preparation.durationSeconds,
+        soundtrack: houseMotionOptions?.soundtrack ?? "cinematic",
+        aspectPreference: preparation.nativeAspectRatio,
+        resolution: preparation.resolution,
+        pacing: "cinematic",
+      });
+      return;
+    }
     setVideoDirectorDeliveryId(deliveryId);
     setIsVideoDirectorOpen(true);
   };
@@ -2830,14 +2999,79 @@ export const PostResult: React.FC<PostResultProps> = ({
     else if (mode === "startOver") onStartOver();
   };
 
-  const renderMediaHistoryRail = (desktop = false) => {
+  /**
+   * Per-platform caption tabs. Brand mode moves this whole strip behind the
+   * "Studio tools" disclosure; legacy mode keeps it on the caption surface.
+   */
+  const renderCaptionPlatformTabs = () => {
+    if (platformCaptionTabs.length === 0) return null;
+    return (
+      <div
+        className="mb-3 flex flex-wrap gap-2"
+        role="tablist"
+        aria-label="Platform captions"
+      >
+        <button
+          ref={(node) => {
+            captionTabRefs.current[0] = node;
+          }}
+          id="caption-platform-tab-0"
+          type="button"
+          role="tab"
+          aria-selected={activeCaptionPlatform === null}
+          aria-controls="caption-platform-panel"
+          tabIndex={activeCaptionPlatform === null ? 0 : -1}
+          onClick={() => selectCaptionPlatform(null)}
+          onKeyDown={(event) => handleCaptionTabKeyDown(event, 0)}
+          className={cn(
+            "min-h-[40px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
+            isDesktopLayout && "lg:min-h-9 lg:px-3 lg:py-1",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
+            activeCaptionPlatform === null
+              ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
+              : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
+          )}
+        >
+          Primary
+        </button>
+        {platformCaptionTabs.map((tab, index) => (
+          <button
+            key={tab.id}
+            ref={(node) => {
+              captionTabRefs.current[index + 1] = node;
+            }}
+            id={`caption-platform-tab-${index + 1}`}
+            type="button"
+            role="tab"
+            aria-selected={activeCaptionPlatform === tab.id}
+            aria-controls="caption-platform-panel"
+            tabIndex={activeCaptionPlatform === tab.id ? 0 : -1}
+            onClick={() => selectCaptionPlatform(tab.id)}
+            onKeyDown={(event) => handleCaptionTabKeyDown(event, index + 1)}
+            className={cn(
+              "min-h-[40px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
+              isDesktopLayout && "lg:min-h-9 lg:px-3 lg:py-1",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
+              activeCaptionPlatform === tab.id
+                ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
+                : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  const renderMediaHistoryRail = (desktop = false, forceVisible = false) => {
     if (creativeLockedForReview) return null;
 
     const completedVideos = videoJobs.filter(
       (job) => job.url && job.sourceCreativeKey === currentVideoCreativeKey,
     );
     const mediaCount = 1 + imageVersions.length + completedVideos.length;
-    if (!desktop && mediaCount <= 1) return null;
+    if (!desktop && !forceVisible && mediaCount <= 1) return null;
 
     return (
       <section
@@ -2974,6 +3208,89 @@ export const PostResult: React.FC<PostResultProps> = ({
       </section>
     );
   };
+
+  /**
+   * Brand mode Playful (spec §4.2): the playful frame is a SECOND image shown
+   * beside the house-style master, never a replacement. Either one can be made
+   * the delivered creative with a single tap.
+   */
+  const renderPlayfulPair = () => {
+    if (!playfulPair) return null;
+    const options: Array<{ url: string; label: string; detail: string }> = [
+      {
+        url: playfulPair.master,
+        label: "House style",
+        detail: "Your dealership's signature look",
+      },
+      {
+        url: playfulPair.playful,
+        label: "Playful",
+        detail: "Same photo, dealership playful style",
+      },
+    ];
+    return (
+      <section
+        className="w-full rounded-xl border border-white/10 bg-surface-950/80 p-2.5"
+        aria-label="Photo versions"
+        data-testid="playful-pair"
+      >
+        <p className="mb-2 text-xs font-semibold text-surface-100">
+          Two versions ready
+        </p>
+        <div className="flex gap-2">
+          {options.map((option) => {
+            const isActive = post.image === option.url;
+            return (
+              <button
+                key={option.label}
+                type="button"
+                onClick={() => selectPlayfulVersion(option.url)}
+                aria-label={`Use the ${option.label.toLowerCase()} version`}
+                aria-current={isActive ? "true" : undefined}
+                className={cn(
+                  "flex min-w-0 flex-1 items-center gap-2 rounded-lg border p-1.5 text-left transition-colors",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400",
+                  isActive
+                    ? "border-primary-300 bg-primary-500/10"
+                    : "border-white/15 hover:border-primary-400/60",
+                )}
+              >
+                <img
+                  src={option.url}
+                  alt=""
+                  className="h-14 w-14 shrink-0 rounded-md object-cover"
+                  loading="lazy"
+                />
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-semibold text-surface-50">
+                    {option.label}
+                  </span>
+                  <span className="block truncate text-[10px] text-surface-400">
+                    {isActive ? "Currently selected" : option.detail}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    );
+  };
+
+  /**
+   * Brand mode "Studio tools" (spec §8): the destination caption tabs, the
+   * hashtag chip editor, and the media version tray live behind the disclosure
+   * instead of sitting on the publish surface.
+   */
+  const renderBrandStudioExtras = () => (
+    <div className="mt-2 space-y-3" data-testid="studio-tools-extras">
+      {renderCaptionPlatformTabs()}
+      {/* The caption editor itself stays on the publish surface; opening
+          Studio tools reveals its hashtag chip mode in place rather than
+          mounting a second editor here. */}
+      {renderMediaHistoryRail(false, true)}
+    </div>
+  );
 
   const renderMobileFocusedMedia = () => (
     <div className="relative grid h-full min-h-0 w-full place-items-center overflow-hidden">
@@ -3255,7 +3572,12 @@ export const PostResult: React.FC<PostResultProps> = ({
 
       <Suspense fallback={null}>
         <LazyEditTextModal
-          isOpen={isTextEditing && !contentEditingLocked && !historyReadOnly}
+          isOpen={
+            isTextEditing &&
+            !contentEditingLocked &&
+            !historyReadOnly &&
+            (!brandModeOn || resolved.freeTextEditAllowed)
+          }
           onClose={() => setIsTextEditing(false)}
           onSubmit={handleTextEditSubmit}
           originalText={editedText}
@@ -3264,7 +3586,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       </Suspense>
       <Suspense fallback={null}>
         <LazyVideoDirectorModal
-          isOpen={isVideoDirectorOpen && !creativeLockedForReview}
+          isOpen={isVideoDirectorOpen && !brandModeOn && !creativeLockedForReview}
           onClose={() => {
             setIsVideoDirectorOpen(false);
             setVideoDirectorDeliveryId(null);
@@ -3319,7 +3641,12 @@ export const PostResult: React.FC<PostResultProps> = ({
       </Suspense>
       <Suspense fallback={null}>
         <LazyFunModeDirectorModal
-          isOpen={isFunModeDirectorOpen && !contentEditingLocked && hasOriginalCapture}
+          isOpen={
+            isFunModeDirectorOpen &&
+            !brandModeOn &&
+            !contentEditingLocked &&
+            hasOriginalCapture
+          }
           onClose={() => setIsFunModeDirectorOpen(false)}
           enabledFunStyles={enabledFunStyles}
           onSelectStyle={(styleName) => {
@@ -3862,7 +4189,11 @@ export const PostResult: React.FC<PostResultProps> = ({
               deliveryOutputs.length > 0 ? handleStartShareBatch : undefined
             }
             onCopyCaption={handleCopy}
-            onEditCaption={() => setIsTextEditing(true)}
+            onEditCaption={
+              brandModeOn && !resolved.freeTextEditAllowed
+                ? undefined
+                : () => setIsTextEditing(true)
+            }
             onBack={handleCreateAnotherRequest}
             onRemix={hasOriginalCapture ? handleRemixRequest : undefined}
             onShowSettings={onShowSettings}
@@ -4267,7 +4598,8 @@ export const PostResult: React.FC<PostResultProps> = ({
                 </>
               ) : null}
 
-              {!isDesktopLayout ? renderMediaHistoryRail() : null}
+              {!isDesktopLayout && !brandModeOn ? renderMediaHistoryRail() : null}
+              {brandModeOn && playfulPair ? renderPlayfulPair() : null}
 
               <div className="w-full space-y-2 mb-2">
                 <div
@@ -4284,48 +4616,79 @@ export const PostResult: React.FC<PostResultProps> = ({
                       isDesktopLayout ? "flex flex-1" : "grid grid-cols-3",
                     )}
                   >
-                    <ActionTile
-                      icon={Film}
-                      iconClassName={TILE_ICON_ACCENT}
-                      tooltip={
-                        historyReadOnly
-                          ? "This teammate's saved post is view-only"
-                          : "Turn your image into a video"
-                      }
-                      disabled={
-                        imageBusy ||
-                        isVideoLoading ||
-                        creativeLockedForReview ||
-                        historyReadOnly
-                      }
-                      busy={isVideoLoading}
-                      label={
-                        isVideoLoading ? "Render" : videoUrl ? "New video" : "Video"
-                      }
-                      onClick={() => {
-                        setVideoDirectorDeliveryId(null);
-                        setIsVideoDirectorOpen(true);
-                      }}
-                    />
-                    <ActionTile
-                      icon={Sparkles}
-                      iconClassName="text-primary-300"
-                      tooltip={
-                        hasOriginalCapture
-                          ? "Artistic style (optional)"
-                          : originalRequiredMessage
-                      }
-                      disabled={
-                        imageBusy ||
-                        !!videoUrl ||
-                        contentEditingLocked ||
-                        historyReadOnly ||
-                        !hasOriginalCapture
-                      }
-                      busy={imageBusy}
-                      label={imageBusy ? "Wait" : "Fun mode"}
-                      onClick={() => setIsFunModeDirectorOpen(true)}
-                    />
+                    {/* Brand mode hides the tile outright when the category or
+                        a manager permission forbids motion; otherwise it is the
+                        same tile, opening the same director. */}
+                    {!brandModeOn || resolved.videoAllowed ? (
+                      <ActionTile
+                        icon={Film}
+                        iconClassName={TILE_ICON_ACCENT}
+                        ariaLabel={brandModeOn ? "Add video" : undefined}
+                        tooltip={
+                          historyReadOnly
+                            ? "This teammate's saved post is view-only"
+                            : brandModeOn
+                              ? "Render this photo with your dealership's motion signature"
+                              : "Turn your image into a video"
+                        }
+                        disabled={
+                          imageBusy ||
+                          isVideoLoading ||
+                          creativeLockedForReview ||
+                          historyReadOnly
+                        }
+                        busy={isVideoLoading}
+                        label={
+                          isVideoLoading
+                            ? "Render"
+                            : brandModeOn
+                              ? "Add video"
+                              : videoUrl
+                                ? "New video"
+                                : "Video"
+                        }
+                        onClick={() => {
+                          if (brandModeOn) {
+                            void handleAddHouseVideo();
+                            return;
+                          }
+                          setVideoDirectorDeliveryId(null);
+                          setIsVideoDirectorOpen(true);
+                        }}
+                      />
+                    ) : null}
+                    {!brandModeOn || resolved.playfulAllowed ? (
+                      <ActionTile
+                        icon={Sparkles}
+                        iconClassName="text-primary-300"
+                        ariaLabel={brandModeOn ? "Playful" : undefined}
+                        tooltip={
+                          !hasOriginalCapture
+                            ? originalRequiredMessage
+                            : brandModeOn
+                              ? "Add your dealership's playful version beside this photo"
+                              : "Artistic style (optional)"
+                        }
+                        disabled={
+                          imageBusy ||
+                          !!videoUrl ||
+                          contentEditingLocked ||
+                          historyReadOnly ||
+                          !hasOriginalCapture
+                        }
+                        busy={imageBusy}
+                        label={
+                          imageBusy ? "Wait" : brandModeOn ? "Playful" : "Fun mode"
+                        }
+                        onClick={() => {
+                          if (brandModeOn) {
+                            void handleApplyHousePlayful();
+                            return;
+                          }
+                          setIsFunModeDirectorOpen(true);
+                        }}
+                      />
+                    ) : null}
                     <ActionTile
                       icon={Calendar}
                       iconClassName="text-emerald-300"
@@ -4386,7 +4749,13 @@ export const PostResult: React.FC<PostResultProps> = ({
                     type="button"
                     onClick={() => setIsToolsOpen((open) => !open)}
                     aria-label={
-                      isToolsOpen ? "Hide creative tools" : "Show creative tools"
+                      brandModeOn
+                        ? isToolsOpen
+                          ? "Hide studio tools"
+                          : "Show studio tools"
+                        : isToolsOpen
+                          ? "Hide creative tools"
+                          : "Show creative tools"
                     }
                     aria-expanded={isToolsOpen}
                     aria-controls="creative-tools-panel"
@@ -4396,7 +4765,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                       !isDesktopLayout && "px-2",
                     )}
                   >
-                    More
+                    {brandModeOn ? "Studio tools" : "More"}
                     <ChevronDown
                       className={cn(
                         "h-4 w-4 shrink-0 text-surface-400 transition-transform",
@@ -4439,84 +4808,118 @@ export const PostResult: React.FC<PostResultProps> = ({
                     icon={RefreshCw}
                     iconClassName="text-surface-300"
                     tooltip={
-                      hasOriginalCapture
-                        ? "Generate a new image version"
-                        : originalRequiredMessage
+                      !hasOriginalCapture
+                        ? originalRequiredMessage
+                        : brandModeOn && photoRetryUsed
+                          ? oneShotSpentMessage
+                          : brandModeOn
+                            ? "One new photo per post"
+                            : "Generate a new image version"
                     }
-                    ariaLabel="Regenerate image"
+                    ariaLabel={brandModeOn ? "Try another photo" : "Regenerate image"}
                     disabled={
                       imageBusy ||
                       !!videoUrl ||
                       contentEditingLocked ||
                       historyReadOnly ||
-                      !hasOriginalCapture
-                    }
-                    busy={imageBusy}
-                    label={imageBusy ? "Working…" : "Regenerate image"}
-                    onClick={() => {
-                      void handleImageAction(onRegenerateImage, [
-                        "Refreshing with your chosen style...",
-                        "Balancing lighting and color...",
-                        "Finishing touches...",
-                      ]).catch(() => undefined);
-                    }}
-                  />
-
-                  <ActionTile
-                    icon={Edit3}
-                    iconClassName={TILE_ICON_ACCENT}
-                    tooltip={
-                      historyReadOnly
-                        ? "This teammate's saved post is view-only"
-                        : "Change specific details"
-                    }
-                    disabled={
-                      imageBusy || !!videoUrl || contentEditingLocked || historyReadOnly
+                      !hasOriginalCapture ||
+                      (brandModeOn && photoRetryUsed)
                     }
                     busy={imageBusy}
                     label={
-                      imageBusy ? "Working…" : isImageEditing ? "Cancel" : "Edit image"
+                      imageBusy
+                        ? "Working…"
+                        : brandModeOn
+                          ? "Try another photo"
+                          : "Regenerate image"
                     }
-                    onClick={() => setIsImageEditing(!isImageEditing)}
+                    onClick={() => {
+                      void handleTryAnotherPhoto();
+                    }}
                   />
+
+                  {!brandModeOn || resolved.freeTextEditAllowed ? (
+                    <ActionTile
+                      icon={Edit3}
+                      iconClassName={TILE_ICON_ACCENT}
+                      tooltip={
+                        historyReadOnly
+                          ? "This teammate's saved post is view-only"
+                          : "Change specific details"
+                      }
+                      disabled={
+                        imageBusy ||
+                        !!videoUrl ||
+                        contentEditingLocked ||
+                        historyReadOnly
+                      }
+                      busy={imageBusy}
+                      label={
+                        imageBusy
+                          ? "Working…"
+                          : isImageEditing
+                            ? "Cancel"
+                            : "Edit image"
+                      }
+                      onClick={() => setIsImageEditing(!isImageEditing)}
+                    />
+                  ) : null}
 
                   <ActionTile
                     icon={RefreshCw}
                     iconClassName="text-surface-300"
                     tooltip={
-                      hasOriginalCapture
-                        ? "Generate a new caption"
-                        : originalRequiredMessage
+                      !hasOriginalCapture
+                        ? originalRequiredMessage
+                        : brandModeOn && captionRetryUsed
+                          ? oneShotSpentMessage
+                          : brandModeOn
+                            ? "One new caption per post"
+                            : "Generate a new caption"
                     }
-                    ariaLabel="Regenerate caption"
+                    ariaLabel={
+                      brandModeOn ? "Try another caption" : "Regenerate caption"
+                    }
                     disabled={
                       textBusy ||
                       contentEditingLocked ||
                       historyReadOnly ||
-                      !hasOriginalCapture
+                      !hasOriginalCapture ||
+                      (brandModeOn && captionRetryUsed)
                     }
                     busy={textBusy}
-                    label={textBusy ? "Working…" : "Regenerate caption"}
+                    label={
+                      textBusy
+                        ? "Working…"
+                        : brandModeOn
+                          ? "Try another caption"
+                          : "Regenerate caption"
+                    }
                     onClick={() => {
-                      void handleTextAction(onRegenerateText).catch(() => undefined);
+                      void handleTryAnotherCaption();
                     }}
                   />
 
-                  <ActionTile
-                    icon={Edit3}
-                    iconClassName={TILE_ICON_ACCENT}
-                    tooltip={
-                      historyReadOnly
-                        ? "This teammate's saved post is view-only"
-                        : "Describe a caption change"
-                    }
-                    disabled={textBusy || contentEditingLocked || historyReadOnly}
-                    busy={textBusy}
-                    label={textBusy ? "Working…" : "Edit text"}
-                    onClick={() => setIsTextEditing(true)}
-                  />
+                  {!brandModeOn || resolved.freeTextEditAllowed ? (
+                    <ActionTile
+                      icon={Edit3}
+                      iconClassName={TILE_ICON_ACCENT}
+                      tooltip={
+                        historyReadOnly
+                          ? "This teammate's saved post is view-only"
+                          : "Describe a caption change"
+                      }
+                      disabled={textBusy || contentEditingLocked || historyReadOnly}
+                      busy={textBusy}
+                      label={textBusy ? "Working…" : "Edit text"}
+                      onClick={() => setIsTextEditing(true)}
+                    />
+                  ) : null}
 
-                  {onGenerateCaptionVariant ? (
+                  {/* Three-at-once caption ideas are another caption
+                      regeneration path, so brand mode retires it rather than
+                      letting it walk around the one-shot budget. */}
+                  {onGenerateCaptionVariant && !brandModeOn ? (
                     <ActionTile
                       icon={Sparkles}
                       iconClassName={TILE_ICON_ACCENT}
@@ -4536,53 +4939,64 @@ export const PostResult: React.FC<PostResultProps> = ({
                     />
                   ) : null}
                 </div>
+                {brandModeOn && (photoRetryUsed || captionRetryUsed) ? (
+                  <p
+                    className="mt-1 text-xs text-surface-400"
+                    data-testid="one-shot-retry-note"
+                  >
+                    {oneShotSpentMessage}
+                  </p>
+                ) : null}
+                {brandModeOn && isToolsOpen ? renderBrandStudioExtras() : null}
                 <AnimatePresence>
-                  {isToolsOpen && isImageEditing && (
-                    <m.div
-                      className="space-y-2 rounded-xl border border-white/10 bg-surface-800/50 p-3"
-                      initial={shouldReduceMotion ? false : { opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
-                    >
-                      <label
-                        htmlFor="image-edit-request"
-                        className="text-xs font-semibold text-surface-200"
+                  {isToolsOpen &&
+                    isImageEditing &&
+                    (!brandModeOn || resolved.freeTextEditAllowed) && (
+                      <m.div
+                        className="space-y-2 rounded-xl border border-white/10 bg-surface-800/50 p-3"
+                        initial={shouldReduceMotion ? false : { opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
                       >
-                        Image edit request
-                      </label>
-                      <textarea
-                        id="image-edit-request"
-                        value={imageEditPrompt}
-                        onChange={(e) => setImageEditPrompt(e.target.value)}
-                        placeholder="Example: Make the headline gold and brighten the vehicle."
-                        className="w-full bg-surface-800/50 text-surface-50 border-2 border-white/20 rounded-xl px-3 py-2 focus:ring-2 focus:ring-primary-400 focus:border-primary-400 outline-none transition text-sm"
-                        rows={2}
-                      />
-                      <Button
-                        onClick={() => {
-                          void handleImageAction(
-                            () => onEditImage(imageEditPrompt),
-                            [
-                              "Applying your edit request...",
-                              "Re-rendering safely around people and cars...",
-                              "Finalizing the updated image...",
-                            ],
-                          )
-                            .then(() => {
-                              setIsImageEditing(false);
-                              setImageEditPrompt("");
-                            })
-                            .catch(() => undefined);
-                        }}
-                        disabled={!imageEditPrompt.trim()}
-                        fullWidth
-                        size="sm"
-                      >
-                        Apply image edit
-                      </Button>
-                    </m.div>
-                  )}
+                        <label
+                          htmlFor="image-edit-request"
+                          className="text-xs font-semibold text-surface-200"
+                        >
+                          Image edit request
+                        </label>
+                        <textarea
+                          id="image-edit-request"
+                          value={imageEditPrompt}
+                          onChange={(e) => setImageEditPrompt(e.target.value)}
+                          placeholder="Example: Make the headline gold and brighten the vehicle."
+                          className="w-full bg-surface-800/50 text-surface-50 border-2 border-white/20 rounded-xl px-3 py-2 focus:ring-2 focus:ring-primary-400 focus:border-primary-400 outline-none transition text-sm"
+                          rows={2}
+                        />
+                        <Button
+                          onClick={() => {
+                            void handleImageAction(
+                              () => onEditImage(imageEditPrompt),
+                              [
+                                "Applying your edit request...",
+                                "Re-rendering safely around people and cars...",
+                                "Finalizing the updated image...",
+                              ],
+                            )
+                              .then(() => {
+                                setIsImageEditing(false);
+                                setImageEditPrompt("");
+                              })
+                              .catch(() => undefined);
+                          }}
+                          disabled={!imageEditPrompt.trim()}
+                          fullWidth
+                          size="sm"
+                        >
+                          Apply image edit
+                        </Button>
+                      </m.div>
+                    )}
                 </AnimatePresence>
                 {isToolsOpen && videoJobs.length > 0 && (
                   <m.div
@@ -4729,47 +5143,54 @@ export const PostResult: React.FC<PostResultProps> = ({
                           ? websiteHandoffStarted
                             ? "Website copy is locked to the exact final draft sent to Customer Hub."
                             : "Review copy is locked to the exact creative submitted to the manager."
-                          : "Ready to copy and post. Tap New caption if you want a different version."}
+                          : brandModeOn
+                            ? "Ready to copy and post. Everything else lives in Studio tools."
+                            : "Ready to copy and post. Tap New caption if you want a different version."}
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleTextAction(onRegenerateText).catch(() => undefined);
-                      }}
-                      disabled={
-                        textBusy ||
-                        contentEditingLocked ||
-                        historyReadOnly ||
-                        !hasOriginalCapture
-                      }
-                      className={cn(
-                        "inline-flex min-h-11 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors",
-                        isDesktopLayout &&
-                          "lg:min-h-9 lg:rounded-lg lg:px-3 lg:py-1.5 lg:text-xs",
-                        "border-primary-400/45 bg-primary-500/15 text-primary-50",
-                        "hover:border-primary-400/65 hover:bg-primary-500/25",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
-                        "disabled:cursor-not-allowed disabled:opacity-40",
-                      )}
-                      title={
-                        historyReadOnly
-                          ? "This teammate's saved post is view-only"
-                          : !hasOriginalCapture
-                            ? originalRequiredMessage
-                            : "Generate a full new marketing caption and hashtags"
-                      }
-                      aria-label="New caption"
-                    >
-                      {textBusy ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-4 w-4" />
-                      )}
-                      {textBusy ? "Writing..." : "New caption"}
-                    </button>
-                    {onGenerateCaptionVariant ? (
+                    {/* Brand mode keeps exactly one caption-regeneration
+                        control, the one-shot "Try another caption" in Studio
+                        tools, so this duplicate is retired there. */}
+                    {!brandModeOn ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleTryAnotherCaption();
+                        }}
+                        disabled={
+                          textBusy ||
+                          contentEditingLocked ||
+                          historyReadOnly ||
+                          !hasOriginalCapture
+                        }
+                        className={cn(
+                          "inline-flex min-h-11 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors",
+                          isDesktopLayout &&
+                            "lg:min-h-9 lg:rounded-lg lg:px-3 lg:py-1.5 lg:text-xs",
+                          "border-primary-400/45 bg-primary-500/15 text-primary-50",
+                          "hover:border-primary-400/65 hover:bg-primary-500/25",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
+                          "disabled:cursor-not-allowed disabled:opacity-40",
+                        )}
+                        title={
+                          historyReadOnly
+                            ? "This teammate's saved post is view-only"
+                            : !hasOriginalCapture
+                              ? originalRequiredMessage
+                              : "Generate a full new marketing caption and hashtags"
+                        }
+                        aria-label="New caption"
+                      >
+                        {textBusy ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                        {textBusy ? "Writing..." : "New caption"}
+                      </button>
+                    ) : null}
+                    {onGenerateCaptionVariant && !brandModeOn ? (
                       <button
                         type="button"
                         onClick={() => setIsCaptionAltsOpen(true)}
@@ -4834,63 +5255,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     </button>
                   </div>
                 </div>
-                {platformCaptionTabs.length > 0 && (
-                  <div
-                    className="mb-3 flex flex-wrap gap-2"
-                    role="tablist"
-                    aria-label="Platform captions"
-                  >
-                    <button
-                      ref={(node) => {
-                        captionTabRefs.current[0] = node;
-                      }}
-                      id="caption-platform-tab-0"
-                      type="button"
-                      role="tab"
-                      aria-selected={activeCaptionPlatform === null}
-                      aria-controls="caption-platform-panel"
-                      tabIndex={activeCaptionPlatform === null ? 0 : -1}
-                      onClick={() => selectCaptionPlatform(null)}
-                      onKeyDown={(event) => handleCaptionTabKeyDown(event, 0)}
-                      className={cn(
-                        "min-h-[40px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
-                        isDesktopLayout && "lg:min-h-9 lg:px-3 lg:py-1",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
-                        activeCaptionPlatform === null
-                          ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
-                          : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
-                      )}
-                    >
-                      Primary
-                    </button>
-                    {platformCaptionTabs.map((tab, index) => (
-                      <button
-                        key={tab.id}
-                        ref={(node) => {
-                          captionTabRefs.current[index + 1] = node;
-                        }}
-                        id={`caption-platform-tab-${index + 1}`}
-                        type="button"
-                        role="tab"
-                        aria-selected={activeCaptionPlatform === tab.id}
-                        aria-controls="caption-platform-panel"
-                        tabIndex={activeCaptionPlatform === tab.id ? 0 : -1}
-                        onClick={() => selectCaptionPlatform(tab.id)}
-                        onKeyDown={(event) => handleCaptionTabKeyDown(event, index + 1)}
-                        className={cn(
-                          "min-h-[40px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
-                          isDesktopLayout && "lg:min-h-9 lg:px-3 lg:py-1",
-                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
-                          activeCaptionPlatform === tab.id
-                            ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
-                            : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
-                        )}
-                      >
-                        {tab.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                {!brandModeOn ? renderCaptionPlatformTabs() : null}
 
                 <div
                   id="caption-platform-panel"
@@ -4909,6 +5274,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                       <span>Caption edited for this platform</span>
                     </div>
                   )}
+                  {/* One caption editor serves both modes. Brand mode keeps the
+                      caption on the surface but hides the hashtag chip editor
+                      until "Studio tools" is opened, so two editors are never
+                      mounted at once. */}
                   <CaptionStudio
                     value={editedText}
                     onChange={handleTextChange}
@@ -4916,6 +5285,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     platformId={activeCaptionPlatform}
                     claimLocked={claimLocked || identityLocked}
                     compact={isDesktopLayout}
+                    hideHashtagEditor={brandModeOn && !isToolsOpen}
                   />
                 </div>
 
@@ -5003,7 +5373,7 @@ export const PostResult: React.FC<PostResultProps> = ({
             ) : null}
           </div>
         </div>
-        {isDesktopLayout ? renderMediaHistoryRail(true) : null}
+        {isDesktopLayout && !brandModeOn ? renderMediaHistoryRail(true) : null}
       </m.section>
 
       {/* Mobile/narrow: sticky bottom delivery bar (Save · Share · Copy).

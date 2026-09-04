@@ -33,10 +33,27 @@ assert.equal(
   "function",
   "PocketBase policy must export geminiModelPolicySnapshot()",
 );
+assert.equal(
+  typeof policyModule.exports.geminiResponseSchemaIds,
+  "function",
+  "PocketBase policy must export geminiResponseSchemaIds()",
+);
 assert.deepEqual(
   policyModule.exports.geminiModelPolicySnapshot(),
   canonical,
   "PocketBase Gemini policy drifted from config/gemini-model-policy.json",
+);
+
+// The policy `version` is a data-migration contract, not a changelog. Stored
+// posts carry the version they were reviewed under and the reopen/deliver
+// gates compare it by exact equality, so a bump strands every archived
+// creative behind a forced re-review. `versionPinNote` has to explain why the
+// number sits where it does; keeping it mandatory stops the number from
+// drifting silently.
+assert.ok(
+  typeof canonical.versionPinNote === "string" &&
+    canonical.versionPinNote.trim().length >= 40,
+  "Canonical Gemini policy must carry a versionPinNote explaining why `version` is where it is",
 );
 
 const expectedTaskNames = [
@@ -162,10 +179,30 @@ assert.deepEqual(canonical.tasks.video_quality, {
 });
 
 const generateFields = canonical.allowedRequestFields.generateContent;
-assert.deepEqual(generateFields.topLevel, ["contents", "generationConfig"]);
+assert.deepEqual(generateFields.topLevel, [
+  "contents",
+  "generationConfig",
+  "systemInstruction",
+]);
+assert.deepEqual(
+  generateFields.requiredTopLevel,
+  ["contents", "generationConfig"],
+  "systemInstruction must stay optional so clients that predate it remain valid",
+);
+assert.ok(
+  generateFields.requiredTopLevel.every((field) =>
+    generateFields.topLevel.includes(field),
+  ),
+  "Every required top-level field must also be an allowed top-level field",
+);
+assert.deepEqual(
+  generateFields.systemInstruction,
+  ["parts"],
+  "systemInstruction must admit only `parts`",
+);
 assert.deepEqual(
   generateFields.textGenerationConfig,
-  ["maxOutputTokens", "thinkingConfig"],
+  ["maxOutputTokens", "thinkingConfig", "responseMimeType", "schemaId"],
   "Text generationConfig allowlist drifted",
 );
 assert.deepEqual(
@@ -176,6 +213,71 @@ assert.deepEqual(
 assert.ok(
   !generateFields.topLevel.includes("safetySettings"),
   "Clients must not be allowed to submit safetySettings",
+);
+
+// Structured output is an id into a server-owned registry. Accepting a schema
+// body from the browser would let a tampered PWA rewrite the response
+// contract, so neither spelling may ever appear in an allowlist.
+for (const [group, fieldSets] of Object.entries(canonical.allowedRequestFields)) {
+  for (const [name, fields] of Object.entries(fieldSets)) {
+    for (const field of fields) {
+      assert.ok(
+        !["responseSchema", "responseJsonSchema"].includes(field),
+        `${group}.${name} must never accept a client-supplied ${field}`,
+      );
+      // Deprecated on Gemini 3.x since 2026-07-21; documented as a 400 on the
+      // pinned 3.6-flash / 3.5-flash-lite ids. Style guidance belongs in
+      // systemInstruction instead.
+      assert.ok(
+        !["temperature", "topP", "topK", "candidateCount"].includes(field),
+        `${group}.${name} must never accept the deprecated sampling field ${field}`,
+      );
+    }
+  }
+}
+
+assert.deepEqual(
+  canonical.allowedResponseMimeTypes,
+  ["application/json"],
+  "Structured output is JSON-only",
+);
+assert.deepEqual(
+  policyModule.exports.geminiResponseSchemaIds(),
+  canonical.responseSchemaIds,
+  "PocketBase response-schema registry drifted from responseSchemaIds in config/gemini-model-policy.json",
+);
+assert.ok(
+  canonical.responseSchemaIds.length > 0 &&
+    canonical.responseSchemaIds.every((id) => /^[a-z0-9_]+_v\d+$/.test(id)),
+  "Every response schema id must be lowercase snake_case with a trailing _v<N>",
+);
+for (const schemaId of canonical.responseSchemaIds) {
+  const schema = policyModule.exports.geminiResponseSchema(schemaId);
+  assert.ok(schema && schema.type === "object", `${schemaId} must be an object schema`);
+  assert.equal(
+    schema.additionalProperties,
+    false,
+    `${schemaId} must forbid additional properties`,
+  );
+  for (const required of schema.required || []) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(schema.properties, required),
+      `${schemaId} requires "${required}" but does not declare it`,
+    );
+  }
+}
+assert.equal(
+  policyModule.exports.geminiResponseSchema("not_a_registered_schema_v1"),
+  null,
+  "Unknown schema ids must resolve to null",
+);
+
+assert.ok(
+  Number.isInteger(canonical.requestLimits.maxSystemInstructionChars) &&
+    canonical.requestLimits.maxSystemInstructionChars > 0 &&
+    canonical.requestLimits.maxSystemInstructionChars <=
+      canonical.requestLimits.maxPromptChars,
+  "maxSystemInstructionChars must be a positive bound no larger than maxPromptChars",
 );
 assert.deepEqual(
   canonical.safetySettings.map((setting) => setting.category).sort(),

@@ -94,7 +94,14 @@ describe("canonical Gemini model policy", () => {
     }
     expect(
       MODEL_POLICY.allowedRequestFields.generateContent.textGenerationConfig,
-    ).toEqual(["maxOutputTokens", "thinkingConfig"]);
+    ).toEqual([
+      "maxOutputTokens",
+      "thinkingConfig",
+      // Structured output: the client sends an id, the proxy injects the
+      // schema body from its own registry.
+      "responseMimeType",
+      "schemaId",
+    ]);
     expect(MODEL_POLICY.allowedRequestFields.generateContent.thinkingConfig).toEqual([
       "thinkingLevel",
     ]);
@@ -117,6 +124,13 @@ describe("canonical Gemini model policy", () => {
 
   it("keeps server-owned safety fields out of the client allowlist", () => {
     expect(MODEL_POLICY.allowedRequestFields.generateContent.topLevel).toEqual([
+      "contents",
+      "generationConfig",
+      "systemInstruction",
+    ]);
+    // systemInstruction is accepted but not required, so a client that
+    // predates the prompt split stays valid.
+    expect(MODEL_POLICY.allowedRequestFields.generateContent.requiredTopLevel).toEqual([
       "contents",
       "generationConfig",
     ]);

@@ -24,6 +24,8 @@ type Policies = {
     path: string,
   ) => { bucket: string; maxRequests: number; windowMs: number } | null;
   geminiModelPolicySnapshot: () => Record<string, unknown>;
+  geminiResponseSchemaIds: () => string[];
+  geminiResponseSchema: (schemaId: unknown) => Record<string, unknown> | null;
   postImageReviewRequired: (record: unknown, currentPolicy: unknown) => boolean;
 };
 
@@ -864,6 +866,183 @@ You are a strict visual quality-control inspector for an automotive dealership i
       }),
       "image models never accept a thinkingConfig",
     ).toBeNull();
+  });
+
+  it("accepts a bounded systemInstruction on text requests only", () => {
+    const withSystem = (systemInstruction: unknown) => ({
+      contents: [{ parts: [{ text: "Write a concise dealer caption" }] }],
+      generationConfig: { maxOutputTokens: 2048 },
+      systemInstruction,
+    });
+    const rules = { parts: [{ text: "Hard rules:\n- Output ONLY the caption." }] };
+
+    const sanitized = policies.buildGeminiProxyRequest(textPath, withSystem(rules));
+    expect(sanitized?.systemInstruction).toEqual(rules);
+    expect(sanitized?.safetySettings).toEqual(canonicalModelPolicy.safetySettings);
+
+    // Absent stays valid: an installed client that predates the split sends
+    // one text part and no system turn.
+    const withoutSystem = {
+      contents: withSystem(rules).contents,
+      generationConfig: { maxOutputTokens: 2048 },
+    };
+    expect(policies.buildGeminiProxyRequest(textPath, withoutSystem)).toEqual(
+      withServerSafety(withoutSystem),
+    );
+    expect(
+      policies.buildGeminiProxyRequest(textPath, withoutSystem),
+    ).not.toHaveProperty("systemInstruction");
+
+    const maxChars = canonicalModelPolicy.requestLimits
+      .maxSystemInstructionChars as number;
+    expect(
+      policies.buildGeminiProxyRequest(
+        textPath,
+        withSystem({ parts: [{ text: "r".repeat(maxChars) }] }),
+      ),
+      "a system instruction at the limit is accepted",
+    ).not.toBeNull();
+    expect(
+      policies.buildGeminiProxyRequest(
+        textPath,
+        withSystem({ parts: [{ text: "r".repeat(maxChars + 1) }] }),
+      ),
+      "an oversized system instruction is rejected",
+    ).toBeNull();
+    expect(
+      policies.buildGeminiProxyRequest(
+        textPath,
+        withSystem({
+          parts: [{ text: "r".repeat(maxChars) }, { text: "r".repeat(maxChars) }],
+        }),
+      ),
+      "the limit is the total across parts, not per part",
+    ).toBeNull();
+
+    const rejectedSystemInstructions = [
+      null,
+      "just a string",
+      ["parts"],
+      {},
+      { parts: [] },
+      { parts: [{ text: "" }] },
+      { parts: [{ text: "   " }] },
+      { parts: [{ text: 42 }] },
+      { parts: [{ text: "ok", role: "system" }] },
+      { parts: [inlineImage] },
+      { parts: [{ text: "ok" }], role: "system" },
+    ];
+    for (const systemInstruction of rejectedSystemInstructions) {
+      expect(
+        policies.buildGeminiProxyRequest(textPath, withSystem(systemInstruction)),
+        `should reject systemInstruction ${JSON.stringify(systemInstruction)}`,
+      ).toBeNull();
+    }
+
+    expect(
+      policies.buildGeminiProxyRequest(proImagePath, {
+        ...imageRequest("2K"),
+        systemInstruction: rules,
+      }),
+      "image models never accept a systemInstruction",
+    ).toBeNull();
+  });
+
+  it("resolves structured output from a server-side schema registry only", () => {
+    const withResponseFormat = (generationConfig: Record<string, unknown>) => ({
+      contents: [{ parts: [{ text: "Return the review JSON" }] }],
+      generationConfig: { maxOutputTokens: 2048, ...generationConfig },
+    });
+
+    // The registry the client codes against is the one the server implements.
+    expect(policies.geminiResponseSchemaIds()).toEqual(
+      canonicalModelPolicy.responseSchemaIds,
+    );
+
+    for (const schemaId of canonicalModelPolicy.responseSchemaIds as string[]) {
+      const sanitized = policies.buildGeminiProxyRequest(
+        textPath,
+        withResponseFormat({ responseMimeType: "application/json", schemaId }),
+      );
+      const generationConfig = sanitized?.generationConfig as Record<string, unknown>;
+      expect(generationConfig?.responseMimeType, schemaId).toBe("application/json");
+      // The id is swapped for the server's own schema body and never forwarded.
+      expect(generationConfig?.responseJsonSchema, schemaId).toEqual(
+        policies.geminiResponseSchema(schemaId),
+      );
+      expect(generationConfig, schemaId).not.toHaveProperty("schemaId");
+    }
+
+    const rejectedGenerationConfigs: Array<Record<string, unknown>> = [
+      // Unknown, misspelled, or prototype-shaped schema ids.
+      { responseMimeType: "application/json", schemaId: "vision_review_v2" },
+      { responseMimeType: "application/json", schemaId: "not_a_schema" },
+      { responseMimeType: "application/json", schemaId: "" },
+      { responseMimeType: "application/json", schemaId: 1 },
+      { responseMimeType: "application/json", schemaId: null },
+      { responseMimeType: "application/json", schemaId: "constructor" },
+      { responseMimeType: "application/json", schemaId: "toString" },
+      // Half a contract: an unbounded JSON ask, or a schema the model ignores.
+      { responseMimeType: "application/json" },
+      { schemaId: "vision_review_v1" },
+      // Non-JSON mime types are not part of the contract.
+      { responseMimeType: "text/plain", schemaId: "vision_review_v1" },
+      {
+        responseMimeType: "application/json; charset=utf-8",
+        schemaId: "vision_review_v1",
+      },
+      // A schema BODY from the browser is never accepted, under either spelling.
+      {
+        responseMimeType: "application/json",
+        responseJsonSchema: { type: "object" },
+      },
+      { responseMimeType: "application/json", responseSchema: { type: "object" } },
+      {
+        responseMimeType: "application/json",
+        schemaId: "vision_review_v1",
+        responseJsonSchema: { type: "object", additionalProperties: true },
+      },
+      {
+        responseMimeType: "application/json",
+        schemaId: "vision_review_v1",
+        responseSchema: { type: "string" },
+      },
+      // Deprecated on Gemini 3.x (400 on the pinned models); still refused.
+      { temperature: 0.8 },
+      { topP: 0.9 },
+      { topK: 32 },
+      { candidateCount: 2 },
+      {
+        responseMimeType: "application/json",
+        schemaId: "vision_review_v1",
+        temperature: 0.8,
+      },
+    ];
+    for (const generationConfig of rejectedGenerationConfigs) {
+      expect(
+        policies.buildGeminiProxyRequest(
+          textPath,
+          withResponseFormat(generationConfig),
+        ),
+        `should reject generationConfig ${JSON.stringify(generationConfig)}`,
+      ).toBeNull();
+    }
+
+    expect(
+      policies.buildGeminiProxyRequest(proImagePath, {
+        ...imageRequest("2K"),
+        generationConfig: {
+          ...imageRequest("2K").generationConfig,
+          responseMimeType: "application/json",
+          schemaId: "vision_review_v1",
+        },
+      }),
+      "image models never accept a response schema",
+    ).toBeNull();
+
+    expect(policies.geminiResponseSchema("vision_review_v1")).not.toBe(
+      policies.geminiResponseSchema("vision_review_v1"),
+    );
   });
 
   it("caps the Claude fallback at the text task's 2048-token contract", () => {
