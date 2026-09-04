@@ -214,7 +214,9 @@ should be weighed as such, against the risk of altering prompt fidelity for
 every dealership.
 
 **Still genuinely open:** the Veo → Omni migration (P1-4). Both Veo 3.1 ids
-remain preview-only with no GA path, and each video task pins a single model,
-so a retirement is a total video outage. Omni is a different API surface
+remain preview-only with no GA path. As of 2026-09-04 each video task carries
+`veo-3.1-lite-generate-preview` as a second rung, so a single-id retirement
+degrades video to the lite model (via the existing 404 → next-model path)
+instead of taking it down; a whole-family retirement still needs Omni. Omni is a different API surface
 (Interactions), needs its own proxy route and ownership ledger, and carries a
 different cost model — a planned effort, not a drop-in.

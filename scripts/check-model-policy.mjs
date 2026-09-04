@@ -170,18 +170,35 @@ for (const captionTask of ["caption", "caption_regenerate", "caption_edit"]) {
   );
 }
 
+// Both Veo 3.1 ids are preview-only with no GA path, and a single-model
+// ladder turns a retirement into a total video outage: the client advances
+// to the next rung only on a 404 from the start call. veo-3.1-lite is the
+// documented fallback (720p/1080p, image-to-video, no 4K) — so neither task
+// may ever pin 4K, and the fallback must be the last rung on both ladders.
+assert.equal(
+  canonical.models.videoFallback,
+  "veo-3.1-lite-generate-preview",
+  "The video fallback rung must be the documented veo-3.1-lite preview id.",
+);
+const VIDEO_FALLBACK_MODEL = canonical.models.videoFallback;
 assert.deepEqual(canonical.tasks.video_standard, {
   kind: "video",
   tier: "standard",
-  models: [canonical.models.videoStandard],
+  models: [canonical.models.videoStandard, VIDEO_FALLBACK_MODEL],
   resolution: "720p",
 });
 assert.deepEqual(canonical.tasks.video_quality, {
   kind: "video",
   tier: "quality",
-  models: [canonical.models.videoQuality],
+  models: [canonical.models.videoQuality, VIDEO_FALLBACK_MODEL],
   resolution: "1080p",
 });
+for (const task of ["video_standard", "video_quality"]) {
+  assert.ok(
+    ["720p", "1080p"].includes(canonical.tasks[task].resolution),
+    `${task} must stay within the fallback model's 720p/1080p envelope (no 4K).`,
+  );
+}
 
 const generateFields = canonical.allowedRequestFields.generateContent;
 assert.deepEqual(generateFields.topLevel, [

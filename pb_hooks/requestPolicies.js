@@ -309,6 +309,7 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
     imageLite: "gemini-3.1-flash-lite-image",
     videoStandard: "veo-3.1-fast-generate-preview",
     videoQuality: "veo-3.1-generate-preview",
+    videoFallback: "veo-3.1-lite-generate-preview",
   },
   thinkingLevels: {
     "gemini-3.6-flash": ["minimal", "low", "medium", "high"],
@@ -381,13 +382,13 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
     video_standard: {
       kind: "video",
       tier: "standard",
-      models: ["veo-3.1-fast-generate-preview"],
+      models: ["veo-3.1-fast-generate-preview", "veo-3.1-lite-generate-preview"],
       resolution: "720p",
     },
     video_quality: {
       kind: "video",
       tier: "quality",
-      models: ["veo-3.1-generate-preview"],
+      models: ["veo-3.1-generate-preview", "veo-3.1-lite-generate-preview"],
       resolution: "1080p",
     },
   },

@@ -38,11 +38,11 @@ describe("canonical Gemini model policy", () => {
       "gemini-3-pro-image": "4K",
     });
     expect(MODEL_POLICY.tasks.video_standard).toMatchObject({
-      models: ["veo-3.1-fast-generate-preview"],
+      models: ["veo-3.1-fast-generate-preview", "veo-3.1-lite-generate-preview"],
       resolution: "720p",
     });
     expect(MODEL_POLICY.tasks.video_quality).toMatchObject({
-      models: ["veo-3.1-generate-preview"],
+      models: ["veo-3.1-generate-preview", "veo-3.1-lite-generate-preview"],
       resolution: "1080p",
     });
     expect(JSON.stringify(MODEL_POLICY)).not.toContain("gemini-2.5");
