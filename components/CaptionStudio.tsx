@@ -9,6 +9,7 @@ import {
   splitCaptionBodyAndTags,
 } from "../utils/hashtags";
 import { resolvePlatformOption } from "../services/platformCopy";
+import { Textarea } from "./ui/Input";
 
 export interface CaptionStudioProps {
   value: string;
@@ -177,24 +178,22 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
       </div>
 
       {combinedMode ? (
-        <textarea
+        // Shared field system: one focus treatment (the app-wide field focus
+        // border) instead of a bespoke ring stacked on the global brand ring.
+        <Textarea
           aria-label="Full caption text"
           aria-invalid={claimLocked || undefined}
           aria-describedby={claimLocked ? "caption-compliance-alert" : undefined}
           value={combinedDraft}
           onChange={(e) => handleCombinedChange(e.target.value)}
           disabled={disabled}
+          fullWidth
           placeholder="Your social post appears here automatically…"
           className={cn(
             compact
-              ? "h-36 min-h-[8rem] w-full lg:h-40 lg:max-h-[18rem]"
-              : "h-56 min-h-[12rem] w-full lg:h-72 lg:max-h-[28rem]",
-            "bg-surface-800/50 text-surface-100 p-4 rounded-xl text-base",
-            "resize-y border-2 border-transparent leading-relaxed",
-            "focus:border-primary-400 focus:ring-2 focus:ring-primary-400",
-            "outline-none transition-all duration-300",
-            "placeholder:text-surface-600",
-            "disabled:cursor-not-allowed disabled:opacity-60",
+              ? "h-36 min-h-[8rem] lg:h-40 lg:max-h-[18rem]"
+              : "h-56 min-h-[12rem] lg:h-72 lg:max-h-[28rem]",
+            "resize-y leading-relaxed",
           )}
         />
       ) : (
@@ -212,7 +211,7 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
                 {bodyChars} chars
               </span>
             </div>
-            <textarea
+            <Textarea
               id="caption-body-editor"
               aria-label="Caption body without hashtags"
               aria-invalid={claimLocked || undefined}
@@ -220,17 +219,13 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
               value={body}
               onChange={(e) => handleBodyChange(e.target.value)}
               disabled={disabled}
+              fullWidth
               placeholder="Post body…"
               className={cn(
                 compact
-                  ? "h-28 w-full lg:h-32 lg:max-h-[15rem]"
-                  : "h-36 w-full lg:h-44 lg:max-h-[20rem]",
-                "bg-surface-800/50 text-surface-100 p-4 rounded-xl text-base",
-                "resize-y border-2 border-transparent leading-relaxed",
-                "focus:border-primary-400 focus:ring-2 focus:ring-primary-400",
-                "outline-none transition-all duration-300",
-                "placeholder:text-surface-600",
-                "disabled:cursor-not-allowed disabled:opacity-60",
+                  ? "h-28 lg:h-32 lg:max-h-[15rem]"
+                  : "h-36 lg:h-44 lg:max-h-[20rem]",
+                "resize-y leading-relaxed",
               )}
             />
           </div>

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { m, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
@@ -296,6 +296,16 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 }) => {
   const currentDealer = useAppStore((s) => s.currentDealer);
   const currentPerson = useAppStore((s) => s.currentPerson);
+  // Each customizer section is a labelled group of controls, not a form field.
+  // A bare <label> with no `for` announces nothing, so the section headings are
+  // plain text nodes wired to a role="group" wrapper by id.
+  const groupId = useId();
+  const vehicleGroupId = `${groupId}-vehicle`;
+  const releaseGroupId = `${groupId}-release`;
+  const styleGroupId = `${groupId}-style`;
+  const destinationGroupId = `${groupId}-destinations`;
+  const toneGroupId = `${groupId}-tone`;
+  const captionGroupId = `${groupId}-caption`;
   const restoredCustomerName = toPublicCustomerLabel(
     typeof initialGenerationParams?.customerName === "string"
       ? initialGenerationParams.customerName
@@ -925,10 +935,13 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             />
 
             {/* VIN Scanner — show pill if vehicle decoded, otherwise show CTA */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+            <div className="space-y-2" role="group" aria-labelledby={vehicleGroupId}>
+              <span
+                id={vehicleGroupId}
+                className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+              >
                 Vehicle
-              </label>
+              </span>
               {decodedVehicle && !decodedVehicle.empty ? (
                 <m.div
                   initial={{ opacity: 0, scale: 0.98 }}
@@ -981,10 +994,13 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             </div>
 
             {/* Photo release — capture customer's signed consent before posting their photo */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+            <div className="space-y-2" role="group" aria-labelledby={releaseGroupId}>
+              <span
+                id={releaseGroupId}
+                className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+              >
                 Photo release · {scenarioNeedsCustomerRelease ? "required" : "optional"}
-              </label>
+              </span>
               {capturedRelease ? (
                 <m.div
                   initial={{ opacity: 0, scale: 0.98 }}
@@ -1053,11 +1069,14 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             </div>
 
             {/* Style Selection - Simplified Grid */}
-            <div className="space-y-2">
+            <div className="space-y-2" role="group" aria-labelledby={styleGroupId}>
               <div className="flex justify-between items-baseline">
-                <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+                <span
+                  id={styleGroupId}
+                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+                >
                   Design Style
-                </label>
+                </span>
                 <span className="text-[10px] text-surface-400 opacity-60">
                   Select one
                 </span>
@@ -1153,11 +1172,18 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             </div>
 
             {/* Where they'll post — drives caption length + export bias */}
-            <div className="space-y-2">
+            <div
+              className="space-y-2"
+              role="group"
+              aria-labelledby={destinationGroupId}
+            >
               <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+                <span
+                  id={destinationGroupId}
+                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+                >
                   Share to
-                </label>
+                </span>
                 <span className="text-[10px] text-surface-400">
                   Pick all that apply
                 </span>
@@ -1487,10 +1513,13 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             </div>
 
             {/* Tone Selection - Horizontal Scroll on Mobile with Snap */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+            <div className="space-y-2" role="group" aria-labelledby={toneGroupId}>
+              <span
+                id={toneGroupId}
+                className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+              >
                 Tone
-              </label>
+              </span>
               <div className="mobile-h-scroll -mx-1 px-1 pb-2">
                 {Object.values(ToneOption).map((option) => {
                   const info = TONE_INFO[option];
@@ -1533,10 +1562,13 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             </div>
 
             {/* Caption Mode Toggle */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+            <div className="space-y-2" role="group" aria-labelledby={captionGroupId}>
+              <span
+                id={captionGroupId}
+                className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+              >
                 Caption
-              </label>
+              </span>
               <div className="flex gap-2 bg-surface-950/30 p-1 rounded-xl border border-hairline">
                 <Button
                   variant={captionSource === "ai" ? "filled" : "ghost"}

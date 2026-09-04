@@ -79,10 +79,116 @@ interface HealthPayload {
     total24h: number;
     topActions: Array<{ name: string; count: number }>;
   };
+  /**
+   * Per-dealer generation usage ledger (helpers.generationUsageSummary).
+   * Deliberately `unknown`: a backend older than the usage migration omits it
+   * entirely, and the shape is wide enough that a partial payload should
+   * degrade to "not reported" rather than throw inside the panel. Narrowed by
+   * `normalizeUsageSummary` at render time.
+   */
+  usage?: unknown;
+}
+
+/** One dealership's row in the usage ledger. */
+interface UsageDealer {
+  dealer: string;
+  name: string;
+  events: number;
+  tokensTotal: number;
+  videoSeconds: number;
+  latencyP50Ms: number;
+  latencyP95Ms: number;
+  latencySamples: number;
+}
+
+interface UsageSummary {
+  windowDays: number;
+  since: string | null;
+  truncated: boolean;
+  dealers: UsageDealer[];
+  totals: {
+    events: number;
+    tokens: number;
+    images: number;
+    videoSeconds: number;
+    imagesBySize: Array<{ size: string; count: number }>;
+  };
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
+
+const finiteCount = (value: unknown): number =>
+  typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : 0;
+
+/**
+ * Narrow the health payload's usage ledger without ever throwing. Every field
+ * is optional on purpose: a pre-migration backend omits `usage` completely, a
+ * mid-upgrade one can return rows whose token or latency sub-objects are not
+ * there yet, and neither case may take the rest of the diagnostics down with
+ * it. Returns null when there is nothing worth rendering.
+ */
+const normalizeUsageSummary = (value: unknown): UsageSummary | null => {
+  if (!isRecord(value) || !Array.isArray(value.dealers)) return null;
+
+  const dealers: UsageDealer[] = [];
+  const imageTotals = new Map<string, number>();
+  const totals = { events: 0, tokens: 0, images: 0, videoSeconds: 0 };
+
+  for (const row of value.dealers) {
+    if (!isRecord(row) || typeof row.dealer !== "string" || !row.dealer) continue;
+    const tokens = isRecord(row.tokens) ? row.tokens : {};
+    const latency = isRecord(row.latencyMs) ? row.latencyMs : {};
+    // Image renders are only shown in aggregate — a per-dealer size breakdown
+    // is more rows than a health strip can carry — so fold them straight in.
+    if (isRecord(row.images)) {
+      for (const [size, count] of Object.entries(row.images)) {
+        const parsed = finiteCount(count);
+        if (!size || parsed === 0) continue;
+        imageTotals.set(size, (imageTotals.get(size) ?? 0) + parsed);
+        totals.images += parsed;
+      }
+    }
+    const entry: UsageDealer = {
+      dealer: row.dealer,
+      name: typeof row.name === "string" ? row.name : "",
+      events: finiteCount(row.events),
+      tokensTotal: finiteCount(tokens.total),
+      videoSeconds: finiteCount(row.videoSeconds),
+      latencyP50Ms: finiteCount(latency.p50),
+      latencyP95Ms: finiteCount(latency.p95),
+      latencySamples: finiteCount(latency.samples),
+    };
+    totals.events += entry.events;
+    totals.tokens += entry.tokensTotal;
+    totals.videoSeconds += entry.videoSeconds;
+    dealers.push(entry);
+  }
+
+  return {
+    windowDays: finiteCount(value.windowDays) || 7,
+    since: typeof value.since === "string" ? value.since : null,
+    truncated: value.truncated === true,
+    dealers,
+    totals: {
+      ...totals,
+      imagesBySize: Array.from(imageTotals, ([size, count]) => ({ size, count })).sort(
+        (a, b) => a.size.localeCompare(b.size),
+      ),
+    },
+  };
+};
+
+/** Six-figure token counts have to stay readable inside a stat tile. */
+const formatCount = (value: number): string => value.toLocaleString();
+
+const formatLatency = (ms: number): string =>
+  ms === 0 ? "—" : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+
+/** Dealers are ordered by volume server-side; only the busiest are listed. */
+const USAGE_DEALER_ROWS = 8;
 
 const healthCheckKeys: Array<keyof HealthPayload["checks"]> = [
   "pocketbase",
@@ -345,6 +451,7 @@ export const SystemHealthPanel: React.FC = () => {
     return () => window.clearInterval(t);
   }, [load]);
 
+  const usage = normalizeUsageSummary(data?.usage);
   const overallOk = data?.ok ?? false;
   const criticalFailures = checkRows.filter(
     (r) => r.critical && data && data.checks[r.key] === false,
@@ -627,6 +734,125 @@ export const SystemHealthPanel: React.FC = () => {
             </section>
           ) : null}
 
+          {data && usage ? (
+            <section className="space-y-3 rounded-md border border-hairline p-4">
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-content-tertiary">
+                    Generation usage · last {usage.windowDays} days
+                  </p>
+                  <p className="mt-1 text-sm text-content-secondary">
+                    Counters only — no prompts, captions, or media are recorded.
+                  </p>
+                </div>
+                <p className="text-xs text-content-tertiary">
+                  {usage.truncated
+                    ? "Bounded sample — older or overflow rows are not counted"
+                    : usage.since
+                      ? `Since ${new Date(usage.since).toLocaleDateString()}`
+                      : "Trailing window"}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <MiniStat
+                  label="Events"
+                  value={usage.totals.events}
+                  display={formatCount(usage.totals.events)}
+                />
+                <MiniStat
+                  label="Tokens"
+                  value={usage.totals.tokens}
+                  display={formatCount(usage.totals.tokens)}
+                />
+                <MiniStat
+                  label="Images"
+                  value={usage.totals.images}
+                  display={formatCount(usage.totals.images)}
+                />
+                <MiniStat
+                  label="Video seconds"
+                  value={usage.totals.videoSeconds}
+                  display={formatCount(usage.totals.videoSeconds)}
+                />
+              </div>
+
+              {usage.totals.imagesBySize.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {usage.totals.imagesBySize.map((bucket) => (
+                    <span
+                      key={bucket.size}
+                      className="rounded-full border border-hairline bg-fill-subtle px-2.5 py-1 text-[10px] font-semibold text-content-secondary"
+                    >
+                      {bucket.size}{" "}
+                      <span className="tabular-nums text-content-primary">
+                        {formatCount(bucket.count)}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
+              {usage.dealers.length > 0 ? (
+                <>
+                  <ul className="divide-y divide-hairline text-xs">
+                    {usage.dealers.slice(0, USAGE_DEALER_ROWS).map((dealer) => (
+                      <li
+                        key={dealer.dealer}
+                        className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2"
+                      >
+                        <span className="min-w-0 flex-1 truncate text-content-secondary">
+                          {dealer.name || dealer.dealer}
+                        </span>
+                        <span
+                          className="flex shrink-0 items-center gap-3 tabular-nums text-content-tertiary"
+                          // Percentiles are per dealership: the server ranks
+                          // each dealer's own latency samples, so they cannot
+                          // be summed into one headline figure.
+                          title={`Upstream latency over ${formatCount(
+                            dealer.latencySamples,
+                          )} timed calls`}
+                        >
+                          <span>
+                            <span className="font-semibold text-content-primary">
+                              {formatCount(dealer.events)}
+                            </span>{" "}
+                            events
+                          </span>
+                          <span>
+                            <span className="font-semibold text-content-primary">
+                              {formatCount(dealer.tokensTotal)}
+                            </span>{" "}
+                            tokens
+                          </span>
+                          <span>p50 {formatLatency(dealer.latencyP50Ms)}</span>
+                          <span>p95 {formatLatency(dealer.latencyP95Ms)}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {usage.dealers.length > USAGE_DEALER_ROWS ? (
+                    <p className="text-[11px] text-content-tertiary">
+                      {usage.dealers.length - USAGE_DEALER_ROWS} quieter{" "}
+                      {usage.dealers.length - USAGE_DEALER_ROWS === 1
+                        ? "dealership is"
+                        : "dealerships are"}{" "}
+                      counted in the totals above but not listed.
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <p className="text-xs text-content-tertiary">
+                  No generation activity recorded in this window.
+                </p>
+              )}
+            </section>
+          ) : data ? (
+            <div className="rounded-md border border-hairline px-3 py-2 text-xs text-content-tertiary">
+              Generation usage accounting is unavailable from this health endpoint.
+            </div>
+          ) : null}
+
           {data?.recentErrors ? (
             <section className="rounded-md border border-hairline p-4">
               <div className="flex items-center justify-between gap-3">
@@ -681,8 +907,10 @@ const Stat: React.FC<{ label: string; value: number }> = ({ label, value }) => (
 const MiniStat: React.FC<{
   label: string;
   value: number;
+  /** Grouped or abbreviated text for figures a raw number renders badly. */
+  display?: string;
   warning?: boolean;
-}> = ({ label, value, warning = false }) => (
+}> = ({ label, value, display, warning = false }) => (
   <div
     className={cn(
       "rounded-md border px-3 py-2",
@@ -695,7 +923,7 @@ const MiniStat: React.FC<{
         warning ? "text-warning-500" : "text-content-primary",
       )}
     >
-      {value}
+      {display ?? value}
     </div>
     <div className="text-[9px] font-semibold uppercase tracking-wide text-content-tertiary">
       {label}

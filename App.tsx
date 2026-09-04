@@ -14,6 +14,68 @@ import { Modal } from "./components/ui/Modal";
 import { Button } from "./components/ui/Button";
 import { History, LayoutDashboard, Settings } from "lucide-react";
 import { PwaUpdatePrompt } from "./components/PwaUpdatePrompt";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+
+interface PanelBoundaryProps {
+  children: React.ReactNode;
+  /** Surface name used in the compact fallback copy. */
+  panelName: string;
+  /** Closes the crashed surface so the workspace is left clean. */
+  onDismiss?: () => void;
+}
+
+/**
+ * Scoped boundary for one lazy/heavy surface.
+ *
+ * It extends the app's single ErrorBoundary so the catch path and the redacted
+ * crash telemetry stay identical, and replaces only the full-screen recovery
+ * screen with a compact inline panel. Without this, a crash inside settings,
+ * the crop dialog, or history unwinds all the way to the root boundary and
+ * blanks the entire workspace. The root boundary in index.tsx still backstops
+ * everything these do not cover.
+ */
+export class PanelErrorBoundary extends ErrorBoundary {
+  declare props: Readonly<PanelBoundaryProps>;
+
+  private handleRetryPanel = () => {
+    this.setState({ hasError: false, error: null, errorInfo: null, copied: false });
+  };
+
+  public render() {
+    if (!this.state.hasError) return this.props.children;
+    const { panelName, onDismiss } = this.props;
+    return (
+      <div
+        role="alert"
+        className="mx-auto my-3 w-full max-w-md rounded-xl border border-error-500/30 bg-surface-900 px-4 py-3"
+      >
+        <p className="text-sm font-semibold text-surface-50">
+          {panelName} could not open
+        </p>
+        <p className="mt-1 text-sm leading-relaxed text-surface-300">
+          The rest of your workspace is untouched. Try opening it again.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={this.handleRetryPanel}>
+            Try again
+          </Button>
+          {onDismiss && (
+            <Button
+              variant="plain"
+              size="sm"
+              onClick={() => {
+                this.handleRetryPanel();
+                onDismiss();
+              }}
+            >
+              Close
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+}
 
 // Lazy load heavyweight modals
 const LazySettingsModal = React.lazy(() =>
@@ -306,30 +368,37 @@ const AppContent: React.FC = () => {
         </main>
       </div>
 
-      <Suspense fallback={null}>
-        <LazySettingsModal
-          isOpen={isSettingsOpen}
-          onClose={() => setIsSettingsOpen(false)}
-          imageQualityTier={imageQualityTier}
-          theme={theme}
-          onImageQualityTierChange={(value) =>
-            setPreferences({ imageQualityTier: value })
-          }
-          onThemeChange={(value) => setPreferences({ theme: value })}
-        />
-      </Suspense>
+      <PanelErrorBoundary
+        panelName="Settings"
+        onDismiss={() => setIsSettingsOpen(false)}
+      >
+        <Suspense fallback={null}>
+          <LazySettingsModal
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            imageQualityTier={imageQualityTier}
+            theme={theme}
+            onImageQualityTierChange={(value) =>
+              setPreferences({ imageQualityTier: value })
+            }
+            onThemeChange={(value) => setPreferences({ theme: value })}
+          />
+        </Suspense>
+      </PanelErrorBoundary>
 
-      <Suspense fallback={null}>
-        <LazyImageCropModal
-          isOpen={cropModalOpen}
-          onClose={handleCropClose}
-          imageSrc={tempImageForCrop}
-          originalSource={tempOriginalForBackup}
-          originalFilename={tempOriginalFilename}
-          onConfirm={handleCropConfirm}
-          originalBackupStatus={originalBackupStatus}
-        />
-      </Suspense>
+      <PanelErrorBoundary panelName="Photo review" onDismiss={handleCropClose}>
+        <Suspense fallback={null}>
+          <LazyImageCropModal
+            isOpen={cropModalOpen}
+            onClose={handleCropClose}
+            imageSrc={tempImageForCrop}
+            originalSource={tempOriginalForBackup}
+            originalFilename={tempOriginalFilename}
+            onConfirm={handleCropConfirm}
+            originalBackupStatus={originalBackupStatus}
+          />
+        </Suspense>
+      </PanelErrorBoundary>
 
       <Modal
         isOpen={isHistoryOpen}
@@ -339,18 +408,23 @@ const AppContent: React.FC = () => {
         description="Reopen prior creatives, captions, and customer posts without regenerating."
         className="mx-2 w-[calc(100%-1rem)] sm:mx-4 sm:w-[min(72rem,calc(100%-2rem))]"
       >
-        <Suspense
-          fallback={
-            <div
-              className="flex min-h-48 items-center justify-center text-sm text-surface-300"
-              role="status"
-            >
-              Loading your work…
-            </div>
-          }
+        <PanelErrorBoundary
+          panelName="My work"
+          onDismiss={() => setIsHistoryOpen(false)}
         >
-          <LazyPostHistory onOpenCreative={() => setIsHistoryOpen(false)} />
-        </Suspense>
+          <Suspense
+            fallback={
+              <div
+                className="flex min-h-48 items-center justify-center text-sm text-surface-300"
+                role="status"
+              >
+                Loading your work…
+              </div>
+            }
+          >
+            <LazyPostHistory onOpenCreative={() => setIsHistoryOpen(false)} />
+          </Suspense>
+        </PanelErrorBoundary>
       </Modal>
 
       <Modal

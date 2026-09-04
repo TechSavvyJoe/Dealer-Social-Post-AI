@@ -50,6 +50,29 @@ const healthyPayload = {
     lastProviderAttemptAt: "2026-07-17T21:40:00.000Z",
   },
   recentErrors: { total24h: 1, topActions: [{ name: "generation.failed", count: 1 }] },
+  usage: {
+    windowDays: 7,
+    since: "2026-07-10T22:00:00.000Z",
+    truncated: false,
+    dealers: [
+      {
+        dealer: "dlr_alpha",
+        name: "Alpha Motors",
+        events: 1240,
+        succeeded: 1200,
+        tokens: {
+          prompt: 900000,
+          candidate: 240000,
+          thoughts: 60000,
+          cached: 4000,
+          total: 1204000,
+        },
+        images: { "1K": 40, "2K": 12 },
+        videoSeconds: 96,
+        latencyMs: { p50: 820, p95: 4300, samples: 1180 },
+      },
+    ],
+  },
 } as const;
 
 const jsonResponse = (body: unknown, status = 200) =>
@@ -114,6 +137,74 @@ describe("SystemHealthPanel readiness diagnostics", () => {
     await waitFor(() =>
       expect(screen.queryByText(/Operational — \d+ advisor/)).toBeNull(),
     );
+  });
+
+  it("renders the seven-day usage ledger behind Details", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(healthyPayload)));
+
+    render(<SystemHealthPanel />);
+    expect(await screen.findByText(/Operational — \d+ advisor/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Details/ }));
+
+    expect(screen.getByText("Generation usage · last 7 days")).toBeInTheDocument();
+    // Totals: events, tokens, image renders, video seconds. Six-figure token
+    // counts are grouped — an ungrouped 1204000 is unreadable in a tile.
+    // Each figure appears twice: once in the totals tile, once in the single
+    // dealership's row.
+    expect(screen.getAllByText("1,240")).toHaveLength(2);
+    expect(screen.getAllByText("1,204,000")).toHaveLength(2);
+    expect(screen.getByText("52")).toBeInTheDocument();
+    expect(screen.getByText("96")).toBeInTheDocument();
+    // Image counts stay broken out by billable size.
+    expect(screen.getByText("1K")).toBeInTheDocument();
+    expect(screen.getByText("2K")).toBeInTheDocument();
+    // Latency percentiles are per dealership and read as durations.
+    expect(screen.getByText("Alpha Motors")).toBeInTheDocument();
+    expect(screen.getByText("p50 820ms")).toBeInTheDocument();
+    expect(screen.getByText("p95 4.3s")).toBeInTheDocument();
+  });
+
+  it("keeps the rest of the panel working when an older server omits usage", async () => {
+    const { usage: _usage, ...withoutUsage } = healthyPayload;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(withoutUsage)));
+
+    render(<SystemHealthPanel />);
+    expect(await screen.findByText(/Operational — \d+ advisor/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Details/ }));
+
+    expect(
+      screen.getByText(
+        "Generation usage accounting is unavailable from this health endpoint.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Generation usage · last/)).toBeNull();
+    // The neighbouring sections still render.
+    expect(screen.getByText("Generation · last 24 hours")).toBeInTheDocument();
+  });
+
+  it("survives a partially populated usage payload from a mid-upgrade server", async () => {
+    const partial = {
+      ...healthyPayload,
+      usage: {
+        dealers: [
+          { dealer: "dlr_beta", events: 3 },
+          { name: "no id — dropped", events: 99 },
+        ],
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(partial)));
+
+    render(<SystemHealthPanel />);
+    expect(await screen.findByText(/Operational — \d+ advisor/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Details/ }));
+
+    // Missing windowDays falls back to the server's own 7-day window, missing
+    // token/latency objects read as zero, and a row with no dealer id is
+    // dropped rather than counted under an empty key.
+    expect(screen.getByText("Generation usage · last 7 days")).toBeInTheDocument();
+    expect(screen.getByText("dlr_beta")).toBeInTheDocument();
+    expect(screen.queryByText("no id — dropped")).toBeNull();
+    expect(screen.getAllByText("p50 —").length).toBe(1);
   });
 
   it("clears stale diagnostics when the endpoint returns non-JSON", async () => {

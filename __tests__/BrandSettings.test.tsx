@@ -77,7 +77,7 @@ describe("dealer Brand section", () => {
 
     const brand = screen.getByRole("region", { name: "Brand" });
     expect(
-      within(brand).getByRole("radiogroup", { name: "Signature Look" }),
+      within(brand).getByRole("radiogroup", { name: "Signature look" }),
     ).toBeInTheDocument();
     for (const look of ["Showroom", "Hometown", "Turbo"]) {
       expect(within(brand).getByRole("radio", { name: look })).toHaveAttribute(
@@ -85,7 +85,7 @@ describe("dealer Brand section", () => {
         "false",
       );
     }
-    expect(within(brand).getByLabelText("Alternate Look")).toHaveValue("");
+    expect(within(brand).getByLabelText("Alternate look")).toHaveValue("");
     expect(within(brand).getByLabelText("Playful style")).toHaveValue("");
     expect(
       within(brand).getByText("Shown to salespeople as a single Playful option"),
@@ -109,7 +109,111 @@ describe("dealer Brand section", () => {
     ).toBeInTheDocument();
   });
 
-  it("marks the form dirty when a Look is chosen and saves signature_look with its tone", async () => {
+  // Phase 1 ships dark, so the Brand copy must not claim to govern behavior
+  // while the legacy overlay-style picker below is the section that actually
+  // does. The two sections used to state opposite things on the same card.
+  it("scopes the Brand promise to the creative system being switched on", () => {
+    renderSettings();
+
+    const brand = screen.getByRole("region", { name: "Brand" });
+    expect(
+      within(brand).getByText(
+        /One house style for every post: salespeople never pick image style, tone, or video look themselves\./,
+      ),
+    ).toBeInTheDocument();
+    const note = within(brand).getByText(/^Not turned on yet\./);
+    expect(note).toHaveTextContent(
+      /they take over once the new creative system is switched on for your store/,
+    );
+    expect(note).toHaveTextContent(
+      /the image overlay styles further down are what your team actually sees/,
+    );
+  });
+
+  it("says the legacy overlay styles are the ones in charge today", () => {
+    renderSettings();
+
+    const overlay = screen.getByText(/^Pick which design styles your team can use/);
+    expect(overlay).toHaveTextContent(
+      /These stay in charge until the Brand section above is switched on\./,
+    );
+    // The legacy section itself is untouched: Phase 1 must not silently drop
+    // the control that governs today.
+    expect(screen.getByText("Image overlay styles")).toBeInTheDocument();
+    expect(screen.getAllByText("available to salespeople").length).toBeGreaterThan(0);
+  });
+
+  // Sentence case is the single rule for every label in this section: "look"
+  // is no longer title-cased while "style" and "signature" stay lowercase.
+  it("labels every brand control in sentence case", () => {
+    renderSettings();
+
+    const brand = screen.getByRole("region", { name: "Brand" });
+    for (const label of [
+      "Signature look",
+      "Alternate look",
+      "Playful style",
+      "Motion signature",
+      "Motion style",
+      "Logo placement",
+      "Logo size",
+      "Image quality",
+    ]) {
+      expect(within(brand).getByText(label)).toBeInTheDocument();
+    }
+    for (const titleCased of ["Signature Look", "Alternate Look", "Motion Style"]) {
+      expect(within(brand).queryByText(titleCased)).toBeNull();
+    }
+    expect(
+      within(brand).getByText(
+        "Optional second look a manager may enable for the team.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(brand).getByText(
+        "Percent of the image width. The look decides the rest of the layout.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  // The two phrase columns sit side by side at desktop width: the placeholder
+  // has to fit its own field and both helper lines have to wrap the same way.
+  it("keeps the do and don't columns balanced", () => {
+    renderSettings();
+
+    expect(screen.getByLabelText("Do phrase")).toHaveAttribute(
+      "placeholder",
+      "Use first names",
+    );
+    expect(screen.getByLabelText("Don't phrase")).toHaveAttribute(
+      "placeholder",
+      "No exclamation points",
+    );
+
+    const doHelp = "Up to 3 phrases captions always use.";
+    const dontHelp = "Up to 3 phrases captions never use.";
+    expect(screen.getByText(doHelp)).toBeInTheDocument();
+    expect(screen.getByText(dontHelp)).toBeInTheDocument();
+    // Within one character of each other, so neither column wraps alone.
+    expect(Math.abs(doHelp.length - dontHelp.length)).toBeLessThanOrEqual(1);
+  });
+
+  // The bar is sticky, so the card has to reserve room for it or the last
+  // control sits permanently underneath.
+  it("reserves bottom padding at least as tall as the sticky save bar", () => {
+    renderSettings();
+
+    const bar = screen.getByTestId("dealer-settings-save-bar");
+    expect(bar.className).toContain("sticky");
+    expect(bar.className).toContain("min-h-14");
+
+    const card = bar.parentElement as HTMLElement;
+    expect(card.className).toContain("pb-20");
+    // sm:p-6 would otherwise win back the bottom padding at desktop width.
+    expect(card.className).toContain("sm:pb-20");
+  });
+
+  it("marks the form dirty when a look is chosen and saves signature_look with its tone", async () => {
     const { onSaved, onDirtyChange } = renderSettings();
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
@@ -143,7 +247,7 @@ describe("dealer Brand section", () => {
     expect(payload.brand_color).toBe("#1d4ed8");
   });
 
-  it("keeps the alternate Look distinct from the Signature Look and skips default_tone when the Look is unchanged", async () => {
+  it("keeps the alternate look distinct from the signature look and skips default_tone when the look is unchanged", async () => {
     const { onSaved } = renderSettings({
       ...baseDealer,
       signature_look: "showroom",
@@ -153,7 +257,7 @@ describe("dealer Brand section", () => {
       "aria-checked",
       "true",
     );
-    const alternate = screen.getByLabelText("Alternate Look");
+    const alternate = screen.getByLabelText("Alternate look");
     expect(within(alternate).queryByRole("option", { name: "Showroom" })).toBeNull();
 
     fireEvent.change(alternate, { target: { value: "turbo" } });
@@ -165,19 +269,19 @@ describe("dealer Brand section", () => {
     expect(payload).not.toHaveProperty("default_tone");
   });
 
-  it("clears the alternate Look when the house Look moves onto it", () => {
+  it("clears the alternate look when the house look moves onto it", () => {
     renderSettings({
       ...baseDealer,
       signature_look: "showroom",
       alternate_look: "turbo",
     });
-    expect(screen.getByLabelText("Alternate Look")).toHaveValue("turbo");
+    expect(screen.getByLabelText("Alternate look")).toHaveValue("turbo");
 
     fireEvent.click(screen.getByRole("radio", { name: "Turbo" }));
 
-    expect(screen.getByLabelText("Alternate Look")).toHaveValue("");
+    expect(screen.getByLabelText("Alternate look")).toHaveValue("");
     expect(
-      within(screen.getByLabelText("Alternate Look")).getByRole("option", {
+      within(screen.getByLabelText("Alternate look")).getByRole("option", {
         name: "Showroom",
       }),
     ).toBeInTheDocument();

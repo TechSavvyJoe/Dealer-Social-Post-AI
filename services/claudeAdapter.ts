@@ -20,7 +20,7 @@ import {
   captureAuthEpoch,
   notifySessionRejected,
 } from "../utils/authBoundary";
-import { isBlockedContentError } from "../utils/errorHandler";
+import { normalizeError } from "../utils/errorHandler";
 
 const PROXY_PATH = "/api/proxy/anthropic/v1/messages";
 
@@ -216,27 +216,35 @@ export const generateTextViaClaude = async (
   return text;
 };
 
+/** A caller cancellation, not a provider failure. */
+const isAbortError = (err: unknown): boolean =>
+  typeof err === "object" &&
+  err !== null &&
+  "name" in err &&
+  (err as { name?: unknown }).name === "AbortError";
+
 /**
- * Detects whether an error from Gemini is "vendor failure" severe enough to
- * justify a Claude fallback attempt. Quota/billing errors qualify; transient
- * network blips do not (those should retry on Gemini first), and a typed
- * content refusal never does — Claude would be handed the same input.
+ * Detects whether a Gemini failure is a vendor problem another vendor could
+ * actually solve.
+ *
+ * Classification is by `normalizeError(...).kind`, never by scanning the
+ * message: the proxy now throws curated product copy ("Too many requests —
+ * try again in a minute."), so a substring hunt for "quota" or "429" matched
+ * nothing and the fallback was unreachable for the exact failure it exists
+ * for. `normalizeError` also walks `cause`/`lastError`, so the model-ladder
+ * wrapper still resolves to the provider's own typed failure.
+ *
+ * Only two kinds qualify. `quota` is Gemini's rate ceiling and
+ * `model_unavailable` is a Gemini outage or retired model id — Anthropic has
+ * its own capacity and catalog. Everything else is declined on purpose:
+ * `blocked` is a verdict on the photo and wording that Claude would repeat,
+ * `unauthorized` is our own credential, `outdated` needs an app update, and
+ * `network`/`timeout`/`validation`/`unknown` either retry on Gemini first or
+ * would fail identically here.
  */
 export const shouldFallbackToClaude = (err: unknown): boolean => {
   if (!FLAGS.enableClaudeFallback) return false;
-  if (isBlockedContentError(err)) return false;
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  if (
-    msg.includes("quota") ||
-    msg.includes("rate limit") ||
-    msg.includes("rate_limit") ||
-    msg.includes("503") ||
-    msg.includes("500") ||
-    msg.includes("unavailable") ||
-    msg.includes("safety") ||
-    msg.includes("blocked")
-  ) {
-    return true;
-  }
-  return false;
+  if (isAbortError(err)) return false;
+  const kind = normalizeError(err).kind;
+  return kind === "quota" || kind === "model_unavailable";
 };

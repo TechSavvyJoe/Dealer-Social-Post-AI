@@ -124,8 +124,65 @@ export interface PostVideoStatus {
   has_video: true;
 }
 
-const publicCustomerByPostId = new Map<string, string>();
-const customerIdentityRequiredByPostId = new Map<string, boolean>();
+/**
+ * Public-label lookups for the posts the UI is currently working with. They
+ * back the identity guard in `updatePostDraft`, so this must never become a
+ * long-lived store: an entry recorded for one signed-in workspace must not be
+ * readable from another.
+ *
+ * Two properties keep that true:
+ *   1. Every entry is scoped to the auth epoch it was recorded under. Logout,
+ *      login, impersonation, exiting impersonation, and session restore all
+ *      bump `authEpoch` (see stores/appStore.ts), so a dealer switch drops the
+ *      whole cache instead of leaking a previous tenant's label.
+ *   2. Within one epoch the cache is a small LRU, so scrolling a long History
+ *      list cannot grow it without bound for the life of the tab.
+ *
+ * A miss is safe: `updatePostDraft` then guards with no known label, and the
+ * server revalidates ownership and compliance on every write regardless.
+ */
+const POST_IDENTITY_CACHE_LIMIT = 200;
+
+interface PostIdentityEntry {
+  /** Approved public label (first name), or undefined when none is approved. */
+  publicCustomer?: string;
+  customerIdentityRequired: boolean;
+}
+
+const postIdentityByPostId = new Map<string, PostIdentityEntry>();
+let postIdentityAuthEpoch = captureAuthEpoch();
+
+/** The cache for the current auth epoch, emptied when the workspace changes. */
+const postIdentityCache = (): Map<string, PostIdentityEntry> => {
+  const epoch = captureAuthEpoch();
+  if (epoch !== postIdentityAuthEpoch) {
+    postIdentityAuthEpoch = epoch;
+    postIdentityByPostId.clear();
+  }
+  return postIdentityByPostId;
+};
+
+const rememberPostIdentity = (postId: string, entry: PostIdentityEntry): void => {
+  const cache = postIdentityCache();
+  // Re-insert so Map iteration order stays least-recently-used first.
+  cache.delete(postId);
+  cache.set(postId, entry);
+  while (cache.size > POST_IDENTITY_CACHE_LIMIT) {
+    const oldest = cache.keys().next();
+    if (oldest.done) break;
+    cache.delete(oldest.value);
+  }
+};
+
+const recallPostIdentity = (postId: string): PostIdentityEntry | undefined => {
+  const cache = postIdentityCache();
+  const entry = cache.get(postId);
+  if (!entry) return undefined;
+  // A read is a use: keep the post the salesperson is editing off the evict end.
+  cache.delete(postId);
+  cache.set(postId, entry);
+  return entry;
+};
 
 const assertCustomerCopyIsSafe = (input: {
   customerName?: string;
@@ -200,14 +257,12 @@ export const projectPostRecordForUi = (record: PostRecord): PostRecord => {
   const protectedName = record.customer_name || "";
   const publicCustomer = toPublicCustomerLabel(protectedName);
   if (record.id) {
-    if (publicCustomer) publicCustomerByPostId.set(record.id, publicCustomer);
-    else publicCustomerByPostId.delete(record.id);
-    customerIdentityRequiredByPostId.set(
-      record.id,
-      Boolean(
+    rememberPostIdentity(record.id, {
+      publicCustomer: publicCustomer || undefined,
+      customerIdentityRequired: Boolean(
         record.release_required || record.website_draft?.kind === "customer_story",
       ),
-    );
+    });
   }
   const customerIdentityRequired = Boolean(
     record.release_required || record.website_draft?.kind === "customer_story",
@@ -475,9 +530,10 @@ export const updatePostDraft = async (
   postId: string,
   input: UpdatePostDraftInput,
 ): Promise<{ id: string; updated: true; post_revision: string }> => {
+  const knownIdentity = recallPostIdentity(postId);
   assertCustomerCopyIsSafe({
-    customerName: publicCustomerByPostId.get(postId),
-    customerIdentityRequired: customerIdentityRequiredByPostId.get(postId),
+    customerName: knownIdentity?.publicCustomer,
+    customerIdentityRequired: knownIdentity?.customerIdentityRequired,
     caption: input.caption,
     disclosures: input.disclosures,
     platformCaptions: input.platformCaptions,

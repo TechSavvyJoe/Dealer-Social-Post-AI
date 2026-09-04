@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   generatePostVideo: vi.fn(),
   loadGeminiService: vi.fn(),
   logPost: vi.fn(),
+  linkReleaseToPostWithRetry: vi.fn(),
   renderFormat: vi.fn(async (source: string) => source),
 }));
 
@@ -55,12 +56,18 @@ vi.mock("../services/posts", () => ({
 }));
 
 vi.mock("../services/photoReleases", () => ({
+  // Mirrors the real gate: a captured signature is durably stored (and given
+  // an id) before the provider task ever runs.
   runWithPersistedPhotoRelease: async (
-    _captured: unknown,
+    captured: { releaseId?: string } | undefined,
     _dealerName: string,
     providerTask: () => Promise<unknown>,
-  ) => ({ result: await providerTask() }),
+  ) => ({
+    result: await providerTask(),
+    ...(captured ? { releaseId: captured.releaseId ?? "release-stored-1" } : {}),
+  }),
   linkReleaseToPost: vi.fn(),
+  linkReleaseToPostWithRetry: mocks.linkReleaseToPostWithRetry,
 }));
 
 vi.mock("../utils/telemetry", () => ({
@@ -166,6 +173,11 @@ describe("useGeneration model-tier and provenance wiring", () => {
     mocks.generateFunSocialPostImage.mockResolvedValue("data:image/png;base64,ZnVu");
     mocks.editSocialPostImage.mockResolvedValue("data:image/png;base64,ZWRpdA==");
     mocks.logPost.mockResolvedValue(null);
+    mocks.linkReleaseToPostWithRetry.mockResolvedValue({
+      id: "release-stored-1",
+      post_id: "post-77",
+      has_release: true,
+    });
     mocks.loadGeminiService.mockResolvedValue({
       generateSocialPost: mocks.generateSocialPost,
       generateFunSocialPostImage: mocks.generateFunSocialPostImage,
@@ -672,5 +684,92 @@ describe("useGeneration model-tier and provenance wiring", () => {
     expect(mocks.setGeneratedPost).not.toHaveBeenCalled();
 
     cleanup();
+  });
+
+  describe("photo release linking", () => {
+    const capturedRelease = {
+      customerName: "Alex Rivera",
+      signaturePngDataUrl: "data:image/png;base64,c2ln",
+    };
+
+    const generateWithRelease = async (result: {
+      current: ReturnType<typeof useGeneration>;
+    }) => {
+      await act(async () => {
+        await result.current.handleGenerate(
+          StyleOption.Modern,
+          ToneOption.Professional,
+          "Alex",
+          undefined,
+          undefined,
+          { capturedRelease: { ...capturedRelease } },
+        );
+      });
+      return mocks.setGeneratedPost.mock.calls.at(-1)?.[0] as GeneratedPost | undefined;
+    };
+
+    it("marks a failed link as recoverable and carries the ids a retry needs", async () => {
+      mocks.logPost.mockResolvedValue({ id: "post-77" });
+      mocks.linkReleaseToPostWithRetry.mockRejectedValue(
+        new Error("Photo release link failed: Service Unavailable"),
+      );
+      const { result, cleanup } = renderGeneration();
+
+      const finalPost = await generateWithRelease(result);
+
+      expect(mocks.linkReleaseToPostWithRetry).toHaveBeenCalledWith(
+        "release-stored-1",
+        "post-77",
+        expect.objectContaining({ requestAuthEpoch: 1 }),
+      );
+      // Delivery stays locked, but as the repairable variant.
+      expect(finalPost?.releaseStatus).toBe("save_failed");
+      expect(finalPost?.releaseLinkStatus).toBe("link_failed");
+      expect(finalPost?.releaseId).toBe("release-stored-1");
+      expect(finalPost?.postId).toBe("post-77");
+      // The banner on the result screen is the single place this is stated.
+      expect(mocks.toastError).not.toHaveBeenCalled();
+
+      cleanup();
+    });
+
+    it("unlocks delivery when the link succeeds", async () => {
+      mocks.logPost.mockResolvedValue({ id: "post-77" });
+      const { result, cleanup } = renderGeneration();
+
+      const finalPost = await generateWithRelease(result);
+
+      expect(finalPost?.releaseStatus).toBe("saved");
+      expect(finalPost?.releaseLinkStatus).toBeUndefined();
+      expect(finalPost?.releaseId).toBeUndefined();
+
+      cleanup();
+    });
+
+    it("leaves a post with no stored release id on the strict, non-recoverable path", async () => {
+      mocks.logPost.mockResolvedValue({
+        id: "post-78",
+        release_required: true,
+        release_status: "pending",
+      });
+      const { result, cleanup } = renderGeneration();
+
+      await act(async () => {
+        await result.current.handleGenerate(
+          StyleOption.Modern,
+          ToneOption.Professional,
+          "Alex",
+        );
+      });
+      const finalPost = mocks.setGeneratedPost.mock.calls.at(-1)?.[0] as
+        GeneratedPost | undefined;
+
+      expect(mocks.linkReleaseToPostWithRetry).not.toHaveBeenCalled();
+      expect(finalPost?.releaseStatus).toBe("save_failed");
+      expect(finalPost?.releaseLinkStatus).toBeUndefined();
+      expect(finalPost?.releaseId).toBeUndefined();
+
+      cleanup();
+    });
   });
 });

@@ -8,8 +8,13 @@ import {
   generateTextViaClaude,
   shouldFallbackToClaude,
 } from "./claudeAdapter";
-import { CLAUDE_MODELS, FLAGS, TASKS } from "./modelConfig";
-import { createBlockedContentError } from "../utils/errorHandler";
+import { CLAUDE_MODELS, FLAGS, MODEL_POLICY_VERSION, TASKS } from "./modelConfig";
+import {
+  createBlockedContentError,
+  createOutdatedClientError,
+  type ErrorKind,
+  type NormalizedError,
+} from "../utils/errorHandler";
 
 type AnthropicPolicies = {
   buildAnthropicMessageRequest: (
@@ -177,24 +182,76 @@ describe("shouldFallbackToClaude", () => {
     FLAGS.enableClaudeFallback = originalFlag;
   });
 
-  it("declines typed content blocks even when the flag is on", () => {
+  /** The exact shape services/geminiProxy.ts throws for a proxy failure. */
+  const proxyError = (message: string, kind: ErrorKind, retryable = false) => {
+    const error = new Error(message) as NormalizedError;
+    error.kind = kind;
+    error.retryable = retryable;
+    return error;
+  };
+
+  /** How the model ladder re-throws: curated copy, provider failure on cause. */
+  const ladderFailure = (cause: unknown) => {
+    const wrapper = new Error("All models failed for task caption");
+    Object.defineProperty(wrapper, "cause", { value: cause, enumerable: false });
+    return wrapper;
+  };
+
+  it("falls back on the proxy's curated quota and outage copy", () => {
     FLAGS.enableClaudeFallback = true;
 
-    expect(
-      shouldFallbackToClaude(createBlockedContentError("finishReason=SAFETY")),
-    ).toBe(false);
-    const ladderFailure = new Error(
-      "This photo or wording can't be used for an AI post.",
+    // The regression this guards: the proxy stopped putting "quota", "429",
+    // or "503" in the message, so substring classification never fired and a
+    // rate-limited dealer silently got a template instead of Claude.
+    const quota = proxyError("Too many requests — try again in a minute.", "quota");
+    const outage = proxyError(
+      "The AI service is temporarily unavailable.",
+      "model_unavailable",
+      true,
     );
-    Object.defineProperty(ladderFailure, "cause", {
-      value: createBlockedContentError("finishReason=SAFETY"),
-      enumerable: false,
-    });
-    expect(shouldFallbackToClaude(ladderFailure)).toBe(false);
+
+    expect(quota.message).not.toMatch(/quota|429|rate.?limit/i);
+    expect(shouldFallbackToClaude(quota)).toBe(true);
+    expect(shouldFallbackToClaude(outage)).toBe(true);
+    // Classification survives the ladder wrapper via `cause`.
+    expect(shouldFallbackToClaude(ladderFailure(quota))).toBe(true);
+    expect(shouldFallbackToClaude(ladderFailure(outage))).toBe(true);
+    // …and the retry wrapper, which carries the terminal failure separately.
     expect(
       shouldFallbackToClaude(
-        new Error("The AI service could not complete this request (error 503)."),
+        Object.assign(new Error("Failed after 3 attempts"), { lastError: outage }),
       ),
     ).toBe(true);
+  });
+
+  it("declines every kind another vendor cannot fix", () => {
+    FLAGS.enableClaudeFallback = true;
+
+    const blocked = createBlockedContentError("finishReason=SAFETY");
+    expect(shouldFallbackToClaude(blocked)).toBe(false);
+    expect(shouldFallbackToClaude(ladderFailure(blocked))).toBe(false);
+    expect(
+      shouldFallbackToClaude(
+        proxyError("Session expired — please sign in again.", "unauthorized"),
+      ),
+    ).toBe(false);
+    expect(
+      shouldFallbackToClaude(createOutdatedClientError(MODEL_POLICY_VERSION, "99")),
+    ).toBe(false);
+    expect(shouldFallbackToClaude(proxyError("Check your inputs.", "validation"))).toBe(
+      false,
+    );
+    // A cancelled generation is a caller decision, not a provider failure.
+    expect(shouldFallbackToClaude(new DOMException("Task aborted", "AbortError"))).toBe(
+      false,
+    );
+  });
+
+  it("stays off entirely while the flag is disabled", () => {
+    FLAGS.enableClaudeFallback = false;
+
+    expect(shouldFallbackToClaude(proxyError("Too many requests.", "quota"))).toBe(
+      false,
+    );
   });
 });

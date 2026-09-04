@@ -30,7 +30,9 @@ const {
   mockGetWebsitePublication,
   mockListWebsiteDestinations,
   mockRetryWebsitePublication,
+  mockLinkReleaseToPostWithRetry,
 } = vi.hoisted(() => ({
+  mockLinkReleaseToPostWithRetry: vi.fn(),
   mockGetPostApprovalStatus: vi.fn(),
   mockMarkPostVideoGenerated: vi.fn(),
   mockRenderFormat: vi.fn(async (source: string) => source),
@@ -102,6 +104,10 @@ vi.mock("../services/websitePublishing", async (importOriginal) => {
     listWebsiteDestinations: mockListWebsiteDestinations,
     retryWebsitePublication: mockRetryWebsitePublication,
   };
+});
+vi.mock("../services/photoReleases", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/photoReleases")>();
+  return { ...actual, linkReleaseToPostWithRetry: mockLinkReleaseToPostWithRetry };
 });
 vi.mock("../components/ui/ProgressiveImage", () => ({
   ProgressiveImage: ({
@@ -186,6 +192,11 @@ describe("PostResult job-first flow", () => {
     });
     mockListWebsiteDestinations.mockResolvedValue([]);
     mockRetryWebsitePublication.mockResolvedValue({ status: "queued", attempts: 0 });
+    mockLinkReleaseToPostWithRetry.mockResolvedValue({
+      id: "release-9",
+      post_id: "delivery-post-1",
+      has_release: true,
+    });
     mockSavePreparedMediaToLibrary.mockResolvedValue({
       method: "download",
       kind: "image",
@@ -278,7 +289,7 @@ describe("PostResult job-first flow", () => {
     expect(screen.queryByText("TikTok")).not.toBeInTheDocument();
     expect(screen.queryByText("Choose a destination output")).not.toBeInTheDocument();
     expect(screen.getByText("Private website draft")).toBeVisible();
-    expect(screen.getByText(/Website selected — review before sending/i)).toBeVisible();
+    expect(screen.getByText(/Website selected/i)).toBeVisible();
     expect(screen.getByRole("button", { name: /Edit with AI/i })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Send website draft" }));
@@ -346,7 +357,7 @@ describe("PostResult job-first flow", () => {
         expect.any(AbortSignal),
       ),
     );
-    expect(await screen.findByText("Private website draft ready")).toBeVisible();
+    expect(await screen.findByText("Private draft ready")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Send website draft" })).toBeNull();
     expect(useAppStore.getState().generatedPost).toMatchObject({
       postId: "website-reload-1",
@@ -534,7 +545,7 @@ describe("PostResult job-first flow", () => {
       },
     });
 
-    expect(screen.getByText("Website draft was not saved")).toBeVisible();
+    expect(screen.getByText("Draft not saved")).toBeVisible();
     expect(
       screen.getByRole("button", { name: "Not saved website draft" }),
     ).toBeDisabled();
@@ -849,6 +860,187 @@ describe("PostResult job-first flow", () => {
         name: "Save image (release not saved)",
       }),
     ).toBeDisabled();
+    // Consent really may be missing here, so the strict wording stands and
+    // there is nothing to retry from this screen.
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The signed photo release was not stored, so consent cannot be verified. Copy, share, save, and export remain locked; check your connection and create another post to retry.",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Retry saving release" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Delivery locked · Release not saved")).toBeVisible();
+  });
+
+  describe("recoverable photo release link failure", () => {
+    const linkFailedPost = {
+      image: "data:image/png;base64,aGVsbG8=",
+      text: "A customer delivery post.",
+      postId: "delivery-post-1",
+      releaseStatus: "save_failed" as const,
+      releaseLinkStatus: "link_failed" as const,
+      releaseId: "release-9",
+    };
+
+    it("tells the truth about stored consent and offers a retry instead of a re-signature", () => {
+      renderResult({ post: linkFailedPost });
+
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent("Photo release not attached yet");
+      expect(alert).toHaveTextContent(
+        "The customer's signed release was captured and saved — nothing needs to be signed again. Only its link to this post did not finish, so copy, share, save, and export stay locked until it does. Retry saving the release below.",
+      );
+      expect(alert).not.toHaveTextContent("was not stored");
+      expect(
+        screen.getByRole("button", { name: "Retry saving release" }),
+      ).toBeEnabled();
+
+      // Stated once as a status, never as a second pressable control.
+      const lockStatus = screen.getByText("Delivery locked · Release not attached");
+      expect(lockStatus).toBeVisible();
+      expect(lockStatus.closest("button")).toBeNull();
+
+      const delivery = screen.getByLabelText("Post delivery actions");
+      expect(
+        within(delivery).getByRole("button", {
+          name: "Copy caption (release not attached)",
+        }),
+      ).toBeDisabled();
+      expect(
+        within(delivery).getByRole("button", {
+          name: "Share post (release not attached)",
+        }),
+      ).toBeDisabled();
+      expect(
+        within(delivery).getByRole("button", {
+          name: "Save image (release not attached)",
+        }),
+      ).toBeDisabled();
+    });
+
+    it("clears the lock when the retry links the stored release", async () => {
+      const user = userEvent.setup();
+      renderResult({ post: linkFailedPost });
+
+      await user.click(screen.getByRole("button", { name: "Retry saving release" }));
+
+      await waitFor(() =>
+        expect(mockLinkReleaseToPostWithRetry).toHaveBeenCalledWith(
+          "release-9",
+          "delivery-post-1",
+        ),
+      );
+      await waitFor(() =>
+        expect(
+          screen.queryByText("Photo release not attached yet"),
+        ).not.toBeInTheDocument(),
+      );
+      expect(
+        screen.getByText(
+          "Photo release saved to this post. Copy, share, save, and export are unlocked.",
+        ),
+      ).toBeVisible();
+      expect(screen.queryByText(/^Delivery locked · /)).not.toBeInTheDocument();
+
+      const delivery = screen.getByLabelText("Post delivery actions");
+      expect(
+        within(delivery).getByRole("button", { name: "Copy caption" }),
+      ).toBeEnabled();
+      await waitFor(() =>
+        expect(
+          within(delivery).getByRole("button", { name: "Share post" }),
+        ).toBeEnabled(),
+      );
+      expect(useAppStore.getState().generatedPost).toMatchObject({
+        postId: "delivery-post-1",
+        releaseStatus: "saved",
+      });
+      expect(useAppStore.getState().generatedPost?.releaseLinkStatus).toBeUndefined();
+    });
+
+    it("keeps the lock and promises a reconnect retry when the attempt is exhausted", async () => {
+      const user = userEvent.setup();
+      mockLinkReleaseToPostWithRetry.mockRejectedValue(
+        new Error("Photo release link failed: Service Unavailable"),
+      );
+      renderResult({ post: linkFailedPost });
+
+      await user.click(screen.getByRole("button", { name: "Retry saving release" }));
+
+      await waitFor(() =>
+        expect(
+          screen.getByText(
+            "That did not go through. Nothing was lost — the signed release is still stored. Try again in a moment; it also retries on its own when the connection comes back.",
+          ),
+        ).toBeVisible(),
+      );
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Photo release not attached yet",
+      );
+      expect(
+        screen.getByRole("button", { name: "Retry saving release" }),
+      ).toBeEnabled();
+
+      const delivery = screen.getByLabelText("Post delivery actions");
+      expect(
+        within(delivery).getByRole("button", {
+          name: "Copy caption (release not attached)",
+        }),
+      ).toBeDisabled();
+      expect(
+        within(delivery).getByRole("button", {
+          name: "Share post (release not attached)",
+        }),
+      ).toBeDisabled();
+      expect(
+        within(delivery).getByRole("button", {
+          name: "Save image (release not attached)",
+        }),
+      ).toBeDisabled();
+      expect(useAppStore.getState().generatedPost).toBeNull();
+    });
+
+    it("promises the offline reconnect retry when the device has no connection", async () => {
+      const user = userEvent.setup();
+      mockLinkReleaseToPostWithRetry.mockRejectedValue(new Error("Failed to fetch"));
+      renderResult({ post: linkFailedPost });
+
+      await act(async () => {
+        window.dispatchEvent(new Event("offline"));
+      });
+      await user.click(screen.getByRole("button", { name: "Retry saving release" }));
+
+      await waitFor(() =>
+        expect(
+          screen.getByText(
+            "You are offline. Nothing was lost — the signed release is still stored, and this retries automatically as soon as you are back online.",
+          ),
+        ).toBeVisible(),
+      );
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Photo release not attached yet",
+      );
+      // Left offline on purpose: the next case exercises the reconnect.
+    });
+
+    it("repairs the link on its own when the connection comes back", async () => {
+      renderResult({ post: linkFailedPost });
+
+      expect(mockLinkReleaseToPostWithRetry).not.toHaveBeenCalled();
+
+      await act(async () => {
+        window.dispatchEvent(new Event("offline"));
+        window.dispatchEvent(new Event("online"));
+      });
+
+      await waitFor(() =>
+        expect(mockLinkReleaseToPostWithRetry).toHaveBeenCalledTimes(1),
+      );
+      await waitFor(() =>
+        expect(
+          screen.queryByText("Photo release not attached yet"),
+        ).not.toBeInTheDocument(),
+      );
+    });
   });
 
   it("rescans direct caption edits and blocks prohibited delivery claims", () => {

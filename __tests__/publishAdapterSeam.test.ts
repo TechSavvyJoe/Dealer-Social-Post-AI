@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PUBLISH_TARGETS, adapterFor, publishTo } from "../services/publishTargets";
+import { PUBLISH_TARGETS, adapterFor } from "../services/publishTargets";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -22,14 +22,11 @@ describe("publish adapter seam", () => {
     expect(adapterFor("myspace")).toBeNull();
   });
 
-  it("fails a share honestly while offline, before any handoff side effects", async () => {
-    vi.stubGlobal("navigator", { onLine: false });
-    const status = await publishTo("instagram_feed", {
-      text: "caption",
-      imageDataUrl: "data:image/png;base64,AAAA",
-    } as never);
-    expect(status.kind).toBe("error");
-    expect("message" in status && status.message).toMatch(/offline/i);
-    expect("message" in status && status.message).toMatch(/saved on this device/i);
-  });
+  // The former `publishTo()` one-shot share flow was deleted: it awaited media
+  // preparation before calling navigator.share(), which spends WebKit's
+  // transient user activation and makes the share sheet silently refuse to
+  // open. Production goes through preparePublishShare() + sharePrepared(),
+  // which shares from inside the click handler; publishTargets.test.ts and
+  // ShareDialogReliability.test.tsx cover that path. Do not reintroduce a
+  // prepare-then-share helper here.
 });

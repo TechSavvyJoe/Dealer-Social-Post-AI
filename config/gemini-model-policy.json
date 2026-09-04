@@ -37,6 +37,13 @@
       "maxOutputTokens": 2048,
       "thinkingLevel": "minimal"
     },
+    "vision_review": {
+      "kind": "text",
+      "tier": "quality",
+      "models": ["gemini-3.6-flash", "gemini-3.5-flash-lite"],
+      "maxOutputTokens": 2048,
+      "thinkingLevel": "medium"
+    },
     "image_standard": {
       "kind": "image",
       "tier": "standard",

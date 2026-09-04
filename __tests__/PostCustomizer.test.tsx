@@ -112,6 +112,24 @@ describe("PostCustomizer", () => {
     vi.unstubAllGlobals();
   });
 
+  it("announces each customizer section as a named group", () => {
+    render(<PostCustomizer {...baseProps} />);
+
+    // These headings used to be bare <label> elements with no control
+    // association, so assistive tech announced the controls with no section
+    // context at all.
+    for (const name of [
+      "Vehicle",
+      "Design Style",
+      "Share to",
+      "Tone",
+      "Caption",
+    ] as const) {
+      expect(screen.getByRole("group", { name })).toBeInTheDocument();
+    }
+    expect(screen.getByRole("group", { name: /^Photo release/ })).toBeInTheDocument();
+  });
+
   it("invokes onStyleToneChange when selecting a new style", () => {
     render(<PostCustomizer {...baseProps} />);
 

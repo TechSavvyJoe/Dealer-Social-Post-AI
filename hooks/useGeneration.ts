@@ -394,7 +394,6 @@ export const useGeneration = () => {
         analyzeCaptionSetForDelivery,
         buildFallbackWebsiteDraft,
         buildWebsiteDraftPrompt,
-        linkReleaseToPost,
         logPost,
         parsePlatformCaptionPack,
         parseWebsiteDraftResponse,
@@ -660,12 +659,32 @@ export const useGeneration = () => {
               : captured
                 ? "save_failed"
                 : "not_required";
+          // Distinct from the branch above: here the signature is already
+          // durably stored (runWithPersistedPhotoRelease rejects before the
+          // provider call otherwise), so a failure is only a missing
+          // association, and both ids needed to repair it are in hand.
+          let releaseLinkStatus: GeneratedPost["releaseLinkStatus"];
+          let unlinkedReleaseId: string | undefined;
           if (captured && releaseId && post) {
+            const { linkReleaseToPostWithRetry } =
+              await import("../services/photoReleases");
             try {
-              await linkReleaseToPost(releaseId, post.id, variables.authEpoch);
+              await linkReleaseToPostWithRetry(releaseId, post.id, {
+                requestAuthEpoch: variables.authEpoch,
+                onRetry: (attempt) =>
+                  logEvent("photo_release.link_retry", {
+                    attempt,
+                    postId: post.id,
+                  }),
+              });
               assertOperationAuthEpoch(variables.authEpoch);
               releaseStatus = "saved";
             } catch (err) {
+              // Consent exists on the server. Keep every delivery gate closed,
+              // but record that this is the recoverable variant so the result
+              // screen offers a retry instead of demanding a new signature.
+              releaseLinkStatus = "link_failed";
+              unlinkedReleaseId = releaseId;
               logError("photo_release.link_failed", {
                 message: err instanceof Error ? err.message : String(err),
                 postId: post.id,
@@ -680,7 +699,7 @@ export const useGeneration = () => {
                 : "Post record was unavailable for release linking",
             });
           }
-          return { post, releaseStatus };
+          return { post, releaseStatus, releaseLinkStatus, unlinkedReleaseId };
         };
 
         // Await the small first-party persistence request for every generated
@@ -690,6 +709,10 @@ export const useGeneration = () => {
         if (variables.authEpoch !== useAppStore.getState().authEpoch) return;
         const post = persisted.post;
         finalPost.releaseStatus = persisted.releaseStatus;
+        if (persisted.releaseLinkStatus && persisted.unlinkedReleaseId) {
+          finalPost.releaseLinkStatus = persisted.releaseLinkStatus;
+          finalPost.releaseId = persisted.unlinkedReleaseId;
+        }
         if (post) {
           finalPost.postId = post.id;
           finalPost.imageReviewRequired = Boolean(post.image_review_required);
@@ -708,11 +731,10 @@ export const useGeneration = () => {
           };
         }
 
-        if (persisted.releaseStatus === "save_failed") {
-          toastError(
-            "The signed photo release could not be stored. Copy, share, save, and export are locked; check your connection and create another post to retry.",
-          );
-        }
+        // No toast for a release failure. The result screen renders one
+        // authoritative banner (with the retry action and the accurate copy for
+        // whichever variant this is); a toast here repeated the same sentence
+        // on top of the customer's photo.
 
         if (finalPost.imageReviewRequired) {
           toastError(

@@ -2124,3 +2124,110 @@ describe("generation usage accounting and stale-client rejection (Gemini P0-1, P
     }
   });
 });
+
+describe("vision-QC review is its own generation task (Gemini P0-2)", () => {
+  const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
+  const migration = readFileSync(
+    resolve(process.cwd(), "pb_migrations/1751700000_vision_review_task.js"),
+    "utf8",
+  );
+  const currentVersion = String(canonicalModelPolicy.version);
+  const textPath = "v1beta/models/gemini-3.6-flash:generateContent";
+  const visionReview = canonicalModelPolicy.tasks.vision_review as {
+    kind: string;
+    tier: string;
+    models: string[];
+    maxOutputTokens: number;
+    thinkingLevel: string;
+  };
+
+  it("is the only text task that pays for medium reasoning", () => {
+    // Thinking tokens bill as output tokens, so this split is a cost
+    // contract: the QC read decides whether a flawed render ships, every
+    // caption does not.
+    expect(visionReview).toMatchObject({
+      kind: "text",
+      maxOutputTokens: 2048,
+      thinkingLevel: "medium",
+    });
+    const mediumTextTasks = Object.entries(canonicalModelPolicy.tasks)
+      .filter(
+        ([, task]) =>
+          (task as { kind: string; thinkingLevel?: string }).kind === "text" &&
+          (task as { thinkingLevel?: string }).thinkingLevel === "medium",
+      )
+      .map(([name]) => name);
+    expect(mediumTextTasks).toEqual(["vision_review"]);
+  });
+
+  it("accepts a vision_review request and records it as a review, not a caption", () => {
+    const request = {
+      contents: [
+        {
+          parts: [
+            { text: "IMAGE 1: GENERATED OUTPUT IMAGE\n\nReview this render." },
+            inlineImage,
+          ],
+        },
+      ],
+      generationConfig: {
+        maxOutputTokens: visionReview.maxOutputTokens,
+        thinkingConfig: { thinkingLevel: visionReview.thinkingLevel },
+      },
+    };
+    expect(
+      policies.buildGeminiProxyRequest(textPath, request, "vision_review"),
+    ).toMatchObject({
+      generationConfig: {
+        maxOutputTokens: 2048,
+        thinkingConfig: { thinkingLevel: "medium" },
+      },
+      safetySettings: canonicalModelPolicy.safetySettings,
+    });
+
+    // The proxy must attribute the event to vision_review rather than
+    // silently falling back to `caption`, or the ledger keeps over-counting
+    // captions exactly as it did before the split.
+    expect(
+      helpers.proxyGenerationIdentity(
+        textPath,
+        {
+          method: "POST",
+          headers: {
+            "x-generation-task": "vision_review",
+            "x-model-policy-version": currentVersion,
+          },
+          data: {},
+        },
+        policies,
+        "gemini",
+        "",
+      ),
+    ).toMatchObject({ task: "vision_review", kind: "text", tier: "quality" });
+  });
+
+  it("never lets a QC review stand in as the AI caption's provenance", () => {
+    const captionTasks = hook.slice(
+      hook.indexOf("const captionTasks = {"),
+      hook.indexOf("const imageTasks = {"),
+    );
+    expect(captionTasks).toContain("caption: true");
+    expect(captionTasks).toContain("caption_regenerate: true");
+    expect(captionTasks).toContain("caption_edit: true");
+    expect(captionTasks).toContain("vision_review: false");
+  });
+
+  it("extends the generation_events task enum idempotently, with a real rollback", () => {
+    // `task` is a select field: without the schema value, every recorded
+    // review would fail validation on write and vanish from the ledger.
+    expect(migration).toContain('"vision_review"');
+    expect(migration).toContain("generation_events");
+    expect(migration).toContain("values.indexOf(NEW_TASK_VALUE) !== -1) return");
+    // The rollback refuses to orphan rows that already use the value.
+    expect(migration).toContain("stillInUse");
+    expect(migration).toContain("values.splice(index, 1)");
+
+    const packageJson = readFileSync(resolve(process.cwd(), "package.json"), "utf8");
+    expect(packageJson).toContain("pb_migrations/175170*.js");
+  });
+});

@@ -2762,10 +2762,16 @@ routerAdd("POST", "/api/app/posts", (c) => {
         });
       }
     }
+    // Which text tasks may be claimed as "an AI wrote this caption". This is
+    // provenance, not a task inventory: `vision_review` is a text task on the
+    // same models, but it is a QC read of a rendered image and must never
+    // relabel a locally templated caption as AI-generated. Any new text task
+    // has to be listed here explicitly, with its answer.
     const captionTasks = {
       caption: true,
       caption_regenerate: true,
       caption_edit: true,
+      vision_review: false,
     };
     const imageTasks = { image_standard: true, image_studio: true };
     let latestCaptionSuccess = null;

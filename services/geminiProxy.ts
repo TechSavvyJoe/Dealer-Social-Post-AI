@@ -17,6 +17,18 @@ import {
 let requestCounter = 0;
 
 /**
+ * Per-request tracing is a local debugging affordance, not production
+ * telemetry. Every generation used to log a request line and a response line
+ * unconditionally, which buried the `console.error` a support session is
+ * actually looking for (and put paths and status codes in a salesperson's
+ * console). Genuine failures below still use `console.error`; real telemetry
+ * goes through `utils/telemetry`.
+ */
+const traceProxy = (message: string) => {
+  if (import.meta.env.DEV) console.log(message);
+};
+
+/**
  * What the browser is doing with a generation request, sent as
  * `X-Generation-Purpose` so the server's usage ledger can tell a vision-QC
  * review or caption pack apart from a plain caption. Accounting metadata
@@ -105,7 +117,7 @@ export async function fetchFromProxy(
   else externalSignal?.addEventListener("abort", relayExternalAbort, { once: true });
 
   try {
-    console.log(`[GeminiProxy] [${requestId}] Requesting ${method} ${path}`);
+    traceProxy(`[GeminiProxy] [${requestId}] Requesting ${method} ${path}`);
 
     // Auth is the HttpOnly session cookie. Provider credentials never enter
     // the browser bundle.
@@ -164,7 +176,7 @@ export async function fetchFromProxy(
       );
     });
 
-    console.log(`[GeminiProxy] [${requestId}] Response ${response.status} for ${path}`);
+    traceProxy(`[GeminiProxy] [${requestId}] Response ${response.status} for ${path}`);
 
     const responseText = await response.text();
     assertAuthEpoch(requestAuthEpoch);

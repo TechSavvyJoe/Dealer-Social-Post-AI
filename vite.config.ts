@@ -91,13 +91,18 @@ export default defineConfig(() => {
                 id.includes("zustand")
               )
                 return "vendor";
-              if (id.includes("framer-motion")) return "ui";
+              // framer-motion is deliberately NOT pinned to a chunk. index.tsx
+              // loads the DOM animation feature set through an async
+              // LazyMotion loader (utils/motionFeatures.ts); force-assigning
+              // every framer-motion module to one statically-imported chunk
+              // defeated that split and pulled the whole animation runtime
+              // into the boot path. Left unassigned, the features chunk
+              // resolves after first paint.
             }
           },
         },
       },
-      // Keep warnings useful without flagging the intentionally grouped
-      // framer-motion UI chunk.
+      // Keep warnings useful without flagging the large lazy route chunks.
       chunkSizeWarningLimit: 1000,
       // Enable minification
       minify: "esbuild" as const,

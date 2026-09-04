@@ -148,6 +148,17 @@ export interface GeneratedPost {
    * post can never claim consent that the backend does not hold.
    */
   releaseStatus?: "not_required" | "saved" | "save_failed";
+  /**
+   * The two release writes fail independently: the signature is stored before
+   * the paid provider call, the post-to-release association after it. This is
+   * set only when consent IS durably stored and just the association failed —
+   * a recoverable state the result screen can retry. Its absence on a locked
+   * post means the lock is a genuine missing-consent lock, which keeps the
+   * strict copy.
+   */
+  releaseLinkStatus?: "link_failed";
+  /** Server id of the stored consent record, so the link can be retried. */
+  releaseId?: string;
   /** Manager/super-admin History view of another salesperson's immutable work. */
   historyReadOnly?: boolean;
   /** Server policy quarantine for legacy/unreviewed creative pixels. */

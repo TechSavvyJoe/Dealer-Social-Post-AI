@@ -70,6 +70,43 @@ describe("fetchFromProxy", () => {
     expect(init.headers).not.toHaveProperty("X-Generation-Purpose");
   });
 
+  /** Proxy trace lines only; other modules log through the same spy. */
+  const proxyTraceLines = () =>
+    (console.log as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .map((call) => String(call[0]))
+      .filter((line) => line.startsWith("[GeminiProxy]"));
+
+  it("keeps per-request tracing out of production consoles but still reports failures", async () => {
+    vi.stubEnv("DEV", false);
+    stubFetch(200, { candidates: [] });
+
+    await fetchFromProxy("POST", textPath, { contents: [] }, "caption");
+
+    // Two lines per generation (request + response) drowned the one line a
+    // support session needs, on a device where the console is the only tool.
+    expect(proxyTraceLines()).toEqual([]);
+
+    stubFetch(400, { error: { message: "bad request" } });
+    await expect(
+      fetchFromProxy("POST", textPath, { contents: [] }, "caption"),
+    ).rejects.toMatchObject({ kind: "validation" });
+    // A genuine failure still reaches the console in production.
+    expect(console.error).toHaveBeenCalled();
+    expect(proxyTraceLines()).toEqual([]);
+
+    vi.unstubAllEnvs();
+  });
+
+  it("traces every request in development", async () => {
+    vi.stubEnv("DEV", true);
+    stubFetch(200, { candidates: [] });
+
+    await fetchFromProxy("POST", textPath, { contents: [] }, "caption");
+
+    expect(proxyTraceLines()).toHaveLength(2);
+    vi.unstubAllEnvs();
+  });
+
   it("maps 409 POLICY_VERSION_MISMATCH to a terminal outdated error without retrying or tripping the breaker", async () => {
     const fetchMock = stubFetch(409, {
       error: "POLICY_VERSION_MISMATCH",

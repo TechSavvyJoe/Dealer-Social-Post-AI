@@ -188,6 +188,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
             leftIcon={<Plus className="w-3.5 h-3.5" />}
             onClick={startNew}
             disabled={saving}
+            className="whitespace-nowrap"
           >
             Add scenario
           </Button>

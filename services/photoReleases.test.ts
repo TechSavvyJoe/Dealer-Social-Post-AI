@@ -3,9 +3,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   linkReleaseToPost,
+  linkReleaseToPostWithRetry,
   runWithPersistedPhotoRelease,
+  shouldRetryReleaseLink,
   type CapturedRelease,
 } from "./photoReleases";
+import { ApiError } from "./apiErrors";
 import { captureAuthEpoch, setActiveAuthEpoch } from "../utils/authBoundary";
 
 beforeEach(() => {
@@ -219,5 +222,90 @@ describe("photo release consent gate", () => {
     );
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(request.body).not.toContain("signature");
+  });
+});
+
+describe("post↔release link recovery", () => {
+  const linkResponse = () =>
+    new Response(
+      JSON.stringify({ id: "release-1", post_id: "post-1", has_release: true }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  const unavailable = () =>
+    new Response(JSON.stringify({ message: "Service Unavailable" }), {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  it("retries a transient link failure instead of stranding stored consent", async () => {
+    let attempts = 0;
+    const fetchMock = vi.fn(async () => {
+      attempts += 1;
+      return attempts === 1 ? unavailable() : linkResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      linkReleaseToPostWithRetry("release-1", "post-1", { maxAttempts: 2 }),
+    ).resolves.toEqual({ id: "release-1", post_id: "post-1", has_release: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("rethrows the underlying failure, not a retry wrapper, once attempts run out", async () => {
+    const fetchMock = vi.fn(async () => unavailable());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      linkReleaseToPostWithRetry("release-1", "post-1", { maxAttempts: 2 }),
+    ).rejects.toThrow("Photo release link failed: Service Unavailable");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("never repeats an authorization rejection", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ message: "Forbidden" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      linkReleaseToPostWithRetry("release-1", "post-1", { maxAttempts: 3 }),
+    ).rejects.toThrow("Photo release link failed: Forbidden");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops immediately when the signed-in workspace changed mid-flight", async () => {
+    setActiveAuthEpoch(4);
+    const fetchMock = vi.fn(async () => linkResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      linkReleaseToPostWithRetry("release-1", "post-1", {
+        requestAuthEpoch: 3,
+        maxAttempts: 3,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("classifies retryable and permanent link failures", () => {
+    const withCause = (status: number) =>
+      new Error("Photo release link failed", {
+        cause: new ApiError("nope", { status }),
+      });
+
+    expect(shouldRetryReleaseLink(withCause(503))).toBe(true);
+    expect(shouldRetryReleaseLink(withCause(408))).toBe(true);
+    expect(shouldRetryReleaseLink(withCause(401))).toBe(false);
+    expect(shouldRetryReleaseLink(withCause(422))).toBe(false);
+    expect(shouldRetryReleaseLink(new Error("Failed to fetch"))).toBe(true);
+    expect(
+      shouldRetryReleaseLink(
+        new DOMException("workspace changed", "AbortError") as unknown as Error,
+      ),
+    ).toBe(false);
   });
 });

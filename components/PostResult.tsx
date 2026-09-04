@@ -81,6 +81,8 @@ import {
 } from "../utils/mediaSave";
 import { useAppStore } from "../stores/appStore";
 import { ApiError } from "../services/apiErrors";
+import { linkReleaseToPostWithRetry } from "../services/photoReleases";
+import { connectionManager } from "../utils/connectionManager";
 import { archiveDealerMedia } from "../utils/creativeStorage";
 import { EXPORT_FORMATS, renderFormatIfNeeded } from "../utils/multiFormatExport";
 import { logError } from "../utils/telemetry";
@@ -150,77 +152,70 @@ const websitePublicationCopy = (
   switch (publication?.status) {
     case "not_requested":
       return {
-        title: "Website selected — review before sending",
-        detail: "Finish the image and caption, then send one final private draft.",
+        title: "Website selected",
+        detail: "Review, then send one private draft.",
         tone: "neutral",
       };
     case "waiting_approval":
       return {
-        title: "Website draft waiting for approval",
-        detail:
-          "AI prepared the private draft. Customer Hub delivery starts only after this exact creative is approved.",
+        title: "Draft waiting for approval",
+        detail: "Delivery starts once this creative is approved.",
         tone: "warning",
       };
     case "queued":
     case "retrying":
       return {
         title: "Website draft queued",
-        detail:
-          "The secure handoff to Customer Hub is queued. Nothing has been published publicly.",
+        detail: "Handoff queued. Nothing is public yet.",
         tone: "info",
       };
     case "delivering":
       return {
-        title: "Sending private website draft",
-        detail:
-          "Customer Hub is receiving the exact approved creative and website copy.",
+        title: "Sending private draft",
+        detail: "Customer Hub is receiving this creative.",
         tone: "info",
       };
     case "draft_ready":
       return publication.lastError
         ? {
-            title: "Private draft ready — status check needs attention",
-            detail:
-              "The draft and review link are safe in Customer Hub. Retry the status check after the connection issue is corrected.",
+            title: "Draft ready — check status",
+            detail: "The draft is safe. Retry once you are back online.",
             tone: "warning",
           }
         : {
-            title: "Private website draft ready",
-            detail:
-              "Review it in Customer Hub, then publish it when you are satisfied.",
+            title: "Private draft ready",
+            detail: "Review in Customer Hub, then publish.",
             tone: "success",
           };
     case "published":
       return {
         title: "Published on the website",
-        detail: "Customer Hub reports that this website item is public.",
+        detail: "Customer Hub reports this item is public.",
         tone: "success",
       };
     case "failed":
       if (!hasSavedPost) {
         return {
-          title: "Website draft was not saved",
-          detail:
-            "The original post did not finish saving, so nothing can be retried. Start a new post when the connection is ready.",
+          title: "Draft not saved",
+          detail: "The post never saved. Start a new one when online.",
           tone: "error",
         };
       }
       return {
-        title: "Website draft delivery needs attention",
+        title: "Draft delivery needs attention",
         detail: friendlyWebsiteDeliveryError(publication.lastError),
         tone: "error",
       };
     case "withdrawn":
       return {
         title: "Website draft withdrawn",
-        detail: "This website revision is no longer queued or public.",
+        detail: "This revision is no longer queued or public.",
         tone: "neutral",
       };
     default:
       return {
         title: "Website draft prepared",
-        detail:
-          "AI prepared private website copy. Nothing is public until Customer Hub publishes it.",
+        detail: "Nothing is public until Customer Hub publishes it.",
         tone: "neutral",
       };
   }
@@ -503,6 +498,22 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [imageReviewRequired, setImageReviewRequired] = useState(
     Boolean(post.imageReviewRequired),
   );
+  /**
+   * Release state is local because it is repairable from this screen: a
+   * successful "Retry saving release" turns a locked post into a deliverable
+   * one without regenerating anything.
+   */
+  const [releaseStatus, setReleaseStatus] = useState<GeneratedPost["releaseStatus"]>(
+    post.releaseStatus,
+  );
+  const [releaseLinkStatus, setReleaseLinkStatus] = useState<
+    GeneratedPost["releaseLinkStatus"]
+  >(post.releaseLinkStatus);
+  const [releaseRetrying, setReleaseRetrying] = useState(false);
+  const [releaseRetryNotice, setReleaseRetryNotice] = useState<string | null>(null);
+  /** One automatic reconnect retry per mount; the button stays available after. */
+  const releaseReconnectUsedRef = useRef(false);
+  const releaseRetryingRef = useRef(false);
   const [websitePublication, setWebsitePublication] = useState<
     WebsitePublication | undefined
   >(
@@ -857,7 +868,19 @@ export const PostResult: React.FC<PostResultProps> = ({
       ? post.approvalStatus !== "n_a"
       : requiresApproval;
   const approvalLocked = reviewRequired && approvalStatus !== "approved";
-  const releaseLocked = post.releaseStatus === "save_failed";
+  // The gate itself is unchanged: delivery stays locked for BOTH release
+  // failures. Only the explanation and the remedy differ below.
+  const releaseLocked = releaseStatus === "save_failed";
+  /**
+   * The recoverable variant: the customer's signature is durably stored on the
+   * server and only its association with this post is missing, so both ids
+   * needed to repair it are already in hand.
+   */
+  const releaseLinkRepairable =
+    releaseLocked &&
+    releaseLinkStatus === "link_failed" &&
+    Boolean(post.releaseId) &&
+    Boolean(post.postId);
   const claimLocked = captionSetAnalysis.prohibited.length > 0;
   const deliveryLocked =
     imageReviewRequired ||
@@ -888,6 +911,65 @@ export const PostResult: React.FC<PostResultProps> = ({
     },
     [],
   );
+  /**
+   * Repair the missing post↔release association. Nothing is re-signed and no
+   * paid generation runs: this is the same small first-party POST that failed
+   * after the post was created, replayed with the ids already on the post.
+   */
+  const retryReleaseLink = useCallback(
+    async (trigger: "manual" | "reconnect") => {
+      const sourcePost = currentPostPropRef.current;
+      const releaseId = sourcePost.releaseId;
+      const postId = sourcePost.postId;
+      if (!releaseId || !postId || releaseRetryingRef.current) return;
+      releaseRetryingRef.current = true;
+      setReleaseRetrying(true);
+      setReleaseRetryNotice(null);
+      try {
+        await linkReleaseToPostWithRetry(releaseId, postId);
+        setReleaseStatus("saved");
+        setReleaseLinkStatus(undefined);
+        const store = useAppStore.getState();
+        const current = store.generatedPost;
+        if (!current || current.postId === postId) {
+          const base = current || sourcePost;
+          store.setGeneratedPost({
+            ...base,
+            releaseStatus: "saved",
+            releaseLinkStatus: undefined,
+          });
+        }
+        toast.success(
+          "Photo release saved to this post. Copy, share, save, and export are unlocked.",
+        );
+      } catch (error) {
+        logError("photo_release.link_retry_failed", {
+          message: error instanceof Error ? error.message : String(error),
+          trigger,
+        });
+        setReleaseRetryNotice(
+          connectionManager.isOnline
+            ? "That did not go through. Nothing was lost — the signed release is still stored. Try again in a moment; it also retries on its own when the connection comes back."
+            : "You are offline. Nothing was lost — the signed release is still stored, and this retries automatically as soon as you are back online.",
+        );
+      } finally {
+        releaseRetryingRef.current = false;
+        setReleaseRetrying(false);
+      }
+    },
+    [toast],
+  );
+  // Queue one automatic repair for the common field case: the link failed
+  // because the lot Wi-Fi dropped, and the salesperson is still on this screen
+  // when the connection comes back.
+  useEffect(() => {
+    if (!releaseLinkRepairable) return;
+    return connectionManager.subscribe((online) => {
+      if (!online || releaseReconnectUsedRef.current) return;
+      releaseReconnectUsedRef.current = true;
+      void retryReleaseLink("reconnect");
+    });
+  }, [releaseLinkRepairable, retryReleaseLink]);
   // Once a creative has entered the review workflow it must remain byte-for-
   // byte equivalent to what the manager saw. Delivery unlocks on approval,
   // while edits require starting a new review submission.
@@ -1018,8 +1100,16 @@ export const PostResult: React.FC<PostResultProps> = ({
         : approvalStatus === "submission_failed"
           ? "This creative could not be submitted for approval. Delivery remains locked; check your connection and create another post to retry."
           : "This exact image and caption are awaiting manager approval. Save, share, and export unlock automatically after approval.";
-  const releaseGateMessage =
-    "The signed photo release was not stored, so consent cannot be verified. Copy, share, save, and export remain locked; check your connection and create another post to retry.";
+  // Two different failures, two different truths. The harsher wording is
+  // reserved for the case where consent may genuinely be missing; claiming a
+  // stored signature "was not stored" sent salespeople back to customers who
+  // had already driven away.
+  const releaseGateTitle = releaseLinkRepairable
+    ? "Photo release not attached yet"
+    : "Photo release not saved";
+  const releaseGateMessage = releaseLinkRepairable
+    ? "The customer's signed release was captured and saved — nothing needs to be signed again. Only its link to this post did not finish, so copy, share, save, and export stay locked until it does. Retry saving the release below."
+    : "The signed photo release was not stored, so consent cannot be verified. Copy, share, save, and export remain locked; check your connection and create another post to retry.";
   const claimGateMessage = claimLocked
     ? prohibitedClaimsMessage(captionSetAnalysis.prohibited)
     : "";
@@ -1047,8 +1137,23 @@ export const PostResult: React.FC<PostResultProps> = ({
       : claimLocked
         ? "Claim blocked"
         : releaseLocked
-          ? "Release not saved"
+          ? releaseLinkRepairable
+            ? "Release not attached"
+            : "Release not saved"
           : "Approval pending";
+  /**
+   * The action bar states the lock; it does not offer it as something to press.
+   * It used to render inside the Copy button, so the same sentence appeared as
+   * a banner, a toast, and a disabled control that looked tappable. The reason
+   * still reaches assistive tech through each disabled button's aria-label, so
+   * this stays out of the live regions rather than announcing a third time.
+   */
+  const deliveryLockStatus = deliveryLocked ? (
+    <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-warning-200">
+      <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span>Delivery locked · {deliveryLockLabel}</span>
+    </p>
+  ) : null;
   const websiteStatusCopy = websitePublicationCopy(
     websitePublication,
     Boolean(post.postId),
@@ -1066,6 +1171,14 @@ export const PostResult: React.FC<PostResultProps> = ({
     setApprovalCheckError(null);
     setImageReviewRequired(Boolean(post.imageReviewRequired));
   }, [post.postId, post.approvalStatus, post.imageReviewRequired, requiresApproval]);
+
+  // A different post (or a store update after a repair) owns the release gate.
+  useEffect(() => {
+    setReleaseStatus(post.releaseStatus);
+    setReleaseLinkStatus(post.releaseLinkStatus);
+    setReleaseRetryNotice(null);
+    releaseReconnectUsedRef.current = false;
+  }, [post.postId, post.releaseStatus, post.releaseLinkStatus]);
 
   useEffect(() => {
     if (!reviewRequired || approvalStatus !== "pending" || !post.postId) {
@@ -3469,7 +3582,7 @@ export const PostResult: React.FC<PostResultProps> = ({
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <p className="font-semibold">Photo release not saved</p>
+                <p className="font-semibold">{releaseGateTitle}</p>
                 <Badge variant="error" uppercase={false}>
                   Delivery locked
                 </Badge>
@@ -3477,6 +3590,34 @@ export const PostResult: React.FC<PostResultProps> = ({
               <p className="mt-1 text-sm leading-relaxed opacity-80">
                 {releaseGateMessage}
               </p>
+              {releaseLinkRepairable ? (
+                <div className="mt-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="min-h-11"
+                    disabled={releaseRetrying}
+                    leftIcon={
+                      releaseRetrying ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )
+                    }
+                    onClick={() => void retryReleaseLink("manual")}
+                  >
+                    {releaseRetrying ? "Saving release…" : "Retry saving release"}
+                  </Button>
+                  {releaseRetryNotice ? (
+                    <p
+                      className="mt-2 text-sm leading-relaxed opacity-80"
+                      aria-live="polite"
+                    >
+                      {releaseRetryNotice}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </m.div>
         )}
@@ -3568,7 +3709,10 @@ export const PostResult: React.FC<PostResultProps> = ({
               <Globe2 className="h-4 w-4" aria-hidden="true" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 items-center gap-1.5">
+              {/* Wrap rather than clip: these strings were being cut mid-word
+                  ("Website draft was not s…"), which reads as a rendering bug
+                  and hides the part that says what to do next. */}
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <p className="truncate text-sm font-semibold">
                   {websiteStatusCopy.title}
                 </p>
@@ -4778,6 +4922,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 {/* Desktop: delivery actions sit with the caption panel. */}
                 {isDesktopLayout ? (
                   <div className="mb-3" aria-label="Post delivery actions">
+                    {deliveryLockStatus}
                     <Button
                       variant="outline"
                       onClick={handleCopy}
@@ -4798,11 +4943,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                       disableHaptics
                     >
                       <span aria-live="polite">
-                        {deliveryLocked
-                          ? deliveryLockLabel
-                          : copied
-                            ? "Copied"
-                            : "Copy caption"}
+                        {copied ? "Copied" : "Copy caption"}
                       </span>
                     </Button>
                   </div>
@@ -4877,6 +5018,9 @@ export const PostResult: React.FC<PostResultProps> = ({
                 paddingRight: "env(safe-area-inset-right)",
               }}
             >
+              {deliveryLockStatus ? (
+                <div className="mx-auto max-w-lg px-3 pt-2">{deliveryLockStatus}</div>
+              ) : null}
               <div
                 className="mx-auto grid max-w-lg grid-cols-3 gap-2 px-3 pt-2"
                 aria-label="Post delivery actions"
@@ -4970,9 +5114,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                   className="min-w-0 px-2"
                   disableHaptics
                 >
-                  <span aria-live="polite">
-                    {deliveryLocked ? deliveryLockLabel : copied ? "Copied" : "Copy"}
-                  </span>
+                  <span aria-live="polite">{copied ? "Copied" : "Copy"}</span>
                 </Button>
               </div>
             </div>,

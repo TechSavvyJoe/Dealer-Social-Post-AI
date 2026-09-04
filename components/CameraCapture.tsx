@@ -224,7 +224,8 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
               Add a photo
             </h2>
             <p className="mt-2 text-sm leading-6 text-surface-300">
-              Use the rear camera for a new handoff, or select an existing photo.
+              Shoot the handoff with the rear camera, or pick a photo already on this
+              device.
             </p>
 
             <div className="mt-7 space-y-3">
@@ -267,7 +268,7 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
           className={`capture-studio-preview relative flex min-h-[260px] items-center justify-center overflow-hidden border-t border-hairline bg-surface-950 p-4 transition-colors sm:col-start-1 sm:row-start-1 sm:min-h-[480px] sm:border-r sm:border-t-0 sm:p-5 lg:min-h-[640px] lg:p-6 ${
             isDraggingOver ? "border-primary-400 bg-primary-950/30" : ""
           }`}
-          aria-label="Photo drop zone"
+          aria-label="Photo preview area"
         >
           {isProcessing && (
             <div
@@ -310,7 +311,13 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
               Ready for the delivery moment
             </p>
             <p className="mt-2 text-sm leading-6 text-surface-400">
-              Drag a photo anywhere onto this studio, or choose a source from the panel.
+              Take the photo now, or choose one already saved on this device.
+            </p>
+            {/* Drag-and-drop is a desktop-only convenience. The window-level
+                listeners above stay active for every viewport, but the hint is
+                hidden on the phones salespeople actually shoot from. */}
+            <p className="mt-2 hidden text-xs leading-5 text-surface-500 sm:block">
+              On a computer you can also drag a photo anywhere onto this studio.
             </p>
           </div>
         </section>

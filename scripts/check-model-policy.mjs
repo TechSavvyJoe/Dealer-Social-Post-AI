@@ -43,6 +43,7 @@ const expectedTaskNames = [
   "caption",
   "caption_regenerate",
   "caption_edit",
+  "vision_review",
   "image_standard",
   "image_studio",
   "video_standard",
@@ -130,6 +131,21 @@ for (const [taskName, task] of Object.entries(canonical.tasks)) {
       `${taskName} must specify an output size for every model`,
     );
   }
+}
+
+// Thinking tokens bill as output tokens, so the split is a cost contract, not
+// a style preference: the vision-QC review is the only text task that pays
+// for "medium" reasoning, and every caption task stays below it.
+assert.equal(
+  canonical.tasks.vision_review.thinkingLevel,
+  "medium",
+  "vision_review must keep thinkingLevel medium — it is the QC read the plan pays for",
+);
+for (const captionTask of ["caption", "caption_regenerate", "caption_edit"]) {
+  assert.ok(
+    ["minimal", "low"].includes(canonical.tasks[captionTask].thinkingLevel),
+    `${captionTask} must stay at minimal/low thinking; medium bills reasoning on every caption`,
+  );
 }
 
 assert.deepEqual(canonical.tasks.video_standard, {

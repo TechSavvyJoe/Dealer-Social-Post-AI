@@ -2,7 +2,7 @@ import "./styles/globals.css";
 import React, { Suspense } from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { domAnimation, LazyMotion, MotionConfig } from "framer-motion";
+import { LazyMotion, MotionConfig } from "framer-motion";
 import App from "./App";
 import { getQueryClient } from "./services/queryClient";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -36,6 +36,13 @@ const ReactQueryDevtools = React.lazy(() =>
 const showReactQueryDevtools =
   import.meta.env.DEV && import.meta.env.VITE_SHOW_QUERY_DEVTOOLS === "true";
 
+// LazyMotion loads its feature bundle asynchronously so the DOM animation
+// runtime is not part of the boot-critical graph: the shell paints, then the
+// features stream in and every `m.*` component upgrades in place. Strict mode
+// stays on, so `motion.*` still throws and only `m.*` is renderable.
+const loadMotionFeatures = () =>
+  import("./utils/motionFeatures").then((mod) => mod.default);
+
 const rootElement = document.getElementById("root");
 if (!rootElement) {
   throw new Error("Could not find root element to mount to");
@@ -44,7 +51,7 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <LazyMotion features={domAnimation} strict={true}>
+    <LazyMotion features={loadMotionFeatures} strict={true}>
       <MotionConfig reducedMotion="user">
         <QueryClientProvider client={getQueryClient()}>
           <ToastProvider>

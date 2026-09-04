@@ -25,7 +25,11 @@ import {
 } from "./modelConfig";
 import { generateTextViaClaude } from "./claudeAdapter";
 import { generateImageViaOpenAI } from "./openaiAdapter";
-import { createBlockedContentError, normalizeError } from "../utils/errorHandler";
+import {
+  createBlockedContentError,
+  normalizeError,
+  type NormalizedError,
+} from "../utils/errorHandler";
 
 // Hoist the mocks so they can be used in the mock factory
 const { mockGenerateContent, mockGenerateVideos, mockGetVideosOperation } = vi.hoisted(
@@ -218,10 +222,12 @@ describe("GeminiService model routing", () => {
     );
 
     const expected = TASKS.caption.primary;
+    // Match on the task, not just the model id: the vision-QC review runs on
+    // the same primary model and would otherwise be picked up here.
     const textCall = mockGenerateContent.mock.calls.find(
-      (call) => call[0].model === expected,
+      (call) => call[0].task === "caption" && call[0].model === expected,
     );
-    expect(textCall, `expected a call with model=${expected}`).toBeDefined();
+    expect(textCall, `expected a caption call with model=${expected}`).toBeDefined();
     expect(textCall?.[0].generationConfig).toEqual({
       maxOutputTokens: 2048,
       thinkingConfig: { thinkingLevel: "low" },
@@ -314,7 +320,19 @@ describe("GeminiService model routing", () => {
     const reviewRequest = mockGenerateContent.mock.calls.find(([request]) =>
       isImageTextReviewRequest(request),
     )?.[0];
+    // The QC review is the one text call that pays for "medium" reasoning:
+    // it decides whether a flawed render reaches a customer's feed. Captions
+    // stay at "low" because thinking tokens bill as output.
+    expect(reviewRequest?.task).toBe("vision_review");
+    expect(reviewRequest?.purpose).toBe("vision_review");
     expect(reviewRequest?.generationConfig).toEqual({
+      maxOutputTokens: 2048,
+      thinkingConfig: { thinkingLevel: "medium" },
+    });
+    const captionRequest = mockGenerateContent.mock.calls.find(
+      ([request]) => request.task === "caption",
+    )?.[0];
+    expect(captionRequest?.generationConfig).toEqual({
       maxOutputTokens: 2048,
       thinkingConfig: { thinkingLevel: "low" },
     });
@@ -1918,8 +1936,18 @@ describe("GeminiService model routing", () => {
     const originalOpenAIFlag = FLAGS.enableOpenAIFallback;
     const usableCaption =
       "A fresh set of keys and a picture-perfect delivery day at Test Dealer. Congratulations on the new ride! #TestDealer";
-    const vendorOutage = () =>
-      new Error("The AI service could not complete this request (error 503).");
+    // What services/geminiProxy.ts actually throws once a 5xx has exhausted
+    // its retries: curated copy plus a typed `kind`. The message deliberately
+    // contains no status code or vendor token, which is exactly why the
+    // cross-vendor fallbacks classify on `kind` instead of substrings.
+    const vendorOutage = () => {
+      const error = new Error(
+        "The AI service is temporarily unavailable.",
+      ) as NormalizedError;
+      error.kind = "model_unavailable";
+      error.retryable = true;
+      return error;
+    };
     const isImageRequest = (request: {
       generationConfig?: { responseModalities?: string[] };
     }) => request.generationConfig?.responseModalities?.includes("IMAGE") === true;

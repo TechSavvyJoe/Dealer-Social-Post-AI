@@ -5,6 +5,7 @@ export type ModelTaskName =
   | "caption"
   | "caption_regenerate"
   | "caption_edit"
+  | "vision_review"
   | "image_standard"
   | "image_studio"
   | "video_standard"
@@ -223,14 +224,14 @@ export const OPENAI_MODELS = {
   image: "gpt-image-2",
 } as const;
 
-type TextTaskName = "caption" | "caption_regenerate" | "caption_edit";
+type TextTaskName = "caption" | "caption_regenerate" | "caption_edit" | "vision_review";
 
 /**
  * Text tasks emit the policy's `maxOutputTokens` plus its per-task
  * `thinkingConfig.thinkingLevel`. Gemini 3.x defaults to `medium` and bills
- * thinking as output tokens, so captions pin a cheaper level. The vision-QC
- * review currently reuses the `caption_regenerate` task and therefore runs
- * at that task's level too.
+ * thinking as output tokens, so captions pin a cheaper level. `vision_review`
+ * is the deliberate exception: it is the one call where reasoning quality
+ * decides whether a flawed render ships, so it keeps `medium`.
  */
 const textGenerationParams = (task: TextTaskName): GenerationParams => {
   const policyTask = MODEL_POLICY.tasks[task];
@@ -253,6 +254,7 @@ export const TASK_PARAMS: Record<ModelTaskName, GenerationParams> = {
   caption: textGenerationParams("caption"),
   caption_regenerate: textGenerationParams("caption_regenerate"),
   caption_edit: textGenerationParams("caption_edit"),
+  vision_review: textGenerationParams("vision_review"),
   // Image models manage their own reasoning and composition defaults.
   image_standard: {
     maxOutputTokens: MODEL_POLICY.tasks.image_standard.maxOutputTokens,
@@ -297,6 +299,19 @@ export const TASKS: Record<ModelTaskName, TaskConfig> = {
     claudeFallback: CLAUDE_MODELS.text_fast,
     claudeTemperature: 0.4,
     params: TASK_PARAMS.caption_edit,
+  },
+  // Second-pass quality control on a generated image. Same ladder as a
+  // regenerated caption, but its own task so the request carries
+  // thinkingLevel "medium" and the server's usage ledger records a review
+  // instead of a caption. No cross-vendor fallback: Claude cannot answer the
+  // structured verdict this reviewer returns.
+  vision_review: {
+    kind: "text",
+    tier: "quality",
+    models: MODEL_POLICY.tasks.vision_review.models,
+    primary: MODEL_POLICY.tasks.vision_review.models[0],
+    fallback: MODEL_POLICY.tasks.vision_review.models[1],
+    params: TASK_PARAMS.vision_review,
   },
   image_standard: {
     kind: "image",

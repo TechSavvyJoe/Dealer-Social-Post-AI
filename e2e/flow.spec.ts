@@ -1180,7 +1180,7 @@ test.describe("Dealer Social Post AI Flow", () => {
     expect(websitePostCount).toBe(0);
 
     const statusCard = page.getByRole("status").filter({
-      hasText: "Website selected — review before sending",
+      hasText: "Website selected",
     });
     await expect(statusCard).toBeVisible();
     const initialCardGeometry = await statusCard.evaluate((element) => ({
@@ -1273,7 +1273,7 @@ test.describe("Dealer Social Post AI Flow", () => {
     });
     await expect(
       page.getByRole("alert").filter({
-        hasText: "Private draft ready — status check needs attention",
+        hasText: "Draft ready — check status",
       }),
     ).toBeVisible();
     await expect(

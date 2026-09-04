@@ -40,6 +40,9 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
   const listboxId = useId();
   const labelId = useId();
   const selectedValueId = useId();
+  // Category headings are visual only unless each category is a real listbox
+  // group, so every heading gets an id that names its role="group" wrapper.
+  const categoryLabelId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -226,8 +229,16 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
             className="rounded-xl border border-hairline bg-surface-900/95 backdrop-blur-xl shadow-2xl p-2 max-h-96 overflow-y-auto"
           >
             {grouped.map(([category, list]) => (
-              <div key={category} role="presentation" className="mb-2 last:mb-0">
-                <div className="text-[10px] uppercase tracking-wide text-surface-400 px-2 pb-1 pt-1.5">
+              <div
+                key={category}
+                role="group"
+                aria-labelledby={`${categoryLabelId}-${category}`}
+                className="mb-2 last:mb-0"
+              >
+                <div
+                  id={`${categoryLabelId}-${category}`}
+                  className="text-[10px] uppercase tracking-wide text-surface-400 px-2 pb-1 pt-1.5"
+                >
                   {SCENARIO_CATEGORY_LABELS[category]}
                 </div>
                 <div role="presentation" className="space-y-0.5">

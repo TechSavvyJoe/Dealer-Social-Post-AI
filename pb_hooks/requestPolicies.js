@@ -322,6 +322,18 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
       maxOutputTokens: 2048,
       thinkingLevel: "minimal",
     },
+    // The image quality-control review reads pixels and returns a strict
+    // verdict; it is the one text call where reasoning quality is worth
+    // paying for, so it keeps "medium" while captions run at "low"/"minimal".
+    // A dedicated task also stops the usage ledger from counting QC reviews
+    // as captions.
+    vision_review: {
+      kind: "text",
+      tier: "quality",
+      models: ["gemini-3.6-flash", "gemini-3.5-flash-lite"],
+      maxOutputTokens: 2048,
+      thinkingLevel: "medium",
+    },
     image_standard: {
       kind: "image",
       tier: "standard",
@@ -444,6 +456,7 @@ const TEXT_GENERATE_CONTENT_MODELS = uniqueModelsForTasks([
   "caption",
   "caption_regenerate",
   "caption_edit",
+  "vision_review",
 ]);
 const IMAGE_GENERATE_CONTENT_MODELS = uniqueModelsForTasks([
   "image_standard",

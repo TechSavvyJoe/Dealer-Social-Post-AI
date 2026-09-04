@@ -16,7 +16,7 @@ import {
   captureAuthEpoch,
   notifySessionRejected,
 } from "../utils/authBoundary";
-import { isBlockedContentError } from "../utils/errorHandler";
+import { normalizeError } from "../utils/errorHandler";
 
 const PROXY_PATH = "/api/proxy/openai/v1/images/generations";
 
@@ -115,27 +115,27 @@ export const generateImageViaOpenAI = async (
   return `data:image/png;base64,${b64}`;
 };
 
+/** A caller cancellation, not a provider failure. */
+const isAbortError = (err: unknown): boolean =>
+  typeof err === "object" &&
+  err !== null &&
+  "name" in err &&
+  (err as { name?: unknown }).name === "AbortError";
+
 /**
- * Detects whether an error from Gemini image generation is severe enough to
- * try the OpenAI fallback. Mirrors the Claude fallback heuristic. A typed
- * content refusal never qualifies: text-to-image would fabricate a scene
- * without the customer's actual photo, so the caller ships the original.
+ * Detects whether a Gemini image failure is severe enough to try OpenAI.
+ * Mirrors `shouldFallbackToClaude`, including the reason it stopped matching
+ * message substrings: the proxy throws curated product copy, so the old
+ * "quota"/"429" scan never fired on a real rate-limit failure.
+ *
+ * Only `quota` and `model_unavailable` qualify. A typed `blocked` never does
+ * — text-to-image would fabricate a scene without the customer's actual
+ * photo, so the caller ships the original — and neither do `unauthorized`,
+ * `outdated`, or the retry-on-Gemini kinds.
  */
 export const shouldFallbackToOpenAI = (err: unknown): boolean => {
   if (!FLAGS.enableOpenAIFallback) return false;
-  if (isBlockedContentError(err)) return false;
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  if (
-    msg.includes("quota") ||
-    msg.includes("rate limit") ||
-    msg.includes("rate_limit") ||
-    msg.includes("503") ||
-    msg.includes("500") ||
-    msg.includes("unavailable") ||
-    msg.includes("safety") ||
-    msg.includes("blocked")
-  ) {
-    return true;
-  }
-  return false;
+  if (isAbortError(err)) return false;
+  const kind = normalizeError(err).kind;
+  return kind === "quota" || kind === "model_unavailable";
 };

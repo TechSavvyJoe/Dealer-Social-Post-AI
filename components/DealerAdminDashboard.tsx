@@ -733,7 +733,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
 
   const selectLook = (next: SignatureLook) => {
     setSignatureLook(next);
-    // The alternate is "a second Look", so it can never equal the house Look.
+    // The alternate is "a second look", so it can never equal the house look.
     if (alternateLook === next) setAlternateLook("");
   };
 
@@ -756,7 +756,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
 
   const validateBrandFields = (): string | null => {
     if (signatureLook && alternateLook && alternateLook === signatureLook) {
-      return "The alternate Look must differ from the Signature Look.";
+      return "The alternate look must differ from the signature look.";
     }
     for (const list of [voiceDo, voiceDont]) {
       if (list.length > BRAND_VOICE_MAX_ITEMS) {
@@ -859,11 +859,14 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
     }
   };
 
+  // pb-20 (80px) reserves at least the sticky save bar's own footprint —
+  // min-h-14 (56px) plus its bottom-2 (8px) offset — so the last control is
+  // never trapped underneath the bar. sm:pb-20 re-asserts it past sm:p-6.
   return (
     <m.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="rounded-lg border border-hairline bg-surface-overlay p-4 sm:p-6 space-y-6"
+      className="rounded-lg border border-hairline bg-surface-overlay p-4 pb-20 sm:p-6 sm:pb-20 space-y-6"
     >
       <div className="flex items-center gap-3">
         <div
@@ -1001,15 +1004,25 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             Brand
           </div>
           <p className="text-[11px] text-surface-400">
-            One house style for every post. Salespeople never pick image style, tone, or
+            One house style for every post: salespeople never pick image style, tone, or
             video look themselves.
+          </p>
+          {/*
+            Phase 1 ships dark, so nothing in this section governs behavior yet —
+            "Image overlay styles" further down still does. Say so plainly rather
+            than leaving two live sections that contradict each other.
+          */}
+          <p className="mt-2 rounded-lg border border-hairline bg-fill-subtle px-3 py-2 text-[11px] text-surface-300">
+            Not turned on yet. Save your choices here now — they take over once the new
+            creative system is switched on for your store. Until then, the image overlay
+            styles further down are what your team actually sees.
           </p>
         </div>
 
-        {/* Signature Look */}
+        {/* Signature look */}
         <div className="space-y-2">
           <div id={lookGroupId} className="text-xs font-semibold text-surface-200">
-            Signature Look
+            Signature look
           </div>
           <div
             role="radiogroup"
@@ -1067,14 +1080,14 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             })}
           </div>
           <Select
-            label="Alternate Look"
+            label="Alternate look"
             value={alternateLook}
             onChange={(event) =>
               setAlternateLook(
                 isSignatureLook(event.target.value) ? event.target.value : "",
               )
             }
-            helperText="Optional second Look a manager may enable for the team."
+            helperText="Optional second look a manager may enable for the team."
             fullWidth
           >
             <option value="">None</option>
@@ -1245,7 +1258,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             ) : null}
           </div>
           <p className="text-[11px] text-surface-400">
-            Percent of the image width. The Look decides the rest of the layout.
+            Percent of the image width. The look decides the rest of the layout.
           </p>
         </fieldset>
 
@@ -1306,16 +1319,21 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           className="bg-fill-subtle border-hairline focus:border-primary-400"
         />
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {/*
+            Both columns sit side by side at desktop width, so the placeholder has
+            to fit its own field and the two helper lines have to wrap the same
+            way — otherwise the columns end at different heights.
+          */}
           <PhraseChipEditor
             label="Do"
-            helperText="Up to 3 phrases the captions always follow."
-            placeholder="Mention the salesperson by first name"
+            helperText="Up to 3 phrases captions always use."
+            placeholder="Use first names"
             phrases={voiceDo}
             onChange={setVoiceDo}
           />
           <PhraseChipEditor
             label="Don't"
-            helperText="Up to 3 phrases the captions never do."
+            helperText="Up to 3 phrases captions never use."
             placeholder="No exclamation points"
             phrases={voiceDont}
             onChange={setVoiceDont}
@@ -1397,8 +1415,9 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           Image overlay styles
         </div>
         <p className="text-[11px] text-surface-400">
-          Pick which design styles your team can use. Star one to preselect it when a
-          salesperson opens the customizer.
+          Pick which design styles your team can use today. Star one to preselect it
+          when a salesperson opens the customizer. These stay in charge until the Brand
+          section above is switched on.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {Object.values(StyleOption).map((s) => {
@@ -1580,7 +1599,10 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
         </div>
       )}
 
-      <div className="sticky bottom-2 z-10 flex items-center justify-between rounded-xl border border-hairline bg-surface-950/95 px-3 py-3 shadow-elevation-3 backdrop-blur-xl">
+      <div
+        data-testid="dealer-settings-save-bar"
+        className="sticky bottom-2 z-10 flex min-h-14 items-center justify-between rounded-xl border border-hairline bg-surface-950/95 px-3 py-3 shadow-elevation-3 backdrop-blur-xl"
+      >
         <div className="text-[11px] text-surface-400">
           {savedAt
             ? `Saved ${savedAt.toLocaleTimeString([], {

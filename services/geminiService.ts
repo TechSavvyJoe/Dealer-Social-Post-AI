@@ -807,7 +807,14 @@ export const reviewGeneratedImageText = async (
     dealershipName,
     context,
   )}`;
-  const task = "caption_regenerate" as const;
+  // Its own policy task, not `caption_regenerate`. The two share a model
+  // ladder and a 2048-token budget, but this is the one text call where
+  // reasoning quality decides whether a flawed render ships, so the policy
+  // pins `thinkingLevel: "medium"` here while captions stay at "low".
+  // Thinking tokens bill as output, so the split is also what keeps captions
+  // cheap. The proxy records the task, and the ledger stops counting QC
+  // reviews as captions.
+  const task = "vision_review" as const;
   const taskConfig = TASKS[task];
   const attemptId = createGenerationAttemptId();
 
@@ -817,8 +824,6 @@ export const reviewGeneratedImageText = async (
       model: modelId,
       task,
       attemptId,
-      // Runs under the caption_regenerate policy but is a QC review, not a
-      // caption; the ledger must not count it as one.
       purpose: "vision_review",
       contents: {
         parts: [
