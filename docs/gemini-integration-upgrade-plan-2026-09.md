@@ -3,7 +3,7 @@
 Sources: live Google docs/pricing fetched 2026-09-02 (ai.google.dev models,
 pricing, changelog, deprecations, thinking, image-generation, omni pages) and a
 file-level audit of this repo's integration. Model policy on file is v5,
-verified 2026-08-14.
+verified 2026-09-02 (originally 2026-08-14).
 
 ## Where we stand
 
@@ -23,9 +23,10 @@ switched on.
 
 ## Hard dates
 
-- **2026-09-28** — `config/gemini-model-policy.json` `verifiedAt` is 45 days
-  old and `scripts/check-model-policy.mjs` turns CI red, which blocks Fly
-  deploys. Re-verify and bump before then.
+- **2026-10-17** — `config/gemini-model-policy.json` `verifiedAt` (re-verified
+  2026-09-02) turns 45 days old and `scripts/check-model-policy.mjs` turns CI
+  red, which silently blocks Fly deploys. Re-verify and bump `verifiedAt`
+  before then — but never bump `version` casually (see the pin note below).
 - **2026-09-30** — `gemini-omni-flash-preview` shuts down (not pinned; do not
   adopt it — go straight to `gemini-omni-1.1-flash`).
 - **2027-01-01** — 3.6/3.7 Flash text pricing doubles ($0.75→$1.50 in,
