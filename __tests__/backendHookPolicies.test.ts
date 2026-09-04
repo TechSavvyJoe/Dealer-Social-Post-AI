@@ -754,6 +754,70 @@ You are a strict visual quality-control inspector for an automotive dealership i
     expect(policies.buildGeminiProxyRequest(veoPath, veoRequest(8, "720p"))).toBeNull();
   });
 
+  it("forwards a bounded Veo negativePrompt and rejects a malformed one", () => {
+    const fastPath = "v1beta/models/veo-3.1-fast-generate-preview:predictLongRunning";
+    const withNegativePrompt = (negativePrompt: unknown) => {
+      const request = veoRequest(6, "720p");
+      return {
+        ...request,
+        parameters: { ...request.parameters, negativePrompt },
+      };
+    };
+
+    const accepted = policies.buildGeminiProxyRequest(
+      fastPath,
+      withNegativePrompt("second car, vehicle morphing, warped badges"),
+    );
+    expect(accepted).toEqual(
+      withNegativePrompt("second car, vehicle morphing, warped badges"),
+    );
+
+    // Optional: a client that predates the parameter stays valid, and the
+    // sanitized body must not invent the key.
+    const withoutNegativePrompt = policies.buildGeminiProxyRequest(
+      fastPath,
+      veoRequest(6, "720p"),
+    );
+    expect(withoutNegativePrompt).toEqual(veoRequest(6, "720p"));
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        (withoutNegativePrompt as { parameters: Record<string, unknown> }).parameters,
+        "negativePrompt",
+      ),
+    ).toBe(false);
+
+    // Present but malformed is a rejection, never a silently dropped field.
+    const maxNegativePromptChars =
+      canonicalModelPolicy.requestLimits.maxNegativePromptChars;
+    expect(typeof maxNegativePromptChars).toBe("number");
+    for (const invalid of [
+      "",
+      "   ",
+      123,
+      null,
+      ["second car"],
+      { text: "second car" },
+      "x".repeat(maxNegativePromptChars + 1),
+    ]) {
+      expect(
+        policies.buildGeminiProxyRequest(fastPath, withNegativePrompt(invalid)),
+      ).toBeNull();
+    }
+
+    // `generateAudio` is a Vertex/GEAP-only parameter. It must stay off the
+    // allowlist so it can never reach generativelanguage.googleapis.com.
+    expect(canonicalModelPolicy.allowedRequestFields.veo.parameters).not.toContain(
+      "generateAudio",
+    );
+    const request = veoRequest(6, "720p");
+    expect(
+      policies.buildGeminiProxyRequest(fastPath, {
+        ...request,
+        parameters: { ...request.parameters, generateAudio: false },
+      }),
+    ).toBeNull();
+  });
+
   it("does not construct POST bodies for polling or file paths", () => {
     expect(
       policies.buildGeminiProxyRequest("v1beta/operations/job-123", {}),
@@ -2408,5 +2472,36 @@ describe("vision-QC review is its own generation task (Gemini P0-2)", () => {
 
     const packageJson = readFileSync(resolve(process.cwd(), "package.json"), "utf8");
     expect(packageJson).toContain("pb_migrations/175170*.js");
+  });
+
+  it("advertises optional proxy capabilities on every session payload and on health", () => {
+    const helpers = readFileSync(resolve(process.cwd(), "pb_hooks/helpers.js"), "utf8");
+    const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
+    expect(helpers).toMatch(
+      /const PROXY_CAPABILITIES = Object\.freeze\(\{[^}]*veoNegativePrompt: true,[^}]*\}\);/,
+    );
+    expect(helpers).toContain("\n  PROXY_CAPABILITIES,\n");
+    // Dealer login, cookie restore, impersonate, exit-impersonate, and health.
+    expect(hook.match(/capabilities: helpers\.PROXY_CAPABILITIES,/g)).toHaveLength(5);
+    expect(hook).toContain(
+      "apiContractVersion: helpers.API_CONTRACT_VERSION,\n    capabilities: helpers.PROXY_CAPABILITIES,",
+    );
+    // The client sends the optional Veo field only when advertised and re-issues
+    // a start only for the proxy's own pre-upstream validation body.
+    const service = readFileSync(
+      resolve(process.cwd(), "services/geminiService.ts"),
+      "utf8",
+    );
+    expect(service).toContain("proxyCapabilities().veoNegativePrompt === true");
+    expect(service).toContain("...(includeNegativePrompt ? { negativePrompt } : {})");
+    expect(service).toContain("isProxyValidationRejection(response.status, text)");
+    const proxy = readFileSync(
+      resolve(process.cwd(), "services/geminiProxy.ts"),
+      "utf8",
+    );
+    expect(proxy).toContain(
+      'PROXY_VALIDATION_REJECTION = "Invalid or unsupported generation request"',
+    );
+    expect(hook).toContain('error: "Invalid or unsupported generation request"');
   });
 });

@@ -336,6 +336,8 @@ export interface SessionPayload {
   dealer: { id: string; name: string; [key: string]: unknown };
   person?: PersonSummary;
   is_impersonation?: boolean;
+  /** Optional proxy request fields this backend accepts; absent on older servers. */
+  capabilities?: Record<string, unknown>;
 }
 
 export const impersonatePerson = async (personId: string): Promise<SessionPayload> =>

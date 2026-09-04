@@ -6,6 +6,7 @@ import {
   resolveRestoredStep,
   useAppStore,
 } from "../stores/appStore";
+import { proxyCapabilities, setProxyCapabilities } from "../services/proxyCapabilities";
 import { MODEL_POLICY_VERSION } from "../services/modelConfig";
 import { AppStep, StyleOption, ToneOption } from "../types";
 
@@ -232,5 +233,51 @@ describe("session restore navigation", () => {
       localStorage.getItem("dealer-social-post-ai.session") || "{}",
     );
     expect(persistedAfterReload.generationParams).toBeUndefined();
+  });
+});
+
+describe("proxy capability negotiation", () => {
+  afterEach(() => setProxyCapabilities(undefined));
+
+  const sessionBody = (capabilities?: unknown) => ({
+    role: "salesperson",
+    dealer: { id: "dealer-capability", name: "Capability Motors" },
+    is_impersonation: false,
+    ...(capabilities === undefined ? {} : { capabilities }),
+  });
+  const stubSession = (body: unknown) =>
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+  it("adopts the advertisement from a restored cookie session (PWA reopen)", async () => {
+    stubSession(sessionBody({ veoNegativePrompt: true }));
+    await useAppStore.getState().restoreSession();
+    expect(proxyCapabilities().veoNegativePrompt).toBe(true);
+  });
+
+  it("clears the advertisement when an older backend restores the session", async () => {
+    setProxyCapabilities({ veoNegativePrompt: true });
+    stubSession(sessionBody());
+    await useAppStore.getState().restoreSession();
+    expect(proxyCapabilities().veoNegativePrompt).toBeUndefined();
+  });
+
+  it("replaces the advertisement on every applyAuthPayload", () => {
+    const dealer = { id: "dealer-capability", name: "Capability Motors" } as never;
+    useAppStore.getState().applyAuthPayload({
+      role: "salesperson",
+      dealer,
+      capabilities: { veoNegativePrompt: true },
+    });
+    expect(proxyCapabilities().veoNegativePrompt).toBe(true);
+    useAppStore.getState().applyAuthPayload({ role: "salesperson", dealer });
+    expect(proxyCapabilities()).toEqual({});
   });
 });

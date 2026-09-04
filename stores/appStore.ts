@@ -10,6 +10,7 @@ import {
   ImageQualityTier,
 } from "../types";
 import { loadSession, saveSession, clearSession } from "../utils/persistence";
+import { setProxyCapabilities } from "../services/proxyCapabilities";
 import { MODEL_POLICY_VERSION } from "../services/modelConfig";
 // Removed duplicate import
 import { logEvent, logError } from "../utils/telemetry";
@@ -127,6 +128,7 @@ interface AppState {
     dealer?: Dealer;
     person?: PersonSummary | null;
     is_impersonation?: boolean;
+    capabilities?: unknown;
   }) => void;
   impersonatePerson: (personId: string) => Promise<void>;
   exitImpersonation: () => Promise<void>;
@@ -253,6 +255,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   imageQualityTier: "standard",
 
   applyAuthPayload: (body) => {
+    // Replace, never merge: a session from an older backend advertises nothing.
+    setProxyCapabilities((body as { capabilities?: unknown }).capabilities);
     const dealer = body.dealer || null;
     const serverRole: UserRole = (body.role as UserRole) || "salesperson";
     const targetStep = stepForRole(serverRole);
@@ -295,6 +299,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       dealer: body.dealer as Dealer,
       person: body.person || null,
       is_impersonation: true,
+      capabilities: body.capabilities,
     });
   },
 
@@ -307,6 +312,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       dealer: body.dealer as Dealer,
       person: null,
       is_impersonation: false,
+      capabilities: body.capabilities,
     });
   },
 
@@ -454,6 +460,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           dealer,
           person: body.person || null,
           is_impersonation: !!body.is_impersonation,
+          capabilities: body.capabilities,
         });
         return { ok: true };
       }
@@ -616,6 +623,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       const res = await fetchSession({ method: "GET" });
       if (res.ok) {
         const body = await res.json();
+        // The cookie-restore path applies the session directly (no
+        // applyAuthPayload), so it must forward the advertisement itself or
+        // every reopened PWA would silently lose the optional Veo fields.
+        setProxyCapabilities((body as { capabilities?: unknown }).capabilities);
         const dealer = body.dealer;
         const serverRole: UserRole = (body.role as UserRole) || "salesperson";
         if (dealer) {

@@ -62,6 +62,27 @@ export const outdatedClientErrorFromResponse = (
   }
 };
 
+/**
+ * The proxy's own request validation answers 400 with exactly this body before
+ * anything is sent upstream (pb_hooks/main.pb.js), so a match proves no paid
+ * job was started. A relayed Google 400 carries `{ error: { code, message,
+ * status } }` instead and never matches.
+ */
+export const PROXY_VALIDATION_REJECTION = "Invalid or unsupported generation request";
+
+export const isProxyValidationRejection = (
+  status: number,
+  bodyText: string,
+): boolean => {
+  if (status !== 400) return false;
+  try {
+    const json = JSON.parse(bodyText) as { error?: unknown };
+    return json?.error === PROXY_VALIDATION_REJECTION;
+  } catch {
+    return false;
+  }
+};
+
 // Errors thrown to the UI must read like product copy, but the retry/toast
 // machinery still routes on `kind`. Building the NormalizedError here keeps
 // classification exact without leaking status codes into the message.

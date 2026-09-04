@@ -3,7 +3,7 @@
 Sources: live Google docs/pricing fetched 2026-09-02 (ai.google.dev models,
 pricing, changelog, deprecations, thinking, image-generation, omni pages) and a
 file-level audit of this repo's integration. Model policy on file is v5,
-verified 2026-08-14.
+verified 2026-09-02 (originally 2026-08-14).
 
 ## Where we stand
 
@@ -11,7 +11,7 @@ verified 2026-08-14.
 | ------------ | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | Text quality | `gemini-3.6-flash`                                                            | GA (2026-07-21), no shutdown announced; `gemini-3.7-flash` is newer at the same price                                                                       | Keep. Set `thinkingLevel` (see P0-2).                                             |
 | Text fast    | `gemini-3.5-flash-lite`                                                       | GA, current Lite                                                                                                                                            | Keep.                                                                             |
-| Image        | `gemini-3-pro-image`, `gemini-3.1-flash-image`, `gemini-3.1-flash-lite-image` | All GA, no shutdown announced                                                                                                                               | Keep; tune defaults and adopt reference images (P1-5).                            |
+| Image        | `gemini-3-pro-image`, `gemini-3.1-flash-image`, `gemini-3.1-flash-lite-image` | All GA, no shutdown announced                                                                                                                               | Keep; tune defaults. Reference images: see the 2026-09-04 correction.             |
 | Video        | `veo-3.1-generate-preview`, `veo-3.1-fast-generate-preview`                   | **Preview only, no GA path; Google now positions Veo 3.1 for "legacy pipelines."** Replacement is `gemini-omni-1.1-flash` (GA 2026-08-27, Interactions API) | Plan the migration (P1-4). Single-model tasks = total video outage on retirement. |
 
 The models are current. What is dated is the **integration pattern**: raw
@@ -23,9 +23,10 @@ switched on.
 
 ## Hard dates
 
-- **2026-09-28** — `config/gemini-model-policy.json` `verifiedAt` is 45 days
-  old and `scripts/check-model-policy.mjs` turns CI red, which blocks Fly
-  deploys. Re-verify and bump before then.
+- **2026-10-17** — `config/gemini-model-policy.json` `verifiedAt` (re-verified
+  2026-09-02) turns 45 days old and `scripts/check-model-policy.mjs` turns CI
+  red, which silently blocks Fly deploys. Re-verify and bump `verifiedAt`
+  before then — but never bump `version` casually (see the pin note below).
 - **2026-09-30** — `gemini-omni-flash-preview` shuts down (not pinned; do not
   adopt it — go straight to `gemini-omni-1.1-flash`).
 - **2027-01-01** — 3.6/3.7 Flash text pricing doubles ($0.75→$1.50 in,
@@ -125,7 +126,8 @@ switched on.
    character/style refs, so never use it for people. Raise
    `requestLimits.maxImageTaskImages` accordingly. Route non-interactive
    generation (scheduled posts) through the Batch API at 50% off.
-6. **Veo request parameters.** Whitelist `generateAudio` (makes "soundtrack:
+6. **Veo request parameters.** ~~Whitelist `generateAudio`~~ — REFUTED, see the
+   2026-09-04 correction below. (Original text: whitelist `generateAudio` (makes "soundtrack:
    none" deterministic instead of prose), `negativePrompt` (carry the "no
    second car / no morph" locks), `referenceImages`/`lastFrame`; read
    `raiMediaFilteredReasons` so a content-filtered video stops looking like
@@ -162,3 +164,76 @@ watermark must stay. Meta auto-applies an "AI info" label to detected
 AI imagery in ads. The existing FTC rule holds: AI imagery must never
 misrepresent the actual vehicle, price, or condition. Lyria music beds are not
 licensed for commercial use in the API terms — check before using in ads.
+
+---
+
+## Correction — 2026-09-04 (verified against the official SDKs)
+
+Two items above were written from documentation-site research and are **wrong
+for this API surface**. Both were checked against the Google SDK converters,
+which encode the exact wire shape per surface, because the live doc pages
+render their field tables through JavaScript and could not be extracted
+reliably. Implementing either as originally written would have returned 400 on
+every affected generation.
+
+**1. `generateAudio` does not exist on this endpoint.** The proxy's upstream is
+`https://generativelanguage.googleapis.com/` (`pb_hooks/main.pb.js`) — the
+Gemini Developer API ("mldev"), not Vertex. Both SDKs hard-refuse the field on
+that surface:
+
+- `googleapis/python-genai`, `_GenerateVideosConfig_to_mldev`: raises
+  `generate_audio parameter is only supported in Gemini Enterprise Agent
+Platform mode, not in Gemini Developer API mode.`
+- `googleapis/js-genai`, `_models_converters.ts`: the identical throw on the
+  mldev converter; only the Vertex converter sets `parameters.generateAudio`.
+
+Veo 3.1 audio is always on. "Silent" is therefore carried by `negativePrompt`
+(music, soundtrack, score, singing, voiceover, narration, dialogue, speech) —
+confirmed and accepted, strictly better than the prose-only sentence it
+replaced, but a strong suppression rather than a hard boolean guarantee.
+`scripts/check-model-policy.mjs` now fails if `generateAudio` is ever added.
+
+**2. There is no reference-image field for the `generateContent` image models.**
+`referenceImages` exists only on the **Veo** path (`instances[0]`). For image
+generation, `ImageConfig` exposes only aspect ratio, image size, person
+generation, prominent people, output mime type, compression quality, and output
+options. Character-consistency and style references are supplied as **additional
+inline image Parts inside the request contents** — which is exactly the
+mechanism the dealer logo already uses. There is no separate mechanism to
+migrate to. `maxImageTaskImages` was therefore left at 2: raising it without a
+caller only widens an inline-image security bound for no behavioural gain.
+
+If cross-post logo fidelity is the goal, the lever is prompt and part-ordering
+work inside the existing inline-parts contract, not a new request field.
+
+**3. Priority note on P1-2 (server-side prompt templates).** The "119 kB
+shipped to the browser" framing overstates the urgency: `promptConfig` is
+already a lazy chunk and is not in the boot-critical modulepreload list, so
+this is not a first-paint cost. The real benefit is operational — decoupling
+prompt releases from PWA updates, which is a recurring support problem — and it
+should be weighed as such, against the risk of altering prompt fidelity for
+every dealership.
+
+**Still genuinely open:** the Veo → Omni migration (P1-4). Both Veo 3.1 ids
+remain preview-only with no GA path. As of 2026-09-04 each video task carries
+`veo-3.1-lite-generate-preview` as a second rung, so a single-id retirement
+degrades video to the lite model (via the existing 404 → next-model path)
+instead of taking it down; a whole-family retirement still needs Omni. Omni is a different API surface
+(Interactions), needs its own proxy route and ownership ledger, and carries a
+different cost model — a planned effort, not a drop-in.
+
+### Capability negotiation for optional request fields (2026-09-04, PR #30 review)
+
+`parameters.negativePrompt` is optional on the wire and is **negotiated, not
+assumed**. The backend advertises `capabilities: { veoNegativePrompt: true }`
+on every session payload and on `/api/app/health` (`PROXY_CAPABILITIES` in
+`pb_hooks/helpers.js`); the client (`services/proxyCapabilities.ts`) sends the
+field only when the server that issued its session said so, so a rollback to a
+pre-capability backend keeps every video start byte-identical to what that
+server validates. For a mixed-version deploy (session from a new instance,
+start answered by an old one) the client re-issues the start exactly once
+without the field, on the same model, keyed on the proxy's own pre-upstream
+validation body (`"Invalid or unsupported generation request"`), which proves
+no Veo job was started. Neither the model policy version (exact match, guards
+paid routing) nor `API_CONTRACT_VERSION` (guards breaking response shapes) is
+bumped for an optional field.

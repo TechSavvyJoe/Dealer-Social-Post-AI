@@ -338,6 +338,10 @@ export const TASKS: Record<ModelTaskName, TaskConfig> = {
     tier: "standard",
     models: MODEL_POLICY.tasks.video_standard.models,
     primary: MODEL_POLICY.tasks.video_standard.models[0],
+    // The lite rung is reached only on a 404 from the primary's start call —
+    // the poller never re-issues a paid start for any other failure.
+    fallback: MODEL_POLICY.tasks.video_standard.models[1],
+    emergency: MODEL_POLICY.tasks.video_standard.models[2],
     params: TASK_PARAMS.video_standard,
     resolution: "720p",
   },
@@ -346,6 +350,10 @@ export const TASKS: Record<ModelTaskName, TaskConfig> = {
     tier: "quality",
     models: MODEL_POLICY.tasks.video_quality.models,
     primary: MODEL_POLICY.tasks.video_quality.models[0],
+    // The lite rung is reached only on a 404 from the primary's start call —
+    // the poller never re-issues a paid start for any other failure.
+    fallback: MODEL_POLICY.tasks.video_quality.models[1],
+    emergency: MODEL_POLICY.tasks.video_quality.models[2],
     params: TASK_PARAMS.video_quality,
     resolution: "1080p",
   },

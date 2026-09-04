@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { StyleOption, ToneOption } from "../types";
-import { FLAGS } from "./modelConfig";
+import { FLAGS, MODEL_POLICY } from "./modelConfig";
 import { editImagePrompt, generateImagePrompt } from "./promptConfig";
 import {
   CAPTION_SYSTEM_INSTRUCTION,
@@ -9,6 +9,7 @@ import {
   editTextPromptV2,
   generateFunPromptV2,
   generateImagePromptV2,
+  generateVideoNegativePrompt,
   generateTextPromptPartsV2,
   generateTextPromptV2,
   isApprovedOnImageHeadline,
@@ -514,5 +515,64 @@ describe("image layout art direction", () => {
       '"SERVICE MADE SIMPLE", "SERVICE SPOTLIGHT", "ROAD READY", "PEACE OF MIND"',
     );
     expect(prompt).not.toContain('"DELIVERED", "KEYS DAY"');
+  });
+});
+
+describe("Veo negative prompt", () => {
+  const options = {
+    durationSeconds: 8,
+    aspectPreference: "9:16",
+    resolution: "720p",
+    pacing: "cinematic",
+  } as const;
+
+  it("carries the identity locks that the prompt only states as prose", () => {
+    const negativePrompt = generateVideoNegativePrompt({
+      ...options,
+      soundtrack: "cinematic",
+    });
+
+    for (const lock of [
+      "second car",
+      "vehicle morphing",
+      "warped badges",
+      "face morphing",
+      "background replacement",
+    ]) {
+      expect(negativePrompt).toContain(lock);
+    }
+  });
+
+  it("suppresses audio only when the salesperson picked Silent", () => {
+    const silent = generateVideoNegativePrompt({ ...options, soundtrack: "none" });
+    const scored = generateVideoNegativePrompt({
+      ...options,
+      soundtrack: "celebration",
+    });
+
+    for (const audio of ["music", "soundtrack", "score", "voiceover", "dialogue"]) {
+      expect(silent).toContain(audio);
+      expect(scored).not.toContain(audio);
+    }
+    // A silent request must still keep every visual lock.
+    expect(silent).toContain("second car");
+  });
+
+  it("stays inside the proxy's negativePrompt bound", () => {
+    const maxNegativePromptChars = (
+      MODEL_POLICY.requestLimits as Record<string, number>
+    ).maxNegativePromptChars;
+
+    for (const soundtrack of [
+      "none",
+      "cinematic",
+      "celebration",
+      "anthemic",
+      "funk",
+    ] as const) {
+      const negativePrompt = generateVideoNegativePrompt({ ...options, soundtrack });
+      expect(negativePrompt.trim().length).toBeGreaterThan(0);
+      expect(negativePrompt.length).toBeLessThanOrEqual(maxNegativePromptChars);
+    }
   });
 });

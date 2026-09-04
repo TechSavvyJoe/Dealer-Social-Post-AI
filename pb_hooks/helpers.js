@@ -16,6 +16,22 @@ const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
 const PROVIDER_RESOURCE_TTL_SECONDS = 48 * 60 * 60; // provider jobs/files are short-lived
 const API_CONTRACT_VERSION = "2026-07-31.v4";
 
+/**
+ * Optional proxy request fields this backend accepts, advertised on every
+ * session payload and on /api/app/health. The installed app sends an optional
+ * field only when the server that issued its session said so, so a backend
+ * rollback or the older half of a mixed-version deploy never turns a new field
+ * into a validation 400 for a request that server still accepts. Deliberately
+ * separate from the model policy version (exact match, guards paid model
+ * routing) and from API_CONTRACT_VERSION (guards breaking response shapes):
+ * adding an optional field bumps neither. Mirrored by
+ * services/proxyCapabilities.ts.
+ */
+const PROXY_CAPABILITIES = Object.freeze({
+  // buildVeoRequest forwards a bounded `parameters.negativePrompt`.
+  veoNegativePrompt: true,
+});
+
 // ---------------------------------------------------------------------------
 // Cookie parsing
 // ---------------------------------------------------------------------------
@@ -4095,6 +4111,7 @@ module.exports = {
   PROVIDER_RESOURCE_TTL_SECONDS,
   TURNSTILE_ACTION,
   API_CONTRACT_VERSION,
+  PROXY_CAPABILITIES,
   // Validation
   assertString,
   assertEnum,
