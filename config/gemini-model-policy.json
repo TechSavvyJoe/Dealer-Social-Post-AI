@@ -88,6 +88,7 @@
       "resolution": "1080p"
     }
   },
+  "veoParameterNote": "Veo runs against the Gemini Developer API (generativelanguage.googleapis.com predictLongRunning), not Vertex. `negativePrompt` is accepted there and maps to parameters.negativePrompt. `generateAudio` is deliberately absent: both official Google SDKs raise \"generateAudio parameter is only supported in Gemini Enterprise Agent Platform mode, not in Gemini Developer API mode\" (googleapis/python-genai _GenerateVideosConfig_to_mldev, googleapis/js-genai _models_converters), so sending it on this endpoint risks a 400 on every video. A silent clip is requested through negativePrompt instead.",
   "allowedImageAspectRatios": ["1:1", "4:5", "9:16", "16:9", "4:3"],
   "allowedResponseMimeTypes": ["application/json"],
   "responseSchemaIds": ["vision_review_v1", "caption_pack_v1", "website_draft_v1"],
@@ -122,12 +123,25 @@
       "instance": ["prompt", "image"],
       "image": ["bytesBase64Encoded", "mimeType"],
       "legacyImage": ["inlineData"],
-      "parameters": ["aspectRatio", "personGeneration", "durationSeconds", "resolution"]
+      "parameters": [
+        "aspectRatio",
+        "personGeneration",
+        "durationSeconds",
+        "resolution",
+        "negativePrompt"
+      ],
+      "requiredParameters": [
+        "aspectRatio",
+        "personGeneration",
+        "durationSeconds",
+        "resolution"
+      ]
     }
   },
   "requestLimits": {
     "maxPromptChars": 20000,
     "maxSystemInstructionChars": 8000,
+    "maxNegativePromptChars": 2000,
     "maxInlineImageChars": 16777216,
     "maxTotalInlineImageChars": 20971520,
     "maxTextImages": 3,

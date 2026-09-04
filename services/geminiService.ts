@@ -21,15 +21,18 @@ import {
   funStyleCatalog,
   generateVideoPrompt,
 } from "./promptConfig";
+import { generateVideoNegativePrompt } from "./promptsV2";
 import {
+  createBlockedContentError,
   isBlockedContentError,
   isOutdatedClientError,
   normalizeError,
   recoveryHint,
+  type NormalizedError,
 } from "../utils/errorHandler";
 import { getGeminiClient } from "./geminiClient";
 import { outdatedClientErrorFromResponse, type GenerationPurpose } from "./geminiProxy";
-import { GeminiVideoOperationSchema } from "../utils/schemas";
+import { GeminiVideoOperationSchema, resolveVeoVideoOutcome } from "../utils/schemas";
 import {
   type CaptionGenerationResult,
   createGenerationAttemptId,
@@ -2540,18 +2543,56 @@ export const fetchVideoThroughProxy = async (
   }
 };
 
-const providerVideoUri = (value: any): string | null => {
-  if (!value || typeof value !== "object") return null;
-  const candidate =
-    value.downloadUri ||
-    value.download_uri ||
-    value.fileUri ||
-    value.file_uri ||
-    value.videoUri ||
-    value.video_uri ||
-    value.uri;
-  return typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
+/**
+ * The provider refused the clip on content grounds (`raiMediaFilteredReasons`
+ * on an otherwise successful operation). Terminal by construction: the same
+ * photo and prompt cannot pass on a different Veo model, so the caller must not
+ * advance the model ladder.
+ */
+const blockedVideoError = (reasons: string[]): NormalizedError =>
+  createBlockedContentError(`video RAI filter: ${reasons.join("; ")}`);
+
+/**
+ * Veo returned something this app does not recognise. Named and non-retryable
+ * so a provider shape change is diagnosable in one log line instead of
+ * surfacing as the old generic "no video found". `received` lists key names
+ * only and rides on `original`, never in the user-facing message.
+ */
+const unrecognizedVideoResponseError = (
+  stage: "start" | "operation",
+  received: string,
+): NormalizedError => {
+  const error = new Error(
+    "The video service returned a response this app could not read.",
+  ) as NormalizedError;
+  error.name = "UnrecognizedVideoResponseError";
+  error.kind = "validation";
+  error.retryable = false;
+  error.original = new Error(
+    `Veo ${stage} response did not match the documented shape (received ${received}).`,
+  );
+  return error;
 };
+
+/** Key names only — never URIs, prompts, or media bytes. */
+const describeResponseShape = (value: unknown): string => {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  if (typeof value !== "object") return typeof value;
+  const keys = Object.keys(value as Record<string, unknown>).slice(0, 8);
+  return keys.length ? `keys ${keys.join(",")}` : "empty object";
+};
+
+/**
+ * Our own typed failures (blocked content, unrecognised shape) are terminal.
+ * The poll loop must rethrow them instead of treating them as a transient
+ * network blip and spinning until the six-minute timeout.
+ */
+const isTerminalTypedError = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "kind" in error &&
+  (error as NormalizedError).retryable === false;
 
 export const generatePostVideo = async (
   imageBase64Url: string,
@@ -2595,6 +2636,19 @@ export const generatePostVideo = async (
     pacing: options.pacing || "cinematic",
   });
 
+  // The identity locks and the silent-clip request ride as a real request
+  // parameter, not only as prose the model may weigh against the rest of the
+  // prompt. `generateAudio` is deliberately not sent: it is a Vertex/GEAP-only
+  // parameter that both official Google SDKs refuse to forward to
+  // generativelanguage.googleapis.com, so it would risk a 400 on every clip.
+  const negativePrompt = generateVideoNegativePrompt({
+    ...options,
+    durationSeconds,
+    aspectPreference: aspectRatio,
+    resolution: resolvedResolution,
+    pacing: options.pacing || "cinematic",
+  });
+
   // Veo 3.x predictLongRunning expects image as { bytesBase64Encoded, mimeType }.
   // Gemini generateContent-style { inlineData: { data, mimeType } } returns 400
   // "inlineData isn't supported by this model".
@@ -2613,12 +2667,14 @@ export const generatePostVideo = async (
       personGeneration: "allow_adult", // Required for image-to-video with people
       durationSeconds: durationSeconds,
       resolution: resolvedResolution,
+      negativePrompt: negativePrompt,
     },
   };
 
   // Veo 3.1 bakes native audio from the prompt (no separate track upload).
   // When soundtrack !== none, the prompt requires score/ambience so the MP4
-  // is not silent. Log for support when diagnosing "no sound" reports.
+  // is not silent; when it is none, negativePrompt suppresses music, score,
+  // and speech. Log for support when diagnosing "no sound" reports.
   console.log(
     `[VideoGen] Options: aspect=${aspectRatio} duration=${durationSeconds}s soundtrack=${options.soundtrack || "cinematic"}`,
   );
@@ -2745,62 +2801,15 @@ export const generatePostVideo = async (
       ); // 6 minute timeout for Veo 3.1
     }
 
-    // Check for immediate response (unlikely but handle it)
-    if (json?.generatedVideos?.[0]) {
-      return finishVideo(
-        await extractVideoFromResponse(json, requestAuthEpoch, signal),
-      );
-    }
-
-    // Try to extract video from response
-    const candidates = json?.candidates;
-    if (candidates && candidates.length > 0) {
-      const parts = candidates[0]?.content?.parts;
-      if (parts && parts.length > 0) {
-        for (const part of parts) {
-          // Check for inline video data
-          if (part.inlineData?.mimeType?.startsWith("video/")) {
-            console.log(`[VideoGen] Got inline video data`);
-            return finishVideo(createVideoBlobUrl(part.inlineData.data));
-          }
-          // Check for a provider file/download URI
-          const partFileUri = providerVideoUri(part.fileData);
-          if (partFileUri) {
-            return finishVideo(
-              await fetchVideoThroughProxy(partFileUri, requestAuthEpoch, signal),
-            );
-          }
-          // Check for video URI directly
-          const partVideoUri =
-            providerVideoUri(part.videoMetadata) || providerVideoUri(part);
-          if (partVideoUri) {
-            return finishVideo(
-              await fetchVideoThroughProxy(partVideoUri, requestAuthEpoch, signal),
-            );
-          }
-        }
-      }
-    }
-
-    // Check for generatedVideos format
-    if (json?.generatedVideos || json?.videos) {
-      return finishVideo(
-        await extractVideoFromResponse(json, requestAuthEpoch, signal),
-      );
-    }
-
-    // Check predictions format (fallback)
-    if (json?.predictions?.[0]) {
-      return finishVideo(
-        await extractVideoFromPrediction(json.predictions[0], requestAuthEpoch, signal),
-      );
-    }
-
-    lastError = new Error(
-      "No video content found in response. The model may not support video generation with the current configuration.",
+    // `:predictLongRunning` documents exactly one accepted-start shape: an
+    // operation envelope carrying `name`. A 200 without it is ambiguous — the
+    // job may or may not be running — so name what arrived and stop. Do not
+    // send another billable start request.
+    lastError = unrecognizedVideoResponseError("start", describeResponseShape(json));
+    console.error(
+      "[VideoGen] Accepted start had no operation name.",
+      (lastError as NormalizedError).original,
     );
-    // A successful-but-unrecognized start response is ambiguous. Do not send
-    // another billable start request.
     break;
   }
 
@@ -2892,58 +2901,24 @@ const pollGeminiVideoOperation = async (
           );
         }
 
-        if (operation.response) {
-          // Try to extract video from the response
-          const resp = operation.response;
-          // Check generateVideoResponse format (from predictLongRunning) - OFFICIAL FORMAT
-          const officialVideoUri = providerVideoUri(
-            resp.generateVideoResponse?.generatedSamples?.[0]?.video,
-          );
-          if (officialVideoUri) {
-            // Download video through proxy to handle auth
-            return await fetchVideoThroughProxy(
-              officialVideoUri,
-              requestAuthEpoch,
-              signal,
-            );
-          }
-
-          // Alternative format: direct generatedSamples
-          const generatedSampleUri = providerVideoUri(
-            resp.generatedSamples?.[0]?.video,
-          );
-          if (generatedSampleUri) {
-            return await fetchVideoThroughProxy(
-              generatedSampleUri,
-              requestAuthEpoch,
-              signal,
-            );
-          }
-
-          // Check candidates
-          if (resp.candidates?.[0]?.content?.parts) {
-            for (const part of resp.candidates[0].content.parts) {
-              if (part.inlineData?.data) {
-                return createVideoBlobUrl(part.inlineData.data);
-              }
-              const partFileUri = providerVideoUri(part.fileData);
-              if (partFileUri) {
-                return await fetchVideoThroughProxy(
-                  partFileUri,
-                  requestAuthEpoch,
-                  signal,
-                );
-              }
-            }
-          }
-
-          // Check generatedVideos
-          if (resp.generatedVideos) {
-            return extractVideoFromResponse(resp, requestAuthEpoch, signal);
-          }
+        // One typed classification of the documented shape — no probing. A
+        // content refusal arrives here on a *successful* operation, which is
+        // why it used to be indistinguishable from an empty result.
+        const outcome = resolveVeoVideoOutcome(operation.response);
+        if (outcome.kind === "uri") {
+          // Download through the proxy so the provider key never reaches the browser.
+          return await fetchVideoThroughProxy(outcome.uri, requestAuthEpoch, signal);
         }
-
-        throw new Error("Operation completed but no video found in response.");
+        if (outcome.kind === "inline") {
+          return createVideoBlobUrl(outcome.data);
+        }
+        if (outcome.kind === "blocked") {
+          console.error(
+            `[VideoGen] Provider filtered the clip on content grounds: ${outcome.reasons.join("; ")}`,
+          );
+          throw blockedVideoError(outcome.reasons);
+        }
+        throw unrecognizedVideoResponseError("operation", outcome.received);
       }
 
       const elapsed = Math.round((Date.now() - startTime) / 1000);
@@ -2954,6 +2929,13 @@ const pollGeminiVideoOperation = async (
       pollInterval = Math.min(pollInterval * 1.5, maxPollInterval);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
+        throw error;
+      }
+      // A content refusal or an unrecognised response shape is already typed
+      // and non-retryable; rethrow instead of polling until the timeout. This
+      // also carries the terminal classification out to the caller, which never
+      // starts a second billable job for it.
+      if (isTerminalTypedError(error)) {
         throw error;
       }
       if (error instanceof Error) {
@@ -2967,8 +2949,7 @@ const pollGeminiVideoOperation = async (
           msg.includes("error payload") ||
           msg.includes("empty media") ||
           msg.includes("too small") ||
-          msg.includes("not trusted") ||
-          msg.includes("Operation completed but no video")
+          msg.includes("not trusted")
         ) {
           throw error;
         }
@@ -2983,80 +2964,6 @@ const pollGeminiVideoOperation = async (
   }
 
   throw new Error(`Video generation timed out after ${timeoutMs / 1000} seconds.`);
-};
-
-/**
- * Extracts video URL or blob from a Veo response
- */
-const extractVideoFromResponse = async (
-  response: any,
-  requestAuthEpoch: number,
-  signal?: AbortSignal,
-): Promise<string> => {
-  // Check for generated videos array (common Veo response format)
-  const generatedVideos = response?.generatedVideos || response?.videos;
-  if (generatedVideos && generatedVideos.length > 0) {
-    const video = generatedVideos[0];
-
-    // Check for video URI
-    const uri = providerVideoUri(video?.video) || providerVideoUri(video);
-    if (uri) {
-      return await fetchVideoThroughProxy(uri, requestAuthEpoch, signal);
-    }
-
-    // Check for base64 video data
-    const base64Data = video?.video?.bytesBase64Encoded || video?.bytesBase64Encoded;
-    if (base64Data) {
-      return createVideoBlobUrl(base64Data);
-    }
-  }
-
-  // Check for predictions format
-  if (response?.predictions) {
-    return await extractVideoFromPrediction(
-      response.predictions[0],
-      requestAuthEpoch,
-      signal,
-    );
-  }
-
-  throw new Error("Could not extract video from response.");
-};
-
-/**
- * Extracts video from a prediction object
- */
-const extractVideoFromPrediction = async (
-  prediction: any,
-  requestAuthEpoch: number,
-  signal?: AbortSignal,
-): Promise<string> => {
-  if (!prediction) {
-    throw new Error("No prediction data available.");
-  }
-
-  const base64Video =
-    prediction.byteStream ||
-    prediction.byteContent ||
-    prediction.bytesBase64Encoded ||
-    prediction.videoBytes ||
-    prediction.video?.bytesBase64Encoded;
-
-  if (base64Video) {
-    return createVideoBlobUrl(base64Video);
-  }
-
-  const uri =
-    providerVideoUri(prediction.video) ||
-    providerVideoUri(prediction) ||
-    (typeof prediction.outputUri === "string" ? prediction.outputUri : null) ||
-    (typeof prediction.mediaUri === "string" ? prediction.mediaUri : null);
-
-  if (uri) {
-    return await fetchVideoThroughProxy(uri, requestAuthEpoch, signal);
-  }
-
-  throw new Error("No video content found in prediction.");
 };
 
 /**

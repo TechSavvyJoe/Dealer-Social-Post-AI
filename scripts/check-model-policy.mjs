@@ -55,6 +55,11 @@ assert.ok(
     canonical.versionPinNote.trim().length >= 40,
   "Canonical Gemini policy must carry a versionPinNote explaining why `version` is where it is",
 );
+assert.equal(
+  canonical.version,
+  5,
+  "Gemini policy `version` is pinned at 5. postImageReviewRequired compares a stored post's model_policy_version by exact equality, so bumping it strands every archived creative behind a forced re-review. New request capabilities must ship additively under version 5.",
+);
 
 const expectedTaskNames = [
   "caption",
@@ -235,6 +240,49 @@ for (const [group, fieldSets] of Object.entries(canonical.allowedRequestFields))
     }
   }
 }
+
+// Veo request surface. `negativePrompt` is the only optional parameter and is
+// verified against both official Google SDKs' Gemini-Developer-API converters
+// (parameters.negativePrompt). `generateAudio` must never appear: those same
+// converters raise on it outside Vertex/GEAP, so sending it on
+// generativelanguage.googleapis.com risks a 400 on every video generation.
+const veoFields = canonical.allowedRequestFields.veo;
+assert.deepEqual(
+  veoFields.parameters,
+  [
+    "aspectRatio",
+    "personGeneration",
+    "durationSeconds",
+    "resolution",
+    "negativePrompt",
+  ],
+  "Veo parameters allowlist drifted",
+);
+assert.deepEqual(
+  veoFields.requiredParameters,
+  ["aspectRatio", "personGeneration", "durationSeconds", "resolution"],
+  "negativePrompt must stay optional so clients that predate it remain valid",
+);
+assert.ok(
+  veoFields.requiredParameters.every((field) => veoFields.parameters.includes(field)),
+  "Every required Veo parameter must also be an allowed Veo parameter",
+);
+assert.ok(
+  !veoFields.parameters.includes("generateAudio"),
+  "generateAudio is not accepted on the Gemini Developer API Veo endpoint this proxy calls",
+);
+assert.ok(
+  typeof canonical.veoParameterNote === "string" &&
+    canonical.veoParameterNote.includes("generateAudio"),
+  "Canonical Gemini policy must record why generateAudio stays off the Veo allowlist",
+);
+assert.ok(
+  Number.isInteger(canonical.requestLimits.maxNegativePromptChars) &&
+    canonical.requestLimits.maxNegativePromptChars > 0 &&
+    canonical.requestLimits.maxNegativePromptChars <=
+      canonical.requestLimits.maxPromptChars,
+  "maxNegativePromptChars must be a positive bound no larger than maxPromptChars",
+);
 
 assert.deepEqual(
   canonical.allowedResponseMimeTypes,

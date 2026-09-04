@@ -20,6 +20,13 @@ export default defineConfig({
     // workers prevents CPU starvation from turning 5-second assertions into
     // scheduling failures on 2-core CI and 8-core developer machines.
     maxWorkers: 2,
+    // The heavy component suites (PostResult, PostCustomizer) render large
+    // trees and genuinely exceed vitest's 5s default whenever the machine is
+    // busy — a full agent fan-out locally, or a noisy runner in CI. Those
+    // timeouts are scheduling artifacts, not assertions: the same files pass
+    // in isolation every time. Since a red suite silently blocks Fly deploys,
+    // the default is raised so a busy machine cannot manufacture a failure.
+    testTimeout: 30000,
     // automation/ is a separate package with its own dependencies, vitest
     // config and check script. Root `npm ci` does not install its deps, so
     // running its suites from here fails in CI while passing for anyone who

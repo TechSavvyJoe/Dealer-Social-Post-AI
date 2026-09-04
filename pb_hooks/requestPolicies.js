@@ -391,6 +391,16 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
       resolution: "1080p",
     },
   },
+  // Veo runs against the Gemini Developer API (generativelanguage.googleapis.com
+  // predictLongRunning), not Vertex. `negativePrompt` is accepted there and maps
+  // to parameters.negativePrompt. `generateAudio` is deliberately absent: both
+  // official Google SDKs raise "generateAudio parameter is only supported in
+  // Gemini Enterprise Agent Platform mode, not in Gemini Developer API mode"
+  // (googleapis/python-genai _GenerateVideosConfig_to_mldev, googleapis/js-genai
+  // _models_converters), so sending it on this endpoint risks a 400 on every
+  // video. A silent clip is requested through negativePrompt instead.
+  veoParameterNote:
+    'Veo runs against the Gemini Developer API (generativelanguage.googleapis.com predictLongRunning), not Vertex. `negativePrompt` is accepted there and maps to parameters.negativePrompt. `generateAudio` is deliberately absent: both official Google SDKs raise "generateAudio parameter is only supported in Gemini Enterprise Agent Platform mode, not in Gemini Developer API mode" (googleapis/python-genai _GenerateVideosConfig_to_mldev, googleapis/js-genai _models_converters), so sending it on this endpoint risks a 400 on every video. A silent clip is requested through negativePrompt instead.',
   allowedImageAspectRatios: ["1:1", "4:5", "9:16", "16:9", "4:3"],
   allowedResponseMimeTypes: ["application/json"],
   // Ids the browser may reference. The schema bodies live only in
@@ -435,12 +445,27 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
       instance: ["prompt", "image"],
       image: ["bytesBase64Encoded", "mimeType"],
       legacyImage: ["inlineData"],
-      parameters: ["aspectRatio", "personGeneration", "durationSeconds", "resolution"],
+      // `parameters` is the accepted set; `requiredParameters` is the mandatory
+      // subset, so `negativePrompt` stays optional for clients that predate it.
+      parameters: [
+        "aspectRatio",
+        "personGeneration",
+        "durationSeconds",
+        "resolution",
+        "negativePrompt",
+      ],
+      requiredParameters: [
+        "aspectRatio",
+        "personGeneration",
+        "durationSeconds",
+        "resolution",
+      ],
     },
   },
   requestLimits: {
     maxPromptChars: 20000,
     maxSystemInstructionChars: 8000,
+    maxNegativePromptChars: 2000,
     maxInlineImageChars: 16 * 1024 * 1024,
     maxTotalInlineImageChars: 20 * 1024 * 1024,
     maxTextImages: 3,
@@ -932,6 +957,7 @@ const GEMINI_REQUEST_FIELDS = GEMINI_MODEL_POLICY_SNAPSHOT.allowedRequestFields;
 const GEMINI_REQUEST_LIMITS = GEMINI_MODEL_POLICY_SNAPSHOT.requestLimits;
 const MAX_PROMPT_CHARS = GEMINI_REQUEST_LIMITS.maxPromptChars;
 const MAX_SYSTEM_INSTRUCTION_CHARS = GEMINI_REQUEST_LIMITS.maxSystemInstructionChars;
+const MAX_NEGATIVE_PROMPT_CHARS = GEMINI_REQUEST_LIMITS.maxNegativePromptChars;
 const MAX_INLINE_IMAGE_CHARS = GEMINI_REQUEST_LIMITS.maxInlineImageChars;
 const MAX_TOTAL_INLINE_IMAGE_CHARS = GEMINI_REQUEST_LIMITS.maxTotalInlineImageChars;
 const ALLOWED_INLINE_IMAGE_TYPES = [
@@ -1361,7 +1387,7 @@ function buildVeoRequest(model, input) {
 
   const parameters = input.parameters;
   if (
-    !hasOnlyKeys(parameters, fields.parameters, fields.parameters) ||
+    !hasOnlyKeys(parameters, fields.parameters, fields.requiredParameters) ||
     ["16:9", "9:16"].indexOf(parameters.aspectRatio) === -1 ||
     parameters.personGeneration !== "allow_adult" ||
     [4, 6, 8].indexOf(parameters.durationSeconds) === -1 ||
@@ -1377,6 +1403,29 @@ function buildVeoRequest(model, input) {
     return null;
   }
 
+  // Optional, and bounded separately from the prompt. `negativePrompt` is the
+  // one Veo knob this proxy admits beyond the fixed four: it turns the prompt's
+  // prose locks ("no second car, no morphing, no warped badges") and a silent
+  // soundtrack choice into real request constraints. A present-but-malformed
+  // value is a rejection, never a silently dropped field.
+  const sanitizedParameters = {
+    aspectRatio: parameters.aspectRatio,
+    personGeneration: "allow_adult",
+    durationSeconds: parameters.durationSeconds,
+    resolution: parameters.resolution,
+  };
+  if (Object.prototype.hasOwnProperty.call(parameters, "negativePrompt")) {
+    const negativePrompt = parameters.negativePrompt;
+    if (
+      typeof negativePrompt !== "string" ||
+      !negativePrompt.trim() ||
+      negativePrompt.length > MAX_NEGATIVE_PROMPT_CHARS
+    ) {
+      return null;
+    }
+    sanitizedParameters.negativePrompt = negativePrompt;
+  }
+
   return {
     instances: [
       {
@@ -1384,12 +1433,7 @@ function buildVeoRequest(model, input) {
         image: veoImage,
       },
     ],
-    parameters: {
-      aspectRatio: parameters.aspectRatio,
-      personGeneration: "allow_adult",
-      durationSeconds: parameters.durationSeconds,
-      resolution: parameters.resolution,
-    },
+    parameters: sanitizedParameters,
   };
 }
 

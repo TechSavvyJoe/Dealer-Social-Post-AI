@@ -1354,6 +1354,61 @@ const videoMotionForStyle = (
   }
 };
 
+/**
+ * Veo `parameters.negativePrompt` — the request-level counterpart to the prose
+ * `<hard_locks>` block below. Prose is advice the model may weigh against the
+ * rest of the prompt; this is a constraint carried in the request itself, so the
+ * identity locks that matter most to a dealership (no second car, no morphing,
+ * no warped badges) stop depending on the model reading a paragraph.
+ *
+ * The soundtrack clause is the only deterministic silent path available on this
+ * endpoint. `generateAudio` is a Vertex/GEAP-only parameter — both official
+ * Google SDKs refuse to send it to generativelanguage.googleapis.com — so when
+ * the salesperson picks "Silent" the request suppresses audio here instead.
+ */
+export const generateVideoNegativePrompt = (options: VideoRequestOptions): string => {
+  const locks = [
+    "second car",
+    "additional vehicle",
+    "different vehicle",
+    "stock hero vehicle",
+    "vehicle morphing",
+    "car body morphing",
+    "paint color change",
+    "warped badges",
+    "distorted logos",
+    "misspelled text",
+    "face morphing",
+    "distorted faces",
+    "re-posed people",
+    "extra people",
+    "people leaving the ground",
+    "changed license plate",
+    "background replacement",
+    "showroom swap",
+    "watermarks",
+    "on-screen prices",
+    "phone numbers",
+    "social media interface",
+    "flicker",
+  ];
+
+  if (options.soundtrack === "none") {
+    locks.push(
+      "music",
+      "soundtrack",
+      "score",
+      "singing",
+      "voiceover",
+      "narration",
+      "dialogue",
+      "speech",
+    );
+  }
+
+  return locks.join(", ");
+};
+
 export const generateVideoPromptV2 = (
   style: VideoStyle,
   options: VideoRequestOptions,

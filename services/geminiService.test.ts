@@ -1586,9 +1586,11 @@ describe("GeminiService model routing", () => {
                 generateVideoResponse: {
                   generatedSamples: [
                     {
+                      // `uri` is the documented Gemini Developer API spelling
+                      // (the only one both official SDKs' mldev converters
+                      // read). The old `downloadUri` probe was speculative.
                       video: {
-                        downloadUri:
-                          "https://generativelanguage.googleapis.com/v1beta/files/test-video",
+                        uri: "https://generativelanguage.googleapis.com/v1beta/files/test-video",
                       },
                     },
                   ],
@@ -1799,6 +1801,200 @@ describe("GeminiService model routing", () => {
     expect(startCalls).toHaveLength(1);
     expect(pollCalls).toHaveLength(2);
   });
+
+  it("sends the identity locks as a real negativePrompt and suppresses audio when the salesperson picks Silent", async () => {
+    const startVideo = async (soundtrack: "none" | "cinematic") => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ name: "operations/negative-prompt-123" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            name: "operations/negative-prompt-123",
+            done: true,
+            response: {
+              generateVideoResponse: {
+                generatedSamples: [
+                  {
+                    video: {
+                      uri: "https://generativelanguage.googleapis.com/v1beta/files/negative-prompt-video",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          blob: async () =>
+            new Blob([makeMp4Bytes().buffer as ArrayBuffer], { type: "video/mp4" }),
+        });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(global.URL, "createObjectURL").mockReturnValue("blob:negative-prompt");
+      stubLoadedVideoImage();
+
+      await expect(
+        generatePostVideo("data:image/jpeg;base64,fake", VideoStyle.GoldenRadiance, {
+          durationSeconds: 8,
+          aspectPreference: "auto",
+          resolution: "720p",
+          soundtrack,
+          pacing: "snappy",
+        }),
+      ).resolves.toBe("blob:negative-prompt");
+
+      const startBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+      return startBody.parameters as Record<string, unknown>;
+    };
+
+    const silent = await startVideo("none");
+    expect(typeof silent.negativePrompt).toBe("string");
+    // The visual locks stop being prose the model can weigh away.
+    for (const lock of ["second car", "vehicle morphing", "warped badges"]) {
+      expect(silent.negativePrompt).toContain(lock);
+    }
+    // "Silent" is deterministic through the one parameter this endpoint accepts.
+    for (const audio of ["music", "soundtrack", "score", "voiceover", "dialogue"]) {
+      expect(silent.negativePrompt).toContain(audio);
+    }
+    // generateAudio is Vertex/GEAP-only; sending it here risks a 400 per clip.
+    expect(silent).not.toHaveProperty("generateAudio");
+    expect(
+      MODEL_POLICY.allowedRequestFields.veo.parameters as readonly string[],
+    ).not.toContain("generateAudio");
+
+    const scored = await startVideo("cinematic");
+    expect(scored.negativePrompt).toContain("second car");
+    expect(scored.negativePrompt).not.toContain("music");
+    expect(scored.negativePrompt).not.toContain("voiceover");
+  });
+
+  it("surfaces a content-filtered video as a blocked error without trying another model", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ name: "operations/rai-filtered-123" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          name: "operations/rai-filtered-123",
+          done: true,
+          // A refusal arrives on a *successful* operation with no sample; only
+          // these fields separate it from an empty result.
+          response: {
+            generateVideoResponse: {
+              raiMediaFilteredCount: 1,
+              raiMediaFilteredReasons: [
+                "Video generation blocked by our responsible AI filters.",
+              ],
+            },
+          },
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    stubLoadedVideoImage();
+
+    const failure = await generatePostVideo(
+      "data:image/jpeg;base64,fake",
+      VideoStyle.GoldenRadiance,
+      {
+        durationSeconds: 8,
+        aspectPreference: "auto",
+        resolution: "720p",
+        soundtrack: "none",
+        pacing: "snappy",
+      },
+    ).catch((error: unknown) => error);
+
+    const normalized = normalizeError(failure);
+    expect(normalized.kind).toBe("blocked");
+    expect(normalized.retryable).toBe(false);
+    // Curated copy only — no provider reason text in the toast.
+    expect(normalized.message).not.toContain("responsible AI");
+
+    const startCalls = fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).includes(":predictLongRunning") && init?.method === "POST",
+    );
+    // One billable start, and the model ladder never advanced.
+    expect(startCalls).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    {
+      label: "a provider rename of the sample's video field",
+      // Structurally valid, but nothing readable — the case that used to
+      // surface as the generic "no video found".
+      response: {
+        generateVideoResponse: {
+          generatedSamples: [{ clip: { downloadUri: "https://example.test/x" } }],
+        },
+      },
+    },
+    {
+      label: "a wrongly typed documented field",
+      // Must fail fast rather than read as a transient poll blip and spin
+      // until the six-minute timeout.
+      response: { generateVideoResponse: { generatedSamples: "one video" } },
+    },
+  ])(
+    "names an unrecognized Veo response shape ($label) instead of reporting no video found",
+    async ({ response }) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ name: "operations/mangled-shape-123" }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            name: "operations/mangled-shape-123",
+            done: true,
+            response,
+          }),
+        });
+      vi.stubGlobal("fetch", fetchMock);
+      stubLoadedVideoImage();
+
+      const failure = await generatePostVideo(
+        "data:image/jpeg;base64,fake",
+        VideoStyle.GoldenRadiance,
+        {
+          durationSeconds: 8,
+          aspectPreference: "auto",
+          resolution: "720p",
+          soundtrack: "none",
+          pacing: "snappy",
+        },
+      ).catch((error: unknown) => error);
+
+      const normalized = normalizeError(failure);
+      expect(normalized.kind).toBe("validation");
+      expect(normalized.retryable).toBe(false);
+      // The diagnostic names what arrived; the toast copy stays curated.
+      expect(String((normalized.original as Error)?.message ?? "")).toContain(
+        "did not match the documented shape",
+      );
+      expect(normalized.message).not.toContain("generatedSamples");
+      // One start, one poll — no ladder advance and no polling until timeout.
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("accepts inline base64 only when it contains an MP4 ftyp header", () => {
     const createObjectUrl = vi

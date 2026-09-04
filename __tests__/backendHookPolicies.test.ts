@@ -754,6 +754,70 @@ You are a strict visual quality-control inspector for an automotive dealership i
     expect(policies.buildGeminiProxyRequest(veoPath, veoRequest(8, "720p"))).toBeNull();
   });
 
+  it("forwards a bounded Veo negativePrompt and rejects a malformed one", () => {
+    const fastPath = "v1beta/models/veo-3.1-fast-generate-preview:predictLongRunning";
+    const withNegativePrompt = (negativePrompt: unknown) => {
+      const request = veoRequest(6, "720p");
+      return {
+        ...request,
+        parameters: { ...request.parameters, negativePrompt },
+      };
+    };
+
+    const accepted = policies.buildGeminiProxyRequest(
+      fastPath,
+      withNegativePrompt("second car, vehicle morphing, warped badges"),
+    );
+    expect(accepted).toEqual(
+      withNegativePrompt("second car, vehicle morphing, warped badges"),
+    );
+
+    // Optional: a client that predates the parameter stays valid, and the
+    // sanitized body must not invent the key.
+    const withoutNegativePrompt = policies.buildGeminiProxyRequest(
+      fastPath,
+      veoRequest(6, "720p"),
+    );
+    expect(withoutNegativePrompt).toEqual(veoRequest(6, "720p"));
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        (withoutNegativePrompt as { parameters: Record<string, unknown> }).parameters,
+        "negativePrompt",
+      ),
+    ).toBe(false);
+
+    // Present but malformed is a rejection, never a silently dropped field.
+    const maxNegativePromptChars =
+      canonicalModelPolicy.requestLimits.maxNegativePromptChars;
+    expect(typeof maxNegativePromptChars).toBe("number");
+    for (const invalid of [
+      "",
+      "   ",
+      123,
+      null,
+      ["second car"],
+      { text: "second car" },
+      "x".repeat(maxNegativePromptChars + 1),
+    ]) {
+      expect(
+        policies.buildGeminiProxyRequest(fastPath, withNegativePrompt(invalid)),
+      ).toBeNull();
+    }
+
+    // `generateAudio` is a Vertex/GEAP-only parameter. It must stay off the
+    // allowlist so it can never reach generativelanguage.googleapis.com.
+    expect(canonicalModelPolicy.allowedRequestFields.veo.parameters).not.toContain(
+      "generateAudio",
+    );
+    const request = veoRequest(6, "720p");
+    expect(
+      policies.buildGeminiProxyRequest(fastPath, {
+        ...request,
+        parameters: { ...request.parameters, generateAudio: false },
+      }),
+    ).toBeNull();
+  });
+
   it("does not construct POST bodies for polling or file paths", () => {
     expect(
       policies.buildGeminiProxyRequest("v1beta/operations/job-123", {}),
