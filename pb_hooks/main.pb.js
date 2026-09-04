@@ -1037,6 +1037,7 @@ routerAdd("GET", "/api/app/health", (c) => {
     version: "2.0",
     releaseSha: releaseSha,
     apiContractVersion: helpers.API_CONTRACT_VERSION,
+    capabilities: helpers.PROXY_CAPABILITIES,
     modelPolicyVersion: String(modelPolicy.version),
     backup: {
       configured: backupEnabled,
@@ -1825,6 +1826,7 @@ routerAdd("POST", "/api/app/session", (c) => {
       role: role,
       dealer: helpers.serializeDealer(record),
       is_impersonation: false,
+      capabilities: helpers.PROXY_CAPABILITIES,
     };
     if (personRecord) {
       payload.person = helpers.serializePersonSummary(personRecord);
@@ -1862,6 +1864,7 @@ routerAdd("GET", "/api/app/session", (c) => {
     role: context.role,
     dealer: helpers.serializeDealer(context.dealer),
     is_impersonation: context.isImpersonating,
+    capabilities: helpers.PROXY_CAPABILITIES,
   };
   if (context.person) {
     payload.person = helpers.serializePersonSummary(context.person);
@@ -1937,6 +1940,7 @@ routerAdd("POST", "/api/app/session/impersonate", (c) => {
     dealer: helpers.serializeDealer(dealer),
     person: helpers.serializePersonSummary(person),
     is_impersonation: true,
+    capabilities: helpers.PROXY_CAPABILITIES,
   });
 });
 
@@ -1988,6 +1992,7 @@ routerAdd("POST", "/api/app/session/exit-impersonate", (c) => {
     role: "super_admin",
     dealer: helpers.serializeDealer(adminDealer),
     is_impersonation: false,
+    capabilities: helpers.PROXY_CAPABILITIES,
   });
 });
 

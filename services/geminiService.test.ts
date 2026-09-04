@@ -15,6 +15,7 @@ import {
   reviewGeneratedImageText,
   type GeneratedImageTextReview,
 } from "./geminiService";
+import { setProxyCapabilities } from "./proxyCapabilities";
 import { parsePlatformCaptionPack } from "./platformCopy";
 import { StyleOption, ToneOption, VideoStyle } from "../types";
 import {
@@ -1804,6 +1805,7 @@ describe("GeminiService model routing", () => {
 
   it("sends the identity locks as a real negativePrompt and suppresses audio when the salesperson picks Silent", async () => {
     const startVideo = async (soundtrack: "none" | "cinematic") => {
+      setProxyCapabilities({ veoNegativePrompt: true });
       const fetchMock = vi
         .fn()
         .mockResolvedValueOnce({
@@ -1874,6 +1876,159 @@ describe("GeminiService model routing", () => {
     expect(scored.negativePrompt).toContain("second car");
     expect(scored.negativePrompt).not.toContain("music");
     expect(scored.negativePrompt).not.toContain("voiceover");
+  });
+
+  it("omits negativePrompt until the session advertised the proxy capability", async () => {
+    setProxyCapabilities(undefined);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ name: "operations/no-capability-123" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          name: "operations/no-capability-123",
+          done: true,
+          response: {
+            generateVideoResponse: {
+              generatedSamples: [
+                {
+                  video: {
+                    uri: "https://generativelanguage.googleapis.com/v1beta/files/no-capability-video",
+                  },
+                },
+              ],
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        blob: async () =>
+          new Blob([makeMp4Bytes().buffer as ArrayBuffer], { type: "video/mp4" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(global.URL, "createObjectURL").mockReturnValue("blob:no-capability");
+    stubLoadedVideoImage();
+
+    await expect(
+      generatePostVideo("data:image/jpeg;base64,fake", VideoStyle.GoldenRadiance, {
+        durationSeconds: 8,
+        aspectPreference: "auto",
+        resolution: "720p",
+        soundtrack: "none",
+        pacing: "snappy",
+      }),
+    ).resolves.toBe("blob:no-capability");
+
+    const start = JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    // Byte-identical to what a pre-capability backend already validates.
+    expect(Object.keys(start.parameters).sort()).toEqual([
+      "aspectRatio",
+      "durationSeconds",
+      "personGeneration",
+      "resolution",
+    ]);
+  });
+
+  it("re-issues the start once without negativePrompt when the proxy's own validation rejects it, on the same model", async () => {
+    setProxyCapabilities({ veoNegativePrompt: true });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        text: async () =>
+          JSON.stringify({ error: "Invalid or unsupported generation request" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ name: "operations/mixed-version-123" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          name: "operations/mixed-version-123",
+          done: true,
+          response: {
+            generateVideoResponse: {
+              generatedSamples: [
+                {
+                  video: {
+                    uri: "https://generativelanguage.googleapis.com/v1beta/files/mixed-version-video",
+                  },
+                },
+              ],
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        blob: async () =>
+          new Blob([makeMp4Bytes().buffer as ArrayBuffer], { type: "video/mp4" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(global.URL, "createObjectURL").mockReturnValue("blob:mixed-version");
+    stubLoadedVideoImage();
+
+    await expect(
+      generatePostVideo("data:image/jpeg;base64,fake", VideoStyle.GoldenRadiance, {
+        durationSeconds: 8,
+        aspectPreference: "auto",
+        resolution: "720p",
+        soundtrack: "none",
+        pacing: "snappy",
+      }),
+    ).resolves.toBe("blob:mixed-version");
+
+    const [firstUrl, firstInit] = fetchMock.mock.calls[0];
+    const [secondUrl, secondInit] = fetchMock.mock.calls[1];
+    expect(secondUrl).toBe(firstUrl);
+    expect(JSON.parse(String(firstInit.body)).parameters).toHaveProperty(
+      "negativePrompt",
+    );
+    expect(JSON.parse(String(secondInit.body)).parameters).not.toHaveProperty(
+      "negativePrompt",
+    );
+    expect(secondInit.headers["X-Generation-Attempt-ID"]).toBe(
+      firstInit.headers["X-Generation-Attempt-ID"],
+    );
+    // Both rejections and the accepted start share one model: the ladder never advanced.
+    expect(fetchMock.mock.calls.filter(([url]) => url === firstUrl)).toHaveLength(2);
+  });
+
+  it("never re-issues a start for a relayed provider 400, which may already have been billed", async () => {
+    setProxyCapabilities({ veoNegativePrompt: true });
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: async () =>
+        JSON.stringify({
+          error: { code: 400, message: "Invalid argument", status: "INVALID_ARGUMENT" },
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    stubLoadedVideoImage();
+
+    await expect(
+      generatePostVideo("data:image/jpeg;base64,fake", VideoStyle.GoldenRadiance, {
+        durationSeconds: 8,
+        aspectPreference: "auto",
+        resolution: "720p",
+        soundtrack: "none",
+        pacing: "snappy",
+      }),
+    ).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("surfaces a content-filtered video as a blocked error without trying another model", async () => {

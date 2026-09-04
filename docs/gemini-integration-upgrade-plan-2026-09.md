@@ -221,3 +221,19 @@ degrades video to the lite model (via the existing 404 → next-model path)
 instead of taking it down; a whole-family retirement still needs Omni. Omni is a different API surface
 (Interactions), needs its own proxy route and ownership ledger, and carries a
 different cost model — a planned effort, not a drop-in.
+
+### Capability negotiation for optional request fields (2026-09-04, PR #30 review)
+
+`parameters.negativePrompt` is optional on the wire and is **negotiated, not
+assumed**. The backend advertises `capabilities: { veoNegativePrompt: true }`
+on every session payload and on `/api/app/health` (`PROXY_CAPABILITIES` in
+`pb_hooks/helpers.js`); the client (`services/proxyCapabilities.ts`) sends the
+field only when the server that issued its session said so, so a rollback to a
+pre-capability backend keeps every video start byte-identical to what that
+server validates. For a mixed-version deploy (session from a new instance,
+start answered by an old one) the client re-issues the start exactly once
+without the field, on the same model, keyed on the proxy's own pre-upstream
+validation body (`"Invalid or unsupported generation request"`), which proves
+no Veo job was started. Neither the model policy version (exact match, guards
+paid routing) nor `API_CONTRACT_VERSION` (guards breaking response shapes) is
+bumped for an optional field.

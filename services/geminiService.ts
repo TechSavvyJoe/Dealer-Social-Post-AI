@@ -31,7 +31,12 @@ import {
   type NormalizedError,
 } from "../utils/errorHandler";
 import { getGeminiClient } from "./geminiClient";
-import { outdatedClientErrorFromResponse, type GenerationPurpose } from "./geminiProxy";
+import {
+  isProxyValidationRejection,
+  outdatedClientErrorFromResponse,
+  type GenerationPurpose,
+} from "./geminiProxy";
+import { proxyCapabilities } from "./proxyCapabilities";
 import { GeminiVideoOperationSchema, resolveVeoVideoOutcome } from "../utils/schemas";
 import {
   type CaptionGenerationResult,
@@ -2649,10 +2654,17 @@ export const generatePostVideo = async (
     pacing: options.pacing || "cinematic",
   });
 
+  // `negativePrompt` is optional on the wire and negotiated, never assumed: it
+  // rides only when the backend that issued this session advertised
+  // `capabilities.veoNegativePrompt`. An older backend (a rollback, or the
+  // older half of a mixed-version deploy) validates the body against an exact
+  // key whitelist and would answer 400 before ever reaching Veo.
+  let includeNegativePrompt = proxyCapabilities().veoNegativePrompt === true;
+
   // Veo 3.x predictLongRunning expects image as { bytesBase64Encoded, mimeType }.
   // Gemini generateContent-style { inlineData: { data, mimeType } } returns 400
   // "inlineData isn't supported by this model".
-  const body = {
+  const buildStartBody = () => ({
     instances: [
       {
         prompt: prompt,
@@ -2667,9 +2679,9 @@ export const generatePostVideo = async (
       personGeneration: "allow_adult", // Required for image-to-video with people
       durationSeconds: durationSeconds,
       resolution: resolvedResolution,
-      negativePrompt: negativePrompt,
+      ...(includeNegativePrompt ? { negativePrompt } : {}),
     },
-  };
+  });
 
   // Veo 3.1 bakes native audio from the prompt (no separate track upload).
   // When soundtrack !== none, the prompt requires score/ambience so the MP4
@@ -2720,7 +2732,7 @@ export const generatePostVideo = async (
           "X-Generation-Attempt-ID": generationAttemptId,
           "X-Generation-Purpose": "video",
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(buildStartBody()),
         signal,
       });
     } catch (error) {
@@ -2752,6 +2764,21 @@ export const generatePostVideo = async (
         lastError = outdated;
         console.error("[VideoGen] The installed app is behind the server policy.");
         break;
+      }
+      // The proxy validates the body against its key whitelist before any
+      // upstream call, so this exact 400 proves no Veo job was started. It is
+      // the one failure a start may be re-issued for: the session advertised
+      // `negativePrompt`, but the instance that answered predates it (a
+      // rollback or mixed-version deploy). Send the same start once more
+      // without the optional field, on the same model — never on the next
+      // rung, which would turn a request-shape problem into a model change.
+      if (includeNegativePrompt && isProxyValidationRejection(response.status, text)) {
+        includeNegativePrompt = false;
+        console.warn(
+          `[VideoGen] ${veoModel} rejected negativePrompt; re-issuing the start without it.`,
+        );
+        modelIndex -= 1;
+        continue;
       }
       // 5xx carries no normalizeError token, so spell out "unavailable" to
       // classify as a temporary outage; other statuses classify off their

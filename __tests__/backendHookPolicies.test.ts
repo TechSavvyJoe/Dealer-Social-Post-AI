@@ -2473,4 +2473,35 @@ describe("vision-QC review is its own generation task (Gemini P0-2)", () => {
     const packageJson = readFileSync(resolve(process.cwd(), "package.json"), "utf8");
     expect(packageJson).toContain("pb_migrations/175170*.js");
   });
+
+  it("advertises optional proxy capabilities on every session payload and on health", () => {
+    const helpers = readFileSync(resolve(process.cwd(), "pb_hooks/helpers.js"), "utf8");
+    const hook = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
+    expect(helpers).toMatch(
+      /const PROXY_CAPABILITIES = Object\.freeze\(\{[^}]*veoNegativePrompt: true,[^}]*\}\);/,
+    );
+    expect(helpers).toContain("\n  PROXY_CAPABILITIES,\n");
+    // Dealer login, cookie restore, impersonate, exit-impersonate, and health.
+    expect(hook.match(/capabilities: helpers\.PROXY_CAPABILITIES,/g)).toHaveLength(5);
+    expect(hook).toContain(
+      "apiContractVersion: helpers.API_CONTRACT_VERSION,\n    capabilities: helpers.PROXY_CAPABILITIES,",
+    );
+    // The client sends the optional Veo field only when advertised and re-issues
+    // a start only for the proxy's own pre-upstream validation body.
+    const service = readFileSync(
+      resolve(process.cwd(), "services/geminiService.ts"),
+      "utf8",
+    );
+    expect(service).toContain("proxyCapabilities().veoNegativePrompt === true");
+    expect(service).toContain("...(includeNegativePrompt ? { negativePrompt } : {})");
+    expect(service).toContain("isProxyValidationRejection(response.status, text)");
+    const proxy = readFileSync(
+      resolve(process.cwd(), "services/geminiProxy.ts"),
+      "utf8",
+    );
+    expect(proxy).toContain(
+      'PROXY_VALIDATION_REJECTION = "Invalid or unsupported generation request"',
+    );
+    expect(hook).toContain('error: "Invalid or unsupported generation request"');
+  });
 });
