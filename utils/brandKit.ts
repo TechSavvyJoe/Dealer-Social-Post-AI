@@ -15,6 +15,13 @@ export interface DealerBrandKit {
   name?: string;
   default_hashtags?: string;
   default_footer?: string;
+  /**
+   * When true, every dealer hashtag (brand tag + default_hashtags) is always
+   * kept, even past TARGET_HASHTAG_COUNT — agency discovery tags only fill the
+   * remaining slots. Off, the historical cap applies and a long dealer list is
+   * trimmed to the target.
+   */
+  required_hashtags_locked?: boolean;
 }
 
 /**
@@ -148,14 +155,29 @@ export const applyDealerBrandKit = (
 
   const seen = new Set<string>();
   const merged: string[] = [];
-  for (const t of [...required, ...tags, ...AGENCY_DISCOVERY_HASHTAGS]) {
-    const formatted = formatHashtag(t);
-    if (!formatted) continue;
+  const pushUnique = (tag: string): boolean => {
+    const formatted = formatHashtag(tag);
+    if (!formatted) return false;
     const key = formatted.toLowerCase();
-    if (seen.has(key)) continue;
+    if (seen.has(key)) return false;
     seen.add(key);
     merged.push(formatted);
-    if (merged.length >= TARGET_HASHTAG_COUNT) break;
+    return true;
+  };
+  if (kit?.required_hashtags_locked) {
+    // Dealer-required tags are a brand contract: never trimmed, never
+    // displaced by discovery tags. Everything else fills the remaining slots.
+    required.forEach(pushUnique);
+    const cap = Math.max(TARGET_HASHTAG_COUNT, merged.length);
+    for (const t of [...tags, ...AGENCY_DISCOVERY_HASHTAGS]) {
+      if (merged.length >= cap) break;
+      pushUnique(t);
+    }
+  } else {
+    for (const t of [...required, ...tags, ...AGENCY_DISCOVERY_HASHTAGS]) {
+      pushUnique(t);
+      if (merged.length >= TARGET_HASHTAG_COUNT) break;
+    }
   }
   // Always keep at least brand + 3 discovery if possible
   if (merged.length < 4) {

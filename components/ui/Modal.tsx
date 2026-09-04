@@ -157,13 +157,9 @@ export const Modal: React.FC<ModalProps> = ({
               className,
             )}
           >
-            {/* Mobile Drag Handle */}
-            <div
-              className="sm:hidden w-full flex justify-center pt-3 pb-1"
-              aria-hidden="true"
-            >
-              <div className="w-12 h-1.5 bg-surface-700/50 rounded-full" />
-            </div>
+            {/* No mobile grabber. The sheet is dismissed with the close button,
+                the backdrop, or Escape — never by dragging — so a grabber would
+                promise a swipe gesture this dialog does not implement. */}
 
             {/* Header */}
             {(title || description || showCloseButton) && (

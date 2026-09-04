@@ -1,5 +1,5 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ScenarioPicker } from "../components/ScenarioPicker";
@@ -36,6 +36,23 @@ describe("ScenarioPicker keyboard behavior", () => {
     );
     await waitFor(() => expect(trigger).toHaveFocus());
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("exposes each category as a named group inside the listbox", async () => {
+    render(<ScenarioPicker onChange={vi.fn()} />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Post type Customer Delivery" }),
+    );
+    await screen.findByRole("listbox");
+
+    // The category headings are visual-only text nodes; without grouping the
+    // listbox announces one flat run of options.
+    const deliveries = screen.getByRole("group", { name: "Delivery" });
+    expect(
+      within(deliveries).getByRole("option", { name: /Customer Delivery/ }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("group").length).toBeGreaterThan(1);
   });
 
   it("closes with Escape and restores focus to its trigger", async () => {

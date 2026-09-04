@@ -22,6 +22,38 @@ describe("applyDealerBrandKit", () => {
     expect(out).toContain("#HappyCustomer");
   });
 
+  it("keeps every dealer hashtag when required_hashtags_locked is set", () => {
+    const out = applyDealerBrandKit("Keys handed over. #Sunday #Weekend", {
+      name: "Bob Maxey Ford",
+      default_hashtags:
+        "#BobMaxeyFord, #HowellMI, #FordFamily, #NewFord, #FordTrucks, #Built4Ford",
+      required_hashtags_locked: true,
+    });
+    const tags = out.split("\n").pop() || "";
+    for (const required of [
+      "#BobMaxeyFord",
+      "#HowellMI",
+      "#FordFamily",
+      "#NewFord",
+      "#FordTrucks",
+      "#Built4Ford",
+    ]) {
+      expect(tags).toContain(required);
+    }
+    // Discovery tags never displace a locked dealer tag.
+    expect(tags).not.toContain("#NewCarDelivery");
+  });
+
+  it("still trims a long dealer list to the target when the lock is off", () => {
+    const out = applyDealerBrandKit("Keys handed over.", {
+      name: "Bob Maxey Ford",
+      default_hashtags:
+        "#HowellMI, #FordFamily, #NewFord, #FordTrucks, #Built4Ford, #Extra",
+    });
+    const tags = (out.split("\n").pop() || "").split(/\s+/).filter(Boolean);
+    expect(tags).toHaveLength(5);
+  });
+
   it("does not double-append the same footer", () => {
     const once = applyDealerBrandKit(
       "Hello from the delivery bay — another happy owner just got their keys.\nVisit us this week!",

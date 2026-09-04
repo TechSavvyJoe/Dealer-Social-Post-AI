@@ -558,7 +558,14 @@ async function runCaption(client, policy) {
             ],
           },
         ],
-        generationConfig: { maxOutputTokens: task.maxOutputTokens },
+        generationConfig: {
+          maxOutputTokens: task.maxOutputTokens,
+          // Mirror the production text request shape so the canary proves the
+          // proxy accepts the pinned per-task thinking level.
+          ...(task.thinkingLevel
+            ? { thinkingConfig: { thinkingLevel: task.thinkingLevel } }
+            : {}),
+        },
       }),
     },
   );

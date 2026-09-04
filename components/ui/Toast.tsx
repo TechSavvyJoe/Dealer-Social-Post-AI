@@ -1,6 +1,7 @@
 import React, {
   createContext,
   useContext,
+  useEffect,
   useState,
   useCallback,
   useMemo,
@@ -233,12 +234,109 @@ interface ToastContainerProps {
   onResume: (id: string) => void;
 }
 
+/** Below this width the result screen is a single column and a bottom-docked
+ *  toast lands on the creative rather than beside it. */
+const PHONE_VIEWPORT_QUERY = "(max-width: 767px)";
+/**
+ * The result screen's media preview declares itself. Toasts are the only
+ * fixed overlay that can land on it, so they measure it and step aside — a
+ * salesperson must never be shown a notification sitting on the customers'
+ * faces in the photo they are about to post.
+ */
+const MEDIA_PREVIEW_SELECTOR = '[role="region"][aria-label="Media preview"]';
+const MEDIA_PREVIEW_GAP = 10;
+/** Below this, a docked stack would be clipped to nothing; keep the default. */
+const MIN_TOAST_SPACE = 72;
+
+type ToastOffsets = Pick<
+  React.CSSProperties,
+  "top" | "bottom" | "maxHeight" | "overflow"
+>;
+
+const usePhoneViewport = (): boolean => {
+  const readMatches = () =>
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(PHONE_VIEWPORT_QUERY).matches;
+  const [isPhone, setIsPhone] = useState(readMatches);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+    const mql = window.matchMedia(PHONE_VIEWPORT_QUERY);
+    const update = () => setIsPhone(mql.matches);
+    update();
+    mql.addEventListener?.("change", update);
+    return () => mql.removeEventListener?.("change", update);
+  }, []);
+
+  return isPhone;
+};
+
+/**
+ * Dock the stack into whichever gap around the media preview is larger, so it
+ * can never overlap. Returns null when there is nothing to avoid, which leaves
+ * the `.toast-viewport` stylesheet rule (bottom-docked, clear of the sticky
+ * delivery bar) in charge.
+ */
+const computeMediaSafeOffsets = (): ToastOffsets | null => {
+  if (typeof window === "undefined" || typeof document === "undefined") return null;
+  const preview = document.querySelector(MEDIA_PREVIEW_SELECTOR);
+  if (!preview) return null;
+  const rect = preview.getBoundingClientRect();
+  const viewportHeight = window.innerHeight || 0;
+  if (!viewportHeight || (rect.width === 0 && rect.height === 0)) return null;
+
+  const spaceAbove = rect.top;
+  const spaceBelow = viewportHeight - rect.bottom;
+  // Nothing usable on either side (the preview fills the screen): showing a
+  // clipped sliver would be worse than the default placement.
+  if (Math.max(spaceAbove, spaceBelow) < MIN_TOAST_SPACE) return null;
+  if (spaceBelow >= spaceAbove) {
+    return {
+      top: Math.max(MEDIA_PREVIEW_GAP, rect.bottom + MEDIA_PREVIEW_GAP),
+      bottom: "auto",
+      // A tall stack must clip rather than grow back over the creative.
+      maxHeight: Math.max(0, spaceBelow - MEDIA_PREVIEW_GAP * 2),
+      overflow: "hidden",
+    };
+  }
+  return {
+    top: "auto",
+    bottom: Math.max(MEDIA_PREVIEW_GAP, viewportHeight - rect.top + MEDIA_PREVIEW_GAP),
+    maxHeight: Math.max(0, spaceAbove - MEDIA_PREVIEW_GAP * 2),
+    overflow: "hidden",
+  };
+};
+
 const ToastContainer: React.FC<ToastContainerProps> = ({
   toasts,
   onRemove,
   onPause,
   onResume,
 }) => {
+  const isPhone = usePhoneViewport();
+  const [mediaSafeOffsets, setMediaSafeOffsets] = useState<ToastOffsets | null>(null);
+  const hasToasts = toasts.length > 0;
+
+  useEffect(() => {
+    if (!isPhone || !hasToasts) {
+      setMediaSafeOffsets(null);
+      return;
+    }
+    const measure = () => setMediaSafeOffsets(computeMediaSafeOffsets());
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    window.addEventListener("orientationchange", measure);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+      window.removeEventListener("orientationchange", measure);
+    };
+  }, [hasToasts, isPhone]);
+
   return (
     <div
       className="toast-viewport pointer-events-none fixed z-[100]"
@@ -246,6 +344,7 @@ const ToastContainer: React.FC<ToastContainerProps> = ({
         width:
           "min(28rem, calc(100vw - max(1rem, var(--sal)) - max(1rem, var(--sar))))",
         right: "max(1rem, var(--sar))",
+        ...(mediaSafeOffsets ?? {}),
       }}
     >
       <div className="flex flex-col gap-3 items-end">

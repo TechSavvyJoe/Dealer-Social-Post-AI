@@ -5,18 +5,26 @@ export type ModelTaskName =
   | "caption"
   | "caption_regenerate"
   | "caption_edit"
+  | "vision_review"
   | "image_standard"
   | "image_studio"
   | "video_standard"
   | "video_quality";
 export type ModelTier = "fast" | "quality" | "standard" | "studio";
 export type ImageSize = "1K" | "2K" | "4K";
+/**
+ * Gemini 3.x `thinkingConfig.thinkingLevel` values. `thinkingBudget` is
+ * deprecated and `includeThoughts` is never sent; the proxy rejects both.
+ */
+export type ThinkingLevel = "minimal" | "low" | "medium" | "high";
 
 interface ModelPolicyTask {
   kind: "text" | "image" | "video";
   tier: ModelTier;
   models: readonly string[];
   maxOutputTokens?: number;
+  /** Text tasks only: reasoning effort, billed as output tokens. */
+  thinkingLevel?: ThinkingLevel;
   imageSizes?: Readonly<Record<string, ImageSize>>;
   resolution?: "720p" | "1080p";
 }
@@ -34,6 +42,8 @@ interface ModelPolicyDocument {
     videoStandard: string;
     videoQuality: string;
   };
+  /** Thinking levels each pinned text model supports (proxy-enforced). */
+  thinkingLevels: Readonly<Record<string, readonly ThinkingLevel[]>>;
   tasks: Record<ModelTaskName, ModelPolicyTask>;
   allowedImageAspectRatios: readonly string[];
   allowedRequestFields: Record<string, Record<string, readonly string[]>>;
@@ -122,6 +132,8 @@ export interface SocialPostGenerationResult {
 
 export interface GenerationParams {
   maxOutputTokens?: number;
+  /** Text tasks only: Gemini 3.x reasoning effort, mirrored from the policy. */
+  thinkingConfig?: { thinkingLevel: ThinkingLevel };
   /** Stop sequences that cut the response short. */
   stopSequences?: string[];
 }
@@ -188,12 +200,15 @@ export const MODELS = {
  * `VITE_ENABLE_CLAUDE_FALLBACK` / server-side `ANTHROPIC_API_KEY` is set.
  * Anthropic API usage is separately metered; a Claude subscription does not
  * cover these server-side API calls.
+ *
+ * Advertise only ids the proxy accepts: `pb_hooks/requestPolicies.js`
+ * `buildAnthropicMessageRequest` pins exactly `ANTHROPIC_FALLBACK_MODEL` and
+ * returns 400 for anything else, so listing Sonnet/Opus here would only
+ * create a guaranteed-failure path.
  */
 export const CLAUDE_MODELS = {
-  // The single-turn caption + edit task is fast on Haiku and good on Sonnet.
+  // The single-turn caption + edit fallback runs on Haiku.
   text_fast: "claude-haiku-4-5-20251001",
-  text_quality: "claude-sonnet-4-6",
-  text_premium: "claude-opus-4-6",
 } as const;
 
 /**
@@ -209,6 +224,25 @@ export const OPENAI_MODELS = {
   image: "gpt-image-2",
 } as const;
 
+type TextTaskName = "caption" | "caption_regenerate" | "caption_edit" | "vision_review";
+
+/**
+ * Text tasks emit the policy's `maxOutputTokens` plus its per-task
+ * `thinkingConfig.thinkingLevel`. Gemini 3.x defaults to `medium` and bills
+ * thinking as output tokens, so captions pin a cheaper level. `vision_review`
+ * is the deliberate exception: it is the one call where reasoning quality
+ * decides whether a flawed render ships, so it keeps `medium`.
+ */
+const textGenerationParams = (task: TextTaskName): GenerationParams => {
+  const policyTask = MODEL_POLICY.tasks[task];
+  return {
+    maxOutputTokens: policyTask.maxOutputTokens,
+    ...(policyTask.thinkingLevel
+      ? { thinkingConfig: { thinkingLevel: policyTask.thinkingLevel } }
+      : {}),
+  };
+};
+
 /**
  * Per-task output limits. Prompt instructions carry the tone and variation;
  * Google recommends leaving Gemini 3.x sampling parameters at their defaults.
@@ -217,15 +251,10 @@ export const TASK_PARAMS: Record<ModelTaskName, GenerationParams> = {
   // Caption text is short, but Gemini 3.x may spend tokens on internal
   // reasoning before the visible caption — keep headroom so MAX_TOKENS
   // never truncates the actual post body to empty.
-  caption: {
-    maxOutputTokens: MODEL_POLICY.tasks.caption.maxOutputTokens,
-  },
-  caption_regenerate: {
-    maxOutputTokens: MODEL_POLICY.tasks.caption_regenerate.maxOutputTokens,
-  },
-  caption_edit: {
-    maxOutputTokens: MODEL_POLICY.tasks.caption_edit.maxOutputTokens,
-  },
+  caption: textGenerationParams("caption"),
+  caption_regenerate: textGenerationParams("caption_regenerate"),
+  caption_edit: textGenerationParams("caption_edit"),
+  vision_review: textGenerationParams("vision_review"),
   // Image models manage their own reasoning and composition defaults.
   image_standard: {
     maxOutputTokens: MODEL_POLICY.tasks.image_standard.maxOutputTokens,
@@ -270,6 +299,19 @@ export const TASKS: Record<ModelTaskName, TaskConfig> = {
     claudeFallback: CLAUDE_MODELS.text_fast,
     claudeTemperature: 0.4,
     params: TASK_PARAMS.caption_edit,
+  },
+  // Second-pass quality control on a generated image. Same ladder as a
+  // regenerated caption, but its own task so the request carries
+  // thinkingLevel "medium" and the server's usage ledger records a review
+  // instead of a caption. No cross-vendor fallback: Claude cannot answer the
+  // structured verdict this reviewer returns.
+  vision_review: {
+    kind: "text",
+    tier: "quality",
+    models: MODEL_POLICY.tasks.vision_review.models,
+    primary: MODEL_POLICY.tasks.vision_review.models[0],
+    fallback: MODEL_POLICY.tasks.vision_review.models[1],
+    params: TASK_PARAMS.vision_review,
   },
   image_standard: {
     kind: "image",

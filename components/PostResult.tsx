@@ -49,6 +49,7 @@ import {
 } from "./PlatformDeliveryBoard";
 import { MobilePublishStudio } from "./MobilePublishStudio";
 import { CaptionAlternativesModal } from "./CaptionAlternativesModal";
+import { isBrandCategoryId, resolveCreative } from "../services/creativeSystem";
 import { ProgressiveImage } from "./ui/ProgressiveImage";
 import { useToast } from "./ui/Toast";
 import { Modal } from "./ui/Modal";
@@ -81,6 +82,8 @@ import {
 } from "../utils/mediaSave";
 import { useAppStore } from "../stores/appStore";
 import { ApiError } from "../services/apiErrors";
+import { linkReleaseToPostWithRetry } from "../services/photoReleases";
+import { connectionManager } from "../utils/connectionManager";
 import { archiveDealerMedia } from "../utils/creativeStorage";
 import { EXPORT_FORMATS, renderFormatIfNeeded } from "../utils/multiFormatExport";
 import { logError } from "../utils/telemetry";
@@ -150,77 +153,70 @@ const websitePublicationCopy = (
   switch (publication?.status) {
     case "not_requested":
       return {
-        title: "Website selected — review before sending",
-        detail: "Finish the image and caption, then send one final private draft.",
+        title: "Website selected",
+        detail: "Review, then send one private draft.",
         tone: "neutral",
       };
     case "waiting_approval":
       return {
-        title: "Website draft waiting for approval",
-        detail:
-          "AI prepared the private draft. Customer Hub delivery starts only after this exact creative is approved.",
+        title: "Draft waiting for approval",
+        detail: "Delivery starts once this creative is approved.",
         tone: "warning",
       };
     case "queued":
     case "retrying":
       return {
         title: "Website draft queued",
-        detail:
-          "The secure handoff to Customer Hub is queued. Nothing has been published publicly.",
+        detail: "Handoff queued. Nothing is public yet.",
         tone: "info",
       };
     case "delivering":
       return {
-        title: "Sending private website draft",
-        detail:
-          "Customer Hub is receiving the exact approved creative and website copy.",
+        title: "Sending private draft",
+        detail: "Customer Hub is receiving this creative.",
         tone: "info",
       };
     case "draft_ready":
       return publication.lastError
         ? {
-            title: "Private draft ready — status check needs attention",
-            detail:
-              "The draft and review link are safe in Customer Hub. Retry the status check after the connection issue is corrected.",
+            title: "Draft ready — check status",
+            detail: "The draft is safe. Retry once you are back online.",
             tone: "warning",
           }
         : {
-            title: "Private website draft ready",
-            detail:
-              "Review it in Customer Hub, then publish it when you are satisfied.",
+            title: "Private draft ready",
+            detail: "Review in Customer Hub, then publish.",
             tone: "success",
           };
     case "published":
       return {
         title: "Published on the website",
-        detail: "Customer Hub reports that this website item is public.",
+        detail: "Customer Hub reports this item is public.",
         tone: "success",
       };
     case "failed":
       if (!hasSavedPost) {
         return {
-          title: "Website draft was not saved",
-          detail:
-            "The original post did not finish saving, so nothing can be retried. Start a new post when the connection is ready.",
+          title: "Draft not saved",
+          detail: "The post never saved. Start a new one when online.",
           tone: "error",
         };
       }
       return {
-        title: "Website draft delivery needs attention",
+        title: "Draft delivery needs attention",
         detail: friendlyWebsiteDeliveryError(publication.lastError),
         tone: "error",
       };
     case "withdrawn":
       return {
         title: "Website draft withdrawn",
-        detail: "This website revision is no longer queued or public.",
+        detail: "This revision is no longer queued or public.",
         tone: "neutral",
       };
     default:
       return {
         title: "Website draft prepared",
-        detail:
-          "AI prepared private website copy. Nothing is public until Customer Hub publishes it.",
+        detail: "Nothing is public until Customer Hub publishes it.",
         tone: "neutral",
       };
   }
@@ -409,6 +405,40 @@ export const PostResult: React.FC<PostResultProps> = ({
   const currentDealer = useAppStore((s) => s.currentDealer);
   const currentPersonName = useAppStore((s) => s.currentPerson?.name || "");
   const hasOriginalCapture = useAppStore((s) => Boolean(s.selectedImage));
+  const generationScenarioId = useAppStore((s) => s.generationParams?.scenarioId);
+  const generationStyle = useAppStore((s) => s.generationParams?.style);
+  const generationTone = useAppStore((s) => s.generationParams?.tone);
+
+  /**
+   * Phase 2 creative resolver (docs/superpowers/specs/
+   * 2026-09-02-brand-consistent-creative-system.md §4, §8).
+   *
+   * `resolveCreative` is pure, so the result screen calls it directly. Every
+   * branch below keys off `resolved.enabled`; when it is false the resolver
+   * prescribes nothing and restricts nothing, and this screen renders exactly
+   * what it renders today.
+   */
+  const resolved = useMemo(
+    () =>
+      resolveCreative({
+        dealer: currentDealer ?? null,
+        categoryId: isBrandCategoryId(post.websiteDraft?.category)
+          ? post.websiteDraft?.category
+          : undefined,
+        scenarioId: generationScenarioId,
+        fallbackStyle: generationStyle,
+        fallbackTone: generationTone,
+      }),
+    [
+      currentDealer,
+      generationScenarioId,
+      generationStyle,
+      generationTone,
+      post.websiteDraft?.category,
+    ],
+  );
+  /** Single switch for every publish-surface behavior added in phase 2. */
+  const brandModeOn = resolved.enabled;
 
   const [isImageEditing, setIsImageEditing] = useState(false);
   const [imageEditPrompt, setImageEditPrompt] = useState("");
@@ -436,6 +466,24 @@ export const PostResult: React.FC<PostResultProps> = ({
     null,
   );
   const [isFunModeDirectorOpen, setIsFunModeDirectorOpen] = useState(false);
+  /**
+   * Brand mode only. The house-style master is snapshotted before the Playful
+   * render starts so the playful frame can be shown as a SECOND image instead
+   * of replacing the master.
+   */
+  const [playfulPair, setPlayfulPair] = useState<{
+    master: string;
+    playful: string;
+  } | null>(null);
+  const playfulPendingMasterRef = useRef<string | null>(null);
+  /**
+   * Brand mode only: "Try another photo" / "Try another caption" are one shot
+   * each. The budget is deliberately mount-scoped rather than keyed on
+   * `resultIdentity` — a regenerated image mints a new attempt id, so keying on
+   * it would hand the salesperson an unlimited supply of retries.
+   */
+  const [photoRetryUsed, setPhotoRetryUsed] = useState(false);
+  const [captionRetryUsed, setCaptionRetryUsed] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   /** Legacy free-form video selection stays separate from an exact delivery row. */
   const [manualVideoSelected, setManualVideoSelected] = useState(false);
@@ -503,6 +551,22 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [imageReviewRequired, setImageReviewRequired] = useState(
     Boolean(post.imageReviewRequired),
   );
+  /**
+   * Release state is local because it is repairable from this screen: a
+   * successful "Retry saving release" turns a locked post into a deliverable
+   * one without regenerating anything.
+   */
+  const [releaseStatus, setReleaseStatus] = useState<GeneratedPost["releaseStatus"]>(
+    post.releaseStatus,
+  );
+  const [releaseLinkStatus, setReleaseLinkStatus] = useState<
+    GeneratedPost["releaseLinkStatus"]
+  >(post.releaseLinkStatus);
+  const [releaseRetrying, setReleaseRetrying] = useState(false);
+  const [releaseRetryNotice, setReleaseRetryNotice] = useState<string | null>(null);
+  /** One automatic reconnect retry per mount; the button stays available after. */
+  const releaseReconnectUsedRef = useRef(false);
+  const releaseRetryingRef = useRef(false);
   const [websitePublication, setWebsitePublication] = useState<
     WebsitePublication | undefined
   >(
@@ -619,6 +683,22 @@ export const PostResult: React.FC<PostResultProps> = ({
       });
     }
     prevImageRef.current = post.image;
+  }, [post.image]);
+
+  // Brand mode: pair the playful render with the master it was made from, so
+  // both stay on screen and the salesperson can switch back with one tap. The
+  // pair is dropped as soon as the creative moves to an image that is neither
+  // half of it (a fresh regenerate, a restored version, a different post).
+  useEffect(() => {
+    const master = playfulPendingMasterRef.current;
+    if (master && master !== post.image) {
+      playfulPendingMasterRef.current = null;
+      setPlayfulPair({ master, playful: post.image });
+      return;
+    }
+    setPlayfulPair((pair) =>
+      pair && post.image !== pair.master && post.image !== pair.playful ? null : pair,
+    );
   }, [post.image]);
 
   const effectivePack = useMemo(() => {
@@ -857,7 +937,19 @@ export const PostResult: React.FC<PostResultProps> = ({
       ? post.approvalStatus !== "n_a"
       : requiresApproval;
   const approvalLocked = reviewRequired && approvalStatus !== "approved";
-  const releaseLocked = post.releaseStatus === "save_failed";
+  // The gate itself is unchanged: delivery stays locked for BOTH release
+  // failures. Only the explanation and the remedy differ below.
+  const releaseLocked = releaseStatus === "save_failed";
+  /**
+   * The recoverable variant: the customer's signature is durably stored on the
+   * server and only its association with this post is missing, so both ids
+   * needed to repair it are already in hand.
+   */
+  const releaseLinkRepairable =
+    releaseLocked &&
+    releaseLinkStatus === "link_failed" &&
+    Boolean(post.releaseId) &&
+    Boolean(post.postId);
   const claimLocked = captionSetAnalysis.prohibited.length > 0;
   const deliveryLocked =
     imageReviewRequired ||
@@ -888,6 +980,65 @@ export const PostResult: React.FC<PostResultProps> = ({
     },
     [],
   );
+  /**
+   * Repair the missing post↔release association. Nothing is re-signed and no
+   * paid generation runs: this is the same small first-party POST that failed
+   * after the post was created, replayed with the ids already on the post.
+   */
+  const retryReleaseLink = useCallback(
+    async (trigger: "manual" | "reconnect") => {
+      const sourcePost = currentPostPropRef.current;
+      const releaseId = sourcePost.releaseId;
+      const postId = sourcePost.postId;
+      if (!releaseId || !postId || releaseRetryingRef.current) return;
+      releaseRetryingRef.current = true;
+      setReleaseRetrying(true);
+      setReleaseRetryNotice(null);
+      try {
+        await linkReleaseToPostWithRetry(releaseId, postId);
+        setReleaseStatus("saved");
+        setReleaseLinkStatus(undefined);
+        const store = useAppStore.getState();
+        const current = store.generatedPost;
+        if (!current || current.postId === postId) {
+          const base = current || sourcePost;
+          store.setGeneratedPost({
+            ...base,
+            releaseStatus: "saved",
+            releaseLinkStatus: undefined,
+          });
+        }
+        toast.success(
+          "Photo release saved to this post. Copy, share, save, and export are unlocked.",
+        );
+      } catch (error) {
+        logError("photo_release.link_retry_failed", {
+          message: error instanceof Error ? error.message : String(error),
+          trigger,
+        });
+        setReleaseRetryNotice(
+          connectionManager.isOnline
+            ? "That did not go through. Nothing was lost — the signed release is still stored. Try again in a moment; it also retries on its own when the connection comes back."
+            : "You are offline. Nothing was lost — the signed release is still stored, and this retries automatically as soon as you are back online.",
+        );
+      } finally {
+        releaseRetryingRef.current = false;
+        setReleaseRetrying(false);
+      }
+    },
+    [toast],
+  );
+  // Queue one automatic repair for the common field case: the link failed
+  // because the lot Wi-Fi dropped, and the salesperson is still on this screen
+  // when the connection comes back.
+  useEffect(() => {
+    if (!releaseLinkRepairable) return;
+    return connectionManager.subscribe((online) => {
+      if (!online || releaseReconnectUsedRef.current) return;
+      releaseReconnectUsedRef.current = true;
+      void retryReleaseLink("reconnect");
+    });
+  }, [releaseLinkRepairable, retryReleaseLink]);
   // Once a creative has entered the review workflow it must remain byte-for-
   // byte equivalent to what the manager saw. Delivery unlocks on approval,
   // while edits require starting a new review submission.
@@ -903,6 +1054,9 @@ export const PostResult: React.FC<PostResultProps> = ({
   const editableDraft = !contentEditingLocked && !historyReadOnly;
   const originalRequiredMessage =
     "This tool needs the original captured photo. Reopened History keeps the finished creative, so use Edit image or start a new photo instead.";
+  /** Brand mode only: shown once a one-shot retry has been spent. */
+  const oneShotSpentMessage =
+    "Already used once on this post. A manager can regenerate it for you.";
 
   const flushPendingDraft = useCallback((): Promise<boolean> => {
     const draft = pendingDraftSyncRef.current;
@@ -1018,8 +1172,16 @@ export const PostResult: React.FC<PostResultProps> = ({
         : approvalStatus === "submission_failed"
           ? "This creative could not be submitted for approval. Delivery remains locked; check your connection and create another post to retry."
           : "This exact image and caption are awaiting manager approval. Save, share, and export unlock automatically after approval.";
-  const releaseGateMessage =
-    "The signed photo release was not stored, so consent cannot be verified. Copy, share, save, and export remain locked; check your connection and create another post to retry.";
+  // Two different failures, two different truths. The harsher wording is
+  // reserved for the case where consent may genuinely be missing; claiming a
+  // stored signature "was not stored" sent salespeople back to customers who
+  // had already driven away.
+  const releaseGateTitle = releaseLinkRepairable
+    ? "Photo release not attached yet"
+    : "Photo release not saved";
+  const releaseGateMessage = releaseLinkRepairable
+    ? "The customer's signed release was captured and saved — nothing needs to be signed again. Only its link to this post did not finish, so copy, share, save, and export stay locked until it does. Retry saving the release below."
+    : "The signed photo release was not stored, so consent cannot be verified. Copy, share, save, and export remain locked; check your connection and create another post to retry.";
   const claimGateMessage = claimLocked
     ? prohibitedClaimsMessage(captionSetAnalysis.prohibited)
     : "";
@@ -1047,8 +1209,23 @@ export const PostResult: React.FC<PostResultProps> = ({
       : claimLocked
         ? "Claim blocked"
         : releaseLocked
-          ? "Release not saved"
+          ? releaseLinkRepairable
+            ? "Release not attached"
+            : "Release not saved"
           : "Approval pending";
+  /**
+   * The action bar states the lock; it does not offer it as something to press.
+   * It used to render inside the Copy button, so the same sentence appeared as
+   * a banner, a toast, and a disabled control that looked tappable. The reason
+   * still reaches assistive tech through each disabled button's aria-label, so
+   * this stays out of the live regions rather than announcing a third time.
+   */
+  const deliveryLockStatus = deliveryLocked ? (
+    <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-warning-200">
+      <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span>Delivery locked · {deliveryLockLabel}</span>
+    </p>
+  ) : null;
   const websiteStatusCopy = websitePublicationCopy(
     websitePublication,
     Boolean(post.postId),
@@ -1066,6 +1243,14 @@ export const PostResult: React.FC<PostResultProps> = ({
     setApprovalCheckError(null);
     setImageReviewRequired(Boolean(post.imageReviewRequired));
   }, [post.postId, post.approvalStatus, post.imageReviewRequired, requiresApproval]);
+
+  // A different post (or a store update after a repair) owns the release gate.
+  useEffect(() => {
+    setReleaseStatus(post.releaseStatus);
+    setReleaseLinkStatus(post.releaseLinkStatus);
+    setReleaseRetryNotice(null);
+    releaseReconnectUsedRef.current = false;
+  }, [post.postId, post.releaseStatus, post.releaseLinkStatus]);
 
   useEffect(() => {
     if (!reviewRequired || approvalStatus !== "pending" || !post.postId) {
@@ -2222,6 +2407,88 @@ export const PostResult: React.FC<PostResultProps> = ({
     await startVideoJob(style, options);
   };
 
+  /**
+   * Brand mode "Add video": the dealership motion signature, not an option
+   * matrix. Spec §4.3 — 9:16 · 6s · 720p · music on, style bound to the Look.
+   */
+  const houseMotionOptions = useMemo((): VideoRequestOptions | null => {
+    const motion = resolved.motion;
+    if (!motion) return null;
+    const aspect: VideoRequestOptions["aspectPreference"] =
+      motion.aspects[0] === "16:9" ? "16:9" : "9:16";
+    const soundtrack = (
+      ["none", "celebration", "cinematic", "anthemic", "funk"] as const
+    ).includes(motion.audio as VideoRequestOptions["soundtrack"])
+      ? (motion.audio as VideoRequestOptions["soundtrack"])
+      : "cinematic";
+    return {
+      durationSeconds: 6,
+      soundtrack,
+      aspectPreference: aspect,
+      resolution: "720p",
+      pacing: "cinematic",
+    };
+  }, [resolved.motion]);
+
+  const handleAddHouseVideo = async () => {
+    if (!resolved.motion || !houseMotionOptions) return;
+    await handleGenerateVideo(resolved.motion.style, houseMotionOptions);
+  };
+
+  /**
+   * Brand mode Playful: apply the one configured style with no catalogue, and
+   * keep the house-style master beside the result instead of replacing it.
+   */
+  const handleApplyHousePlayful = async () => {
+    const styleId = resolved.playfulStyleId;
+    if (!styleId) {
+      toast.warning(
+        "No playful style is set for this dealership yet. A manager can choose one in Brand settings.",
+      );
+      return;
+    }
+    playfulPendingMasterRef.current = post.image;
+    await handleImageAction(
+      () => onFunMode(styleId),
+      [
+        "Applying your dealership's playful style…",
+        "Keeping the real car and people intact…",
+        "Finishing the second version…",
+      ],
+    ).catch(() => {
+      playfulPendingMasterRef.current = null;
+    });
+  };
+
+  /** Swap between the house-style master and its playful companion. */
+  const selectPlayfulVersion = (url: string) => {
+    if (url === post.image) return;
+    triggerHapticFeedback();
+    const store = useAppStore.getState();
+    const current = store.generatedPost;
+    store.setGeneratedPost({ ...(current || post), image: url });
+  };
+
+  const handleTryAnotherPhoto = async () => {
+    if (brandModeOn) {
+      if (photoRetryUsed) return;
+      setPhotoRetryUsed(true);
+    }
+    await handleImageAction(onRegenerateImage, [
+      "Refreshing with your chosen style...",
+      "Balancing lighting and color...",
+      "Finishing touches...",
+    ]).catch(() => undefined);
+  };
+
+  const handleTryAnotherCaption = async () => {
+    if (brandModeOn) {
+      if (captionRetryUsed) return;
+      setCaptionRetryUsed(true);
+    }
+    await handleTextAction(onRegenerateText).catch(() => undefined);
+  };
+
   const handleRetryVideo = async (jobId: string) => {
     const job = videoJobs.find((j) => j.id === jobId);
     if (!job) return;
@@ -2499,6 +2766,21 @@ export const PostResult: React.FC<PostResultProps> = ({
     }
     if (delivery.profile.preparation.kind !== "veo") return;
     setSelectedDeliveryId(deliveryId);
+    // Brand mode never opens the option matrix: render this destination's exact
+    // file straight from the dealership motion signature.
+    if (brandModeOn) {
+      if (!resolved.motion || !resolved.videoAllowed) return;
+      const preparation = delivery.profile.preparation;
+      setManualVideoSelected(false);
+      await startVideoJob(resolved.motion.style, {
+        durationSeconds: preparation.durationSeconds,
+        soundtrack: houseMotionOptions?.soundtrack ?? "cinematic",
+        aspectPreference: preparation.nativeAspectRatio,
+        resolution: preparation.resolution,
+        pacing: "cinematic",
+      });
+      return;
+    }
     setVideoDirectorDeliveryId(deliveryId);
     setIsVideoDirectorOpen(true);
   };
@@ -2717,14 +2999,79 @@ export const PostResult: React.FC<PostResultProps> = ({
     else if (mode === "startOver") onStartOver();
   };
 
-  const renderMediaHistoryRail = (desktop = false) => {
+  /**
+   * Per-platform caption tabs. Brand mode moves this whole strip behind the
+   * "Studio tools" disclosure; legacy mode keeps it on the caption surface.
+   */
+  const renderCaptionPlatformTabs = () => {
+    if (platformCaptionTabs.length === 0) return null;
+    return (
+      <div
+        className="mb-3 flex flex-wrap gap-2"
+        role="tablist"
+        aria-label="Platform captions"
+      >
+        <button
+          ref={(node) => {
+            captionTabRefs.current[0] = node;
+          }}
+          id="caption-platform-tab-0"
+          type="button"
+          role="tab"
+          aria-selected={activeCaptionPlatform === null}
+          aria-controls="caption-platform-panel"
+          tabIndex={activeCaptionPlatform === null ? 0 : -1}
+          onClick={() => selectCaptionPlatform(null)}
+          onKeyDown={(event) => handleCaptionTabKeyDown(event, 0)}
+          className={cn(
+            "min-h-[40px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
+            isDesktopLayout && "lg:min-h-9 lg:px-3 lg:py-1",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
+            activeCaptionPlatform === null
+              ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
+              : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
+          )}
+        >
+          Primary
+        </button>
+        {platformCaptionTabs.map((tab, index) => (
+          <button
+            key={tab.id}
+            ref={(node) => {
+              captionTabRefs.current[index + 1] = node;
+            }}
+            id={`caption-platform-tab-${index + 1}`}
+            type="button"
+            role="tab"
+            aria-selected={activeCaptionPlatform === tab.id}
+            aria-controls="caption-platform-panel"
+            tabIndex={activeCaptionPlatform === tab.id ? 0 : -1}
+            onClick={() => selectCaptionPlatform(tab.id)}
+            onKeyDown={(event) => handleCaptionTabKeyDown(event, index + 1)}
+            className={cn(
+              "min-h-[40px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
+              isDesktopLayout && "lg:min-h-9 lg:px-3 lg:py-1",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
+              activeCaptionPlatform === tab.id
+                ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
+                : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  const renderMediaHistoryRail = (desktop = false, forceVisible = false) => {
     if (creativeLockedForReview) return null;
 
     const completedVideos = videoJobs.filter(
       (job) => job.url && job.sourceCreativeKey === currentVideoCreativeKey,
     );
     const mediaCount = 1 + imageVersions.length + completedVideos.length;
-    if (!desktop && mediaCount <= 1) return null;
+    if (!desktop && !forceVisible && mediaCount <= 1) return null;
 
     return (
       <section
@@ -2861,6 +3208,89 @@ export const PostResult: React.FC<PostResultProps> = ({
       </section>
     );
   };
+
+  /**
+   * Brand mode Playful (spec §4.2): the playful frame is a SECOND image shown
+   * beside the house-style master, never a replacement. Either one can be made
+   * the delivered creative with a single tap.
+   */
+  const renderPlayfulPair = () => {
+    if (!playfulPair) return null;
+    const options: Array<{ url: string; label: string; detail: string }> = [
+      {
+        url: playfulPair.master,
+        label: "House style",
+        detail: "Your dealership's signature look",
+      },
+      {
+        url: playfulPair.playful,
+        label: "Playful",
+        detail: "Same photo, dealership playful style",
+      },
+    ];
+    return (
+      <section
+        className="w-full rounded-xl border border-white/10 bg-surface-950/80 p-2.5"
+        aria-label="Photo versions"
+        data-testid="playful-pair"
+      >
+        <p className="mb-2 text-xs font-semibold text-surface-100">
+          Two versions ready
+        </p>
+        <div className="flex gap-2">
+          {options.map((option) => {
+            const isActive = post.image === option.url;
+            return (
+              <button
+                key={option.label}
+                type="button"
+                onClick={() => selectPlayfulVersion(option.url)}
+                aria-label={`Use the ${option.label.toLowerCase()} version`}
+                aria-current={isActive ? "true" : undefined}
+                className={cn(
+                  "flex min-w-0 flex-1 items-center gap-2 rounded-lg border p-1.5 text-left transition-colors",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400",
+                  isActive
+                    ? "border-primary-300 bg-primary-500/10"
+                    : "border-white/15 hover:border-primary-400/60",
+                )}
+              >
+                <img
+                  src={option.url}
+                  alt=""
+                  className="h-14 w-14 shrink-0 rounded-md object-cover"
+                  loading="lazy"
+                />
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-semibold text-surface-50">
+                    {option.label}
+                  </span>
+                  <span className="block truncate text-[10px] text-surface-400">
+                    {isActive ? "Currently selected" : option.detail}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    );
+  };
+
+  /**
+   * Brand mode "Studio tools" (spec §8): the destination caption tabs, the
+   * hashtag chip editor, and the media version tray live behind the disclosure
+   * instead of sitting on the publish surface.
+   */
+  const renderBrandStudioExtras = () => (
+    <div className="mt-2 space-y-3" data-testid="studio-tools-extras">
+      {renderCaptionPlatformTabs()}
+      {/* The caption editor itself stays on the publish surface; opening
+          Studio tools reveals its hashtag chip mode in place rather than
+          mounting a second editor here. */}
+      {renderMediaHistoryRail(false, true)}
+    </div>
+  );
 
   const renderMobileFocusedMedia = () => (
     <div className="relative grid h-full min-h-0 w-full place-items-center overflow-hidden">
@@ -3142,7 +3572,12 @@ export const PostResult: React.FC<PostResultProps> = ({
 
       <Suspense fallback={null}>
         <LazyEditTextModal
-          isOpen={isTextEditing && !contentEditingLocked && !historyReadOnly}
+          isOpen={
+            isTextEditing &&
+            !contentEditingLocked &&
+            !historyReadOnly &&
+            (!brandModeOn || resolved.freeTextEditAllowed)
+          }
           onClose={() => setIsTextEditing(false)}
           onSubmit={handleTextEditSubmit}
           originalText={editedText}
@@ -3151,7 +3586,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       </Suspense>
       <Suspense fallback={null}>
         <LazyVideoDirectorModal
-          isOpen={isVideoDirectorOpen && !creativeLockedForReview}
+          isOpen={isVideoDirectorOpen && !brandModeOn && !creativeLockedForReview}
           onClose={() => {
             setIsVideoDirectorOpen(false);
             setVideoDirectorDeliveryId(null);
@@ -3206,7 +3641,12 @@ export const PostResult: React.FC<PostResultProps> = ({
       </Suspense>
       <Suspense fallback={null}>
         <LazyFunModeDirectorModal
-          isOpen={isFunModeDirectorOpen && !contentEditingLocked && hasOriginalCapture}
+          isOpen={
+            isFunModeDirectorOpen &&
+            !brandModeOn &&
+            !contentEditingLocked &&
+            hasOriginalCapture
+          }
           onClose={() => setIsFunModeDirectorOpen(false)}
           enabledFunStyles={enabledFunStyles}
           onSelectStyle={(styleName) => {
@@ -3469,7 +3909,7 @@ export const PostResult: React.FC<PostResultProps> = ({
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <p className="font-semibold">Photo release not saved</p>
+                <p className="font-semibold">{releaseGateTitle}</p>
                 <Badge variant="error" uppercase={false}>
                   Delivery locked
                 </Badge>
@@ -3477,6 +3917,34 @@ export const PostResult: React.FC<PostResultProps> = ({
               <p className="mt-1 text-sm leading-relaxed opacity-80">
                 {releaseGateMessage}
               </p>
+              {releaseLinkRepairable ? (
+                <div className="mt-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="min-h-11"
+                    disabled={releaseRetrying}
+                    leftIcon={
+                      releaseRetrying ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )
+                    }
+                    onClick={() => void retryReleaseLink("manual")}
+                  >
+                    {releaseRetrying ? "Saving release…" : "Retry saving release"}
+                  </Button>
+                  {releaseRetryNotice ? (
+                    <p
+                      className="mt-2 text-sm leading-relaxed opacity-80"
+                      aria-live="polite"
+                    >
+                      {releaseRetryNotice}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </m.div>
         )}
@@ -3568,7 +4036,10 @@ export const PostResult: React.FC<PostResultProps> = ({
               <Globe2 className="h-4 w-4" aria-hidden="true" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 items-center gap-1.5">
+              {/* Wrap rather than clip: these strings were being cut mid-word
+                  ("Website draft was not s…"), which reads as a rendering bug
+                  and hides the part that says what to do next. */}
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <p className="truncate text-sm font-semibold">
                   {websiteStatusCopy.title}
                 </p>
@@ -3718,7 +4189,11 @@ export const PostResult: React.FC<PostResultProps> = ({
               deliveryOutputs.length > 0 ? handleStartShareBatch : undefined
             }
             onCopyCaption={handleCopy}
-            onEditCaption={() => setIsTextEditing(true)}
+            onEditCaption={
+              brandModeOn && !resolved.freeTextEditAllowed
+                ? undefined
+                : () => setIsTextEditing(true)
+            }
             onBack={handleCreateAnotherRequest}
             onRemix={hasOriginalCapture ? handleRemixRequest : undefined}
             onShowSettings={onShowSettings}
@@ -4123,7 +4598,8 @@ export const PostResult: React.FC<PostResultProps> = ({
                 </>
               ) : null}
 
-              {!isDesktopLayout ? renderMediaHistoryRail() : null}
+              {!isDesktopLayout && !brandModeOn ? renderMediaHistoryRail() : null}
+              {brandModeOn && playfulPair ? renderPlayfulPair() : null}
 
               <div className="w-full space-y-2 mb-2">
                 <div
@@ -4140,48 +4616,79 @@ export const PostResult: React.FC<PostResultProps> = ({
                       isDesktopLayout ? "flex flex-1" : "grid grid-cols-3",
                     )}
                   >
-                    <ActionTile
-                      icon={Film}
-                      iconClassName={TILE_ICON_ACCENT}
-                      tooltip={
-                        historyReadOnly
-                          ? "This teammate's saved post is view-only"
-                          : "Turn your image into a video"
-                      }
-                      disabled={
-                        imageBusy ||
-                        isVideoLoading ||
-                        creativeLockedForReview ||
-                        historyReadOnly
-                      }
-                      busy={isVideoLoading}
-                      label={
-                        isVideoLoading ? "Render" : videoUrl ? "New video" : "Video"
-                      }
-                      onClick={() => {
-                        setVideoDirectorDeliveryId(null);
-                        setIsVideoDirectorOpen(true);
-                      }}
-                    />
-                    <ActionTile
-                      icon={Sparkles}
-                      iconClassName="text-primary-300"
-                      tooltip={
-                        hasOriginalCapture
-                          ? "Artistic style (optional)"
-                          : originalRequiredMessage
-                      }
-                      disabled={
-                        imageBusy ||
-                        !!videoUrl ||
-                        contentEditingLocked ||
-                        historyReadOnly ||
-                        !hasOriginalCapture
-                      }
-                      busy={imageBusy}
-                      label={imageBusy ? "Wait" : "Fun mode"}
-                      onClick={() => setIsFunModeDirectorOpen(true)}
-                    />
+                    {/* Brand mode hides the tile outright when the category or
+                        a manager permission forbids motion; otherwise it is the
+                        same tile, opening the same director. */}
+                    {!brandModeOn || resolved.videoAllowed ? (
+                      <ActionTile
+                        icon={Film}
+                        iconClassName={TILE_ICON_ACCENT}
+                        ariaLabel={brandModeOn ? "Add video" : undefined}
+                        tooltip={
+                          historyReadOnly
+                            ? "This teammate's saved post is view-only"
+                            : brandModeOn
+                              ? "Render this photo with your dealership's motion signature"
+                              : "Turn your image into a video"
+                        }
+                        disabled={
+                          imageBusy ||
+                          isVideoLoading ||
+                          creativeLockedForReview ||
+                          historyReadOnly
+                        }
+                        busy={isVideoLoading}
+                        label={
+                          isVideoLoading
+                            ? "Render"
+                            : brandModeOn
+                              ? "Add video"
+                              : videoUrl
+                                ? "New video"
+                                : "Video"
+                        }
+                        onClick={() => {
+                          if (brandModeOn) {
+                            void handleAddHouseVideo();
+                            return;
+                          }
+                          setVideoDirectorDeliveryId(null);
+                          setIsVideoDirectorOpen(true);
+                        }}
+                      />
+                    ) : null}
+                    {!brandModeOn || resolved.playfulAllowed ? (
+                      <ActionTile
+                        icon={Sparkles}
+                        iconClassName="text-primary-300"
+                        ariaLabel={brandModeOn ? "Playful" : undefined}
+                        tooltip={
+                          !hasOriginalCapture
+                            ? originalRequiredMessage
+                            : brandModeOn
+                              ? "Add your dealership's playful version beside this photo"
+                              : "Artistic style (optional)"
+                        }
+                        disabled={
+                          imageBusy ||
+                          !!videoUrl ||
+                          contentEditingLocked ||
+                          historyReadOnly ||
+                          !hasOriginalCapture
+                        }
+                        busy={imageBusy}
+                        label={
+                          imageBusy ? "Wait" : brandModeOn ? "Playful" : "Fun mode"
+                        }
+                        onClick={() => {
+                          if (brandModeOn) {
+                            void handleApplyHousePlayful();
+                            return;
+                          }
+                          setIsFunModeDirectorOpen(true);
+                        }}
+                      />
+                    ) : null}
                     <ActionTile
                       icon={Calendar}
                       iconClassName="text-emerald-300"
@@ -4242,7 +4749,13 @@ export const PostResult: React.FC<PostResultProps> = ({
                     type="button"
                     onClick={() => setIsToolsOpen((open) => !open)}
                     aria-label={
-                      isToolsOpen ? "Hide creative tools" : "Show creative tools"
+                      brandModeOn
+                        ? isToolsOpen
+                          ? "Hide studio tools"
+                          : "Show studio tools"
+                        : isToolsOpen
+                          ? "Hide creative tools"
+                          : "Show creative tools"
                     }
                     aria-expanded={isToolsOpen}
                     aria-controls="creative-tools-panel"
@@ -4252,7 +4765,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                       !isDesktopLayout && "px-2",
                     )}
                   >
-                    More
+                    {brandModeOn ? "Studio tools" : "More"}
                     <ChevronDown
                       className={cn(
                         "h-4 w-4 shrink-0 text-surface-400 transition-transform",
@@ -4295,84 +4808,118 @@ export const PostResult: React.FC<PostResultProps> = ({
                     icon={RefreshCw}
                     iconClassName="text-surface-300"
                     tooltip={
-                      hasOriginalCapture
-                        ? "Generate a new image version"
-                        : originalRequiredMessage
+                      !hasOriginalCapture
+                        ? originalRequiredMessage
+                        : brandModeOn && photoRetryUsed
+                          ? oneShotSpentMessage
+                          : brandModeOn
+                            ? "One new photo per post"
+                            : "Generate a new image version"
                     }
-                    ariaLabel="Regenerate image"
+                    ariaLabel={brandModeOn ? "Try another photo" : "Regenerate image"}
                     disabled={
                       imageBusy ||
                       !!videoUrl ||
                       contentEditingLocked ||
                       historyReadOnly ||
-                      !hasOriginalCapture
-                    }
-                    busy={imageBusy}
-                    label={imageBusy ? "Working…" : "Regenerate image"}
-                    onClick={() => {
-                      void handleImageAction(onRegenerateImage, [
-                        "Refreshing with your chosen style...",
-                        "Balancing lighting and color...",
-                        "Finishing touches...",
-                      ]).catch(() => undefined);
-                    }}
-                  />
-
-                  <ActionTile
-                    icon={Edit3}
-                    iconClassName={TILE_ICON_ACCENT}
-                    tooltip={
-                      historyReadOnly
-                        ? "This teammate's saved post is view-only"
-                        : "Change specific details"
-                    }
-                    disabled={
-                      imageBusy || !!videoUrl || contentEditingLocked || historyReadOnly
+                      !hasOriginalCapture ||
+                      (brandModeOn && photoRetryUsed)
                     }
                     busy={imageBusy}
                     label={
-                      imageBusy ? "Working…" : isImageEditing ? "Cancel" : "Edit image"
+                      imageBusy
+                        ? "Working…"
+                        : brandModeOn
+                          ? "Try another photo"
+                          : "Regenerate image"
                     }
-                    onClick={() => setIsImageEditing(!isImageEditing)}
+                    onClick={() => {
+                      void handleTryAnotherPhoto();
+                    }}
                   />
+
+                  {!brandModeOn || resolved.freeTextEditAllowed ? (
+                    <ActionTile
+                      icon={Edit3}
+                      iconClassName={TILE_ICON_ACCENT}
+                      tooltip={
+                        historyReadOnly
+                          ? "This teammate's saved post is view-only"
+                          : "Change specific details"
+                      }
+                      disabled={
+                        imageBusy ||
+                        !!videoUrl ||
+                        contentEditingLocked ||
+                        historyReadOnly
+                      }
+                      busy={imageBusy}
+                      label={
+                        imageBusy
+                          ? "Working…"
+                          : isImageEditing
+                            ? "Cancel"
+                            : "Edit image"
+                      }
+                      onClick={() => setIsImageEditing(!isImageEditing)}
+                    />
+                  ) : null}
 
                   <ActionTile
                     icon={RefreshCw}
                     iconClassName="text-surface-300"
                     tooltip={
-                      hasOriginalCapture
-                        ? "Generate a new caption"
-                        : originalRequiredMessage
+                      !hasOriginalCapture
+                        ? originalRequiredMessage
+                        : brandModeOn && captionRetryUsed
+                          ? oneShotSpentMessage
+                          : brandModeOn
+                            ? "One new caption per post"
+                            : "Generate a new caption"
                     }
-                    ariaLabel="Regenerate caption"
+                    ariaLabel={
+                      brandModeOn ? "Try another caption" : "Regenerate caption"
+                    }
                     disabled={
                       textBusy ||
                       contentEditingLocked ||
                       historyReadOnly ||
-                      !hasOriginalCapture
+                      !hasOriginalCapture ||
+                      (brandModeOn && captionRetryUsed)
                     }
                     busy={textBusy}
-                    label={textBusy ? "Working…" : "Regenerate caption"}
+                    label={
+                      textBusy
+                        ? "Working…"
+                        : brandModeOn
+                          ? "Try another caption"
+                          : "Regenerate caption"
+                    }
                     onClick={() => {
-                      void handleTextAction(onRegenerateText).catch(() => undefined);
+                      void handleTryAnotherCaption();
                     }}
                   />
 
-                  <ActionTile
-                    icon={Edit3}
-                    iconClassName={TILE_ICON_ACCENT}
-                    tooltip={
-                      historyReadOnly
-                        ? "This teammate's saved post is view-only"
-                        : "Describe a caption change"
-                    }
-                    disabled={textBusy || contentEditingLocked || historyReadOnly}
-                    busy={textBusy}
-                    label={textBusy ? "Working…" : "Edit text"}
-                    onClick={() => setIsTextEditing(true)}
-                  />
+                  {!brandModeOn || resolved.freeTextEditAllowed ? (
+                    <ActionTile
+                      icon={Edit3}
+                      iconClassName={TILE_ICON_ACCENT}
+                      tooltip={
+                        historyReadOnly
+                          ? "This teammate's saved post is view-only"
+                          : "Describe a caption change"
+                      }
+                      disabled={textBusy || contentEditingLocked || historyReadOnly}
+                      busy={textBusy}
+                      label={textBusy ? "Working…" : "Edit text"}
+                      onClick={() => setIsTextEditing(true)}
+                    />
+                  ) : null}
 
-                  {onGenerateCaptionVariant ? (
+                  {/* Three-at-once caption ideas are another caption
+                      regeneration path, so brand mode retires it rather than
+                      letting it walk around the one-shot budget. */}
+                  {onGenerateCaptionVariant && !brandModeOn ? (
                     <ActionTile
                       icon={Sparkles}
                       iconClassName={TILE_ICON_ACCENT}
@@ -4392,53 +4939,64 @@ export const PostResult: React.FC<PostResultProps> = ({
                     />
                   ) : null}
                 </div>
+                {brandModeOn && (photoRetryUsed || captionRetryUsed) ? (
+                  <p
+                    className="mt-1 text-xs text-surface-400"
+                    data-testid="one-shot-retry-note"
+                  >
+                    {oneShotSpentMessage}
+                  </p>
+                ) : null}
+                {brandModeOn && isToolsOpen ? renderBrandStudioExtras() : null}
                 <AnimatePresence>
-                  {isToolsOpen && isImageEditing && (
-                    <m.div
-                      className="space-y-2 rounded-xl border border-white/10 bg-surface-800/50 p-3"
-                      initial={shouldReduceMotion ? false : { opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
-                    >
-                      <label
-                        htmlFor="image-edit-request"
-                        className="text-xs font-semibold text-surface-200"
+                  {isToolsOpen &&
+                    isImageEditing &&
+                    (!brandModeOn || resolved.freeTextEditAllowed) && (
+                      <m.div
+                        className="space-y-2 rounded-xl border border-white/10 bg-surface-800/50 p-3"
+                        initial={shouldReduceMotion ? false : { opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
                       >
-                        Image edit request
-                      </label>
-                      <textarea
-                        id="image-edit-request"
-                        value={imageEditPrompt}
-                        onChange={(e) => setImageEditPrompt(e.target.value)}
-                        placeholder="Example: Make the headline gold and brighten the vehicle."
-                        className="w-full bg-surface-800/50 text-surface-50 border-2 border-white/20 rounded-xl px-3 py-2 focus:ring-2 focus:ring-primary-400 focus:border-primary-400 outline-none transition text-sm"
-                        rows={2}
-                      />
-                      <Button
-                        onClick={() => {
-                          void handleImageAction(
-                            () => onEditImage(imageEditPrompt),
-                            [
-                              "Applying your edit request...",
-                              "Re-rendering safely around people and cars...",
-                              "Finalizing the updated image...",
-                            ],
-                          )
-                            .then(() => {
-                              setIsImageEditing(false);
-                              setImageEditPrompt("");
-                            })
-                            .catch(() => undefined);
-                        }}
-                        disabled={!imageEditPrompt.trim()}
-                        fullWidth
-                        size="sm"
-                      >
-                        Apply image edit
-                      </Button>
-                    </m.div>
-                  )}
+                        <label
+                          htmlFor="image-edit-request"
+                          className="text-xs font-semibold text-surface-200"
+                        >
+                          Image edit request
+                        </label>
+                        <textarea
+                          id="image-edit-request"
+                          value={imageEditPrompt}
+                          onChange={(e) => setImageEditPrompt(e.target.value)}
+                          placeholder="Example: Make the headline gold and brighten the vehicle."
+                          className="w-full bg-surface-800/50 text-surface-50 border-2 border-white/20 rounded-xl px-3 py-2 focus:ring-2 focus:ring-primary-400 focus:border-primary-400 outline-none transition text-sm"
+                          rows={2}
+                        />
+                        <Button
+                          onClick={() => {
+                            void handleImageAction(
+                              () => onEditImage(imageEditPrompt),
+                              [
+                                "Applying your edit request...",
+                                "Re-rendering safely around people and cars...",
+                                "Finalizing the updated image...",
+                              ],
+                            )
+                              .then(() => {
+                                setIsImageEditing(false);
+                                setImageEditPrompt("");
+                              })
+                              .catch(() => undefined);
+                          }}
+                          disabled={!imageEditPrompt.trim()}
+                          fullWidth
+                          size="sm"
+                        >
+                          Apply image edit
+                        </Button>
+                      </m.div>
+                    )}
                 </AnimatePresence>
                 {isToolsOpen && videoJobs.length > 0 && (
                   <m.div
@@ -4585,47 +5143,54 @@ export const PostResult: React.FC<PostResultProps> = ({
                           ? websiteHandoffStarted
                             ? "Website copy is locked to the exact final draft sent to Customer Hub."
                             : "Review copy is locked to the exact creative submitted to the manager."
-                          : "Ready to copy and post. Tap New caption if you want a different version."}
+                          : brandModeOn
+                            ? "Ready to copy and post. Everything else lives in Studio tools."
+                            : "Ready to copy and post. Tap New caption if you want a different version."}
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleTextAction(onRegenerateText).catch(() => undefined);
-                      }}
-                      disabled={
-                        textBusy ||
-                        contentEditingLocked ||
-                        historyReadOnly ||
-                        !hasOriginalCapture
-                      }
-                      className={cn(
-                        "inline-flex min-h-11 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors",
-                        isDesktopLayout &&
-                          "lg:min-h-9 lg:rounded-lg lg:px-3 lg:py-1.5 lg:text-xs",
-                        "border-primary-400/45 bg-primary-500/15 text-primary-50",
-                        "hover:border-primary-400/65 hover:bg-primary-500/25",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
-                        "disabled:cursor-not-allowed disabled:opacity-40",
-                      )}
-                      title={
-                        historyReadOnly
-                          ? "This teammate's saved post is view-only"
-                          : !hasOriginalCapture
-                            ? originalRequiredMessage
-                            : "Generate a full new marketing caption and hashtags"
-                      }
-                      aria-label="New caption"
-                    >
-                      {textBusy ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-4 w-4" />
-                      )}
-                      {textBusy ? "Writing..." : "New caption"}
-                    </button>
-                    {onGenerateCaptionVariant ? (
+                    {/* Brand mode keeps exactly one caption-regeneration
+                        control, the one-shot "Try another caption" in Studio
+                        tools, so this duplicate is retired there. */}
+                    {!brandModeOn ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleTryAnotherCaption();
+                        }}
+                        disabled={
+                          textBusy ||
+                          contentEditingLocked ||
+                          historyReadOnly ||
+                          !hasOriginalCapture
+                        }
+                        className={cn(
+                          "inline-flex min-h-11 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors",
+                          isDesktopLayout &&
+                            "lg:min-h-9 lg:rounded-lg lg:px-3 lg:py-1.5 lg:text-xs",
+                          "border-primary-400/45 bg-primary-500/15 text-primary-50",
+                          "hover:border-primary-400/65 hover:bg-primary-500/25",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
+                          "disabled:cursor-not-allowed disabled:opacity-40",
+                        )}
+                        title={
+                          historyReadOnly
+                            ? "This teammate's saved post is view-only"
+                            : !hasOriginalCapture
+                              ? originalRequiredMessage
+                              : "Generate a full new marketing caption and hashtags"
+                        }
+                        aria-label="New caption"
+                      >
+                        {textBusy ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                        {textBusy ? "Writing..." : "New caption"}
+                      </button>
+                    ) : null}
+                    {onGenerateCaptionVariant && !brandModeOn ? (
                       <button
                         type="button"
                         onClick={() => setIsCaptionAltsOpen(true)}
@@ -4690,63 +5255,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                     </button>
                   </div>
                 </div>
-                {platformCaptionTabs.length > 0 && (
-                  <div
-                    className="mb-3 flex flex-wrap gap-2"
-                    role="tablist"
-                    aria-label="Platform captions"
-                  >
-                    <button
-                      ref={(node) => {
-                        captionTabRefs.current[0] = node;
-                      }}
-                      id="caption-platform-tab-0"
-                      type="button"
-                      role="tab"
-                      aria-selected={activeCaptionPlatform === null}
-                      aria-controls="caption-platform-panel"
-                      tabIndex={activeCaptionPlatform === null ? 0 : -1}
-                      onClick={() => selectCaptionPlatform(null)}
-                      onKeyDown={(event) => handleCaptionTabKeyDown(event, 0)}
-                      className={cn(
-                        "min-h-[40px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
-                        isDesktopLayout && "lg:min-h-9 lg:px-3 lg:py-1",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
-                        activeCaptionPlatform === null
-                          ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
-                          : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
-                      )}
-                    >
-                      Primary
-                    </button>
-                    {platformCaptionTabs.map((tab, index) => (
-                      <button
-                        key={tab.id}
-                        ref={(node) => {
-                          captionTabRefs.current[index + 1] = node;
-                        }}
-                        id={`caption-platform-tab-${index + 1}`}
-                        type="button"
-                        role="tab"
-                        aria-selected={activeCaptionPlatform === tab.id}
-                        aria-controls="caption-platform-panel"
-                        tabIndex={activeCaptionPlatform === tab.id ? 0 : -1}
-                        onClick={() => selectCaptionPlatform(tab.id)}
-                        onKeyDown={(event) => handleCaptionTabKeyDown(event, index + 1)}
-                        className={cn(
-                          "min-h-[40px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
-                          isDesktopLayout && "lg:min-h-9 lg:px-3 lg:py-1",
-                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
-                          activeCaptionPlatform === tab.id
-                            ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
-                            : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
-                        )}
-                      >
-                        {tab.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                {!brandModeOn ? renderCaptionPlatformTabs() : null}
 
                 <div
                   id="caption-platform-panel"
@@ -4765,6 +5274,10 @@ export const PostResult: React.FC<PostResultProps> = ({
                       <span>Caption edited for this platform</span>
                     </div>
                   )}
+                  {/* One caption editor serves both modes. Brand mode keeps the
+                      caption on the surface but hides the hashtag chip editor
+                      until "Studio tools" is opened, so two editors are never
+                      mounted at once. */}
                   <CaptionStudio
                     value={editedText}
                     onChange={handleTextChange}
@@ -4772,12 +5285,14 @@ export const PostResult: React.FC<PostResultProps> = ({
                     platformId={activeCaptionPlatform}
                     claimLocked={claimLocked || identityLocked}
                     compact={isDesktopLayout}
+                    hideHashtagEditor={brandModeOn && !isToolsOpen}
                   />
                 </div>
 
                 {/* Desktop: delivery actions sit with the caption panel. */}
                 {isDesktopLayout ? (
                   <div className="mb-3" aria-label="Post delivery actions">
+                    {deliveryLockStatus}
                     <Button
                       variant="outline"
                       onClick={handleCopy}
@@ -4798,11 +5313,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                       disableHaptics
                     >
                       <span aria-live="polite">
-                        {deliveryLocked
-                          ? deliveryLockLabel
-                          : copied
-                            ? "Copied"
-                            : "Copy caption"}
+                        {copied ? "Copied" : "Copy caption"}
                       </span>
                     </Button>
                   </div>
@@ -4862,7 +5373,7 @@ export const PostResult: React.FC<PostResultProps> = ({
             ) : null}
           </div>
         </div>
-        {isDesktopLayout ? renderMediaHistoryRail(true) : null}
+        {isDesktopLayout && !brandModeOn ? renderMediaHistoryRail(true) : null}
       </m.section>
 
       {/* Mobile/narrow: sticky bottom delivery bar (Save · Share · Copy).
@@ -4877,6 +5388,9 @@ export const PostResult: React.FC<PostResultProps> = ({
                 paddingRight: "env(safe-area-inset-right)",
               }}
             >
+              {deliveryLockStatus ? (
+                <div className="mx-auto max-w-lg px-3 pt-2">{deliveryLockStatus}</div>
+              ) : null}
               <div
                 className="mx-auto grid max-w-lg grid-cols-3 gap-2 px-3 pt-2"
                 aria-label="Post delivery actions"
@@ -4970,9 +5484,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                   className="min-w-0 px-2"
                   disableHaptics
                 >
-                  <span aria-live="polite">
-                    {deliveryLocked ? deliveryLockLabel : copied ? "Copied" : "Copy"}
-                  </span>
+                  <span aria-live="polite">{copied ? "Copied" : "Copy"}</span>
                 </Button>
               </div>
             </div>,

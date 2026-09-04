@@ -7,7 +7,12 @@
  */
 import { dataUrlToBlob } from "../utils/imageUtils";
 import { assertAuthEpoch, captureAuthEpoch } from "../utils/authBoundary";
-import { readApiError } from "./apiErrors";
+import { ApiError, readApiError } from "./apiErrors";
+import { RetryError, retryWithBackoff } from "../utils/retry";
+import type { GeneratedPost } from "../types";
+
+/** Recoverable post↔release association failure. */
+export type ReleaseLinkStatus = NonNullable<GeneratedPost["releaseLinkStatus"]>;
 
 export interface PhotoReleaseInput {
   /** Kept for backwards compat; ignored — the server uses the session dealer. */
@@ -140,4 +145,70 @@ export const linkReleaseToPost = async (
   const linked = (await res.json()) as LinkedPhotoReleaseRecord;
   assertAuthEpoch(requestAuthEpoch);
   return linked;
+};
+
+/**
+ * Attempts for the post↔release link. Deliberately small: the result screen
+ * owns the visible "Retry saving release" action and the reconnect retry, so a
+ * long silent backoff would only hold a finished post behind a spinner.
+ */
+const RELEASE_LINK_ATTEMPTS = 3;
+
+/**
+ * The link is a small first-party POST, so nearly every failure is transport
+ * or server-side and worth another attempt. Identity changes (AbortError) and
+ * authorization/validation rejections can never succeed on retry, and
+ * retrying them would keep a doomed request alive across a workspace switch.
+ */
+export const shouldRetryReleaseLink = (error: Error): boolean => {
+  if (error.name === "AbortError") return false;
+  const cause = (error as { cause?: unknown }).cause;
+  if (cause instanceof ApiError) {
+    // Every other 4xx is a permanent client-side rejection; 408 is the one
+    // timeout that arrives as one.
+    return cause.status === 408 || cause.status >= 500;
+  }
+  const message = error.message.toLowerCase();
+  return !(
+    message.includes("unauthorized") ||
+    message.includes("forbidden") ||
+    message.includes("blocked")
+  );
+};
+
+export interface ReleaseLinkRetryOptions {
+  requestAuthEpoch?: number;
+  maxAttempts?: number;
+  /** Cancels the in-flight attempt and any pending backoff. */
+  signal?: AbortSignal;
+  onRetry?: (attempt: number, error: Error) => void;
+}
+
+/**
+ * Link an already-stored release to its post, retrying transient failures with
+ * bounded backoff. The underlying failure is rethrown rather than a RetryError
+ * wrapper so callers keep classifying and logging the real error.
+ */
+export const linkReleaseToPostWithRetry = async (
+  releaseId: string,
+  postId: string,
+  options: ReleaseLinkRetryOptions = {},
+): Promise<LinkedPhotoReleaseRecord> => {
+  const requestAuthEpoch = options.requestAuthEpoch ?? captureAuthEpoch();
+  try {
+    return await retryWithBackoff(
+      () => linkReleaseToPost(releaseId, postId, requestAuthEpoch),
+      {
+        maxAttempts: options.maxAttempts ?? RELEASE_LINK_ATTEMPTS,
+        initialDelay: 500,
+        maxDelay: 3000,
+        shouldRetry: shouldRetryReleaseLink,
+        signal: options.signal,
+        onRetry: options.onRetry,
+      },
+    );
+  } catch (error) {
+    if (error instanceof RetryError) throw error.lastError;
+    throw error;
+  }
 };

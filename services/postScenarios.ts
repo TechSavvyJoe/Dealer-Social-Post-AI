@@ -262,6 +262,32 @@ export const findScenario = (id: string): PostScenario | undefined =>
   POST_SCENARIOS.find((s) => s.id === id);
 
 /**
+ * Legacy-only accessor for a scenario's `defaultStyle`/`defaultTone`.
+ *
+ * Scenarios are content templates: they drive WHAT a post says through
+ * `promptAdditions`, never HOW the dealership looks. Under the brand-consistent
+ * creative system (spec 2026-09-02 §4.1) the Signature Look is the sole
+ * authority for style and tone, so this returns null whenever the creative
+ * system is enabled.
+ *
+ * The two fields stay on the type and on every scenario record because dealer
+ * custom scenarios are persisted with that shape — dropping them would
+ * invalidate stored `custom_scenarios` JSON.
+ *
+ * Callers must pass `creativeSystemEnabled` from
+ * `isCreativeSystemEnabled(dealer)` in services/creativeSystem.ts. It is a
+ * plain boolean here so this module stays free of that import (creativeSystem
+ * imports this catalog).
+ */
+export const scenarioLegacyCreativeDefaults = (
+  scenario: PostScenario | undefined,
+  creativeSystemEnabled: boolean,
+): { style: StyleOption; tone: ToneOption } | null => {
+  if (!scenario || creativeSystemEnabled) return null;
+  return { style: scenario.defaultStyle, tone: scenario.defaultTone };
+};
+
+/**
  * Parse the JSON blob stored on `dealer.custom_scenarios`. Returns an
  * empty array if missing, malformed, or any entry fails type-checks.
  * Logs on malformed input but never throws — the picker should keep working

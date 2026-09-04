@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { m, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
@@ -60,8 +60,11 @@ import {
   PostScenario,
   POST_SCENARIOS,
   scenarioToCreativeBrief,
+  scenarioLegacyCreativeDefaults,
   getScenariosForDealer,
 } from "../services/postScenarios";
+import { LOOK_DEFINITIONS, resolveCreative } from "../services/creativeSystem";
+import { logEvent } from "../utils/telemetry";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { ProgressiveImage } from "./ui/ProgressiveImage";
 import {
@@ -103,6 +106,8 @@ interface PostCustomizerProps {
       capturedRelease?: CapturedRelease;
       websiteEnabled?: boolean;
       websiteVehicleDescription?: string;
+      /** Dealership Playful style requested for a second image (spec §4.2). */
+      playfulStyleId?: string;
     },
     platformIds?: PlatformId[],
     outputProfile?: PrimaryImageProfile,
@@ -232,12 +237,75 @@ const isToneOption = (value: unknown): value is ToneOption =>
 const isPrimaryImageFormatId = (value: unknown): value is PrimaryImageFormatId =>
   OUTPUT_FORMAT_CHOICES.some((format) => format.id === value);
 
+/**
+ * Spec §4.5: the personal line is appended after the caption body — it is
+ * never a replacement caption — and is capped so it cannot become a second
+ * caption in disguise.
+ */
+const PERSONAL_LINE_MAX = 140;
+
+/**
+ * One optional yes/no capability (Add video, Playful). The creative system
+ * replaces multi-choice option grids with these, so the salesperson screen
+ * never grows a fourth mandatory decision.
+ */
+const CapabilityToggle: React.FC<{
+  label: string;
+  hint: string;
+  icon: LucideIcon;
+  pressed: boolean;
+  onToggle: () => void;
+}> = ({ label, hint, icon: Icon, pressed, onToggle }) => (
+  <button
+    type="button"
+    aria-pressed={pressed}
+    onClick={() => {
+      triggerHapticFeedback();
+      onToggle();
+    }}
+    className={cn(
+      "flex min-h-16 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
+      pressed
+        ? "border-primary-300 bg-primary-500/25 text-primary-50 [.theme-light_&]:text-primary-950"
+        : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/35",
+    )}
+  >
+    <span
+      className={cn(
+        "grid h-10 w-10 shrink-0 place-items-center rounded-xl border",
+        pressed
+          ? "border-primary-300/40 bg-primary-400/20 text-primary-100"
+          : "border-hairline bg-surface-950/50 text-surface-400",
+      )}
+      aria-hidden="true"
+    >
+      <Icon className="h-5 w-5" />
+    </span>
+    <span className="min-w-0 flex-1">
+      <span className="block text-sm font-semibold">{label}</span>
+      <span className="mt-0.5 block text-[10px] leading-relaxed text-surface-400">
+        {hint}
+      </span>
+    </span>
+    {pressed ? (
+      <span
+        className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary-300 text-primary-950"
+        aria-hidden="true"
+      >
+        <Check className="h-3.5 w-3.5" strokeWidth={3} />
+      </span>
+    ) : null}
+  </button>
+);
+
 interface CreativeBriefSections {
   dealershipName: string;
   scenarioBlock?: string;
   vehicleBlock?: string;
   oemBlock?: string;
   designBlock: string;
+  /** Dealer brand voice — a brand contract, so it rides inside the caption window. */
+  voiceBlock?: string;
   supportingBlocks: string[];
   platformBlock?: string;
 }
@@ -249,6 +317,7 @@ export const composeGenerationCreativeBrief = ({
   vehicleBlock,
   oemBlock,
   designBlock,
+  voiceBlock,
   supportingBlocks,
   platformBlock,
 }: CreativeBriefSections): string => {
@@ -259,8 +328,13 @@ export const composeGenerationCreativeBrief = ({
   // worst-case envelope so a verbose custom scenario cannot push vehicle, OEM,
   // or design facts out of the live caption prompt. The remaining budget is
   // still available to the image model for dealer and destination guidance.
+  // Brand voice sits second: identity + voice never exceed 320 chars, so the
+  // dealership's voice can no longer be pushed out of the caption window by a
+  // verbose scenario or VIN block. Design DNA is last because the caption
+  // model also receives style guidance through its own styleHint.
   const essential = [
     `Dealership identity (use this exact name): "${bounded(dealershipName, 100)}".`,
+    bounded(voiceBlock, 220),
     bounded(scenarioBlock, 240),
     bounded(vehicleBlock, 220),
     bounded(oemBlock, 120),
@@ -288,6 +362,16 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 }) => {
   const currentDealer = useAppStore((s) => s.currentDealer);
   const currentPerson = useAppStore((s) => s.currentPerson);
+  // Each customizer section is a labelled group of controls, not a form field.
+  // A bare <label> with no `for` announces nothing, so the section headings are
+  // plain text nodes wired to a role="group" wrapper by id.
+  const groupId = useId();
+  const vehicleGroupId = `${groupId}-vehicle`;
+  const releaseGroupId = `${groupId}-release`;
+  const styleGroupId = `${groupId}-style`;
+  const destinationGroupId = `${groupId}-destinations`;
+  const toneGroupId = `${groupId}-tone`;
+  const captionGroupId = `${groupId}-caption`;
   const restoredCustomerName = toPublicCustomerLabel(
     typeof initialGenerationParams?.customerName === "string"
       ? initialGenerationParams.customerName
@@ -420,6 +504,14 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   // it before the customer photo is sent to an AI provider, then links that
   // same protected record to the created post.
   const [capturedRelease, setCapturedRelease] = useState<CapturedRelease | null>(null);
+  // Creative-system-only controls. They render nothing while the dealership has
+  // not opted in, so a legacy dealer sees exactly today's screen.
+  const [addVideo, setAddVideo] = useState(() => {
+    const restoredMode = initialGenerationParams?.mediaOutputMode;
+    return restoredMode === "video" || restoredMode === "both";
+  });
+  const [playfulRequested, setPlayfulRequested] = useState(false);
+  const [personalLine, setPersonalLine] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -462,6 +554,66 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   }, [scenarioId, currentDealer?.custom_scenarios]);
   const scenarioNeedsCustomerRelease =
     activeScenario.requiresCustomer || activeScenario.category === "delivery";
+
+  // RESOLVE ONCE. Every creative-system branch below keys off `resolved`.
+  //
+  // Safety property (services/creativeSystem.ts): for a dealership that has not
+  // set `creative_system_v2`, this returns `enabled: false`, the style/tone the
+  // screen already computed, empty `platformIds`/`formatIds` (prescribes
+  // nothing) and every permission `true` (restricts nothing). So each
+  // `resolved.enabled` guard below collapses to today's exact behavior.
+  const resolved = useMemo(
+    () =>
+      resolveCreative({
+        dealer: currentDealer ?? null,
+        scenarioId,
+        fallbackStyle: style,
+        fallbackTone: tone,
+      }),
+    [currentDealer, scenarioId, style, tone],
+  );
+  const creativeEnabled = resolved.enabled;
+  const lookDefinition = resolved.look ? LOOK_DEFINITIONS[resolved.look] : null;
+  // Joined keys keep the derived memos below stable across renders: the
+  // resolver returns fresh arrays every call.
+  const prescribedPlatformKey = resolved.platformIds.join("|");
+  const prescribedFormatKey = resolved.formatIds.join("|");
+
+  // Destinations and canvases come from the category once the system is on
+  // (spec §4.4). While it is off both fall through to the existing pickers.
+  const effectivePlatformIds = useMemo<PlatformId[]>(
+    () =>
+      creativeEnabled
+        ? prescribedPlatformKey
+          ? prescribedPlatformKey.split("|")
+          : []
+        : selectedPlatforms,
+    [creativeEnabled, prescribedPlatformKey, selectedPlatforms],
+  );
+  const effectiveImageProfile = useMemo(() => {
+    if (!creativeEnabled) return primaryImageProfile;
+    const prescribed = (prescribedFormatKey ? prescribedFormatKey.split("|") : []).find(
+      isPrimaryImageFormatId,
+    );
+    return prescribed
+      ? getPrimaryImageProfile(prescribed)
+      : resolvePrimaryImageProfile(effectivePlatformIds);
+  }, [creativeEnabled, prescribedFormatKey, effectivePlatformIds, primaryImageProfile]);
+  const destinationSummary = useMemo(() => {
+    const labels = effectivePlatformIds.map(
+      (id) => platformOptions.find((option) => option.id === id)?.label || id,
+    );
+    return labels.join(" · ");
+  }, [effectivePlatformIds, platformOptions]);
+  const videoOffered = creativeEnabled && resolved.videoAllowed;
+  const playfulOffered =
+    creativeEnabled && resolved.playfulAllowed && Boolean(resolved.playfulStyleId);
+  // "Add video" collapses the old Photo/Video/Both matrix to one yes/no.
+  const effectiveMediaMode: MediaOutputMode = creativeEnabled
+    ? videoOffered && addVideo
+      ? "both"
+      : "photo"
+    : mediaOutputMode;
 
   // Filter the style picker to the dealer's enabled set. Empty enabled_styles
   // = all enabled (default). Default style is pre-selected when the dealer set
@@ -516,16 +668,22 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   // When the salesperson picks a new scenario, retune style + tone to the
   // scenario's smart defaults — but respect the dealer's enabled_styles list
   // (don't pick a style the GSM has disabled).
+  //
+  // Under the creative system a scenario is a content template only:
+  // `scenarioLegacyCreativeDefaults` returns null, so the Look keeps style and
+  // tone and the three-authority conflict cannot reappear (spec §4.1).
   const handleScenarioChange = useCallback(
     (s: PostScenario | undefined) => {
       if (!s) return;
       setScenarioId(s.id);
-      if (allowedStyles.includes(s.defaultStyle)) {
-        setStyle(s.defaultStyle);
+      const legacyDefaults = scenarioLegacyCreativeDefaults(s, creativeEnabled);
+      if (!legacyDefaults) return;
+      if (allowedStyles.includes(legacyDefaults.style)) {
+        setStyle(legacyDefaults.style);
       }
-      setTone(s.defaultTone);
+      setTone(legacyDefaults.tone);
     },
-    [allowedStyles],
+    [allowedStyles, creativeEnabled],
   );
 
   const togglePlatform = useCallback((id: PlatformId) => {
@@ -577,7 +735,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
   const handleGenerate = useCallback(async () => {
     triggerHapticFeedback();
-    if (selectedPlatforms.length === 0 && !websiteSelected) return;
+    if (effectivePlatformIds.length === 0 && !websiteSelected) return;
     if (scenarioNeedsCustomerRelease && !capturedRelease) {
       setReleaseValidationError(true);
       setReleaseModalOpen(true);
@@ -600,8 +758,50 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     setReleaseValidationError(false);
     let preparedText: string | undefined;
 
-    const styleInfo = STYLE_INFO[style];
+    // Style and tone are the resolver's answer. Disabled: identical to the
+    // picker state. Enabled: the dealership Look, and nothing else.
+    const effectiveStyle = resolved.style;
+    const effectiveTone = resolved.tone;
+    const styleInfo = STYLE_INFO[effectiveStyle];
     const supportingBriefParts: string[] = [];
+
+    const vehiclePhrase =
+      decodedVehicle && !decodedVehicle.empty
+        ? [
+            decodedVehicle.year,
+            decodedVehicle.make,
+            decodedVehicle.model,
+            decodedVehicle.trim,
+          ]
+            .filter(Boolean)
+            .join(" ")
+        : undefined;
+
+    // Spec §4.5: the personal line rides in the brief as an appended sentence,
+    // never as a replacement caption, and passes the same identity lock the
+    // free-text caption path uses.
+    const trimmedPersonalLine = creativeEnabled
+      ? personalLine.trim().slice(0, PERSONAL_LINE_MAX)
+      : "";
+    if (trimmedPersonalLine) {
+      if (
+        !captionUsesOnlyExpectedCustomer(trimmedPersonalLine, customerName, {
+          allowedPhrases: [dealershipName, vehiclePhrase],
+          rejectAnyCustomerIdentity: scenarioNeedsCustomerRelease && !customerName,
+        })
+      ) {
+        setCaptionIdentityError(
+          customerName
+            ? `Your personal line appears to name someone other than ${customerName}. Correct it before generating.`
+            : "Your personal line names a customer, but no approved customer name is attached to this post. Remove the name or add the approved customer first name.",
+        );
+        return;
+      }
+      setCaptionIdentityError("");
+      supportingBriefParts.push(
+        `Personal line (append verbatim after the caption body): "${trimmedPersonalLine}"`,
+      );
+    }
 
     // Scenario context (Customer Delivery / Pre-Owned Spotlight / Service
     // Promo / etc). This goes near the top of the brief so it dominates the
@@ -611,7 +811,10 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
       scenarioId,
       currentDealer?.custom_scenarios,
     );
-    const platformBrief = platformsToCreativeBrief(selectedPlatforms, dealershipName);
+    const platformBrief = platformsToCreativeBrief(
+      effectivePlatformIds,
+      dealershipName,
+    );
 
     // Inject decoded vehicle context if a VIN was scanned. This grounds the
     // model in concrete facts (year/make/model/trim/powertrain) so the caption
@@ -631,11 +834,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     // Per-dealer brand voice / banned phrases / OEM affiliation. These come
     // from the dealers PocketBase record so each dealership can tune voice
     // without a code change.
-    if (currentDealer?.brand_voice?.trim()) {
-      supportingBriefParts.push(
-        `Brand voice (match this exactly): ${currentDealer.brand_voice.trim()}`,
-      );
-    }
+    const voiceBlock = currentDealer?.brand_voice?.trim()
+      ? `Brand voice (match this exactly): ${currentDealer.brand_voice.trim()}`
+      : "";
     if (currentDealer?.banned_phrases?.trim()) {
       const banned = currentDealer.banned_phrases
         .split(/[\n,]+/)
@@ -707,22 +908,15 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
       vehicleBlock,
       oemBlock,
       designBlock: `Design DNA: ${styleInfo.aiHint}`,
+      voiceBlock,
       supportingBlocks: supportingBriefParts,
       platformBlock: platformBrief,
     });
 
-    if (captionSource === "custom" && customMessage.trim()) {
-      const vehiclePhrase =
-        decodedVehicle && !decodedVehicle.empty
-          ? [
-              decodedVehicle.year,
-              decodedVehicle.make,
-              decodedVehicle.model,
-              decodedVehicle.trim,
-            ]
-              .filter(Boolean)
-              .join(" ")
-          : undefined;
+    // The free-text "Write my own" path is a legacy-only caption source. Under
+    // the creative system the personal line above is the only typed copy, and
+    // it never replaces the caption body.
+    if (!creativeEnabled && captionSource === "custom" && customMessage.trim()) {
       if (
         !captionUsesOnlyExpectedCustomer(customMessage, customerName, {
           allowedPhrases: [dealershipName, vehiclePhrase],
@@ -740,11 +934,21 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
       preparedText = customMessage.trim();
     }
 
+    // Spec §10: instrument the mandatory decision count so the ≤ 5-decision
+    // goal is measurable rather than asserted.
+    logEvent("customizer.decisions", {
+      creativeSystem: creativeEnabled,
+      look: resolved.look,
+      addVideo: creativeEnabled ? videoOffered && addVideo : undefined,
+      playful: creativeEnabled ? playfulOffered && playfulRequested : undefined,
+      personalLine: creativeEnabled ? Boolean(trimmedPersonalLine) : undefined,
+    });
+
     setIsSubmitting(true);
     try {
       await onGenerate(
-        style,
-        tone,
+        effectiveStyle,
+        effectiveTone,
         customerName,
         preparedText,
         creativeBrief,
@@ -755,39 +959,40 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           hasRelease: !!capturedRelease,
           capturedRelease: capturedRelease || undefined,
           websiteEnabled: websiteSelected,
-          websiteVehicleDescription:
-            decodedVehicle && !decodedVehicle.empty
-              ? [
-                  decodedVehicle.year,
-                  decodedVehicle.make,
-                  decodedVehicle.model,
-                  decodedVehicle.trim,
-                ]
-                  .filter(Boolean)
-                  .join(" ")
+          websiteVehicleDescription: vehiclePhrase,
+          // Carries the dealership's single Playful style to the result step,
+          // where it renders a second image beside the house-style master.
+          playfulStyleId:
+            playfulOffered && playfulRequested
+              ? resolved.playfulStyleId || undefined
               : undefined,
         },
-        selectedPlatforms,
-        primaryImageProfile,
-        mediaOutputMode,
+        effectivePlatformIds,
+        effectiveImageProfile,
+        effectiveMediaMode,
       );
     } finally {
       setIsSubmitting(false);
     }
   }, [
+    addVideo,
     captionSource,
-    tone,
-    style,
+    creativeEnabled,
+    resolved,
     customerName,
     customMessage,
     decodedVehicle,
     capturedRelease,
     currentDealer,
+    personalLine,
+    playfulOffered,
+    playfulRequested,
     scenarioId,
     scenarioNeedsCustomerRelease,
-    selectedPlatforms,
-    primaryImageProfile,
-    mediaOutputMode,
+    effectivePlatformIds,
+    effectiveImageProfile,
+    effectiveMediaMode,
+    videoOffered,
     websiteSelected,
     dealershipName,
     onGenerate,
@@ -870,7 +1075,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               <div className="min-w-0 flex-1">
                 <CardTitle className="text-lg sm:text-xl">Create your post</CardTitle>
                 <CardDescription className="text-xs sm:text-sm">
-                  Pick a style — AI handles the rest
+                  {lookDefinition
+                    ? `${lookDefinition.label} look — ${lookDefinition.description}`
+                    : "Pick a style — AI handles the rest"}
                 </CardDescription>
               </div>
             </div>
@@ -879,7 +1086,11 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           <CardContent className="relative space-y-5 pt-0">
             {/* Post scenario — selects which kind of post this is (delivery,
                 pre-owned spotlight, service promo, etc). Tunes prompt + defaults. */}
-            <ScenarioPicker value={scenarioId} onChange={handleScenarioChange} />
+            <ScenarioPicker
+              value={scenarioId}
+              onChange={handleScenarioChange}
+              categoryFirst={creativeEnabled}
+            />
 
             <div
               className="flex items-center gap-3 rounded-xl border border-primary-400/20 bg-primary-500/[0.07] px-3 py-2.5"
@@ -918,10 +1129,13 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             />
 
             {/* VIN Scanner — show pill if vehicle decoded, otherwise show CTA */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+            <div className="space-y-2" role="group" aria-labelledby={vehicleGroupId}>
+              <span
+                id={vehicleGroupId}
+                className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+              >
                 Vehicle
-              </label>
+              </span>
               {decodedVehicle && !decodedVehicle.empty ? (
                 <m.div
                   initial={{ opacity: 0, scale: 0.98 }}
@@ -974,10 +1188,13 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             </div>
 
             {/* Photo release — capture customer's signed consent before posting their photo */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+            <div className="space-y-2" role="group" aria-labelledby={releaseGroupId}>
+              <span
+                id={releaseGroupId}
+                className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+              >
                 Photo release · {scenarioNeedsCustomerRelease ? "required" : "optional"}
-              </label>
+              </span>
               {capturedRelease ? (
                 <m.div
                   initial={{ opacity: 0, scale: 0.98 }}
@@ -1045,12 +1262,21 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               ) : null}
             </div>
 
-            {/* Style Selection - Simplified Grid */}
-            <div className="space-y-2">
+            {/* Style Selection - Simplified Grid. Hidden (never deleted) once
+                the Look owns the image treatment (spec §4.1). */}
+            <div
+              className="space-y-2"
+              role="group"
+              aria-labelledby={styleGroupId}
+              hidden={creativeEnabled}
+            >
               <div className="flex justify-between items-baseline">
-                <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+                <span
+                  id={styleGroupId}
+                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+                >
                   Design Style
-                </label>
+                </span>
                 <span className="text-[10px] text-surface-400 opacity-60">
                   Select one
                 </span>
@@ -1146,49 +1372,73 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
             </div>
 
             {/* Where they'll post — drives caption length + export bias */}
-            <div className="space-y-2">
+            <div
+              className="space-y-2"
+              role="group"
+              aria-labelledby={destinationGroupId}
+            >
               <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
-                  Share to
-                </label>
+                <span
+                  id={destinationGroupId}
+                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+                >
+                  {creativeEnabled ? "Where this posts" : "Share to"}
+                </span>
                 <span className="text-[10px] text-surface-400">
-                  Pick all that apply
+                  {creativeEnabled ? "Set by your category" : "Pick all that apply"}
                 </span>
               </div>
-              <div className="mobile-h-scroll -mx-1 px-1 pb-1 sm:flex-wrap sm:overflow-visible">
-                {primaryPlatformOptions.map((p) => {
-                  const on = selectedPlatforms.includes(p.id);
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() => togglePlatform(p.id)}
-                      className={cn(
-                        "min-h-11 shrink-0 snap-start rounded-full border px-3.5 py-2 text-left transition-colors",
-                        on
-                          ? "border-primary-400 bg-primary-500/25 text-primary-50 [.theme-light_&]:text-primary-950"
-                          : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/40",
-                      )}
-                    >
-                      <span className="flex items-center gap-1.5 text-sm font-semibold">
-                        {on ? (
-                          <span
-                            className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-primary-300 text-primary-950"
-                            aria-hidden="true"
-                          >
-                            <Check className="h-3 w-3" strokeWidth={3} />
-                          </span>
-                        ) : null}
-                        {p.shortLabel}
-                      </span>
-                      <span className="block text-[10px] leading-tight opacity-80">
-                        {p.verticalPreferred ? "9:16 story-ready" : "Feed"}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+              {/* Prescribed destinations + canvases replace the chips, the
+                  "More platforms" accordion, and the size grid (spec §4.4). */}
+              {creativeEnabled ? (
+                <p className="rounded-xl border border-hairline bg-fill-subtle px-3 py-2.5 text-xs leading-relaxed text-surface-300">
+                  {destinationSummary || "No social destinations for this category."}
+                  <span className="mt-0.5 block text-[10px] text-surface-400">
+                    {effectiveImageProfile.label} master · every destination still gets
+                    its own exact file.
+                  </span>
+                </p>
+              ) : null}
+              {/* Conditionally rendered rather than [hidden]: .mobile-h-scroll
+                  declares `display: flex` later in the base layer than
+                  Preflight's `[hidden]` rule at equal specificity, so the
+                  attribute alone would leave these chips on screen. */}
+              {creativeEnabled ? null : (
+                <div className="mobile-h-scroll -mx-1 px-1 pb-1 sm:flex-wrap sm:overflow-visible">
+                  {primaryPlatformOptions.map((p) => {
+                    const on = selectedPlatforms.includes(p.id);
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => togglePlatform(p.id)}
+                        className={cn(
+                          "min-h-11 shrink-0 snap-start rounded-full border px-3.5 py-2 text-left transition-colors",
+                          on
+                            ? "border-primary-400 bg-primary-500/25 text-primary-50 [.theme-light_&]:text-primary-950"
+                            : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/40",
+                        )}
+                      >
+                        <span className="flex items-center gap-1.5 text-sm font-semibold">
+                          {on ? (
+                            <span
+                              className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-primary-300 text-primary-950"
+                              aria-hidden="true"
+                            >
+                              <Check className="h-3 w-3" strokeWidth={3} />
+                            </span>
+                          ) : null}
+                          {p.shortLabel}
+                        </span>
+                        <span className="block text-[10px] leading-tight opacity-80">
+                          {p.verticalPreferred ? "9:16 story-ready" : "Feed"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               <button
                 type="button"
                 aria-pressed={websiteSelected}
@@ -1265,7 +1515,30 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   </span>
                 ) : null}
               </button>
-              <div className="overflow-hidden rounded-xl border border-hairline bg-surface-950/25">
+              {/* Spec §4.3: the Photo/Video/Both matrix becomes one yes/no,
+                  and only for a category and a person allowed to use it. */}
+              {videoOffered ? (
+                <CapabilityToggle
+                  label="Add video"
+                  hint="9:16 · 6s · music on, in your dealership's motion style."
+                  icon={Film}
+                  pressed={addVideo}
+                  onToggle={() => setAddVideo((current) => !current)}
+                />
+              ) : null}
+              {playfulOffered ? (
+                <CapabilityToggle
+                  label="Make it playful"
+                  hint="Adds your dealership's Playful image beside the house-style master."
+                  icon={PartyPopper}
+                  pressed={playfulRequested}
+                  onToggle={() => setPlayfulRequested((current) => !current)}
+                />
+              ) : null}
+              <div
+                className="overflow-hidden rounded-xl border border-hairline bg-surface-950/25"
+                hidden={creativeEnabled}
+              >
                 <button
                   type="button"
                   aria-expanded={showMorePlatforms}
@@ -1348,7 +1621,10 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   ) : null}
                 </AnimatePresence>
               </div>
-              <fieldset className="rounded-xl border border-hairline bg-surface-950/30 p-1.5">
+              <fieldset
+                className="rounded-xl border border-hairline bg-surface-950/30 p-1.5"
+                hidden={creativeEnabled}
+              >
                 <legend className="sr-only">
                   Media to create for each destination
                 </legend>
@@ -1411,7 +1687,10 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       : "Creates the exact photo set and a video-ready delivery plan without hiding extra paid renders."}
                 </p>
               </fieldset>
-              <fieldset className="space-y-2 rounded-xl border border-primary-400/20 bg-primary-500/10 p-3">
+              <fieldset
+                className="space-y-2 rounded-xl border border-primary-400/20 bg-primary-500/10 p-3"
+                hidden={creativeEnabled}
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <legend className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-300">
@@ -1479,11 +1758,20 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               </fieldset>
             </div>
 
-            {/* Tone Selection - Horizontal Scroll on Mobile with Snap */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+            {/* Tone Selection - Horizontal Scroll on Mobile with Snap. Hidden
+                (never deleted) once the Look owns the caption voice. */}
+            <div
+              className="space-y-2"
+              role="group"
+              aria-labelledby={toneGroupId}
+              hidden={creativeEnabled}
+            >
+              <span
+                id={toneGroupId}
+                className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+              >
                 Tone
-              </label>
+              </span>
               <div className="mobile-h-scroll -mx-1 px-1 pb-2">
                 {Object.values(ToneOption).map((option) => {
                   const info = TONE_INFO[option];
@@ -1525,11 +1813,46 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               </div>
             </div>
 
+            {/* Spec §4.5: one optional appended line replaces "Write my own"
+                and the 10 templates for a creative-system dealership. */}
+            {creativeEnabled ? (
+              <div className="space-y-2">
+                <Input
+                  label="Add a personal line (optional)"
+                  value={personalLine}
+                  onChange={(e) => {
+                    setPersonalLine(e.target.value.slice(0, PERSONAL_LINE_MAX));
+                    setCaptionIdentityError("");
+                  }}
+                  maxLength={PERSONAL_LINE_MAX}
+                  placeholder="Something only you would say"
+                  helperText={`Appended after the caption — never replaces it. ${
+                    PERSONAL_LINE_MAX - personalLine.length
+                  } characters left.`}
+                  fullWidth
+                  className="bg-fill-subtle border-hairline focus:border-primary-400 focus:bg-fill-hover transition-colors"
+                />
+                {captionIdentityError ? (
+                  <p className="text-xs font-medium text-error-200" role="alert">
+                    {captionIdentityError}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
             {/* Caption Mode Toggle */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-surface-300 uppercase tracking-wide">
+            <div
+              className="space-y-2"
+              role="group"
+              aria-labelledby={captionGroupId}
+              hidden={creativeEnabled}
+            >
+              <span
+                id={captionGroupId}
+                className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+              >
                 Caption
-              </label>
+              </span>
               <div className="flex gap-2 bg-surface-950/30 p-1 rounded-xl border border-hairline">
                 <Button
                   variant={captionSource === "ai" ? "filled" : "ghost"}
@@ -1570,7 +1893,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
             {/* Custom Message Input */}
             <AnimatePresence mode="wait">
-              {captionSource === "custom" && (
+              {!creativeEnabled && captionSource === "custom" && (
                 <m.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: "auto" }}
@@ -1601,14 +1924,16 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 </m.div>
               )}
             </AnimatePresence>
-            {captionSource !== "custom" && captionIdentityError ? (
+            {!creativeEnabled && captionSource !== "custom" && captionIdentityError ? (
               <p className="text-xs font-medium text-error-200" role="alert">
                 {captionIdentityError}
               </p>
             ) : null}
 
-            {/* Advanced Options - Collapsible */}
-            <div className="border-t border-hairline pt-3">
+            {/* Advanced Options - Collapsible. The 10 templates and the AI
+                instruction preview are salesperson-facing option sprawl, so
+                they are hidden (never deleted) under the creative system. */}
+            <div className="border-t border-hairline pt-3" hidden={creativeEnabled}>
               <button
                 type="button"
                 aria-expanded={showAdvanced}
@@ -1699,12 +2024,12 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 rightIcon={!isBusy && <ChevronRight />}
                 onClick={handleGenerate}
                 disabled={
-                  isBusy || (selectedPlatforms.length === 0 && !websiteSelected)
+                  isBusy || (effectivePlatformIds.length === 0 && !websiteSelected)
                 }
                 aria-label={`Generate Post — ${
-                  mediaOutputMode === "photo"
+                  effectiveMediaMode === "photo"
                     ? "create photo outputs"
-                    : mediaOutputMode === "video"
+                    : effectiveMediaMode === "video"
                       ? "create video plan"
                       : "create photo and video set"
                 }`}
@@ -1726,9 +2051,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 <span className="relative z-10 flex items-center gap-2">
                   {isBusy
                     ? "Creating platform outputs..."
-                    : mediaOutputMode === "photo"
+                    : effectiveMediaMode === "photo"
                       ? "Create photo outputs"
-                      : mediaOutputMode === "video"
+                      : effectiveMediaMode === "video"
                         ? "Create video plan"
                         : "Create photo + video set"}
                   {!isBusy && (
@@ -1739,7 +2064,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   )}
                 </span>
               </Button>
-              {selectedPlatforms.length === 0 && !websiteSelected ? (
+              {effectivePlatformIds.length === 0 && !websiteSelected ? (
                 <p
                   className="text-center text-xs font-medium text-warning-200"
                   role="status"

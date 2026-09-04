@@ -16,6 +16,11 @@ import { ToastProvider } from "../components/ui/Toast";
 import type { WebsitePublication } from "../services/websitePublishing";
 import { VideoStyle } from "../types";
 import { useAppStore } from "../stores/appStore";
+import {
+  EXPOSED_VIDEO_STYLES,
+  UNEXPOSED_VIDEO_STYLES,
+  styles as videoStyleSlate,
+} from "../components/video-director/constants";
 
 vi.mock("canvas-confetti", () => ({ default: vi.fn() }));
 const {
@@ -30,7 +35,9 @@ const {
   mockGetWebsitePublication,
   mockListWebsiteDestinations,
   mockRetryWebsitePublication,
+  mockLinkReleaseToPostWithRetry,
 } = vi.hoisted(() => ({
+  mockLinkReleaseToPostWithRetry: vi.fn(),
   mockGetPostApprovalStatus: vi.fn(),
   mockMarkPostVideoGenerated: vi.fn(),
   mockRenderFormat: vi.fn(async (source: string) => source),
@@ -102,6 +109,10 @@ vi.mock("../services/websitePublishing", async (importOriginal) => {
     listWebsiteDestinations: mockListWebsiteDestinations,
     retryWebsitePublication: mockRetryWebsitePublication,
   };
+});
+vi.mock("../services/photoReleases", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/photoReleases")>();
+  return { ...actual, linkReleaseToPostWithRetry: mockLinkReleaseToPostWithRetry };
 });
 vi.mock("../components/ui/ProgressiveImage", () => ({
   ProgressiveImage: ({
@@ -186,6 +197,11 @@ describe("PostResult job-first flow", () => {
     });
     mockListWebsiteDestinations.mockResolvedValue([]);
     mockRetryWebsitePublication.mockResolvedValue({ status: "queued", attempts: 0 });
+    mockLinkReleaseToPostWithRetry.mockResolvedValue({
+      id: "release-9",
+      post_id: "delivery-post-1",
+      has_release: true,
+    });
     mockSavePreparedMediaToLibrary.mockResolvedValue({
       method: "download",
       kind: "image",
@@ -278,7 +294,7 @@ describe("PostResult job-first flow", () => {
     expect(screen.queryByText("TikTok")).not.toBeInTheDocument();
     expect(screen.queryByText("Choose a destination output")).not.toBeInTheDocument();
     expect(screen.getByText("Private website draft")).toBeVisible();
-    expect(screen.getByText(/Website selected — review before sending/i)).toBeVisible();
+    expect(screen.getByText(/Website selected/i)).toBeVisible();
     expect(screen.getByRole("button", { name: /Edit with AI/i })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Send website draft" }));
@@ -346,7 +362,7 @@ describe("PostResult job-first flow", () => {
         expect.any(AbortSignal),
       ),
     );
-    expect(await screen.findByText("Private website draft ready")).toBeVisible();
+    expect(await screen.findByText("Private draft ready")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Send website draft" })).toBeNull();
     expect(useAppStore.getState().generatedPost).toMatchObject({
       postId: "website-reload-1",
@@ -534,7 +550,7 @@ describe("PostResult job-first flow", () => {
       },
     });
 
-    expect(screen.getByText("Website draft was not saved")).toBeVisible();
+    expect(screen.getByText("Draft not saved")).toBeVisible();
     expect(
       screen.getByRole("button", { name: "Not saved website draft" }),
     ).toBeDisabled();
@@ -849,6 +865,187 @@ describe("PostResult job-first flow", () => {
         name: "Save image (release not saved)",
       }),
     ).toBeDisabled();
+    // Consent really may be missing here, so the strict wording stands and
+    // there is nothing to retry from this screen.
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The signed photo release was not stored, so consent cannot be verified. Copy, share, save, and export remain locked; check your connection and create another post to retry.",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Retry saving release" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Delivery locked · Release not saved")).toBeVisible();
+  });
+
+  describe("recoverable photo release link failure", () => {
+    const linkFailedPost = {
+      image: "data:image/png;base64,aGVsbG8=",
+      text: "A customer delivery post.",
+      postId: "delivery-post-1",
+      releaseStatus: "save_failed" as const,
+      releaseLinkStatus: "link_failed" as const,
+      releaseId: "release-9",
+    };
+
+    it("tells the truth about stored consent and offers a retry instead of a re-signature", () => {
+      renderResult({ post: linkFailedPost });
+
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent("Photo release not attached yet");
+      expect(alert).toHaveTextContent(
+        "The customer's signed release was captured and saved — nothing needs to be signed again. Only its link to this post did not finish, so copy, share, save, and export stay locked until it does. Retry saving the release below.",
+      );
+      expect(alert).not.toHaveTextContent("was not stored");
+      expect(
+        screen.getByRole("button", { name: "Retry saving release" }),
+      ).toBeEnabled();
+
+      // Stated once as a status, never as a second pressable control.
+      const lockStatus = screen.getByText("Delivery locked · Release not attached");
+      expect(lockStatus).toBeVisible();
+      expect(lockStatus.closest("button")).toBeNull();
+
+      const delivery = screen.getByLabelText("Post delivery actions");
+      expect(
+        within(delivery).getByRole("button", {
+          name: "Copy caption (release not attached)",
+        }),
+      ).toBeDisabled();
+      expect(
+        within(delivery).getByRole("button", {
+          name: "Share post (release not attached)",
+        }),
+      ).toBeDisabled();
+      expect(
+        within(delivery).getByRole("button", {
+          name: "Save image (release not attached)",
+        }),
+      ).toBeDisabled();
+    });
+
+    it("clears the lock when the retry links the stored release", async () => {
+      const user = userEvent.setup();
+      renderResult({ post: linkFailedPost });
+
+      await user.click(screen.getByRole("button", { name: "Retry saving release" }));
+
+      await waitFor(() =>
+        expect(mockLinkReleaseToPostWithRetry).toHaveBeenCalledWith(
+          "release-9",
+          "delivery-post-1",
+        ),
+      );
+      await waitFor(() =>
+        expect(
+          screen.queryByText("Photo release not attached yet"),
+        ).not.toBeInTheDocument(),
+      );
+      expect(
+        screen.getByText(
+          "Photo release saved to this post. Copy, share, save, and export are unlocked.",
+        ),
+      ).toBeVisible();
+      expect(screen.queryByText(/^Delivery locked · /)).not.toBeInTheDocument();
+
+      const delivery = screen.getByLabelText("Post delivery actions");
+      expect(
+        within(delivery).getByRole("button", { name: "Copy caption" }),
+      ).toBeEnabled();
+      await waitFor(() =>
+        expect(
+          within(delivery).getByRole("button", { name: "Share post" }),
+        ).toBeEnabled(),
+      );
+      expect(useAppStore.getState().generatedPost).toMatchObject({
+        postId: "delivery-post-1",
+        releaseStatus: "saved",
+      });
+      expect(useAppStore.getState().generatedPost?.releaseLinkStatus).toBeUndefined();
+    });
+
+    it("keeps the lock and promises a reconnect retry when the attempt is exhausted", async () => {
+      const user = userEvent.setup();
+      mockLinkReleaseToPostWithRetry.mockRejectedValue(
+        new Error("Photo release link failed: Service Unavailable"),
+      );
+      renderResult({ post: linkFailedPost });
+
+      await user.click(screen.getByRole("button", { name: "Retry saving release" }));
+
+      await waitFor(() =>
+        expect(
+          screen.getByText(
+            "That did not go through. Nothing was lost — the signed release is still stored. Try again in a moment; it also retries on its own when the connection comes back.",
+          ),
+        ).toBeVisible(),
+      );
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Photo release not attached yet",
+      );
+      expect(
+        screen.getByRole("button", { name: "Retry saving release" }),
+      ).toBeEnabled();
+
+      const delivery = screen.getByLabelText("Post delivery actions");
+      expect(
+        within(delivery).getByRole("button", {
+          name: "Copy caption (release not attached)",
+        }),
+      ).toBeDisabled();
+      expect(
+        within(delivery).getByRole("button", {
+          name: "Share post (release not attached)",
+        }),
+      ).toBeDisabled();
+      expect(
+        within(delivery).getByRole("button", {
+          name: "Save image (release not attached)",
+        }),
+      ).toBeDisabled();
+      expect(useAppStore.getState().generatedPost).toBeNull();
+    });
+
+    it("promises the offline reconnect retry when the device has no connection", async () => {
+      const user = userEvent.setup();
+      mockLinkReleaseToPostWithRetry.mockRejectedValue(new Error("Failed to fetch"));
+      renderResult({ post: linkFailedPost });
+
+      await act(async () => {
+        window.dispatchEvent(new Event("offline"));
+      });
+      await user.click(screen.getByRole("button", { name: "Retry saving release" }));
+
+      await waitFor(() =>
+        expect(
+          screen.getByText(
+            "You are offline. Nothing was lost — the signed release is still stored, and this retries automatically as soon as you are back online.",
+          ),
+        ).toBeVisible(),
+      );
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Photo release not attached yet",
+      );
+      // Left offline on purpose: the next case exercises the reconnect.
+    });
+
+    it("repairs the link on its own when the connection comes back", async () => {
+      renderResult({ post: linkFailedPost });
+
+      expect(mockLinkReleaseToPostWithRetry).not.toHaveBeenCalled();
+
+      await act(async () => {
+        window.dispatchEvent(new Event("offline"));
+        window.dispatchEvent(new Event("online"));
+      });
+
+      await waitFor(() =>
+        expect(mockLinkReleaseToPostWithRetry).toHaveBeenCalledTimes(1),
+      );
+      await waitFor(() =>
+        expect(
+          screen.queryByText("Photo release not attached yet"),
+        ).not.toBeInTheDocument(),
+      );
+    });
   });
 
   it("rescans direct caption edits and blocks prohibited delivery claims", () => {
@@ -1738,5 +1935,494 @@ describe("LoadingOverlay", () => {
     expect(
       screen.getByRole("list", { name: "Post generation stages" }),
     ).toBeInTheDocument();
+  });
+});
+
+/**
+ * Phase 2 of the brand-consistent creative system
+ * (docs/superpowers/specs/2026-09-02-brand-consistent-creative-system.md §4, §8).
+ *
+ * The load-bearing property is the DISABLED half: a dealership without
+ * `creative_system_v2` must get byte-identical behavior, so the first block
+ * pins the legacy catalogue and option matrix that the enabled block replaces.
+ */
+describe("PostResult creative system", () => {
+  const basePost = {
+    image: "data:image/png;base64,aGVsbG8=",
+    text: "A polished delivery-day caption.",
+  };
+
+  const renderPost = (
+    overrides: Partial<React.ComponentProps<typeof PostResult>> = {},
+  ) =>
+    render(
+      <ToastProvider>
+        <PostResult
+          post={basePost}
+          {...callbacks}
+          isDesktopLayout={false}
+          {...overrides}
+        />
+      </ToastProvider>,
+    );
+
+  const brandDealer = (extra: Record<string, unknown> = {}) => ({
+    id: "dealer-brand-1",
+    name: "Bob Maxey Ford",
+    creative_system_v2: true,
+    signature_look: "showroom" as const,
+    playful_style: "pixar",
+    ...extra,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetPostApprovalStatus.mockResolvedValue({
+      id: "post-review-1",
+      approval_status: "pending",
+    });
+    mockUpdatePostDraft.mockResolvedValue({
+      id: "post-1",
+      updated: true,
+      post_revision: "2026-08-05 09:42:00.000Z",
+    });
+    mockGetWebsitePublication.mockResolvedValue({
+      status: "not_requested",
+      attempts: 0,
+    });
+    mockListWebsiteDestinations.mockResolvedValue([]);
+    mockSavePreparedMediaToLibrary.mockResolvedValue({
+      method: "download",
+      kind: "image",
+    });
+    Object.defineProperty(navigator, "vibrate", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    useAppStore.setState({
+      currentDealer: null,
+      generatedPost: null,
+      selectedImage: "data:image/png;base64,b3JpZ2luYWw=",
+    });
+  });
+
+  describe("dealership without the creative system (today's screen)", () => {
+    it("still opens the full Fun Mode catalogue with search, favorites and Surprise Me", async () => {
+      const user = userEvent.setup();
+      renderPost();
+
+      await user.click(screen.getByRole("button", { name: "Fun mode" }));
+
+      expect(await screen.findByLabelText("Search fun styles")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Surprise Me!" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Show all styles" })).toBeVisible();
+      expect(callbacks.onFunMode).not.toHaveBeenCalled();
+    });
+
+    it("still opens the video option matrix instead of rendering a fixed format", async () => {
+      const user = userEvent.setup();
+      renderPost();
+
+      await user.click(screen.getByRole("button", { name: "Video" }));
+
+      expect(await screen.findByText("Format for")).toBeVisible();
+      expect(screen.getByText("Video quality")).toBeVisible();
+      expect(screen.getByText("Aspect ratio")).toBeVisible();
+      expect(screen.getByText("Sound")).toBeVisible();
+      expect(screen.getByText("Length")).toBeVisible();
+      expect(callbacks.onGenerateVideo).not.toHaveBeenCalled();
+    });
+
+    it("keeps caption tabs, the hashtag editor and unlimited regeneration on the surface", async () => {
+      const user = userEvent.setup();
+      renderPost({
+        post: {
+          ...basePost,
+          platformIds: ["facebook_feed"],
+          platformCaptions: { facebook_feed: "Facebook flavored caption." },
+        },
+        isDesktopLayout: true,
+      });
+
+      // Destination tabs and the hashtag chip editor stay on the caption panel.
+      expect(screen.getByRole("tablist", { name: "Platform captions" })).toBeVisible();
+      expect(screen.getByRole("button", { name: /Edit hashtags/i })).toBeVisible();
+      expect(screen.queryByTestId("studio-tools-extras")).not.toBeInTheDocument();
+
+      const disclosure = screen.getByRole("button", { name: "Show creative tools" });
+      await user.click(disclosure);
+      expect(screen.getByRole("button", { name: "Regenerate image" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Regenerate caption" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Edit image" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Edit text" })).toBeEnabled();
+      expect(screen.queryByTestId("one-shot-retry-note")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("dealership with the creative system enabled", () => {
+    it("applies the one configured playful style and keeps the master as a second image", async () => {
+      const user = userEvent.setup();
+      useAppStore.setState({ currentDealer: brandDealer() });
+      const { rerender } = renderPost();
+
+      expect(
+        screen.queryByRole("button", { name: "Fun mode" }),
+      ).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Playful" }));
+
+      // No catalogue: the dealership style is applied directly.
+      await waitFor(() => expect(callbacks.onFunMode).toHaveBeenCalledWith("pixar"));
+      expect(screen.queryByLabelText("Search fun styles")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Surprise Me!" }),
+      ).not.toBeInTheDocument();
+
+      // The app swaps in the playful render; the master must survive beside it.
+      rerender(
+        <ToastProvider>
+          <PostResult
+            post={{ ...basePost, image: "data:image/png;base64,cGxheWZ1bA==" }}
+            {...callbacks}
+            isDesktopLayout={false}
+          />
+        </ToastProvider>,
+      );
+
+      const pair = await screen.findByTestId("playful-pair");
+      expect(
+        within(pair).getByRole("button", { name: "Use the house style version" }),
+      ).toBeInTheDocument();
+      const playfulOption = within(pair).getByRole("button", {
+        name: "Use the playful version",
+      });
+      expect(playfulOption).toHaveAttribute("aria-current", "true");
+      expect(
+        Array.from(pair.querySelectorAll("img")).map((img) => img.getAttribute("src")),
+      ).toEqual([basePost.image, "data:image/png;base64,cGxheWZ1bA=="]);
+    });
+
+    it("renders Add video straight from the dealership motion signature", async () => {
+      const user = userEvent.setup();
+      useAppStore.setState({
+        currentDealer: brandDealer({
+          motion_signature: {
+            style: VideoStyle.Spotlight,
+            aspects: ["9:16"],
+            audio: "celebration",
+          },
+        }),
+      });
+      callbacks.onGenerateVideo.mockResolvedValueOnce("blob:house-video");
+      renderPost();
+
+      await user.click(screen.getByRole("button", { name: "Add video" }));
+
+      await waitFor(() =>
+        expect(callbacks.onGenerateVideo).toHaveBeenCalledWith(VideoStyle.Spotlight, {
+          durationSeconds: 6,
+          soundtrack: "celebration",
+          aspectPreference: "9:16",
+          resolution: "720p",
+          pacing: "cinematic",
+        }),
+      );
+      // The option matrix never opens.
+      expect(screen.queryByText("Format for")).not.toBeInTheDocument();
+      expect(screen.queryByText("Marketing styles")).not.toBeInTheDocument();
+    });
+
+    it("falls back to the Look's motion style when no signature is stored", async () => {
+      const user = userEvent.setup();
+      useAppStore.setState({ currentDealer: brandDealer({ signature_look: "turbo" }) });
+      callbacks.onGenerateVideo.mockResolvedValueOnce("blob:house-video");
+      renderPost();
+
+      await user.click(screen.getByRole("button", { name: "Add video" }));
+
+      await waitFor(() =>
+        expect(callbacks.onGenerateVideo).toHaveBeenCalledWith(
+          VideoStyle.LiquidChrome,
+          expect.objectContaining({
+            aspectPreference: "9:16",
+            soundtrack: "cinematic",
+          }),
+        ),
+      );
+    });
+
+    it("hides the Playful and Add video tiles when a manager turns them off", () => {
+      useAppStore.setState({
+        currentDealer: brandDealer({
+          feature_permissions: {
+            playful: { team: false, people: {} },
+            video: { team: false, people: {} },
+          },
+        }),
+      });
+      renderPost();
+
+      expect(screen.queryByRole("button", { name: "Playful" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Add video" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Schedule" })).toBeInTheDocument();
+    });
+
+    it("hides Add video for a category that may not produce motion", () => {
+      useAppStore.setState({ currentDealer: brandDealer() });
+      renderPost({
+        post: {
+          ...basePost,
+          websiteDraft: {
+            enabled: true as const,
+            kind: "site_update" as const,
+            category: "service" as const,
+            title: "Service special",
+            body: "A private service update.",
+            altText: "A service bay image.",
+            schemaVersion: 1 as const,
+          },
+        },
+      });
+
+      expect(
+        screen.queryByRole("button", { name: "Add video" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Playful" })).toBeInTheDocument();
+    });
+
+    it("spends the photo and caption retries once each and then explains the limit", async () => {
+      const user = userEvent.setup();
+      useAppStore.setState({ currentDealer: brandDealer() });
+      renderPost();
+
+      await user.click(screen.getByRole("button", { name: "Show studio tools" }));
+      const photo = screen.getByRole("button", { name: "Try another photo" });
+      const caption = screen.getByRole("button", { name: "Try another caption" });
+      expect(photo).toBeEnabled();
+      expect(caption).toBeEnabled();
+
+      await user.click(photo);
+      await waitFor(() => expect(callbacks.onRegenerateImage).toHaveBeenCalledTimes(1));
+      await user.click(caption);
+      await waitFor(() => expect(callbacks.onRegenerateText).toHaveBeenCalledTimes(1));
+
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Try another photo" }),
+        ).toBeDisabled(),
+      );
+      expect(
+        screen.getByRole("button", { name: "Try another caption" }),
+      ).toBeDisabled();
+      expect(screen.getByTestId("one-shot-retry-note")).toHaveTextContent(
+        "Already used once on this post. A manager can regenerate it for you.",
+      );
+
+      await user.click(screen.getByRole("button", { name: "Try another photo" }));
+      await user.click(screen.getByRole("button", { name: "Try another caption" }));
+      expect(callbacks.onRegenerateImage).toHaveBeenCalledTimes(1);
+      expect(callbacks.onRegenerateText).toHaveBeenCalledTimes(1);
+    });
+
+    it("hides both free-text edits when the manager permission is off", async () => {
+      const user = userEvent.setup();
+      useAppStore.setState({
+        currentDealer: brandDealer({
+          feature_permissions: { freeTextEdit: { team: false, people: {} } },
+        }),
+      });
+      renderPost();
+
+      expect(
+        screen.queryByRole("button", { name: /Edit with AI/i }),
+      ).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Show studio tools" }));
+      expect(
+        screen.queryByRole("button", { name: "Edit image" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Edit text" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Try another photo" })).toBeEnabled();
+    });
+
+    it("keeps both free-text edits when the permission is unset", async () => {
+      const user = userEvent.setup();
+      useAppStore.setState({ currentDealer: brandDealer() });
+      renderPost();
+
+      expect(screen.getByRole("button", { name: /Edit with AI/i })).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Show studio tools" }));
+      expect(screen.getByRole("button", { name: "Edit image" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Edit text" })).toBeEnabled();
+    });
+
+    it("moves export sizes, caption tabs, the hashtag editor and the media tray behind Studio tools", async () => {
+      const user = userEvent.setup();
+      useAppStore.setState({ currentDealer: brandDealer() });
+      renderPost({
+        post: {
+          ...basePost,
+          platformIds: ["facebook_feed"],
+          platformCaptions: { facebook_feed: "Facebook flavored caption." },
+        },
+        isDesktopLayout: true,
+      });
+
+      expect(
+        screen.queryByRole("tablist", { name: "Platform captions" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /Edit hashtags/i }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Media history")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Generated media tray")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Export sizes" }),
+      ).not.toBeInTheDocument();
+      // The caption itself stays editable on the publish surface, in the same
+      // editor the disclosure later reveals hashtag chips inside — brand mode
+      // must never mount a second caption editor.
+      expect(screen.getByLabelText("Full caption text")).toHaveValue(basePost.text);
+      expect(
+        screen.queryByRole("button", { name: /Edit hashtags/i }),
+      ).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Show studio tools" }));
+
+      const extras = screen.getByTestId("studio-tools-extras");
+      expect(screen.getByRole("button", { name: "Export sizes" })).toBeInTheDocument();
+      expect(
+        within(extras).getByRole("tablist", { name: "Platform captions" }),
+      ).toBeVisible();
+      // The chip editor is revealed in place on the single surface editor.
+      expect(screen.getAllByLabelText("Full caption text")).toHaveLength(1);
+      expect(screen.getByRole("button", { name: /Edit hashtags/i })).toBeVisible();
+      expect(within(extras).getByLabelText("Generated media tray")).toBeInTheDocument();
+    });
+
+    it("renders an exact destination file from the signature instead of a dead end", async () => {
+      const user = userEvent.setup();
+      useAppStore.setState({
+        currentDealer: brandDealer({
+          motion_signature: {
+            style: VideoStyle.Spotlight,
+            aspects: ["9:16"],
+            audio: "cinematic",
+          },
+        }),
+      });
+      callbacks.onGenerateVideo.mockResolvedValueOnce("blob:reel-video");
+      renderPost({
+        post: {
+          ...basePost,
+          platformIds: ["instagram_feed"],
+          mediaOutputMode: "both" as const,
+        },
+      });
+
+      await user.click(
+        screen.getByRole("button", {
+          name: "Select Instagram Reel video 9:16, 1080 by 1920 pixels",
+        }),
+      );
+      await user.click(
+        screen.getByRole("button", { name: "Create Instagram Reel video 9:16" }),
+      );
+
+      // The pinned-output matrix never appears; the house style renders the
+      // destination's exact 1080p file directly.
+      expect(screen.queryByText("Exact output pinned")).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(callbacks.onGenerateVideo).toHaveBeenCalledWith(
+          VideoStyle.Spotlight,
+          expect.objectContaining({
+            aspectPreference: "9:16",
+            durationSeconds: 8,
+            resolution: "1080p",
+          }),
+        ),
+      );
+    });
+
+    it("keeps every compliance lock and the release retry intact in brand mode", () => {
+      useAppStore.setState({ currentDealer: brandDealer() });
+      renderPost({
+        post: {
+          ...basePost,
+          postId: "delivery-post-1",
+          releaseStatus: "save_failed" as const,
+          releaseLinkStatus: "link_failed" as const,
+          releaseId: "release-9",
+          disclosures: "Offer subject to approved credit.",
+          disclosureCategories: ["finance"],
+        },
+      });
+
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent("Photo release not attached yet");
+      expect(
+        screen.getByRole("button", { name: "Retry saving release" }),
+      ).toBeEnabled();
+      expect(screen.getByText("Delivery locked · Release not attached")).toBeVisible();
+
+      const delivery = screen.getByLabelText("Post delivery actions");
+      expect(
+        within(delivery).getByRole("button", {
+          name: "Copy caption (release not attached)",
+        }),
+      ).toBeDisabled();
+      expect(
+        within(delivery).getByRole("button", {
+          name: "Share post (release not attached)",
+        }),
+      ).toBeDisabled();
+      expect(
+        within(delivery).getByRole("button", {
+          name: "Save image (release not attached)",
+        }),
+      ).toBeDisabled();
+    });
+
+    it("keeps the required disclosure block and its claim lock in brand mode", () => {
+      useAppStore.setState({ currentDealer: brandDealer() });
+      renderPost({
+        post: {
+          ...basePost,
+          text: "Guaranteed approval for everyone!",
+          disclosures: "Offer subject to approved credit.",
+          disclosureCategories: ["finance"],
+        },
+      });
+
+      const delivery = screen.getByLabelText("Post delivery actions");
+      expect(
+        within(delivery).getByRole("button", {
+          name: /Copy caption \(.*\)/,
+        }),
+      ).toBeDisabled();
+    });
+  });
+});
+
+/**
+ * The `VideoStyle` enum keeps 20 members because prompt code and already-saved
+ * posts reference them, but only the curated slate is reachable from any UI.
+ * These pin that partition so a style can never be quietly stranded again.
+ */
+describe("video style slate", () => {
+  it("exposes exactly the curated slate and names every unreachable enum value", () => {
+    expect(EXPOSED_VIDEO_STYLES).toEqual(videoStyleSlate.map((entry) => entry.style));
+    expect(new Set(EXPOSED_VIDEO_STYLES).size).toBe(EXPOSED_VIDEO_STYLES.length);
+
+    const all = Object.values(VideoStyle);
+    expect([...EXPOSED_VIDEO_STYLES, ...UNEXPOSED_VIDEO_STYLES].sort()).toEqual(
+      [...all].sort(),
+    );
+    expect(UNEXPOSED_VIDEO_STYLES).toHaveLength(9);
+    expect(
+      EXPOSED_VIDEO_STYLES.filter((style) => UNEXPOSED_VIDEO_STYLES.includes(style)),
+    ).toEqual([]);
   });
 });

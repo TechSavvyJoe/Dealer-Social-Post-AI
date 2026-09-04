@@ -445,16 +445,29 @@ const WebsiteDraftAiSchema = z
   })
   .strict();
 
+/**
+ * Strict parse first, slice second.
+ *
+ * The proxy now pins the `website_draft_v1` schema server-side
+ * (`responseMimeType: "application/json"` plus a `schemaId`), so the whole
+ * payload is normally valid JSON and `WebsiteDraftAiSchema` is the only guard
+ * that matters. The fence-stripping brace slice below is KEPT deliberately:
+ * a proxy that predates the schema registry runs this call in prose mode, and
+ * the model then wraps the object in fences or commentary.
+ */
 const extractJsonObject = (raw: string): unknown => {
-  const trimmed = (raw || "")
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "");
-  const start = trimmed.indexOf("{");
-  const end = trimmed.lastIndexOf("}");
+  const trimmed = (raw || "").trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    /* fall through to the legacy prose-mode recovery */
+  }
+  const unfenced = trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+  const start = unfenced.indexOf("{");
+  const end = unfenced.lastIndexOf("}");
   if (start < 0 || end <= start)
     throw new Error("Website AI response had no JSON object");
-  return JSON.parse(trimmed.slice(start, end + 1));
+  return JSON.parse(unfenced.slice(start, end + 1));
 };
 
 export interface PreparedWebsiteDraft {

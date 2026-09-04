@@ -14,11 +14,18 @@ import {
 } from "lucide-react";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
-import { Input } from "./ui/Input";
+import { Input, Select } from "./ui/Input";
 import { cn } from "../utils/classNames";
 import { toUiMessage } from "../utils/errorMessages";
-import type { CredentialResult, Person, PersonRole } from "../services/salespeople";
+import type {
+  CredentialResult,
+  Person,
+  PersonRole,
+  PersonUpdateFields,
+} from "../services/salespeople";
 import {
+  BRAND_CATEGORY_OPTIONS,
+  SIGNATURE_LINE_MAX_LENGTH,
   acknowledgePinDistribution,
   configureManagerLogin,
   disableManagerLogin,
@@ -36,6 +43,11 @@ export interface PersonEditModalProps {
   allowPinReveal?: boolean;
   /** Super-admin-only manager username/password administration. */
   allowManagerLoginEdit?: boolean;
+  /**
+   * Dealer-admin / super-admin may grant the sales-manager permission subset
+   * (spec §5). The server rejects manager_scope from any other session.
+   */
+  allowManagerScopeEdit?: boolean;
   onClose: () => void;
   onSaved: (person: Person) => void;
   /** Called as soon as a server-side credential/status mutation commits. */
@@ -55,6 +67,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
   allowRoleEdit = false,
   allowPinReveal = false,
   allowManagerLoginEdit = false,
+  allowManagerScopeEdit = false,
   onClose,
   onSaved,
   onCommitted,
@@ -63,6 +76,10 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
   const [name, setName] = useState("");
   const [active, setActive] = useState(true);
   const [role, setRole] = useState<PersonRole>("salesperson");
+  const [managerScope, setManagerScope] = useState(false);
+  const [signatureLine, setSignatureLine] = useState("");
+  const [defaultCategory, setDefaultCategory] = useState("");
+  const [playfulDefault, setPlayfulDefault] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -99,6 +116,10 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
     setName(person.name || "");
     setActive(person.active !== false);
     setRole(person.role === "manager" ? "manager" : "salesperson");
+    setManagerScope(person.managerScope === true);
+    setSignatureLine(person.signatureLine || "");
+    setDefaultCategory(person.defaultCategory || "");
+    setPlayfulDefault(person.playfulDefault === true);
     setHasExistingCode(person.hasPin);
     setNeedsDistribution(person.pinNeedsDistribution);
     setCredentialPin(null);
@@ -278,14 +299,25 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
       setError("Name is required.");
       return;
     }
+    const trimmedSignatureLine = signatureLine.replace(/\s+/g, " ").trim();
+    if (trimmedSignatureLine.length > SIGNATURE_LINE_MAX_LENGTH) {
+      setError(
+        `Signature line must be ${SIGNATURE_LINE_MAX_LENGTH} characters or fewer.`,
+      );
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      const fields: Partial<Pick<Person, "name" | "active" | "role">> = {
+      const fields: PersonUpdateFields = {
         name: trimmed,
         active,
+        signatureLine: trimmedSignatureLine,
+        defaultCategory,
+        playfulDefault,
       };
       if (allowRoleEdit) fields.role = role;
+      if (allowManagerScopeEdit) fields.managerScope = managerScope;
       const updated = await updatePerson(person.id, fields);
       onSaved({
         ...person,
@@ -295,6 +327,10 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
         pinNeedsDistribution: needsDistribution,
         active,
         role: allowRoleEdit ? role : person.role,
+        managerScope: allowManagerScopeEdit ? managerScope : person.managerScope,
+        signatureLine: trimmedSignatureLine,
+        defaultCategory,
+        playfulDefault,
       });
       onClose();
     } catch (err) {
@@ -407,6 +443,73 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                 <option value="manager">Manager — store dashboard & team</option>
               </select>
             </div>
+          )}
+
+          <Input
+            label="Signature line"
+            value={signatureLine}
+            onChange={(e) =>
+              setSignatureLine(e.target.value.slice(0, SIGNATURE_LINE_MAX_LENGTH))
+            }
+            maxLength={SIGNATURE_LINE_MAX_LENGTH}
+            helperText={`Added after the caption footer · ${
+              SIGNATURE_LINE_MAX_LENGTH - signatureLine.length
+            } characters left`}
+            placeholder="Ask for Taylor — happy to help your family find the right fit."
+            fullWidth
+            autoComplete="off"
+          />
+
+          <Select
+            label="Default category"
+            value={defaultCategory}
+            onChange={(e) => setDefaultCategory(e.target.value)}
+            helperText="Pre-selects the post category when they start a post."
+            fullWidth
+          >
+            <option value="">Ask every time</option>
+            {BRAND_CATEGORY_OPTIONS.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.label}
+              </option>
+            ))}
+          </Select>
+
+          <label className="flex min-h-12 cursor-pointer items-center gap-3 rounded-2xl border border-hairline bg-surface-950/40 px-4 py-3.5 transition-colors hover:border-strong">
+            <input
+              type="checkbox"
+              checked={playfulDefault}
+              onChange={(e) => setPlayfulDefault(e.target.checked)}
+              className="h-5 w-5 rounded border-surface-600 bg-surface-900 text-primary-500 focus:ring-primary-500"
+            />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-surface-100">
+                Playful default
+              </span>
+              <span className="block text-xs text-surface-400">
+                Pre-selects the Playful second image whenever the dealership allows it.
+              </span>
+            </span>
+          </label>
+
+          {allowManagerScopeEdit && (
+            <label className="flex min-h-12 cursor-pointer items-center gap-3 rounded-2xl border border-hairline bg-surface-950/40 px-4 py-3.5 transition-colors hover:border-strong">
+              <input
+                type="checkbox"
+                checked={managerScope}
+                onChange={(e) => setManagerScope(e.target.checked)}
+                className="h-5 w-5 rounded border-surface-600 bg-surface-900 text-primary-500 focus:ring-primary-500"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-surface-100">
+                  Sales manager scope
+                </span>
+                <span className="block text-xs text-surface-400">
+                  Can approve posts, curate templates, and enable features for the team.
+                  Cannot change the brand kit or compliance settings.
+                </span>
+              </span>
+            </label>
           )}
         </section>
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { m } from "framer-motion";
 import {
   Settings,
@@ -14,11 +14,12 @@ import {
   Pencil,
   Check,
   Copy,
+  X,
 } from "lucide-react";
 import { PersonEditModal } from "./PersonEditModal";
 import type { CredentialResult, Person } from "../services/salespeople";
 import { Button } from "./ui/Button";
-import { Input, Textarea } from "./ui/Input";
+import { Input, Select, Textarea } from "./ui/Input";
 import { Modal } from "./ui/Modal";
 import { Leaderboard } from "./Leaderboard";
 import { ApprovalQueue } from "./ApprovalQueue";
@@ -29,7 +30,24 @@ import * as db from "../services/database";
 import { cn } from "../utils/classNames";
 import { toUiMessage } from "../utils/errorMessages";
 import { triggerHapticFeedback } from "../utils/haptics";
-import { StyleOption } from "../types";
+import {
+  StyleOption,
+  ToneOption,
+  VideoStyle,
+  type ImageQualityTier,
+  type LogoCorner,
+  type LogoPlacement,
+  type MotionAspect,
+  type MotionAudio,
+  type MotionSignature,
+  type SignatureLook,
+} from "../types";
+import { featuredFunStyleCatalog } from "../services/promptConfig";
+import {
+  aspectRatios as motionAspectOptions,
+  soundtracks as motionAudioOptions,
+  styles as motionStyleOptions,
+} from "./video-director/constants";
 import { CustomScenarioManager } from "./CustomScenarioManager";
 import { HoursPicker } from "./HoursPicker";
 import {
@@ -43,6 +61,184 @@ import { normalizeDealerSocialProfileValue } from "../utils/socialAttribution";
 import { YouTubeConnectionCard } from "./YouTubeConnectionCard";
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+// ---------------------------------------------------------------------------
+// Brand-consistent creative system (spec 2026-09-02 §4.1–§4.3, §6). Limits
+// mirror pb_hooks/helpers.js so the form reports problems inline instead of
+// surfacing a 400 after the round trip.
+// ---------------------------------------------------------------------------
+interface SignatureLookOption {
+  id: SignatureLook;
+  label: string;
+  description: string;
+  tone: ToneOption;
+  motionStyle: VideoStyle;
+}
+
+export const SIGNATURE_LOOK_OPTIONS: readonly SignatureLookOption[] = [
+  {
+    id: "showroom",
+    label: "Showroom",
+    description:
+      "Luxury image treatment, professional captions, clean type with the logo bottom-right.",
+    tone: ToneOption.Professional,
+    motionStyle: VideoStyle.GoldenRadiance,
+  },
+  {
+    id: "hometown",
+    label: "Hometown",
+    description:
+      "Friendly image treatment, family-friendly captions, warm headline over the photo.",
+    tone: ToneOption.Family,
+    motionStyle: VideoStyle.Spotlight,
+  },
+  {
+    id: "turbo",
+    label: "Turbo",
+    description:
+      "Sporty image treatment, excited captions, bold type with 3D Depth Pop allowed.",
+    tone: ToneOption.Excited,
+    motionStyle: VideoStyle.LiquidChrome,
+  },
+];
+
+const LOGO_CORNER_OPTIONS: ReadonlyArray<{ id: LogoCorner; label: string }> = [
+  { id: "top_left", label: "Top left" },
+  { id: "top_right", label: "Top right" },
+  { id: "bottom_left", label: "Bottom left" },
+  { id: "bottom_right", label: "Bottom right" },
+];
+/** Logo width as a fraction of the canvas; mirrors LOGO_SCALE_MIN/MAX. */
+const LOGO_SCALE_MIN = 0.04;
+const LOGO_SCALE_MAX = 0.5;
+const LOGO_SCALE_DEFAULT = 0.18;
+const BRAND_VOICE_MAX_ITEMS = 3;
+const BRAND_VOICE_MAX_CHARS = 60;
+const MOTION_STYLE_MAX_CHARS = 40;
+const DEFAULT_MOTION_ASPECTS: MotionAspect[] = ["9:16"];
+const DEFAULT_MOTION_AUDIO: MotionAudio = "cinematic";
+
+const isSignatureLook = (value: unknown): value is SignatureLook =>
+  SIGNATURE_LOOK_OPTIONS.some((option) => option.id === value);
+
+const isLogoCorner = (value: unknown): value is LogoCorner =>
+  LOGO_CORNER_OPTIONS.some((option) => option.id === value);
+
+const isMotionAspect = (value: unknown): value is MotionAspect =>
+  motionAspectOptions.some((option) => option.value === value);
+
+const isMotionAudio = (value: unknown): value is MotionAudio =>
+  motionAudioOptions.some((option) => option.value === value);
+
+const collapsePhrase = (value: string) => value.replace(/\s+/g, " ").trim();
+
+interface PhraseChipEditorProps {
+  /** Short noun used in every accessible name ("Do" → "Add do phrase"). */
+  label: string;
+  helperText: string;
+  placeholder: string;
+  phrases: string[];
+  onChange: (next: string[]) => void;
+}
+
+/** Bounded chip list for the structured brand-voice do / don't phrases. */
+const PhraseChipEditor: React.FC<PhraseChipEditorProps> = ({
+  label,
+  helperText,
+  placeholder,
+  phrases,
+  onChange,
+}) => {
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const lowerLabel = label.toLowerCase();
+  const full = phrases.length >= BRAND_VOICE_MAX_ITEMS;
+
+  const add = () => {
+    const phrase = collapsePhrase(draft);
+    if (!phrase) return;
+    if (phrase.length > BRAND_VOICE_MAX_CHARS) {
+      setError(`Keep each phrase to ${BRAND_VOICE_MAX_CHARS} characters.`);
+      return;
+    }
+    if (full) {
+      setError(`Up to ${BRAND_VOICE_MAX_ITEMS} phrases.`);
+      return;
+    }
+    if (phrases.some((existing) => existing.toLowerCase() === phrase.toLowerCase())) {
+      setError("That phrase is already listed.");
+      return;
+    }
+    onChange([...phrases, phrase]);
+    setDraft("");
+    setError(null);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="text-xs font-semibold text-surface-200">{label}</div>
+      <ul className="flex flex-wrap gap-1.5" aria-label={`${label} phrases`}>
+        {phrases.length === 0 ? (
+          <li className="text-[11px] text-surface-500">None yet</li>
+        ) : (
+          phrases.map((phrase) => (
+            <li
+              key={phrase}
+              className="inline-flex items-center gap-1 rounded-full border border-hairline bg-fill-subtle px-2.5 py-1 text-xs text-surface-100"
+            >
+              <span>{phrase}</span>
+              <button
+                type="button"
+                aria-label={`Remove ${lowerLabel} phrase ${phrase}`}
+                onClick={() => {
+                  onChange(phrases.filter((existing) => existing !== phrase));
+                  setError(null);
+                }}
+                className="inline-flex h-5 w-5 items-center justify-center rounded-full text-surface-400 hover:bg-fill-hover hover:text-surface-100"
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </li>
+          ))
+        )}
+      </ul>
+      <div className="flex items-start gap-2">
+        <Input
+          label=""
+          aria-label={`${label} phrase`}
+          value={draft}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            setError(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            add();
+          }}
+          maxLength={BRAND_VOICE_MAX_CHARS}
+          placeholder={placeholder}
+          disabled={full}
+          error={error || undefined}
+          helperText={full ? `All ${BRAND_VOICE_MAX_ITEMS} slots used` : helperText}
+          fullWidth
+          className="bg-fill-subtle border-hairline focus:border-primary-400"
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="min-h-11 shrink-0"
+          disabled={full || !collapsePhrase(draft)}
+          aria-label={`Add ${lowerLabel} phrase`}
+          onClick={add}
+        >
+          Add
+        </Button>
+      </div>
+    </div>
+  );
+};
 
 /**
  * Per-dealership admin dashboard. The GSM/GM lands here when they log in
@@ -325,19 +521,93 @@ export const DealerAdminDashboard: React.FC = () => {
 // ----------------------------------------------------------------------------
 // Settings card — inline editing of voice / color / banned / approval gate
 // ----------------------------------------------------------------------------
+/**
+ * Hours and enabled styles both have a derived default when the dealer has
+ * never saved them: a full default week, and every overlay style. The dirty
+ * baseline has to run the SAME derivation as the initial state — comparing the
+ * derived form value against a raw empty column made an untouched card report
+ * itself dirty on mount, which enabled Save, raised "Discard unsaved
+ * settings?" on tab switch, and armed the beforeunload prompt.
+ */
+const deriveHoursWeek = (raw?: string): WeekHours =>
+  parseHoursString(raw) || defaultWeekHours();
+
+const deriveEnabledStyles = (raw?: string): Set<string> => {
+  const trimmed = (raw || "").trim();
+  return trimmed
+    ? new Set(
+        trimmed
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      )
+    : new Set<string>(Object.values(StyleOption));
+};
+
 interface DealerSettingsProps {
   dealer: NonNullable<ReturnType<typeof useAppStore.getState>["currentDealer"]>;
   onSaved: (fields: Record<string, string | boolean>) => Promise<unknown>;
   onDirtyChange: (dirty: boolean) => void;
 }
 
-const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
+export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
   dealer,
   onSaved,
   onDirtyChange,
 }) => {
   // Voice / brand
   const [voice, setVoice] = useState(dealer.brand_voice || "");
+  const [voiceDo, setVoiceDo] = useState<string[]>(() =>
+    (dealer.brand_voice_do || []).slice(0, BRAND_VOICE_MAX_ITEMS),
+  );
+  const [voiceDont, setVoiceDont] = useState<string[]>(() =>
+    (dealer.brand_voice_dont || []).slice(0, BRAND_VOICE_MAX_ITEMS),
+  );
+
+  // Brand kit (spec §4.1–§4.3)
+  const [signatureLook, setSignatureLook] = useState<SignatureLook | "">(() =>
+    isSignatureLook(dealer.signature_look) ? dealer.signature_look : "",
+  );
+  const [alternateLook, setAlternateLook] = useState<SignatureLook | "">(() =>
+    isSignatureLook(dealer.alternate_look) ? dealer.alternate_look : "",
+  );
+  const [hashtagsLocked, setHashtagsLocked] = useState(
+    !!dealer.required_hashtags_locked,
+  );
+  const [playfulStyle, setPlayfulStyle] = useState(dealer.playful_style || "");
+  const [motionStyle, setMotionStyle] = useState(dealer.motion_signature?.style || "");
+  const [motionAspects, setMotionAspects] = useState<MotionAspect[]>(() => {
+    const saved = (dealer.motion_signature?.aspects || []).filter(isMotionAspect);
+    return saved.length > 0 ? saved : DEFAULT_MOTION_ASPECTS;
+  });
+  const [motionAudio, setMotionAudio] = useState<MotionAudio>(() =>
+    isMotionAudio(dealer.motion_signature?.audio)
+      ? dealer.motion_signature.audio
+      : DEFAULT_MOTION_AUDIO,
+  );
+  const [logoCorner, setLogoCorner] = useState<LogoCorner | "">(() =>
+    isLogoCorner(dealer.logo_placement?.corner) ? dealer.logo_placement.corner : "",
+  );
+  const [logoScale, setLogoScale] = useState<number>(() => {
+    const saved = dealer.logo_placement?.scale;
+    return typeof saved === "number" && Number.isFinite(saved)
+      ? Math.min(LOGO_SCALE_MAX, Math.max(LOGO_SCALE_MIN, saved))
+      : LOGO_SCALE_DEFAULT;
+  });
+  const [imageQualityTier, setImageQualityTier] = useState<ImageQualityTier | "">(
+    dealer.image_quality_tier === "standard" || dealer.image_quality_tier === "studio"
+      ? dealer.image_quality_tier
+      : "",
+  );
+  const lookGroupId = React.useId();
+  const hashtagLockLabelId = React.useId();
+  const hashtagLockHelpId = React.useId();
+  const logoScaleId = React.useId();
+  const lookRefs = useRef<Record<SignatureLook, HTMLButtonElement | null>>({
+    showroom: null,
+    hometown: null,
+    turbo: null,
+  });
   const [banned, setBanned] = useState(dealer.banned_phrases || "");
   const [color, setColor] = useState(dealer.brand_color || "");
   const [oem, setOem] = useState(dealer.oem_affiliation || "");
@@ -347,10 +617,14 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
   const [website, setWebsite] = useState(dealer.website || "");
   const [phone, setPhone] = useState(dealer.phone || "");
   const [address, setAddress] = useState(dealer.address || "");
-  const [hoursWeek, setHoursWeek] = useState<WeekHours>(
-    () => parseHoursString(dealer.hours) || defaultWeekHours(),
+  const [hoursWeek, setHoursWeek] = useState<WeekHours>(() =>
+    deriveHoursWeek(dealer.hours),
   );
   const hoursSerialized = serializeHours(hoursWeek);
+  const savedHoursSerialized = useMemo(
+    () => serializeHours(deriveHoursWeek(dealer.hours)),
+    [dealer.hours],
+  );
   const [tagline, setTagline] = useState(dealer.tagline || "");
 
   // Social
@@ -371,17 +645,9 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
   const [defaultFooter, setDefaultFooter] = useState(dealer.default_footer || "");
 
   // Overlay preferences
-  const [enabledStyles, setEnabledStyles] = useState<Set<string>>(() => {
-    const raw = (dealer.enabled_styles || "").trim();
-    return raw
-      ? new Set(
-          raw
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-        )
-      : new Set(Object.values(StyleOption));
-  });
+  const [enabledStyles, setEnabledStyles] = useState<Set<string>>(() =>
+    deriveEnabledStyles(dealer.enabled_styles),
+  );
   const [defaultStyle, setDefaultStyle] = useState(dealer.default_style || "");
 
   const [saving, setSaving] = useState(false);
@@ -391,8 +657,40 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
   const approvalRequiredRef = useRef<HTMLButtonElement>(null);
 
   const enabledStylesStr = Array.from(enabledStyles).join(",");
+  const savedEnabledStylesStr = useMemo(
+    () => Array.from(deriveEnabledStyles(dealer.enabled_styles)).join(","),
+    [dealer.enabled_styles],
+  );
+
+  // Structured brand fields compare by their canonical JSON so an untouched
+  // form (including "not set" → null) never reads as dirty.
+  const currentMotionSignature: MotionSignature | null = motionStyle
+    ? { style: motionStyle, aspects: motionAspects, audio: motionAudio }
+    : null;
+  const currentLogoPlacement: LogoPlacement | null = logoCorner
+    ? { corner: logoCorner, scale: Math.round(logoScale * 1000) / 1000 }
+    : null;
+  const savedMotionSignature = dealer.motion_signature ?? null;
+  const savedLogoPlacement = dealer.logo_placement ?? null;
+  const savedLook: SignatureLook | "" = isSignatureLook(dealer.signature_look)
+    ? dealer.signature_look
+    : "";
+  const savedAlternateLook: SignatureLook | "" = isSignatureLook(dealer.alternate_look)
+    ? dealer.alternate_look
+    : "";
+  const brandDirty =
+    signatureLook !== savedLook ||
+    alternateLook !== savedAlternateLook ||
+    JSON.stringify(voiceDo) !== JSON.stringify(dealer.brand_voice_do || []) ||
+    JSON.stringify(voiceDont) !== JSON.stringify(dealer.brand_voice_dont || []) ||
+    hashtagsLocked !== !!dealer.required_hashtags_locked ||
+    playfulStyle !== (dealer.playful_style || "") ||
+    JSON.stringify(currentMotionSignature) !== JSON.stringify(savedMotionSignature) ||
+    JSON.stringify(currentLogoPlacement) !== JSON.stringify(savedLogoPlacement) ||
+    imageQualityTier !== (dealer.image_quality_tier || "");
 
   const dirty =
+    brandDirty ||
     voice !== (dealer.brand_voice || "") ||
     banned !== (dealer.banned_phrases || "") ||
     color !== (dealer.brand_color || "") ||
@@ -401,7 +699,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
     website !== (dealer.website || "") ||
     phone !== (dealer.phone || "") ||
     address !== (dealer.address || "") ||
-    hoursSerialized !== (dealer.hours || "") ||
+    hoursSerialized !== savedHoursSerialized ||
     tagline !== (dealer.tagline || "") ||
     facebookUrl !== (dealer.facebook_url || "") ||
     facebookPageTag !== (dealer.facebook_page_tag || "") ||
@@ -412,7 +710,7 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
     gbpUrl !== (dealer.gbp_url || "") ||
     defaultHashtags !== (dealer.default_hashtags || "") ||
     defaultFooter !== (dealer.default_footer || "") ||
-    enabledStylesStr !== (dealer.enabled_styles || "") ||
+    enabledStylesStr !== savedEnabledStylesStr ||
     defaultStyle !== (dealer.default_style || "");
 
   useEffect(() => {
@@ -433,15 +731,94 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
     });
   };
 
+  const selectLook = (next: SignatureLook) => {
+    setSignatureLook(next);
+    // The alternate is "a second look", so it can never equal the house look.
+    if (alternateLook === next) setAlternateLook("");
+  };
+
+  const toggleMotionAspect = (aspect: MotionAspect) => {
+    setMotionAspects((prev) =>
+      prev.includes(aspect)
+        ? prev.filter((item) => item !== aspect)
+        : [...prev, aspect],
+    );
+  };
+
+  const selectedLookOption = SIGNATURE_LOOK_OPTIONS.find(
+    (option) => option.id === signatureLook,
+  );
+  const suggestedMotionStyle = selectedLookOption
+    ? motionStyleOptions.find(
+        (option) => option.style === selectedLookOption.motionStyle,
+      )
+    : undefined;
+
+  const validateBrandFields = (): string | null => {
+    if (signatureLook && alternateLook && alternateLook === signatureLook) {
+      return "The alternate look must differ from the signature look.";
+    }
+    for (const list of [voiceDo, voiceDont]) {
+      if (list.length > BRAND_VOICE_MAX_ITEMS) {
+        return `Brand voice lists may hold up to ${BRAND_VOICE_MAX_ITEMS} phrases.`;
+      }
+      if (list.some((phrase) => phrase.length > BRAND_VOICE_MAX_CHARS)) {
+        return `Brand voice phrases must be ${BRAND_VOICE_MAX_CHARS} characters or fewer.`;
+      }
+    }
+    if (motionStyle) {
+      if (motionStyle.length > MOTION_STYLE_MAX_CHARS) {
+        return "Choose a motion style from the list.";
+      }
+      if (motionAspects.length === 0) {
+        return "Pick at least one video aspect for the motion signature.";
+      }
+    }
+    if (
+      logoCorner &&
+      (!Number.isFinite(logoScale) ||
+        logoScale < LOGO_SCALE_MIN ||
+        logoScale > LOGO_SCALE_MAX)
+    ) {
+      return `Logo size must be between ${Math.round(LOGO_SCALE_MIN * 100)}% and ${Math.round(
+        LOGO_SCALE_MAX * 100,
+      )}% of the image width.`;
+    }
+    return null;
+  };
+
   const handleSave = async () => {
     setError(null);
     if (color && !HEX_RE.test(color.trim())) {
       setError("Brand color should be a hex value like #1d4ed8.");
       return;
     }
+    const brandProblem = validateBrandFields();
+    if (brandProblem) {
+      setError(brandProblem);
+      return;
+    }
     setSaving(true);
     try {
+      // Approval policy, category destinations, and feature permissions are
+      // deliberately absent: the server leaves any field it does not receive
+      // untouched, and their UI arrives in phase 2.
+      const brandFields = db.encodeDealerBrandFields({
+        signature_look: signatureLook,
+        alternate_look: alternateLook,
+        ...(signatureLook !== savedLook
+          ? { default_tone: selectedLookOption?.tone || "" }
+          : {}),
+        brand_voice_do: voiceDo,
+        brand_voice_dont: voiceDont,
+        required_hashtags_locked: hashtagsLocked,
+        playful_style: playfulStyle,
+        motion_signature: currentMotionSignature,
+        logo_placement: currentLogoPlacement,
+        image_quality_tier: imageQualityTier,
+      });
       const fields: Record<string, string | boolean> = {
+        ...brandFields,
         brand_voice: voice.trim(),
         banned_phrases: banned.trim(),
         brand_color: color.trim(),
@@ -482,11 +859,14 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
     }
   };
 
+  // pb-20 (80px) reserves at least the sticky save bar's own footprint —
+  // min-h-14 (56px) plus its bottom-2 (8px) offset — so the last control is
+  // never trapped underneath the bar. sm:pb-20 re-asserts it past sm:p-6.
   return (
     <m.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="rounded-lg border border-hairline bg-surface-overlay p-4 sm:p-6 space-y-6"
+      className="rounded-lg border border-hairline bg-surface-overlay p-4 pb-20 sm:p-6 sm:pb-20 space-y-6"
     >
       <div className="flex items-center gap-3">
         <div
@@ -616,6 +996,312 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
         />
       </section>
 
+      {/* ---- Brand kit (spec §4.1–§4.3) ---- */}
+      <section className="space-y-4" aria-label="Brand">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-semibold text-surface-50">
+            <Palette className="w-4 h-4 text-primary-300" />
+            Brand
+          </div>
+          <p className="text-[11px] text-surface-400">
+            One house style for every post: salespeople never pick image style, tone, or
+            video look themselves.
+          </p>
+          {/*
+            Phase 1 ships dark, so nothing in this section governs behavior yet —
+            "Image overlay styles" further down still does. Say so plainly rather
+            than leaving two live sections that contradict each other.
+          */}
+          <p className="mt-2 rounded-lg border border-hairline bg-fill-subtle px-3 py-2 text-[11px] text-surface-300">
+            Not turned on yet. Save your choices here now — they take over once the new
+            creative system is switched on for your store. Until then, the image overlay
+            styles further down are what your team actually sees.
+          </p>
+        </div>
+
+        {/* Signature look */}
+        <div className="space-y-2">
+          <div id={lookGroupId} className="text-xs font-semibold text-surface-200">
+            Signature look
+          </div>
+          <div
+            role="radiogroup"
+            aria-labelledby={lookGroupId}
+            className="grid grid-cols-1 gap-2 sm:grid-cols-3"
+            onKeyDown={(event) => {
+              if (
+                !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
+              )
+                return;
+              event.preventDefault();
+              const ids = SIGNATURE_LOOK_OPTIONS.map((option) => option.id);
+              const current = Math.max(0, ids.indexOf(signatureLook as SignatureLook));
+              const delta =
+                event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
+              const next = ids[(current + delta + ids.length) % ids.length];
+              selectLook(next);
+              requestAnimationFrame(() => lookRefs.current[next]?.focus());
+            }}
+          >
+            {SIGNATURE_LOOK_OPTIONS.map((option, index) => {
+              const selected = signatureLook === option.id;
+              const focusable = selected || (!signatureLook && index === 0);
+              return (
+                <button
+                  key={option.id}
+                  ref={(element) => {
+                    lookRefs.current[option.id] = element;
+                  }}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  aria-label={option.label}
+                  aria-describedby={`${lookGroupId}-${option.id}`}
+                  tabIndex={focusable ? 0 : -1}
+                  onClick={() => selectLook(option.id)}
+                  className={cn(
+                    "rounded-xl border px-3 py-2.5 text-left transition-colors",
+                    selected
+                      ? "border-primary-500/40 bg-primary-500/5"
+                      : "border-hairline bg-fill-subtle hover:bg-fill-hover",
+                  )}
+                >
+                  <div className="text-sm font-semibold text-surface-50">
+                    {option.label}
+                  </div>
+                  <div
+                    id={`${lookGroupId}-${option.id}`}
+                    className="text-[11px] text-surface-400"
+                  >
+                    {option.description}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <Select
+            label="Alternate look"
+            value={alternateLook}
+            onChange={(event) =>
+              setAlternateLook(
+                isSignatureLook(event.target.value) ? event.target.value : "",
+              )
+            }
+            helperText="Optional second look a manager may enable for the team."
+            fullWidth
+          >
+            <option value="">None</option>
+            {SIGNATURE_LOOK_OPTIONS.filter((option) => option.id !== signatureLook).map(
+              (option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ),
+            )}
+          </Select>
+        </div>
+
+        {/* Playful style */}
+        <Select
+          label="Playful style"
+          value={playfulStyle}
+          onChange={(event) => setPlayfulStyle(event.target.value)}
+          helperText="Shown to salespeople as a single Playful option"
+          fullWidth
+        >
+          <option value="">Not set</option>
+          {featuredFunStyleCatalog.map((style) => (
+            <option key={style.id} value={style.id}>
+              {style.name}
+            </option>
+          ))}
+        </Select>
+
+        {/* Motion signature */}
+        <fieldset className="space-y-2">
+          <legend className="text-xs font-semibold text-surface-200">
+            Motion signature
+          </legend>
+          <Select
+            label="Motion style"
+            value={motionStyle}
+            onChange={(event) => setMotionStyle(event.target.value)}
+            helperText={
+              suggestedMotionStyle
+                ? `Suggested for ${selectedLookOption?.label}: ${suggestedMotionStyle.label}`
+                : "Bound to every video the team adds."
+            }
+            fullWidth
+          >
+            <option value="">Not set</option>
+            {motionStyleOptions.map((option) => (
+              <option key={option.style} value={option.style}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <div className="text-[11px] font-medium text-surface-300">Aspects</div>
+              {motionAspectOptions.map((option) => (
+                <label
+                  key={option.value}
+                  className={cn(
+                    "flex min-h-11 items-center gap-2 rounded-lg border border-hairline bg-fill-subtle px-3 text-sm text-surface-100",
+                    !motionStyle && "opacity-60",
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={
+                      isMotionAspect(option.value) &&
+                      motionAspects.includes(option.value)
+                    }
+                    disabled={!motionStyle}
+                    onChange={() => {
+                      if (isMotionAspect(option.value))
+                        toggleMotionAspect(option.value);
+                    }}
+                    className="h-4 w-4 rounded border-surface-600 bg-surface-900 text-primary-500 focus:ring-primary-500"
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+            <Select
+              label="Audio"
+              value={motionAudio}
+              disabled={!motionStyle}
+              onChange={(event) => {
+                if (isMotionAudio(event.target.value))
+                  setMotionAudio(event.target.value);
+              }}
+              fullWidth
+            >
+              {motionAudioOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </fieldset>
+
+        {/* Logo placement */}
+        <fieldset className="space-y-2">
+          <legend className="text-xs font-semibold text-surface-200">
+            Logo placement
+          </legend>
+          <div
+            role="radiogroup"
+            aria-label="Logo corner"
+            className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+          >
+            {LOGO_CORNER_OPTIONS.map((option) => {
+              const selected = logoCorner === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => setLogoCorner(option.id)}
+                  className={cn(
+                    "min-h-11 rounded-lg border px-3 py-2 text-sm transition-colors",
+                    selected
+                      ? "border-primary-500/40 bg-primary-500/5 text-primary-100"
+                      : "border-hairline bg-fill-subtle text-surface-300 hover:bg-fill-hover",
+                  )}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-3">
+            <label
+              htmlFor={logoScaleId}
+              className="shrink-0 text-[11px] font-medium text-surface-300"
+            >
+              Logo size
+            </label>
+            <input
+              id={logoScaleId}
+              type="range"
+              min={Math.round(LOGO_SCALE_MIN * 100)}
+              max={Math.round(LOGO_SCALE_MAX * 100)}
+              step={1}
+              value={Math.round(logoScale * 100)}
+              disabled={!logoCorner}
+              onChange={(event) => setLogoScale(Number(event.target.value) / 100)}
+              className="w-full accent-primary-500 disabled:opacity-50"
+            />
+            <output
+              htmlFor={logoScaleId}
+              className="w-12 shrink-0 text-right font-mono text-xs text-surface-200"
+            >
+              {Math.round(logoScale * 100)}%
+            </output>
+            {logoCorner ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="min-h-9 shrink-0"
+                onClick={() => {
+                  setLogoCorner("");
+                  setLogoScale(LOGO_SCALE_DEFAULT);
+                }}
+              >
+                Clear
+              </Button>
+            ) : null}
+          </div>
+          <p className="text-[11px] text-surface-400">
+            Percent of the image width. The look decides the rest of the layout.
+          </p>
+        </fieldset>
+
+        {/* Image quality */}
+        <div className="space-y-2">
+          <div className="text-xs font-semibold text-surface-200">Image quality</div>
+          <div
+            role="radiogroup"
+            aria-label="Image quality"
+            className="flex flex-col gap-2 sm:flex-row sm:items-center"
+          >
+            {(
+              [
+                { id: "standard", label: "Standard" },
+                { id: "studio", label: "Studio" },
+              ] as Array<{ id: ImageQualityTier; label: string }>
+            ).map((option) => {
+              const selected = imageQualityTier === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => setImageQualityTier(option.id)}
+                  className={cn(
+                    "min-h-11 rounded-lg border px-3 py-2 text-sm transition-colors",
+                    selected
+                      ? "border-primary-500/40 bg-primary-500/5 text-primary-100"
+                      : "border-hairline bg-fill-subtle text-surface-300 hover:bg-fill-hover",
+                  )}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-surface-400">
+            Studio renders at the higher-cost tier for every post.
+          </p>
+        </div>
+      </section>
+
       {/* ---- Voice ---- */}
       <section className="space-y-2">
         <div className="flex items-center gap-2 text-sm font-semibold text-surface-50">
@@ -632,6 +1318,27 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           placeholder={`e.g. "Confident, no exclamation points, never 'family-owned'. Local Detroit references are good."`}
           className="bg-fill-subtle border-hairline focus:border-primary-400"
         />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {/*
+            Both columns sit side by side at desktop width, so the placeholder has
+            to fit its own field and the two helper lines have to wrap the same
+            way — otherwise the columns end at different heights.
+          */}
+          <PhraseChipEditor
+            label="Do"
+            helperText="Up to 3 phrases captions always use."
+            placeholder="Use first names"
+            phrases={voiceDo}
+            onChange={setVoiceDo}
+          />
+          <PhraseChipEditor
+            label="Don't"
+            helperText="Up to 3 phrases captions never use."
+            placeholder="No exclamation points"
+            phrases={voiceDont}
+            onChange={setVoiceDont}
+          />
+        </div>
       </section>
 
       {/* ---- Default hashtags + footer ---- */}
@@ -648,6 +1355,49 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           placeholder={"#YourDealership\n#DetroitFord\n#NewRide"}
           className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono text-sm"
         />
+        <button
+          type="button"
+          role="switch"
+          aria-checked={hashtagsLocked}
+          aria-labelledby={hashtagLockLabelId}
+          aria-describedby={hashtagLockHelpId}
+          onClick={() => setHashtagsLocked((value) => !value)}
+          className={cn(
+            "flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
+            hashtagsLocked
+              ? "border-primary-500/40 bg-primary-500/5"
+              : "border-hairline bg-fill-subtle hover:bg-fill-hover",
+          )}
+        >
+          <span className="min-w-0">
+            <span
+              id={hashtagLockLabelId}
+              className="block text-sm font-medium text-surface-100"
+            >
+              Always include every hashtag above
+            </span>
+            <span id={hashtagLockHelpId} className="block text-[11px] text-surface-400">
+              Keeps these tags on every post no matter the platform cap. Discovery
+              hashtags only fill the remaining slots.
+            </span>
+          </span>
+          <span
+            aria-hidden="true"
+            className={cn(
+              "flex h-6 w-11 shrink-0 items-center rounded-full border px-0.5 transition-colors",
+              hashtagsLocked
+                ? "border-primary-400 bg-primary-500"
+                : "border-hairline bg-fill-hover",
+            )}
+          >
+            <span
+              className={cn(
+                "block h-5 w-5 rounded-full bg-white transition-transform",
+                hashtagsLocked && "translate-x-5",
+              )}
+            />
+          </span>
+        </button>
         <Textarea
           label="Default footer / CTA"
           value={defaultFooter}
@@ -665,8 +1415,9 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           Image overlay styles
         </div>
         <p className="text-[11px] text-surface-400">
-          Pick which design styles your team can use. Star one to preselect it when a
-          salesperson opens the customizer.
+          Pick which design styles your team can use today. Star one to preselect it
+          when a salesperson opens the customizer. These stay in charge until the Brand
+          section above is switched on.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {Object.values(StyleOption).map((s) => {
@@ -848,7 +1599,10 @@ const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
         </div>
       )}
 
-      <div className="sticky bottom-2 z-10 flex items-center justify-between rounded-xl border border-hairline bg-surface-950/95 px-3 py-3 shadow-elevation-3 backdrop-blur-xl">
+      <div
+        data-testid="dealer-settings-save-bar"
+        className="sticky bottom-2 z-10 flex min-h-14 items-center justify-between rounded-xl border border-hairline bg-surface-950/95 px-3 py-3 shadow-elevation-3 backdrop-blur-xl"
+      >
         <div className="text-[11px] text-surface-400">
           {savedAt
             ? `Saved ${savedAt.toLocaleTimeString([], {
@@ -909,6 +1663,7 @@ export const DealerTeamCard: React.FC = () => {
   const [codeCopied, setCodeCopied] = useState(false);
   const [codeBusy, setCodeBusy] = useState(false);
   const dealer = useAppStore((s) => s.currentDealer);
+  const role = useAppStore((s) => s.role);
 
   const load = React.useCallback(async () => {
     if (!dealer) return;
@@ -1331,6 +2086,7 @@ export const DealerTeamCard: React.FC = () => {
         person={editingPerson}
         storeName={dealer?.name}
         allowRoleEdit={false}
+        allowManagerScopeEdit={role === "dealer_admin" || role === "super_admin"}
         onClose={() => setEditingPerson(null)}
         onCommitted={handlePersonCommitted}
         onCredentialIssued={handleCredentialIssued}

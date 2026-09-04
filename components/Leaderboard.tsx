@@ -172,7 +172,7 @@ export const Leaderboard: React.FC = () => {
           <div>
             <h3 className="text-xl font-bold text-surface-50 flex items-center gap-2">
               <Trophy className="h-5 w-5 text-amber-400" />
-              Salesperson Leaderboard
+              Salesperson leaderboard
             </h3>
             <p className="text-xs text-surface-400">
               {total} post{total === 1 ? "" : "s"} in window
@@ -333,7 +333,7 @@ export const Leaderboard: React.FC = () => {
                 <div className="flex-shrink-0 text-right leading-none">
                   <div
                     className={cn(
-                      "text-2xl font-extrabold tabular-nums",
+                      "text-2xl font-bold tabular-nums",
                       idx === 0 ? "text-amber-200" : "text-surface-50",
                     )}
                   >

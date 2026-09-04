@@ -21,8 +21,14 @@ import {
   funStyleCatalog,
   generateVideoPrompt,
 } from "./promptConfig";
-import { normalizeError, recoveryHint } from "../utils/errorHandler";
+import {
+  isBlockedContentError,
+  isOutdatedClientError,
+  normalizeError,
+  recoveryHint,
+} from "../utils/errorHandler";
 import { getGeminiClient } from "./geminiClient";
+import { outdatedClientErrorFromResponse, type GenerationPurpose } from "./geminiProxy";
 import { GeminiVideoOperationSchema } from "../utils/schemas";
 import {
   type CaptionGenerationResult,
@@ -46,7 +52,11 @@ import {
   captureAuthEpoch,
   notifySessionRejected,
 } from "../utils/authBoundary";
-import { generateTextViaClaude, shouldFallbackToClaude } from "./claudeAdapter";
+import {
+  claudeAcceptsImage,
+  generateTextViaClaude,
+  shouldFallbackToClaude,
+} from "./claudeAdapter";
 import { generateImageViaOpenAI, shouldFallbackToOpenAI } from "./openaiAdapter";
 import { requestCache } from "../utils/requestCache";
 import {
@@ -56,7 +66,44 @@ import {
 import { cleanSocialCaption, ensureUsableCaption } from "../utils/captionQuality";
 import { toPublicCustomerLabel } from "../utils/customerIdentity";
 import { z } from "zod";
-import { isSafeOnImageHeadline, ON_IMAGE_TEXT_BUDGET } from "./promptsV2";
+import {
+  editTextPromptPartsV2,
+  editTextPromptV2,
+  generateTextPromptPartsV2,
+  generateTextPromptV2,
+  isSafeOnImageHeadline,
+  ON_IMAGE_TEXT_BUDGET,
+  type PromptTurn,
+} from "./promptsV2";
+
+/**
+ * Transport for a text prompt: `{ parts: [...] }` for the Gemini
+ * `systemInstruction` field, or `undefined` when the prompt is a single turn.
+ */
+const systemInstructionPart = (turn: PromptTurn) =>
+  turn.systemInstruction.trim()
+    ? { parts: [{ text: turn.systemInstruction }] }
+    : undefined;
+
+/**
+ * Decide whether the routed prompt (`promptConfig` picks V2 or the legacy
+ * prompt behind `FLAGS.useV2Prompts`) is the V2 one, and if so send its
+ * static rules as a `systemInstruction` instead of concatenating them into
+ * the user turn.
+ *
+ * The routing rule itself is not duplicated here: the flattened V2 rendering
+ * is compared against what the router actually returned. When they match, the
+ * split form carries byte-identical guidance; when the router chose the legacy
+ * prompt, it is sent unchanged as a single user turn.
+ */
+const splitRoutedPrompt = (
+  routedPrompt: string,
+  flattenedV2Prompt: string,
+  splitV2Prompt: () => PromptTurn,
+): PromptTurn =>
+  routedPrompt === flattenedV2Prompt
+    ? splitV2Prompt()
+    : { systemInstruction: "", userPrompt: routedPrompt };
 
 /**
  * Tries each model in the fallback chain for a given task. The action
@@ -126,6 +173,76 @@ const isAbortError = (error: unknown): boolean =>
   "name" in error &&
   error.name === "AbortError";
 
+/**
+ * Ids in the server's response-schema registry
+ * (`GEMINI_RESPONSE_SCHEMAS` in pb_hooks/requestPolicies.js, listed as
+ * `responseSchemaIds` in config/gemini-model-policy.json). The browser sends
+ * only the id; the proxy swaps it for the real `responseJsonSchema`, so no
+ * schema body ever travels from an untrusted client.
+ */
+export const RESPONSE_SCHEMA_IDS = {
+  visionReview: "vision_review_v1",
+  captionPack: "caption_pack_v1",
+  websiteDraft: "website_draft_v1",
+} as const;
+
+export type ResponseSchemaId =
+  (typeof RESPONSE_SCHEMA_IDS)[keyof typeof RESPONSE_SCHEMA_IDS];
+
+/**
+ * Structured JSON output is a capability of the deployed proxy, not of the
+ * browser. A server that predates the schema registry sees `responseMimeType`
+ * and `schemaId` as unknown generationConfig keys and refuses the whole
+ * request with a 400. The first such refusal latches structured output off
+ * for the session and every later call runs in prose mode — which is exactly
+ * why the heuristic JSON recovery in the parsers is kept rather than deleted.
+ */
+let structuredJsonSupported = true;
+
+/** Test seam: reset the per-session structured-output latch. */
+export const resetStructuredJsonSupport = (): void => {
+  structuredJsonSupported = true;
+};
+
+const isStructuredTransportRejection = (error: unknown): boolean => {
+  if (isAbortError(error) || isBlockedContentError(error)) return false;
+  if (isOutdatedClientError(error)) return false;
+  if (normalizeError(error).kind === "validation") return true;
+  return /\berror 400\b/i.test(
+    error instanceof Error ? error.message : String(error ?? ""),
+  );
+};
+
+/**
+ * Run one model attempt asking for schema-bound JSON, retrying the identical
+ * request without the structured fields when the proxy rejects them. The
+ * retry stays inside the caller's fallback-chain attempt so it is not counted
+ * as a model failure.
+ */
+const withStructuredJson = async <T>(
+  schemaId: ResponseSchemaId,
+  params: GenerationParams,
+  attempt: (generationConfig: Record<string, unknown>) => Promise<T>,
+): Promise<T> => {
+  if (structuredJsonSupported) {
+    try {
+      return await attempt({
+        ...params,
+        responseMimeType: "application/json",
+        schemaId,
+      });
+    } catch (error) {
+      if (!isStructuredTransportRejection(error)) throw error;
+      structuredJsonSupported = false;
+      console.warn(
+        "[geminiService] Structured JSON output was refused by the proxy; falling back to prose parsing for this session.",
+        error,
+      );
+    }
+  }
+  return attempt({ ...params });
+};
+
 const latestSuccessfulGenerationAt = (
   ...executions: ModelExecutionMetadata[]
 ): string | undefined => {
@@ -157,6 +274,16 @@ async function withFallbackChain<T>(
       // to another provider/model after the queue has aborted the active task.
       if (isAbortError(err)) throw err;
       lastErr = err;
+      // A content refusal is a verdict on the photo/wording, not on the model:
+      // the next model would be shown the same input and answer the same way.
+      if (isBlockedContentError(err)) {
+        throw new ModelChainFailure(task, attemptedModels, err);
+      }
+      // A stale installed app is rejected before the model is even chosen;
+      // every model in the chain would answer with the same 409.
+      if (isOutdatedClientError(err)) {
+        throw new ModelChainFailure(task, attemptedModels, err);
+      }
       const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
       // Authentication and malformed requests will fail identically across
       // models, so stop. A 404 can be model-specific (regional rollout or a
@@ -240,7 +367,10 @@ const blobToDataUrl = async (blob: Blob): Promise<string> => {
   return `data:${mime};base64,${btoa(binary)}`;
 };
 
-const normaliseDataUrl = async (source?: string): Promise<string> => {
+const normaliseDataUrl = async (
+  source?: string,
+  signal?: AbortSignal,
+): Promise<string> => {
   if (!source) {
     throw new Error("No image data provided.");
   }
@@ -248,10 +378,10 @@ const normaliseDataUrl = async (source?: string): Promise<string> => {
     return source;
   }
   if (source.startsWith("http")) {
-    return await urlToDataUrl(source);
+    return await urlToDataUrl(source, signal);
   }
   if (source.startsWith("/")) {
-    const response = await fetch(source, { credentials: "include" });
+    const response = await fetch(source, { credentials: "include", signal });
     if (!response.ok) {
       throw new Error(`Could not load same-origin image (${response.status}).`);
     }
@@ -262,7 +392,7 @@ const normaliseDataUrl = async (source?: string): Promise<string> => {
     return await blobToDataUrl(blob);
   }
   if (source.startsWith("blob:")) {
-    const response = await fetch(source);
+    const response = await fetch(source, { signal });
     if (!response.ok) {
       throw new Error(`Could not read blob url: ${response.statusText}`);
     }
@@ -281,16 +411,18 @@ const SUPPORTED_PROVIDER_IMAGE_TYPES = new Set([
   "image/heif",
 ]);
 
-const optionalLogoImagePart = async (source?: string) => {
+const optionalLogoImagePart = async (source?: string, signal?: AbortSignal) => {
   if (!source) return null;
   try {
-    const normalisedLogo = await normaliseDataUrl(source);
+    const normalisedLogo = await normaliseDataUrl(source, signal);
     const { mimeType, data } = parseDataUrl(normalisedLogo);
     if (!SUPPORTED_PROVIDER_IMAGE_TYPES.has(mimeType.toLowerCase())) {
       throw new Error(`Unsupported logo format: ${mimeType}`);
     }
     return { inlineData: { mimeType: mimeType.toLowerCase(), data } };
-  } catch {
+  } catch (error) {
+    // Cancellation is not a broken logo — let the queue/caller see it.
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
     // A configured asset is an explicit brand contract. Silently dropping it
     // changes the requested creative and also disables exact-logo vision QC.
     // Keep the underlying transport/URL out of the user-facing error.
@@ -342,9 +474,12 @@ const imageFailureReason = (response: unknown): string => {
 
 /**
  * Run image generation across the model ladder. Treats "HTTP 200 but no
- * image bytes" (IMAGE_RECITATION, SAFETY, empty parts) as a failure so the
- * next model is tried — previously that silent empty success aborted the
- * whole post with a generic error.
+ * image bytes" (empty parts, NO_IMAGE, IMAGE_OTHER) as a failure so the next
+ * model is tried — previously that silent empty success aborted the whole
+ * post with a generic error. Content refusals (SAFETY, IMAGE_SAFETY, empty
+ * IMAGE_RECITATION) arrive from the client as a typed `blocked` error: the
+ * ladder stops and `shouldFallbackToOpenAI` declines, so callers ship the
+ * original photo instead of a fabricated one.
  */
 const generateImageWithFallback = async (
   task: "image_standard" | "image_studio",
@@ -555,9 +690,13 @@ interface GeneratedImageReviewContext {
 }
 
 /**
- * Model responses frequently wrap JSON in Markdown fences or prose because
- * the proxy's text-task allowlist has no JSON response mode. Extract the
- * first balanced object instead of failing the whole review on formatting.
+ * Strict parse first, brace-scan second.
+ *
+ * With `responseMimeType: "application/json"` and the server-injected
+ * `vision_review_v1` schema, the direct `JSON.parse` below is the normal
+ * path. The balanced-object scan is KEPT — not dead code — as the fallback
+ * for a proxy that predates the schema registry (see `withStructuredJson`),
+ * where the model still wraps JSON in Markdown fences or prose.
  */
 const extractJsonObject = (raw: string): unknown => {
   const direct = raw.trim();
@@ -750,7 +889,7 @@ export const reviewGeneratedImageText = async (
   }
 
   const normalisedImage = await prepareVisionReviewCopy(
-    await normaliseDataUrl(imageBase64Url),
+    await normaliseDataUrl(imageBase64Url, signal),
     perComparisonImageBudget,
   );
   assertAuthEpoch(requestAuthEpoch);
@@ -759,7 +898,7 @@ export const reviewGeneratedImageText = async (
   let sourceImagePart: { inlineData: { mimeType: string; data: string } } | null = null;
   if (context.sourceImageBase64Url) {
     const normalisedSource = await prepareVisionReviewCopy(
-      await normaliseDataUrl(context.sourceImageBase64Url),
+      await normaliseDataUrl(context.sourceImageBase64Url, signal),
       perComparisonImageBudget,
     );
     assertAuthEpoch(requestAuthEpoch);
@@ -779,40 +918,57 @@ export const reviewGeneratedImageText = async (
     dealershipName,
     context,
   )}`;
-  const task = "caption_regenerate" as const;
+  // Its own policy task, not `caption_regenerate`. The two share a model
+  // ladder and a 2048-token budget, but this is the one text call where
+  // reasoning quality decides whether a flawed render ships, so the policy
+  // pins `thinkingLevel: "medium"` here while captions stay at "low".
+  // Thinking tokens bill as output, so the split is also what keeps captions
+  // cheap. The proxy records the task, and the ledger stops counting QC
+  // reviews as captions.
+  const task = "vision_review" as const;
   const taskConfig = TASKS[task];
   const attemptId = createGenerationAttemptId();
 
-  const generated = await withFallbackChain(task, attemptId, async (modelId) => {
-    assertAuthEpoch(requestAuthEpoch);
-    const response = await getGeminiClient().models.generateContent({
-      model: modelId,
-      task,
-      attemptId,
-      contents: {
-        parts: [
-          { text: reviewPrompt },
-          ...(sourceImagePart ? [sourceImagePart] : []),
-          imagePart,
-          ...(logoReferenceImagePart ? [logoReferenceImagePart] : []),
-        ],
+  const generated = await withFallbackChain(task, attemptId, async (modelId) =>
+    // Schema-bound JSON: the proxy injects `vision_review_v1` from its own
+    // registry, so the verdict comes back as a parseable object instead of
+    // JSON buried in prose. `extractJsonObject` still guards the prose path.
+    withStructuredJson(
+      RESPONSE_SCHEMA_IDS.visionReview,
+      taskConfig.params,
+      async (generationConfig) => {
+        assertAuthEpoch(requestAuthEpoch);
+        const response = await getGeminiClient().models.generateContent({
+          model: modelId,
+          task,
+          attemptId,
+          purpose: "vision_review",
+          contents: {
+            parts: [
+              { text: reviewPrompt },
+              ...(sourceImagePart ? [sourceImagePart] : []),
+              imagePart,
+              ...(logoReferenceImagePart ? [logoReferenceImagePart] : []),
+            ],
+          },
+          // Beyond the task policy's config and the server-resolved schema,
+          // no browser-supplied knobs: strictness comes from the schema plus
+          // the Zod boundary below.
+          generationConfig,
+          requestAuthEpoch,
+          signal,
+        } as any);
+        assertAuthEpoch(requestAuthEpoch);
+        const rawText = typeof response.text === "function" ? response.text() : "";
+        const parsedJson = extractJsonObject(rawText);
+        const parsed = GeneratedImageTextReviewSchema.safeParse(parsedJson);
+        if (!parsed.success) {
+          throw new Error("Image text review returned an invalid structured result.");
+        }
+        return parsed.data;
       },
-      // The server allowlist intentionally accepts only the task policy's
-      // exact text-generation config. Strictness comes from the JSON-only
-      // prompt plus the Zod boundary below, not extra browser-supplied knobs.
-      generationConfig: taskConfig.params,
-      requestAuthEpoch,
-      signal,
-    } as any);
-    assertAuthEpoch(requestAuthEpoch);
-    const rawText = typeof response.text === "function" ? response.text() : "";
-    const parsedJson = extractJsonObject(rawText);
-    const parsed = GeneratedImageTextReviewSchema.safeParse(parsedJson);
-    if (!parsed.success) {
-      throw new Error("Image text review returned an invalid structured result.");
-    }
-    return parsed.data;
-  });
+    ),
+  );
 
   const review = generated.value;
   const safetyReviewComplete =
@@ -1130,8 +1286,9 @@ const generatedImageReviewScore = (review: GeneratedImageTextReview): number => 
 const imagePartFromDataUrl = async (
   dataUrl: string,
   requestAuthEpoch: number,
+  signal?: AbortSignal,
 ): Promise<{ inlineData: { mimeType: string; data: string } }> => {
-  const normalised = await normaliseDataUrl(dataUrl);
+  const normalised = await normaliseDataUrl(dataUrl, signal);
   assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data } = parseDataUrl(normalised);
   return { inlineData: { mimeType, data } };
@@ -1476,12 +1633,12 @@ export const generateFunSocialPostImage = async (
   signal?: AbortSignal,
 ): Promise<string> => {
   const requestAuthEpoch = captureAuthEpoch();
-  const normalisedOriginal = await normaliseDataUrl(originalImageBase64Url);
+  const normalisedOriginal = await normaliseDataUrl(originalImageBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedOriginal);
   const originalImagePart = { inlineData: { mimeType, data: base64Data } };
 
-  const logoImagePart = await optionalLogoImagePart(logoBase64Url);
+  const logoImagePart = await optionalLogoImagePart(logoBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
 
   const funPrompt = generateFunPrompt(
@@ -1495,7 +1652,7 @@ export const generateFunSocialPostImage = async (
       (style) => style.id === requestedStyle || style.name === requestedStyle,
     )?.name || "Fun Mode";
 
-  const imageParts: any[] = [originalImagePart, { text: funPrompt }];
+  const imageParts: any[] = [{ text: funPrompt }, originalImagePart];
   if (logoImagePart) {
     imageParts.push(logoImagePart);
   }
@@ -1536,12 +1693,12 @@ export const editSocialPostImage = async (
   signal?: AbortSignal,
 ): Promise<string> => {
   const requestAuthEpoch = captureAuthEpoch();
-  const normalisedPrevious = await normaliseDataUrl(previousImageBase64Url);
+  const normalisedPrevious = await normaliseDataUrl(previousImageBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedPrevious);
   const previousImagePart = { inlineData: { mimeType, data: base64Data } };
 
-  const logoImagePart = await optionalLogoImagePart(logoBase64Url);
+  const logoImagePart = await optionalLogoImagePart(logoBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
 
   const editInstruction = editImagePrompt(
@@ -1550,7 +1707,7 @@ export const editSocialPostImage = async (
     logoBase64Url,
   );
 
-  const imageParts: any[] = [previousImagePart, { text: editInstruction }];
+  const imageParts: any[] = [{ text: editInstruction }, previousImagePart];
   if (logoImagePart) {
     imageParts.push(logoImagePart);
   }
@@ -1591,11 +1748,11 @@ export const generateSocialPostTextDetailed = async (
   signal?: AbortSignal,
 ): Promise<CaptionGenerationResult> => {
   const requestAuthEpoch = captureAuthEpoch();
-  const normalisedImage = await normaliseDataUrl(imageBase64Url);
+  const normalisedImage = await normaliseDataUrl(imageBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
   const imagePart = { inlineData: { mimeType, data: base64Data } };
-  const textPrompt = generateTextPrompt(
+  const promptArgs = [
     tone,
     dealershipName,
     customerName,
@@ -1603,6 +1760,16 @@ export const generateSocialPostTextDetailed = async (
     creativeBrief,
     style,
     customerIdentityRequired,
+  ] as const;
+  // Flattened prompt: the cache key, the Claude fallback, and the legacy
+  // transport all still take one string.
+  const textPrompt = generateTextPrompt(...promptArgs);
+  // Split transport: the invariant compliance/identity/output rules move to
+  // `systemInstruction`; only the per-post facts stay in the user turn.
+  const promptTurn = splitRoutedPrompt(
+    textPrompt,
+    generateTextPromptV2(...promptArgs),
+    () => generateTextPromptPartsV2(...promptArgs),
   );
 
   const task: "caption" | "caption_regenerate" = isRegeneration
@@ -1642,7 +1809,10 @@ export const generateSocialPostTextDetailed = async (
         model: modelId,
         task,
         attemptId,
-        contents: { parts: [imagePart, { text: textPrompt }] },
+        // Text first: the shared prompt prefix precedes the per-post image
+        // bytes so Gemini's implicit cache can match across requests.
+        contents: { parts: [{ text: promptTurn.userPrompt }, imagePart] },
+        systemInstruction: systemInstructionPart(promptTurn),
         generationConfig: taskConfig.params,
         requestAuthEpoch,
         signal,
@@ -1678,6 +1848,10 @@ export const generateSocialPostTextDetailed = async (
     fallbackCount = generated.aiMeta.fallbackCount;
   } catch (err) {
     if (isAbortError(err)) throw err;
+    // Terminal: the photo or wording was refused. A template caption would
+    // hide that from the salesperson, and Claude would be handed the same
+    // input, so surface the typed error for the curated toast instead.
+    if (isBlockedContentError(err)) throw err;
     fallbackCount = attemptedModelsFromError(err);
     fallbackReason =
       err instanceof Error && err.message.toLowerCase().includes("quality gate")
@@ -1689,8 +1863,12 @@ export const generateSocialPostTextDetailed = async (
         err,
       );
       try {
-        // Claude doesn't see the image, so include a one-liner that frames it.
-        const claudePrompt = `${textPrompt}\n\n(Note: image was not transmitted to fallback model. Use the creative brief above to infer scene; do not invent specific visual details you cannot verify.)`;
+        // Claude sees the same photo when its media type is supported;
+        // otherwise a one-liner frames the missing image.
+        const claudeImage = { mimeType, data: base64Data };
+        const claudePrompt = claudeAcceptsImage(claudeImage)
+          ? textPrompt
+          : `${textPrompt}\n\n(Note: image was not transmitted to fallback model. Use the creative brief above to infer scene; do not invent specific visual details you cannot verify.)`;
         text = cleanGeneratedText(
           await generateTextViaClaude(claudePrompt, {
             task,
@@ -1698,6 +1876,7 @@ export const generateSocialPostTextDetailed = async (
             model: taskConfig.claudeFallback,
             temperature: taskConfig.claudeTemperature,
             maxTokens: taskConfig.params.maxOutputTokens,
+            image: claudeImage,
             requestAuthEpoch,
             signal,
           }),
@@ -1806,10 +1985,12 @@ const generateRawStructuredImageText = async (
   imageBase64Url: string,
   prompt: string,
   emptyResponseMessage: string,
+  purpose: GenerationPurpose,
+  schemaId: ResponseSchemaId,
   signal?: AbortSignal,
 ): Promise<string> => {
   const requestAuthEpoch = captureAuthEpoch();
-  const normalisedImage = await normaliseDataUrl(imageBase64Url);
+  const normalisedImage = await normaliseDataUrl(imageBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
   const imagePart = { inlineData: { mimeType, data: base64Data } };
@@ -1817,23 +1998,26 @@ const generateRawStructuredImageText = async (
   const attemptId = createGenerationAttemptId();
   const taskConfig = TASKS[task];
 
-  const generated = await withFallbackChain(task, attemptId, async (modelId) => {
-    assertAuthEpoch(requestAuthEpoch);
-    const client = getGeminiClient();
-    const response = await client.models.generateContent({
-      model: modelId,
-      task,
-      attemptId,
-      contents: { parts: [imagePart, { text: prompt }] },
-      generationConfig: taskConfig.params,
-      requestAuthEpoch,
-      signal,
-    } as any);
-    assertAuthEpoch(requestAuthEpoch);
-    const rawText = typeof response.text === "function" ? response.text() : "";
-    if (!rawText.trim()) throw new Error(emptyResponseMessage);
-    return rawText.trim();
-  });
+  const generated = await withFallbackChain(task, attemptId, async (modelId) =>
+    withStructuredJson(schemaId, taskConfig.params, async (generationConfig) => {
+      assertAuthEpoch(requestAuthEpoch);
+      const client = getGeminiClient();
+      const response = await client.models.generateContent({
+        model: modelId,
+        task,
+        attemptId,
+        purpose,
+        contents: { parts: [{ text: prompt }, imagePart] },
+        generationConfig,
+        requestAuthEpoch,
+        signal,
+      } as any);
+      assertAuthEpoch(requestAuthEpoch);
+      const rawText = typeof response.text === "function" ? response.text() : "";
+      if (!rawText.trim()) throw new Error(emptyResponseMessage);
+      return rawText.trim();
+    }),
+  );
 
   return generated.value;
 };
@@ -1860,6 +2044,8 @@ export const generatePlatformCaptionPack = async (
     imageBase64Url,
     `${prompt}\n\n${identityRule}`,
     "Caption-pack AI returned no structured copy.",
+    "caption_pack",
+    RESPONSE_SCHEMA_IDS.captionPack,
     signal,
   );
 };
@@ -1873,6 +2059,8 @@ export const generateWebsiteDraftMetadata = async (
     imageBase64Url,
     prompt,
     "Website draft AI returned no metadata.",
+    "website_draft",
+    RESPONSE_SCHEMA_IDS.websiteDraft,
     signal,
   );
 
@@ -1885,6 +2073,11 @@ export const editSocialPostTextDetailed = async (
   const requestAuthEpoch = captureAuthEpoch();
   assertAuthEpoch(requestAuthEpoch);
   const prompt = editTextPrompt(originalText, editPromptString, tone);
+  const promptTurn = splitRoutedPrompt(
+    prompt,
+    editTextPromptV2(originalText, editPromptString, tone),
+    () => editTextPromptPartsV2(originalText, editPromptString, tone),
+  );
   const taskConfig = TASKS["caption_edit"];
   const attemptId = createGenerationAttemptId();
 
@@ -1896,7 +2089,8 @@ export const editSocialPostTextDetailed = async (
         model: modelId,
         task: "caption_edit",
         attemptId,
-        contents: { parts: [{ text: prompt }] },
+        contents: { parts: [{ text: promptTurn.userPrompt }] },
+        systemInstruction: systemInstructionPart(promptTurn),
         generationConfig: taskConfig.params,
         requestAuthEpoch,
         signal,
@@ -1995,7 +2189,7 @@ export const generateSocialPost = async (
   signal?: AbortSignal,
 ): Promise<SocialPostGenerationResult> => {
   const requestAuthEpoch = captureAuthEpoch();
-  const normalisedImage = await normaliseDataUrl(imageBase64Url);
+  const normalisedImage = await normaliseDataUrl(imageBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
   const { mimeType, data: base64Data } = parseDataUrl(normalisedImage);
 
@@ -2006,7 +2200,7 @@ export const generateSocialPost = async (
     },
   };
 
-  const logoImagePart = await optionalLogoImagePart(logoBase64Url);
+  const logoImagePart = await optionalLogoImagePart(logoBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
 
   // Generate text (or use provided template/custom text) and the final image in parallel.
@@ -2030,10 +2224,13 @@ export const generateSocialPost = async (
         )
   ).catch((error) => {
     if (isAbortError(error)) throw error;
+    // Keep the typed provider failure reachable so a blocked-content verdict
+    // still classifies as `blocked` for the toast instead of "unknown".
     throw new Error(
       `Failed to generate text content: ${
         error instanceof Error ? error.message : String(error)
       }`,
+      { cause: error },
     );
   });
 
@@ -2044,16 +2241,20 @@ export const generateSocialPost = async (
     initialText,
     creativeBrief,
   );
+  // Text first: the shared style prompt precedes the per-post image bytes so
+  // Gemini's implicit cache can match across requests.
   const imageParts: (typeof imagePart | { text: string })[] = [
-    imagePart,
     { text: imagePrompt },
+    imagePart,
   ];
   if (logoImagePart) {
     imageParts.push(logoImagePart);
   }
 
   // Image ladder → OpenAI → original photo. Never hard-fail a delivery post
-  // just because the retoucher model blocked/recited the image.
+  // just because the retoucher model blocked/recited the image. A content
+  // block skips OpenAI (it would fabricate a photo without the customer) and
+  // ships the original photo directly.
   const imagePromise = (async () => {
     try {
       const generated = await generateImageWithFallback(
@@ -2364,7 +2565,7 @@ export const generatePostVideo = async (
   const videoModels = getFallbackChain(videoTask);
   const resolvedResolution = TASKS[videoTask].resolution ?? "720p";
 
-  const normalisedImage = await normaliseDataUrl(imageBase64Url);
+  const normalisedImage = await normaliseDataUrl(imageBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
 
   // Resolve final Veo params FIRST so the prompt matches the wire body.
@@ -2461,6 +2662,7 @@ export const generatePostVideo = async (
           "X-Generation-Task": videoTask,
           "X-Model-Policy-Version": MODEL_POLICY_VERSION,
           "X-Generation-Attempt-ID": generationAttemptId,
+          "X-Generation-Purpose": "video",
         },
         body: JSON.stringify(body),
         signal,
@@ -2486,6 +2688,14 @@ export const generatePostVideo = async (
         text = await response.text();
       } catch (_error) {
         // The status is still useful even if its response body cannot be read.
+      }
+      // The proxy rejected a stale installed app before validating the body;
+      // no model in the chain would be treated differently.
+      const outdated = outdatedClientErrorFromResponse(response.status, text);
+      if (outdated) {
+        lastError = outdated;
+        console.error("[VideoGen] The installed app is behind the server policy.");
+        break;
       }
       // 5xx carries no normalizeError token, so spell out "unavailable" to
       // classify as a temporary outage; other statuses classify off their
@@ -2595,11 +2805,15 @@ export const generatePostVideo = async (
   }
 
   const normalized = normalizeError(lastError);
-  throw new Error(
+  const startFailure = new Error(
     `Video generation did not start safely: ${normalized.message} ${recoveryHint(
       normalized,
     )} The start request was not retried to prevent a duplicate paid video job.`,
   );
+  // Keep the typed provider failure reachable so a terminal classification
+  // (blocked, outdated) survives the wrapper instead of degrading to unknown.
+  Object.defineProperty(startFailure, "cause", { value: lastError, enumerable: false });
+  throw startFailure;
 };
 
 /**

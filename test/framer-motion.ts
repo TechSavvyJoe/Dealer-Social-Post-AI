@@ -57,12 +57,33 @@ const settledComponent = (element: React.ElementType) => {
 
 const motionFactory = (element: React.ElementType) => settledComponent(element);
 
-export const motion = new Proxy(motionFactory, {
+/**
+ * `m.*` is the only motion component the app may render: production wraps the
+ * tree in <LazyMotion strict>, where any `motion.*` component throws during
+ * render. Mirror that here so a regression that reintroduces `motion.*`
+ * fails the unit suite instead of crashing a rarely-visited screen in prod.
+ */
+export const m = new Proxy(motionFactory, {
   get: (_target, element: string | symbol) =>
     settledComponent(String(element) as React.ElementType),
 });
 
-export const m = motion;
+const strictViolation = (element: string) => {
+  const Violation: React.FC = () => {
+    throw new Error(
+      `motion.${element} rendered under LazyMotion strict mode — use m.${element} from framer-motion instead.`,
+    );
+  };
+  Violation.displayName = `StrictMotionViolation(${element})`;
+  return Violation;
+};
+
+export const motion = new Proxy(
+  (element: React.ElementType) => strictViolation(String(element)),
+  {
+    get: (_target, element: string | symbol) => strictViolation(String(element)),
+  },
+);
 
 type MotionProviderProps = {
   children?: React.ReactNode;

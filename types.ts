@@ -26,6 +26,60 @@ export type ImageAspectRatio = "1:1" | "4:5" | "9:16" | "16:9" | "4:3";
 export type PrimaryImageFormatId =
   "feed_portrait" | "feed_square" | "story_vertical" | "marketplace" | "gbp";
 
+// ---- Brand-consistent creative system (spec 2026-09-02) -------------------
+// Shared contract for the dealer/person fields added in phase 1. The backend
+// (pb_hooks/helpers.js) validates every shape below before storing it.
+
+/** Dealership Signature Look: bundles image style, caption tone, layout, motion. */
+export type SignatureLook = "showroom" | "hometown" | "turbo";
+/** The six Customer Hub categories the per-category destination table keys off. */
+export type BrandCategoryId =
+  "deliveries" | "inventory" | "service" | "promotions" | "community" | "team";
+/** Any EXPORT_FORMATS id, including the landscape export that is never primary. */
+export type CategoryFormatId = PrimaryImageFormatId | "social_landscape";
+export type LogoCorner = "top_left" | "top_right" | "bottom_left" | "bottom_right";
+export interface LogoPlacement {
+  corner: LogoCorner;
+  /** Logo width as a fraction of the canvas width (0.04-0.5). */
+  scale: number;
+}
+export type MotionAspect = "9:16" | "16:9";
+export type MotionAudio = "none" | "celebration" | "cinematic" | "anthemic" | "funk";
+/** Fixed motion format for a Look; the manager may enable a 16:9 variant. */
+export interface MotionSignature {
+  /** VideoStyle display value bound to the Look (e.g. "Golden Radiance"). */
+  style: string;
+  aspects: MotionAspect[];
+  audio: MotionAudio;
+}
+export interface CategoryDestination {
+  /** publishTargets ids (backend allowlist: allowedPostPlatformIds). */
+  platformIds: string[];
+  formatIds: CategoryFormatId[];
+  video: boolean;
+}
+export type CategoryDestinations = Partial<
+  Record<BrandCategoryId, CategoryDestination>
+>;
+export type ApprovalPolicyMode = "none" | "first_n" | "always" | "per_category";
+export interface ApprovalPolicy {
+  mode: ApprovalPolicyMode;
+  /** Only for mode "first_n": posts 1..firstN of each person need sign-off. */
+  firstN?: number;
+  /** Only for mode "per_category". */
+  categories?: BrandCategoryId[];
+}
+export type FeaturePermissionKey = "playful" | "video" | "freeTextEdit";
+export interface FeaturePermission {
+  /** Team-wide default. */
+  team: boolean;
+  /** Per-person overrides keyed by salespeople record id. */
+  people: Record<string, boolean>;
+}
+export type FeaturePermissions = Partial<
+  Record<FeaturePermissionKey, FeaturePermission>
+>;
+
 export enum StyleOption {
   Luxury = "Luxury & Elegance",
   Modern = "Modern & Bold",
@@ -94,6 +148,17 @@ export interface GeneratedPost {
    * post can never claim consent that the backend does not hold.
    */
   releaseStatus?: "not_required" | "saved" | "save_failed";
+  /**
+   * The two release writes fail independently: the signature is stored before
+   * the paid provider call, the post-to-release association after it. This is
+   * set only when consent IS durably stored and just the association failed —
+   * a recoverable state the result screen can retry. Its absence on a locked
+   * post means the lock is a genuine missing-consent lock, which keeps the
+   * strict copy.
+   */
+  releaseLinkStatus?: "link_failed";
+  /** Server id of the stored consent record, so the link can be retried. */
+  releaseId?: string;
   /** Manager/super-admin History view of another salesperson's immutable work. */
   historyReadOnly?: boolean;
   /** Server policy quarantine for legacy/unreviewed creative pixels. */
@@ -227,6 +292,35 @@ export interface Dealer {
 
   /** JSON-serialized array of GSM-defined post scenarios. Augments the built-in catalog. */
   custom_scenarios?: string;
+
+  // ---- Brand-consistent creative system (phase 1; all optional, ships dark) ----
+  /** House Look; empty until the dealer admin picks one. */
+  signature_look?: SignatureLook | "";
+  /** Optional second Look a manager may enable. */
+  alternate_look?: SignatureLook | "";
+  /** Tone derived from the Look; stored so overrides can be audited. */
+  default_tone?: string;
+  /** Exactly one Fun Mode style id; supersedes free-form enabled_fun_styles. */
+  playful_style?: string;
+  motion_signature?: MotionSignature | null;
+  logo_placement?: LogoPlacement | null;
+  /** Up to 3 "do" phrases (<= 60 chars) alongside brand_voice. */
+  brand_voice_do?: string[];
+  /** Up to 3 "don't" phrases (<= 60 chars). */
+  brand_voice_dont?: string[];
+  /** When true, default_hashtags survive the per-platform tag cap. */
+  required_hashtags_locked?: boolean;
+  category_destinations?: CategoryDestinations | null;
+  approval_policy?: ApprovalPolicy | null;
+  feature_permissions?: FeaturePermissions | null;
+  /** Server-owned replacement for the client localStorage tier. */
+  image_quality_tier?: ImageQualityTier | "";
+  /**
+   * Phase 2 resolver flag (spec §9). While false or unset,
+   * services/creativeSystem.ts reproduces today's style/tone precedence and
+   * prescribes no destinations, so only a piloted dealership changes behavior.
+   */
+  creative_system_v2?: boolean;
 }
 
 // FIX: Added User interface to resolve import error in UserModal.tsx.

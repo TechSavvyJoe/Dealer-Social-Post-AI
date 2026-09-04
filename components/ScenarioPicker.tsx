@@ -18,7 +18,28 @@ interface ScenarioPickerProps {
   value?: string;
   onChange: (scenario: PostScenario | undefined) => void;
   className?: string;
+  /**
+   * Creative-system layout (spec §8 step 2): the six categories become the
+   * primary choice and scenarios drop to optional sub-templates inside the
+   * chosen category. Defaults to false, which keeps the listbox exactly as it
+   * is today for every dealership that has not opted in.
+   */
+  categoryFirst?: boolean;
 }
+
+/**
+ * Canonical category order for the six-tile grid. Any category a dealer's
+ * custom scenarios introduce outside this list is appended, so a custom
+ * scenario can never disappear from the picker.
+ */
+const CATEGORY_ORDER: ScenarioCategory[] = [
+  "delivery",
+  "inventory",
+  "service",
+  "promo",
+  "community",
+  "team",
+];
 
 /**
  * Compact scenario picker. Sits at the top of the post customizer and tunes
@@ -34,12 +55,16 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
   value,
   onChange,
   className,
+  categoryFirst = false,
 }) => {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const listboxId = useId();
   const labelId = useId();
   const selectedValueId = useId();
+  // Category headings are visual only unless each category is a real listbox
+  // group, so every heading gets an id that names its role="group" wrapper.
+  const categoryLabelId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -147,6 +172,126 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
     }
   };
 
+  // Category-first ordering. Built-in categories keep the canonical order; a
+  // dealer-custom category is appended rather than dropped.
+  const orderedCategories = useMemo(() => {
+    const byCategory = new Map(grouped);
+    const known = CATEGORY_ORDER.filter((category) => byCategory.has(category));
+    const extra = grouped
+      .map(([category]) => category)
+      .filter((category) => !CATEGORY_ORDER.includes(category));
+    return [...known, ...extra].map(
+      (category) => [category, byCategory.get(category) || []] as const,
+    );
+  }, [grouped]);
+
+  const activeCategory = current?.category;
+  const categoryTemplates = useMemo(
+    () =>
+      activeCategory
+        ? allScenarios.filter((scenario) => scenario.category === activeCategory)
+        : [],
+    [activeCategory, allScenarios],
+  );
+
+  // Picking a category selects that category's first scenario, so the
+  // sub-template row below is always optional — the category tile alone is a
+  // complete decision.
+  const selectCategory = useCallback(
+    (category: ScenarioCategory) => {
+      const first = allScenarios.find((scenario) => scenario.category === category);
+      if (!first) return;
+      triggerHapticFeedback();
+      onChange(first);
+    },
+    [allScenarios, onChange],
+  );
+
+  if (categoryFirst) {
+    return (
+      <div className={cn("space-y-1.5", className)}>
+        <span
+          id={labelId}
+          className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+        >
+          Post type
+        </span>
+        <div
+          role="group"
+          aria-labelledby={labelId}
+          className="grid grid-cols-3 gap-2 sm:grid-cols-6"
+        >
+          {orderedCategories.map(([category]) => {
+            const Icon = SCENARIO_CATEGORY_ICON[category];
+            const selected = activeCategory === category;
+            return (
+              <button
+                key={category}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => selectCategory(category)}
+                className={cn(
+                  "flex min-h-20 flex-col items-center justify-center gap-1.5 rounded-xl border px-1 py-2.5 text-center transition-colors",
+                  selected
+                    ? "border-primary-400 bg-primary-500/20 text-primary-100"
+                    : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/35 hover:bg-fill-hover",
+                )}
+              >
+                <Icon className="h-5 w-5" aria-hidden="true" />
+                <span className="text-[11px] font-semibold leading-tight">
+                  {SCENARIO_CATEGORY_LABELS[category]}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {categoryTemplates.length > 1 ? (
+          <div
+            role="group"
+            aria-labelledby={`${categoryLabelId}-templates`}
+            className="space-y-1.5 pt-1"
+          >
+            <span
+              id={`${categoryLabelId}-templates`}
+              className="block text-[10px] uppercase tracking-wide text-surface-400"
+            >
+              Template (optional)
+            </span>
+            <div className="mobile-h-scroll -mx-1 px-1 pb-1 sm:flex-wrap sm:overflow-visible">
+              {categoryTemplates.map((scenario) => {
+                const selected = current?.id === scenario.id;
+                return (
+                  <button
+                    key={scenario.id}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      onChange(scenario);
+                    }}
+                    className={cn(
+                      "min-h-11 shrink-0 snap-start rounded-full border px-3.5 py-2 text-xs font-semibold transition-colors",
+                      selected
+                        ? "border-primary-400 bg-primary-500/25 text-primary-50 [.theme-light_&]:text-primary-950"
+                        : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/40",
+                    )}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      {selected ? (
+                        <Check className="h-3 w-3 shrink-0" strokeWidth={3} />
+                      ) : null}
+                      {scenario.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div ref={rootRef} className={cn("space-y-1.5", className)}>
       <span
@@ -226,8 +371,16 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
             className="rounded-xl border border-hairline bg-surface-900/95 backdrop-blur-xl shadow-2xl p-2 max-h-96 overflow-y-auto"
           >
             {grouped.map(([category, list]) => (
-              <div key={category} role="presentation" className="mb-2 last:mb-0">
-                <div className="text-[10px] uppercase tracking-wide text-surface-400 px-2 pb-1 pt-1.5">
+              <div
+                key={category}
+                role="group"
+                aria-labelledby={`${categoryLabelId}-${category}`}
+                className="mb-2 last:mb-0"
+              >
+                <div
+                  id={`${categoryLabelId}-${category}`}
+                  className="text-[10px] uppercase tracking-wide text-surface-400 px-2 pb-1 pt-1.5"
+                >
                   {SCENARIO_CATEGORY_LABELS[category]}
                 </div>
                 <div role="presentation" className="space-y-0.5">

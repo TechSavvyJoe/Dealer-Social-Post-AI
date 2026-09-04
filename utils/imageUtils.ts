@@ -382,10 +382,13 @@ export const fileToNormalizedDataUrl = async (file: File): Promise<string> => {
  * @param url The URL of the image to fetch.
  * @returns A Promise that resolves to the data URL string representation of the image.
  */
-export const urlToDataUrl = async (url: string): Promise<string> => {
+export const urlToDataUrl = async (
+  url: string,
+  signal?: AbortSignal,
+): Promise<string> => {
   try {
     const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
-    const response = await fetch(proxyUrl, { credentials: "include" });
+    const response = await fetch(proxyUrl, { credentials: "include", signal });
 
     if (!response.ok) {
       throw new Error(`Image proxy rejected the request (${response.status}).`);

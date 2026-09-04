@@ -9,6 +9,7 @@ import {
   splitCaptionBodyAndTags,
 } from "../utils/hashtags";
 import { resolvePlatformOption } from "../services/platformCopy";
+import { Textarea } from "./ui/Input";
 
 export interface CaptionStudioProps {
   value: string;
@@ -20,6 +21,13 @@ export interface CaptionStudioProps {
   claimLocked?: boolean;
   /** Keeps the editor within the desktop publishing workspace's first viewport. */
   compact?: boolean;
+  /**
+   * Suppresses the hashtag chip editor and its toggle, leaving one plain
+   * caption field. Brand mode keeps the caption on the publish surface but
+   * moves chip editing behind the "Studio tools" disclosure, so the same
+   * editor serves both places instead of mounting a second one.
+   */
+  hideHashtagEditor?: boolean;
   className?: string;
 }
 
@@ -30,6 +38,7 @@ export interface CaptionStudioProps {
 export const CaptionStudio: React.FC<CaptionStudioProps> = ({
   value,
   onChange,
+  hideHashtagEditor = false,
   disabled = false,
   platformId = null,
   claimLocked = false,
@@ -40,7 +49,9 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
   const [tags, setTags] = useState<string[]>([]);
   const [tagDraft, setTagDraft] = useState("");
   // Single text box by default — salespeople shouldn't hunt for settings.
-  const [combinedMode, setCombinedMode] = useState(true);
+  const [combinedModeState, setCombinedMode] = useState(true);
+  // Suppressed: the split view is unreachable, so stay in the plain field.
+  const combinedMode = hideHashtagEditor ? true : combinedModeState;
   const [combinedDraft, setCombinedDraft] = useState(value);
   // Track last emitted value so external resets (undo, platform tab) re-sync.
   const lastEmitted = React.useRef(value);
@@ -142,59 +153,59 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
             </span>
           )}
         </div>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => {
-            if (!combinedMode) {
-              setCombinedDraft(value);
-            } else {
-              const split = splitCaptionBodyAndTags(combinedDraft || value);
-              setBody(split.body);
-              setTags(split.tags);
-            }
-            setCombinedMode((m) => !m);
-          }}
-          className={cn(
-            "inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors",
-            "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
-            "disabled:cursor-not-allowed disabled:opacity-40",
-          )}
-        >
-          {combinedMode ? (
-            <>
-              <Hash className="h-3 w-3" />
-              Edit hashtags
-            </>
-          ) : (
-            <>
-              <AlignLeft className="h-3 w-3" />
-              Simple view
-            </>
-          )}
-        </button>
+        {!hideHashtagEditor && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              if (!combinedMode) {
+                setCombinedDraft(value);
+              } else {
+                const split = splitCaptionBodyAndTags(combinedDraft || value);
+                setBody(split.body);
+                setTags(split.tags);
+              }
+              setCombinedMode((m) => !m);
+            }}
+            className={cn(
+              "inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors",
+              "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
+              "disabled:cursor-not-allowed disabled:opacity-40",
+            )}
+          >
+            {combinedMode ? (
+              <>
+                <Hash className="h-3 w-3" />
+                Edit hashtags
+              </>
+            ) : (
+              <>
+                <AlignLeft className="h-3 w-3" />
+                Simple view
+              </>
+            )}
+          </button>
+        )}
       </div>
 
       {combinedMode ? (
-        <textarea
+        // Shared field system: one focus treatment (the app-wide field focus
+        // border) instead of a bespoke ring stacked on the global brand ring.
+        <Textarea
           aria-label="Full caption text"
           aria-invalid={claimLocked || undefined}
           aria-describedby={claimLocked ? "caption-compliance-alert" : undefined}
           value={combinedDraft}
           onChange={(e) => handleCombinedChange(e.target.value)}
           disabled={disabled}
+          fullWidth
           placeholder="Your social post appears here automatically…"
           className={cn(
             compact
-              ? "h-36 min-h-[8rem] w-full lg:h-40 lg:max-h-[18rem]"
-              : "h-56 min-h-[12rem] w-full lg:h-72 lg:max-h-[28rem]",
-            "bg-surface-800/50 text-surface-100 p-4 rounded-xl text-base",
-            "resize-y border-2 border-transparent leading-relaxed",
-            "focus:border-primary-400 focus:ring-2 focus:ring-primary-400",
-            "outline-none transition-all duration-300",
-            "placeholder:text-surface-600",
-            "disabled:cursor-not-allowed disabled:opacity-60",
+              ? "h-36 min-h-[8rem] lg:h-40 lg:max-h-[18rem]"
+              : "h-56 min-h-[12rem] lg:h-72 lg:max-h-[28rem]",
+            "resize-y leading-relaxed",
           )}
         />
       ) : (
@@ -212,7 +223,7 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
                 {bodyChars} chars
               </span>
             </div>
-            <textarea
+            <Textarea
               id="caption-body-editor"
               aria-label="Caption body without hashtags"
               aria-invalid={claimLocked || undefined}
@@ -220,17 +231,13 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
               value={body}
               onChange={(e) => handleBodyChange(e.target.value)}
               disabled={disabled}
+              fullWidth
               placeholder="Post body…"
               className={cn(
                 compact
-                  ? "h-28 w-full lg:h-32 lg:max-h-[15rem]"
-                  : "h-36 w-full lg:h-44 lg:max-h-[20rem]",
-                "bg-surface-800/50 text-surface-100 p-4 rounded-xl text-base",
-                "resize-y border-2 border-transparent leading-relaxed",
-                "focus:border-primary-400 focus:ring-2 focus:ring-primary-400",
-                "outline-none transition-all duration-300",
-                "placeholder:text-surface-600",
-                "disabled:cursor-not-allowed disabled:opacity-60",
+                  ? "h-28 lg:h-32 lg:max-h-[15rem]"
+                  : "h-36 lg:h-44 lg:max-h-[20rem]",
+                "resize-y leading-relaxed",
               )}
             />
           </div>

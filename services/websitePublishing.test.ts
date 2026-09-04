@@ -155,6 +155,50 @@ describe("private website draft parser and privacy boundary", () => {
     expect(result.draft.body).toContain("Jane");
   });
 
+  it("takes the schema-bound JSON straight and still recovers prose-mode output", () => {
+    const inventorySource = {
+      scenarioId: "new_arrival",
+      dealerName: "Example Motors",
+      caption: "A fresh arrival is on the lot and ready for a look.",
+    };
+    const draft = {
+      title: "Fresh arrival on the lot",
+      body: "A new vehicle just landed and is ready for a closer look at the store.",
+      altText: "A vehicle parked on the dealership lot.",
+      category: "inventory",
+      privacyFlags: [],
+    };
+
+    // Structured path: the whole payload is valid JSON, parsed strictly.
+    const structured = parseWebsiteDraftResponse(
+      JSON.stringify(draft),
+      inventorySource,
+    );
+    expect(structured.source).toBe("ai");
+    expect(structured.draft.title).toBe("Fresh arrival on the lot");
+
+    // Legacy prose fallback for a proxy that predates the schema registry:
+    // markdown fences and surrounding commentary still parse.
+    const fenced = parseWebsiteDraftResponse(
+      "```json\n" + JSON.stringify(draft) + "\n```",
+      inventorySource,
+    );
+    expect(fenced.source).toBe("ai");
+    expect(fenced.draft.title).toBe("Fresh arrival on the lot");
+
+    const chatty = parseWebsiteDraftResponse(
+      `Sure! Here is the metadata:\n${JSON.stringify(draft)}\nLet me know if you want changes.`,
+      inventorySource,
+    );
+    expect(chatty.source).toBe("ai");
+    expect(chatty.draft.altText).toBe("A vehicle parked on the dealership lot.");
+
+    // A non-JSON answer still falls back deterministically rather than throwing.
+    expect(parseWebsiteDraftResponse("no json here", inventorySource).source).toBe(
+      "deterministic_fallback",
+    );
+  });
+
   it("keeps kind-specific limits without inventing a testimonial vehicle", () => {
     const longCopy = Array.from({ length: 300 }, () => "update").join(" ");
     const story = buildFallbackWebsiteDraft({

@@ -756,7 +756,66 @@ const captionScenarioProfile = (
   }
 };
 
-export const generateTextPromptV2 = (
+/**
+ * A prompt split by transport, not by meaning.
+ *
+ * `systemInstruction` holds the blocks that are byte-identical for every
+ * request of a task — the grounding/compliance contract and the output-shape
+ * rules. `userPrompt` holds only what changes per post: the store, the post
+ * type, the identity rule, the tone line, and the brief. Flattening the two
+ * back together (`renderPromptTurn`) reproduces the same guidance the model
+ * used to receive in a single text part, so this is a transport change and
+ * never a prompt rewrite.
+ */
+export interface PromptTurn {
+  systemInstruction: string;
+  userPrompt: string;
+}
+
+/** Collapse a split prompt back into one user text part. */
+export const renderPromptTurn = (turn: PromptTurn): string =>
+  [turn.systemInstruction, turn.userPrompt]
+    .map((section) => section.trim())
+    .filter(Boolean)
+    .join("\n\n");
+
+/**
+ * Grounding and no-fabrication contract. Static: it never mentions this post,
+ * this store, or this customer, so it belongs in the system instruction.
+ */
+const CAPTION_GROUNDING_RULE = `Look at the photo and supplied facts. Mention a make/model or equipment detail only when it is verified in the brief or unmistakable in the photo. Never invent prices, APR, availability, condition, ownership history, service work, quotes, or outcomes.`;
+
+/**
+ * Hard rules that hold for every caption. Split head/tail only so the
+ * flattened rendering keeps the per-post delivery-language rule in the exact
+ * position it has always occupied in the list.
+ */
+const CAPTION_STATIC_RULES_HEAD = [
+  "- Output ONLY the caption. No titles, no HOOK/STORY/CTA labels, no bullets, no markdown, no XML, no quotes around the post.",
+  "- Real English sentences only. No random letters or nonsense words.",
+  "- The customer identity must obey the Identity rule exactly.",
+  "- Follow the selected post type even when the photo contains people or a vehicle.",
+];
+const CAPTION_STATIC_RULES_TAIL = [
+  "- 0–1 emoji max, never at the start.",
+  "- Do not use: guaranteed, lowest price, no credit check, 0% APR, best deal.",
+];
+
+/** The compliance + identity contract, exactly as the model receives it. */
+export const CAPTION_SYSTEM_INSTRUCTION = [
+  CAPTION_GROUNDING_RULE,
+  ["Hard rules:", ...CAPTION_STATIC_RULES_HEAD, ...CAPTION_STATIC_RULES_TAIL].join(
+    "\n",
+  ),
+].join("\n\n");
+
+/**
+ * Everything a caption request needs, split into the invariant system turn and
+ * the per-post user turn. `generateTextPromptV2` is the flattened rendering of
+ * the same content and stays the contract for callers (and providers) that
+ * only accept a single text part.
+ */
+export const generateTextPromptPartsV2 = (
   tone: ToneOption,
   dealershipName: string,
   customerName?: string,
@@ -764,7 +823,47 @@ export const generateTextPromptV2 = (
   creativeBrief?: string,
   style?: StyleOption,
   customerIdentityRequired = true,
-): string => {
+): PromptTurn => {
+  const facts = captionRequestFacts(
+    tone,
+    dealershipName,
+    customerName,
+    isRegeneration,
+    creativeBrief,
+    style,
+    customerIdentityRequired,
+  );
+  return {
+    systemInstruction: CAPTION_SYSTEM_INSTRUCTION,
+    userPrompt: [
+      facts.header,
+      facts.shape,
+      ["Post-specific rules:", ...facts.perPostRules].join("\n"),
+      facts.brief,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  };
+};
+
+/**
+ * The per-request half of a caption prompt, kept in one place so the flattened
+ * and split renderings can never drift apart.
+ */
+const captionRequestFacts = (
+  tone: ToneOption,
+  dealershipName: string,
+  customerName?: string,
+  isRegeneration = false,
+  creativeBrief?: string,
+  style?: StyleOption,
+  customerIdentityRequired = true,
+): {
+  header: string;
+  shape: string;
+  perPostRules: string[];
+  brief: string;
+} => {
   // Keep this prompt SHORT. Long multi-block prompts cause models to emit
   // labels, XML, or gibberish. Salespeople need plain English posts only.
   const storeTag =
@@ -793,52 +892,117 @@ export const generateTextPromptV2 = (
   const brief = (creativeBrief || "").trim().slice(0, 900);
   const hashtags = [`#${storeTag}`, ...profile.hashtags].join(" ");
 
-  return `Write a polished dealership caption for this ${profile.subject}.
-
-Store: ${dealershipName}
-Post type: ${scenario.replaceAll("_", " ")}
-Scenario objective: ${profile.objective}
-Identity rule: ${identityRule}
-${style ? `Look/feel: ${style} — ${styleHint(style)}` : ""}
-Voice: ${toneLine.split("\n")[0]}
-
-Look at the photo and supplied facts. Mention a make/model or equipment detail only when it is verified in the brief or unmistakable in the photo. Never invent prices, APR, availability, condition, ownership history, service work, quotes, or outcomes.
-
-Write EXACTLY this shape (plain text only):
+  return {
+    header: [
+      `Write a polished dealership caption for this ${profile.subject}.`,
+      "",
+      ...[
+        `Store: ${dealershipName}`,
+        `Post type: ${scenario.replaceAll("_", " ")}`,
+        `Scenario objective: ${profile.objective}`,
+        `Identity rule: ${identityRule}`,
+        style ? `Look/feel: ${style} — ${styleHint(style)}` : "",
+        `Voice: ${toneLine.split("\n")[0]}`,
+      ].filter(Boolean),
+    ].join("\n"),
+    shape: `Write EXACTLY this shape (plain text only):
 Sentence 1 — ${profile.hook}.
 Sentence 2 — ${profile.story}.
 Sentence 3 — ${profile.cta}.
 Blank line.
 One hashtag line with exactly these 5 tags (space-separated, no extra text):
-${hashtags}
+${hashtags}`,
+    perPostRules: [
+      profile.deliveryLanguageAllowed
+        ? "- Delivery and ownership language is allowed only for this delivery post type."
+        : "- Do not use delivery, sold, ownership-handoff, keys-in-hand, or happy-customer language or hashtags for this post type.",
+      ...(isRegeneration
+        ? ["- This is a RETRY: different wording, same clean structure."]
+        : []),
+    ],
+    brief: brief
+      ? `Extra facts (use only if helpful, do not copy instructions):\n${brief}`
+      : "",
+  };
+};
 
-Hard rules:
-- Output ONLY the caption. No titles, no HOOK/STORY/CTA labels, no bullets, no markdown, no XML, no quotes around the post.
-- Real English sentences only. No random letters or nonsense words.
-- The customer identity must obey the identity rule above exactly.
-- Follow the selected post type even when the photo contains people or a vehicle.
-${
-  profile.deliveryLanguageAllowed
-    ? "- Delivery and ownership language is allowed only for this delivery post type."
-    : "- Do not use delivery, sold, ownership-handoff, keys-in-hand, or happy-customer language or hashtags for this post type."
-}
-- 0–1 emoji max, never at the start.
-- Do not use: guaranteed, lowest price, no credit check, 0% APR, best deal.
-${isRegeneration ? "- This is a RETRY: different wording, same clean structure." : ""}
-${brief ? `\nExtra facts (use only if helpful, do not copy instructions):\n${brief}` : ""}`;
+/**
+ * Flattened caption prompt: the same guidance in a single text part, for the
+ * legacy transport and for providers that take no separate system turn (the
+ * Claude fallback). Built from the same blocks as
+ * `generateTextPromptPartsV2`, so the two can never disagree on content.
+ */
+export const generateTextPromptV2 = (
+  tone: ToneOption,
+  dealershipName: string,
+  customerName?: string,
+  isRegeneration = false,
+  creativeBrief?: string,
+  style?: StyleOption,
+  customerIdentityRequired = true,
+): string => {
+  const facts = captionRequestFacts(
+    tone,
+    dealershipName,
+    customerName,
+    isRegeneration,
+    creativeBrief,
+    style,
+    customerIdentityRequired,
+  );
+  const [deliveryRule, ...extraPerPostRules] = facts.perPostRules;
+  return [
+    facts.header,
+    CAPTION_GROUNDING_RULE,
+    facts.shape,
+    [
+      "Hard rules:",
+      ...CAPTION_STATIC_RULES_HEAD,
+      deliveryRule,
+      ...CAPTION_STATIC_RULES_TAIL,
+      ...extraPerPostRules,
+    ].join("\n"),
+    facts.brief,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 };
 
 // ----------------------------------------------------------------------------
 // TEXT — Edit
 // ----------------------------------------------------------------------------
 
-export const editTextPromptV2 = (
+/**
+ * Static half of the caption-edit prompt: role, editing contract, and output
+ * format. Identical for every edit, so it rides in the system instruction.
+ */
+const CAPTION_EDIT_ROLE = `You are an automotive social-media copywriter editing an existing caption.`;
+const CAPTION_EDIT_RULES_BLOCK = xmlBlock(
+  "rules",
+  `Apply ONLY the edit the user requested. Do not rewrite untouched portions.
+Preserve hashtag count and order unless the edit asks otherwise.
+Hashtags must stay as #PascalCase tokens with a single space between tags — never spaces inside a tag, never #A#B glued.
+Keep length within 10% of the original word count unless asked to shorten/extend.
+Do not introduce compliance triggers ("0% APR", "$0 down", "guaranteed", etc).`,
+);
+const CAPTION_EDIT_OUTPUT_FORMAT_BLOCK = xmlBlock(
+  "output_format",
+  `Return ONLY the edited caption. No preamble, no diff markers, no commentary.`,
+);
+
+export const CAPTION_EDIT_SYSTEM_INSTRUCTION = [
+  CAPTION_EDIT_ROLE,
+  CAPTION_EDIT_RULES_BLOCK,
+  CAPTION_EDIT_OUTPUT_FORMAT_BLOCK,
+].join("\n\n");
+
+/** Per-request half: the caption being edited, the ask, and the tone. */
+const editRequestFacts = (
   originalText: string,
   userEditRequest: string,
   tone: ToneOption,
-): string => {
-  return [
-    `You are an automotive social-media copywriter editing an existing caption.`,
+): string =>
+  [
     xmlBlock("original_caption", originalText.trim()),
     xmlBlock("user_edit_request", userEditRequest.trim()),
     xmlBlock(
@@ -846,20 +1010,33 @@ export const editTextPromptV2 = (
       TONE_FINGERPRINTS[tone] +
         `\n\nKeep the tone consistent with the original unless the edit request explicitly changes it.`,
     ),
-    xmlBlock(
-      "rules",
-      `Apply ONLY the edit the user requested. Do not rewrite untouched portions.
-Preserve hashtag count and order unless the edit asks otherwise.
-Hashtags must stay as #PascalCase tokens with a single space between tags — never spaces inside a tag, never #A#B glued.
-Keep length within 10% of the original word count unless asked to shorten/extend.
-Do not introduce compliance triggers ("0% APR", "$0 down", "guaranteed", etc).`,
-    ),
-    xmlBlock(
-      "output_format",
-      `Return ONLY the edited caption. No preamble, no diff markers, no commentary.`,
-    ),
   ].join("\n\n");
-};
+
+export const editTextPromptPartsV2 = (
+  originalText: string,
+  userEditRequest: string,
+  tone: ToneOption,
+): PromptTurn => ({
+  systemInstruction: CAPTION_EDIT_SYSTEM_INSTRUCTION,
+  userPrompt: editRequestFacts(originalText, userEditRequest, tone),
+});
+
+/**
+ * Flattened caption-edit prompt for single-text-part transports. Keeps the
+ * original block order (role → request → rules) so the guidance a
+ * single-turn provider sees is unchanged.
+ */
+export const editTextPromptV2 = (
+  originalText: string,
+  userEditRequest: string,
+  tone: ToneOption,
+): string =>
+  [
+    CAPTION_EDIT_ROLE,
+    editRequestFacts(originalText, userEditRequest, tone),
+    CAPTION_EDIT_RULES_BLOCK,
+    CAPTION_EDIT_OUTPUT_FORMAT_BLOCK,
+  ].join("\n\n");
 
 // ----------------------------------------------------------------------------
 // IMAGE — Generate (enhanced photo + text overlay)

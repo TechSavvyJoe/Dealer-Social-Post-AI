@@ -61,6 +61,15 @@ const FORMAT_PRESETS: Array<{
   },
 ];
 
+/**
+ * Legacy Video Director option matrix (format → quality → sound → length →
+ * style).
+ *
+ * PostResult only mounts this while the dealership's creative system is OFF.
+ * With `creative_system_v2` on, "Add video" renders directly from the
+ * dealership motion signature (`resolveCreative().motion`) and this matrix is
+ * never opened. Nothing here changes in either mode.
+ */
 interface VideoDirectorModalProps {
   isOpen: boolean;
   onClose: () => void;

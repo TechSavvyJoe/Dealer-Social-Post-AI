@@ -118,7 +118,58 @@ describe("platformCopy", () => {
     expect(brief).toContain("x_twitter");
     expect(brief).toContain("Primary caption about a new F-150.");
     expect(brief).toMatch(/JSON object/i);
+    // The structured shape the server's `caption_pack_v1` schema pins.
+    expect(brief).toContain('{"captions":[{"platformId":"...","caption":"..."}]}');
+    // The legacy grammars stay documented for a proxy without the registry.
+    expect(brief).toContain("A flat object keyed by platform id is also accepted");
+    expect(brief).toContain("=== instagram_feed ===");
     expect(platformCopyGuidance("x_twitter")).toMatch(/280/);
+  });
+
+  it("parses the structured caption_pack_v1 captions array", () => {
+    const raw = JSON.stringify({
+      captions: [
+        { platformId: "instagram_feed", caption: "  IG feed caption  " },
+        { platformId: "tiktok", caption: "TikTok punchy line #cars" },
+        // Ids outside the selected destinations never become captions.
+        { platformId: "linkedin", caption: "Not requested" },
+        // Malformed entries are skipped, not fatal.
+        { platformId: "facebook_feed", caption: "   " },
+        { caption: "no id" },
+        null,
+      ],
+    });
+
+    expect(
+      parsePlatformCaptionPack(raw, ["instagram_feed", "tiktok", "facebook_feed"]),
+    ).toEqual({
+      instagram_feed: "IG feed caption",
+      tiktok: "TikTok punchy line #cars",
+    });
+  });
+
+  it("still recovers prose-mode packs from a proxy without the schema registry", () => {
+    // Fenced structured array.
+    const fencedStructured =
+      '```json\n{"captions":[{"platformId":"instagram_story","caption":"Story line"}]}\n```';
+    expect(parsePlatformCaptionPack(fencedStructured, ["instagram_story"])).toEqual({
+      instagram_story: "Story line",
+    });
+
+    // Structured array wrapped in commentary.
+    const chatty =
+      'Here you go:\n{"captions":[{"platformId":"tiktok","caption":"TikTok body"}]}\nHope that helps!';
+    expect(parsePlatformCaptionPack(chatty, ["tiktok"])).toEqual({
+      tiktok: "TikTok body",
+    });
+
+    // Legacy flat object and delimited blocks keep working unchanged.
+    expect(
+      parsePlatformCaptionPack(JSON.stringify({ tiktok: "Flat body" }), ["tiktok"]),
+    ).toEqual({ tiktok: "Flat body" });
+    expect(
+      parsePlatformCaptionPack("=== tiktok ===\nDelimited body", ["tiktok"]),
+    ).toEqual({ tiktok: "Delimited body" });
   });
 
   it("parses JSON caption packs", () => {

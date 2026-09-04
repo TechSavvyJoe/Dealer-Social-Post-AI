@@ -1,4 +1,8 @@
-import { normalizeError, type NormalizedError } from "../utils/errorHandler";
+import {
+  createOutdatedClientError,
+  normalizeError,
+  type NormalizedError,
+} from "../utils/errorHandler";
 import { retryWithBackoff } from "../utils/retry";
 import { performanceMonitor } from "../utils/performanceMonitor";
 import { withCircuitBreaker } from "../utils/circuitBreaker";
@@ -11,6 +15,52 @@ import {
 
 // Request tracking for debugging
 let requestCounter = 0;
+
+/**
+ * Per-request tracing is a local debugging affordance, not production
+ * telemetry. Every generation used to log a request line and a response line
+ * unconditionally, which buried the `console.error` a support session is
+ * actually looking for (and put paths and status codes in a salesperson's
+ * console). Genuine failures below still use `console.error`; real telemetry
+ * goes through `utils/telemetry`.
+ */
+const traceProxy = (message: string) => {
+  if (import.meta.env.DEV) console.log(message);
+};
+
+/**
+ * What the browser is doing with a generation request, sent as
+ * `X-Generation-Purpose` so the server's usage ledger can tell a vision-QC
+ * review or caption pack apart from a plain caption. Accounting metadata
+ * only: the proxy ignores unknown values and defaults by task kind (text →
+ * caption, image → image, video → video). Mirrors GENERATION_PURPOSES in
+ * pb_hooks/helpers.js.
+ */
+export type GenerationPurpose =
+  "caption" | "vision_review" | "caption_pack" | "website_draft" | "image" | "video";
+
+/**
+ * The proxy answers a stale installed client with 409 POLICY_VERSION_MISMATCH
+ * before validating the body. Shared by the JSON proxy path and the raw Veo
+ * start request so both surface the same terminal "update the app" error.
+ */
+export const outdatedClientErrorFromResponse = (
+  status: number,
+  bodyText: string,
+): NormalizedError | null => {
+  if (status !== 409) return null;
+  try {
+    const json = JSON.parse(bodyText) as { code?: unknown; currentVersion?: unknown };
+    if (json?.code !== "POLICY_VERSION_MISMATCH") return null;
+    const serverVersion =
+      typeof json.currentVersion === "string" || typeof json.currentVersion === "number"
+        ? String(json.currentVersion)
+        : "";
+    return createOutdatedClientError(MODEL_POLICY_VERSION, serverVersion);
+  } catch {
+    return null;
+  }
+};
 
 // Errors thrown to the UI must read like product copy, but the retry/toast
 // machinery still routes on `kind`. Building the NormalizedError here keeps
@@ -34,6 +84,7 @@ const normalizedProxyError = (
  * @param method 'GET' or 'POST'
  * @param path The path for the Google API (e.g., 'v1beta/models/gemini-3.6-flash:generateContent')
  * @param body The request body to be sent to the Gemini API.
+ * @param purpose Usage-ledger label (see GenerationPurpose); sent only with a task.
  * @returns The JSON response from the API.
  */
 export async function fetchFromProxy(
@@ -44,6 +95,7 @@ export async function fetchFromProxy(
   attemptId?: string,
   requestAuthEpoch: number = captureAuthEpoch(),
   externalSignal?: AbortSignal,
+  purpose?: GenerationPurpose,
 ) {
   assertAuthEpoch(requestAuthEpoch);
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
@@ -65,7 +117,7 @@ export async function fetchFromProxy(
   else externalSignal?.addEventListener("abort", relayExternalAbort, { once: true });
 
   try {
-    console.log(`[GeminiProxy] [${requestId}] Requesting ${method} ${path}`);
+    traceProxy(`[GeminiProxy] [${requestId}] Requesting ${method} ${path}`);
 
     // Auth is the HttpOnly session cookie. Provider credentials never enter
     // the browser bundle.
@@ -90,6 +142,7 @@ export async function fetchFromProxy(
                     "X-Generation-Task": task,
                     "X-Model-Policy-Version": MODEL_POLICY_VERSION,
                     ...(attemptId ? { "X-Generation-Attempt-ID": attemptId } : {}),
+                    ...(purpose ? { "X-Generation-Purpose": purpose } : {}),
                   }
                 : {}),
             },
@@ -123,7 +176,7 @@ export async function fetchFromProxy(
       );
     });
 
-    console.log(`[GeminiProxy] [${requestId}] Response ${response.status} for ${path}`);
+    traceProxy(`[GeminiProxy] [${requestId}] Response ${response.status} for ${path}`);
 
     const responseText = await response.text();
     assertAuthEpoch(requestAuthEpoch);
@@ -143,6 +196,10 @@ export async function fetchFromProxy(
       console.error(
         `[GeminiProxy] [${requestId}] ${method} ${path} failed (${response.status}): ${detail}`,
       );
+      // A stale installed app: terminal, never retried, and already outside
+      // the circuit breaker (only 5xx/network failures count against it).
+      const outdated = outdatedClientErrorFromResponse(response.status, responseText);
+      if (outdated) throw outdated;
       if (response.status === 401) {
         throw normalizedProxyError(
           "Session expired — please sign in again.",
