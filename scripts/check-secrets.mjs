@@ -13,8 +13,13 @@ const trackedFiles = execFileSync(
   .split("\0")
   .filter(Boolean);
 
+// A printf conversion (`%s`, optionally trailed by an escape) is a format
+// specifier, never a credential. Runbooks pipe secrets to `flyctl secrets
+// import` as `printf 'NAME=%s\n' "$VALUE"` precisely so the value never appears
+// in argv or shell history, so this shape is the SAFE one and must not be
+// flagged.
 const placeholders =
-  /^(?:|<[^>]+>|\$\{[^}]+\}|\$[A-Z_][A-Z0-9_]*|process\.env\..*|your[-_].*|example.*|placeholder.*|redacted.*|hidden|fake.*|test.*|changeme|admin@example\.com)$/i;
+  /^(?:|<[^>]+>|\$\{[^}]+\}|\$[A-Z_][A-Z0-9_]*|process\.env\..*|%[sd](?:\\[nrt])*|your[-_].*|example.*|placeholder.*|redacted.*|hidden|fake.*|test.*|changeme|admin@example\.com)$/i;
 
 const secretValuePatterns = [
   { label: "Google API key", pattern: /AIza[0-9A-Za-z_-]{20,}/ },
