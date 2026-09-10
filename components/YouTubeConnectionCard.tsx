@@ -8,6 +8,7 @@ import {
   startYouTubeConnection,
 } from "../services/walkarounds";
 import { Modal } from "./ui/Modal";
+import { toUiMessage } from "../utils/errorMessages";
 
 export const YouTubeConnectionCard: React.FC = () => {
   const [status, setStatus] = React.useState<{
@@ -27,10 +28,7 @@ export const YouTubeConnectionCard: React.FC = () => {
         if (active) setStatus(result);
       })
       .catch((cause) => {
-        if (active)
-          setError(
-            cause instanceof Error ? cause.message : "YouTube status is unavailable.",
-          );
+        if (active) setError(toUiMessage(cause, "YouTube status is unavailable."));
       });
     return () => {
       active = false;
@@ -43,9 +41,7 @@ export const YouTubeConnectionCard: React.FC = () => {
     try {
       await task();
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : "YouTube connection failed safely.",
-      );
+      setError(toUiMessage(cause, "YouTube connection failed safely."));
     } finally {
       setBusy(false);
     }

@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Modal } from "./ui/Modal";
+import { toUiMessage } from "../utils/errorMessages";
 import {
   approveWalkaround,
   completeYouTubeConnection,
@@ -198,7 +199,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
     try {
       await task();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The request failed safely.");
+      setError(toUiMessage(cause, "The request failed safely."));
     } finally {
       setBusy(false);
     }
