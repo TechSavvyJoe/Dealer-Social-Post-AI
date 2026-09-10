@@ -1930,9 +1930,7 @@ export const DealerTeamCard: React.FC = () => {
       handlePersonCommitted(updated);
       setOneTimeCode(null);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Could not mark the code as shared.",
-      );
+      setError(toUiMessage(err, "Could not mark the code as shared."));
     } finally {
       setCodeBusy(false);
     }

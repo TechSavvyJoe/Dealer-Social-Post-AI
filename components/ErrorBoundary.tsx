@@ -11,6 +11,8 @@ interface State {
   error: Error | null;
   errorInfo: ErrorInfo | null;
   copied: boolean;
+  /** Second-tap guard on the destructive reset. */
+  confirmingReset: boolean;
 }
 
 /**
@@ -29,6 +31,7 @@ export class ErrorBoundary extends Component<Props, State> {
     error: null,
     errorInfo: null,
     copied: false,
+    confirmingReset: false,
   };
 
   public static getDerivedStateFromError(error: Error): Partial<State> {
@@ -64,6 +67,7 @@ export class ErrorBoundary extends Component<Props, State> {
       error: null,
       errorInfo: null,
       copied: false,
+      confirmingReset: false,
     });
   };
 
@@ -163,11 +167,11 @@ export class ErrorBoundary extends Component<Props, State> {
   public render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-surface-950 p-4">
+        <div className="min-h-screen flex items-center justify-center bg-surface-base text-content-primary p-4">
           <div className="p-8 max-w-lg w-full text-center border border-error-500/30 rounded-lg bg-surface-overlay shadow-elevation-3">
-            <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+            <div className="w-16 h-16 bg-error-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
               <svg
-                className="w-8 h-8 text-red-400"
+                className="w-8 h-8 text-error-400 [.theme-light_&]:text-error-700"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -180,11 +184,23 @@ export class ErrorBoundary extends Component<Props, State> {
                 />
               </svg>
             </div>
-            <h1 className="text-2xl font-bold text-white mb-2">Something went wrong</h1>
+            <h1 className="text-2xl font-bold text-content-primary mb-2">
+              Something went wrong
+            </h1>
             <p className="text-surface-300 mb-6 text-sm">
               The app hit an unexpected error. Try one of these — they go from least to
               most destructive.
             </p>
+            {this.state.confirmingReset && (
+              <p
+                role="alert"
+                className="mb-6 rounded-lg border border-warning-500/40 bg-warning-500/10 px-3 py-2 text-sm text-warning-100 [.theme-light_&]:text-warning-900"
+              >
+                This removes photos and posts saved on this device and signs you out.
+                Anything already shared or saved to your dealership stays. Try
+                &ldquo;Try again&rdquo; or &ldquo;Refresh page&rdquo; first.
+              </p>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button
@@ -195,20 +211,36 @@ export class ErrorBoundary extends Component<Props, State> {
               </button>
               <button
                 onClick={() => window.location.reload()}
-                className="px-4 py-2.5 bg-fill-hover hover:border-strong border border-hairline text-white rounded-lg transition-colors text-sm"
+                className="px-4 py-2.5 bg-fill-hover hover:border-strong border border-hairline text-content-primary rounded-lg transition-colors text-sm"
               >
                 Refresh page
               </button>
-              <button
-                onClick={this.handleResetSession}
-                className="px-4 py-2.5 bg-warning-600/30 hover:bg-warning-600/50 border border-warning-500/40 text-warning-100 rounded-lg transition-colors text-sm"
-                title="Clears local storage, caches, and the service worker, then reloads. Use when the app is stuck after a deploy."
-              >
-                Reset session
-              </button>
+              {this.state.confirmingReset ? (
+                <>
+                  <button
+                    onClick={() => this.setState({ confirmingReset: false })}
+                    className="px-4 py-2.5 bg-fill-hover hover:border-strong border border-hairline text-content-primary rounded-lg transition-colors text-sm font-semibold"
+                  >
+                    Keep my work
+                  </button>
+                  <button
+                    onClick={this.handleResetSession}
+                    className="px-4 py-2.5 bg-error-600/30 hover:bg-error-600/50 border border-error-500/40 text-error-100 [.theme-light_&]:text-error-900 rounded-lg transition-colors text-sm font-semibold"
+                  >
+                    Clear and sign out
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => this.setState({ confirmingReset: true })}
+                  className="px-4 py-2.5 bg-warning-600/30 hover:bg-warning-600/50 border border-warning-500/40 text-warning-100 [.theme-light_&]:text-warning-900 rounded-lg transition-colors text-sm"
+                >
+                  Sign out and clear this device
+                </button>
+              )}
               <button
                 onClick={this.handleCopyDetails}
-                className="px-4 py-2.5 bg-fill-hover hover:border-strong border border-hairline text-white rounded-lg transition-colors text-sm"
+                className="px-4 py-2.5 bg-fill-hover hover:border-strong border border-hairline text-content-primary rounded-lg transition-colors text-sm"
               >
                 {this.state.copied ? "Copied" : "Copy error details"}
               </button>

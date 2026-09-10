@@ -387,9 +387,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
         onOpenCreative?.();
         toastSuccess("Creative reopened — share or export without regenerating.");
       } catch (err) {
-        toastError(
-          err instanceof Error ? err.message : "Could not open this creative.",
-        );
+        toastError(toUiMessage(err, "Could not open this creative."));
       } finally {
         setOpeningId(null);
       }
@@ -435,9 +433,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
             : "Private website draft queued again.",
         );
       } catch (err) {
-        toastError(
-          err instanceof Error ? err.message : "Website draft could not be retried.",
-        );
+        toastError(toUiMessage(err, "Website draft could not be retried."));
       } finally {
         setWebsiteRetryingId(null);
       }

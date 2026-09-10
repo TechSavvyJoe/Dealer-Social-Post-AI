@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dealer } from "../types";
 import * as db from "../services/database";
+import { toUiMessage } from "../utils/errorMessages";
 import { logError } from "../utils/telemetry";
 import { m } from "framer-motion";
 import { Button } from "./ui/Button";
@@ -193,7 +194,7 @@ export const AdminDashboard: React.FC = () => {
       resetDealerForm();
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to create dealer.");
+      toast.error(toUiMessage(err, "Failed to create dealer."));
     },
   });
 
@@ -206,7 +207,7 @@ export const AdminDashboard: React.FC = () => {
       resetDealerForm();
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to update dealer.");
+      toast.error(toUiMessage(err, "Failed to update dealer."));
     },
   });
 
@@ -220,7 +221,7 @@ export const AdminDashboard: React.FC = () => {
       logError("admin.dealer.delete.failed", {
         message: err instanceof Error ? err.message : String(err),
       });
-      toast.error(err instanceof Error ? err.message : "Failed to delete dealer.");
+      toast.error(toUiMessage(err, "Failed to delete dealer."));
     },
   });
 
@@ -298,7 +299,7 @@ export const AdminDashboard: React.FC = () => {
       setPersonForm({ name: "" });
       await refetchPeople();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to add person.");
+      toast.error(toUiMessage(err, "Failed to add person."));
     } finally {
       setSavingPerson(false);
     }
@@ -309,7 +310,7 @@ export const AdminDashboard: React.FC = () => {
       await updatePerson(person.id, { active: !person.active });
       await refetchPeople();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Update failed.");
+      toast.error(toUiMessage(err, "Update failed."));
     }
   };
 
@@ -323,9 +324,7 @@ export const AdminDashboard: React.FC = () => {
       await impersonatePerson(person.id);
       toast.success(`Now viewing as ${person.name}.`);
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Could not open as this person.",
-      );
+      toast.error(toUiMessage(err, "Could not open as this person."));
     } finally {
       setImpersonatingId(null);
     }
@@ -880,11 +879,7 @@ export const AdminDashboard: React.FC = () => {
                         toast.success("Code marked as shared.");
                       })
                       .catch((err) =>
-                        toast.error(
-                          err instanceof Error
-                            ? err.message
-                            : "Could not update code status.",
-                        ),
+                        toast.error(toUiMessage(err, "Could not update code status.")),
                       );
                   }}
                 >

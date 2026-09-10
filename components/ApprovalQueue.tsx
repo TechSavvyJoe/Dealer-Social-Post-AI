@@ -94,7 +94,7 @@ export const ApprovalQueue: React.FC = () => {
       await setApprovalStatus(post.id, status, approver.trim());
       setPending((prev) => prev.filter((p) => p.id !== post.id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(toUiMessage(err, "Could not load the approval queue."));
     } finally {
       setBusy((b) => ({ ...b, [post.id]: false }));
     }

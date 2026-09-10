@@ -33,6 +33,7 @@ import confetti from "canvas-confetti";
 import { Tooltip } from "./ui/Tooltip";
 import { GeneratedPost, VideoStyle, VideoRequestOptions } from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
+import { toUiMessage } from "../utils/errorMessages";
 import { Badge } from "./ui/Badge";
 import { cn } from "../utils/classNames";
 import { ProgressBar } from "./ui/ProgressBar";
@@ -1429,9 +1430,7 @@ export const PostResult: React.FC<PostResultProps> = ({
           : "Private website draft queued again.",
       );
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Website draft could not be retried.",
-      );
+      toast.error(toUiMessage(err, "Website draft could not be retried."));
     } finally {
       setWebsiteRetrying(false);
     }
@@ -1575,11 +1574,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         // Preserve the original, more useful send error below.
       }
       if (!restored) {
-        toast.error(
-          err instanceof Error
-            ? err.message
-            : "The final website draft could not be sent.",
-        );
+        toast.error(toUiMessage(err, "The final website draft could not be sent."));
       }
     } finally {
       websiteSendingRef.current = false;
@@ -3656,9 +3651,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 );
                 setIsScheduleOpen(false);
               } catch (err) {
-                toast.error(
-                  err instanceof Error ? err.message : "Failed to schedule post",
-                );
+                toast.error(toUiMessage(err, "Could not save that share time."));
               } finally {
                 setIsScheduling(false);
               }

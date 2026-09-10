@@ -61,6 +61,7 @@ import {
   PublishTarget,
 } from "../services/publishTargets";
 import { triggerHapticFeedback } from "../utils/haptics";
+import { toUiMessage } from "../utils/errorMessages";
 import { logEvent } from "../utils/telemetry";
 import { cn } from "../utils/classNames";
 import { captionIncludesDealershipMention } from "../utils/socialAttribution";
@@ -358,8 +359,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         targetId: selectedTargetId,
         status: {
           kind: "error",
-          message:
-            err instanceof Error ? err.message : "Sharing could not start. Try again.",
+          message: toUiMessage(err, "Sharing could not start. Try again."),
         },
       });
     } finally {
