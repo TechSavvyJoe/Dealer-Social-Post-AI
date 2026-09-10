@@ -41,7 +41,7 @@ echo "✓ GEMINI_API_KEY is configured"
 echo ""
 
 # Keep local development on the same tested maintenance release as Docker.
-PB_VERSION="${PB_VERSION:-0.22.37}"
+PB_VERSION="${PB_VERSION:-0.22.55}"
 CURRENT_PB_VERSION=""
 if [ -x "./pocketbase" ]; then
     CURRENT_PB_VERSION=$(./pocketbase --version 2>/dev/null | awk '{print $3}')
@@ -74,16 +74,16 @@ if [ "$CURRENT_PB_VERSION" != "$PB_VERSION" ]; then
 
     case "${OS}-${ARCH}" in
         darwin-arm64)
-            PB_SHA256="7c9b125ad043f39e3764ef9176c8a09cd2fb2799717c8813603aac74538487b7"
+            PB_SHA256="8d00428304d840b18ca57aa66ebcd9bd142e05ff5a40d1f3d564d0ba9c49fdf9"
             ;;
         darwin-amd64)
-            PB_SHA256="c358d8f564e36e3024d2e3a376497911be2d6a1cbe5b3a2c256af4df6ba3b410"
+            PB_SHA256="c108087a494dc7683fa26f2a8e2a6e1b01c5a6dc86bc89e3063b32e36c93cab0"
             ;;
         linux-arm64)
-            PB_SHA256="5c992470e47fc83e9e113f7fcb50483ba353d9d20bffda959194be1106684860"
+            PB_SHA256="70b735f135c512e8310935efec7a2b52aef9531c79579d92c5e05c2e8a89d396"
             ;;
         linux-amd64)
-            PB_SHA256="71ea53559eff79e7afc80898bd63bdb04930003e2ee9440971c3d958c25c63d8"
+            PB_SHA256="2e404f98bc693cfa7c8160bc9f1903fc7dc448c4f6fe78128c0cd1561a2db46e"
             ;;
         *)
             echo "Unsupported PocketBase platform: ${OS}-${ARCH}"

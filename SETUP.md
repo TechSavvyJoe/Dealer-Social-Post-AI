@@ -6,7 +6,7 @@
 - `curl` and `unzip` for the verified PocketBase download
 - A Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
 
-The repository is pinned to PocketBase `0.22.37`, the latest maintenance release on the compatibility line used by the current JSVM hooks. `start-pocketbase.sh` downloads the correct macOS/Linux and arm64/amd64 archive and verifies its SHA-256 checksum. The Docker image uses the same release.
+The repository is pinned to PocketBase `0.22.55`, the latest maintenance release on the compatibility line used by the current JSVM hooks. `start-pocketbase.sh` downloads the correct macOS/Linux and arm64/amd64 archive and verifies its SHA-256 checksum. The Docker image uses the same release.
 
 ## Install and configure
 
@@ -181,7 +181,7 @@ Both standard and Studio image routes start with `gemini-3-pro-image` for reliab
 ├── pb_migrations/           # Forward-only schema/security migrations
 ├── scripts/                 # Guarded diagnostics and verification tools
 ├── start-pocketbase.sh      # Verified local PocketBase bootstrap
-├── Dockerfile               # Node 22 build + PocketBase 0.22.37 runtime
+├── Dockerfile               # Node 22 build + PocketBase 0.22.55 runtime
 └── .env.example             # Documented variables with no real secrets
 ```
 
@@ -211,7 +211,7 @@ The committed Fly workflow waits for the full `CI` workflow and fails if direct 
 
 Follow [docs/production-backups-and-release.md](docs/production-backups-and-release.md) to provision the private R2 backup gate, prove a disposable restore, stage Vercel without assigning the production domain, and promote the exact verified artifact.
 
-Do not upgrade PocketBase beyond 0.22.37 as a routine dependency bump. Releases after the 0.22 compatibility line removed APIs used by the current hooks; upgrading requires a separately reviewed hook/migration port.
+Do not upgrade PocketBase beyond 0.22.55 as a routine dependency bump. Releases after the 0.22 compatibility line removed APIs used by the current hooks; upgrading requires a separately reviewed hook/migration port.
 
 ## Troubleshooting
 
@@ -225,7 +225,7 @@ Do not upgrade PocketBase beyond 0.22.37 as a routine dependency bump. Releases 
 ### PocketBase does not start
 
 - Check whether port 8090 is already in use with `lsof -nP -iTCP:8090 -sTCP:LISTEN`.
-- Run `./pocketbase --version`; the supported local version is `0.22.37`.
+- Run `./pocketbase --version`; the supported local version is `0.22.55`.
 - If the verified download fails, check network/TLS access to GitHub Releases. Do not substitute an unverified binary.
 
 ### Long-running image or video request times out

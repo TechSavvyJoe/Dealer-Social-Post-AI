@@ -9,11 +9,11 @@ if [ -f /pb/pb_data/data.db ]; then
   # Never move an attached production database aside and silently boot an
   # empty replacement: that turns a version mismatch into apparent data loss.
   if ! sqlite3 /pb/pb_data/data.db "PRAGMA table_info(_collections);" | grep -q "schema"; then
-    echo "ERROR: /pb/pb_data/data.db is not compatible with PocketBase 0.22.37." >&2
+    echo "ERROR: /pb/pb_data/data.db is not compatible with the PocketBase 0.22 line." >&2
     echo "Refusing to replace or rename the database. Restore the matching runtime or migrate a verified backup explicitly." >&2
     exit 1
   else
-    echo "Database schema is compatible with PB v0.22.37."
+    echo "Database schema is compatible with the PocketBase 0.22 line."
   fi
 fi
 # Create temp directory for signing operations with restrictive perms

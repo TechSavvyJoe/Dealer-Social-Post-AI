@@ -23,7 +23,7 @@ Quick reference:
 
 ### Non-obvious setup caveats
 
-- **PocketBase is pinned to 0.22.37** on purpose — the hooks and migrations use the
+- **PocketBase is pinned to 0.22.55** on purpose — the hooks and migrations use the
   0.22 JSVM API (`$app.dao()`, `new Dao(db)`, `$apis.requestInfo`, `collection.schema`,
   `c.pathParam(...)`, `c.request()`) which changed in PB 0.23+. Do NOT bump PocketBase
   without porting all hooks and migrations. `start-pocketbase.sh` downloads the binary on

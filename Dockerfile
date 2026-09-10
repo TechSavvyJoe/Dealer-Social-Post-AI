@@ -29,10 +29,13 @@ FROM ubuntu:22.04
 # hooks that throw at runtime (every /api/app/*
 # and /api/proxy/* route fails). To move to 0.39 later, migrate ALL hooks +
 # migrations to the v0.23+ API first, then bump this version + SHA together.
-# SHA256 is for pocketbase_0.22.37_linux_amd64.zip (verified against the
-# official GitHub release).
-ARG PB_VERSION=0.22.37
-ARG PB_SHA256="71ea53559eff79e7afc80898bd63bdb04930003e2ee9440971c3d958c25c63d8"
+# SHA256 is for pocketbase_0.22.55_linux_amd64.zip (computed from the official
+# GitHub release artifact; the project publishes no checksums file). 0.22.55 is
+# the current head of the 0.22 line: it backports the goja bump, the golang.org/x
+# security fixes, and the Go 1.27 encoding/json recursion workaround, with no
+# API change for our hooks.
+ARG PB_VERSION=0.22.55
+ARG PB_SHA256="2e404f98bc693cfa7c8160bc9f1903fc7dc448c4f6fe78128c0cd1561a2db46e"
 # Cache bust arg - change to force rebuild of frontend copy
 ARG CACHE_BUST=1
 
