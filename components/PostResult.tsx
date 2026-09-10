@@ -2015,6 +2015,24 @@ export const PostResult: React.FC<PostResultProps> = ({
   };
   const captionWithDisclosures = appendDisclosureText(editedText, activeDisclosures);
 
+  /**
+   * What actually reaches the destination, including the FTC team-member
+   * disclosure that every delivery path prepends as a protected prefix.
+   *
+   * `captionWithDisclosures` is body + compliance footer and stops there, so
+   * anything measuring or previewing it was short by the length of the
+   * disclosure plus its blank line — around 45 characters for a typical
+   * dealership name, which is 16% of X's 280-character budget. The meter told
+   * a salesperson they had room the destination was never going to give them,
+   * and the phone preview showed a caption missing the one line that is there
+   * for legal reasons. Idempotent, so a salesperson who typed the disclosure
+   * themselves does not see it twice.
+   */
+  const deliveredCaption = prependEmployeeDisclosure(
+    captionWithDisclosures,
+    currentDealer,
+  );
+
   // Persist textarea edits into the active pack slot so Share uses salesperson edits.
   useEffect(() => {
     if (!activeCaptionPlatform) return;
@@ -4212,7 +4230,7 @@ export const PostResult: React.FC<PostResultProps> = ({
             outputs={deliveryOutputs}
             title={publishTitle}
             mediaPreview={renderMobileFocusedMedia()}
-            caption={captionWithDisclosures}
+            caption={deliveredCaption}
             postingAs={currentPersonName || undefined}
             captionNote={
               historyReadOnly
@@ -5389,7 +5407,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 ) : null}
 
                 <PlatformLimitMeter
-                  text={captionWithDisclosures}
+                  text={deliveredCaption}
                   platformIds={post.platformIds}
                   className={isDesktopLayout ? "mb-3" : "mb-4"}
                 />

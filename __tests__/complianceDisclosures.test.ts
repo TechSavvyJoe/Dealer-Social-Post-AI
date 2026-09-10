@@ -1,4 +1,8 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { PLATFORM_LIMITS, evaluate } from "../utils/platformLimits";
+import { fitPublishCaptionToBudget } from "../services/publishTargets";
 import {
   DEFAULT_EMPLOYEE_DISCLOSURE_TEMPLATE,
   analyzeCaptionForDelivery,
@@ -219,5 +223,62 @@ describe("the disclosure survives the caption sanitizer", () => {
       dealer,
     );
     expect(rightOrder).toContain(disclosure);
+  });
+});
+
+/**
+ * The character meter on the result screen has to measure the string that
+ * actually reaches the destination, and the phone preview has to show it.
+ *
+ * Both were fed body + compliance footer and nothing else, while every
+ * delivery path prepends the team-member disclosure as a protected prefix. For
+ * a typical dealership name that is about 45 characters, or 16% of X's budget:
+ * the meter said a caption fit, the destination truncated it, and the
+ * salesperson found out from the published post.
+ */
+describe("the meter measures what is actually delivered", () => {
+  const dealer = { name: "Bob Maxey Ford of Howell" };
+  const disclosure = buildEmployeeDisclosure(dealer);
+  const x = PLATFORM_LIMITS.find((limit) => limit.id === "x")!;
+
+  it("counts a caption as over budget once the disclosure is included", () => {
+    // Comfortably inside 280 on its own, over it once the prefix is added.
+    const body = "A".repeat(x.maxChars - 20);
+
+    expect(evaluate(body, x).state).toBe("ok");
+    expect(evaluate(prependEmployeeDisclosure(body, dealer), x).state).toBe("over");
+  });
+
+  it("and the destination really does truncate it, so the old count was a lie", () => {
+    const body = "A".repeat(x.maxChars - 20);
+    const delivered = fitPublishCaptionToBudget(
+      { text: body, requiredPrefix: disclosure },
+      x.maxChars,
+    );
+
+    expect(delivered.startsWith(disclosure)).toBe(true);
+    expect(delivered.length).toBeLessThanOrEqual(x.maxChars);
+    // The body lost characters to make room. Measuring the body alone would
+    // have reported "ok" for a caption that arrives cut short.
+    expect(delivered).not.toContain(body);
+  });
+
+  it("does not double-count a disclosure the salesperson typed themselves", () => {
+    const body = `${disclosure}\n\nCome see this one today.`;
+    expect(prependEmployeeDisclosure(body, dealer)).toBe(body);
+  });
+
+  it("keeps the result screen wired to the delivered string, not the body", () => {
+    // A source guard, because the defect was a prop pointing one variable to
+    // the left. Both consumers claim to show or measure what gets posted.
+    const source = readFileSync(
+      resolve(process.cwd(), "components/PostResult.tsx"),
+      "utf8",
+    );
+    expect(source).toContain("text={deliveredCaption}");
+    expect(source).toContain("caption={deliveredCaption}");
+    expect(source).toMatch(
+      /const deliveredCaption = prependEmployeeDisclosure\(\s*captionWithDisclosures,\s*currentDealer,?\s*\)/,
+    );
   });
 });
