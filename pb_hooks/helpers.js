@@ -2862,21 +2862,113 @@ function verifyTurnstileToken(token, remoteIp) {
 const MAX_PROXY_RATE_BUCKETS = 2048;
 const PROXY_RATE_EVICTION_BATCH = 128;
 const MAX_PROXY_CONCURRENCY_BUCKETS = 512;
+/**
+ * PocketBase 0.22 serves each hook callback from a pooled JSVM runtime
+ * (`--hooksPool`, default 25) and every runtime gets its own `require()`
+ * instance of this file. Module-level counters are therefore PER-VM: a
+ * "global" provider concurrency cap of 12 was really up to 12 x 25, and the
+ * per-minute buckets were as many times too permissive. pb_hooks/walkarounds.js
+ * already documents this for replay nonces and keeps them in `$app.store()`,
+ * which is shared across the pool; these counters now do the same.
+ *
+ * Check-then-set through the store is not atomic, so two perfectly simultaneous
+ * requests can both pass a boundary. That is acceptable here: these are
+ * throttles, not authorization. Being off by one beats being off by 25x.
+ *
+ * The module-level maps remain as the fallback when `$app.store()` is
+ * unavailable (the unit-test harness, or a future runtime change). Falling back
+ * to per-VM counting preserves today's behavior; it never fails open.
+ */
+const PROXY_RATE_STORE_PREFIX = "proxyRate:";
+const PROXY_CONCURRENCY_STORE_PREFIX = "proxyConc:";
+
 var _proxyHits = Object.create(null);
 var _proxyHitOperations = 0;
 var _proxyConcurrency = Object.create(null);
 
+function sharedStore() {
+  try {
+    if (typeof $app === "undefined" || !$app || typeof $app.store !== "function") {
+      return null;
+    }
+    const store = $app.store();
+    return store && typeof store.get === "function" ? store : null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+/**
+ * Read a bucket from the pool-shared store, falling back to the per-VM map.
+ * Values are JSON so the shape survives whatever the store does with objects.
+ */
+function readSharedBucket(prefix, localMap, key) {
+  const store = sharedStore();
+  if (!store) return localMap[key];
+  try {
+    const raw = store.get(prefix + key);
+    if (!raw) return undefined;
+    return typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch (_e) {
+    return localMap[key];
+  }
+}
+
+function writeSharedBucket(prefix, localMap, key, value) {
+  const store = sharedStore();
+  if (!store) {
+    localMap[key] = value;
+    return;
+  }
+  try {
+    store.set(prefix + key, JSON.stringify(value));
+  } catch (_e) {
+    localMap[key] = value;
+  }
+}
+
+function deleteSharedBucket(prefix, localMap, key) {
+  const store = sharedStore();
+  delete localMap[key];
+  if (!store) return;
+  try {
+    if (typeof store.remove === "function") store.remove(prefix + key);
+  } catch (_e) {}
+}
+
+/** Keys currently held for one prefix, across the pool when the store is up. */
+function sharedBucketKeys(prefix, localMap) {
+  const store = sharedStore();
+  if (!store || typeof store.getAll !== "function") return Object.keys(localMap);
+  try {
+    const all = store.getAll() || {};
+    const keys = [];
+    Object.keys(all).forEach(function (candidate) {
+      if (candidate.indexOf(prefix) === 0) keys.push(candidate.slice(prefix.length));
+    });
+    return keys;
+  } catch (_e) {
+    return Object.keys(localMap);
+  }
+}
+
+function readRateBucket(key) {
+  return readSharedBucket(PROXY_RATE_STORE_PREFIX, _proxyHits, key);
+}
+
 function pruneProxyRateBuckets(now, reserveSlot) {
   _proxyHitOperations += 1;
-  let keys = Object.keys(_proxyHits);
+  let keys = sharedBucketKeys(PROXY_RATE_STORE_PREFIX, _proxyHits);
   if (keys.length < MAX_PROXY_RATE_BUCKETS && _proxyHitOperations % 128 !== 0) {
     return;
   }
   keys.forEach(function (key) {
-    const bucket = _proxyHits[key];
-    if (!bucket || now >= bucket.resetAt) delete _proxyHits[key];
+    const bucket = readRateBucket(key);
+    if (!bucket || now >= bucket.resetAt) {
+      deleteSharedBucket(PROXY_RATE_STORE_PREFIX, _proxyHits, key);
+    }
   });
-  keys = Object.keys(_proxyHits);
+  keys = sharedBucketKeys(PROXY_RATE_STORE_PREFIX, _proxyHits);
   // When the map is full, evict a small batch rather than sorting the entire
   // map again for every new attacker-controlled key.
   const target = Math.max(
@@ -2884,11 +2976,16 @@ function pruneProxyRateBuckets(now, reserveSlot) {
     MAX_PROXY_RATE_BUCKETS - (reserveSlot ? PROXY_RATE_EVICTION_BATCH : 0),
   );
   if (keys.length <= target) return;
+  const resetAtFor = {};
+  keys.forEach(function (key) {
+    const bucket = readRateBucket(key);
+    resetAtFor[key] = (bucket && bucket.resetAt) || 0;
+  });
   keys.sort(function (left, right) {
-    return (_proxyHits[left].resetAt || 0) - (_proxyHits[right].resetAt || 0);
+    return resetAtFor[left] - resetAtFor[right];
   });
   for (let index = 0; index < keys.length - target; index++) {
-    delete _proxyHits[keys[index]];
+    deleteSharedBucket(PROXY_RATE_STORE_PREFIX, _proxyHits, keys[index]);
   }
 }
 
@@ -2896,8 +2993,8 @@ function checkProxyRateLimit(key, maxPerWindow, windowMs) {
   if (!key) return { ok: true };
   const now = Date.now();
   const normalizedKey = key.toString().slice(0, 256);
-  pruneProxyRateBuckets(now, !_proxyHits[normalizedKey]);
-  const bucket = _proxyHits[normalizedKey] || {
+  pruneProxyRateBuckets(now, !readRateBucket(normalizedKey));
+  const bucket = readRateBucket(normalizedKey) || {
     count: 0,
     resetAt: now + windowMs,
   };
@@ -2906,7 +3003,7 @@ function checkProxyRateLimit(key, maxPerWindow, windowMs) {
     bucket.resetAt = now + windowMs;
   }
   bucket.count += 1;
-  _proxyHits[normalizedKey] = bucket;
+  writeSharedBucket(PROXY_RATE_STORE_PREFIX, _proxyHits, normalizedKey, bucket);
   if (bucket.count > maxPerWindow) {
     return {
       ok: false,
@@ -2919,7 +3016,7 @@ function checkProxyRateLimit(key, maxPerWindow, windowMs) {
 
 function proxyRateLimitStateSize() {
   pruneProxyRateBuckets(Date.now(), false);
-  return Object.keys(_proxyHits).length;
+  return sharedBucketKeys(PROXY_RATE_STORE_PREFIX, _proxyHits).length;
 }
 
 /**
@@ -2930,28 +3027,42 @@ function acquireProxyConcurrency(key, maxConcurrent) {
   const normalizedKey = (key || "").toString().slice(0, 256);
   const limit = Math.max(1, Math.min(100, Number(maxConcurrent) || 1));
   if (!normalizedKey) return { ok: false, retryAfterMs: 1000 };
-  let keys = Object.keys(_proxyConcurrency);
-  if (
-    !_proxyConcurrency[normalizedKey] &&
-    keys.length >= MAX_PROXY_CONCURRENCY_BUCKETS
-  ) {
-    keys = keys.filter(function (candidate) {
-      return !_proxyConcurrency[candidate] || _proxyConcurrency[candidate].count <= 0;
-    });
-    keys.forEach(function (candidate) {
-      delete _proxyConcurrency[candidate];
-    });
-    if (Object.keys(_proxyConcurrency).length >= MAX_PROXY_CONCURRENCY_BUCKETS) {
+  const readSlot = (candidate) =>
+    readSharedBucket(PROXY_CONCURRENCY_STORE_PREFIX, _proxyConcurrency, candidate);
+
+  let keys = sharedBucketKeys(PROXY_CONCURRENCY_STORE_PREFIX, _proxyConcurrency);
+  if (!readSlot(normalizedKey) && keys.length >= MAX_PROXY_CONCURRENCY_BUCKETS) {
+    keys
+      .filter(function (candidate) {
+        const slot = readSlot(candidate);
+        return !slot || slot.count <= 0;
+      })
+      .forEach(function (candidate) {
+        deleteSharedBucket(
+          PROXY_CONCURRENCY_STORE_PREFIX,
+          _proxyConcurrency,
+          candidate,
+        );
+      });
+    if (
+      sharedBucketKeys(PROXY_CONCURRENCY_STORE_PREFIX, _proxyConcurrency).length >=
+      MAX_PROXY_CONCURRENCY_BUCKETS
+    ) {
       return { ok: false, retryAfterMs: 1000 };
     }
   }
 
-  const bucket = _proxyConcurrency[normalizedKey] || { count: 0 };
+  const bucket = readSlot(normalizedKey) || { count: 0 };
   if (bucket.count >= limit) {
     return { ok: false, retryAfterMs: 1000, count: bucket.count };
   }
   bucket.count += 1;
-  _proxyConcurrency[normalizedKey] = bucket;
+  writeSharedBucket(
+    PROXY_CONCURRENCY_STORE_PREFIX,
+    _proxyConcurrency,
+    normalizedKey,
+    bucket,
+  );
   let released = false;
   return {
     ok: true,
@@ -2959,10 +3070,25 @@ function acquireProxyConcurrency(key, maxConcurrent) {
     release: function () {
       if (released) return;
       released = true;
-      const current = _proxyConcurrency[normalizedKey];
+      // Re-read rather than closing over `bucket`: another pool VM may have
+      // changed the count between acquisition and release.
+      const current = readSlot(normalizedKey);
       if (!current) return;
       current.count = Math.max(0, current.count - 1);
-      if (current.count === 0) delete _proxyConcurrency[normalizedKey];
+      if (current.count === 0) {
+        deleteSharedBucket(
+          PROXY_CONCURRENCY_STORE_PREFIX,
+          _proxyConcurrency,
+          normalizedKey,
+        );
+      } else {
+        writeSharedBucket(
+          PROXY_CONCURRENCY_STORE_PREFIX,
+          _proxyConcurrency,
+          normalizedKey,
+          current,
+        );
+      }
     },
   };
 }
