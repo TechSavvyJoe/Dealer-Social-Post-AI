@@ -187,7 +187,7 @@ export const CaptionAlternativesModal: React.FC<CaptionAlternativesModalProps> =
                   )}
                 </div>
                 {v.error ? (
-                  <div className="flex-1 flex items-center justify-center text-xs text-error-300">
+                  <div className="flex-1 flex items-center justify-center text-xs text-error-300 [.theme-light_&]:text-error-800">
                     Failed: {v.error}
                   </div>
                 ) : v.loading ? (

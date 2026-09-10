@@ -1096,7 +1096,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               className="flex items-center gap-3 rounded-xl border border-primary-400/20 bg-primary-500/[0.07] px-3 py-2.5"
               aria-label={`Posting as ${currentPerson?.name || "signed-in team member"}`}
             >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-primary-400/20 bg-primary-500/10 text-primary-300">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-primary-400/20 bg-primary-500/10 text-primary-300 [.theme-light_&]:text-primary-800">
                 <Users className="h-4 w-4" aria-hidden="true" />
               </span>
               <div className="min-w-0 flex-1">

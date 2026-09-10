@@ -252,7 +252,7 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={handleLogout}
                 className={cn(
                   "transition-all duration-200",
-                  "hover:bg-error-500/15 hover:border-error-500/40 hover:text-error-300",
+                  "hover:bg-error-500/15 hover:border-error-500/40 hover:text-error-300 [.theme-light_&]:hover:text-error-800",
                   "active:bg-error-500/25",
                 )}
                 aria-label="Log out"

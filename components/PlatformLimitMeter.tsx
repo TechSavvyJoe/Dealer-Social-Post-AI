@@ -125,7 +125,9 @@ export const PlatformLimitMeter: React.FC<PlatformLimitMeterProps> = ({
                 <p
                   className={cn(
                     "pl-3.5 text-[10px] leading-snug",
-                    hashtagWarning ? "text-error-300" : "text-surface-400",
+                    hashtagWarning
+                      ? "text-error-300 [.theme-light_&]:text-error-800"
+                      : "text-surface-400",
                   )}
                 >
                   Tags: {hashtags}

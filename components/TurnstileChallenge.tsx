@@ -136,7 +136,7 @@ export const TurnstileChallenge: React.FC<TurnstileChallengeProps> = ({
   return (
     <div className="rounded-2xl border border-primary-400/20 bg-primary-500/[0.06] p-4 sm:p-5">
       <div className="mb-4 flex items-start gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary-400/20 bg-primary-500/10 text-primary-300">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary-400/20 bg-primary-500/10 text-primary-300 [.theme-light_&]:text-primary-800">
           <ShieldCheck className="h-5 w-5" aria-hidden="true" />
         </span>
         <div>
@@ -162,7 +162,10 @@ export const TurnstileChallenge: React.FC<TurnstileChallengeProps> = ({
         data-action="turnstile-spin-v2"
       />
       {loadError ? (
-        <p className="mt-3 text-sm text-error-300" role="alert">
+        <p
+          className="mt-3 text-sm text-error-300 [.theme-light_&]:text-error-800"
+          role="alert"
+        >
           The security check could not load. Check your connection and try again.
         </p>
       ) : null}

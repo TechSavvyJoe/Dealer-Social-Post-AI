@@ -55,7 +55,7 @@ export const YouTubeConnectionCard: React.FC = () => {
     <section className="rounded-2xl border border-hairline bg-surface-900/65 p-5 sm:p-6">
       <div className="flex items-start gap-3">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-error-500/15">
-          <Video className="h-5 w-5 text-error-300" />
+          <Video className="h-5 w-5 text-error-300 [.theme-light_&]:text-error-800" />
         </span>
         <div>
           <h2 className="text-lg font-semibold text-surface-50">YouTube channel</h2>

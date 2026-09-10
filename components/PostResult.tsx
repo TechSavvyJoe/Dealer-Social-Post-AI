@@ -5434,7 +5434,17 @@ export const PostResult: React.FC<PostResultProps> = ({
       {!isDesktopLayout && typeof document !== "undefined"
         ? createPortal(
             <div
-              className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-surface-950/95 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur-md"
+              /* `publish-studio-theme` is repeated here on purpose. This bar is
+                 part of the result studio, but it renders through a portal into
+                 document.body, so it lands OUTSIDE the wrapper in App.tsx that
+                 normally applies that class. Without it the bar inherits
+                 Sunlight Mode, where the surface ramp is inverted and
+                 `bg-surface-950/95` resolves to near-white — measured in a real
+                 browser against the built CSS, the "Delivery locked" notice
+                 came out at 1.19:1, i.e. invisible, on exactly the phone layout
+                 this bar exists for. With the class the same notice measures
+                 14.94:1. Any theme-aware class added below depends on this. */
+              className="publish-studio-theme fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-surface-950/95 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur-md"
               style={{
                 paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))",
                 paddingLeft: "env(safe-area-inset-left)",

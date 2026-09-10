@@ -253,9 +253,9 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
                 className={cn(
                   "text-[10px] font-mono tabular-nums",
                   tagStatus === "over"
-                    ? "text-error-300"
+                    ? "text-error-300 [.theme-light_&]:text-error-800"
                     : tagStatus === "low"
-                      ? "text-warning-300"
+                      ? "text-warning-300 [.theme-light_&]:text-warning-800"
                       : "text-surface-400",
                 )}
               >

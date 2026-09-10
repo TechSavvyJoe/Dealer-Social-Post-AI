@@ -938,7 +938,7 @@ export const AdminDashboard: React.FC = () => {
                         person.pinNeedsDistribution
                           ? "bg-warning-500/10 text-warning-200 ring-1 ring-warning-500/20 [.theme-light_&]:text-warning-800"
                           : person.hasPin
-                            ? "bg-success-500/10 text-success-300 ring-1 ring-success-500/20"
+                            ? "bg-success-500/10 text-success-300 ring-1 ring-success-500/20 [.theme-light_&]:text-success-900"
                             : "bg-surface-800 text-surface-400 ring-1 ring-hairline",
                       )}
                     >

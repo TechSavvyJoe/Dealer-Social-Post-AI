@@ -1498,7 +1498,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
 
       <section className="space-y-2">
         <div className="flex items-center gap-2 text-sm font-semibold text-surface-50">
-          <Ban className="w-4 h-4 text-error-300" />
+          <Ban className="w-4 h-4 text-error-300 [.theme-light_&]:text-error-800" />
           Banned phrases
         </div>
         <Textarea
@@ -2096,7 +2096,7 @@ export const DealerTeamCard: React.FC = () => {
                         p.pinNeedsDistribution
                           ? "bg-warning-500/15 text-warning-200 [.theme-light_&]:text-warning-800"
                           : p.hasPin
-                            ? "bg-success-500/10 text-success-300"
+                            ? "bg-success-500/10 text-success-300 [.theme-light_&]:text-success-900"
                             : "bg-surface-800 text-surface-400",
                       )}
                     >

@@ -40,8 +40,10 @@ export const ErrorBanner: React.FC<ErrorBannerProps> = ({
         type="button"
         onClick={onRetry}
         className={cn(
-          "flex-shrink-0 inline-flex items-center gap-1 font-semibold text-error-100",
-          "[.theme-light_&]:text-error-800",
+          // Kept on one literal on purpose: the Sunlight Mode guard checks the
+          // string it matched, so an override split onto its own cn() argument
+          // reads to the guard as a missing override.
+          "flex-shrink-0 inline-flex items-center gap-1 font-semibold text-error-100 [.theme-light_&]:text-error-800",
           "hover:text-content-primary transition-colors",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-400/70 rounded",
         )}

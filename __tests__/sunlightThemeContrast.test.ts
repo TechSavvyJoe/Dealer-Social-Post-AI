@@ -15,6 +15,48 @@ import { describe, expect, it } from "vitest";
  */
 const read = (p: string) => readFileSync(resolve(process.cwd(), p), "utf8");
 
+const componentFiles = (): string[] => {
+  const dir = resolve(process.cwd(), "components");
+  return [
+    ...readdirSync(dir)
+      .filter((f) => f.endsWith(".tsx"))
+      .map((f) => `components/${f}`),
+    ...readdirSync(resolve(dir, "ui"))
+      .filter((f) => f.endsWith(".tsx"))
+      .map((f) => `components/ui/${f}`),
+  ];
+};
+
+/**
+ * The one subtree these rules must not police.
+ *
+ * The publish result is deliberately dark in both themes: App.tsx puts
+ * `publish-studio-theme` on the result wrapper and globals.css re-darkens the
+ * whole surface ramp inside it, so photo and video colour stays accurate. Ink
+ * that would be unreadable anywhere else is correct there — measured, the one
+ * site this exempts is 8.13:1 on the studio ground and would drop to roughly
+ * 1.5:1 if "fixed" for Sunlight Mode.
+ *
+ * "studioThemeInvariants" below pins the three facts this exemption rests on,
+ * so if the studio theme is ever removed or the portal loses it, that test
+ * fails rather than this exemption silently hiding a real defect.
+ */
+const STUDIO_THEMED_FILES = new Set(["components/PostResult.tsx"]);
+
+/**
+ * Does this exact class literal already carry its own Sunlight Mode override?
+ *
+ * Checks the matched literal, not a window of nearby lines. An earlier version
+ * scanned +/-4 lines, which let one branch of a cn() ternary excuse its
+ * sibling: components/AdminDashboard.tsx had a fixed warning branch sitting
+ * directly above a broken success branch, two pills rendered side by side, one
+ * readable in Sunlight Mode and one not. Variants are tolerated between the
+ * theme selector and the utility so `[.theme-light_&]:hover:text-error-800`
+ * counts.
+ */
+const hasLightOverride = (literal: string, ramp: string): boolean =>
+  new RegExp(`theme-light_&\\]:(?:[a-z-]+:)*text-${ramp}`).test(literal);
+
 describe("Sunlight Mode keeps selected controls readable", () => {
   it("gives every Badge variant light-theme ink", () => {
     const badge = read("components/ui/Badge.tsx");
@@ -48,39 +90,37 @@ describe("Sunlight Mode keeps selected controls readable", () => {
   });
 
   it("gives tinted-fill text a light-theme override on every ramp", () => {
-    // The generalised rule. Every semantic ramp is static hex, so -50/-100/-200
-    // ink is tuned for a dark surface; on its own 10-40% tinted fill in
-    // Sunlight Mode that fill resolves near-white and the text measures about
-    // 1.5:1. Error copy was the worst case (53 sites) because it appears when
-    // something has already gone wrong, but the brand pills (33), warning and
-    // success states (37) all had it too.
-    const dir = resolve(process.cwd(), "components");
-    const files = [
-      ...readdirSync(dir)
-        .filter((f) => f.endsWith(".tsx"))
-        .map((f) => `components/${f}`),
-      ...readdirSync(resolve(dir, "ui"))
-        .filter((f) => f.endsWith(".tsx"))
-        .map((f) => `components/ui/${f}`),
-    ];
-
+    // The generalised rule. Every semantic ramp is static hex, so -50 through
+    // -300 ink is tuned for a dark surface; on its own 10-40% tinted fill in
+    // Sunlight Mode that fill resolves near-white and the text measures 1.19
+    // to 1.60:1. Error copy was the worst case (53 sites) because it appears
+    // when something has already gone wrong, but the brand pills (33), warning
+    // and success states (37) all had it too.
+    //
+    // -300 was added after -50/-100/-200 shipped. Stopping at -200 left 12
+    // live sites the rule could not see, including a success pill measured at
+    // 1.24:1 sitting directly beside a warning pill the same commit had fixed.
+    // -400 is deliberately still out: the tree has no such sites, so including
+    // it would prove nothing.
     const offenders: string[] = [];
+    const files = componentFiles();
     for (const ramp of ["error", "primary", "warning", "success", "info"]) {
+      // `[^"\n]` rather than `[^"]`: the character class must not cross a line
+      // break, or a match can start at the quote closing an unrelated line and
+      // end several lines later, reporting a line number that points at the
+      // wrong code. Proven in a sandbox: an offender was reported as line 1,
+      // the `import React from "react";` above it.
       const tintedFillWithLightInk = new RegExp(
-        `"[^"]*\\bbg-${ramp}-\\d{2,3}\\/\\d+\\b[^"]*\\btext-${ramp}-(?:50|100|200)\\b[^"]*"`,
+        `"[^"\\n]*\\bbg-${ramp}-\\d{2,3}\\/\\d+\\b[^"\\n]*\\btext-${ramp}-(?:50|100|200|300)\\b[^"\\n]*"`,
         "g",
       );
       for (const file of files) {
+        if (STUDIO_THEMED_FILES.has(file)) continue;
         const source = read(file);
-        const lines = source.split("\n");
         for (const match of source.matchAll(tintedFillWithLightInk)) {
-          if (match[0].includes("theme-light")) continue;
-          // A cn() call may spread one className over several lines, so the
-          // override can legitimately sit on a neighbouring line.
-          const line = source.slice(0, match.index).split("\n").length - 1;
-          const window = lines.slice(Math.max(0, line - 4), line + 5).join("\n");
-          if (window.includes(`theme-light_&]:text-${ramp}`)) continue;
-          offenders.push(`${ramp}  ${file}:${line + 1}`);
+          if (hasLightOverride(match[0], ramp)) continue;
+          const line = source.slice(0, match.index).split("\n").length;
+          offenders.push(`${ramp}  ${file}:${line}`);
         }
       }
     }
@@ -93,32 +133,48 @@ describe("Sunlight Mode keeps selected controls readable", () => {
 
   it("still flags plain error ink outside a tinted fill, which the ramp rule misses", () => {
     // Kept separate: an error message on a plain surface has no bg-error-* to
-    // match on, and those were the majority of the original 53.
+    // match on, and those were the majority of the original 53. On the three
+    // Sunlight surfaces (#f8fafc, #f1f5f9, #ffffff) text-error-300 measures
+    // 1.73 to 1.90:1; the -800 override takes it to 7.59 to 8.31:1.
     const offenders: string[] = [];
-    const dir = resolve(process.cwd(), "components");
-    const files = [
-      ...readdirSync(dir)
-        .filter((f) => f.endsWith(".tsx"))
-        .map((f) => `components/${f}`),
-      ...readdirSync(resolve(dir, "ui"))
-        .filter((f) => f.endsWith(".tsx"))
-        .map((f) => `components/ui/${f}`),
-    ];
-    for (const file of files) {
+    for (const file of componentFiles()) {
+      if (STUDIO_THEMED_FILES.has(file)) continue;
       const source = read(file);
-      const lines = source.split("\n");
-      for (const match of source.matchAll(/"[^"]*\btext-error-(?:100|200)\b[^"]*"/g)) {
-        if (match[0].includes("theme-light")) continue;
-        const line = source.slice(0, match.index).split("\n").length - 1;
-        const window = lines.slice(Math.max(0, line - 4), line + 5).join("\n");
-        if (window.includes("theme-light_&]:text-error")) continue;
-        offenders.push(`${file}:${line + 1}`);
+      for (const match of source.matchAll(
+        /"[^"\n]*\btext-error-(?:100|200|300)\b[^"\n]*"/g,
+      )) {
+        if (hasLightOverride(match[0], "error")) continue;
+        const line = source.slice(0, match.index).split("\n").length;
+        offenders.push(`${file}:${line}`);
       }
     }
     expect(
       offenders,
       `error ink with no Sunlight Mode override:\n${offenders.join("\n")}`,
     ).toEqual([]);
+  });
+
+  it("pins the studio-theme invariants the PostResult exemption rests on", () => {
+    // STUDIO_THEMED_FILES exempts the result screen because it is dark in both
+    // themes. That is only true while all three of these hold. If any stops
+    // holding, the exemption starts hiding real defects, so fail here instead.
+    const app = read("App.tsx");
+    expect(app).toContain("publish-studio-theme");
+    expect(app).toContain("AppStep.RESULT");
+
+    // globals.css must re-darken the surface ramp inside the studio, otherwise
+    // the ramp stays inverted under .theme-light and the screen goes light.
+    const css = read("styles/globals.css");
+    const studio = css.slice(css.indexOf(".publish-studio-theme"));
+    expect(studio).toMatch(/--surface-950:\s*2 6 23/);
+
+    // The sticky delivery bar renders through createPortal into document.body,
+    // so it lands outside the wrapper App.tsx themes and has to carry the class
+    // itself. Without it the "Delivery locked" notice measured 1.19:1 in a real
+    // browser against the built CSS; with it, 14.94:1.
+    const result = read("components/PostResult.tsx");
+    const portal = result.slice(result.indexOf("createPortal("));
+    expect(portal).toContain("publish-studio-theme");
   });
 
   it("never puts a light-theme override on a ramp that already inverts", () => {
