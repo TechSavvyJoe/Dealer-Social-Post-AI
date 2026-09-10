@@ -553,7 +553,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                   className={cn(
                     "shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide",
                     person?.hasManagerLogin
-                      ? "bg-success-500/15 text-success-200 ring-1 ring-success-500/25"
+                      ? "bg-success-500/15 text-success-200 ring-1 ring-success-500/25 [.theme-light_&]:text-success-800"
                       : "bg-surface-800 text-surface-400 ring-1 ring-hairline",
                   )}
                 >
@@ -691,7 +691,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                   className={cn(
                     "rounded-xl border px-3 py-2.5 text-xs",
                     managerLoginMessage.kind === "success"
-                      ? "border-success-500/25 bg-success-500/10 text-success-100"
+                      ? "border-success-500/25 bg-success-500/10 text-success-100 [.theme-light_&]:text-success-900"
                       : "border-error-700/40 bg-error-900/30 text-error-100 [.theme-light_&]:text-error-800",
                   )}
                   role={managerLoginMessage.kind === "error" ? "alert" : "status"}
@@ -761,9 +761,9 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                 className={cn(
                   "shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide",
                   needsDistribution
-                    ? "bg-warning-500/15 text-warning-200 ring-1 ring-warning-500/30"
+                    ? "bg-warning-500/15 text-warning-200 ring-1 ring-warning-500/30 [.theme-light_&]:text-warning-800"
                     : hasExistingCode
-                      ? "bg-success-500/15 text-success-200 ring-1 ring-success-500/25"
+                      ? "bg-success-500/15 text-success-200 ring-1 ring-success-500/25 [.theme-light_&]:text-success-800"
                       : "bg-surface-800 text-surface-400 ring-1 ring-hairline",
                 )}
               >

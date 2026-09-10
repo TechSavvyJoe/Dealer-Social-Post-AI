@@ -611,7 +611,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
 
         {failedTargetCount > 0 && selectedPreparation?.status !== "error" ? (
           <p
-            className="rounded-xl border border-warning-500/25 bg-warning-500/10 px-3 py-2.5 text-xs text-warning-100"
+            className="rounded-xl border border-warning-500/25 bg-warning-500/10 px-3 py-2.5 text-xs text-warning-100 [.theme-light_&]:text-warning-900"
             role="status"
           >
             {failedTargetCount === 1
@@ -711,7 +711,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
           </div>
         ) : selectedTarget ? (
           <div
-            className="rounded-xl border border-warning-500/25 bg-warning-500/10 p-4 text-sm text-warning-100"
+            className="rounded-xl border border-warning-500/25 bg-warning-500/10 p-4 text-sm text-warning-100 [.theme-light_&]:text-warning-900"
             role="alert"
           >
             Media preparation did not start.
@@ -750,7 +750,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                   ? "border-error-500/40 bg-error-500/10 text-error-100 [.theme-light_&]:text-error-800"
                   : status.status.kind === "cancelled"
                     ? "border-surface-600 bg-surface-900/60 text-surface-300"
-                    : "border-success-500/40 bg-success-500/10 text-success-100",
+                    : "border-success-500/40 bg-success-500/10 text-success-100 [.theme-light_&]:text-success-900",
               )}
               role={status.status.kind === "error" ? "alert" : "status"}
             >

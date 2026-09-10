@@ -3822,7 +3822,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         ) : null}
         {post.isBasicFallback || post.captionSource === "basic_fallback" ? (
           <m.div
-            className="mx-auto flex max-w-3xl flex-col gap-3 rounded-2xl border border-warning-500/30 bg-warning-500/10 px-4 py-4 text-warning-100 shadow-lg shadow-black/10 sm:flex-row sm:items-center"
+            className="mx-auto flex max-w-3xl flex-col gap-3 rounded-2xl border border-warning-500/30 bg-warning-500/10 px-4 py-4 text-warning-100 shadow-lg shadow-black/10 sm:flex-row sm:items-center [.theme-light_&]:text-warning-900"
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
@@ -3992,9 +3992,9 @@ export const PostResult: React.FC<PostResultProps> = ({
             className={cn(
               "mx-auto flex max-w-3xl flex-col gap-3 rounded-2xl px-4 py-4 shadow-lg shadow-black/10 sm:flex-row sm:items-start",
               approvalStatus === "approved"
-                ? "border border-success-500/30 bg-success-500/10 text-success-100"
+                ? "border border-success-500/30 bg-success-500/10 text-success-100 [.theme-light_&]:text-success-900"
                 : approvalStatus === "pending"
-                  ? "border border-warning-500/30 bg-warning-500/10 text-warning-100"
+                  ? "border border-warning-500/30 bg-warning-500/10 text-warning-100 [.theme-light_&]:text-warning-900"
                   : "border border-error-500/30 bg-error-500/10 text-error-100 [.theme-light_&]:text-error-800",
             )}
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
@@ -4051,13 +4051,13 @@ export const PostResult: React.FC<PostResultProps> = ({
             className={cn(
               "relative mx-auto flex min-h-14 w-full max-w-3xl items-center gap-2 rounded-xl border px-2.5 py-2 shadow-lg shadow-black/10 sm:px-3",
               websiteStatusCopy.tone === "success"
-                ? "border-success-500/30 bg-success-500/10 text-success-100"
+                ? "border-success-500/30 bg-success-500/10 text-success-100 [.theme-light_&]:text-success-900"
                 : websiteStatusCopy.tone === "warning"
-                  ? "border-warning-500/30 bg-warning-500/10 text-warning-100"
+                  ? "border-warning-500/30 bg-warning-500/10 text-warning-100 [.theme-light_&]:text-warning-900"
                   : websiteStatusCopy.tone === "error"
                     ? "border-error-500/30 bg-error-500/10 text-error-100 [.theme-light_&]:text-error-800"
                     : websiteStatusCopy.tone === "info"
-                      ? "border-info-500/30 bg-info-500/10 text-info-100"
+                      ? "border-info-500/30 bg-info-500/10 text-info-100 [.theme-light_&]:text-info-900"
                       : "border-white/10 bg-white/[0.04] text-surface-100",
             )}
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
@@ -4367,7 +4367,7 @@ export const PostResult: React.FC<PostResultProps> = ({
             {(deliveryPlan.unsupported.length > 0 ||
               deliveryPlan.unknown.length > 0) && (
               <div
-                className="w-full rounded-xl border border-warning-500/25 bg-warning-500/10 px-4 py-3 text-sm text-warning-100"
+                className="w-full rounded-xl border border-warning-500/25 bg-warning-500/10 px-4 py-3 text-sm text-warning-100 [.theme-light_&]:text-warning-900"
                 role="status"
               >
                 <p className="font-semibold">Some saved destinations need attention</p>

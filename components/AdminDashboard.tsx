@@ -783,7 +783,7 @@ export const AdminDashboard: React.FC = () => {
                 className={cn(
                   "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition-colors",
                   codesToShare
-                    ? "border-warning-400/30 bg-warning-500/15 text-warning-100"
+                    ? "border-warning-400/30 bg-warning-500/15 text-warning-100 [.theme-light_&]:text-warning-900"
                     : "border-surface-700 bg-surface-900/80 text-surface-300 hover:border-surface-600",
                 )}
               >
@@ -936,7 +936,7 @@ export const AdminDashboard: React.FC = () => {
                       className={cn(
                         "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
                         person.pinNeedsDistribution
-                          ? "bg-warning-500/10 text-warning-200 ring-1 ring-warning-500/20"
+                          ? "bg-warning-500/10 text-warning-200 ring-1 ring-warning-500/20 [.theme-light_&]:text-warning-800"
                           : person.hasPin
                             ? "bg-success-500/10 text-success-300 ring-1 ring-success-500/20"
                             : "bg-surface-800 text-surface-400 ring-1 ring-hairline",

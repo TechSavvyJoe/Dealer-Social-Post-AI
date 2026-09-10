@@ -47,11 +47,13 @@ describe("Sunlight Mode keeps selected controls readable", () => {
     expect(dialog).not.toContain("text-white");
   });
 
-  it("gives every error message light-theme ink, wherever it lives", () => {
-    // Error copy is the worst thing to lose in Sunlight Mode: it appears when
-    // something already went wrong. The tinted error fills resolve near-white
-    // in light theme, so -100/-200 ink measures about 1.5:1 there. 53 sites
-    // across 24 components were affected before this rule.
+  it("gives tinted-fill text a light-theme override on every ramp", () => {
+    // The generalised rule. Every semantic ramp is static hex, so -50/-100/-200
+    // ink is tuned for a dark surface; on its own 10-40% tinted fill in
+    // Sunlight Mode that fill resolves near-white and the text measures about
+    // 1.5:1. Error copy was the worst case (53 sites) because it appears when
+    // something has already gone wrong, but the brand pills (33), warning and
+    // success states (37) all had it too.
     const dir = resolve(process.cwd(), "components");
     const files = [
       ...readdirSync(dir)
@@ -63,58 +65,59 @@ describe("Sunlight Mode keeps selected controls readable", () => {
     ];
 
     const offenders: string[] = [];
+    for (const ramp of ["error", "primary", "warning", "success", "info"]) {
+      const tintedFillWithLightInk = new RegExp(
+        `"[^"]*\\bbg-${ramp}-\\d{2,3}\\/\\d+\\b[^"]*\\btext-${ramp}-(?:50|100|200)\\b[^"]*"`,
+        "g",
+      );
+      for (const file of files) {
+        const source = read(file);
+        const lines = source.split("\n");
+        for (const match of source.matchAll(tintedFillWithLightInk)) {
+          if (match[0].includes("theme-light")) continue;
+          // A cn() call may spread one className over several lines, so the
+          // override can legitimately sit on a neighbouring line.
+          const line = source.slice(0, match.index).split("\n").length - 1;
+          const window = lines.slice(Math.max(0, line - 4), line + 5).join("\n");
+          if (window.includes(`theme-light_&]:text-${ramp}`)) continue;
+          offenders.push(`${ramp}  ${file}:${line + 1}`);
+        }
+      }
+    }
+
+    expect(
+      offenders,
+      `tinted-fill text with no Sunlight Mode override:\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("still flags plain error ink outside a tinted fill, which the ramp rule misses", () => {
+    // Kept separate: an error message on a plain surface has no bg-error-* to
+    // match on, and those were the majority of the original 53.
+    const offenders: string[] = [];
+    const dir = resolve(process.cwd(), "components");
+    const files = [
+      ...readdirSync(dir)
+        .filter((f) => f.endsWith(".tsx"))
+        .map((f) => `components/${f}`),
+      ...readdirSync(resolve(dir, "ui"))
+        .filter((f) => f.endsWith(".tsx"))
+        .map((f) => `components/ui/${f}`),
+    ];
     for (const file of files) {
       const source = read(file);
       const lines = source.split("\n");
       for (const match of source.matchAll(/"[^"]*\btext-error-(?:100|200)\b[^"]*"/g)) {
         if (match[0].includes("theme-light")) continue;
-        // A cn() call may spread one className over several lines, so the
-        // override can legitimately sit on a neighbouring line.
         const line = source.slice(0, match.index).split("\n").length - 1;
         const window = lines.slice(Math.max(0, line - 4), line + 5).join("\n");
         if (window.includes("theme-light_&]:text-error")) continue;
         offenders.push(`${file}:${line + 1}`);
       }
     }
-
     expect(
       offenders,
       `error ink with no Sunlight Mode override:\n${offenders.join("\n")}`,
-    ).toEqual([]);
-  });
-
-  it("gives every selected brand pill light-theme ink too", () => {
-    // Same defect class as the error ink, on the brand ramp: a selected pill's
-    // -50/-100/-200 text on a tinted primary fill vanishes in Sunlight Mode.
-    // 33 sites across 16 components were affected.
-    const dir = resolve(process.cwd(), "components");
-    const files = [
-      ...readdirSync(dir)
-        .filter((f) => f.endsWith(".tsx"))
-        .map((f) => `components/${f}`),
-      ...readdirSync(resolve(dir, "ui"))
-        .filter((f) => f.endsWith(".tsx"))
-        .map((f) => `components/ui/${f}`),
-    ];
-
-    const offenders: string[] = [];
-    for (const file of files) {
-      const source = read(file);
-      const lines = source.split("\n");
-      const selectedPill =
-        /"[^"]*\bbg-primary-\d{3}\/\d+\b[^"]*\btext-primary-(?:50|100|200)\b[^"]*"/g;
-      for (const match of source.matchAll(selectedPill)) {
-        if (match[0].includes("theme-light")) continue;
-        const line = source.slice(0, match.index).split("\n").length - 1;
-        const window = lines.slice(Math.max(0, line - 4), line + 5).join("\n");
-        if (window.includes("theme-light_&]:text-primary")) continue;
-        offenders.push(`${file}:${line + 1}`);
-      }
-    }
-
-    expect(
-      offenders,
-      `selected brand pills with no Sunlight Mode override:\n${offenders.join("\n")}`,
     ).toEqual([]);
   });
 });

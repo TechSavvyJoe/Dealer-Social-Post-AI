@@ -323,7 +323,7 @@ export const ApprovalQueue: React.FC = () => {
                       ) : null}
                       {!releaseReady ? (
                         <p
-                          className="rounded-lg border border-warning-500/25 bg-warning-500/10 px-3 py-2 text-xs font-medium text-warning-100"
+                          className="rounded-lg border border-warning-500/25 bg-warning-500/10 px-3 py-2 text-xs font-medium text-warning-100 [.theme-light_&]:text-warning-900"
                           role="alert"
                         >
                           Approval is locked until the customer photo release is

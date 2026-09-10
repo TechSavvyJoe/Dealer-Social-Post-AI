@@ -74,7 +74,7 @@ export const YouTubeConnectionCard: React.FC = () => {
       )}
       {status?.connected ? (
         <div className="mt-4 space-y-3">
-          <p className="flex items-center gap-2 rounded-xl border border-success-400/30 bg-success-500/10 p-3 text-sm font-semibold text-success-200">
+          <p className="flex items-center gap-2 rounded-xl border border-success-400/30 bg-success-500/10 p-3 text-sm font-semibold text-success-200 [.theme-light_&]:text-success-800">
             <CheckCircle2 className="h-5 w-5" />
             Connected to {status.channelTitle || "verified dealership channel"}
           </p>

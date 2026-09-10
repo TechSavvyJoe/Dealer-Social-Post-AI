@@ -185,7 +185,7 @@ export const LocalMediaArchive: React.FC<LocalMediaArchiveProps> = ({ dealerId }
                         setBusyId(null);
                       }
                     }}
-                    className="inline-flex min-h-10 min-w-0 items-center justify-center gap-1.5 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-xs font-semibold text-success-100 transition-colors hover:bg-success-500/15 disabled:opacity-50"
+                    className="inline-flex min-h-10 min-w-0 items-center justify-center gap-1.5 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-xs font-semibold text-success-100 transition-colors hover:bg-success-500/15 disabled:opacity-50 [.theme-light_&]:text-success-900"
                   >
                     {isBusy ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />

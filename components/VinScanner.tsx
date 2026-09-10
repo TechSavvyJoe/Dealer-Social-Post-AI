@@ -434,7 +434,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
               role="status"
               aria-live="polite"
               aria-atomic="true"
-              className="flex items-start gap-3 bg-success-900/40 border border-success-700/50 rounded-xl p-3 text-success-100"
+              className="flex items-start gap-3 bg-success-900/40 border border-success-700/50 rounded-xl p-3 text-success-100 [.theme-light_&]:text-success-900"
             >
               <Check className="h-5 w-5 text-success-400 flex-shrink-0 mt-0.5" />
               <div className="text-sm">

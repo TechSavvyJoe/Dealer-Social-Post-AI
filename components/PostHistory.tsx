@@ -726,7 +726,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                               )}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[10px] font-semibold text-success-100"
+                              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[10px] font-semibold text-success-100 [.theme-light_&]:text-success-900"
                             >
                               <Globe2 className="h-3 w-3" /> Site draft
                             </a>
@@ -906,7 +906,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                                 )}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[10px] font-semibold text-success-100"
+                                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[10px] font-semibold text-success-100 [.theme-light_&]:text-success-900"
                                 title="Review private website draft"
                               >
                                 <Globe2 className="h-3 w-3" /> Site

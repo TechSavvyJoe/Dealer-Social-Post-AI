@@ -206,7 +206,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
             onClick={() => void handleSaveOriginal()}
             disabled={!preparedOriginal || isPreparingOriginal || isSavingOriginal}
             aria-busy={isPreparingOriginal || isSavingOriginal}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-success-400/30 bg-success-500/10 px-5 py-3 text-sm font-semibold text-success-100 transition-colors hover:border-success-300/50 hover:bg-success-500/15 disabled:cursor-not-allowed disabled:opacity-50 sm:justify-self-center"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-success-400/30 bg-success-500/10 px-5 py-3 text-sm font-semibold text-success-100 transition-colors hover:border-success-300/50 hover:bg-success-500/15 disabled:cursor-not-allowed disabled:opacity-50 sm:justify-self-center [.theme-light_&]:text-success-900"
           >
             {isPreparingOriginal || isSavingOriginal ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />

@@ -60,13 +60,13 @@ const mobileStatus = {
     label: "Needs video",
     detail: "Create this video before saving or sharing it.",
     Icon: Film,
-    tone: "border-warning-400/35 bg-warning-500/10 text-warning-100",
+    tone: "border-warning-400/35 bg-warning-500/10 text-warning-100 [.theme-light_&]:text-warning-900",
   },
   ready: {
     label: "Ready",
     detail: "File ready. Caption is included when you share.",
     Icon: CheckCircle2,
-    tone: "border-success-400/35 bg-success-500/10 text-success-100",
+    tone: "border-success-400/35 bg-success-500/10 text-success-100 [.theme-light_&]:text-success-900",
   },
   generating: {
     label: "Preparing",

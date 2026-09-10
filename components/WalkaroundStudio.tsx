@@ -795,7 +795,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
               </div>
             )}
             {project.publicationState === "reconciliation_required" && (
-              <div className="mt-4 rounded-xl border border-warning-400/35 bg-warning-500/10 p-4 text-sm text-warning-100">
+              <div className="mt-4 rounded-xl border border-warning-400/35 bg-warning-500/10 p-4 text-sm text-warning-100 [.theme-light_&]:text-warning-900">
                 <strong className="block">YouTube reconciliation is required.</strong>A
                 manager must verify the existing YouTube upload before any new
                 publication attempt. Do not upload it again.
@@ -1063,7 +1063,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
                 </p>
               </div>
               <div
-                className={`rounded-xl border p-3 text-sm ${youtubeConnection?.connected ? "border-success-400/30 bg-success-500/10 text-success-200" : "border-warning-400/30 bg-warning-500/10 text-warning-100"}`}
+                className={`rounded-xl border p-3 text-sm ${youtubeConnection?.connected ? "border-success-400/30 bg-success-500/10 text-success-200 [.theme-light_&]:text-success-800" : "border-warning-400/30 bg-warning-500/10 text-warning-100 [.theme-light_&]:text-warning-900"}`}
               >
                 {youtubeConnection === null
                   ? "Checking the dealership YouTube channel…"
@@ -1119,7 +1119,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
                 </div>
               )}
               {project.audience === "customer" ? (
-                <div className="rounded-xl border border-warning-400/30 bg-warning-500/10 p-3 text-sm text-warning-100">
+                <div className="rounded-xl border border-warning-400/30 bg-warning-500/10 p-3 text-sm text-warning-100 [.theme-light_&]:text-warning-900">
                   Customer walkarounds are always unlisted. Anyone with the link can
                   forward it.
                 </div>
@@ -1139,7 +1139,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
                     </select>
                   </label>
                   {visibility === "public" && (
-                    <label className="flex items-start gap-3 rounded-xl border border-warning-400/30 bg-warning-500/10 p-3 text-sm text-warning-100">
+                    <label className="flex items-start gap-3 rounded-xl border border-warning-400/30 bg-warning-500/10 p-3 text-sm text-warning-100 [.theme-light_&]:text-warning-900">
                       <input
                         type="checkbox"
                         className="mt-1"

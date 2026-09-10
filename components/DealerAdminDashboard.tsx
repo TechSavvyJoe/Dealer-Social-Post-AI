@@ -1477,7 +1477,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
                       "text-[10px] px-2 py-1 rounded-md transition-colors",
                       enabled
                         ? "bg-fill-subtle hover:bg-fill-hover text-surface-300"
-                        : "bg-success-500/20 hover:bg-success-500/30 text-success-100",
+                        : "bg-success-500/20 hover:bg-success-500/30 text-success-100 [.theme-light_&]:text-success-900",
                     )}
                   >
                     {enabled ? "Disable" : "Enable"}
@@ -1997,7 +1997,7 @@ export const DealerTeamCard: React.FC = () => {
 
       {oneTimeCode && (
         <div
-          className="rounded-xl border border-warning-400/30 bg-warning-500/10 px-3 py-3 text-sm text-warning-50"
+          className="rounded-xl border border-warning-400/30 bg-warning-500/10 px-3 py-3 text-sm text-warning-50 [.theme-light_&]:text-warning-900"
           role="status"
           aria-label="Access code ready to share"
         >
@@ -2094,7 +2094,7 @@ export const DealerTeamCard: React.FC = () => {
                       className={cn(
                         "text-[10px] uppercase tracking-wide font-semibold rounded-full px-2 py-0.5",
                         p.pinNeedsDistribution
-                          ? "bg-warning-500/15 text-warning-200"
+                          ? "bg-warning-500/15 text-warning-200 [.theme-light_&]:text-warning-800"
                           : p.hasPin
                             ? "bg-success-500/10 text-success-300"
                             : "bg-surface-800 text-surface-400",
@@ -2151,7 +2151,7 @@ export const DealerTeamCard: React.FC = () => {
                         "min-h-11 text-[11px] px-3 py-2 rounded-md transition-colors",
                         p.active
                           ? "bg-fill-subtle hover:bg-fill-hover text-surface-300"
-                          : "bg-success-500/20 hover:bg-success-500/30 text-success-100",
+                          : "bg-success-500/20 hover:bg-success-500/30 text-success-100 [.theme-light_&]:text-success-900",
                       )}
                       title={p.active ? "Deactivate" : "Reactivate"}
                     >

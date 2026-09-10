@@ -516,7 +516,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                             "text-[10px] px-2 py-1 rounded-md transition-colors",
                             enabled
                               ? "bg-fill-subtle hover:bg-fill-hover text-surface-300"
-                              : "bg-success-500/20 hover:bg-success-500/30 text-success-100",
+                              : "bg-success-500/20 hover:bg-success-500/30 text-success-100 [.theme-light_&]:text-success-900",
                           )}
                         >
                           {enabled ? "Disable" : "Enable"}
@@ -623,7 +623,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                   className={cn(
                     "p-3 rounded-xl border text-left text-sm transition-colors",
                     !requiresApproval
-                      ? "border-success-500/50 bg-success-500/10 text-success-100"
+                      ? "border-success-500/50 bg-success-500/10 text-success-100 [.theme-light_&]:text-success-900"
                       : "border-hairline bg-fill-subtle text-surface-300 hover:border-strong",
                   )}
                 >
@@ -639,7 +639,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
                   className={cn(
                     "p-3 rounded-xl border text-left text-sm transition-colors",
                     requiresApproval
-                      ? "border-warning-500/50 bg-warning-500/10 text-warning-100"
+                      ? "border-warning-500/50 bg-warning-500/10 text-warning-100 [.theme-light_&]:text-warning-900"
                       : "border-hairline bg-fill-subtle text-surface-300 hover:border-strong",
                   )}
                 >
