@@ -3645,7 +3645,7 @@ export const PostResult: React.FC<PostResultProps> = ({
               try {
                 await schedulePost(post.postId, isoString);
                 toast.success(
-                  "Post scheduled for " + new Date(isoString).toLocaleString(),
+                  "Share time saved for " + new Date(isoString).toLocaleString(),
                 );
                 setIsScheduleOpen(false);
               } catch (err) {
@@ -3656,8 +3656,11 @@ export const PostResult: React.FC<PostResultProps> = ({
                 setIsScheduling(false);
               }
             } else {
+              // Without a saved post there is nothing to attach the time to, so
+              // the request never happens. Reporting success here told the
+              // salesperson their post was handled when nothing was stored.
               setIsScheduleOpen(false);
-              toast.success("Scheduled for " + new Date(isoString).toLocaleString());
+              toast.warning("Save this post first, then plan a share time.");
             }
           }}
         />

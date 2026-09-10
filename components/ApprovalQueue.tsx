@@ -229,7 +229,7 @@ export const ApprovalQueue: React.FC = () => {
                       )}
                       {post.scheduled_for && (
                         <span className="flex items-center gap-1 text-emerald-300">
-                          <Calendar className="h-3 w-3" /> scheduled
+                          <Calendar className="h-3 w-3" /> share time set
                         </span>
                       )}
                     </div>
