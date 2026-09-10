@@ -439,7 +439,7 @@ export const DealerAdminDashboard: React.FC = () => {
                 className={cn(
                   "flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors sm:min-h-0 sm:flex-none sm:gap-2 sm:px-4",
                   tab === t.key
-                    ? "bg-primary-500/30 text-primary-100"
+                    ? "bg-primary-500/30 text-primary-100 [.theme-light_&]:text-primary-950"
                     : "text-surface-400 hover:text-surface-200",
                 )}
               >
@@ -1225,7 +1225,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
                   className={cn(
                     "min-h-11 rounded-lg border px-3 py-2 text-sm transition-colors",
                     selected
-                      ? "border-primary-500/40 bg-primary-500/5 text-primary-100"
+                      ? "border-primary-500/40 bg-primary-500/5 text-primary-100 [.theme-light_&]:text-primary-950"
                       : "border-hairline bg-fill-subtle text-surface-300 hover:bg-fill-hover",
                   )}
                 >
@@ -1303,7 +1303,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
                   className={cn(
                     "min-h-11 rounded-lg border px-3 py-2 text-sm transition-colors",
                     selected
-                      ? "border-primary-500/40 bg-primary-500/5 text-primary-100"
+                      ? "border-primary-500/40 bg-primary-500/5 text-primary-100 [.theme-light_&]:text-primary-950"
                       : "border-hairline bg-fill-subtle text-surface-300 hover:bg-fill-hover",
                   )}
                 >
@@ -2163,7 +2163,7 @@ export const DealerTeamCard: React.FC = () => {
                     type="button"
                     onClick={() => handlePromoteLoose(p.name)}
                     disabled={saving}
-                    className="min-h-11 text-[11px] px-3 py-2 rounded-md bg-primary-500/20 hover:bg-primary-500/30 text-primary-100 transition-colors disabled:opacity-50"
+                    className="min-h-11 text-[11px] px-3 py-2 rounded-md bg-primary-500/20 hover:bg-primary-500/30 text-primary-100 transition-colors disabled:opacity-50 [.theme-light_&]:text-primary-950"
                     title="Add this person to the formal roster"
                   >
                     Add to roster

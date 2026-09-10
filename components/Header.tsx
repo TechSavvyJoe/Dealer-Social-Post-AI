@@ -197,7 +197,7 @@ export const Header: React.FC<HeaderProps> = ({
                 aria-label={`Posting as ${person.name}`}
               >
                 <span
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary-500/20 text-[10px] font-bold text-primary-100 ring-1 ring-primary-300/25"
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary-500/20 text-[10px] font-bold text-primary-100 ring-1 ring-primary-300/25 [.theme-light_&]:text-primary-950"
                   aria-hidden="true"
                 >
                   {person.name

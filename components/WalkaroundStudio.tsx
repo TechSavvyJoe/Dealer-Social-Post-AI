@@ -533,7 +533,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
                     type="button"
                     aria-pressed={audience === value}
                     onClick={() => setAudience(value)}
-                    className={`min-h-12 rounded-xl border px-3 text-sm font-semibold capitalize ${audience === value ? "border-primary-400 bg-primary-500/20 text-primary-100" : "border-hairline text-surface-300"}`}
+                    className={`min-h-12 rounded-xl border px-3 text-sm font-semibold capitalize ${audience === value ? "border-primary-400 bg-primary-500/20 text-primary-100 [.theme-light_&]:text-primary-950" : "border-hairline text-surface-300"}`}
                   >
                     {value}
                   </button>
@@ -558,7 +558,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
                       if (value === "one_take")
                         setClips((current) => current.slice(0, 1));
                     }}
-                    className={`min-h-12 rounded-xl border px-3 text-sm font-semibold ${captureMode === value ? "border-primary-400 bg-primary-500/20 text-primary-100" : "border-hairline text-surface-300"}`}
+                    className={`min-h-12 rounded-xl border px-3 text-sm font-semibold ${captureMode === value ? "border-primary-400 bg-primary-500/20 text-primary-100 [.theme-light_&]:text-primary-950" : "border-hairline text-surface-300"}`}
                   >
                     {value === "one_take" ? "One take" : "Multiple clips"}
                   </button>

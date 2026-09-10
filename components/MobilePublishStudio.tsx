@@ -72,7 +72,7 @@ const mobileStatus = {
     label: "Preparing",
     detail: "Creating the exact file for this destination.",
     Icon: Loader2,
-    tone: "border-primary-400/35 bg-primary-500/10 text-primary-100",
+    tone: "border-primary-400/35 bg-primary-500/10 text-primary-100 [.theme-light_&]:text-primary-950",
   },
   failed: {
     label: "Needs retry",
@@ -428,7 +428,7 @@ export const MobilePublishStudio: React.FC<MobilePublishStudioProps> = ({
                   type="button"
                   disabled={editCaptionDisabled ?? captionActionsDisabled}
                   onClick={onEditCaption}
-                  className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-primary-400/30 bg-primary-500/10 px-2.5 text-[11px] font-semibold text-primary-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:cursor-not-allowed disabled:opacity-45"
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-primary-400/30 bg-primary-500/10 px-2.5 text-[11px] font-semibold text-primary-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:cursor-not-allowed disabled:opacity-45 [.theme-light_&]:text-primary-950"
                 >
                   <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
                   Edit with AI
@@ -546,7 +546,7 @@ export const MobilePublishStudio: React.FC<MobilePublishStudioProps> = ({
                   batchActionDisabled || actionsDisabled || batchSelectedCount === 0
                 }
                 onClick={() => void onShareBatch()}
-                className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-primary-400/45 bg-primary-500/20 px-2.5 text-[11px] font-semibold text-primary-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-primary-400/45 bg-primary-500/20 px-2.5 text-[11px] font-semibold text-primary-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:cursor-not-allowed disabled:opacity-45 [.theme-light_&]:text-primary-950"
               >
                 <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
                 {allBatchSelected

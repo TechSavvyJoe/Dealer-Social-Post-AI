@@ -187,7 +187,7 @@ export const TurnstileChallenge: React.FC<TurnstileChallengeProps> = ({
           <button
             type="button"
             onClick={retry}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-primary-400/30 bg-primary-500/15 px-4 text-sm font-semibold text-primary-100 transition-colors hover:bg-primary-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-primary-400/30 bg-primary-500/15 px-4 text-sm font-semibold text-primary-100 transition-colors hover:bg-primary-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 [.theme-light_&]:text-primary-950"
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
             Retry security check

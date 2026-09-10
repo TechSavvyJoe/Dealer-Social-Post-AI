@@ -241,7 +241,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
               onClick={() => setSignatureMethod(method)}
               className={`min-h-11 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
                 signatureMethod === method
-                  ? "bg-primary-500/25 text-primary-100"
+                  ? "bg-primary-500/25 text-primary-100 [.theme-light_&]:text-primary-950"
                   : "text-surface-400 hover:bg-fill-subtle hover:text-surface-200"
               }`}
             >

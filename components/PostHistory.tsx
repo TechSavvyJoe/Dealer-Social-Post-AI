@@ -561,7 +561,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
               className={cn(
                 "px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap",
                 statusFilter === f.key
-                  ? "bg-primary-500/30 text-primary-100"
+                  ? "bg-primary-500/30 text-primary-100 [.theme-light_&]:text-primary-950"
                   : "text-surface-400 hover:text-surface-200",
               )}
             >

@@ -3065,7 +3065,7 @@ export const PostResult: React.FC<PostResultProps> = ({
             isDesktopLayout && "lg:min-h-9 lg:px-3 lg:py-1",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
             activeCaptionPlatform === null
-              ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
+              ? "border-primary-400/50 bg-primary-500/20 text-primary-100 [.theme-light_&]:text-primary-950"
               : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
           )}
         >
@@ -3090,7 +3090,7 @@ export const PostResult: React.FC<PostResultProps> = ({
               isDesktopLayout && "lg:min-h-9 lg:px-3 lg:py-1",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
               activeCaptionPlatform === tab.id
-                ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
+                ? "border-primary-400/50 bg-primary-500/20 text-primary-100 [.theme-light_&]:text-primary-950"
                 : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
             )}
           >
@@ -3399,7 +3399,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 setVideoMuted(false);
                 void element.play().catch(() => undefined);
               }}
-              className="flex min-h-11 w-full items-center justify-center rounded-xl border border-primary-400/40 bg-primary-500/15 px-3 text-sm font-semibold text-primary-50"
+              className="flex min-h-11 w-full items-center justify-center rounded-xl border border-primary-400/40 bg-primary-500/15 px-3 text-sm font-semibold text-primary-50 [.theme-light_&]:text-primary-950"
             >
               Turn on sound
             </button>
@@ -3771,7 +3771,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                           "grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[11px] font-bold",
                           active
                             ? "border-primary-300 bg-primary-500 text-white shadow-[0_0_18px_rgba(59,130,246,0.3)]"
-                            : "border-primary-400/45 bg-primary-500/15 text-primary-200",
+                            : "border-primary-400/45 bg-primary-500/15 text-primary-200 [.theme-light_&]:text-primary-900",
                         )}
                         aria-hidden="true"
                       >
@@ -3803,7 +3803,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 <button
                   type="button"
                   onClick={handleRemixRequest}
-                  className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border border-primary-400/35 bg-primary-500/10 px-3 text-xs font-semibold text-primary-100 transition-colors hover:border-primary-400/55 hover:bg-primary-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
+                  className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border border-primary-400/35 bg-primary-500/10 px-3 text-xs font-semibold text-primary-100 transition-colors hover:border-primary-400/55 hover:bg-primary-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 [.theme-light_&]:text-primary-950"
                 >
                   <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
                   Remix
@@ -4539,7 +4539,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                               setVideoMuted(false);
                               void el.play().catch(() => undefined);
                             }}
-                            className="flex w-full min-h-11 items-center justify-center gap-2 rounded-xl border border-primary-400/40 bg-primary-500/15 px-3 py-2 text-sm font-semibold text-primary-50"
+                            className="flex w-full min-h-11 items-center justify-center gap-2 rounded-xl border border-primary-400/40 bg-primary-500/15 px-3 py-2 text-sm font-semibold text-primary-50 [.theme-light_&]:text-primary-950"
                           >
                             Turn on sound
                           </button>
@@ -5207,7 +5207,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                           "inline-flex min-h-11 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors",
                           isDesktopLayout &&
                             "lg:min-h-9 lg:rounded-lg lg:px-3 lg:py-1.5 lg:text-xs",
-                          "border-primary-400/45 bg-primary-500/15 text-primary-50",
+                          "border-primary-400/45 bg-primary-500/15 text-primary-50 [.theme-light_&]:text-primary-950",
                           "hover:border-primary-400/65 hover:bg-primary-500/25",
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
                           "disabled:cursor-not-allowed disabled:opacity-40",

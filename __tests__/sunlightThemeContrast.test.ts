@@ -82,4 +82,39 @@ describe("Sunlight Mode keeps selected controls readable", () => {
       `error ink with no Sunlight Mode override:\n${offenders.join("\n")}`,
     ).toEqual([]);
   });
+
+  it("gives every selected brand pill light-theme ink too", () => {
+    // Same defect class as the error ink, on the brand ramp: a selected pill's
+    // -50/-100/-200 text on a tinted primary fill vanishes in Sunlight Mode.
+    // 33 sites across 16 components were affected.
+    const dir = resolve(process.cwd(), "components");
+    const files = [
+      ...readdirSync(dir)
+        .filter((f) => f.endsWith(".tsx"))
+        .map((f) => `components/${f}`),
+      ...readdirSync(resolve(dir, "ui"))
+        .filter((f) => f.endsWith(".tsx"))
+        .map((f) => `components/ui/${f}`),
+    ];
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const source = read(file);
+      const lines = source.split("\n");
+      const selectedPill =
+        /"[^"]*\bbg-primary-\d{3}\/\d+\b[^"]*\btext-primary-(?:50|100|200)\b[^"]*"/g;
+      for (const match of source.matchAll(selectedPill)) {
+        if (match[0].includes("theme-light")) continue;
+        const line = source.slice(0, match.index).split("\n").length - 1;
+        const window = lines.slice(Math.max(0, line - 4), line + 5).join("\n");
+        if (window.includes("theme-light_&]:text-primary")) continue;
+        offenders.push(`${file}:${line + 1}`);
+      }
+    }
+
+    expect(
+      offenders,
+      `selected brand pills with no Sunlight Mode override:\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
 });

@@ -290,7 +290,8 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
               <div
                 className={cn(
                   "flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] flex-shrink-0",
-                  active && "bg-primary-500/20 text-primary-100",
+                  active &&
+                    "bg-primary-500/20 text-primary-100 [.theme-light_&]:text-primary-950",
                   done && "text-success-200",
                   !active && !done && "text-surface-500",
                 )}

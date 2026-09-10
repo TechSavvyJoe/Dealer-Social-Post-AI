@@ -274,7 +274,7 @@ const CapabilityToggle: React.FC<{
       className={cn(
         "grid h-10 w-10 shrink-0 place-items-center rounded-xl border",
         pressed
-          ? "border-primary-300/40 bg-primary-400/20 text-primary-100"
+          ? "border-primary-300/40 bg-primary-400/20 text-primary-100 [.theme-light_&]:text-primary-950"
           : "border-hairline bg-surface-950/50 text-surface-400",
       )}
       aria-hidden="true"
@@ -1479,7 +1479,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   className={cn(
                     "grid h-10 w-10 shrink-0 place-items-center rounded-xl border",
                     websiteSelected
-                      ? "border-primary-300/40 bg-primary-400/20 text-primary-100"
+                      ? "border-primary-300/40 bg-primary-400/20 text-primary-100 [.theme-light_&]:text-primary-950"
                       : "border-hairline bg-surface-950/50 text-surface-400",
                   )}
                   aria-hidden="true"

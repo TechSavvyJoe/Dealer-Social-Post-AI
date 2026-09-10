@@ -635,7 +635,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                       : "Share now opens the system sheet immediately."}
                 </p>
                 {focusedTagGuidance ? (
-                  <p className="mt-2 max-w-prose rounded-lg border border-primary-400/25 bg-primary-500/10 px-2.5 py-2 text-xs leading-relaxed text-primary-100">
+                  <p className="mt-2 max-w-prose rounded-lg border border-primary-400/25 bg-primary-500/10 px-2.5 py-2 text-xs leading-relaxed text-primary-100 [.theme-light_&]:text-primary-950">
                     {focusedTagGuidance}
                   </p>
                 ) : null}
@@ -825,7 +825,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                     <button
                       type="button"
                       onClick={() => openPreparedTarget(selectedPrepared)}
-                      className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-primary-400/30 bg-primary-500/15 px-3 py-2 text-xs font-semibold text-primary-100"
+                      className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-primary-400/30 bg-primary-500/15 px-3 py-2 text-xs font-semibold text-primary-100 [.theme-light_&]:text-primary-950"
                     >
                       <ExternalLink className="h-3.5 w-3.5" />
                       Open {selectedPrepared.target.label}

@@ -274,7 +274,7 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
                       onClick={() => removeTag(tag)}
                       className={cn(
                         "group inline-flex min-h-9 items-center gap-1 rounded-full border border-primary-400/30",
-                        "bg-primary-500/10 px-2.5 py-1 text-xs font-semibold text-primary-100",
+                        "bg-primary-500/10 px-2.5 py-1 text-xs font-semibold text-primary-100 [.theme-light_&]:text-primary-950",
                         "transition-colors hover:border-error-400/40 hover:bg-error-500/15 hover:text-error-100 [.theme-light_&]:text-error-800",
                         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
                         "disabled:cursor-not-allowed disabled:opacity-50",
@@ -322,7 +322,7 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
                 onClick={addTagsFromDraft}
                 className={cn(
                   "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg",
-                  "border border-primary-400/40 bg-primary-500/20 text-primary-100",
+                  "border border-primary-400/40 bg-primary-500/20 text-primary-100 [.theme-light_&]:text-primary-950",
                   "hover:bg-primary-500/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
                   "disabled:cursor-not-allowed disabled:opacity-40",
                 )}

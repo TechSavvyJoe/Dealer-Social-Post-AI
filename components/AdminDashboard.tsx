@@ -953,7 +953,7 @@ export const AdminDashboard: React.FC = () => {
                         className={cn(
                           "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
                           person.hasManagerLogin
-                            ? "bg-primary-500/10 text-primary-200 ring-1 ring-primary-400/25"
+                            ? "bg-primary-500/10 text-primary-200 ring-1 ring-primary-400/25 [.theme-light_&]:text-primary-900"
                             : "bg-surface-800 text-surface-400 ring-1 ring-hairline",
                         )}
                       >
