@@ -283,7 +283,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
 
         {previewError ? (
           <p
-            className="flex items-start gap-2 rounded-xl border border-error-500/30 bg-error-500/10 px-4 py-3 text-sm text-error-200"
+            className="flex items-start gap-2 rounded-xl border border-error-500/30 bg-error-500/10 px-4 py-3 text-sm text-error-200 [.theme-light_&]:text-error-800"
             role="alert"
           >
             <ImageIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />

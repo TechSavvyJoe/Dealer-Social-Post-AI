@@ -243,7 +243,7 @@ export const ApprovalQueue: React.FC = () => {
                         className="aspect-square w-full rounded-lg border border-hairline bg-surface-950 object-contain"
                       />
                     ) : (
-                      <div className="flex aspect-square w-full items-center justify-center rounded-lg border border-dashed border-error-500/30 bg-error-500/5 px-3 text-center text-xs text-error-200">
+                      <div className="flex aspect-square w-full items-center justify-center rounded-lg border border-dashed border-error-500/30 bg-error-500/5 px-3 text-center text-xs text-error-200 [.theme-light_&]:text-error-800">
                         Review image unavailable
                       </div>
                     )}
@@ -290,7 +290,7 @@ export const ApprovalQueue: React.FC = () => {
                         </div>
                       ) : null}
                       {!hasReviewCreative ? (
-                        <p className="text-xs font-medium text-error-200">
+                        <p className="text-xs font-medium text-error-200 [.theme-light_&]:text-error-800">
                           This legacy item cannot be approved without reviewable
                           creative. Reject it and have the salesperson resubmit.
                         </p>
@@ -307,7 +307,7 @@ export const ApprovalQueue: React.FC = () => {
                       ) : null}
                       {identityReviewRequired ? (
                         <p
-                          className="rounded-lg border border-error-500/25 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100"
+                          className="rounded-lg border border-error-500/25 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100 [.theme-light_&]:text-error-800"
                           role="alert"
                         >
                           Customer-name review required. This legacy copy was
@@ -317,7 +317,7 @@ export const ApprovalQueue: React.FC = () => {
                       ) : null}
                       {imageReviewRequired ? (
                         <p
-                          className="rounded-lg border border-error-500/25 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100"
+                          className="rounded-lg border border-error-500/25 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100 [.theme-light_&]:text-error-800"
                           role="alert"
                         >
                           Image safety review required. This creative predates the

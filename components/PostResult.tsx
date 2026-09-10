@@ -3393,7 +3393,7 @@ export const PostResult: React.FC<PostResultProps> = ({
           ) : null}
           {videoPlayError ? (
             <div
-              className="space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 p-3 text-xs text-error-100"
+              className="space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 p-3 text-xs text-error-100 [.theme-light_&]:text-error-800"
               role="alert"
             >
               <p>{videoPlayError}</p>
@@ -3850,7 +3850,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         ) : null}
         {imageReviewRequired && (
           <m.div
-            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10"
+            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10 [.theme-light_&]:text-error-800"
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
@@ -3875,7 +3875,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         {identityLocked && (
           <m.div
             id="caption-identity-alert"
-            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10"
+            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10 [.theme-light_&]:text-error-800"
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
@@ -3900,7 +3900,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         {claimLocked && (
           <m.div
             id="caption-compliance-alert"
-            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10"
+            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10 [.theme-light_&]:text-error-800"
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
@@ -3924,7 +3924,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         )}
         {releaseLocked && (
           <m.div
-            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10"
+            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10 [.theme-light_&]:text-error-800"
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
@@ -3982,7 +3982,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 ? "border border-success-500/30 bg-success-500/10 text-success-100"
                 : approvalStatus === "pending"
                   ? "border border-warning-500/30 bg-warning-500/10 text-warning-100"
-                  : "border border-error-500/30 bg-error-500/10 text-error-100",
+                  : "border border-error-500/30 bg-error-500/10 text-error-100 [.theme-light_&]:text-error-800",
             )}
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
@@ -4042,7 +4042,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 : websiteStatusCopy.tone === "warning"
                   ? "border-warning-500/30 bg-warning-500/10 text-warning-100"
                   : websiteStatusCopy.tone === "error"
-                    ? "border-error-500/30 bg-error-500/10 text-error-100"
+                    ? "border-error-500/30 bg-error-500/10 text-error-100 [.theme-light_&]:text-error-800"
                     : websiteStatusCopy.tone === "info"
                       ? "border-info-500/30 bg-info-500/10 text-info-100"
                       : "border-white/10 bg-white/[0.04] text-surface-100",
@@ -4423,7 +4423,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                           {draftSyncStatus === "error" ? (
                             <button
                               type="button"
-                              className="min-h-8 rounded-lg border border-error-400/30 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100"
+                              className="min-h-8 rounded-lg border border-error-400/30 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 [.theme-light_&]:text-error-800"
                               onClick={() => void flushPendingDraft()}
                             >
                               Retry
@@ -4552,7 +4552,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                         ) : null}
                         {videoPlayError ? (
                           <div
-                            className="space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 px-3 py-2 text-xs text-error-100"
+                            className="space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 px-3 py-2 text-xs text-error-100 [.theme-light_&]:text-error-800"
                             role="alert"
                           >
                             <p>{videoPlayError}</p>

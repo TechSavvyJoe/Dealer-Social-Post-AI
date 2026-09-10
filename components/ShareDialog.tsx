@@ -690,7 +690,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
           </div>
         ) : selectedPreparation?.status === "error" && selectedTarget ? (
           <div
-            className="rounded-xl border border-error-500/30 bg-error-500/10 p-4 text-sm text-error-100"
+            className="rounded-xl border border-error-500/30 bg-error-500/10 p-4 text-sm text-error-100 [.theme-light_&]:text-error-800"
             role="alert"
           >
             <div className="flex items-start gap-2">
@@ -731,7 +731,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
 
         {operationError ? (
           <p
-            className="rounded-xl border border-error-500/30 bg-error-500/10 px-3 py-2.5 text-xs text-error-100"
+            className="rounded-xl border border-error-500/30 bg-error-500/10 px-3 py-2.5 text-xs text-error-100 [.theme-light_&]:text-error-800"
             role="alert"
           >
             {operationError}
@@ -747,7 +747,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
               className={cn(
                 "rounded-xl border px-3 py-2.5 text-xs leading-relaxed space-y-2",
                 status.status.kind === "error"
-                  ? "border-error-500/40 bg-error-500/10 text-error-100"
+                  ? "border-error-500/40 bg-error-500/10 text-error-100 [.theme-light_&]:text-error-800"
                   : status.status.kind === "cancelled"
                     ? "border-surface-600 bg-surface-900/60 text-surface-300"
                     : "border-success-500/40 bg-success-500/10 text-success-100",

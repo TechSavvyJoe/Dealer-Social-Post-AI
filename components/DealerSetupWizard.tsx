@@ -669,7 +669,7 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
       </AnimatePresence>
 
       {error && (
-        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs">
+        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs [.theme-light_&]:text-error-800">
           {error}
         </div>
       )}

@@ -78,7 +78,7 @@ const mobileStatus = {
     label: "Needs retry",
     detail: "The file did not finish preparing.",
     Icon: RefreshCw,
-    tone: "border-error-400/35 bg-error-500/10 text-error-100",
+    tone: "border-error-400/35 bg-error-500/10 text-error-100 [.theme-light_&]:text-error-800",
   },
 } as const;
 
@@ -287,7 +287,7 @@ export const MobilePublishStudio: React.FC<MobilePublishStudioProps> = ({
                     <button
                       type="button"
                       onClick={() => runMenuAction(onRequestLogout)}
-                      className="flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 text-sm font-medium text-error-200 hover:bg-error-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-400"
+                      className="flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 text-sm font-medium text-error-200 hover:bg-error-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-400 [.theme-light_&]:text-error-800"
                     >
                       <LogOut className="h-4 w-4" aria-hidden="true" />
                       Log out

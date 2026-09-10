@@ -41,7 +41,7 @@ const stateClasses: Record<
   over: {
     dot: "bg-error-400",
     bar: "bg-error-500/80",
-    label: "text-error-200 font-semibold",
+    label: "text-error-200 font-semibold [.theme-light_&]:text-error-800",
   },
 };
 

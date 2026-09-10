@@ -67,7 +67,7 @@ export const YouTubeConnectionCard: React.FC = () => {
       {error && (
         <p
           role="alert"
-          className="mt-4 rounded-xl border border-error-400/30 bg-error-500/10 p-3 text-sm text-error-100"
+          className="mt-4 rounded-xl border border-error-400/30 bg-error-500/10 p-3 text-sm text-error-100 [.theme-light_&]:text-error-800"
         >
           {error}
         </p>

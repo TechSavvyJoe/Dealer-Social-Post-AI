@@ -900,11 +900,11 @@ export const AdminDashboard: React.FC = () => {
           {peopleLoading && <Skeleton className="h-32 w-full rounded-2xl" />}
           {peopleError ? (
             <div
-              className="rounded-2xl border border-error-500/25 bg-error-500/10 p-4 text-sm text-error-100"
+              className="rounded-2xl border border-error-500/25 bg-error-500/10 p-4 text-sm text-error-100 [.theme-light_&]:text-error-800"
               role="alert"
             >
               <p className="font-semibold">Roster unavailable</p>
-              <p className="mt-1 text-error-200">
+              <p className="mt-1 text-error-200 [.theme-light_&]:text-error-800">
                 {peopleError instanceof Error
                   ? peopleError.message
                   : "Try refreshing this view."}

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -44,5 +45,41 @@ describe("Sunlight Mode keeps selected controls readable", () => {
   it("uses no hardcoded text-white on a theme-aware fill in the schedule dialog", () => {
     const dialog = read("components/ScheduleDialog.tsx");
     expect(dialog).not.toContain("text-white");
+  });
+
+  it("gives every error message light-theme ink, wherever it lives", () => {
+    // Error copy is the worst thing to lose in Sunlight Mode: it appears when
+    // something already went wrong. The tinted error fills resolve near-white
+    // in light theme, so -100/-200 ink measures about 1.5:1 there. 53 sites
+    // across 24 components were affected before this rule.
+    const dir = resolve(process.cwd(), "components");
+    const files = [
+      ...readdirSync(dir)
+        .filter((f) => f.endsWith(".tsx"))
+        .map((f) => `components/${f}`),
+      ...readdirSync(resolve(dir, "ui"))
+        .filter((f) => f.endsWith(".tsx"))
+        .map((f) => `components/ui/${f}`),
+    ];
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const source = read(file);
+      const lines = source.split("\n");
+      for (const match of source.matchAll(/"[^"]*\btext-error-(?:100|200)\b[^"]*"/g)) {
+        if (match[0].includes("theme-light")) continue;
+        // A cn() call may spread one className over several lines, so the
+        // override can legitimately sit on a neighbouring line.
+        const line = source.slice(0, match.index).split("\n").length - 1;
+        const window = lines.slice(Math.max(0, line - 4), line + 5).join("\n");
+        if (window.includes("theme-light_&]:text-error")) continue;
+        offenders.push(`${file}:${line + 1}`);
+      }
+    }
+
+    expect(
+      offenders,
+      `error ink with no Sunlight Mode override:\n${offenders.join("\n")}`,
+    ).toEqual([]);
   });
 });

@@ -1229,7 +1229,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       type="button"
                       aria-label="Remove captured release"
                       onClick={() => setCapturedRelease(null)}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-error-400/25 bg-error-500/10 text-error-100 transition-colors hover:bg-error-500/20"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-error-400/25 bg-error-500/10 text-error-100 transition-colors hover:bg-error-500/20 [.theme-light_&]:text-error-800"
                     >
                       <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>
@@ -1253,7 +1253,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               )}
               {releaseValidationError && !capturedRelease ? (
                 <p
-                  className="rounded-lg border border-error-500/30 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100"
+                  className="rounded-lg border border-error-500/30 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100 [.theme-light_&]:text-error-800"
                   role="alert"
                 >
                   This customer-focused post needs a signed photo release before the
@@ -1841,7 +1841,10 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   className="bg-fill-subtle border-hairline focus:border-primary-400 focus:bg-fill-hover transition-colors"
                 />
                 {captionIdentityError ? (
-                  <p className="text-xs font-medium text-error-200" role="alert">
+                  <p
+                    className="text-xs font-medium text-error-200 [.theme-light_&]:text-error-800"
+                    role="alert"
+                  >
                     {captionIdentityError}
                   </p>
                 ) : null}
@@ -1925,7 +1928,10 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                     className="bg-fill-subtle border-hairline focus:border-primary-400"
                   />
                   {captionIdentityError ? (
-                    <p className="mt-2 text-xs font-medium text-error-200" role="alert">
+                    <p
+                      className="mt-2 text-xs font-medium text-error-200 [.theme-light_&]:text-error-800"
+                      role="alert"
+                    >
                       {captionIdentityError}
                     </p>
                   ) : null}
@@ -1933,7 +1939,10 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               )}
             </AnimatePresence>
             {!creativeEnabled && captionSource !== "custom" && captionIdentityError ? (
-              <p className="text-xs font-medium text-error-200" role="alert">
+              <p
+                className="text-xs font-medium text-error-200 [.theme-light_&]:text-error-800"
+                role="alert"
+              >
                 {captionIdentityError}
               </p>
             ) : null}

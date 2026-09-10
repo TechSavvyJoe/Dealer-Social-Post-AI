@@ -206,7 +206,7 @@ export const LocalMediaArchive: React.FC<LocalMediaArchiveProps> = ({ dealerId }
                         setBusyId(null);
                       }
                     }}
-                    className="grid min-h-10 min-w-10 place-items-center rounded-lg border border-hairline bg-fill-subtle text-surface-300 transition-colors hover:border-error-400/40 hover:bg-error-500/10 hover:text-error-200 disabled:opacity-50"
+                    className="grid min-h-10 min-w-10 place-items-center rounded-lg border border-hairline bg-fill-subtle text-surface-300 transition-colors hover:border-error-400/40 hover:bg-error-500/10 hover:text-error-200 disabled:opacity-50 [.theme-light_&]:text-error-800"
                     aria-label={`Delete ${isVideo ? "video" : "image"} ${index + 1}`}
                     title="Delete local copy"
                   >

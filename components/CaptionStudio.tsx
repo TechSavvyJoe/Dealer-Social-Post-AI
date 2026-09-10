@@ -144,7 +144,7 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
               className={cn(
                 "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
                 tagStatus === "over"
-                  ? "bg-error-500/20 text-error-200"
+                  ? "bg-error-500/20 text-error-200 [.theme-light_&]:text-error-800"
                   : "bg-white/5 text-surface-300",
               )}
             >
@@ -275,7 +275,7 @@ export const CaptionStudio: React.FC<CaptionStudioProps> = ({
                       className={cn(
                         "group inline-flex min-h-9 items-center gap-1 rounded-full border border-primary-400/30",
                         "bg-primary-500/10 px-2.5 py-1 text-xs font-semibold text-primary-100",
-                        "transition-colors hover:border-error-400/40 hover:bg-error-500/15 hover:text-error-100",
+                        "transition-colors hover:border-error-400/40 hover:bg-error-500/15 hover:text-error-100 [.theme-light_&]:text-error-800",
                         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
                         "disabled:cursor-not-allowed disabled:opacity-50",
                       )}

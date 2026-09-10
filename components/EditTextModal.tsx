@@ -104,7 +104,7 @@ export const EditTextModal: React.FC<EditTextModalProps> = ({
           />
           {submitError ? (
             <p
-              className="mt-3 rounded-xl border border-error-500/30 bg-error-500/10 px-3 py-2 text-sm text-error-100"
+              className="mt-3 rounded-xl border border-error-500/30 bg-error-500/10 px-3 py-2 text-sm text-error-100 [.theme-light_&]:text-error-800"
               role="alert"
             >
               {submitError}

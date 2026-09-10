@@ -118,7 +118,7 @@ const statusBadge = (status?: ApprovalStatus): React.ReactElement | null => {
       );
     case "rejected":
       return (
-        <span className="inline-flex items-center gap-1 text-error-200 text-[11px]">
+        <span className="inline-flex items-center gap-1 text-error-200 text-[11px] [.theme-light_&]:text-error-800">
           <XCircle className="h-3 w-3" /> rejected
         </span>
       );
@@ -145,7 +145,7 @@ const websiteStatusBadge = (
         ready
           ? "text-success-200"
           : failed
-            ? "text-error-200"
+            ? "text-error-200 [.theme-light_&]:text-error-800"
             : withdrawn
               ? "text-surface-400"
               : "text-info-200",
@@ -739,7 +739,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                               type="button"
                               disabled={Boolean(websiteRetryingId)}
                               onClick={() => void retryWebsite(post)}
-                              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-error-400/25 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 disabled:opacity-50"
+                              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-error-400/25 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 disabled:opacity-50 [.theme-light_&]:text-error-800"
                             >
                               <RefreshCw
                                 className={cn(
@@ -913,7 +913,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                                 type="button"
                                 disabled={Boolean(websiteRetryingId)}
                                 onClick={() => void retryWebsite(p)}
-                                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-error-400/25 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 disabled:opacity-50"
+                                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-error-400/25 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 disabled:opacity-50 [.theme-light_&]:text-error-800"
                               >
                                 <RefreshCw
                                   className={cn(

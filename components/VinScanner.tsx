@@ -455,14 +455,14 @@ export const VinScanner: React.FC<VinScannerProps> = ({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               role="alert"
-              className="flex items-start gap-3 bg-error-900/40 border border-error-700/50 rounded-xl p-3 text-error-100 text-sm"
+              className="flex items-start gap-3 bg-error-900/40 border border-error-700/50 rounded-xl p-3 text-error-100 text-sm [.theme-light_&]:text-error-800"
             >
               <AlertCircle className="h-5 w-5 text-error-400 flex-shrink-0 mt-0.5" />
               <div className="flex-1">{error}</div>
               <button
                 type="button"
                 onClick={() => setError(null)}
-                className="text-error-300 hover:text-error-100"
+                className="text-error-300 hover:text-error-100 [.theme-light_&]:text-error-800"
                 aria-label="Dismiss"
               >
                 <X className="h-4 w-4" />

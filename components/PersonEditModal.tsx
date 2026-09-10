@@ -692,7 +692,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
                     "rounded-xl border px-3 py-2.5 text-xs",
                     managerLoginMessage.kind === "success"
                       ? "border-success-500/25 bg-success-500/10 text-success-100"
-                      : "border-error-700/40 bg-error-900/30 text-error-100",
+                      : "border-error-700/40 bg-error-900/30 text-error-100 [.theme-light_&]:text-error-800",
                   )}
                   role={managerLoginMessage.kind === "error" ? "alert" : "status"}
                   aria-live="polite"
@@ -928,7 +928,7 @@ export const PersonEditModal: React.FC<PersonEditModalProps> = ({
         {error && (
           <p
             role="alert"
-            className="rounded-xl border border-error-700/40 bg-error-900/30 px-3 py-2.5 text-xs text-error-100"
+            className="rounded-xl border border-error-700/40 bg-error-900/30 px-3 py-2.5 text-xs text-error-100 [.theme-light_&]:text-error-800"
           >
             {error}
           </p>

@@ -512,7 +512,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
       {error && (
         <div
           role="alert"
-          className="rounded-xl border border-error-500/35 bg-error-500/10 p-4 text-sm text-error-100"
+          className="rounded-xl border border-error-500/35 bg-error-500/10 p-4 text-sm text-error-100 [.theme-light_&]:text-error-800"
         >
           <strong className="block">Nothing was published.</strong>
           {error}
@@ -786,7 +786,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
               </div>
             )}
             {project.productionState === "terminal_failed" && (
-              <div className="mt-4 rounded-xl border border-error-400/35 bg-error-500/10 p-4 text-sm text-error-100">
+              <div className="mt-4 rounded-xl border border-error-400/35 bg-error-500/10 p-4 text-sm text-error-100 [.theme-light_&]:text-error-800">
                 <strong className="block">
                   This project cannot be retried automatically.
                 </strong>

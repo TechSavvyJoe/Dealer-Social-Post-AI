@@ -165,7 +165,10 @@ export const PwaUpdatePrompt: React.FC<PwaUpdatePromptProps> = ({
           Update now, or finish your current work and update later.
         </p>
         {updateError && (
-          <p className="mt-1 text-xs text-error-200" role="alert">
+          <p
+            className="mt-1 text-xs text-error-200 [.theme-light_&]:text-error-800"
+            role="alert"
+          >
             {updateError}
           </p>
         )}
