@@ -16,12 +16,12 @@ block, not guessed. See [Verified against](#verified-against) at the end.
 | Thing                             | Value                                                                                                        | Source                                        |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
 | Fly app (backend, PocketBase)     | `dealer-social-post-ai-production`                                                                           | `fly.toml:1`                                  |
-| Fly region / sizing               | `iad`, 2 shared CPUs, 1024 MB, `min_machines_running = 1`                                                    | `fly.toml:2`, `fly.toml:19`, `fly.toml:40-43` |
+| Fly region / sizing               | `iad`, 2 shared CPUs, 1024 MB, `min_machines_running = 1`                                                    | `fly.toml:2`, `fly.toml:19`, `fly.toml:36-41` |
 | Fly origin                        | `https://dealer-social-post-ai-production.fly.dev`                                                           | `.github/workflows/fly-deploy.yml:68`         |
 | Canonical origin users load       | `https://dealer-social-post-ai.vercel.app`                                                                   | `.github/workflows/fly-deploy.yml:413-414`    |
 | Vercel project / org              | `prj_h5phWNMNtK4D9dqwbOHrrrRMqrRi` / `team_Tc8DG6XMPUCefkTa3u71mmlN`                                         | `.github/workflows/fly-deploy.yml:423-424`    |
 | Vercel → Fly rewrite              | `/api/(.*)` → `https://dealer-social-post-ai-production.fly.dev/api/$1`, with header `x-dealer-proxy-secret` | `vercel.ts:60-70`                             |
-| Liveness probe (Fly health check) | `GET /api/health`, every 30s, 5s timeout                                                                     | `fly.toml:29-36`                              |
+| Liveness probe (Fly health check) | `GET /api/health`, every 30s, 5s timeout, 10s grace                                                          | `fly.toml:29-34`                              |
 | Readiness probe (the real one)    | `GET /api/app/health`                                                                                        | `pb_hooks/main.pb.js:957`                     |
 | PocketBase version                | pinned `0.22.55`                                                                                             | `Dockerfile:37`                               |
 | flyctl version used by CI         | `0.4.71`                                                                                                     | `.github/workflows/fly-deploy.yml:42`, `:228` |
@@ -64,7 +64,7 @@ Declare SEV1 if any one of these is true:
 - **All generation is failing.** Every dealer's caption/image/video request through
   `/api/proxy/*` (`pb_hooks/main.pb.js:827-828`) is erroring — expired or revoked
   `GEMINI_API_KEY`, provider outage, quota exhaustion. Note `gemini_key_set` only proves a
-  key _string exists_; it never proves the key works (`pb_hooks/main.pb.js:1237`). Use
+  key _string exists_; it never proves the key works (`pb_hooks/main.pb.js:1238`). Use
   `generation.providerFailures24h` / `providerAttempts24h` in the authenticated health payload
   instead (`pb_hooks/main.pb.js:1183-1188`).
 - **Data is at risk.** The machine refuses to boot because `/pb/pb_data/data.db` is not
@@ -113,8 +113,11 @@ Declare SEV1 if any one of these is true:
 
 - One dealership, one salesperson, or one post affected.
 - One stuck website publication that its retry route clears.
-- Telemetry noise: `POST /api/telemetry` 429s (30 events per IP per minute,
-  240 per minute globally — `pb_hooks/main.pb.js:1327-1334`).
+- Telemetry noise: `POST /api/telemetry` 429s. The per-IP limiter is 30 events per IP per
+  minute and it is the only one that returns 429 (`pb_hooks/main.pb.js:1327-1332`). The
+  global ingress limiter, 240 per minute, does **not** return 429 — it returns 202 with
+  `{"success":true,"stored":false}`, so a global flood drops telemetry silently rather than
+  showing up as client errors (`pb_hooks/main.pb.js:1333-1334`).
 - A prune/GC cron missing a run: `prune-client-error-events` 07:17
   (`pb_hooks/main.pb.js:1371`), `prune-unlinked-photo-releases` hourly at :13
   (`pb_hooks/main.pb.js:2311`), `session_gc_and_auth_cleanup` 03:00
@@ -189,7 +192,8 @@ curl -sS -i https://dealer-social-post-ai-production.fly.dev/api/app/health
 Expected on a healthy system: HTTP `200` and a body containing
 `"ok":true`, `"version":"2.0"`, a 40-character `"releaseSha"`, `"apiContractVersion"`,
 `"modelPolicyVersion"`, and a `"backup"` object whose `"status"` is `"verified"`
-(`pb_hooks/main.pb.js:1034-1048`, `:1313`).
+(`pb_hooks/main.pb.js:1034-1049`; the `ok` computation that decides 200 vs 503 is
+`:1296-1316`).
 
 - HTTP `503` with `"ok":false` → **SEV1 configuration or dependency failure.** The public
   payload deliberately does _not_ say which check failed; `checks` is only attached for an
@@ -238,9 +242,12 @@ flyctl logs --app dealer-social-post-ai-production --no-tail \
   | tee "$INCIDENT_DIR/fly-logs.txt"
 ```
 
-This is exactly the command CI uses for post-failure diagnostics
-(`.github/workflows/fly-deploy.yml:384-392`) and the one the manual `Fetch Fly Logs`
-workflow runs (`.github/workflows/fetch-fly-logs.yml:19`).
+`flyctl logs --app dealer-social-post-ai-production --no-tail` is the command CI runs for
+post-failure diagnostics (`.github/workflows/fly-deploy.yml:389`, where it is suffixed
+`|| true`) and the one the manual `Fetch Fly Logs` workflow runs
+(`.github/workflows/fetch-fly-logs.yml:19`). The `| tee` above is this runbook's addition so
+you keep a copy; CI only prints to its own run log. The same failure step also runs
+`flyctl status` and `flyctl machine list` (`.github/workflows/fly-deploy.yml:387-388`).
 
 Startup failures worth recognising immediately:
 
@@ -712,7 +719,7 @@ Every value in this document was read from these files at the stated locations. 
 change one of them, re-check this runbook.
 
 - `fly.toml` — app name, region, VM size, `min_machines_running`, and the liveness-only
-  health-check comment (`:1-2`, `:14-19`, `:22-36`, `:40-43`).
+  health-check comment (`:1-2`, `:14-19`, `:22-34`, `:36-41`). The file is 41 lines long.
 - `Dockerfile` — PocketBase pinned to `0.22.55` and why (`:23-38`).
 - `entrypoint.sh` — the 0.22 database-compatibility refusal and its exact log lines
   (`:7-15`, `:12-13`, `:16`, `:25`).
@@ -724,8 +731,8 @@ change one of them, re-check this runbook.
 - `public/sw.js` — the checked-in `VERSION` placeholder and the no-auto-skipWaiting behaviour
   (`:13`, `:18-33`).
 - `pb_hooks/main.pb.js` — every route and threshold cited: proxy rate limits (`:40-41`,
-  `:360-372`, `:838`), health (`:945-951`, `:957`, `:1018-1048`, `:1052-1053`, `:1136-1225`,
-  `:1237`, `:1295-1313`), telemetry (`:1319-1334`), retention crons (`:1371-1400`), session
+  `:360-372`, `:838`), health (`:945-951`, `:957`, `:1018-1049`, `:1052-1053`, `:1136-1225`,
+  `:1238`, `:1295-1316`), telemetry (`:1319-1334`), retention crons (`:1371-1400`), session
   (`:1415-1421`, `:1453-1460`, `:1503-1531`), photo releases (`:2034`, `:2163`, `:2311-2334`),
   website publication (`:3373`, `:3505`, `:3574`), video (`:3181`), admin routes (`:4212`,
   `:5023`), GC crons (`:5387`, `:5396`).

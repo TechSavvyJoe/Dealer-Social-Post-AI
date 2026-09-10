@@ -16,7 +16,7 @@ Written 2026-09-10 against branch `hardening/production-review-2026-09`. See
 ## 0. Read this first: there is no external monitor today
 
 `fly.toml` states that deep readiness is "verified at deploy time by the CI workflow and by
-external uptime monitors hitting `/api/app/health`" (`fly.toml:26-28`).
+external uptime monitors hitting `/api/app/health`" (`fly.toml:27-28`).
 
 **No such monitor is named, configured, or referenced anywhere in this repository.** There is
 no monitor config file, no vendor account name, no alert routing, no webhook, and no
@@ -110,15 +110,17 @@ That is the entire public payload. No tenant data, no counts, no secret values.
 ### 2.2 Admin-gated fields (super-admin session cookie only)
 
 Gated by `isAuthedAdmin` — a validated session whose role is `super_admin`
-(`main.pb.js:964-965`). Added at `main.pb.js:1052-1080` and populated at `1086-1234`:
+(`main.pb.js:964-965`). The admin sub-objects are attached at `main.pb.js:1052-1080` and
+populated at `1086-1234`; the `checks` booleans themselves are computed at `1238-1293` (declared
+at `967-984`) for every caller and only _attached_ for admins:
 
-| Field          | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `checks`       | ~20 booleans for config presence: `pocketbase`, `gemini_key_set`, `anthropic_key_set`, `openai_key_set`, `claude_fallback_enabled`, `openai_fallback_enabled`, `admin_login_configured`, `pin_pepper_configured`, `trusted_proxy_configured`, `turnstile_*`, `legacy_client_compatibility_enabled`, `off_box_backup_configured`, `off_box_restore_ready`, `website_integration_configured`. Booleans only — values are never echoed (`main.pb.js:1237`). |
-| `counts`       | `dealers`, `posts_24h`, `photo_releases_24h`.                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `generation`   | `aiSuccesses24h`, `basicFallbacks24h`, `fallbackAttempts24h`, `standardTier24h`, `studioTier24h`, `lastSuccessfulAt`, `providerAttempts24h`, `providerFailures24h`, `lastProviderAttemptAt`.                                                                                                                                                                                                                                                             |
-| `recentErrors` | `total24h` plus `topActions` (top 5 client error names, 24h).                                                                                                                                                                                                                                                                                                                                                                                            |
-| `usage`        | 7-day per-dealer rollup from `helpers.generationUsageSummary(7)` (`pb_hooks/helpers.js:1924-2048`): events, succeeded, token totals, image sizes, `videoSeconds`, and `latencyMs.{p50,p95,samples}` (`helpers.js:1987`).                                                                                                                                                                                                                                 |
+| Field          | Contents                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `checks`       | 18 booleans for config presence: `pocketbase`, `gemini_key_set`, `proxy_token_set`, `anthropic_key_set`, `openai_key_set`, `claude_fallback_enabled`, `openai_fallback_enabled`, `admin_login_configured`, `turnstile_enforcement_enabled`, `turnstile_secret_set`, `turnstile_site_key_set`, `turnstile_hostnames_configured`, `trusted_proxy_configured`, `pin_pepper_configured`, `legacy_client_compatibility_enabled`, `off_box_backup_configured`, `off_box_restore_ready`, `website_integration_configured`. Booleans only — values are never echoed (`main.pb.js:1237`). Note `proxy_token_set` is hard-coded `false` and retained only for contract compatibility (`main.pb.js:1239-1242`); a `false` there is not a fault. |
+| `counts`       | `dealers`, `posts_24h`, `photo_releases_24h`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `generation`   | `aiSuccesses24h`, `basicFallbacks24h`, `fallbackAttempts24h`, `standardTier24h`, `studioTier24h`, `lastSuccessfulAt`, `providerAttempts24h`, `providerFailures24h`, `lastProviderAttemptAt`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `recentErrors` | `total24h` plus `topActions` (top 5 client error names, 24h).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `usage`        | 7-day per-dealer rollup from `helpers.generationUsageSummary(7)` (`pb_hooks/helpers.js:1924-2048`): events, succeeded, token totals, image sizes, `videoSeconds`, and `latencyMs.{p50,p95,samples}` (`helpers.js:1987`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 Every one of these blocks is individually wrapped in try/catch so that a missing collection or a
 slow accounting query can never turn a healthy deployment into a failed probe
@@ -226,8 +228,9 @@ If it fails:
   degrading. See §5. You have until 168 hours after `backup.lastVerifiedAt` before this flips
   `ok` to false (`main.pb.js:1010`, `1030-1033`).
 - **Connection timeout on A but not B** — Vercel edge or alias problem. Compare
-  `releaseSha` from both origins; the release workflow asserts they match
-  (`fly-deploy.yml:595-596`).
+  `releaseSha` from both origins; at release time the workflow asserts the Vercel origin's
+  health payload carries the release SHA (`fly-deploy.yml:594-596`), and separately asserts the
+  same for the Fly origin (`fly-deploy.yml:353`).
 - **Both time out** — Fly. Check machines: `flyctl machine list --app dealer-social-post-ai-production`,
   and logs via the manual workflow in §6.3.
 
@@ -341,34 +344,45 @@ Caveats that must be stated with any number:
 - `generation_events` rows are pruned after 14 days by the `prune-client-error-events` cron
   (`main.pb.js:1371-1401`), so a window longer than 14 days cannot be computed from this table.
 - The upstream call itself is bounded at 300s for the Gemini/Veo proxy (`main.pb.js:383`), 120s
-  for the Anthropic and OpenAI fallbacks (`main.pb.js:646`, `764`), and 30s for the image fetch
-  proxy (`main.pb.js:874`). A timeout lands as a failure.
+  for the Anthropic caption fallback (`main.pb.js:764`) and the OpenAI image fallback
+  (`main.pb.js:646`), and 30s for the image fetch proxy (`main.pb.js:874`). A timeout lands as a
+  failure.
 
 > ### Decide and fill in — generation success target
 >
-> | Value               | Recommended default                                         | Reasoning                                                                                                                                                                                                                                                                                                                                                                                                  |
-> | ------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-> | Objective           | **97% of provider attempts succeed, over a rolling 7 days** | The system already treats provider failure as expected, not exceptional: it counts `fallbackAttempts` and `basicFallbacks` as first-class fields (`main.pb.js:1059-1069`) and ships Claude and OpenAI fallback paths behind flags (`main.pb.js:646`, `764`). A target near 100% would be a target on Google's uptime, not on ours. 97% leaves room for upstream flakiness while catching a systemic break. |
-> | Window              | **7 days**                                                  | Long enough to smooth a bursty weekend, comfortably inside the 14-day `generation_events` retention (`main.pb.js:1374-1388`).                                                                                                                                                                                                                                                                              |
-> | Secondary objective | **basic-fallback rate under 5% of posts_24h**               | `basicFallbacks24h` counts posts that shipped with a template caption instead of an AI one (`main.pb.js:1126`, `1137`). Users see this as "the AI stopped working" even while every probe is green.                                                                                                                                                                                                        |
+> | Value               | Recommended default                                         | Reasoning                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+> | ------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+> | Objective           | **97% of provider attempts succeed, over a rolling 7 days** | The system already treats provider failure as expected, not exceptional: it counts `fallbackAttempts` and `basicFallbacks` as first-class fields (`main.pb.js:1059-1069`) and ships Claude and OpenAI fallback paths behind the `ENABLE_CLAUDE_FALLBACK` / `ENABLE_OPENAI_FALLBACK` flags (`main.pb.js:1245-1250`, `.env.example:11-12`). A target near 100% would be a target on Google's uptime, not on ours. 97% leaves room for upstream flakiness while catching a systemic break. |
+> | Window              | **7 days**                                                  | Long enough to smooth a bursty weekend, comfortably inside the 14-day `generation_events` retention (`main.pb.js:1374-1388`).                                                                                                                                                                                                                                                                                                                                                           |
+> | Secondary objective | **basic-fallback rate under 5% of posts_24h**               | `basicFallbacks24h` counts posts that shipped with a template caption instead of an AI one (`main.pb.js:1126`, `1137`). Users see this as "the AI stopped working" even while every probe is green.                                                                                                                                                                                                                                                                                     |
 
 ### 5.3 Latency
 
 Measured as: `usage.dealers[].latencyMs.p50` / `.p95` from the admin health payload
-(`helpers.js:1987`, computed nearest-rank at `helpers.js:2014-2044`), which measures **upstream provider time inside the proxy** — the interval
-around `$http.send` at `main.pb.js:375-388`. It does not include browser render, upload, or
-client-side video polling.
+(`helpers.js:1987`, computed nearest-rank at `helpers.js:2014-2044` via
+`nearestRankPercentile`, `helpers.js:1909-1913`), which measures **upstream provider time inside
+the proxy** — the interval around `$http.send` at `main.pb.js:375-388`. It does not include
+browser render, upload, or client-side video polling.
+
+**Read the `usage.truncated` flag before quoting a percentile.** The latency query returns at
+most `GENERATION_USAGE_SUMMARY_MAX_LATENCY_ROWS` = 5000 rows for the whole window
+(`helpers.js:1907`, `2014-2028`), ordered `dealer ASC, latency_ms ASC`. Once that bound is hit,
+`usage.truncated` is set to `true` (`helpers.js:2026-2028`, rendered by the panel at
+`components/SystemHealthPanel.tsx:749`) and the retained sample is the **fastest** requests of
+the lowest-sorted dealer ids — dealers past the cut-off report `p50`/`p95` of `0` with
+`samples: 0`. A truncated window therefore reads optimistically low. Treat any percentile from a
+window with `truncated: true` as unusable, not as a passing number.
 
 > ### Decide and fill in — latency targets
 >
 > Three separate targets, because three different things happen and the salesperson's patience
 > differs for each.
 >
-> | Path                         | Recommended default                                                                                          | Reasoning                                                                                                                                                                                                                             |
-> | ---------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-> | Health probe                 | **p95 under 1s**                                                                                             | The public payload runs no per-dealer SQL (§2.2) and the machine is kept warm (`fly.toml:14-19`). Anything slower is a signal, and 10s is already the monitor timeout (§3).                                                           |
-> | Caption / image generation   | **p95 under 30s**                                                                                            | Bounded by the 120s fallback proxy timeouts (`main.pb.js:646`, `764`). 30s is the practical ceiling for a person standing beside a car; past that they stop waiting.                                                                  |
-> | Video generation, end to end | **p95 under 120s**, hard failure at the existing 300s client timeout (`services/geminiService.ts:2862-2864`) | `fly.toml:16-18` already prices this: "cold start + Veo 90s = a salesperson watching a spinner for ~100s." 90s is the observed Veo figure the infrastructure was sized around, so 120s at p95 is the honest bound including overhead. |
+> | Path                         | Recommended default                                                                                          | Reasoning                                                                                                                                                                                                                                                                    |
+> | ---------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+> | Health probe                 | **p95 under 1s**                                                                                             | The public payload runs no per-dealer SQL (§2.2) and the machine is kept warm (`fly.toml:14-19`). Anything slower is a signal, and 10s is already the monitor timeout (§3).                                                                                                  |
+> | Caption / image generation   | **p95 under 30s**                                                                                            | The hard ceilings are 300s on the primary Gemini proxy (`main.pb.js:383`) and 120s on the Anthropic/OpenAI fallbacks (`main.pb.js:764`, `646`) — both far past human patience. 30s is the practical ceiling for a person standing beside a car; past that they stop waiting. |
+> | Video generation, end to end | **p95 under 120s**, hard failure at the existing 300s client timeout (`services/geminiService.ts:2862-2864`) | `fly.toml:16-18` already prices this: "cold start + Veo 90s = a salesperson watching a spinner for ~100s." 90s is the observed Veo figure the infrastructure was sized around, so 120s at p95 is the honest bound including overhead.                                        |
 >
 > Also undecided: **whether latency is an SLO at all today.** There is no way to collect these
 > percentiles automatically — they exist only in an admin-gated JSON payload behind a session
@@ -416,7 +430,8 @@ Server side (`pb_hooks/main.pb.js:1319-1366`):
 - Intentionally unauthenticated, because it captures pre-login errors (`:1324-1326`).
 - Rate-limited to **30 events per IP per minute** (`:1327-1332`) and **240 per minute globally**
   (`:1333-1334`); over the global limit it returns 202 and stores nothing.
-- Bodies over **8000 bytes** get 413 (`:1339-1341`).
+- A body whose re-serialized JSON is longer than **8000 characters** gets 413 (`:1338-1341`) —
+  the bound is on `JSON.stringify(body).length`, not on the raw request byte count.
 - Anything not `level === "error"` gets 202 and is discarded (`:1348-1350`).
 - Only an allowlisted envelope is persisted — messages, VINs, names, codes, prompts and
   credentials are dropped server-side even if a tampered client sends them (`:1352-1355`).
@@ -471,8 +486,11 @@ Schedule and shape:
 - `timeout-minutes: 45`, environment `production-backup` (`:19-20`).
 - Concurrency group `production-release-and-backup`, `cancel-in-progress: false` (`:11-13`) —
   it will never race a release.
-- Gated on the environment variable `POCKETBASE_R2_BACKUPS_ENABLED=true`; the job fails loudly
-  if it is not set (`:77-84`).
+- Gated on the GitHub Actions **environment variable** (`vars.`, not a secret)
+  `POCKETBASE_R2_BACKUPS_ENABLED=true` on the `production-backup` environment; the job fails
+  loudly if it is not `true` (`:77-84`). The R2 credentials themselves are separate secrets on
+  the same environment — `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+  plus the `R2_BACKUP_PREFIX` variable (`:104-108`).
 
 What each run proves, in order: it identifies the exact running production source
 (`scripts/resolve-fly-backup-source.mjs`), takes a full backup to private R2 retaining **30**
@@ -513,8 +531,12 @@ If a run failed:
    168 hours (`main.pb.js:1010`).
 3. Re-run it: `gh workflow run pocketbase-backup.yml`, then re-check `backup.status` is
    `verified`.
-4. If the failure is `POCKETBASE_R2_BACKUPS_ENABLED != true`, the R2 credentials for the
-   `production-backup` environment are missing or were removed (`pocketbase-backup.yml:77-84`).
+4. If the failure is `POCKETBASE_R2_BACKUPS_ENABLED != true`, the gate step found the
+   `production-backup` environment **variable** unset or not `true`
+   (`pocketbase-backup.yml:77-84`) — that step checks only the flag, so this failure says
+   nothing either way about whether the R2 secrets are still present. The step's own message
+   ("Set the production-backup environment variable `POCKETBASE_R2_BACKUPS_ENABLED=true` after
+   R2 credentials are configured") is the one to follow.
 
 Recovery procedure itself lives in `docs/production-backups-and-release.md` — this document only
 covers the drill as a _signal_.
@@ -541,9 +563,13 @@ an outage if you have not been told.
 **1. Gemini model-policy expiry — 2026-10-17.**
 `scripts/check-model-policy.mjs:20-25` asserts `policyAgeDays <= 45` against
 `config/gemini-model-policy.json`, whose `verifiedAt` is `2026-09-02`
-(`config/gemini-model-policy.json:4`, mirrored at `pb_hooks/requestPolicies.js:302`). 45 days
-after 2026-09-02 is **2026-10-17**. From that date (00:00 UTC) onward the check fails, CI fails, and because
-`fly-deploy.yml` runs only after CI passes on main, **all deploys stop.** The fix is to
+(`config/gemini-model-policy.json:4`, mirrored at `pb_hooks/requestPolicies.js:302`). The age is
+measured from `2026-09-02T00:00:00Z` (`check-model-policy.mjs:10-11`), and 45 days after that is
+`2026-10-17T00:00:00Z`. The assertion is `<= 45`, so the check fails on **any run after
+2026-10-17T00:00:00Z** — in practice, every CI run on or after 2026-10-17. CI runs it as
+`npm run model-policy:check` (`package.json:31`, `.github/workflows/ci.yml:30`), and because
+`fly-deploy.yml` triggers only on a successful CI run on `main`
+(`.github/workflows/fly-deploy.yml:3-6`, `18-22`), **all deploys stop.** The fix is to
 re-verify Google's live model catalog and refresh `verifiedAt` — not to bump `version`, which is
 pinned at 5 and asserted by `scripts/check-model-policy.mjs:58-62`.
 
@@ -582,7 +608,7 @@ Every claim above was read from these files on 2026-09-10, branch
 - `vercel.ts`
 - `pb_hooks/main.pb.js` (health handler 957-1316; proxy-readiness 945-950; telemetry 1319-1366;
   prune cron 1371-1401; proxy timeouts 383, 646, 764, 874)
-- `pb_hooks/helpers.js` (17, 30-33, 1616-1631, 1802-1809, 1924-2048, 2050-2072)
+- `pb_hooks/helpers.js` (17, 30-33, 1616-1631, 1906-1913, 1924-2048, 2050-2072)
 - `pb_hooks/requestPolicies.js` (298-313, 478-480)
 - `config/gemini-model-policy.json`
 - `scripts/check-model-policy.mjs`
@@ -590,9 +616,10 @@ Every claim above was read from these files on 2026-09-10, branch
 - `utils/telemetry.ts`
 - `components/SystemHealthPanel.tsx`
 - `services/geminiService.ts` (2862-2864, 2993)
-- `.github/workflows/ci.yml` (health assertions 168-169)
-- `.github/workflows/fly-deploy.yml` (readiness 335-362; origins 413-414; staged/live checks
-  560-596)
+- `package.json` (scripts block — `model-policy:check` at 31)
+- `.github/workflows/ci.yml` (model-policy gate 30; health assertions 168-169)
+- `.github/workflows/fly-deploy.yml` (trigger 3-6 and 18-22; readiness 335-362; origins 413-414;
+  staged/live checks 560-596)
 - `.github/workflows/pocketbase-backup.yml`
 - `.github/workflows/fetch-fly-logs.yml`
 - `.env.example` (secret names only)

@@ -15,7 +15,7 @@ files in this repository — nothing here is recalled or assumed):
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `.github/workflows/fly-deploy.yml`        | required Fly secret names (L258-L268), GitHub `production` / `production-backup` environments, `flyctl secrets set --stage` form (L326), Vercel release job |
 | `.github/workflows/pocketbase-backup.yml` | backup environment secrets, schedule `17 7 * * *` (L5), `flyctl secrets set` form (L165)                                                                    |
-| `pb_hooks/helpers.js`                     | `SALESPERSON_PIN_PEPPER` (L353, L371, L442), admin provisioning (L243-L326), proxy trust (L1620), Turnstile verify (L2787)                                  |
+| `pb_hooks/helpers.js`                     | `SALESPERSON_PIN_PEPPER` (L353, L371, L440), admin provisioning (L243-L326), proxy trust (L1620), Turnstile verify (L2787)                                  |
 | `pb_hooks/main.pb.js`                     | provider keys (L57, L590, L708), readiness checks (L1238-L1316), `rotate-pin` route (L4850)                                                                 |
 | `pb_hooks/websitePublications.js`         | Customer Hub config + HMAC (L279-L341, L1717-L1990)                                                                                                         |
 | `pb_hooks/walkarounds.js`                 | Walkaround Studio broker/worker credentials (L89, L384-L419, L1782-L1990)                                                                                   |
@@ -30,9 +30,13 @@ files in this repository — nothing here is recalled or assumed):
 
 Two commands below come from CLI help on the operator machine rather than from a repo file,
 and are marked inline where they appear: `gh secret set … --env` (verified with
-`gh secret set --help`) and the `flyctl tokens …` family (verified with
-`flyctl tokens create --help`, `flyctl tokens list --help`, `flyctl tokens revoke --help`).
-The repo contains no invocation of either.
+`gh secret set --help`, gh 2.92.0) and the `flyctl tokens …` family (verified with
+`flyctl tokens create deploy --help`, `flyctl tokens list --help`,
+`flyctl tokens revoke --help`, flyctl v0.4.83). The repo contains no invocation of either.
+Note the version skew: CI pins flyctl `0.4.71` (`fly-deploy.yml` L228,
+`pocketbase-backup.yml` L32) while these flags were read from the newer local binary. The
+flags used here also exist in the repo's own `flyctl secrets` calls, but re-check
+`--help` if a `tokens` subcommand behaves unexpectedly.
 
 ---
 
@@ -71,7 +75,7 @@ The repo contains no invocation of either.
      https://dealer-social-post-ai-production.fly.dev/api/app/health
    ```
 
-   `pb_hooks/main.pb.js` L1300-L1316 makes `ok:false` (HTTP 503) whenever
+   `pb_hooks/main.pb.js` L1296-L1316 makes `ok:false` (HTTP 503) whenever
    `gemini_key_set`, `admin_login_configured`, `trusted_proxy_configured`,
    `pin_pepper_configured`, `turnstile_secret_set`, `turnstile_site_key_set`,
    `turnstile_hostnames_configured`, `off_box_restore_ready`, or
@@ -92,18 +96,18 @@ The repo contains no invocation of either.
 `fly-deploy.yml` L258-L268 lists exactly ten names. If any is missing from
 `flyctl secrets list`, **the production deploy job fails before it deploys**.
 
-| Secret                        | Protects                                                                                              | Set in                            | Owner                            | Blast radius on rotation                                                                                                                                       |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SALESPERSON_PIN_PEPPER`      | HMAC key for every stored salesperson access code (`helpers.js` L371-L380)                            | Fly                               | Super admin (Joe)                | **IRREVERSIBLE.** Every stored access code stops working. Existing sessions survive. See §3.                                                                   |
-| `ADMIN_LOGIN_PASSWORD`        | System-administrator sign-in                                                                          | Fly                               | Super admin                      | Invalidates outstanding admin sessions (token key changes). Already documented — see §4.                                                                       |
-| `ADMIN_LOGIN_USERNAME`        | System-administrator identity                                                                         | Fly                               | Super admin                      | Renames the single admin account at boot (`helpers.js` L292-L301). Sessions survive a username-only change; the old username stops authenticating.             |
-| `GEMINI_API_KEY`              | All primary caption/image/video generation (`main.pb.js` L57)                                         | Fly                               | Super admin                      | Restart kills in-flight generations. Zero-downtime is impossible on one machine; do it off-hours.                                                              |
-| `TURNSTILE_SECRET`            | Cloudflare Turnstile siteverify (`helpers.js` L2787)                                                  | Fly                               | Super admin                      | **Coordinated frontend+backend.** Paired with the public site key. Rotating one alone breaks challenged logins. See §5.                                        |
-| `VERCEL_TO_FLY_PROXY_SECRET`  | Authenticates Vercel's `/api` rewrite to Fly (`vercel.ts` L67, `helpers.js` L1620-L1631)              | Fly **and** Vercel                | Super admin                      | **Coordinated, and Vercel needs a redeploy.** See §6. Already documented — link below.                                                                         |
-| `CUSTOMER_HUB_SECRET`         | HMAC signing of Customer Hub draft handoffs (`websitePublications.js` L312, L1717-L1721, L1973-L1985) | Fly **and** the Customer Hub site | Super admin + Customer Hub owner | **Coordinated with an external system.** Mismatch = every publish attempt fails signature. Must be 32-512 chars, trimmed (`websitePublications.js` L318-L319). |
-| `CUSTOMER_HUB_URL`            | Destination origin (must be `https`, or loopback)                                                     | Fly                               | Super admin                      | Not a credential, but a wrong value silently disables the destination (`websitePublications.js` L287-L307).                                                    |
-| `CUSTOMER_HUB_DESTINATION_ID` | Destination identifier, `^[a-z0-9][a-z0-9_-]{0,79}$`                                                  | Fly                               | Super admin                      | Not a credential. Invalid value falls back to `joe_customer_hub`.                                                                                              |
-| `CUSTOMER_HUB_DEALER_ID`      | Single-tenant guard: only this dealer may publish (`websitePublications.js` L314, L326-L336)          | Fly                               | Super admin                      | Not a credential. Wrong value disables the integration and fails `website_integration_configured` readiness.                                                   |
+| Secret                        | Protects                                                                                              | Set in                            | Owner                            | Blast radius on rotation                                                                                                                                        |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SALESPERSON_PIN_PEPPER`      | HMAC key for every stored salesperson access code (`helpers.js` L371-L380)                            | Fly                               | Super admin (Joe)                | **IRREVERSIBLE.** Every stored access code stops working. Existing sessions survive. See §3.                                                                    |
+| `ADMIN_LOGIN_PASSWORD`        | System-administrator sign-in                                                                          | Fly                               | Super admin                      | Invalidates outstanding admin sessions (token key changes). Already documented — see §4.                                                                        |
+| `ADMIN_LOGIN_USERNAME`        | System-administrator identity                                                                         | Fly                               | Super admin                      | Renames the single admin account at boot (`helpers.js` L292-L301). **Assume admin sessions are invalidated too** — that branch re-applies the password. See §4. |
+| `GEMINI_API_KEY`              | All primary caption/image/video generation (`main.pb.js` L57)                                         | Fly                               | Super admin                      | Restart kills in-flight generations. Zero-downtime is impossible on one machine; do it off-hours.                                                               |
+| `TURNSTILE_SECRET`            | Cloudflare Turnstile siteverify (`helpers.js` L2787)                                                  | Fly                               | Super admin                      | **Coordinated frontend+backend.** Paired with the public site key. Rotating one alone breaks challenged logins. See §5.                                         |
+| `VERCEL_TO_FLY_PROXY_SECRET`  | Authenticates Vercel's `/api` rewrite to Fly (`vercel.ts` L67, `helpers.js` L1620-L1631)              | Fly **and** Vercel                | Super admin                      | **Coordinated, and Vercel needs a redeploy.** See §6. Already documented — link below.                                                                          |
+| `CUSTOMER_HUB_SECRET`         | HMAC signing of Customer Hub draft handoffs (`websitePublications.js` L312, L1717-L1721, L1973-L1985) | Fly **and** the Customer Hub site | Super admin + Customer Hub owner | **Coordinated with an external system.** Mismatch = every publish attempt fails signature. Must be 32-512 chars, trimmed (`websitePublications.js` L318-L319).  |
+| `CUSTOMER_HUB_URL`            | Destination origin (must be `https`, or loopback)                                                     | Fly                               | Super admin                      | Not a credential, but a wrong value silently disables the destination (`websitePublications.js` L287-L307).                                                     |
+| `CUSTOMER_HUB_DESTINATION_ID` | Destination identifier, `^[a-z0-9][a-z0-9_-]{0,79}$`                                                  | Fly                               | Super admin                      | Not a credential. Invalid value falls back to `joe_customer_hub`.                                                                                               |
+| `CUSTOMER_HUB_DEALER_ID`      | Single-tenant guard: only this dealer may publish (`websitePublications.js` L314, L320-L330)          | Fly                               | Super admin                      | Not a credential. Wrong value disables the integration and fails `website_integration_configured` readiness.                                                    |
 
 ### 1b. Fly runtime secrets — optional / feature-gated
 
@@ -211,7 +215,7 @@ Use this for `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and the
    ```
 
    Expect HTTP 200 with `"ok":true`. A 503 means one of the readiness-critical checks in
-   `main.pb.js` L1300-L1316 is failing.
+   `main.pb.js` L1296-L1316 is failing.
 
 5. Generate one real post end to end in the app before revoking the old credential.
 
@@ -226,7 +230,7 @@ Re-run step 2 with the value pasted from the provider console rather than retype
 readiness stays red, restore the old value the same way — you did not revoke it in step 1.
 
 **If the machine will not come back**, capture diagnostics the way the workflow does
-(`fly-deploy.yml` L385-L391):
+(`fly-deploy.yml` L384-L391):
 
 ```bash
 flyctl status --app dealer-social-post-ai-production
@@ -279,7 +283,7 @@ revealed." There is no path back to the original digits.
   they are locked out with no self-service recovery.
 - **Nobody can be created or re-activated either**, because `personPinHash` is on the write
   path for create (`main.pb.js` L4433) and update (L4561).
-- There _is_ a legacy plaintext fallback at `helpers.js` L1267-L1276, but it only matches
+- There _is_ a legacy plaintext fallback at `helpers.js` L1267-L1284, but it only matches
   rows a bootstrap sweep has not yet converted. On a healthy production database it matches
   nothing, so do not count on it.
 
@@ -353,7 +357,8 @@ into a password manager before step 3. Once it is gone, it is gone.
 
 **If step 5 fails partway through**, people whose code you already rotated have a working
 new code and people you have not reached yet are locked out. Finish the list. `main.pb.js`
-L4880 sets `pin_needs_distribution = true` on each rotated person, so the manager UI can
+L4883 sets `pin_needs_distribution = true` on each rotated person (L4880 is the
+session revocation), so the manager UI can
 show you who still needs their code handed over.
 
 ---
@@ -373,7 +378,16 @@ Facts worth knowing before you follow it:
   outstanding admin sessions on its own (`helpers.js` L317-L322). The `DELETE FROM sessions`
   step in the linked procedure just makes it immediate.
 - Changing **only** the username renames the single existing account
-  (`helpers.js` L292-L301) and does not invalidate sessions.
+  (`helpers.js` L292-L301). Plan for it to log administrators out as well: that branch
+  calls `setUsername(username)` **and** `setPassword(password)` (L296-L297), and admin
+  sessions are bound to the account's token key (`helpers.js` L187-L198 and L518-L531
+  derive the session fingerprint from `tokenKey`; L697-L732 rejects a session whose
+  fingerprint no longer matches). The repo's own comment at L318-L322 states the token key
+  changes with the password. Whether PocketBase 0.22 refreshes the token key when
+  `setPassword` is handed the _unchanged_ password is a PocketBase-internals question this
+  repository does not answer — so treat a username rename as session-invalidating until
+  someone verifies otherwise on a staging instance. Have the new username and the current
+  password to hand before you do it.
 - Constraints are enforced and a bad value is silently ignored with an error log
   (`helpers.js` L266-L273): username 3-32 chars starting with a letter, password 8-128
   characters.
@@ -408,7 +422,7 @@ The four places the pair lives, all read out of the workflows:
    actually contain it (L339-L341).
 
 Every official Cloudflare test key is rejected on Fly and in both release paths
-(`fly-deploy.yml` L169-L175, L294-L299; `vercel-staged-release.sh` L317-L328).
+(`fly-deploy.yml` L176-L181, L296-L301; `vercel-staged-release.sh` L317-L328).
 
 ### Order of operations
 
@@ -428,7 +442,7 @@ site key the backend cannot verify.
    ```
 
    Note this only affects the _next_ deploy, since the value reaches Fly through
-   `fly-deploy.yml` L329. To change it now, stage it directly on Fly with the same
+   `fly-deploy.yml` L330. To change it now, stage it directly on Fly with the same
    `flyctl secrets import` pattern.
 
 3. Install the new secret on Fly:
@@ -573,7 +587,7 @@ and everything for automation.
 3. Prove it works **before** revoking the old one. Run the backup workflow manually
    (`pocketbase-backup.yml` L6 allows `workflow_dispatch`) — its "Identify the exact running
    production source" step is the first thing that authenticates to Fly
-   (`pocketbase-backup.yml` L33-L37). Wait for green.
+   (`pocketbase-backup.yml` L34-L45). Wait for green.
 
 4. Revoke the old token (verified: `flyctl tokens list --help`, `flyctl tokens revoke --help`):
 
@@ -628,7 +642,7 @@ only starts PocketBase.
 
 **Do this in that order, and verify the same day.** Between step 1 and a green step 3, the
 nightly drill fails — and `backup-gate` failing blocks **every production deploy**
-(`fly-deploy.yml` L215-L218: `deploy` runs only `if: needs.backup-gate.result == 'success'`).
+(`fly-deploy.yml` L217: `deploy` runs only `if: needs.backup-gate.result == 'success'`).
 
 ### R2 credentials (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT`, `R2_BUCKET`)
 
@@ -653,7 +667,15 @@ Same shape as above, all in `production-backup`.
 
 3. Run the backup workflow manually. It creates a backup, downloads that exact object key,
    verifies the manifest, and restores it into a disposable container — so one green run
-   proves list, read, write, and delete all work.
+   proves **list, read, and write**.
+
+   It does **not** reliably prove delete. `pruneOldBackups`
+   (`pocketbase-r2-backup.mjs` L384-L394) issues deletes only for keys past
+   `BACKUP_RETENTION = 30` (L16), so on a bucket holding 30 or fewer tool-owned archives a
+   green run never calls delete. Confirm the delete permission in the Cloudflare R2 token's
+   own scope screen instead of inferring it from a green run; a credential missing delete
+   will pass every drill and then start failing once the 31st archive exists.
+
 4. Only then delete the old R2 credential. The bucket retains 30 archives
    (`pocketbase-r2-backup.mjs` L16); the new credential must be able to read the older ones
    for a recovery, so confirm it is scoped to the whole bucket, not to a prefix narrower
@@ -677,17 +699,45 @@ curl --silent --show-error --fail --max-time 20 \
 curl --silent --show-error --max-time 20 \
   https://dealer-social-post-ai.vercel.app/api/app/proxy-readiness
 
-# 3. All ten required Fly secret names still present
-flyctl secrets list --app dealer-social-post-ai-production --json
+# 3. All ten required Fly secret names still present.
+#    The flyctl call only dumps names; this reproduces the deploy gate's own
+#    comparison so you get a verdict instead of a wall of JSON.
+flyctl secrets list --app dealer-social-post-ai-production --json > /tmp/fly-secret-names.json
+node <<'NODE'
+const fs = require("node:fs");
+const secrets = JSON.parse(fs.readFileSync("/tmp/fly-secret-names.json", "utf8"));
+const names = new Set(
+  (Array.isArray(secrets) ? secrets : []).map((entry) =>
+    String(entry.Name || entry.name || ""),
+  ),
+);
+const required = [
+  "ADMIN_LOGIN_USERNAME",
+  "ADMIN_LOGIN_PASSWORD",
+  "SALESPERSON_PIN_PEPPER",
+  "GEMINI_API_KEY",
+  "TURNSTILE_SECRET",
+  "VERCEL_TO_FLY_PROXY_SECRET",
+  "CUSTOMER_HUB_URL",
+  "CUSTOMER_HUB_SECRET",
+  "CUSTOMER_HUB_DESTINATION_ID",
+  "CUSTOMER_HUB_DEALER_ID",
+];
+const missing = required.filter((name) => !names.has(name));
+console.log(missing.length ? `MISSING: ${missing.join(", ")}` : "All ten present.");
+NODE
 
 # 4. Live origin serves the release it claims to
 npm run release:vercel:assert-live -- \
   https://dealer-social-post-ai.vercel.app .vercel/output/static "$(git rev-parse HEAD)"
 ```
 
-Command 3 is the exact gate at `fly-deploy.yml` L248; the ten required names are at L258-L268.
-Command 4 is documented at `docs/production-backups-and-release.md` L114-L121 and requires a
-local `.vercel/output/static` built for that SHA.
+Command 3 is the gate at `fly-deploy.yml` L244-L277 — the `flyctl` call is L248, the ten
+required names are L258-L268, and the comparison above is L270-L276 with its `process.exit(1)`
+replaced by a printed verdict. Command 4 runs the `release:vercel:assert-live` script in
+`package.json` (`node scripts/vercel-live-bundle-assert.mjs --assert-live-bundle`), is
+documented at `docs/production-backups-and-release.md` L114-L121, and requires a local
+`.vercel/output/static` built for that SHA.
 
 Then, by hand:
 
