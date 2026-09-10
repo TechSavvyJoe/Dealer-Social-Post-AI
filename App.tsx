@@ -77,6 +77,26 @@ export class PanelErrorBoundary extends ErrorBoundary {
   }
 }
 
+/**
+ * True from the first time `open` goes true, and never false again.
+ *
+ * A React.lazy component starts its dynamic import when it first renders, not
+ * when it becomes visible. Rendering the Settings and Photo-review modals
+ * unconditionally with isOpen={false} therefore pulled SettingsModal,
+ * ImageCropModal, mediaSave, imageUtils and their icon chunks on the
+ * unauthenticated login screen — verified in the production network log. Gating
+ * on this latch defers those chunks until the panel is actually opened, while
+ * still leaving the component mounted afterwards so its close animation runs
+ * and a second open is instant.
+ */
+const useMountedOnce = (open: boolean): boolean => {
+  const [mounted, setMounted] = React.useState(open);
+  React.useEffect(() => {
+    if (open) setMounted(true);
+  }, [open]);
+  return mounted || open;
+};
+
 // Lazy load heavyweight modals
 const LazySettingsModal = React.lazy(() =>
   import("./components/SettingsModal").then((mod) => ({
@@ -140,6 +160,10 @@ const AppContent: React.FC = () => {
     generateCaptionVariant,
   } = useAppController();
 
+  // Defer the heavyweight panel chunks until each panel is first opened.
+  const settingsEverOpened = useMountedOnce(isSettingsOpen);
+  const cropEverOpened = useMountedOnce(cropModalOpen);
+  const historyEverOpened = useMountedOnce(isHistoryOpen);
   // Must run before any conditional return — React requires a stable hook order.
   const isImpersonating = useAppStore((s) => s.isImpersonating);
   const currentPerson = useAppStore((s) => s.currentPerson);
@@ -373,30 +397,34 @@ const AppContent: React.FC = () => {
         onDismiss={() => setIsSettingsOpen(false)}
       >
         <Suspense fallback={null}>
-          <LazySettingsModal
-            isOpen={isSettingsOpen}
-            onClose={() => setIsSettingsOpen(false)}
-            imageQualityTier={imageQualityTier}
-            theme={theme}
-            onImageQualityTierChange={(value) =>
-              setPreferences({ imageQualityTier: value })
-            }
-            onThemeChange={(value) => setPreferences({ theme: value })}
-          />
+          {settingsEverOpened && (
+            <LazySettingsModal
+              isOpen={isSettingsOpen}
+              onClose={() => setIsSettingsOpen(false)}
+              imageQualityTier={imageQualityTier}
+              theme={theme}
+              onImageQualityTierChange={(value) =>
+                setPreferences({ imageQualityTier: value })
+              }
+              onThemeChange={(value) => setPreferences({ theme: value })}
+            />
+          )}
         </Suspense>
       </PanelErrorBoundary>
 
       <PanelErrorBoundary panelName="Photo review" onDismiss={handleCropClose}>
         <Suspense fallback={null}>
-          <LazyImageCropModal
-            isOpen={cropModalOpen}
-            onClose={handleCropClose}
-            imageSrc={tempImageForCrop}
-            originalSource={tempOriginalForBackup}
-            originalFilename={tempOriginalFilename}
-            onConfirm={handleCropConfirm}
-            originalBackupStatus={originalBackupStatus}
-          />
+          {cropEverOpened && (
+            <LazyImageCropModal
+              isOpen={cropModalOpen}
+              onClose={handleCropClose}
+              imageSrc={tempImageForCrop}
+              originalSource={tempOriginalForBackup}
+              originalFilename={tempOriginalFilename}
+              onConfirm={handleCropConfirm}
+              originalBackupStatus={originalBackupStatus}
+            />
+          )}
         </Suspense>
       </PanelErrorBoundary>
 
@@ -422,7 +450,9 @@ const AppContent: React.FC = () => {
               </div>
             }
           >
-            <LazyPostHistory onOpenCreative={() => setIsHistoryOpen(false)} />
+            {historyEverOpened && (
+              <LazyPostHistory onOpenCreative={() => setIsHistoryOpen(false)} />
+            )}
           </Suspense>
         </PanelErrorBoundary>
       </Modal>
