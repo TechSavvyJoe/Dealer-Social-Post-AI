@@ -301,11 +301,19 @@ const ActionTile: React.FC<{
       ) : (
         <Icon className={cn("w-4 h-4 shrink-0", iconClassName)} />
       )}
-      {/* These tiles sit in a 3-column grid on phones. Below ~400px each column
-          is too narrow for a two-word label, and `truncate` rendered "Video",
-          "Fun mode" and "Schedule" as "Vi…", "Fu…" and "Sc…". An icon-only tile
-          with the name on aria-label and the Tooltip reads better than two
-          characters, and stays legible down to the 280px fold width. */}
+      {/* These tiles sit in a 3-column grid on phones, and `truncate` rendered
+          "Video", "Fun mode" and "Schedule" as "Vi…", "Fu…" and "Sc…". An
+          icon-only tile with the name on aria-label and the Tooltip reads
+          better than two characters.
+
+          The 400px cutoff is verified against a real 390px render, not a model
+          of the grid. A synthetic 3-column row suggests the labels fit from
+          375px up, which is wrong: this grid shares its row with the "More"
+          control (~85px), so each column gets roughly (390 - 32 - 85 - 12) / 3
+          = 87px, leaving ~37px for a label that needs 58px. Lowering the cutoff
+          to 375px brought the "Vi…/Fu…/Sc…" truncation straight back at 390px.
+          If this row is ever given its full width, re-measure before raising
+          the cutoff. */}
       <span className="truncate max-[399px]:hidden">{label}</span>
     </m.button>
   );
