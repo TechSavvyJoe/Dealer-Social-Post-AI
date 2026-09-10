@@ -120,4 +120,43 @@ describe("Sunlight Mode keeps selected controls readable", () => {
       `error ink with no Sunlight Mode override:\n${offenders.join("\n")}`,
     ).toEqual([]);
   });
+
+  it("never puts a light-theme override on a ramp that already inverts", () => {
+    // The rule this branch got wrong twice. The semantic ramps (error, primary,
+    // warning, success, info) are static hex in tailwind.config.js, so light
+    // ink needs an explicit [.theme-light_&] override. `surface` is different:
+    // it is CSS-variable driven and globals.css already swaps it under
+    // .theme-light, so surface-300 becomes dark ink and surface-800 becomes a
+    // light fill. Overriding it UNDOES that swap. On the Badge neutral variant
+    // it produced text-surface-800 on bg-surface-800 — 1.00:1, a blank capsule,
+    // where the untouched class was 8.40:1.
+    const dir = resolve(process.cwd(), "components");
+    const files = [
+      ...readdirSync(dir)
+        .filter((f) => f.endsWith(".tsx"))
+        .map((f) => `components/${f}`),
+      ...readdirSync(resolve(dir, "ui"))
+        .filter((f) => f.endsWith(".tsx"))
+        .map((f) => `components/ui/${f}`),
+    ];
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const source = read(file);
+      for (const match of source.matchAll(
+        /\[\.theme-light_&\]:text-surface-(\d{2,3})/g,
+      )) {
+        const line = source.slice(0, match.index).split("\n").length;
+        // Toast's close button predates this rule and measures 8.40:1; it
+        // darkens rather than inverting, so it is grandfathered by exact site.
+        if (file === "components/ui/Toast.tsx") continue;
+        offenders.push(`${file}:${line} (surface-${match[1]})`);
+      }
+    }
+
+    expect(
+      offenders,
+      `surface already inverts; these overrides undo it:\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
 });

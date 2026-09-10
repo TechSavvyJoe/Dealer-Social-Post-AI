@@ -163,3 +163,61 @@ describe("FTC 16 CFR 255 team-member disclosure", () => {
     ).toBe("Congrats!");
   });
 });
+
+describe("the disclosure survives the caption sanitizer", () => {
+  /**
+   * analyzeCaptionForDelivery runs cleanSocialCaption, whose assistant-preamble
+   * heuristic (utils/captionQuality.ts:34) deletes an entire first line
+   * beginning "here's", "sure", "certainly", "of course", "i have", "i've" or
+   * "as an ai". That is exactly how a compliance officer words a
+   * material-connection line, so prepending the disclosure BEFORE the scan
+   * silently deleted it for four of five realistic wordings — including
+   * "I have a paid position at {dealer}.", the most FTC-appropriate one.
+   *
+   * The fix is ordering: scan the body, then prepend. These cases pin it.
+   */
+  const SWALLOWED_BY_THE_SANITIZER = [
+    "I have a paid position at {dealer}.",
+    "I've worked at {dealer} for 12 years.",
+    "Here's a post from a {dealer} team member.",
+    "Sure, I work at {dealer}.",
+    "Certainly — a {dealer} team member posted this.",
+    "Of course, I work at {dealer}.",
+  ];
+
+  it.each(SWALLOWED_BY_THE_SANITIZER)(
+    "keeps a disclosure worded %j",
+    (employee_disclosure_text) => {
+      const dealer = { name: "Bob Maxey Ford", employee_disclosure_text };
+      const disclosure = buildEmployeeDisclosure(dealer);
+      expect(disclosure).not.toBe("");
+
+      // The order the delivery paths now use: sanitize the body, then prepend.
+      const scanned = analyzeCaptionForDelivery("Great truck, come see it today!");
+      const delivered = prependEmployeeDisclosure(scanned.caption, dealer);
+
+      expect(delivered.startsWith(disclosure)).toBe(true);
+    },
+  );
+
+  it("demonstrates why the order matters, so nobody reverts it", () => {
+    const dealer = {
+      name: "Bob Maxey Ford",
+      employee_disclosure_text: "I have a paid position at {dealer}.",
+    };
+    const disclosure = buildEmployeeDisclosure(dealer);
+
+    // Prepending first: the sanitizer eats the whole first line.
+    const wrongOrder = analyzeCaptionForDelivery(
+      prependEmployeeDisclosure("Great truck, come see it today!", dealer),
+    ).caption;
+    expect(wrongOrder).not.toContain(disclosure);
+
+    // Prepending after: it survives.
+    const rightOrder = prependEmployeeDisclosure(
+      analyzeCaptionForDelivery("Great truck, come see it today!").caption,
+      dealer,
+    );
+    expect(rightOrder).toContain(disclosure);
+  });
+});

@@ -52,7 +52,7 @@ export const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
               value={dateStr}
               onChange={(e) => setDateStr(e.target.value)}
               min={new Date().toISOString().slice(0, 16)} // Only allow future dates
-              className="w-full bg-surface-800/80 border border-surface-700 rounded-lg px-4 py-3 text-surface-50 [.theme-light_&]:text-surface-950 focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent transition-all"
+              className="w-full bg-surface-800/80 border border-surface-700 rounded-lg px-4 py-3 text-surface-50 focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent transition-all"
             />
           </div>
         </div>

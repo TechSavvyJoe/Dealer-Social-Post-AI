@@ -22,8 +22,12 @@ const variantStyles: Record<Variant, string> = {
   error:
     "bg-error-500/15 text-error-300 border border-error-500/30 [.theme-light_&]:text-error-800",
   info: "bg-info-500/15 text-info-300 border border-info-500/30 [.theme-light_&]:text-info-800",
-  neutral:
-    "bg-surface-800 text-surface-300 border border-surface-700 [.theme-light_&]:text-surface-800",
+  // No light-theme override here on purpose. Unlike the semantic ramps above,
+  // which are static hex, `surface` is CSS-variable driven and already inverts
+  // under .theme-light (globals.css): surface-300 becomes dark ink and
+  // surface-800 becomes a light fill. Adding an override made foreground and
+  // background the same token — 1.00:1, a blank capsule.
+  neutral: "bg-surface-800 text-surface-300 border border-surface-700",
 };
 
 const sizeStyles: Record<Size, string> = {

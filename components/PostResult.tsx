@@ -2026,14 +2026,18 @@ export const PostResult: React.FC<PostResultProps> = ({
       // Active platform: use live editor text (includes in-progress edits)
       const base = id === activeCaptionPlatform ? editedText.trim() : cap?.trim();
       if (!base) continue;
-      // The FTC team-member disclosure leads the caption; the dealership
-      // mention trails it. Both are applied before the compliance scan so the
-      // scanned text is exactly what the destination receives.
-      const attributed = prependEmployeeDisclosure(
-        appendDealershipMention(base, id, currentDealer),
-        currentDealer,
-      );
-      const prepared = analyzeCaptionForDelivery(attributed, bannedPhrases);
+      // The disclosure is applied AFTER the compliance/normalisation pass, never
+      // before. analyzeCaptionForDelivery runs cleanSocialCaption, whose
+      // assistant-preamble heuristic drops an entire first line starting with
+      // "I have", "I've", "Here's" or "Sure" — exactly how a compliance officer
+      // words a material-connection line. Prepending first silently deleted the
+      // disclosure for four of five realistic wordings.
+      const attributed = appendDealershipMention(base, id, currentDealer);
+      const scanned = analyzeCaptionForDelivery(attributed, bannedPhrases);
+      const prepared = {
+        ...scanned,
+        caption: prependEmployeeDisclosure(scanned.caption, currentDealer),
+      };
       const identitySafe = customerIdentityIsSafe(prepared.caption);
       out[id] = {
         text: prepared.caption,
@@ -2134,19 +2138,19 @@ export const PostResult: React.FC<PostResultProps> = ({
     let success = false;
     const copyDestinationId =
       activeCaptionPlatform || selectedDelivery?.destinationId || post.platformIds?.[0];
-    const attributedCaption = prependEmployeeDisclosure(
-      copyDestinationId
-        ? appendDealershipMention(editedText, copyDestinationId, currentDealer)
-        : editedText,
-      currentDealer,
-    );
+    const attributedCaption = copyDestinationId
+      ? appendDealershipMention(editedText, copyDestinationId, currentDealer)
+      : editedText;
     const preparedCopy = analyzeCaptionForDelivery(attributedCaption, bannedPhrases);
     if (preparedCopy.compliance.prohibited.length > 0) {
       toast.warning(prohibitedClaimsMessage(preparedCopy.compliance.prohibited));
       return;
     }
+    // Prepend after the scan (see the note in sharePlatformCaptions). This path
+    // pastes straight into Facebook and has no budget fitter behind it, so a
+    // disclosure lost here is simply absent from the published post.
     const textToCopy = appendDisclosureText(
-      preparedCopy.caption,
+      prependEmployeeDisclosure(preparedCopy.caption, currentDealer),
       preparedCopy.disclosures,
     );
     if (navigator.clipboard) {
@@ -2202,7 +2206,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     // is never mislabeled as an exact Facebook/Instagram/Google deliverable.
     setFocusedShareDeliveryId("native_share:manual");
     setFocusedShareContent({
-      text: prependEmployeeDisclosure(editedText, currentDealer),
+      text: editedText,
       disclosures: activeDisclosures || undefined,
       requiredPrefix: employeeDisclosure || undefined,
       videoUrl,
@@ -2625,8 +2629,11 @@ export const PostResult: React.FC<PostResultProps> = ({
       typeof captionVariant === "string"
         ? captionVariant
         : captionVariant?.text || editedText;
-    const caption = prependEmployeeDisclosure(
-      appendDealershipMention(baseCaption, delivery.destinationId, currentDealer),
+    // Body only. requiredPrefix on the PublishContent below carries the
+    // disclosure, so it never passes through the sanitizer.
+    const caption = appendDealershipMention(
+      baseCaption,
+      delivery.destinationId,
       currentDealer,
     );
     const disclosures =
@@ -2649,8 +2656,7 @@ export const PostResult: React.FC<PostResultProps> = ({
 
     setFocusedShareDeliveryId(delivery.id);
     setFocusedShareContent({
-      // `caption` already leads with the disclosure (prependEmployeeDisclosure
-      // above); requiredPrefix marks it protected for the budget fitter.
+      // Body only; requiredPrefix carries the disclosure into the fitter.
       text: caption,
       disclosures,
       requiredPrefix: employeeDisclosure || undefined,
@@ -3525,7 +3531,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         }
         content={
           focusedShareContent || {
-            text: prependEmployeeDisclosure(editedText, currentDealer),
+            text: editedText,
             disclosures: activeDisclosures || undefined,
             requiredPrefix: employeeDisclosure || undefined,
             imageDataUrl: post.image,

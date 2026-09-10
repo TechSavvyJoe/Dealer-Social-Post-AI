@@ -506,14 +506,15 @@ export const fitPublishCaptionToBudget = (
   const withoutFooter = (
     legacyMarkerIndex >= 0 ? content.text.slice(0, legacyMarkerIndex) : content.text
   ).trim();
-  // The team-member disclosure is usually already prepended to `text` by the
-  // delivery path. Split it back off so it is budgeted as a protected prefix
-  // rather than as body the fitter may truncate.
   const requiredPrefix = (content.requiredPrefix || "").trim();
-  const rawBody =
-    requiredPrefix && withoutFooter.startsWith(requiredPrefix)
-      ? withoutFooter.slice(requiredPrefix.length).trim()
-      : withoutFooter;
+  // `text` is the body ALONE: callers no longer prepend the disclosure before
+  // the compliance pass, because cleanSocialCaption's assistant-preamble
+  // heuristic deleted first lines beginning "I have", "I've", "Here's" or
+  // "Sure". An earlier version tried to split the prefix back off with an exact
+  // startsWith, which failed once normalizeCaptionHashtags had rewritten the
+  // text (a disclosure containing "#ad" came back doubled and fused to the
+  // body). withPrefix() below is now the single place the disclosure is added.
+  const rawBody = withoutFooter;
   const trailingMentionMatch = rawBody.match(/(?:^|\n{2,})(@[^\n]{1,100})$/u);
   const dealershipMention = trailingMentionMatch?.[1]?.trim() || "";
   const body = dealershipMention
