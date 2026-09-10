@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_EMPLOYEE_DISCLOSURE_TEMPLATE,
   analyzeCaptionForDelivery,
   analyzeCaptionSetForDelivery,
+  buildEmployeeDisclosure,
   prepareCaptionForDelivery,
+  prependEmployeeDisclosure,
 } from "../utils/complianceDisclosures";
 
 describe("delivery compliance", () => {
@@ -81,5 +84,82 @@ describe("delivery compliance", () => {
     expect(
       result.disclosures.indexOf("Financing subject to credit approval"),
     ).toBeLessThan(result.disclosures.indexOf("Lease offer with approved credit"));
+  });
+});
+
+describe("FTC 16 CFR 255 team-member disclosure", () => {
+  const dealer = { name: "Bob Maxey Ford" };
+
+  it("uses the default template and substitutes the dealership name", () => {
+    expect(buildEmployeeDisclosure(dealer)).toBe(
+      "Posted by a Bob Maxey Ford team member.",
+    );
+    expect(DEFAULT_EMPLOYEE_DISCLOSURE_TEMPLATE).toContain("{dealer}");
+  });
+
+  it("is ON for a dealership that predates the setting", () => {
+    // PocketBase reports an unset bool as false. The field is an opt-OUT, so an
+    // untouched dealership must still get the disclosure; an `enabled` flag
+    // would have silently switched it off for every existing store.
+    expect(buildEmployeeDisclosure({ name: "Lakeside Chevrolet" })).toBe(
+      "Posted by a Lakeside Chevrolet team member.",
+    );
+    expect(
+      buildEmployeeDisclosure({
+        name: "Lakeside Chevrolet",
+        employee_disclosure_disabled: false,
+      }),
+    ).toBe("Posted by a Lakeside Chevrolet team member.");
+  });
+
+  it("returns nothing only when the dealership explicitly opts out", () => {
+    expect(
+      buildEmployeeDisclosure({ ...dealer, employee_disclosure_disabled: true }),
+    ).toBe("");
+    expect(buildEmployeeDisclosure(null)).toBe("");
+    expect(buildEmployeeDisclosure(undefined)).toBe("");
+  });
+
+  it("honors a custom template and substitutes {dealer} case-insensitively", () => {
+    expect(
+      buildEmployeeDisclosure({
+        ...dealer,
+        employee_disclosure_text: "I work at {DEALER}. #ad",
+      }),
+    ).toBe("I work at Bob Maxey Ford. #ad");
+  });
+
+  it("falls back to a readable phrase when the dealership has no name", () => {
+    expect(buildEmployeeDisclosure({ name: "   " })).toBe(
+      "Posted by a our dealership team member.",
+    );
+  });
+
+  it("leads the caption rather than trailing it", () => {
+    const caption = prependEmployeeDisclosure("Congrats on the new truck!", dealer);
+    expect(caption.startsWith("Posted by a Bob Maxey Ford team member.")).toBe(true);
+    expect(caption).toContain("Congrats on the new truck!");
+  });
+
+  it("never stacks on repeated delivery preparation", () => {
+    const once = prependEmployeeDisclosure("Congrats!", dealer);
+    const twice = prependEmployeeDisclosure(once, dealer);
+    const thrice = prependEmployeeDisclosure(twice, dealer);
+    expect(thrice).toBe(once);
+    expect(thrice.match(/team member/g)).toHaveLength(1);
+  });
+
+  it("treats a hand-edited disclosure line as already present", () => {
+    const edited = "posted by a  BOB MAXEY FORD   team member.\n\nCongrats!";
+    expect(prependEmployeeDisclosure(edited, dealer)).toBe(edited.trim());
+  });
+
+  it("leaves the caption untouched when the dealership opted out", () => {
+    expect(
+      prependEmployeeDisclosure("Congrats!", {
+        ...dealer,
+        employee_disclosure_disabled: true,
+      }),
+    ).toBe("Congrats!");
   });
 });

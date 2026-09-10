@@ -568,3 +568,60 @@ describe("person profile fields", () => {
     );
   });
 });
+
+describe("FTC team-member disclosure setting", () => {
+  it("defaults to ON for a dealership that has never touched the setting", () => {
+    renderSettings();
+    expect(screen.getByRole("radio", { name: /add the disclosure/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    // The live preview proves the wording a salesperson's post will carry.
+    expect(screen.getByText(/Preview: Posted by a .* team member\./)).toBeTruthy();
+  });
+
+  it("reads the stored opt-out rather than an enabled flag", () => {
+    // PocketBase reports an unset bool as false, so the column has to be the
+    // opt-OUT. If this ever flips to `..._enabled`, every existing dealership
+    // silently loses its disclosure and this test fails.
+    renderSettings({ ...baseDealer, employee_disclosure_disabled: true });
+    expect(screen.getByRole("radio", { name: /turn it off/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByText(/Preview: No disclosure will be added\./)).toBeTruthy();
+  });
+
+  it("warns before a manager saves an opt-out", () => {
+    renderSettings();
+    fireEvent.click(screen.getByRole("radio", { name: /turn it off/i }));
+    expect(screen.getByRole("alert").textContent).toMatch(
+      /no material-connection disclosure/i,
+    );
+  });
+
+  it("saves the opt-out and custom wording", async () => {
+    const { onSaved } = renderSettings();
+    fireEvent.change(screen.getByLabelText(/wording/i), {
+      target: { value: "I work at {dealer}. #ad" },
+    });
+    const saved = await save(onSaved);
+    expect(saved.employee_disclosure_disabled).toBe(false);
+    expect(saved.employee_disclosure_text).toBe("I work at {dealer}. #ad");
+  });
+
+  it("keeps selected-state pills readable in Sunlight (light) theme", () => {
+    // success-100 / warning-100 ink on a pale tinted fill measures about 1.5:1
+    // in light theme, which made the selected pill render as an empty capsule.
+    renderSettings();
+    for (const name of [/add the disclosure/i, /no approval required/i]) {
+      expect(screen.getByRole("radio", { name }).className).toContain(
+        "[.theme-light_&]:text-success-900",
+      );
+    }
+    fireEvent.click(screen.getByRole("radio", { name: /turn it off/i }));
+    expect(screen.getByRole("radio", { name: /turn it off/i }).className).toContain(
+      "[.theme-light_&]:text-warning-900",
+    );
+  });
+});

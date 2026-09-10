@@ -3005,6 +3005,9 @@ function assertEnum(val, allowedValues) {
 
 const DEALER_TEXT_FIELD_LIMITS = {
   name: 200,
+  // Optional override of the FTC 16 CFR 255 team-member disclosure wording;
+  // must match the max in migration 1751900000.
+  employee_disclosure_text: 280,
   brand_voice: 1500,
   banned_phrases: 1500,
   oem_affiliation: 120,
@@ -3146,6 +3149,9 @@ const DEALER_BOOL_FIELDS = [
   "requires_approval",
   "required_hashtags_locked",
   "creative_system_v2",
+  // Opt-OUT of the FTC team-member disclosure. Unset reads false in
+  // PocketBase, which is the compliant side: the disclosure is applied.
+  "employee_disclosure_disabled",
 ];
 /** Byte caps; must match the json field maxSize in migration 1751500000. */
 const DEALER_JSON_FIELD_LIMITS = {
@@ -3858,6 +3864,8 @@ function serializeDealer(record) {
     image_quality_tier: record.getString("image_quality_tier"),
     // Phase 2 resolver flag. False/unset keeps every legacy creative default.
     creative_system_v2: recordBool(record, "creative_system_v2"),
+    employee_disclosure_text: record.getString("employee_disclosure_text"),
+    employee_disclosure_disabled: recordBool(record, "employee_disclosure_disabled"),
   };
 }
 

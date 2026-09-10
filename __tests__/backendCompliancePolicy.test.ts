@@ -170,4 +170,57 @@ describe("PocketBase post compliance policy", () => {
     expect(hook).toContain("return c.json(400, { error: compliance.error })");
     expect(hook).toContain("return c.json(409, { error: compliance.error })");
   });
+
+  it("wires the team-member disclosure fields through the backend as an opt-out", () => {
+    const helpers = readFileSync(resolve(process.cwd(), "pb_hooks/helpers.js"), "utf8");
+    const migration = readFileSync(
+      resolve(process.cwd(), "pb_migrations/1751900000_employee_disclosure.js"),
+      "utf8",
+    );
+
+    // The column must be the opt-OUT spelling. PocketBase reports an unset bool
+    // as false, so an `..._enabled` field would read false for every dealership
+    // that existed before the deploy and turn the disclosure off for all of them.
+    expect(migration).toContain("employee_disclosure_disabled");
+    expect(migration).not.toContain("employee_disclosure_enabled");
+    expect(helpers).not.toContain("employee_disclosure_enabled");
+
+    // The migration must add fields the way PB 0.22 actually applies them.
+    expect(migration).toContain("schema.getFieldByName(field.name)");
+    expect(migration).toContain("collection.schema.addField(new SchemaField(field))");
+
+    // And it must ROLL BACK for real. `schema = Array.from(schema).filter(...)`
+    // reports "Applied" and leaves the column in place on 0.22 (verified
+    // against 0.22.55 on a copy of production data); removeField takes the
+    // field id. 22 older migrations still carry the broken idiom and are
+    // tracked separately; every new one must use this API.
+    expect(migration).toContain("dealers.schema.removeField(field.id)");
+    // Match the assignment as it appears in code (collection-qualified), so the
+    // migration's own comment naming the broken idiom does not trip this.
+    expect(migration).not.toMatch(/\w+\.schema\s*=\s*Array\.from\(/);
+
+    // Text limit, bool allowlist and serializer all carry the new fields.
+    expect(helpers).toContain("employee_disclosure_text: 280");
+    expect(helpers).toContain('"employee_disclosure_disabled",');
+    expect(helpers).toContain(
+      'employee_disclosure_text: record.getString("employee_disclosure_text")',
+    );
+    expect(helpers).toContain(
+      'employee_disclosure_disabled: recordBool(record, "employee_disclosure_disabled")',
+    );
+  });
+
+  it("keeps the team-member line out of the canonical Reg Z/M disclosure block", () => {
+    // pb_hooks/requestPolicies.js requires posts.disclosures to equal the exact
+    // canonical block, so the employee line has to live in the caption body.
+    // A caption that leads with it must still validate.
+    const prepared = prepareCaptionForDelivery(
+      "Posted by a Bob Maxey Ford team member.\n\nDrive home today with 4.9% APR on approved credit.",
+    );
+    expect(prepared.caption.startsWith("Posted by a Bob Maxey Ford team member.")).toBe(
+      true,
+    );
+    expect(prepared.disclosures).not.toContain("team member");
+    expect(prepared.disclosures).toBeTruthy();
+  });
 });

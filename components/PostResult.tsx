@@ -64,6 +64,8 @@ import {
   analyzeCaptionForDelivery,
   analyzeCaptionSetForDelivery,
   prohibitedClaimsMessage,
+  buildEmployeeDisclosure,
+  prependEmployeeDisclosure,
 } from "../utils/complianceDisclosures";
 import { captionUsesOnlyExpectedCustomer } from "../utils/captionQuality";
 import { toPublicCustomerLabel } from "../utils/customerIdentity";
@@ -1968,6 +1970,14 @@ export const PostResult: React.FC<PostResultProps> = ({
   const captionWasEdited = editedText !== sourceCaptionForActive;
   // Always derive the footer from the actual visible caption. Platform
   // variants and salesperson edits may advertise different terms.
+  // The FTC team-member disclosure travels with every PublishContent as a
+  // protected prefix, so destination character budgets truncate body copy
+  // instead of the disclosure. Empty string when the dealership opted out.
+  const employeeDisclosure = React.useMemo(
+    () => buildEmployeeDisclosure(currentDealer),
+    [currentDealer],
+  );
+
   const activeDisclosures = captionAnalysis.disclosures.trim();
   const activeDisclosureCategories = captionAnalysis.disclosureCategories;
   const appendDisclosureText = (caption: string, disclosures: string): string => {
@@ -2001,7 +2011,13 @@ export const PostResult: React.FC<PostResultProps> = ({
       // Active platform: use live editor text (includes in-progress edits)
       const base = id === activeCaptionPlatform ? editedText.trim() : cap?.trim();
       if (!base) continue;
-      const attributed = appendDealershipMention(base, id, currentDealer);
+      // The FTC team-member disclosure leads the caption; the dealership
+      // mention trails it. Both are applied before the compliance scan so the
+      // scanned text is exactly what the destination receives.
+      const attributed = prependEmployeeDisclosure(
+        appendDealershipMention(base, id, currentDealer),
+        currentDealer,
+      );
       const prepared = analyzeCaptionForDelivery(attributed, bannedPhrases);
       const identitySafe = customerIdentityIsSafe(prepared.caption);
       out[id] = {
@@ -2103,9 +2119,12 @@ export const PostResult: React.FC<PostResultProps> = ({
     let success = false;
     const copyDestinationId =
       activeCaptionPlatform || selectedDelivery?.destinationId || post.platformIds?.[0];
-    const attributedCaption = copyDestinationId
-      ? appendDealershipMention(editedText, copyDestinationId, currentDealer)
-      : editedText;
+    const attributedCaption = prependEmployeeDisclosure(
+      copyDestinationId
+        ? appendDealershipMention(editedText, copyDestinationId, currentDealer)
+        : editedText,
+      currentDealer,
+    );
     const preparedCopy = analyzeCaptionForDelivery(attributedCaption, bannedPhrases);
     if (preparedCopy.compliance.prohibited.length > 0) {
       toast.warning(prohibitedClaimsMessage(preparedCopy.compliance.prohibited));
@@ -2168,8 +2187,9 @@ export const PostResult: React.FC<PostResultProps> = ({
     // is never mislabeled as an exact Facebook/Instagram/Google deliverable.
     setFocusedShareDeliveryId("native_share:manual");
     setFocusedShareContent({
-      text: editedText,
+      text: prependEmployeeDisclosure(editedText, currentDealer),
       disclosures: activeDisclosures || undefined,
+      requiredPrefix: employeeDisclosure || undefined,
       videoUrl,
       preparedFile: activePreparedSave.file,
     });
@@ -2590,9 +2610,8 @@ export const PostResult: React.FC<PostResultProps> = ({
       typeof captionVariant === "string"
         ? captionVariant
         : captionVariant?.text || editedText;
-    const caption = appendDealershipMention(
-      baseCaption,
-      delivery.destinationId,
+    const caption = prependEmployeeDisclosure(
+      appendDealershipMention(baseCaption, delivery.destinationId, currentDealer),
       currentDealer,
     );
     const disclosures =
@@ -2615,8 +2634,11 @@ export const PostResult: React.FC<PostResultProps> = ({
 
     setFocusedShareDeliveryId(delivery.id);
     setFocusedShareContent({
+      // `caption` already leads with the disclosure (prependEmployeeDisclosure
+      // above); requiredPrefix marks it protected for the budget fitter.
       text: caption,
       disclosures,
+      requiredPrefix: employeeDisclosure || undefined,
       preparedFile: activePreparedSave.file,
       ...(delivery.mediaKind === "video"
         ? { videoUrl: job?.url }
@@ -3488,8 +3510,9 @@ export const PostResult: React.FC<PostResultProps> = ({
         }
         content={
           focusedShareContent || {
-            text: editedText,
+            text: prependEmployeeDisclosure(editedText, currentDealer),
             disclosures: activeDisclosures || undefined,
+            requiredPrefix: employeeDisclosure || undefined,
             imageDataUrl: post.image,
             videoUrl: videoUrl || undefined,
           }

@@ -321,6 +321,17 @@ export interface Dealer {
    * prescribes no destinations, so only a piloted dealership changes behavior.
    */
   creative_system_v2?: boolean;
+  /**
+   * Optional override of the FTC 16 CFR 255 team-member disclosure wording.
+   * Empty or unset uses DEFAULT_EMPLOYEE_DISCLOSURE_TEMPLATE.
+   */
+  employee_disclosure_text?: string;
+  /**
+   * Opt-OUT of the team-member disclosure, not an opt-in: unset/false means
+   * the disclosure is applied. PocketBase reports an unset bool as false, so
+   * this polarity keeps every pre-existing dealership on the compliant side.
+   */
+  employee_disclosure_disabled?: boolean;
 }
 
 // FIX: Added User interface to resolve import error in UserModal.tsx.

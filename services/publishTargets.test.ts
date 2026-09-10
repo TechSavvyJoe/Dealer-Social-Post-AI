@@ -312,3 +312,58 @@ describe("publishTargets handoff strategy", () => {
     },
   );
 });
+
+describe("team-member disclosure survives destination budgets", () => {
+  const DISCLOSURE = "Posted by a Bob Maxey Ford team member.";
+
+  it("keeps the disclosure at the top when a long caption is fitted", () => {
+    const fitted = fitPublishCaptionToBudget(
+      {
+        text: `${DISCLOSURE}\n\n${"A polished dealership delivery. ".repeat(30)}`,
+        requiredPrefix: DISCLOSURE,
+      },
+      280,
+    );
+
+    expect(fitted.startsWith(DISCLOSURE)).toBe(true);
+    expect(fitted.length).toBeLessThanOrEqual(280);
+  });
+
+  it("protects the disclosure, the mention and the compliance footer together", () => {
+    const fitted = fitPublishCaptionToBudget(
+      {
+        text: `${DISCLOSURE}\n\n${"Drive home today. ".repeat(40)}\n\n@BobMaxeyFord`,
+        disclosures: "Offer requires approved credit. See dealer for details.",
+        requiredPrefix: DISCLOSURE,
+      },
+      560,
+    );
+
+    expect(fitted.startsWith(DISCLOSURE)).toBe(true);
+    expect(fitted).toContain("@BobMaxeyFord");
+    expect(fitted).toContain("Offer requires approved credit.");
+    expect(fitted.length).toBeLessThanOrEqual(560);
+  });
+
+  it("fails closed instead of publishing a truncated disclosure", () => {
+    expect(() =>
+      fitPublishCaptionToBudget(
+        {
+          text: `${DISCLOSURE}\n\nDrive home today.`,
+          disclosures: "Offer requires approved credit. See dealer for details.",
+          requiredPrefix: DISCLOSURE,
+        },
+        60,
+      ),
+    ).toThrow(/exceed|cannot fit/i);
+  });
+
+  it("still fits a caption when no prefix is required", () => {
+    const fitted = fitPublishCaptionToBudget(
+      { text: `${"Drive home today. ".repeat(30)}` },
+      280,
+    );
+    expect(fitted.length).toBeLessThanOrEqual(280);
+    expect(fitted.startsWith(DISCLOSURE)).toBe(false);
+  });
+});
