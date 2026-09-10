@@ -2881,10 +2881,36 @@ const MAX_PROXY_CONCURRENCY_BUCKETS = 512;
  */
 const PROXY_RATE_STORE_PREFIX = "proxyRate:";
 const PROXY_CONCURRENCY_STORE_PREFIX = "proxyConc:";
+/**
+ * Concurrency slots expire. Rate buckets always carried a `resetAt`; slots were
+ * a bare count, and a count that is never decremented is a count that never
+ * recovers. That was survivable while the counter was per-VM — a leaked slot
+ * poisoned one of 25 runtimes and the other 24 kept serving. Now that the count
+ * is shared across the whole pool, one leak is a leak for every dealership
+ * until the process restarts: `provider:global` is capped at 12
+ * (pb_hooks/main.pb.js), so twelve leaks turn every generation into a 503
+ * "Provider capacity is temporarily busy" with nothing in the logs to explain
+ * it and no way back except a redeploy.
+ *
+ * `release()` runs from a `finally`, so the ordinary path was never the worry.
+ * The paths that are: a pool runtime torn down between acquire and release, a
+ * host-side panic inside $http.send, or a store write that lands in the shared
+ * store while the matching read falls back to the per-VM map. A slot held
+ * longer than any request could legitimately run is a leak, so it is reclaimed.
+ *
+ * Six minutes is deliberately generous. The upstream call is allowed 300s for
+ * Veo (pb_hooks/main.pb.js), and a TTL that expires a slot a live request is
+ * still using would quietly raise the cap it exists to enforce. Erring long
+ * costs a slower recovery from a rare leak; erring short breaks the limit.
+ */
+const PROXY_CONCURRENCY_TTL_MS = 6 * 60 * 1000;
 
 var _proxyHits = Object.create(null);
 var _proxyHitOperations = 0;
 var _proxyConcurrency = Object.create(null);
+// Distinguishes this VM's holders from another pool runtime's, so a release
+// drops exactly the slot it took and never someone else's.
+var _proxyConcurrencyHolderSeq = 0;
 
 function sharedStore() {
   try {
@@ -3020,13 +3046,32 @@ function proxyRateLimitStateSize() {
 }
 
 /**
- * Acquire a bounded process-local provider slot. Every successful acquisition
- * returns an idempotent release callback so handlers can use try/finally.
+ * The holders of one slot key that are still inside their expiry.
+ *
+ * Anything past its expiry belonged to a request that never released, so it is
+ * dropped here instead of counted. A bucket written by an older build has no
+ * `holders` array at all; treating that as empty is the self-healing reading,
+ * and it costs nothing in practice because the store lives in process memory
+ * and any deploy that changes this shape restarts the process anyway.
+ */
+function liveConcurrencyHolders(bucket, now) {
+  if (!bucket || !Array.isArray(bucket.holders)) return [];
+  return bucket.holders.filter(function (holder) {
+    return holder && Number(holder.expiresAt) > now;
+  });
+}
+
+/**
+ * Acquire a bounded provider slot shared across the JSVM pool. Every successful
+ * acquisition returns an idempotent release callback so handlers can use
+ * try/finally, and every slot carries an expiry so a release that never happens
+ * cannot ratchet the cap down permanently.
  */
 function acquireProxyConcurrency(key, maxConcurrent) {
   const normalizedKey = (key || "").toString().slice(0, 256);
   const limit = Math.max(1, Math.min(100, Number(maxConcurrent) || 1));
   if (!normalizedKey) return { ok: false, retryAfterMs: 1000 };
+  const now = Date.now();
   const readSlot = (candidate) =>
     readSharedBucket(PROXY_CONCURRENCY_STORE_PREFIX, _proxyConcurrency, candidate);
 
@@ -3034,8 +3079,7 @@ function acquireProxyConcurrency(key, maxConcurrent) {
   if (!readSlot(normalizedKey) && keys.length >= MAX_PROXY_CONCURRENCY_BUCKETS) {
     keys
       .filter(function (candidate) {
-        const slot = readSlot(candidate);
-        return !slot || slot.count <= 0;
+        return liveConcurrencyHolders(readSlot(candidate), now).length === 0;
       })
       .forEach(function (candidate) {
         deleteSharedBucket(
@@ -3052,30 +3096,39 @@ function acquireProxyConcurrency(key, maxConcurrent) {
     }
   }
 
-  const bucket = readSlot(normalizedKey) || { count: 0 };
-  if (bucket.count >= limit) {
-    return { ok: false, retryAfterMs: 1000, count: bucket.count };
+  const holders = liveConcurrencyHolders(readSlot(normalizedKey), now);
+  if (holders.length >= limit) {
+    return { ok: false, retryAfterMs: 1000, count: holders.length };
   }
-  bucket.count += 1;
-  writeSharedBucket(
-    PROXY_CONCURRENCY_STORE_PREFIX,
-    _proxyConcurrency,
-    normalizedKey,
-    bucket,
-  );
+  _proxyConcurrencyHolderSeq += 1;
+  const token =
+    _proxyConcurrencyHolderSeq.toString(36) +
+    ":" +
+    now.toString(36) +
+    ":" +
+    Math.random().toString(36).slice(2, 10);
+  holders.push({ token: token, expiresAt: now + PROXY_CONCURRENCY_TTL_MS });
+  writeSharedBucket(PROXY_CONCURRENCY_STORE_PREFIX, _proxyConcurrency, normalizedKey, {
+    holders: holders,
+  });
   let released = false;
   return {
     ok: true,
-    count: bucket.count,
+    count: holders.length,
     release: function () {
       if (released) return;
       released = true;
-      // Re-read rather than closing over `bucket`: another pool VM may have
-      // changed the count between acquisition and release.
-      const current = readSlot(normalizedKey);
-      if (!current) return;
-      current.count = Math.max(0, current.count - 1);
-      if (current.count === 0) {
+      // Re-read rather than closing over the array above: another pool VM may
+      // have acquired or released against this key in between. Dropping this
+      // one token, rather than decrementing a shared number, is what makes two
+      // simultaneous releases safe.
+      const remaining = liveConcurrencyHolders(
+        readSlot(normalizedKey),
+        Date.now(),
+      ).filter(function (holder) {
+        return holder.token !== token;
+      });
+      if (remaining.length === 0) {
         deleteSharedBucket(
           PROXY_CONCURRENCY_STORE_PREFIX,
           _proxyConcurrency,
@@ -3086,7 +3139,7 @@ function acquireProxyConcurrency(key, maxConcurrent) {
           PROXY_CONCURRENCY_STORE_PREFIX,
           _proxyConcurrency,
           normalizedKey,
-          current,
+          { holders: remaining },
         );
       }
     },
