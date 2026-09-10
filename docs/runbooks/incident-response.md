@@ -154,9 +154,16 @@ and a checkout of this repo. Run everything from the repo root. The path contain
 quote it.
 
 ```bash
-cd "/Users/joegallant/AI App Development Projects/Dealer-Social-Post-AI"
-mkdir -p .release-evidence/incident-$(date -u +%Y%m%dT%H%M%SZ)
+# From anywhere inside a checkout of this repository:
+cd "$(git rev-parse --show-toplevel)"
+export INCIDENT_DIR=".release-evidence/incident-$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "$INCIDENT_DIR"
+echo "$INCIDENT_DIR"
 ```
+
+`.release-evidence/` is gitignored (`.gitignore:16`), so nothing you capture there can be
+committed by accident. Keep `$INCIDENT_DIR` exported in the same shell for every command
+below.
 
 Do the evidence capture as you go (step 6), not at the end. Fly logs do not wait for you.
 
@@ -187,11 +194,18 @@ Expected on a healthy system: HTTP `200` and a body containing
 - HTTP `503` with `"ok":false` → **SEV1 configuration or dependency failure.** The public
   payload deliberately does _not_ say which check failed; `checks` is only attached for an
   authenticated super-admin (`pb_hooks/main.pb.js:1052-1053`). Get the reason from the
-  SystemHealthPanel (step 5) or from `flyctl logs` (step 3).
+  SystemHealthPanel (step 5) or from `flyctl logs` (step 3). If a secret has gone missing,
+  these ten names must all exist on the app — the deploy workflow refuses to ship without
+  them (`.github/workflows/fly-deploy.yml:258-269`):
+  `ADMIN_LOGIN_USERNAME`, `ADMIN_LOGIN_PASSWORD`, `SALESPERSON_PIN_PEPPER`,
+  `GEMINI_API_KEY`, `TURNSTILE_SECRET`, `VERCEL_TO_FLY_PROXY_SECRET`, `CUSTOMER_HUB_URL`,
+  `CUSTOMER_HUB_SECRET`, `CUSTOMER_HUB_DESTINATION_ID`, `CUSTOMER_HUB_DEALER_ID`.
+  Compare against `flyctl secrets list --app dealer-social-post-ai-production` (names only —
+  it never prints values).
 - `"backup":{"status": ...}` anything other than `"verified"` → restore evidence is
   `not_configured`, `verification_required`, `release_unknown`, `release_mismatch`, or
   `stale` (`pb_hooks/main.pb.js:1018-1032`). On Fly this alone forces `ok:false`
-  (`pb_hooks/main.pb.js:1309-1310`). It is a release/backup problem, not a runtime crash —
+  (`pb_hooks/main.pb.js:1310-1311`). It is a release/backup problem, not a runtime crash —
   do not restart the machine expecting it to clear.
 - Body is HTML, not JSON → you are being answered by something other than PocketBase (proxy
   or CDN error page). Go to step 4.
@@ -221,7 +235,7 @@ Then the logs — **do this before anything else that might rotate them out**:
 
 ```bash
 flyctl logs --app dealer-social-post-ai-production --no-tail \
-  | tee ".release-evidence/incident-$(date -u +%Y%m%d)/fly-logs.txt"
+  | tee "$INCIDENT_DIR/fly-logs.txt"
 ```
 
 This is exactly the command CI uses for post-failure diagnostics
@@ -239,8 +253,8 @@ Startup failures worth recognising immediately:
 
 If you have no local `flyctl` (you are on a phone, or a laptop without credentials), run the
 **Fetch Fly Logs** workflow from the GitHub Actions UI — it is `workflow_dispatch`-only and
-prints the same output into the run log, which persists longer than Fly's buffer
-(`.github/workflows/fetch-fly-logs.yml:1-21`).
+prints the same output into the Actions run log, where you can read and copy it from a
+browser (`.github/workflows/fetch-fly-logs.yml:1-21`).
 
 ### 4. Is it the frontend origin rather than the backend? (2 minutes)
 
@@ -288,9 +302,9 @@ end"). You land on the System admin hub (`AppStep.ADMIN` → `AdminDashboard`,
 - **Details** expands to: every `checks.*` boolean (`:580-619`); counts of dealers, posts in
   24h and photo releases in 24h (`:620-630`); a **Release contract** card showing the first
   16 characters of the server's `releaseSha`, the API contract version, health version and
-  model policy version (`:632-658`); a **Recovery readiness** card translating
+  model policy version (`:633-655`); a **Recovery readiness** card translating
   `backup.status` into plain English plus the last verified timestamp and the 168-hour
-  expiry (`:655-690`); **Generation · last 24 hours** (AI successes, basic fallbacks,
+  expiry (`:657-690`); **Generation · last 24 hours** (AI successes, basic fallbacks,
   fallback hops, standard/studio tier, provider attempts, provider failures) (`:692-733`);
   and a 7-day per-dealer usage ledger (`:736+`).
 
@@ -398,7 +412,7 @@ Decide-and-fill-in block below.
 > - **Uptime monitor** — recommended: an external monitor on
 >   `https://dealer-social-post-ai.vercel.app/api/app/health` (not the Fly origin, so the
 >   rewrite and the CSP-bearing origin are covered), alerting on non-200 or on
->   `"ok":false`. This is what `fly.toml:26-30` already assumes exists.
+>   `"ok":false`. This is what `fly.toml:26-28` already assumes exists.
 > - **Release-drift monitor** — recommended: a daily job comparing `origin/main`, the health
 >   `releaseSha`, and the `dsp-` value in `/sw.js`, alerting on any mismatch older than one
 >   hour. This is the check that would have caught 2026-08-07 on day one instead of day three.
@@ -538,20 +552,30 @@ Capture, in this order:
 
 1. **Fly logs** — first, always:
    ```bash
-   flyctl logs --app dealer-social-post-ai-production --no-tail \
-     > ".release-evidence/incident-$(date -u +%Y%m%dT%H%M%SZ)/fly-logs.txt"
+   flyctl logs --app dealer-social-post-ai-production --no-tail > "$INCIDENT_DIR/fly-logs.txt"
    ```
 2. **Fly state:**
    ```bash
-   flyctl status --app dealer-social-post-ai-production > .../fly-status.txt
-   flyctl machine list --app dealer-social-post-ai-production --json > .../fly-machines.json
+   flyctl status --app dealer-social-post-ai-production > "$INCIDENT_DIR/fly-status.txt"
+   flyctl machine list --app dealer-social-post-ai-production --json \
+     > "$INCIDENT_DIR/fly-machines.json"
    ```
 3. **Both health payloads**, Fly origin and Vercel origin, plus `/api/app/proxy-readiness`
-   and `/sw.js` (the four SHAs from the section above). Save them; they change under you.
-4. **Secret _names_ only** — this lists names and digests, never values
-   (`.github/workflows/fly-deploy.yml:248-249`):
+   and `/sw.js` (the four SHAs from the section above). They change under you:
    ```bash
-   flyctl secrets list --app dealer-social-post-ai-production --json > .../fly-secret-names.json
+   curl -sS https://dealer-social-post-ai-production.fly.dev/api/app/health \
+     > "$INCIDENT_DIR/health-fly.json"
+   curl -sS https://dealer-social-post-ai.vercel.app/api/app/health \
+     > "$INCIDENT_DIR/health-vercel.json"
+   curl -sS https://dealer-social-post-ai.vercel.app/api/app/proxy-readiness \
+     > "$INCIDENT_DIR/proxy-readiness.json"
+   curl -sS https://dealer-social-post-ai.vercel.app/sw.js > "$INCIDENT_DIR/sw.js"
+   ```
+4. **Secret _names_ only** — the deploy workflow reads only the `Name` field from this
+   output; secret values are never returned (`.github/workflows/fly-deploy.yml:248-262`):
+   ```bash
+   flyctl secrets list --app dealer-social-post-ai-production --json \
+     > "$INCIDENT_DIR/fly-secret-names.json"
    ```
 5. **The authenticated health payload** from the SystemHealthPanel (screenshot the expanded
    **Details**, or capture the JSON with a super-admin session). This is the only source for
