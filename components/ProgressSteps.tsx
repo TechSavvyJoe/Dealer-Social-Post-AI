@@ -49,7 +49,9 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
                         "shadow-lg shadow-primary-950/20",
                       ),
                     isComplete &&
-                      cn("border-success-500/50 bg-success-500/10 text-success-100"),
+                      cn(
+                        "border-success-500/50 bg-success-500/10 text-success-100 [.theme-light_&]:text-success-800",
+                      ),
                     isUpcoming && "border-hairline bg-surface-800/45 text-surface-400",
                   )}
                   initial={false}
@@ -81,7 +83,7 @@ export const ProgressSteps: React.FC<ProgressStepsProps> = ({ activeStep }) => {
                     "text-[10px] sm:text-xs tracking-wide font-medium whitespace-nowrap",
                     "transition-all duration-300",
                     isActive && "text-surface-50 font-semibold",
-                    isComplete && "text-success-300",
+                    isComplete && "text-success-300 [.theme-light_&]:text-success-800",
                     isUpcoming && "text-surface-500",
                   )}
                   initial={false}

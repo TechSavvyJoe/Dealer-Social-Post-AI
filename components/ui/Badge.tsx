@@ -5,13 +5,25 @@ import { cn } from "../../utils/classNames";
 type Variant = "primary" | "success" | "warning" | "error" | "info" | "neutral";
 type Size = "sm" | "md" | "lg";
 
+/**
+ * The -300 ink is tuned for the dark theme, where it sits on a dark surface. In
+ * Sunlight Mode the 15%-tinted fill resolves to near-white, so -300 ink drops to
+ * roughly 1.6:1 and the badge renders as an empty capsule (observed on the
+ * "Verified" pill in the customizer). Each variant therefore carries a
+ * light-theme override at -800, which clears AA on the same fill.
+ */
 const variantStyles: Record<Variant, string> = {
-  primary: "bg-primary-500/15 text-primary-300 border border-primary-500/30",
-  success: "bg-success-500/15 text-success-300 border border-success-500/30",
-  warning: "bg-warning-500/15 text-warning-300 border border-warning-500/30",
-  error: "bg-error-500/15 text-error-300 border border-error-500/30",
-  info: "bg-info-500/15 text-info-300 border border-info-500/30",
-  neutral: "bg-surface-800 text-surface-300 border border-surface-700",
+  primary:
+    "bg-primary-500/15 text-primary-300 border border-primary-500/30 [.theme-light_&]:text-primary-800",
+  success:
+    "bg-success-500/15 text-success-300 border border-success-500/30 [.theme-light_&]:text-success-800",
+  warning:
+    "bg-warning-500/15 text-warning-300 border border-warning-500/30 [.theme-light_&]:text-warning-800",
+  error:
+    "bg-error-500/15 text-error-300 border border-error-500/30 [.theme-light_&]:text-error-800",
+  info: "bg-info-500/15 text-info-300 border border-info-500/30 [.theme-light_&]:text-info-800",
+  neutral:
+    "bg-surface-800 text-surface-300 border border-surface-700 [.theme-light_&]:text-surface-800",
 };
 
 const sizeStyles: Record<Size, string> = {

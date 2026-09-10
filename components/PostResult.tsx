@@ -281,9 +281,11 @@ const ActionTile: React.FC<{
         onClick();
       }}
       disabled={disabled}
-      aria-label={ariaLabel}
+      // The visible label is hidden on the narrowest phones (see below), so the
+      // tile must always carry an accessible name of its own.
+      aria-label={ariaLabel || label}
       aria-busy={busy || undefined}
-      className={cn(TILE_BASE, TILE_NEUTRAL)}
+      className={cn(TILE_BASE, TILE_NEUTRAL, "max-[399px]:justify-center")}
       whileHover={shouldReduceMotion ? undefined : { x: disabled ? 0 : 2 }}
       whileTap={shouldReduceMotion ? undefined : { scale: disabled ? 1 : 0.98 }}
     >
@@ -298,7 +300,12 @@ const ActionTile: React.FC<{
       ) : (
         <Icon className={cn("w-4 h-4 shrink-0", iconClassName)} />
       )}
-      <span className="truncate">{label}</span>
+      {/* These tiles sit in a 3-column grid on phones. Below ~400px each column
+          is too narrow for a two-word label, and `truncate` rendered "Video",
+          "Fun mode" and "Schedule" as "Vi…", "Fu…" and "Sc…". An icon-only tile
+          with the name on aria-label and the Tooltip reads better than two
+          characters, and stays legible down to the 280px fold width. */}
+      <span className="truncate max-[399px]:hidden">{label}</span>
     </m.button>
   );
   return tooltip ? (

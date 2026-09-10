@@ -1329,7 +1329,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       <info.icon
                         className={cn(
                           "h-5 w-5 flex-shrink-0 relative z-10 transition-colors",
-                          isActive ? "text-primary-300" : "text-surface-400",
+                          isActive
+                            ? "text-primary-300 [.theme-light_&]:text-primary-800"
+                            : "text-surface-400",
                         )}
                       />
                       <div className="flex-1 min-w-0 relative z-10">
@@ -1337,7 +1339,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                           <span
                             className={cn(
                               "text-sm font-semibold truncate transition-colors",
-                              isActive ? "text-primary-100" : "text-surface-50",
+                              isActive
+                                ? "text-primary-100 [.theme-light_&]:text-primary-950"
+                                : "text-surface-50",
                             )}
                           >
                             {option.split(" ")[0]}
@@ -1351,7 +1355,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         <span
                           className={cn(
                             "text-[11px] block leading-snug transition-colors",
-                            isActive ? "text-primary-200/80" : "text-surface-400",
+                            isActive
+                              ? "text-primary-200/80 [.theme-light_&]:text-primary-900"
+                              : "text-surface-400",
                           )}
                         >
                           {info.desc}
@@ -1359,7 +1365,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         <span
                           className={cn(
                             "mt-0.5 text-[10px] block leading-snug transition-colors",
-                            isActive ? "text-primary-200/60" : "text-surface-400",
+                            isActive
+                              ? "text-primary-200/60 [.theme-light_&]:text-primary-900/80"
+                              : "text-surface-400",
                           )}
                         >
                           {info.detail}
