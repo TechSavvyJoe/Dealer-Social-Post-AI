@@ -551,6 +551,12 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [leaveConfirm, setLeaveConfirm] = useState<"startOver" | "remix" | null>(null);
   const [hasSavedMedia, setHasSavedMedia] = useState(false);
   const [hasCopiedCaption, setHasCopiedCaption] = useState(false);
+  // What the manager asked to be changed. The rejection message used to say
+  // "create another post with the requested changes" while nothing carried the
+  // requested changes; this is them.
+  const [rejectionReason, setRejectionReason] = useState<string>(
+    post.rejectionReason || "",
+  );
   const [approvalStatus, setApprovalStatus] = useState<
     NonNullable<GeneratedPost["approvalStatus"]>
   >(
@@ -1178,7 +1184,9 @@ export const PostResult: React.FC<PostResultProps> = ({
     approvalStatus === "approved"
       ? "Manager approved this exact creative. Save, share, and export are unlocked; start a new post to make changes."
       : approvalStatus === "rejected"
-        ? "A manager rejected this creative. Delivery remains locked; create another post with the requested changes."
+        ? rejectionReason
+          ? `A manager asked for a change: ${rejectionReason} Delivery stays locked until you create another post.`
+          : "A manager rejected this creative. Delivery remains locked; create another post with the requested changes."
         : approvalStatus === "submission_failed"
           ? "This creative could not be submitted for approval. Delivery remains locked; check your connection and create another post to retry."
           : "This exact image and caption are awaiting manager approval. Save, share, and export unlock automatically after approval.";
@@ -1289,12 +1297,17 @@ export const PostResult: React.FC<PostResultProps> = ({
         setApprovalCheckError(null);
         setImageReviewRequired(Boolean(result.image_review_required));
         setApprovalStatus(result.approval_status);
+        setRejectionReason(result.rejection_reason || "");
         if (result.approval_status === "approved") {
           toast.success("Manager approved this post. Delivery is unlocked.");
           return;
         }
         if (result.approval_status === "rejected") {
-          toast.warning("Manager requested changes. Delivery remains locked.");
+          toast.warning(
+            result.rejection_reason
+              ? `Manager asked for a change: ${result.rejection_reason}`
+              : "Manager requested changes. Delivery remains locked.",
+          );
           return;
         }
         schedule();

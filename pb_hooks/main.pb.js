@@ -3307,6 +3307,7 @@ routerAdd("GET", "/api/app/posts/:id/status", (c) => {
       approval_status: record.getString("approval_status"),
       approved_by: record.getString("approved_by"),
       approved_at: record.getString("approved_at"),
+      rejection_reason: record.getString("rejection_reason"),
       image_review_required:
         policies.postImageReviewRequired(
           record,
@@ -3964,6 +3965,7 @@ routerAdd("GET", "/api/app/posts", (c) => {
         has_video: r.getBool ? r.getBool("has_video") : !!r.get("has_video"),
         approval_status: r.getString("approval_status"),
         approved_by: r.getString("approved_by"),
+        rejection_reason: r.getString("rejection_reason"),
         approved_at: r.getString("approved_at"),
         caption: publicCaption,
         caption_source:
@@ -4042,6 +4044,19 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
       context.person ? context.person.getString("name") : "System Admin",
       120,
     );
+    // A rejection without a reason leaves the salesperson guessing: the result
+    // screen tells them to "create another post with the requested changes",
+    // so there have to be requested changes to show. Approvals need none.
+    const rejectionReason = helpers.assertString(
+      (body.rejection_reason || "").toString().trim(),
+      280,
+    );
+    if (decision === "rejected" && !rejectionReason) {
+      return c.json(400, {
+        error: "Tell the salesperson what to change before rejecting this post.",
+        code: "REJECTION_REASON_REQUIRED",
+      });
+    }
 
     if (
       decision === "approved" &&
@@ -4175,7 +4190,8 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
       .newQuery(
         "UPDATE posts " +
           "SET approval_status = {:decision}, approved_by = {:approver}, " +
-          "approved_at = {:approvedAt}, updated = {:updated} " +
+          "approved_at = {:approvedAt}, updated = {:updated}, " +
+          "rejection_reason = {:rejectionReason} " +
           "WHERE id = {:id} AND dealer = {:dealer} " +
           "AND approval_status = 'pending'",
       )
@@ -4184,6 +4200,9 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
         approver: approver,
         approvedAt: approvedAt,
         updated: approvedAt,
+        // Approving clears any note from an earlier cycle so a stale reason
+        // cannot trail an approved post.
+        rejectionReason: decision === "rejected" ? rejectionReason : "",
         id: record.id,
         dealer: dealer.id,
       })

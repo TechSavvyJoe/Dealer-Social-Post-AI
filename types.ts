@@ -142,6 +142,8 @@ export interface GeneratedPost {
   postId?: string;
   /** `submission_failed` is client-only and keeps delivery locked safely. */
   approvalStatus?: "n_a" | "pending" | "approved" | "rejected" | "submission_failed";
+  /** What the manager asked to be changed. Set only when rejected. */
+  rejectionReason?: string;
   /**
    * A captured signature is not considered usable until the protected release
    * record has been saved. Failed persistence locks all delivery actions so a

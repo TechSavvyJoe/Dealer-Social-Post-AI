@@ -873,6 +873,13 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                         </td>
                         <td className="py-2 px-2">
                           {statusBadge(p.approval_status)}
+                          {p.approval_status === "rejected" && p.rejection_reason ? (
+                            // Without this the row says "rejected" and the
+                            // salesperson has to go ask why.
+                            <span className="mt-0.5 block max-w-[22rem] text-[11px] leading-snug text-error-200 [.theme-light_&]:text-error-800">
+                              {p.rejection_reason}
+                            </span>
+                          ) : null}
                           {p.approved_by && (
                             <div className="text-[10px] text-surface-400">
                               by {p.approved_by}

@@ -90,6 +90,7 @@ export interface PostRecord {
   has_video?: boolean;
   approval_status?: ApprovalStatus;
   approved_by?: string;
+  rejection_reason?: string;
   approved_at?: string;
   caption?: string;
   caption_source?: "ai" | "custom" | "basic_fallback" | null;
@@ -115,6 +116,7 @@ export interface PostApprovalStatus {
   id: string;
   approval_status: ApprovalStatus;
   approved_by?: string;
+  rejection_reason?: string;
   approved_at?: string;
   image_review_required?: boolean;
 }
@@ -619,12 +621,19 @@ export const setApprovalStatus = async (
   postId: string,
   status: "approved" | "rejected",
   approvedBy?: string,
+  /**
+   * Required by the backend when status is "rejected": the salesperson's
+   * result screen tells them to make "the requested changes", so there has to
+   * be something to request. Ignored on approval.
+   */
+  rejectionReason?: string,
 ): Promise<void> => {
   await jsonRequest(`/api/app/posts/${encodeURIComponent(postId)}`, {
     method: "PATCH",
     body: JSON.stringify({
       approval_status: status,
       approved_by: approvedBy || "",
+      rejection_reason: rejectionReason || "",
     }),
   });
 };
