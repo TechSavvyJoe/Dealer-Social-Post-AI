@@ -593,7 +593,7 @@ Capture, in this order:
      (`pb_hooks/main.pb.js:1374-1389`).
    - `auth_events`: deleted at **30 days** by the daily 07:17 prune
      (`pb_hooks/main.pb.js:1390-1397`). A second sweep in
-     `purgeExpiredSessionsAndOldEvents` uses 90 days (`pb_hooks/helpers.js:4207-4221`), so
+     `purgeExpiredSessionsAndOldEvents` uses 90 days (`pb_hooks/helpers.js:4257-4271`), so
      **30 days is the effective floor** — do not plan around 90.
    - Unlinked `photo_releases` rows: deleted hourly at minute 13 once `expires_at` has
      passed (`pb_hooks/main.pb.js:2311-2334`).
@@ -737,7 +737,7 @@ change one of them, re-check this runbook.
   website publication (`:3374`, `:3506`, `:3575`), video (`:3181`), admin routes (`:4231`,
   `:5042`), GC crons (`:5406`, `:5415`).
 - `pb_hooks/helpers.js` — telemetry redaction (`:2297-2345`) and the 90-day auth-event sweep
-  in `purgeExpiredSessionsAndOldEvents` (`:4207-4221`).
+  in `purgeExpiredSessionsAndOldEvents` (`:4257-4271`).
 - `pb_hooks/requestPolicies.js` — video (3/min) and image (10/min) cost buckets (`:1595-1613`).
 - `pb_hooks/websitePublications.js` — 8-attempt delivery ceiling (`:33`, `:1839-1841`).
 - `.github/workflows/fly-deploy.yml` — job graph, origins, Vercel ids, CLI versions, the

@@ -110,10 +110,13 @@ function contextOrResponse(c, helpers) {
   // Single choke point for every walkaround app route. Same in-process bucket
   // semantics as /api/proxy/*.
   try {
+    // ipKeyed: one bucket per source IP, so this belongs in the table sized
+    // for attacker-chosen keys rather than the tenant one.
     const rate = helpers.checkProxyRateLimit(
       "walkaround-app:" + helpers.clientIP(c),
       120,
       60 * 1000,
+      { ipKeyed: true },
     );
     if (!rate.ok) {
       try {

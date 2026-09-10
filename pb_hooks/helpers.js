@@ -2472,7 +2472,10 @@ function logCoalescedAuthEvent(kind, opts, windowSeconds, globalMaxPerWindow) {
   const windowMs = seconds * 1000;
   const ip = (options.ip || "").toString().slice(0, 64);
   const localKey = "auth-sample:" + kind + ":" + (ip || "unknown");
-  const localGate = checkProxyRateLimit(localKey, 1, windowMs);
+  // ipKeyed: localKey embeds the client IP. The global sibling below is a
+  // fixed key per kind and stays with the tenant buckets, so a flood cannot
+  // evict the ceiling that bounds it.
+  const localGate = checkProxyRateLimit(localKey, 1, windowMs, { ipKeyed: true });
   if (!localGate.ok) return true;
 
   const globalLimit = Math.max(1, Math.min(1000, Number(globalMaxPerWindow) || 30));
@@ -2861,6 +2864,23 @@ function verifyTurnstileToken(token, remoteIp) {
 // keys include client IPs and must not become a process-memory exhaustion path.
 const MAX_PROXY_RATE_BUCKETS = 2048;
 const PROXY_RATE_EVICTION_BATCH = 128;
+/**
+ * Unauthenticated, IP-keyed buckets get their own table with its own ceiling.
+ *
+ * The bucket cap used to be per-VM, so a flood of source IPs could crowd out
+ * one runtime's map and the other 24 kept counting normally. Sharing the table
+ * across the pool made the cap pool-wide, and eviction sorts ascending by
+ * resetAt and drops the lowest first — which is every 60-second bucket, i.e.
+ * exactly the per-dealer proxy, OpenAI, Anthropic and image throttles. A
+ * distributed flood against the unauthenticated telemetry endpoint could
+ * therefore clear paying dealerships' per-minute limits as a side effect.
+ *
+ * Splitting the namespaces means a flood can only evict other flood buckets.
+ * 512 is deliberately smaller than the tenant table: these keys are attacker-
+ * controlled and exist only to bound abuse, not to protect a quota anyone paid
+ * for.
+ */
+const MAX_PROXY_IP_RATE_BUCKETS = 512;
 const MAX_PROXY_CONCURRENCY_BUCKETS = 512;
 /**
  * PocketBase 0.22 serves each hook callback from a pooled JSVM runtime
@@ -2880,6 +2900,7 @@ const MAX_PROXY_CONCURRENCY_BUCKETS = 512;
  * to per-VM counting preserves today's behavior; it never fails open.
  */
 const PROXY_RATE_STORE_PREFIX = "proxyRate:";
+const PROXY_IP_RATE_STORE_PREFIX = "proxyIpRate:";
 const PROXY_CONCURRENCY_STORE_PREFIX = "proxyConc:";
 /**
  * Concurrency slots expire. Rate buckets always carried a `resetAt`; slots were
@@ -2905,8 +2926,29 @@ const PROXY_CONCURRENCY_STORE_PREFIX = "proxyConc:";
  */
 const PROXY_CONCURRENCY_TTL_MS = 6 * 60 * 1000;
 
-var _proxyHits = Object.create(null);
-var _proxyHitOperations = 0;
+/**
+ * One rate-limit table. `map` is the per-VM fallback used when $app.store() is
+ * unavailable; `ops` paces the periodic sweep so it does not run on every
+ * request. Which table a caller lands in is decided at the call site, not by
+ * sniffing the key: a key-prefix rule would have put the fixed-cardinality
+ * "telemetry:ingress" and "telemetry:global" ceilings in the attacker-
+ * controlled table alongside "telemetry:<ip>", where a flood could evict the
+ * very ceiling meant to contain it.
+ */
+function makeRateNamespace(prefix, cap) {
+  return { prefix: prefix, cap: cap, map: Object.create(null), ops: 0 };
+}
+/** Keys derived from a tenant: dealer ids, action names, fixed ceilings. */
+const TENANT_RATE_NS = makeRateNamespace(
+  PROXY_RATE_STORE_PREFIX,
+  MAX_PROXY_RATE_BUCKETS,
+);
+/** Keys derived from a client IP, so unbounded and attacker-chosen. */
+const IP_RATE_NS = makeRateNamespace(
+  PROXY_IP_RATE_STORE_PREFIX,
+  MAX_PROXY_IP_RATE_BUCKETS,
+);
+const RATE_NAMESPACES = [TENANT_RATE_NS, IP_RATE_NS];
 var _proxyConcurrency = Object.create(null);
 // Distinguishes this VM's holders from another pool runtime's, so a release
 // drops exactly the slot it took and never someone else's.
@@ -2978,49 +3020,53 @@ function sharedBucketKeys(prefix, localMap) {
   }
 }
 
-function readRateBucket(key) {
-  return readSharedBucket(PROXY_RATE_STORE_PREFIX, _proxyHits, key);
+function readRateBucket(ns, key) {
+  return readSharedBucket(ns.prefix, ns.map, key);
 }
 
-function pruneProxyRateBuckets(now, reserveSlot) {
-  _proxyHitOperations += 1;
-  let keys = sharedBucketKeys(PROXY_RATE_STORE_PREFIX, _proxyHits);
-  if (keys.length < MAX_PROXY_RATE_BUCKETS && _proxyHitOperations % 128 !== 0) {
+function pruneRateBuckets(ns, now, reserveSlot) {
+  ns.ops += 1;
+  let keys = sharedBucketKeys(ns.prefix, ns.map);
+  if (keys.length < ns.cap && ns.ops % 128 !== 0) {
     return;
   }
   keys.forEach(function (key) {
-    const bucket = readRateBucket(key);
+    const bucket = readRateBucket(ns, key);
     if (!bucket || now >= bucket.resetAt) {
-      deleteSharedBucket(PROXY_RATE_STORE_PREFIX, _proxyHits, key);
+      deleteSharedBucket(ns.prefix, ns.map, key);
     }
   });
-  keys = sharedBucketKeys(PROXY_RATE_STORE_PREFIX, _proxyHits);
+  keys = sharedBucketKeys(ns.prefix, ns.map);
   // When the map is full, evict a small batch rather than sorting the entire
   // map again for every new attacker-controlled key.
-  const target = Math.max(
-    0,
-    MAX_PROXY_RATE_BUCKETS - (reserveSlot ? PROXY_RATE_EVICTION_BATCH : 0),
-  );
+  const target = Math.max(0, ns.cap - (reserveSlot ? PROXY_RATE_EVICTION_BATCH : 0));
   if (keys.length <= target) return;
   const resetAtFor = {};
   keys.forEach(function (key) {
-    const bucket = readRateBucket(key);
+    const bucket = readRateBucket(ns, key);
     resetAtFor[key] = (bucket && bucket.resetAt) || 0;
   });
   keys.sort(function (left, right) {
     return resetAtFor[left] - resetAtFor[right];
   });
   for (let index = 0; index < keys.length - target; index++) {
-    deleteSharedBucket(PROXY_RATE_STORE_PREFIX, _proxyHits, keys[index]);
+    deleteSharedBucket(ns.prefix, ns.map, keys[index]);
   }
 }
 
-function checkProxyRateLimit(key, maxPerWindow, windowMs) {
+/**
+ * `options.ipKeyed` marks a key whose cardinality is chosen by whoever is
+ * calling — a client IP — so it is counted and evicted separately from tenant
+ * keys. Pass it at every IP-keyed call site; __tests__/rateLimitAcrossVmPool
+ * pins which those are.
+ */
+function checkProxyRateLimit(key, maxPerWindow, windowMs, options) {
   if (!key) return { ok: true };
+  const ns = options && options.ipKeyed ? IP_RATE_NS : TENANT_RATE_NS;
   const now = Date.now();
   const normalizedKey = key.toString().slice(0, 256);
-  pruneProxyRateBuckets(now, !readRateBucket(normalizedKey));
-  const bucket = readRateBucket(normalizedKey) || {
+  pruneRateBuckets(ns, now, !readRateBucket(ns, normalizedKey));
+  const bucket = readRateBucket(ns, normalizedKey) || {
     count: 0,
     resetAt: now + windowMs,
   };
@@ -3029,7 +3075,7 @@ function checkProxyRateLimit(key, maxPerWindow, windowMs) {
     bucket.resetAt = now + windowMs;
   }
   bucket.count += 1;
-  writeSharedBucket(PROXY_RATE_STORE_PREFIX, _proxyHits, normalizedKey, bucket);
+  writeSharedBucket(ns.prefix, ns.map, normalizedKey, bucket);
   if (bucket.count > maxPerWindow) {
     return {
       ok: false,
@@ -3040,9 +3086,13 @@ function checkProxyRateLimit(key, maxPerWindow, windowMs) {
   return { ok: true, count: bucket.count, resetAt: bucket.resetAt };
 }
 
+/** Both tables together: the number a memory ceiling has to reason about. */
 function proxyRateLimitStateSize() {
-  pruneProxyRateBuckets(Date.now(), false);
-  return sharedBucketKeys(PROXY_RATE_STORE_PREFIX, _proxyHits).length;
+  const now = Date.now();
+  return RATE_NAMESPACES.reduce(function (total, ns) {
+    pruneRateBuckets(ns, now, false);
+    return total + sharedBucketKeys(ns.prefix, ns.map).length;
+  }, 0);
 }
 
 /**

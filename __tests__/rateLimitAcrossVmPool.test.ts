@@ -19,6 +19,7 @@ type Helpers = {
     key: string,
     maxPerWindow: number,
     windowMs: number,
+    options?: { ipKeyed?: boolean },
   ) => { ok: boolean };
   acquireProxyConcurrency: (
     key: string,
@@ -114,9 +115,12 @@ describe("throttles are enforced across the whole JSVM pool", () => {
     const vm = loadVm();
 
     for (let i = 0; i < 3000; i += 1) {
-      vm.checkProxyRateLimit(`telemetry:203.0.113.${i}`, 30, 60_000);
+      vm.checkProxyRateLimit(`telemetry:203.0.113.${i}`, 30, 60_000, {
+        ipKeyed: true,
+      });
     }
-    expect(vm.proxyRateLimitStateSize()).toBeLessThanOrEqual(2048);
+    // Both tables together stay under their combined ceiling.
+    expect(vm.proxyRateLimitStateSize()).toBeLessThanOrEqual(2048 + 512);
   });
 });
 
@@ -221,5 +225,102 @@ describe("leaked provider slots expire instead of poisoning the pool", () => {
 
     atSecondsIn(390);
     expect(vm.acquireProxyConcurrency("provider:dealer-f", 1).ok).toBe(true);
+  });
+});
+
+/**
+ * Eviction sorts ascending by resetAt and drops the lowest first, which is
+ * every 60-second bucket — the per-dealer proxy, OpenAI, Anthropic and image
+ * throttles. While the bucket table was per-VM a flood of source IPs crowded
+ * out one runtime's map and the other 24 kept counting. Sharing the table
+ * across the pool made that ceiling pool-wide, so a distributed flood against
+ * the unauthenticated telemetry endpoint could clear a paying dealership's
+ * per-minute limit as a side effect.
+ *
+ * IP-keyed keys now count in their own table. These tests pin the separation
+ * and, just as importantly, which call sites opt into it.
+ */
+describe("an unauthenticated flood cannot evict a dealership's throttle", () => {
+  const flood = (vm: Helpers, n: number) => {
+    for (let i = 0; i < n; i += 1) {
+      vm.checkProxyRateLimit(`telemetry:198.51.100.${i}`, 30, 60_000, {
+        ipKeyed: true,
+      });
+    }
+  };
+
+  it("leaves a dealer's bucket counting after the IP table is filled past its cap", () => {
+    const store = makeSharedStore();
+    runtime.$app = { store: () => store };
+    const vm = loadVm();
+
+    // Two of a limit of three, so the dealer bucket is mid-window and would be
+    // visibly reset if it were evicted.
+    expect(vm.checkProxyRateLimit("dealer:d1", 3, 60_000).ok).toBe(true);
+    expect(vm.checkProxyRateLimit("dealer:d1", 3, 60_000).ok).toBe(true);
+
+    flood(vm, 3000);
+
+    // The third request still passes and the fourth still fails. If the flood
+    // had evicted the bucket, the count would have restarted at 1 and this
+    // dealer would get four more.
+    expect(vm.checkProxyRateLimit("dealer:d1", 3, 60_000).ok).toBe(true);
+    expect(vm.checkProxyRateLimit("dealer:d1", 3, 60_000).ok).toBe(false);
+  });
+
+  it("does not let a flood evict the fixed ceiling that bounds it", () => {
+    const store = makeSharedStore();
+    runtime.$app = { store: () => store };
+    const vm = loadVm();
+
+    // "telemetry:ingress" shares the telemetry: prefix but is one fixed key,
+    // and it is the global cap on the same endpoint. A namespace chosen by key
+    // prefix would have filed it with the per-IP buckets, where the flood it
+    // exists to contain could evict it.
+    for (let i = 0; i < 240; i += 1) {
+      expect(vm.checkProxyRateLimit("telemetry:ingress", 240, 60_000).ok).toBe(true);
+    }
+    flood(vm, 3000);
+    expect(vm.checkProxyRateLimit("telemetry:ingress", 240, 60_000).ok).toBe(false);
+  });
+
+  it("names every IP-keyed call site, so a new one cannot land in the tenant table", () => {
+    // A key built from a client IP has cardinality an attacker picks. Adding
+    // one without `ipKeyed` silently reopens the eviction path, and nothing
+    // else in the suite would notice.
+    const sources = [
+      ["pb_hooks/main.pb.js", '"telemetry:" + helpers.clientIP(c)'],
+      ["pb_hooks/walkarounds.js", '"walkaround-app:" + helpers.clientIP(c)'],
+      ["pb_hooks/helpers.js", '"auth-sample:" + kind + ":" + (ip || "unknown")'],
+    ] as const;
+    for (const [file, keyExpression] of sources) {
+      const source = readFileSync(resolve(process.cwd(), file), "utf8");
+      const at = source.indexOf(keyExpression);
+      expect(at, `${file} no longer builds ${keyExpression}`).toBeGreaterThan(-1);
+      // The option belongs to the same call; 400 characters covers the widest
+      // of these three after prettier wraps them.
+      expect(
+        source.slice(at, at + 400),
+        `${file}: ${keyExpression} is rate-limited without { ipKeyed: true }`,
+      ).toContain("ipKeyed: true");
+    }
+  });
+
+  it("still separates the tables when the shared store is unavailable", () => {
+    // The per-VM fallback has its own map per namespace, not one shared map.
+    runtime.$app = undefined;
+    const vm = loadVm();
+
+    expect(vm.checkProxyRateLimit("dealer:d2", 1, 60_000).ok).toBe(true);
+    // Same string, different table: the IP-keyed call must not see the tenant
+    // bucket that the previous line just created.
+    expect(vm.checkProxyRateLimit("dealer:d2", 1, 60_000, { ipKeyed: true }).ok).toBe(
+      true,
+    );
+    // And each table still enforces on its own side.
+    expect(vm.checkProxyRateLimit("dealer:d2", 1, 60_000).ok).toBe(false);
+    expect(vm.checkProxyRateLimit("dealer:d2", 1, 60_000, { ipKeyed: true }).ok).toBe(
+      false,
+    );
   });
 });

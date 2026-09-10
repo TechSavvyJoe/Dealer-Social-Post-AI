@@ -1324,10 +1324,15 @@ routerAdd("POST", "/api/telemetry", (c) => {
     // This endpoint is intentionally unauthenticated (it captures pre-login
     // client errors), so rate-limit per IP to stop log-injection / disk-fill
     // abuse: 30 events per IP per minute.
+    // ipKeyed: the key is a client IP, so its cardinality is whatever an
+    // attacker chooses. It counts against the separate IP table, where a flood
+    // can only evict other flood buckets — not a dealership's per-minute quota,
+    // and not the "telemetry:ingress" ceiling on the next line.
     const rl = helpers.checkProxyRateLimit(
       "telemetry:" + helpers.clientIP(c),
       30,
       60 * 1000,
+      { ipKeyed: true },
     );
     if (!rl.ok) return c.json(429, { success: false });
     const globalRl = helpers.checkProxyRateLimit("telemetry:ingress", 240, 60 * 1000);
