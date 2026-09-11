@@ -203,7 +203,7 @@ For a production rollout:
 
 1. Rotate any secret previously exposed in source, generated artifacts, logs, or Git history.
 2. Store secrets in the deployment secret manager, never in the frontend environment.
-3. Take and verify a Fly volume/database snapshot before running forward-only migrations.
+3. Take and verify a Fly volume/database snapshot before deploying. Migrations run at container start and the release process treats every schema change as forward-only: a rollback restores the image, never the database (`docs/runbooks/rollback.md` §7).
 4. Deploy the backend, then confirm `/api/app/health`, session login/logout, tenant isolation, and one authorized provider smoke request.
 5. Deploy the frontend/rewrite layer and repeat the same-origin session and generation checks.
 
