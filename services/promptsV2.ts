@@ -757,6 +757,26 @@ const captionScenarioProfile = (
 };
 
 /**
+ * Whether a caption for this creative brief's scenario may use
+ * vehicle-delivery/purchase language ("just drove off in...", "delivery
+ * day"). Reuses the exact same scenario profile the live model prompt is
+ * built from, so the deterministic safe-template fallback in
+ * utils/captionQuality.ts (used when AI output fails the quality/identity
+ * gate or every provider errors) can never contradict what the model itself
+ * was instructed — e.g. never claiming a vehicle handoff for a Recall
+ * Completion or Customer Testimonial post, which the live prompt already
+ * forbids.
+ */
+export const deliveryLanguageAllowedForBrief = (
+  creativeBrief: string | undefined,
+  customerIdentityRequired: boolean,
+): boolean => {
+  const scenario = classifyCreativeBrief(creativeBrief).scenario;
+  return captionScenarioProfile(scenario, customerIdentityRequired)
+    .deliveryLanguageAllowed;
+};
+
+/**
  * A prompt split by transport, not by meaning.
  *
  * `systemInstruction` holds the blocks that are byte-identical for every

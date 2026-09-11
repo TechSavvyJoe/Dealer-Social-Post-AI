@@ -27,6 +27,7 @@ import {
 import type { DealerBrandKit } from "../utils/brandKit";
 import { logEvent, logError } from "../utils/telemetry";
 import type { CapturedRelease } from "../services/photoReleases";
+import type { DecodedVehicle } from "../services/vinDecoder";
 import type { PlatformId, PrimaryImageProfile } from "../services/platformCopy";
 import type { Dealer } from "../types";
 import type { CaptionGenerationResult } from "../services/modelConfig";
@@ -180,6 +181,12 @@ export interface GenerationMeta {
   websiteEnabled?: boolean;
   /** Grounded year/make/model/trim from VIN decode; never the VIN. */
   websiteVehicleDescription?: string;
+  /**
+   * Full decoded VIN record, carried through so it survives the remount a
+   * failed generation attempt sends the customizer through (see
+   * GenerationParams.decodedVehicle in ../types for why this matters).
+   */
+  decodedVehicle?: DecodedVehicle;
   /**
    * Dealership Playful style requested on the customize screen (spec §4.2).
    * The playful asset is a SECOND image rendered on demand from the result
@@ -348,6 +355,7 @@ export const useGeneration = () => {
         imageAspectRatio: variables.imageAspectRatio,
         websiteEnabled: variables.meta?.websiteEnabled,
         websiteVehicleDescription: variables.meta?.websiteVehicleDescription,
+        decodedVehicle: variables.meta?.decodedVehicle,
       });
 
       progressIntervalRef.current = setInterval(() => {
@@ -406,6 +414,7 @@ export const useGeneration = () => {
         analyzeCaptionSetForDelivery,
         buildFallbackWebsiteDraft,
         buildWebsiteDraftPrompt,
+        deliveryLanguageAllowedForBrief,
         logPost,
         parsePlatformCaptionPack,
         parseWebsiteDraftResponse,
@@ -436,6 +445,11 @@ export const useGeneration = () => {
         );
       }
 
+      const deliveryLanguageAllowed = deliveryLanguageAllowedForBrief(
+        variables.creativeBrief,
+        variables.meta?.customerIdentityRequired ?? true,
+      );
+
       // Scan the caption for compliance triggers. Disclosures go into a
       // separate `disclosures` field so the editable caption textarea
       // never contains them (and a salesperson can't silently delete them).
@@ -445,6 +459,7 @@ export const useGeneration = () => {
           result.text,
           currentDealer?.banned_phrases,
           brandKitFromDealer(currentDealer),
+          deliveryLanguageAllowed,
         );
       } catch (err) {
         const message = toUiMessage(
@@ -526,6 +541,7 @@ export const useGeneration = () => {
                 caption,
                 currentDealer.banned_phrases,
                 brandKitFromDealer(currentDealer),
+                deliveryLanguageAllowed,
               );
               if (
                 !customerIdentityIsSafe(pipeline, {
@@ -1073,6 +1089,7 @@ export const useGeneration = () => {
       const pipeline = await loadPublishPipeline();
       const {
         analyzeCaptionSetForDelivery,
+        deliveryLanguageAllowedForBrief,
         parsePlatformCaptionPack,
         platformsToCaptionPackBrief,
         prepareCaptionForDelivery,
@@ -1089,6 +1106,10 @@ export const useGeneration = () => {
           currentDealer.name,
           primaryCaption,
         );
+        const customerIdentityRequired = resolveCustomerIdentityRequired(
+          useAppStore.getState().generatedPost?.customerIdentityRequired,
+          generationParams?.customerIdentityRequired,
+        );
         const { generatePlatformCaptionPack } = await loadGeminiService();
         assertOperationAuthEpoch(operationAuthEpoch);
         const rawPack = await runGeminiTask("ai.caption.pack", (signal) => {
@@ -1097,10 +1118,7 @@ export const useGeneration = () => {
             selectedImage,
             packBrief,
             generationParams?.customerName,
-            resolveCustomerIdentityRequired(
-              useAppStore.getState().generatedPost?.customerIdentityRequired,
-              generationParams?.customerIdentityRequired,
-            ),
+            customerIdentityRequired,
             signal,
           );
         });
@@ -1108,6 +1126,10 @@ export const useGeneration = () => {
         const parsed = parsePlatformCaptionPack(rawPack, platformIds);
         const cleaned: Record<string, string> = {};
         const kit = brandKitFromDealer(currentDealer);
+        const deliveryLanguageAllowed = deliveryLanguageAllowedForBrief(
+          generationParams?.creativeBrief,
+          customerIdentityRequired,
+        );
         const publicCustomer =
           useAppStore.getState().generatedPost?.customerDisplayName ||
           toPublicCustomerLabel(generationParams?.customerName);
@@ -1117,6 +1139,7 @@ export const useGeneration = () => {
               caption,
               currentDealer.banned_phrases,
               kit,
+              deliveryLanguageAllowed,
             );
             if (
               !customerIdentityIsSafe(pipeline, {
@@ -1177,7 +1200,11 @@ export const useGeneration = () => {
         loadPublishPipeline(),
         loadGeminiService(),
       ]);
-      const { prepareCaptionForDelivery } = pipeline;
+      const { deliveryLanguageAllowedForBrief, prepareCaptionForDelivery } = pipeline;
+      const customerIdentityRequired = resolveCustomerIdentityRequired(
+        sourcePost.customerIdentityRequired,
+        generationParams.customerIdentityRequired,
+      );
       assertOperationAuthEpoch(operationAuthEpoch);
       const captionResult = await runGeminiTask("ai.regenerate.text", (signal) => {
         assertOperationAuthEpoch(operationAuthEpoch);
@@ -1189,10 +1216,7 @@ export const useGeneration = () => {
           true,
           generationParams.creativeBrief,
           generationParams.style,
-          resolveCustomerIdentityRequired(
-            sourcePost.customerIdentityRequired,
-            generationParams.customerIdentityRequired,
-          ),
+          customerIdentityRequired,
           signal,
         );
       });
@@ -1201,6 +1225,10 @@ export const useGeneration = () => {
         captionResult.text,
         currentDealer.banned_phrases,
         brandKitFromDealer(currentDealer),
+        deliveryLanguageAllowedForBrief(
+          generationParams.creativeBrief,
+          customerIdentityRequired,
+        ),
       );
       if (
         !customerIdentityIsSafe(pipeline, {
@@ -1277,10 +1305,19 @@ export const useGeneration = () => {
     await regenerateTextMutation.mutateAsync();
   }, [regenerateTextMutation]);
 
-  // One-shot caption generator that RETURNS the text instead of side-effecting
-  // the post. Used by the CaptionAlternativesModal which spawns 3 in parallel
-  // and lets the salesperson pick — replaces state itself on selection.
-  const generateCaptionVariant = useCallback(async (): Promise<string> => {
+  // One-shot caption generator that RETURNS the fully-prepared caption
+  // (brand kit + delivery-language gating + disclosures already applied)
+  // instead of side-effecting the post. Used by CaptionAlternativesModal,
+  // which spawns 3 in parallel and lets the salesperson pick — replaces
+  // state itself on selection. The caller must use this result AS-IS rather
+  // than re-running prepareCaptionForDelivery on it: a second pass has no
+  // scenario/brandKit context of its own to get deliveryLanguageAllowed or
+  // the footer right a second time.
+  const generateCaptionVariant = useCallback(async (): Promise<{
+    caption: string;
+    disclosures: string;
+    disclosureCategories: string[];
+  }> => {
     const operationAuthEpoch = useAppStore.getState().authEpoch;
     if (!selectedImage || !generationParams || !currentDealer) {
       throw new Error("Missing required data for caption variant");
@@ -1290,7 +1327,11 @@ export const useGeneration = () => {
       loadPublishPipeline(),
       loadGeminiService(),
     ]);
-    const { prepareCaptionForDelivery } = pipeline;
+    const { deliveryLanguageAllowedForBrief, prepareCaptionForDelivery } = pipeline;
+    const customerIdentityRequired = resolveCustomerIdentityRequired(
+      useAppStore.getState().generatedPost?.customerIdentityRequired,
+      generationParams.customerIdentityRequired,
+    );
     assertOperationAuthEpoch(operationAuthEpoch);
     const variant = await runGeminiTask("ai.caption.variant", (signal) => {
       assertOperationAuthEpoch(operationAuthEpoch);
@@ -1302,10 +1343,7 @@ export const useGeneration = () => {
         true, // regeneration mode — higher temperature, guaranteed variation
         generationParams.creativeBrief,
         generationParams.style,
-        resolveCustomerIdentityRequired(
-          useAppStore.getState().generatedPost?.customerIdentityRequired,
-          generationParams.customerIdentityRequired,
-        ),
+        customerIdentityRequired,
         signal,
       );
     });
@@ -1314,6 +1352,10 @@ export const useGeneration = () => {
       variant,
       currentDealer.banned_phrases,
       brandKitFromDealer(currentDealer),
+      deliveryLanguageAllowedForBrief(
+        generationParams.creativeBrief,
+        customerIdentityRequired,
+      ),
     );
     if (
       !customerIdentityIsSafe(pipeline, {
@@ -1323,10 +1365,7 @@ export const useGeneration = () => {
           generationParams.customerName,
         dealerName: currentDealer.name,
         vehicleDescription: generationParams.websiteVehicleDescription,
-        identityRequired: resolveCustomerIdentityRequired(
-          useAppStore.getState().generatedPost?.customerIdentityRequired,
-          generationParams.customerIdentityRequired,
-        ),
+        identityRequired: customerIdentityRequired,
       })
     ) {
       throw new Error(customerIdentityError);
@@ -1334,7 +1373,11 @@ export const useGeneration = () => {
     if (operationAuthEpoch !== useAppStore.getState().authEpoch) {
       throw new Error("Your signed-in workspace changed during caption generation.");
     }
-    return prepared.caption;
+    return {
+      caption: prepared.caption,
+      disclosures: prepared.disclosures,
+      disclosureCategories: prepared.disclosureCategories,
+    };
   }, [
     selectedImage,
     generationParams,
@@ -1360,20 +1403,25 @@ export const useGeneration = () => {
       if (!sourcePost || !sourceText || !editPrompt.trim())
         throw new Error("Missing required data");
       const pipeline = await loadPublishPipeline();
-      const { prepareCaptionForDelivery, toPublicCustomerLabel } = pipeline;
+      const {
+        deliveryLanguageAllowedForBrief,
+        prepareCaptionForDelivery,
+        toPublicCustomerLabel,
+      } = pipeline;
       const publicCustomer =
         sourcePost.customerDisplayName ||
         toPublicCustomerLabel(generationParams?.customerName);
+      const customerIdentityRequired = resolveCustomerIdentityRequired(
+        sourcePost.customerIdentityRequired,
+        generationParams?.customerIdentityRequired,
+      );
       if (
         !customerIdentityIsSafe(pipeline, {
           caption: sourceText,
           customerName: publicCustomer,
           dealerName: currentDealer?.name,
           vehicleDescription: generationParams?.websiteVehicleDescription,
-          identityRequired: resolveCustomerIdentityRequired(
-            sourcePost.customerIdentityRequired,
-            generationParams?.customerIdentityRequired,
-          ),
+          identityRequired: customerIdentityRequired,
         })
       ) {
         throw new Error(
@@ -1412,6 +1460,10 @@ export const useGeneration = () => {
         captionResult.text,
         currentDealer?.banned_phrases,
         brandKitFromDealer(currentDealer),
+        deliveryLanguageAllowedForBrief(
+          generationParams?.creativeBrief,
+          customerIdentityRequired,
+        ),
       );
       if (
         !customerIdentityIsSafe(pipeline, {
@@ -1419,10 +1471,7 @@ export const useGeneration = () => {
           customerName: publicCustomer,
           dealerName: currentDealer?.name,
           vehicleDescription: generationParams?.websiteVehicleDescription,
-          identityRequired: resolveCustomerIdentityRequired(
-            sourcePost.customerIdentityRequired,
-            generationParams?.customerIdentityRequired,
-          ),
+          identityRequired: customerIdentityRequired,
           requireExpected: Boolean(
             publicCustomer &&
             customerIdentityIsSafe(pipeline, {

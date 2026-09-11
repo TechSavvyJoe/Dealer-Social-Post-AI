@@ -1,4 +1,5 @@
 import type { WebsiteDraft, WebsitePublication } from "./services/websitePublishing";
+import type { DecodedVehicle } from "./services/vinDecoder";
 
 export enum AppStep {
   LOGIN,
@@ -374,4 +375,14 @@ export interface GenerationParams {
   websiteEnabled?: boolean;
   /** Grounded year/make/model/trim label from VIN decode; never the VIN. */
   websiteVehicleDescription?: string;
+  /**
+   * Full decoded VIN record, restored verbatim after a failed generation
+   * attempt sends the customizer back through a remount (every AppStep
+   * transition is a keyed remount — see PageTransition). Without this, a
+   * successfully scanned VIN silently vanished on retry even though every
+   * other field on screen correctly restored, leaving the next attempt
+   * ungrounded exactly when the hallucination risk the VIN feature exists
+   * to prevent is highest.
+   */
+  decodedVehicle?: DecodedVehicle;
 }

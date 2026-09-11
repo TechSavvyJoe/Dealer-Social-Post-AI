@@ -105,4 +105,68 @@ describe("applyDealerBrandKit", () => {
     const tags = out.match(/#[A-Za-z0-9_]+/g) || [];
     expect(tags.length).toBeGreaterThanOrEqual(4);
   });
+
+  describe("deliveryLanguageAllowed", () => {
+    // A Recall Completion or Customer Testimonial caption involves a real
+    // customer but never a vehicle purchase/delivery. Before this, ANY short
+    // caption for those scenarios — AI-written or a salesperson's own typed
+    // text under the 120-char floor — got a vehicle-shopping CTA appended
+    // ("...let's get you behind the wheel") regardless of scenario.
+    it("does not append a vehicle-shopping CTA to a short caption when false", () => {
+      const out = applyDealerBrandKit(
+        "Sarah's recall was completed today. Thanks for trusting our service team!",
+        { name: "Sunrise Ford of Howell" },
+        false,
+      );
+      expect(out).not.toMatch(/behind the wheel|find the ride|delivery day|keys/i);
+      expect(out).toContain("Sunrise Ford of Howell");
+    });
+
+    it("still appends the vehicle-shopping CTA when true or unset (unchanged default behavior)", () => {
+      const withoutFlag = applyDealerBrandKit(
+        "Sarah's recall was completed today. Thanks for trusting our service team!",
+        { name: "Sunrise Ford of Howell" },
+      );
+      const explicitTrue = applyDealerBrandKit(
+        "Sarah's recall was completed today. Thanks for trusting our service team!",
+        { name: "Sunrise Ford of Howell" },
+        true,
+      );
+      for (const out of [withoutFlag, explicitTrue]) {
+        expect(out).toMatch(/behind the wheel/i);
+      }
+    });
+
+    it("fills a completely empty caption with a non-delivery gratitude template when false", () => {
+      const out = applyDealerBrandKit("", { name: "Lakeside Auto Group" }, false);
+      expect(out).not.toMatch(/drove off|delivery day|keys in hand|behind the wheel/i);
+      expect(out).toContain("Lakeside Auto Group");
+    });
+
+    it("never fills discovery hashtags with delivery tags when false, even once the body floor is already satisfied", () => {
+      // Isolates the hashtag-merge path specifically: a caption already at
+      // (or past) the 120-char body floor still went through
+      // AGENCY_DISCOVERY_HASHTAGS unconditionally before this fix, since the
+      // hashtag loops never read deliveryLanguageAllowed at all.
+      const longEnough =
+        "Sarah's recall was completed today after our service team diagnosed and resolved the issue same-day. Thanks for trusting us with your vehicle!";
+      expect(longEnough.length).toBeGreaterThanOrEqual(120);
+      const out = applyDealerBrandKit(
+        longEnough,
+        { name: "Bob Maxey Ford of Howell" },
+        false,
+      );
+      const tags = out.match(/#[A-Za-z0-9_]+/g) || [];
+      expect(tags).not.toEqual(
+        expect.arrayContaining(["#NewCarDelivery", "#JustDelivered", "#KeysInHand"]),
+      );
+      expect(
+        tags.some((t) =>
+          ["#HappyCustomer", "#CustomerLove", "#TrustedService", "#ThankYou"].includes(
+            t,
+          ),
+        ),
+      ).toBe(true);
+    });
+  });
 });

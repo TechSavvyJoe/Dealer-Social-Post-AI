@@ -254,24 +254,57 @@ const scenarioFromLabel = (value: string): CreativeScenario => {
   const normalized = normalizeLabel(value);
   if (!normalized) return "unknown";
 
+  // Exact match only. A prefix match here previously let any label merely
+  // *starting with* "sold by " collide with sold_by_salesperson — unneeded
+  // even for its own built-in: postScenarios.ts's "Sold by {Salesperson}"
+  // already normalizes to exactly the "sold by salesperson" alias once
+  // normalizeLabel strips the braces, so the prefix case only ever widened
+  // the collision surface for custom scenarios classified by label alone
+  // (this classifyScenario id-marker path bypasses this entirely).
   for (const definition of SCENARIO_DEFINITIONS) {
-    if (
-      definition.aliases.some((alias) => {
-        const normalizedAlias = normalizeLabel(alias);
-        return (
-          normalized === normalizedAlias ||
-          (definition.id === "sold_by_salesperson" &&
-            normalized.startsWith(normalizedAlias + " "))
-        );
-      })
-    ) {
+    if (definition.aliases.some((alias) => normalized === normalizeLabel(alias))) {
       return definition.id;
     }
   }
   return "custom";
 };
 
+const BUILT_IN_SCENARIO_IDS = new Set<string>(
+  SCENARIO_DEFINITIONS.map((definition) => definition.id),
+);
+
+/**
+ * services/postScenarios.ts's scenarioToCreativeBrief embeds "[id:...]" right
+ * after the label. Prefer that authoritative id over label text whenever
+ * it's present: a dealer's custom scenario is free-text and can collide with
+ * a built-in alias by coincidence (or by a GSM deliberately reusing a
+ * familiar name) — matching on id instead of label means a custom scenario
+ * can never be silently misread as a built-in just because it happens to be
+ * labeled the same thing.
+ *
+ * A single "first/only occurrence" search is safe here ONLY because
+ * scenarioToCreativeBrief strips this exact bracket shape out of every
+ * untrusted field (label, promptAdditions, hashtags) before embedding its
+ * own trusted marker — see stripIdMarkerSpoof there. Do not weaken that
+ * sanitization: normalizeSource above collapses all whitespace, including
+ * newlines, before this function ever runs, so there is no reliable
+ * line/sentence boundary left to anchor a "last bracket wins" search on —
+ * an anchored search only *looked* safe in a quick spoof test while
+ * actually failing on ordinary input (a label containing a period broke the
+ * boundary and fell through to the spoofable label match). Preventing the
+ * collision at the source, so at most one genuine marker can ever exist, is
+ * the only approach that is safe order-independently.
+ */
+const scenarioIdMarker = (source: string): string | null =>
+  /\[id:([\w-]+)\]/.exec(source)?.[1] || null;
+
 const classifyScenario = (source: string): CreativeScenario => {
+  const idMarker = scenarioIdMarker(source);
+  if (idMarker) {
+    return BUILT_IN_SCENARIO_IDS.has(idMarker)
+      ? (idMarker as CreativeScenario)
+      : "custom";
+  }
   const primary =
     /Post scenario:\s*([^.]{1,100})\./i.exec(source)?.[1] ||
     /Scenario:\s*([^.]{1,120})\./i.exec(source)?.[1] ||

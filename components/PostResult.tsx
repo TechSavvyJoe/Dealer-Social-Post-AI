@@ -51,6 +51,7 @@ import {
 import { MobilePublishStudio } from "./MobilePublishStudio";
 import { CaptionAlternativesModal } from "./CaptionAlternativesModal";
 import { isBrandCategoryId, resolveCreative } from "../services/creativeSystem";
+import { deliveryLanguageAllowedForBrief } from "../services/promptsV2";
 import { ProgressiveImage } from "./ui/ProgressiveImage";
 import { useToast } from "./ui/Toast";
 import { Modal } from "./ui/Modal";
@@ -347,8 +348,17 @@ interface PostResultProps {
   }) => Promise<WebsiteDraft>;
   onFunMode: (styleName?: string) => Promise<void>;
   onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
-  /** One-shot caption generator for the 3-variant alternatives modal. */
-  onGenerateCaptionVariant?: () => Promise<string>;
+  /**
+   * One-shot caption generator for the 3-variant alternatives modal. Returns
+   * the fully-prepared caption (brand kit + delivery-language gating +
+   * disclosures already applied) — the modal must use it as-is, never re-run
+   * prepareCaptionForDelivery on the result.
+   */
+  onGenerateCaptionVariant?: () => Promise<{
+    caption: string;
+    disclosures: string;
+    disclosureCategories: string[];
+  }>;
   onShowSettings?: () => void;
   onShowHistory?: () => void;
   onRequestLogout?: () => void;
@@ -426,6 +436,18 @@ export const PostResult: React.FC<PostResultProps> = ({
   const generationScenarioId = useAppStore((s) => s.generationParams?.scenarioId);
   const generationStyle = useAppStore((s) => s.generationParams?.style);
   const generationTone = useAppStore((s) => s.generationParams?.tone);
+  const generationCreativeBrief = useAppStore((s) => s.generationParams?.creativeBrief);
+  // `generationParams` and `post` are saved/restored together as a pair (see
+  // appStore's restoreSession), so this is safe even after a reload — it is
+  // never a stale brief from some earlier, different generation.
+  const deliveryLanguageAllowed = useMemo(
+    () =>
+      deliveryLanguageAllowedForBrief(
+        generationCreativeBrief,
+        post.customerIdentityRequired ?? true,
+      ),
+    [generationCreativeBrief, post.customerIdentityRequired],
+  );
 
   /**
    * Phase 2 creative resolver (docs/superpowers/specs/
@@ -910,8 +932,14 @@ export const PostResult: React.FC<PostResultProps> = ({
     setIsToolsOpen(false);
   }, [isDesktopLayout]);
   const captionAnalysis = useMemo(
-    () => analyzeCaptionForDelivery(editedText, bannedPhrases),
-    [bannedPhrases, editedText],
+    () =>
+      analyzeCaptionForDelivery(
+        editedText,
+        bannedPhrases,
+        undefined,
+        deliveryLanguageAllowed,
+      ),
+    [bannedPhrases, editedText, deliveryLanguageAllowed],
   );
   const captionSetAnalysis = useMemo(() => {
     const currentPrimaryCaption = activeCaptionPlatform ? primaryCaption : editedText;
@@ -1124,7 +1152,12 @@ export const PostResult: React.FC<PostResultProps> = ({
     if (!post.postId || !editableDraft) return;
     const historyCaption = activeCaptionPlatform ? primaryCaption : editedText;
     const historyAnalysis = activeCaptionPlatform
-      ? analyzeCaptionForDelivery(primaryCaption, bannedPhrases)
+      ? analyzeCaptionForDelivery(
+          primaryCaption,
+          bannedPhrases,
+          undefined,
+          deliveryLanguageAllowed,
+        )
       : captionAnalysis;
     if (
       !historyCaption.trim() ||
@@ -1164,6 +1197,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     bannedPhrases,
     captionAnalysis,
     captionSetAnalysis,
+    deliveryLanguageAllowed,
     editedText,
     effectivePack,
     flushPendingDraft,
@@ -1475,7 +1509,12 @@ export const PostResult: React.FC<PostResultProps> = ({
       return;
     }
     const finalCaption = activeCaptionPlatform ? primaryCaption : editedText;
-    const finalCaptionAnalysis = analyzeCaptionForDelivery(finalCaption, bannedPhrases);
+    const finalCaptionAnalysis = analyzeCaptionForDelivery(
+      finalCaption,
+      bannedPhrases,
+      undefined,
+      deliveryLanguageAllowed,
+    );
     if (finalCaptionAnalysis.compliance.prohibited.length > 0) {
       toast.warning(
         prohibitedClaimsMessage(finalCaptionAnalysis.compliance.prohibited),
@@ -1489,7 +1528,12 @@ export const PostResult: React.FC<PostResultProps> = ({
       caption: finalCaptionAnalysis.caption,
     };
     const savedPrimaryCaption = activeCaptionPlatform
-      ? analyzeCaptionForDelivery(primaryCaption, bannedPhrases).caption
+      ? analyzeCaptionForDelivery(
+          primaryCaption,
+          bannedPhrases,
+          undefined,
+          deliveryLanguageAllowed,
+        ).caption
       : capturedCreative.caption;
     const savedPlatformCaptions = activeCaptionPlatform
       ? {
@@ -1540,6 +1584,8 @@ export const PostResult: React.FC<PostResultProps> = ({
       const liveCaption = analyzeCaptionForDelivery(
         liveCreative.caption,
         bannedPhrases,
+        undefined,
+        deliveryLanguageAllowed,
       ).caption;
       const storedCreative = useAppStore.getState().generatedPost;
       const changedCreativePart =
@@ -1607,6 +1653,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     currentDealer?.name,
     captionSetAnalysis.disclosures,
     deliveryGateMessage,
+    deliveryLanguageAllowed,
     deliveryLocked,
     editedText,
     effectivePack,
@@ -2057,7 +2104,12 @@ export const PostResult: React.FC<PostResultProps> = ({
       // words a material-connection line. Prepending first silently deleted the
       // disclosure for four of five realistic wordings.
       const attributed = appendDealershipMention(base, id, currentDealer);
-      const scanned = analyzeCaptionForDelivery(attributed, bannedPhrases);
+      const scanned = analyzeCaptionForDelivery(
+        attributed,
+        bannedPhrases,
+        undefined,
+        deliveryLanguageAllowed,
+      );
       // Scan the disclosure-prepended text (unchanged from before), so the
       // identity-safety and prohibited-claims checks see exactly what the
       // caption will look like once a delivery path adds requiredPrefix.
@@ -2095,6 +2147,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     bannedPhrases,
     currentDealer,
     customerIdentityIsSafe,
+    deliveryLanguageAllowed,
     editedText,
     effectivePack,
     identityGateMessage,
@@ -2178,7 +2231,12 @@ export const PostResult: React.FC<PostResultProps> = ({
     const attributedCaption = copyDestinationId
       ? appendDealershipMention(editedText, copyDestinationId, currentDealer)
       : editedText;
-    const preparedCopy = analyzeCaptionForDelivery(attributedCaption, bannedPhrases);
+    const preparedCopy = analyzeCaptionForDelivery(
+      attributedCaption,
+      bannedPhrases,
+      undefined,
+      deliveryLanguageAllowed,
+    );
     if (preparedCopy.compliance.prohibited.length > 0) {
       toast.warning(prohibitedClaimsMessage(preparedCopy.compliance.prohibited));
       return;
@@ -3644,7 +3702,6 @@ export const PostResult: React.FC<PostResultProps> = ({
           }
           onClose={() => setIsCaptionAltsOpen(false)}
           generateOne={onGenerateCaptionVariant}
-          bannedPhrases={bannedPhrases}
           onSelect={({ text }) => {
             handleTextChange(text);
           }}

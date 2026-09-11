@@ -303,6 +303,17 @@ export const parseCustomScenarios = (raw?: string): PostScenario[] => {
       if (
         entry &&
         typeof entry.id === "string" &&
+        // `id` is never rendered — it only ever gets spliced verbatim into
+        // the trusted `[id:${scenario.id}]` marker in scenarioToCreativeBrief
+        // below, which is exactly what stripIdMarkerSpoof exists to protect.
+        // An id containing `[` or `]` (or anything outside this shape) can
+        // break out of that template and forge a fake marker earlier in the
+        // brief that scenarioIdMarker's first-occurrence search then picks
+        // up instead, hijacking classification to any built-in scenario id
+        // it can spell. Legitimate ids (built-ins and CustomScenarioManager's
+        // `custom_<uuid>`) all already match this shape, so this only ever
+        // drops a corrupted or hostile entry, never a real one.
+        /^[\w-]+$/.test(entry.id) &&
         typeof entry.label === "string" &&
         typeof entry.promptAdditions === "string"
       ) {
@@ -386,6 +397,36 @@ export const SCENARIO_CATEGORY_ICON: Record<ScenarioCategory, LucideIcon> = {
 };
 
 /**
+ * The [id:...] marker below is the ONLY thing that makes creativeSkills.ts's
+ * classifier trustworthy — everything else nearby (label, promptAdditions,
+ * hashtags) is free text a dealer fully controls for a custom scenario, with
+ * no format restriction beyond length. Strip that exact bracket shape out of
+ * untrusted text before it goes anywhere near the trusted marker, so at most
+ * one genuine "[id:...]" pattern can ever exist in the composed brief —
+ * a "first occurrence" search on the consumer side is safe ONLY because of
+ * this. (An earlier attempt instead tried to out-position an untrusted
+ * marker by anchoring to a sentence/line boundary; that broke on ordinary
+ * input — ANY period in a custom label — because normalizeSource in
+ * creativeSkills.ts collapses newlines before classification ever runs, so
+ * there was no real boundary left to anchor to. Preventing the collision at
+ * the source, rather than out-clevering it at the point of use, is the only
+ * approach that is safe order-independently.)
+ *
+ * This must also run on every OTHER dealer-editable free-text field that can
+ * end up ahead of this module's own marker in the final creative brief
+ * (components/PostCustomizer.tsx's composeGenerationCreativeBrief — e.g.
+ * dealer.brand_voice) — the classifier trusts whichever "[id:...]" it finds
+ * FIRST, so an unsanitized field earlier in that assembly is just as capable
+ * of forging a scenario as an unsanitized scenario field is. Exported so
+ * PostCustomizer can apply it there too.
+ */
+export const stripIdMarkerSpoof = (value: string): string =>
+  value
+    .replace(/\[id:[\w-]*\]/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/**
  * Build the scenario block that goes into the creative brief. Returns "" when
  * no scenario id is provided so the customizer keeps its current behaviour.
  *
@@ -402,12 +443,35 @@ export const scenarioToCreativeBrief = (
     findScenario(id) ||
     parseCustomScenarios(customScenariosJson).find((s) => s.id === id);
   if (!scenario) return "";
-  const hashtagLine = scenario.suggestedHashtags.length
-    ? `Scenario hashtags (in addition to dealer defaults; each is one #PascalCase token, space-separated): ${scenario.suggestedHashtags.join(
+  const safeLabel = stripIdMarkerSpoof(scenario.label);
+  const safePromptAdditions = stripIdMarkerSpoof(scenario.promptAdditions);
+  const safeHashtags = scenario.suggestedHashtags
+    .map(stripIdMarkerSpoof)
+    .filter(Boolean);
+  const hashtagLine = safeHashtags.length
+    ? `Scenario hashtags (in addition to dealer defaults; each is one #PascalCase token, space-separated): ${safeHashtags.join(
         " ",
       )}.`
     : "";
-  return [`Post scenario: ${scenario.label}.`, scenario.promptAdditions, hashtagLine]
+  // The [id:...] marker lets creativeSkills.ts's classifier key off the
+  // actual scenario id instead of re-deriving it from this free-text label —
+  // a dealer's custom scenario label ("Community Event", "Sold by Our
+  // Finance Team") can otherwise collide with a built-in alias and silently
+  // inherit that built-in's tone/CTA/hashtags. It goes FIRST, ahead of the
+  // label, not inline after it: this block is truncated further downstream
+  // (composeGenerationCreativeBrief's `bounded(scenarioBlock, 240)`), by
+  // character count, with no awareness of where the marker sits. A long but
+  // entirely ordinary custom label — nothing spoofed, `label` already went
+  // through stripIdMarkerSpoof above — could otherwise push the marker past
+  // that cut, silently falling back to the same label-alias matching this
+  // marker system exists to replace (and which a label like "Sold by..."
+  // can legitimately collide with). Leading with a short, fixed-shape marker
+  // keeps it well inside any downstream budget regardless of label length.
+  return [
+    `[id:${scenario.id}] Post scenario: ${safeLabel}.`,
+    safePromptAdditions,
+    hashtagLine,
+  ]
     .filter(Boolean)
     .join("\n");
 };

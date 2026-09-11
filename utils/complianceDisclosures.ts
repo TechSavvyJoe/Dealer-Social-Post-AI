@@ -269,10 +269,11 @@ export const analyzeCaptionForDelivery = (
   text: string,
   bannedPhrases?: DealerBannedPhrases,
   brandKit?: DealerBrandKit | null,
+  deliveryLanguageAllowed = true,
 ): DeliveryCaption => {
   // Clean model junk first, then brand kit (footer + required tags), then compliance.
   const cleaned = cleanSocialCaption(text ?? "");
-  const withBrand = applyDealerBrandKit(cleaned, brandKit);
+  const withBrand = applyDealerBrandKit(cleaned, brandKit, deliveryLanguageAllowed);
   const normalized = normalizeCaptionHashtags(withBrand);
   const compliance = applyDisclosures(normalized, bannedPhrases);
   const markerIndex = compliance.text.indexOf("— Disclosures —");
@@ -321,8 +322,14 @@ export const prepareCaptionForDelivery = (
   text: string,
   bannedPhrases?: DealerBannedPhrases,
   brandKit?: DealerBrandKit | null,
+  deliveryLanguageAllowed = true,
 ): DeliveryCaption => {
-  const result = analyzeCaptionForDelivery(text, bannedPhrases, brandKit);
+  const result = analyzeCaptionForDelivery(
+    text,
+    bannedPhrases,
+    brandKit,
+    deliveryLanguageAllowed,
+  );
   if (result.compliance.prohibited.length > 0) {
     throw new Error(prohibitedClaimsMessage(result.compliance.prohibited));
   }

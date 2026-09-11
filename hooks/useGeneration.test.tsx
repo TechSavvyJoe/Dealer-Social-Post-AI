@@ -358,9 +358,8 @@ describe("useGeneration model-tier and provenance wiring", () => {
     );
     const { result, cleanup } = renderGeneration();
 
-    await expect(result.current.generateCaptionVariant()).resolves.toContain(
-      "Congratulations to Alex",
-    );
+    const variant = await result.current.generateCaptionVariant();
+    expect(variant.caption).toContain("Congratulations to Alex");
     expect(mocks.generateSocialPostText.mock.calls[0].at(-2)).toBe(true);
     expect(mocks.generateSocialPostText.mock.calls[0].at(-1)).toBeInstanceOf(
       AbortSignal,
@@ -375,9 +374,8 @@ describe("useGeneration model-tier and provenance wiring", () => {
     );
     const { result, cleanup } = renderGeneration();
 
-    await expect(result.current.generateCaptionVariant()).resolves.toContain(
-      "Example Motors",
-    );
+    const firstVariant = await result.current.generateCaptionVariant();
+    expect(firstVariant.caption).toContain("Example Motors");
     expect(mocks.generateSocialPostText.mock.calls.at(-1)?.at(-2)).toBe(true);
 
     mocks.store.generatedPost = {
@@ -388,9 +386,8 @@ describe("useGeneration model-tier and provenance wiring", () => {
       ...(mocks.store.generationParams as Record<string, unknown>),
       customerIdentityRequired: undefined,
     };
-    await expect(result.current.generateCaptionVariant()).resolves.toContain(
-      "Example Motors",
-    );
+    const secondVariant = await result.current.generateCaptionVariant();
+    expect(secondVariant.caption).toContain("Example Motors");
     expect(mocks.generateSocialPostText.mock.calls.at(-1)?.at(-2)).toBe(false);
 
     cleanup();

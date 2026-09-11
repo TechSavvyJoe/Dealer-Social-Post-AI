@@ -62,6 +62,7 @@ import {
   scenarioToCreativeBrief,
   scenarioLegacyCreativeDefaults,
   getScenariosForDealer,
+  stripIdMarkerSpoof,
 } from "../services/postScenarios";
 import { LOOK_DEFINITIONS, resolveCreative } from "../services/creativeSystem";
 import { logEvent } from "../utils/telemetry";
@@ -106,6 +107,7 @@ interface PostCustomizerProps {
       capturedRelease?: CapturedRelease;
       websiteEnabled?: boolean;
       websiteVehicleDescription?: string;
+      decodedVehicle?: DecodedVehicle;
       /** Dealership Playful style requested for a second image (spec §4.2). */
       playfulStyleId?: string;
     },
@@ -323,6 +325,21 @@ export const composeGenerationCreativeBrief = ({
 }: CreativeBriefSections): string => {
   const bounded = (value: string | undefined, limit: number) =>
     (value || "").trim().slice(0, limit);
+  // scenarioToCreativeBrief embeds the ONE trusted "[id:...]" marker
+  // creativeSkills.ts's classifier keys off of, and its own docstring is
+  // explicit that this only works if no OTHER "[id:...]"-shaped text can
+  // reach the composed brief ahead of it — the classifier trusts whichever
+  // one it finds FIRST. Every field here except scenarioBlock is dealer-
+  // editable free text (dealer.brand_voice for voiceBlock, dealer name,
+  // hand-typed vehicle/OEM/design notes) that reaches this brief without
+  // ever passing through scenarioToCreativeBrief's own sanitization, so a
+  // dealer typing "[id:sold_by_salesperson]" into, say, their Brand Voice
+  // settings would otherwise forge that scenario's classification (and,
+  // downstream, deliveryLanguageAllowedForBrief) for every post regardless
+  // of which scenario was actually picked. Strip the same marker shape out
+  // of all of them; scenarioBlock is the one field intentionally exempt.
+  const boundedSafe = (value: string | undefined, limit: number) =>
+    bounded(stripIdMarkerSpoof(value || ""), limit);
   // The caption model intentionally reads only the first 900 characters of
   // this shared brief. Keep every immutable grounding block inside an 850-char
   // worst-case envelope so a verbose custom scenario cannot push vehicle, OEM,
@@ -333,15 +350,17 @@ export const composeGenerationCreativeBrief = ({
   // verbose scenario or VIN block. Design DNA is last because the caption
   // model also receives style guidance through its own styleHint.
   const essential = [
-    `Dealership identity (use this exact name): "${bounded(dealershipName, 100)}".`,
-    bounded(voiceBlock, 220),
+    `Dealership identity (use this exact name): "${boundedSafe(dealershipName, 100)}".`,
+    boundedSafe(voiceBlock, 220),
     bounded(scenarioBlock, 240),
-    bounded(vehicleBlock, 220),
-    bounded(oemBlock, 120),
-    bounded(designBlock, 120),
+    boundedSafe(vehicleBlock, 220),
+    boundedSafe(oemBlock, 120),
+    boundedSafe(designBlock, 120),
   ].filter(Boolean);
-  const supporting = supportingBlocks.map((part) => bounded(part, 220)).filter(Boolean);
-  const platform = bounded(platformBlock, 500);
+  const supporting = supportingBlocks
+    .map((part) => boundedSafe(part, 220))
+    .filter(Boolean);
+  const platform = boundedSafe(platformBlock, 500);
   return [...essential, ...supporting, platform]
     .filter(Boolean)
     .join(" ")
@@ -492,7 +511,22 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [vinScannerOpen, setVinScannerOpen] = useState(false);
-  const [decodedVehicle, setDecodedVehicle] = useState<DecodedVehicle | null>(null);
+  // Restored so a scanned VIN survives the remount a failed generation
+  // attempt sends this screen through (every AppStep transition is a keyed
+  // remount — see PageTransition) — without this, a successfully decoded
+  // vehicle silently vanished on retry while every other field restored.
+  // Guarded against the restored scenario itself not expecting a vehicle
+  // (mirrors handleScenarioChange's live-switch clear below): otherwise a
+  // stale vehicle from before a scenario switch could restore alongside a
+  // now-hidden Vehicle section with no way to notice or remove it.
+  const [decodedVehicle, setDecodedVehicle] = useState<DecodedVehicle | null>(() => {
+    const restored = initialGenerationParams?.decodedVehicle;
+    if (!restored) return null;
+    const restoredScenario = getScenariosForDealer(
+      currentDealer?.custom_scenarios,
+    ).find((scenario) => scenario.id === initialGenerationParams?.scenarioId);
+    return restoredScenario?.requiresVehicle === false ? null : restored;
+  });
   const [releaseModalOpen, setReleaseModalOpen] = useState(false);
   const [releaseValidationError, setReleaseValidationError] = useState(false);
   const [captionIdentityError, setCaptionIdentityError] = useState(
@@ -676,6 +710,14 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     (s: PostScenario | undefined) => {
       if (!s) return;
       setScenarioId(s.id);
+      // A scenario that doesn't expect a vehicle also hides the Vehicle
+      // section entirely (below) — clear any already-decoded vehicle from a
+      // prior scenario selection along with it, or it would keep silently
+      // grounding the creative brief with no on-screen control left to
+      // notice or remove it.
+      if (!s.requiresVehicle) {
+        setDecodedVehicle(null);
+      }
       const legacyDefaults = scenarioLegacyCreativeDefaults(s, creativeEnabled);
       if (!legacyDefaults) return;
       if (allowedStyles.includes(legacyDefaults.style)) {
@@ -960,6 +1002,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
           capturedRelease: capturedRelease || undefined,
           websiteEnabled: websiteSelected,
           websiteVehicleDescription: vehiclePhrase,
+          decodedVehicle: decodedVehicle || undefined,
           // Carries the dealership's single Playful style to the result step,
           // where it renders a second image beside the house-style master.
           playfulStyleId:
@@ -1128,64 +1171,72 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               className="bg-fill-subtle border-hairline focus:border-primary-400 focus:bg-fill-hover transition-colors"
             />
 
-            {/* VIN Scanner — show pill if vehicle decoded, otherwise show CTA */}
-            <div className="space-y-2" role="group" aria-labelledby={vehicleGroupId}>
-              <span
-                id={vehicleGroupId}
-                className="text-xs font-medium text-surface-300 uppercase tracking-wide"
-              >
-                Vehicle
-              </span>
-              {decodedVehicle && !decodedVehicle.empty ? (
-                <m.div
-                  initial={{ opacity: 0, scale: 0.98 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="flex items-start gap-3 rounded-xl border border-success-500/40 bg-success-500/10 px-3 py-2.5"
+            {/* VIN Scanner — show pill if vehicle decoded, otherwise show CTA.
+                Hidden entirely for scenarios that don't expect a vehicle in
+                the photo (Service Promotion, Community Event, Team
+                Anniversary) — offering it there was pure clutter, not a
+                functional gap: an already-decoded vehicle still grounds the
+                brief if the salesperson scanned one before switching post
+                types. */}
+            {activeScenario.requiresVehicle && (
+              <div className="space-y-2" role="group" aria-labelledby={vehicleGroupId}>
+                <span
+                  id={vehicleGroupId}
+                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
                 >
-                  <Car className="h-4 w-4 text-success-300 flex-shrink-0 mt-0.5" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-success-100 truncate">
-                      {decodedVehicle.summary}
+                  Vehicle
+                </span>
+                {decodedVehicle && !decodedVehicle.empty ? (
+                  <m.div
+                    initial={{ opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="flex items-start gap-3 rounded-xl border border-success-500/40 bg-success-500/10 px-3 py-2.5"
+                  >
+                    <Car className="h-4 w-4 text-success-300 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-success-100 truncate">
+                        {decodedVehicle.summary}
+                      </div>
+                      <div className="text-[10px] font-mono text-success-300/80 truncate">
+                        VIN {decodedVehicle.vin}
+                      </div>
                     </div>
-                    <div className="text-[10px] font-mono text-success-300/80 truncate">
-                      VIN {decodedVehicle.vin}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    aria-label="Clear vehicle"
-                    disabled={Boolean(capturedRelease)}
-                    title={
-                      capturedRelease
-                        ? "Remove or replace the signed release before changing the vehicle."
-                        : "Clear vehicle"
-                    }
+                    <button
+                      type="button"
+                      aria-label="Clear vehicle"
+                      disabled={Boolean(capturedRelease)}
+                      title={
+                        capturedRelease
+                          ? "Remove or replace the signed release before changing the vehicle."
+                          : "Clear vehicle"
+                      }
+                      onClick={() => {
+                        triggerHapticFeedback();
+                        setDecodedVehicle(null);
+                      }}
+                      className="p-1 -mr-1 text-success-300/80 hover:text-success-100 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </m.div>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="md"
+                    leftIcon={<ScanLine className="h-4 w-4" />}
                     onClick={() => {
                       triggerHapticFeedback();
-                      setDecodedVehicle(null);
+                      setVinScannerOpen(true);
                     }}
-                    className="p-1 -mr-1 text-success-300/80 hover:text-success-100 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                    fullWidth
+                    className="border-dashed border-strong bg-fill-subtle hover:bg-fill-hover"
+                    disabled={Boolean(capturedRelease)}
                   >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </m.div>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="md"
-                  leftIcon={<ScanLine className="h-4 w-4" />}
-                  onClick={() => {
-                    triggerHapticFeedback();
-                    setVinScannerOpen(true);
-                  }}
-                  fullWidth
-                  className="border-dashed border-strong bg-fill-subtle hover:bg-fill-hover"
-                  disabled={Boolean(capturedRelease)}
-                >
-                  Scan VIN (optional — boosts accuracy)
-                </Button>
-              )}
-            </div>
+                    Scan VIN (optional — boosts accuracy)
+                  </Button>
+                )}
+              </div>
+            )}
 
             {/* Photo release — capture customer's signed consent before posting their photo */}
             <div className="space-y-2" role="group" aria-labelledby={releaseGroupId}>

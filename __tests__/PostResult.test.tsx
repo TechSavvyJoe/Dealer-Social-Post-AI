@@ -16,6 +16,7 @@ import { ToastProvider } from "../components/ui/Toast";
 import type { WebsitePublication } from "../services/websitePublishing";
 import { VideoStyle } from "../types";
 import { useAppStore } from "../stores/appStore";
+import { scenarioToCreativeBrief } from "../services/postScenarios";
 import {
   EXPOSED_VIDEO_STYLES,
   UNEXPOSED_VIDEO_STYLES,
@@ -152,7 +153,11 @@ const callbacks = {
   ),
   onFunMode: vi.fn(async () => undefined),
   onGenerateVideo: vi.fn(async (_style: VideoStyle) => "blob:video"),
-  onGenerateCaptionVariant: vi.fn(async () => "Alternative caption"),
+  onGenerateCaptionVariant: vi.fn(async () => ({
+    caption: "Alternative caption",
+    disclosures: "",
+    disclosureCategories: [],
+  })),
 };
 
 const renderResult = (
@@ -213,6 +218,7 @@ describe("PostResult job-first flow", () => {
     useAppStore.setState({
       currentDealer: null,
       generatedPost: null,
+      generationParams: null,
       selectedImage: "data:image/png;base64,b3JpZ2luYWw=",
     });
   });
@@ -747,6 +753,52 @@ describe("PostResult job-first flow", () => {
     expect(writeText.mock.calls[1]?.[0]).toContain(
       "Hidden Facebook caption.\n\n@BobMaxeyFordofHowell",
     );
+  });
+
+  it("does not inject vehicle-delivery filler when copying a short Recall Completion caption", async () => {
+    // Regression test: PostResult's free-text edit/copy/send path used to
+    // default deliveryLanguageAllowed to true unconditionally, so a customer
+    // was present (recall_complete requires one) but no vehicle was
+    // purchased/delivered, and the body-floor filler in utils/brandKit.ts
+    // still added "delivery day"/"behind the wheel" language — the same bug
+    // class the generation path was fixed for, reached through Copy instead.
+    const user = userEvent.setup();
+    const writeText = vi.fn(async (_text: string): Promise<void> => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    useAppStore.setState({
+      currentDealer: { id: "dealer-recall-copy", name: "Bob Maxey Ford of Howell" },
+      generationParams: {
+        style: "Friendly" as never,
+        tone: "Professional" as never,
+        customerName: "Sarah",
+        creativeBrief: scenarioToCreativeBrief("recall_complete"),
+        scenarioId: "recall_complete",
+        customerIdentityRequired: true,
+      },
+    });
+
+    renderResult({
+      post: {
+        image: "data:image/png;base64,aGVsbG8=",
+        text: "Sarah's recall was completed today. Thanks for trusting our service team!",
+        customerDisplayName: "Sarah",
+        customerIdentityRequired: true,
+        mediaOutputMode: "photo",
+      },
+    });
+
+    await user.click(
+      within(screen.getByLabelText("Post delivery actions")).getByRole("button", {
+        name: "Copy caption",
+      }),
+    );
+
+    expect(writeText).toHaveBeenCalled();
+    const copiedText = writeText.mock.calls[0]?.[0] as string;
+    expect(copiedText).not.toMatch(/behind the wheel|find the ride|delivery day/i);
   });
 
   it("gates every delivery path while approval is pending", () => {
@@ -2002,6 +2054,7 @@ describe("PostResult creative system", () => {
     useAppStore.setState({
       currentDealer: null,
       generatedPost: null,
+      generationParams: null,
       selectedImage: "data:image/png;base64,b3JpZ2luYWw=",
     });
   });

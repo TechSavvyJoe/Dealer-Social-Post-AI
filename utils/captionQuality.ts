@@ -9,7 +9,7 @@ import {
   normalizeCaptionHashtags,
   uniqueFormattedHashtags,
 } from "./hashtags";
-import { AGENCY_DISCOVERY_HASHTAGS } from "./brandKit";
+import { AGENCY_DISCOVERY_HASHTAGS, CUSTOMER_TRUST_HASHTAGS } from "./brandKit";
 import { toPublicCustomerLabel } from "./customerIdentity";
 
 const NEUTRAL_DISCOVERY_HASHTAGS = [
@@ -138,6 +138,16 @@ export interface SafeCaptionOptions {
   defaultHashtags?: string;
   /** Defaults to true for legacy delivery flows; inventory/service callers opt out. */
   customerIdentityRequired?: boolean;
+  /**
+   * Whether "just drove off in...", "delivery day" language is true for this
+   * post. Defaults to true so every pre-existing caller (which never had a
+   * reason to think about this before Recall Completion/Customer Testimonial
+   * existed) keeps today's behavior unchanged. A caller for a customer-story
+   * scenario that is NOT a vehicle handoff (a recall visit, a testimonial
+   * quote) must pass false, or the deterministic fallback fabricates a
+   * vehicle purchase/delivery that never happened.
+   */
+  deliveryLanguageAllowed?: boolean;
 }
 
 const escapeIdentityPattern = (value: string): string =>
@@ -483,23 +493,31 @@ export const buildSafeMarketingCaption = (opts: SafeCaptionOptions): string => {
   const store = (opts.storeName || "our dealership").trim();
   const publicCustomer = toPublicCustomerLabel(opts.customerName);
   const customerIdentityRequired = opts.customerIdentityRequired ?? true;
+  const deliveryLanguageAllowed = opts.deliveryLanguageAllowed ?? true;
+  const customerFocused = Boolean(publicCustomer || customerIdentityRequired);
   const who = publicCustomer || "our newest customer";
   const ride = opts.vehiclePhrase?.trim()
     ? opts.vehiclePhrase.trim()
     : "their new ride";
 
   const body = (
-    publicCustomer || customerIdentityRequired
+    customerFocused && deliveryLanguageAllowed
       ? [
           `Keys in hand and big smiles — ${who} just drove off in ${ride}.`,
           `Moments like this are why we love what we do at ${store}.`,
           `Ready for your delivery day? Visit ${store} this week and find the one that feels like yours.`,
         ]
-      : [
-          `Fresh at ${store} — ${opts.vehiclePhrase?.trim() || "a standout vehicle"} is ready for a closer look.`,
-          "Our team is excited to share the details and help shoppers find the right fit.",
-          `Visit ${store} this week to explore what is available.`,
-        ]
+      : customerFocused
+        ? [
+            `We're grateful for the trust ${who} places in ${store}.`,
+            `Moments like this are exactly why our team does what we do.`,
+            `Thank you for being part of the ${store} family.`,
+          ]
+        : [
+            `Fresh at ${store} — ${opts.vehiclePhrase?.trim() || "a standout vehicle"} is ready for a closer look.`,
+            "Our team is excited to share the details and help shoppers find the right fit.",
+            `Visit ${store} this week to explore what is available.`,
+          ]
   ).join("\n\n");
 
   const tags = uniqueFormattedHashtags([
@@ -508,8 +526,10 @@ export const buildSafeMarketingCaption = (opts: SafeCaptionOptions): string => {
       .split(/[\n,]+/)
       .map((h) => formatHashtag(h.trim()))
       .filter(Boolean),
-    ...(customerIdentityRequired
-      ? AGENCY_DISCOVERY_HASHTAGS
+    ...(customerFocused
+      ? deliveryLanguageAllowed
+        ? AGENCY_DISCOVERY_HASHTAGS
+        : CUSTOMER_TRUST_HASHTAGS
       : NEUTRAL_DISCOVERY_HASHTAGS),
   ]).slice(0, 5);
 
