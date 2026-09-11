@@ -342,7 +342,7 @@ Caveats that must be stated with any number:
 
 - Video acceptance is counted as success (§4.4).
 - `generation_events` rows are pruned after 14 days by the `prune-client-error-events` cron
-  (`main.pb.js:1371-1401`), so a window longer than 14 days cannot be computed from this table.
+  (`main.pb.js:1376-1406`), so a window longer than 14 days cannot be computed from this table.
 - The upstream call itself is bounded at 300s for the Gemini/Veo proxy (`main.pb.js:383`), 120s
   for the Anthropic caption fallback (`main.pb.js:764`) and the OpenAI image fallback
   (`main.pb.js:646`), and 30s for the image fetch proxy (`main.pb.js:874`). A timeout lands as a
@@ -353,7 +353,7 @@ Caveats that must be stated with any number:
 > | Value               | Recommended default                                         | Reasoning                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 > | ------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 > | Objective           | **97% of provider attempts succeed, over a rolling 7 days** | The system already treats provider failure as expected, not exceptional: it counts `fallbackAttempts` and `basicFallbacks` as first-class fields (`main.pb.js:1059-1069`) and ships Claude and OpenAI fallback paths behind the `ENABLE_CLAUDE_FALLBACK` / `ENABLE_OPENAI_FALLBACK` flags (`main.pb.js:1245-1250`, `.env.example:11-12`). A target near 100% would be a target on Google's uptime, not on ours. 97% leaves room for upstream flakiness while catching a systemic break. |
-> | Window              | **7 days**                                                  | Long enough to smooth a bursty weekend, comfortably inside the 14-day `generation_events` retention (`main.pb.js:1374-1388`).                                                                                                                                                                                                                                                                                                                                                           |
+> | Window              | **7 days**                                                  | Long enough to smooth a bursty weekend, comfortably inside the 14-day `generation_events` retention (`main.pb.js:1379-1393`).                                                                                                                                                                                                                                                                                                                                                           |
 > | Secondary objective | **basic-fallback rate under 5% of posts_24h**               | `basicFallbacks24h` counts posts that shipped with a template caption instead of an AI one (`main.pb.js:1126`, `1137`). Users see this as "the AI stopped working" even while every probe is green.                                                                                                                                                                                                                                                                                     |
 
 ### 5.3 Latency
@@ -425,7 +425,7 @@ Browser side (`utils/telemetry.ts`):
 - **Only `error`-level events leave the browser**, via `navigator.sendBeacon("/api/telemetry")`
   (`:217-227`). `info` and `warn` never reach the server.
 
-Server side (`pb_hooks/main.pb.js:1319-1366`):
+Server side (`pb_hooks/main.pb.js:1319-1371`):
 
 - Intentionally unauthenticated, because it captures pre-login errors (`:1324-1326`).
 - Rate-limited to **30 events per IP per minute** (`:1327-1332`) and **240 per minute globally**
@@ -469,7 +469,7 @@ Useful strings to grep for, all emitted by the proxy paths:
 - `Too many concurrent image requests` / `Too many concurrent caption requests` — per-dealer
   concurrency caps (`main.pb.js:633`, `750`, `865`).
 - `[proxy-image] fetch failed` — image proxy transport failure (`main.pb.js:931-934`).
-- `Telemetry persistence error at stage` — telemetry ingestion fault (`main.pb.js:1362`).
+- `Telemetry persistence error at stage` — telemetry ingestion fault (`main.pb.js:1367`).
 
 Logs are not retained by this project, not searchable, and not alertable.
 
@@ -587,7 +587,7 @@ State this plainly to anyone who asks what coverage exists.
 | Anything at all, externally                         | No monitor named in the repo (§0)                                                                                                                                 | `ok:false` produces no notification.                                                                                                                                        |
 | Deep readiness from Fly's own check                 | `fly.toml:22-28` — intentional                                                                                                                                    | A config-gap outage keeps returning 200 to Fly.                                                                                                                             |
 | Application logs                                    | `fetch-fly-logs.yml` is `workflow_dispatch` only, no drain, no retention                                                                                          | Post-incident forensics are limited to whatever Fly still holds.                                                                                                            |
-| Browser errors, as a product                        | No Sentry or equivalent; `package.json` has no such dependency; only `error`-level events reach `client_error_events`, pruned at 14 days (`main.pb.js:1374-1388`) | No stack traces, no release-over-release regression view.                                                                                                                   |
+| Browser errors, as a product                        | No Sentry or equivalent; `package.json` has no such dependency; only `error`-level events reach `client_error_events`, pruned at 14 days (`main.pb.js:1379-1393`) | No stack traces, no release-over-release regression view.                                                                                                                   |
 | `info` / `warn` telemetry                           | `utils/telemetry.ts:217-227` sends only `error` via `sendBeacon`                                                                                                  | Usage funnels and near-misses stay on the device.                                                                                                                           |
 | Generation success rate, continuously               | Only in the admin-gated payload behind a super-admin cookie (`main.pb.js:1052-1080`)                                                                              | Nobody sees §5.2 unless a human opens the panel.                                                                                                                            |
 | Latency, continuously                               | `usage.dealers[].latencyMs` is admin-gated and 7-day-windowed (`helpers.js:1924-2048`)                                                                            | No trend, no alert, no history past the 14-day prune.                                                                                                                       |

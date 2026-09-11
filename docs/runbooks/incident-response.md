@@ -45,10 +45,10 @@ the error text is.
 
 Declare SEV1 if any one of these is true:
 
-- **Nobody can sign in.** `POST /api/app/session` (`pb_hooks/main.pb.js:1415`) is failing for
+- **Nobody can sign in.** `POST /api/app/session` (`pb_hooks/main.pb.js:1420`) is failing for
   all three login types — personal 4-digit code (`dealerCode`), manager password
   (`authType: manager_password`), system admin (`authType: admin_password`)
-  (`pb_hooks/main.pb.js:1503-1531`). Includes the fail-closed configuration cases:
+  (`pb_hooks/main.pb.js:1508-1536`). Includes the fail-closed configuration cases:
   `admin_login_configured = false` or `pin_pepper_configured = false`, both of which are
   readiness-critical (`pb_hooks/main.pb.js:1295-1313`).
 - **Readiness is red on the Fly origin.** `GET /api/app/health` returns HTTP 503 with
@@ -73,24 +73,24 @@ Declare SEV1 if any one of these is true:
   (`pb_hooks/main.pb.js:1018-1032`).
 - **Security.** Suspected credential exposure, session/role escalation, or exposure of
   customer photo-release data (`photo_releases` holds customer signatures —
-  `pb_hooks/main.pb.js:2034`). Treat as SEV1 regardless of how few users are affected.
+  `pb_hooks/main.pb.js:2039`). Treat as SEV1 regardless of how few users are affected.
 
 ### SEV2 — one flow is degraded, the rest of the product works
 
 - **Video generation broken, photos fine.** Veo path only: `/api/proxy/*` requests matching
   `:predictLongRunning` / `:generateVideos`, plus
-  `POST /api/app/posts/:id/video-generated` (`pb_hooks/main.pb.js:3181`). Video has its own
+  `POST /api/app/posts/:id/video-generated` (`pb_hooks/main.pb.js:3186`). Video has its own
   cost bucket of 3 starts per dealer per minute (`pb_hooks/requestPolicies.js:1598-1603`).
 - **Photo-release linking failing.** `POST /api/app/photo_releases/:id/link-post`
-  (`pb_hooks/main.pb.js:2163`) erroring. This has a known, already-documented user-visible
+  (`pb_hooks/main.pb.js:2168`) erroring. This has a known, already-documented user-visible
   failure: the consent _is_ stored, only the link fails, and the salesperson is shown
   "Photo release not saved · Delivery locked" with Copy/Share/Save/Export locked
   (`docs/open-issues-2026-09-03.md`, P0 section). Unlinked releases are pruned hourly at
-  minute 13 once `expires_at` passes (`pb_hooks/main.pb.js:2311`), so evidence is perishable —
+  minute 13 once `expires_at` passes (`pb_hooks/main.pb.js:2316`), so evidence is perishable —
   capture the `photo_releases` row id before it is swept.
 - **Website drafts not delivering.** `POST /api/app/posts/:id/website-publication`
-  (`pb_hooks/main.pb.js:3374`), its retry route (`pb_hooks/main.pb.js:3506`), or the
-  every-minute delivery cron `deliver-private-website-drafts` (`pb_hooks/main.pb.js:3575`).
+  (`pb_hooks/main.pb.js:3379`), its retry route (`pb_hooks/main.pb.js:3511`), or the
+  every-minute delivery cron `deliver-private-website-drafts` (`pb_hooks/main.pb.js:3580`).
   A publication gives up and goes to `failed` after 8 attempts
   (`pb_hooks/websitePublications.js:33`, `:1839-1841`).
 - **Image generation degraded to safe-template fallbacks.** `generation.basicFallbacks24h > 0`
@@ -98,10 +98,10 @@ Declare SEV1 if any one of these is true:
   amber (`components/SystemHealthPanel.tsx:712-717`).
 - **Login friction after the Turnstile threshold.** The challenge path itself is broken:
   after 3 failed attempts from an IP the API returns 403 `CHALLENGE_REQUIRED`
-  (`pb_hooks/main.pb.js:1421`, `:1453-1460`); if the widget cannot render or verify, those
+  (`pb_hooks/main.pb.js:1426`, `:1453-1460`); if the widget cannot render or verify, those
   users are stuck even though first-attempt logins still work.
 - **Admin-only flows broken.** Roster and dealership management
-  (`/api/app/salespeople`, `/api/app/dealers` — `pb_hooks/main.pb.js:4231`, `:5042`).
+  (`/api/app/salespeople`, `/api/app/dealers` — `pb_hooks/main.pb.js:4236`, `:5042`).
   Salespeople keep working; managers cannot onboard or rotate PINs.
 - **Rate limiting is biting normal use.** 429/503 from the proxy at normal volume:
   60 requests per dealer per minute (`pb_hooks/main.pb.js:40-41`), 10 image starts per minute
@@ -114,15 +114,15 @@ Declare SEV1 if any one of these is true:
 - One dealership, one salesperson, or one post affected.
 - One stuck website publication that its retry route clears.
 - Telemetry noise: `POST /api/telemetry` 429s. The per-IP limiter is 30 events per IP per
-  minute and it is the only one that returns 429 (`pb_hooks/main.pb.js:1327-1332`). The
+  minute and it is the only one that returns 429 (`pb_hooks/main.pb.js:1331-1337`). The
   global ingress limiter, 240 per minute, does **not** return 429 — it returns 202 with
   `{"success":true,"stored":false}`, so a global flood drops telemetry silently rather than
-  showing up as client errors (`pb_hooks/main.pb.js:1333-1334`).
+  showing up as client errors (`pb_hooks/main.pb.js:1338-1339`).
 - A prune/GC cron missing a run: `prune-client-error-events` 07:17
-  (`pb_hooks/main.pb.js:1371`), `prune-unlinked-photo-releases` hourly at :13
-  (`pb_hooks/main.pb.js:2311`), `session_gc_and_auth_cleanup` 03:00
-  (`pb_hooks/main.pb.js:5406`), `walkaround_abandoned_upload_cleanup` 03:30
-  (`pb_hooks/main.pb.js:5415`). Cron expressions run on the container clock; nothing in
+  (`pb_hooks/main.pb.js:1376`), `prune-unlinked-photo-releases` hourly at :13
+  (`pb_hooks/main.pb.js:2316`), `session_gc_and_auth_cleanup` 03:00
+  (`pb_hooks/main.pb.js:5411`), `walkaround_abandoned_upload_cleanup` 03:30
+  (`pb_hooks/main.pb.js:5420`). Cron expressions run on the container clock; nothing in
   `Dockerfile` or `fly.toml` sets `TZ`, so treat them as UTC.
 - Anything behind the Walkaround Studio flags. That feature is dark by default on both
   sides — `VITE_WALKAROUND_STUDIO_ENABLED=false` and `WALKAROUND_STUDIO_ENABLED=false`
@@ -590,13 +590,13 @@ Capture, in this order:
 6. **Database-side diagnostics, on a clock.** Server-side error and auth records are pruned
    automatically:
    - `client_error_events` and `generation_events`: deleted at **14 days**
-     (`pb_hooks/main.pb.js:1374-1389`).
+     (`pb_hooks/main.pb.js:1379-1394`).
    - `auth_events`: deleted at **30 days** by the daily 07:17 prune
-     (`pb_hooks/main.pb.js:1390-1397`). A second sweep in
+     (`pb_hooks/main.pb.js:1395-1402`). A second sweep in
      `purgeExpiredSessionsAndOldEvents` uses 90 days (`pb_hooks/helpers.js:4257-4271`), so
      **30 days is the effective floor** — do not plan around 90.
    - Unlinked `photo_releases` rows: deleted hourly at minute 13 once `expires_at` has
-     passed (`pb_hooks/main.pb.js:2311-2334`).
+     passed (`pb_hooks/main.pb.js:2316-2339`).
 7. **Release receipts**, if a release is implicated: `.release-evidence/` holds the staged
    release, QA, provider-canary and website-handoff receipts
    (`docs/production-backups-and-release.md`, staged-promotion section). It is gitignored and
@@ -732,10 +732,10 @@ change one of them, re-check this runbook.
   (`:13`, `:18-33`).
 - `pb_hooks/main.pb.js` — every route and threshold cited: proxy rate limits (`:40-41`,
   `:360-372`, `:838`), health (`:945-951`, `:957`, `:1018-1049`, `:1052-1053`, `:1136-1225`,
-  `:1238`, `:1295-1316`), telemetry (`:1319-1334`), retention crons (`:1371-1400`), session
-  (`:1415-1421`, `:1453-1460`, `:1503-1531`), photo releases (`:2034`, `:2163`, `:2311-2334`),
-  website publication (`:3374`, `:3506`, `:3575`), video (`:3181`), admin routes (`:4231`,
-  `:5042`), GC crons (`:5406`, `:5415`).
+  `:1238`, `:1295-1316`), telemetry (`:1319-1339`), retention crons (`:1376-1405`), session
+  (`:1420-1426`, `:1458-1465`, `:1508-1536`), photo releases (`:2039`, `:2168`, `:2316-2339`),
+  website publication (`:3379`, `:3511`, `:3580`), video (`:3186`), admin routes (`:4236`,
+  `:5047`), GC crons (`:5411`, `:5420`).
 - `pb_hooks/helpers.js` — telemetry redaction (`:2297-2345`) and the 90-day auth-event sweep
   in `purgeExpiredSessionsAndOldEvents` (`:4257-4271`).
 - `pb_hooks/requestPolicies.js` — video (3/min) and image (10/min) cost buckets (`:1595-1613`).

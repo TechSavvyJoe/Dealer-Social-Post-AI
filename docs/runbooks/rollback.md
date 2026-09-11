@@ -667,28 +667,38 @@ at container start. Rolling the image back gives PocketBase an image containing 
 _subset_ of `pb_migrations`; the migrations already recorded in `_migrations` are not
 in that subset, and nothing reverses them. The volume keeps the newer schema.
 
-**The down-migrations in this repo cannot be trusted to reverse anything.** Of the 56
-files in `pb_migrations/`, exactly one — the newest,
-`1751900000_employee_disclosure.js` — drops fields in its _down_ function with the API
-that actually works on this PocketBase line:
+**`migrate down` is not part of this procedure, and three migrations make it a one-way
+door regardless.** Every down-migration that drops schema fields now uses the API that
+actually works on this PocketBase line:
 
 ```js
 const field = dealers.schema.getFieldByName(name);
 if (field) dealers.schema.removeField(field.id);
 ```
 
-Its own comment states the problem, and the repository's older code proves it: 21
-other migration files (23 call sites) use `collection.schema =
-Array.from(collection.schema).filter(...)` in their down function, which
-`pb_migrations/1751900000_employee_disclosure.js:56-64` documents as
-"a SILENT NO-OP on PocketBase 0.22: the migration reports 'Applied' and the column is
-still there. Verified against 0.22.55 on a copy of real data." Files affected include
-`1748000200_extend_dealers_brand_voice.js`, `1748000300_approval_gate.js`,
-`1750400000_people_roles_impersonation.js`,
-`1751500000_brand_consistent_creative_foundations.js` and
-`1751800000_creative_system_v2_flag.js`. At least one down-migration is a deliberate
-no-op on security grounds: `1750300000_hash_session_tokens.js` ends with
-`// Security invariant: never restore plaintext bearer-token storage.`
+That was not always true. Until 2026-09-10, 21 migration files used
+`collection.schema = Array.from(collection.schema).filter(...)`, which on 0.22 reports
+"Reverted" and leaves the column in place. All 21 were converted and each was proven
+against the real 0.22.55 binary: 16 in isolation, the rest in a 31-migration reverse
+cascade, plus the 8 migrations after the last forward-only guard cascaded on a copy of
+production data. `__tests__/backendCompliancePolicy.test.ts` now rejects the broken idiom
+repository-wide.
+
+What still bounds any revert:
+
+- Three migrations are deliberately forward-only and throw or do nothing on the way
+  down, because reversing them would restore plaintext or duplicate credentials:
+  `1750500000_auth_people_integrity.js`, `1751300000_person_pin_hash.js` and
+  `1751300001_person_pin_backfill.js`. PocketBase runs `migrate down N` as one
+  transaction, so nothing older than `1751300001` can ever be reverted in place.
+- Two older down-migrations have unrelated defects, left as found because they sit behind
+  those guards: `1750000000_add_dev_dealers.js` binds a JavaScript array into an `IN ()`
+  query, which dbx rejects, and `1732490000_created_dealers.js` looks up
+  `dealers_collection` instead of `dealers` and so never deletes it.
+- `1750200000_harden_auth_events.js` used the broken idiom in its _up_ direction, so the
+  `code_attempted` column it claimed to drop survived in production;
+  `1752100000_purge_code_attempted_column.js` finishes that drop and is itself a no-op on
+  the way down, by design.
 
 Nothing in this repository tests booting an older image against a forward-migrated
 volume. `scripts/dirty-upgrade-smoke.sh` exercises the _forward_ direction only — it
@@ -892,48 +902,48 @@ Fill each one in, then delete the surrounding note.
 Every command, path, secret name, schedule and threshold above was read from these
 files at commit `7192eb1` on 2026-09-10.
 
-| Claim                                                                                                                               | Source                                                                                                                            |
-| ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Deploy triggers on CI completion for `main`; jobs refuse a superseded `main`                                                        | `.github/workflows/fly-deploy.yml:3-6, 18-22, 44-52, 234-242, 443-451`                                                            |
-| Concurrency group shared with the backup workflow                                                                                   | `.github/workflows/fly-deploy.yml:11-13`; `.github/workflows/pocketbase-backup.yml:11-13`                                         |
-| Deploy blocked unless `POCKETBASE_R2_BACKUPS_ENABLED=true`                                                                          | `.github/workflows/fly-deploy.yml:54-61`                                                                                          |
-| Candidate image tag `…:candidate-<sha>`; digest parsed from push output; digest form enforced                                       | `.github/workflows/fly-deploy.yml:187, 196-202, 307-311`                                                                          |
-| `flyctl auth docker`, `docker pull <image_ref>`                                                                                     | `.github/workflows/fly-deploy.yml:188, 203`                                                                                       |
-| Drill timestamp format and job outputs (`verified_at`, `image_ref`, `image_digest`)                                                 | `.github/workflows/fly-deploy.yml:205-212`; job outputs at `26-30`                                                                |
-| Ten required Fly secret names; `flyctl secrets list --json` returns names only                                                      | `.github/workflows/fly-deploy.yml:248-277`                                                                                        |
-| Staged secrets (`RELEASE_SHA`, backup evidence, Turnstile, legacy flag) then `flyctl deploy --image … --wait-timeout 10m`           | `.github/workflows/fly-deploy.yml:324-337`                                                                                        |
-| Readiness greps `"ok":true`, `"status":"verified"`, `"releaseSha":"…"`                                                              | `.github/workflows/fly-deploy.yml:346-362`                                                                                        |
-| Machine digest + `GH_SHA` / `GH_REPO` label assertion                                                                               | `.github/workflows/fly-deploy.yml:363-382`                                                                                        |
-| Failure diagnostics: `flyctl status` / `machine list` / `logs --no-tail`                                                            | `.github/workflows/fly-deploy.yml:384-391`                                                                                        |
-| Frontend released after backend, because `/api/*` rewrites to Fly                                                                   | `.github/workflows/fly-deploy.yml:393-402`; `vercel.ts:61-62, 86`                                                                 |
-| Vercel CLI `58.4.4`, canonical host, org/project ids                                                                                | `.github/workflows/fly-deploy.yml:412-425`; `scripts/vercel-staged-release.sh:4-9`                                                |
-| Bundle must carry its SHA; service worker bound as `dsp-<sha>`                                                                      | `.github/workflows/fly-deploy.yml:502-518`                                                                                        |
-| `/api/app/proxy-readiness` returns `{"ok":true}`                                                                                    | `.github/workflows/fly-deploy.yml:564-566`; `pb_hooks/main.pb.js:945-950`                                                         |
-| `vercel promote` insufficient; `vercel alias set` moves the canonical host; alias-side check required                               | `.github/workflows/fly-deploy.yml:570-593`                                                                                        |
-| Only `release-frontend` writes a step summary (frontend values, no backend digest)                                                  | `.github/workflows/fly-deploy.yml:598-610`                                                                                        |
-| Nightly drill cron `17 7 * * *`; scheduled runs target the running release; evidence refresh guard                                  | `.github/workflows/pocketbase-backup.yml:3-6, 56-75, 143-168, 178-182`                                                            |
-| Health `releaseSha` = `RELEASE_SHA` → `FLY_IMAGE_REF` → `"unknown"`, trimmed to 120 chars                                           | `pb_hooks/main.pb.js:995-1001`                                                                                                    |
-| Health rejects a non-40-hex `releaseSha` (`malformed releaseSha`)                                                                   | `scripts/resolve-fly-backup-source.mjs:52-59`                                                                                     |
-| `backup:create` / `backup:download` required environment; default R2 prefix; manifest comparison                                    | `scripts/pocketbase-r2-backup.mjs:17, 74-85, 121-124, 134, 149-157, 405-408, 483-526`                                             |
-| Volume prep runs before every pipeline backup                                                                                       | `.github/workflows/fly-deploy.yml:85-89`; `.github/workflows/pocketbase-backup.yml:86-90`; `scripts/prepare-fly-backup-volume.sh` |
-| Candidate digest is echoed to `$GITHUB_OUTPUT` only; the log carries it via `docker push`/`docker pull`                             | `.github/workflows/fly-deploy.yml:196-203, 209-211`                                                                               |
-| `backup.status` state machine; 7-day (`7 * 24` h) max age; `verified` ⇒ restore-ready                                               | `pb_hooks/main.pb.js:1002-1049`                                                                                                   |
-| Fly runtime detection; `off_box_restore_ready` false ⇒ `ok:false` ⇒ HTTP 503                                                        | `pb_hooks/main.pb.js:1260, 1284, 1295-1316`                                                                                       |
-| Health/image binding used by the backup job, and its exact error                                                                    | `scripts/resolve-fly-backup-source.mjs:44-60, 62-121, 142-153`                                                                    |
-| Volume mount `/pb/pb_data`; Fly check targets `/api/health`, not `/api/app/health`; 1 GB / 2 shared CPUs                            | `fly.toml:7-9, 22-34, 36-41`                                                                                                      |
-| PocketBase pinned `0.22.55`; migrations copied into the image                                                                       | `Dockerfile` (`ARG PB_VERSION=0.22.55`; `COPY pb_migrations /pb/pb_migrations`)                                                   |
-| 0.22-compatibility guard refuses to replace the database; serve flags                                                               | `entrypoint.sh:7-18, 26`                                                                                                          |
-| `removeField(field.id)` used only in the newest down-migration; the older idiom is a silent no-op on 0.22                           | `pb_migrations/1751900000_employee_disclosure.js:56-64`; 21 other files / 23 call sites matching `schema = Array.from(...)`       |
-| A down-migration deliberately left inert for security                                                                               | `pb_migrations/1750300000_hash_session_tokens.js` (final block)                                                                   |
-| Forward-only upgrade smoke; `SELECT COUNT(*) FROM _migrations`                                                                      | `scripts/dirty-upgrade-smoke.sh:103-120, 169-170, 202-203, 267`                                                                   |
-| `vercel alias list --json --limit 100` paging                                                                                       | `scripts/vercel-staged-release.sh:224-231`                                                                                        |
-| Alias-propagation retry budget (10 × 10 s)                                                                                          | `scripts/vercel-live-bundle-assert.mjs:28-31`                                                                                     |
-| `--assert-alias` needs `VERCEL_TOKEN`, uses `VERCEL_ORG_ID`                                                                         | `scripts/vercel-live-bundle-assert.mjs:533-553`                                                                                   |
-| Restore drill script contract (`RESTORE_RELEASE_SHA`, `RESTORE_VERIFIED_AT`, `BACKUP_ZIP [IMAGE_TAG]`)                              | `scripts/verify-pocketbase-restore.sh:1-31`                                                                                       |
-| npm aliases `backup:create`, `backup:download`, `backup:restore-drill`, `release:vercel:assert-alias`, `release:vercel:assert-live` | `package.json` scripts                                                                                                            |
-| 30-minute post-release watch; rollback constraints; restore-not-rollback procedure; record-keeping requirement                      | `docs/production-backups-and-release.md:244-270`                                                                                  |
-| `production-backup` environment holds the R2 / PocketBase admin credentials                                                         | `docs/production-backups-and-release.md:11-19`                                                                                    |
-| `flyctl ssh console --command 'sqlite3 /pb/pb_data/data.db "…"'` form                                                               | `docs/production-backups-and-release.md:85-86`                                                                                    |
+| Claim                                                                                                                               | Source                                                                                                                                               |
+| ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Deploy triggers on CI completion for `main`; jobs refuse a superseded `main`                                                        | `.github/workflows/fly-deploy.yml:3-6, 18-22, 44-52, 234-242, 443-451`                                                                               |
+| Concurrency group shared with the backup workflow                                                                                   | `.github/workflows/fly-deploy.yml:11-13`; `.github/workflows/pocketbase-backup.yml:11-13`                                                            |
+| Deploy blocked unless `POCKETBASE_R2_BACKUPS_ENABLED=true`                                                                          | `.github/workflows/fly-deploy.yml:54-61`                                                                                                             |
+| Candidate image tag `…:candidate-<sha>`; digest parsed from push output; digest form enforced                                       | `.github/workflows/fly-deploy.yml:187, 196-202, 307-311`                                                                                             |
+| `flyctl auth docker`, `docker pull <image_ref>`                                                                                     | `.github/workflows/fly-deploy.yml:188, 203`                                                                                                          |
+| Drill timestamp format and job outputs (`verified_at`, `image_ref`, `image_digest`)                                                 | `.github/workflows/fly-deploy.yml:205-212`; job outputs at `26-30`                                                                                   |
+| Ten required Fly secret names; `flyctl secrets list --json` returns names only                                                      | `.github/workflows/fly-deploy.yml:248-277`                                                                                                           |
+| Staged secrets (`RELEASE_SHA`, backup evidence, Turnstile, legacy flag) then `flyctl deploy --image … --wait-timeout 10m`           | `.github/workflows/fly-deploy.yml:324-337`                                                                                                           |
+| Readiness greps `"ok":true`, `"status":"verified"`, `"releaseSha":"…"`                                                              | `.github/workflows/fly-deploy.yml:346-362`                                                                                                           |
+| Machine digest + `GH_SHA` / `GH_REPO` label assertion                                                                               | `.github/workflows/fly-deploy.yml:363-382`                                                                                                           |
+| Failure diagnostics: `flyctl status` / `machine list` / `logs --no-tail`                                                            | `.github/workflows/fly-deploy.yml:384-391`                                                                                                           |
+| Frontend released after backend, because `/api/*` rewrites to Fly                                                                   | `.github/workflows/fly-deploy.yml:393-402`; `vercel.ts:61-62, 86`                                                                                    |
+| Vercel CLI `58.4.4`, canonical host, org/project ids                                                                                | `.github/workflows/fly-deploy.yml:412-425`; `scripts/vercel-staged-release.sh:4-9`                                                                   |
+| Bundle must carry its SHA; service worker bound as `dsp-<sha>`                                                                      | `.github/workflows/fly-deploy.yml:502-518`                                                                                                           |
+| `/api/app/proxy-readiness` returns `{"ok":true}`                                                                                    | `.github/workflows/fly-deploy.yml:564-566`; `pb_hooks/main.pb.js:945-950`                                                                            |
+| `vercel promote` insufficient; `vercel alias set` moves the canonical host; alias-side check required                               | `.github/workflows/fly-deploy.yml:570-593`                                                                                                           |
+| Only `release-frontend` writes a step summary (frontend values, no backend digest)                                                  | `.github/workflows/fly-deploy.yml:598-610`                                                                                                           |
+| Nightly drill cron `17 7 * * *`; scheduled runs target the running release; evidence refresh guard                                  | `.github/workflows/pocketbase-backup.yml:3-6, 56-75, 143-168, 178-182`                                                                               |
+| Health `releaseSha` = `RELEASE_SHA` → `FLY_IMAGE_REF` → `"unknown"`, trimmed to 120 chars                                           | `pb_hooks/main.pb.js:995-1001`                                                                                                                       |
+| Health rejects a non-40-hex `releaseSha` (`malformed releaseSha`)                                                                   | `scripts/resolve-fly-backup-source.mjs:52-59`                                                                                                        |
+| `backup:create` / `backup:download` required environment; default R2 prefix; manifest comparison                                    | `scripts/pocketbase-r2-backup.mjs:17, 74-85, 121-124, 134, 149-157, 405-408, 483-526`                                                                |
+| Volume prep runs before every pipeline backup                                                                                       | `.github/workflows/fly-deploy.yml:85-89`; `.github/workflows/pocketbase-backup.yml:86-90`; `scripts/prepare-fly-backup-volume.sh`                    |
+| Candidate digest is echoed to `$GITHUB_OUTPUT` only; the log carries it via `docker push`/`docker pull`                             | `.github/workflows/fly-deploy.yml:196-203, 209-211`                                                                                                  |
+| `backup.status` state machine; 7-day (`7 * 24` h) max age; `verified` ⇒ restore-ready                                               | `pb_hooks/main.pb.js:1002-1049`                                                                                                                      |
+| Fly runtime detection; `off_box_restore_ready` false ⇒ `ok:false` ⇒ HTTP 503                                                        | `pb_hooks/main.pb.js:1260, 1284, 1295-1316`                                                                                                          |
+| Health/image binding used by the backup job, and its exact error                                                                    | `scripts/resolve-fly-backup-source.mjs:44-60, 62-121, 142-153`                                                                                       |
+| Volume mount `/pb/pb_data`; Fly check targets `/api/health`, not `/api/app/health`; 1 GB / 2 shared CPUs                            | `fly.toml:7-9, 22-34, 36-41`                                                                                                                         |
+| PocketBase pinned `0.22.55`; migrations copied into the image                                                                       | `Dockerfile` (`ARG PB_VERSION=0.22.55`; `COPY pb_migrations /pb/pb_migrations`)                                                                      |
+| 0.22-compatibility guard refuses to replace the database; serve flags                                                               | `entrypoint.sh:7-18, 26`                                                                                                                             |
+| Every down-migration removes fields with `removeField(field.id)`; the older no-op idiom is rejected repository-wide                 | `pb_migrations/1751900000_employee_disclosure.js:56-64`; `__tests__/backendCompliancePolicy.test.ts` ("remove schema fields with an API that works") |
+| A down-migration deliberately left inert for security                                                                               | `pb_migrations/1750300000_hash_session_tokens.js` (final block)                                                                                      |
+| Forward-only upgrade smoke; `SELECT COUNT(*) FROM _migrations`                                                                      | `scripts/dirty-upgrade-smoke.sh:103-120, 169-170, 202-203, 267`                                                                                      |
+| `vercel alias list --json --limit 100` paging                                                                                       | `scripts/vercel-staged-release.sh:224-231`                                                                                                           |
+| Alias-propagation retry budget (10 × 10 s)                                                                                          | `scripts/vercel-live-bundle-assert.mjs:28-31`                                                                                                        |
+| `--assert-alias` needs `VERCEL_TOKEN`, uses `VERCEL_ORG_ID`                                                                         | `scripts/vercel-live-bundle-assert.mjs:533-553`                                                                                                      |
+| Restore drill script contract (`RESTORE_RELEASE_SHA`, `RESTORE_VERIFIED_AT`, `BACKUP_ZIP [IMAGE_TAG]`)                              | `scripts/verify-pocketbase-restore.sh:1-31`                                                                                                          |
+| npm aliases `backup:create`, `backup:download`, `backup:restore-drill`, `release:vercel:assert-alias`, `release:vercel:assert-live` | `package.json` scripts                                                                                                                               |
+| 30-minute post-release watch; rollback constraints; restore-not-rollback procedure; record-keeping requirement                      | `docs/production-backups-and-release.md:244-270`                                                                                                     |
+| `production-backup` environment holds the R2 / PocketBase admin credentials                                                         | `docs/production-backups-and-release.md:11-19`                                                                                                       |
+| `flyctl ssh console --command 'sqlite3 /pb/pb_data/data.db "…"'` form                                                               | `docs/production-backups-and-release.md:85-86`                                                                                                       |
 
 **Two corrections to note if you have seen an earlier description of this system:**
 
