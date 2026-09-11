@@ -233,7 +233,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
                 className={cn(
                   "flex min-h-20 flex-col items-center justify-center gap-1.5 rounded-xl border px-1 py-2.5 text-center transition-colors",
                   selected
-                    ? "border-primary-400 bg-primary-500/20 text-primary-100"
+                    ? "border-primary-400 bg-primary-500/20 text-primary-100 [.theme-light_&]:text-primary-950"
                     : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/35 hover:bg-fill-hover",
                 )}
               >
@@ -405,7 +405,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
                           "w-full flex items-start gap-2 px-2 py-2 rounded-lg text-left transition-colors",
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-900",
                           active
-                            ? "bg-primary-500/20 text-primary-100"
+                            ? "bg-primary-500/20 text-primary-100 [.theme-light_&]:text-primary-950"
                             : "hover:bg-fill-subtle text-surface-100",
                         )}
                       >
@@ -416,7 +416,7 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
                               className={cn(
                                 "flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg mt-0.5 transition-colors",
                                 active
-                                  ? "bg-primary-500/20 text-primary-200"
+                                  ? "bg-primary-500/20 text-primary-200 [.theme-light_&]:text-primary-900"
                                   : "bg-fill-subtle text-surface-300",
                               )}
                             >

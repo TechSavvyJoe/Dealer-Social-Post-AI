@@ -17,8 +17,42 @@ assert.ok(
   policyAgeDays >= -1,
   "Canonical Gemini policy verifiedAt cannot be in the future",
 );
+/**
+ * The hard gate. This script runs in `typecheck-and-test`, which playwright,
+ * container-smoke and the whole deploy workflow depend on, so crossing this
+ * threshold blocks every release until someone re-verifies the model catalog.
+ */
+const POLICY_MAX_AGE_DAYS = 45;
+/**
+ * The warning window. Without it the hard gate arrives with no notice: CI is
+ * green on day 44 and every deploy is blocked on day 45, usually discovered by
+ * whoever is trying to ship something unrelated and urgent. Warning from day 31
+ * leaves two weeks to re-check Google's catalog on purpose rather than under
+ * pressure. `.github/workflows/model-policy-freshness.yml` runs this daily so
+ * the warning is seen even when nobody pushes.
+ */
+const POLICY_WARN_AGE_DAYS = 31;
+
+if (policyAgeDays >= POLICY_WARN_AGE_DAYS && policyAgeDays <= POLICY_MAX_AGE_DAYS) {
+  const daysLeft = Math.ceil(POLICY_MAX_AGE_DAYS - policyAgeDays);
+  const message =
+    `Gemini model policy is ${Math.floor(policyAgeDays)} days old (verified ` +
+    `${canonical.verifiedAt}). Deploys are blocked in ${daysLeft} day(s). ` +
+    `Re-check Google's live model catalog against config/gemini-model-policy.json, ` +
+    `then refresh verifiedAt. Do NOT change the policy version to clear this.`;
+  // GitHub Actions renders this as an annotation on the run.
+  if (process.env.GITHUB_ACTIONS) console.log(`::warning::${message}`);
+  console.warn(`WARNING: ${message}`);
+  if (process.env.MODEL_POLICY_FRESHNESS_STRICT === "true") {
+    console.error(
+      "MODEL_POLICY_FRESHNESS_STRICT is set, so the warning window is a failure here.",
+    );
+    process.exit(1);
+  }
+}
+
 assert.ok(
-  policyAgeDays <= 45,
+  policyAgeDays <= POLICY_MAX_AGE_DAYS,
   `Canonical Gemini policy is ${Math.floor(
     policyAgeDays,
   )} days old; re-check Google's live model catalog and refresh verifiedAt`,

@@ -68,15 +68,15 @@ The companion repository skill lives at `skills/dealership-campaign-creative-dir
 ## Architecture
 
 - **Frontend:** React 19, Vite 8, Tailwind CSS, Zustand, and TanStack Query
-- **Backend:** PocketBase custom hooks in `pb_hooks/`, pinned to the latest compatible 0.22 maintenance release (`0.22.37`)
+- **Backend:** PocketBase custom hooks in `pb_hooks/`, pinned to the latest compatible 0.22 maintenance release (`0.22.55`)
 - **Authentication:** `POST /api/app/session` exchanges a personal PIN, dealer-scoped manager username/password, or isolated system-admin secret for an opaque `HttpOnly`, `Secure`, `SameSite=Strict` app cookie; it never exposes a PocketBase auth token
 - **Provider access:** authenticated browser requests use same-origin `/api/proxy/*` routes; Google credentials remain on the server, and asynchronous operation/file IDs are durably bound to the dealer session that created them
-- **Storage:** PocketBase/SQLite with forward-only migrations in `pb_migrations/`
+- **Storage:** PocketBase/SQLite with migrations in `pb_migrations/`, applied at container start. The release process treats every schema change as forward-only — a rollback rolls the image back, never the database (see `docs/runbooks/rollback.md` §7)
 - **Private recovery:** small workflow metadata stays in localStorage while large camera/generated assets use dealer-scoped IndexedDB and are cleared on reset, logout, expiry, or authentication rejection
 - **Delivery compliance:** required financing disclosures are attached automatically; prohibited claims and dealer-configured blocked phrases fail closed across generation, edits, copy, share, save, and export
 - **Deployment:** one Docker image on Fly.io; Vercel can serve the frontend and rewrite `/api/*` to the backend
 
-PocketBase 0.22.37 is a deliberate compatibility pin: the current JSVM hooks use the 0.22 API. Do not bump PocketBase to a newer major/minor line without porting and testing every hook and migration first.
+PocketBase 0.22.55 is a deliberate compatibility pin: the current JSVM hooks use the 0.22 API. Do not bump PocketBase to a newer major/minor line without porting and testing every hook and migration first.
 
 ## Commands
 

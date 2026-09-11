@@ -26,6 +26,7 @@ import {
   invokeWebShareNow,
   prepareMediaForSave,
 } from "../utils/mediaSave";
+import { captionIncludesEmployeeDisclosure } from "../utils/complianceDisclosures";
 
 export type PublishStatus =
   | {
@@ -49,6 +50,13 @@ export interface PublishContent {
   text: string;
   /** Immutable compliance footer; target fitting never truncates this block. */
   disclosures?: string;
+  /**
+   * FTC 16 CFR 255 team-member disclosure, protected at the TOP of the caption.
+   * Unlike `disclosures` this must lead: on several destinations the footer
+   * falls below the "see more" fold, where a material-connection disclosure is
+   * not "clear and conspicuous". Target fitting never truncates it.
+   */
+  requiredPrefix?: string;
   /** Hashtags as a single space-separated string (may already be in `text`). */
   hashtags?: string;
   /** Source generated image as data URL (or http URL). */
@@ -492,13 +500,22 @@ export interface PreparedPublishShare {
  * legally incomplete disclosure.
  */
 export const fitPublishCaptionToBudget = (
-  content: Pick<PublishContent, "text" | "disclosures">,
+  content: Pick<PublishContent, "text" | "disclosures" | "requiredPrefix">,
   maxChars: number,
 ): string => {
   const legacyMarkerIndex = content.text.indexOf("— Disclosures —");
-  const rawBody = (
+  const withoutFooter = (
     legacyMarkerIndex >= 0 ? content.text.slice(0, legacyMarkerIndex) : content.text
   ).trim();
+  const requiredPrefix = (content.requiredPrefix || "").trim();
+  // `text` is the body ALONE: callers no longer prepend the disclosure before
+  // the compliance pass, because cleanSocialCaption's assistant-preamble
+  // heuristic deleted first lines beginning "I have", "I've", "Here's" or
+  // "Sure". An earlier version tried to split the prefix back off with an exact
+  // startsWith, which failed once normalizeCaptionHashtags had rewritten the
+  // text (a disclosure containing "#ad" came back doubled and fused to the
+  // body). withPrefix() below is now the single place the disclosure is added.
+  const rawBody = withoutFooter;
   const trailingMentionMatch = rawBody.match(/(?:^|\n{2,})(@[^\n]{1,100})$/u);
   const dealershipMention = trailingMentionMatch?.[1]?.trim() || "";
   const body = dealershipMention
@@ -517,21 +534,51 @@ export const fitPublishCaptionToBudget = (
   const protectedSuffix = [dealershipMention, canonicalDisclosure]
     .filter(Boolean)
     .join("\n\n");
-  if (!protectedSuffix) return fitCaptionToBudget(body, maxChars);
-  if (!body) {
-    if (protectedSuffix.length > maxChars) {
-      throw new Error(
-        "The dealership mention or required compliance disclosures exceed this destination's character limit.",
-      );
+  const separator = "\n\n";
+  // Defense in depth: `text` is supposed to be body-only by the time it
+  // reaches here, and every known caller now honours that. A caller that
+  // slips and hands over text with the disclosure already baked in (the
+  // shape of a real bug found and fixed once already — see PostResult.tsx's
+  // sharePlatformCaptions) must not get it added a second time. This never
+  // STRIPS anything, only skips one insertion, so it carries none of the risk
+  // of the startsWith-splitting approach abandoned above: nothing here tries
+  // to separate a combined string back into (prefix, body).
+  const withPrefix = (value: string) =>
+    requiredPrefix && value
+      ? captionIncludesEmployeeDisclosure(value, requiredPrefix)
+        ? value
+        : `${requiredPrefix}${separator}${value}`
+      : requiredPrefix || value;
+
+  if (!protectedSuffix) {
+    if (!requiredPrefix) return fitCaptionToBudget(body, maxChars);
+    const bodyOnlyBudget = maxChars - requiredPrefix.length - separator.length;
+    if (bodyOnlyBudget < 1) {
+      if (requiredPrefix.length > maxChars) {
+        throw new Error(
+          `The required team-member disclosure exceeds this destination's ${maxChars}-character limit. Shorten it in dealership settings.`,
+        );
+      }
+      return requiredPrefix;
     }
-    return protectedSuffix;
+    return withPrefix(fitCaptionToBudget(body, bodyOnlyBudget));
   }
 
-  const separator = "\n\n";
-  const bodyBudget = maxChars - protectedSuffix.length - separator.length;
+  if (!body) {
+    const required = withPrefix(protectedSuffix);
+    if (required.length > maxChars) {
+      throw new Error(
+        "The team-member disclosure, dealership mention, or required compliance disclosures exceed this destination's character limit.",
+      );
+    }
+    return required;
+  }
+
+  const prefixCost = requiredPrefix ? requiredPrefix.length + separator.length : 0;
+  const bodyBudget = maxChars - protectedSuffix.length - separator.length - prefixCost;
   if (bodyBudget < 1) {
     throw new Error(
-      `The dealership mention or required compliance disclosures exceed this destination's ${maxChars}-character limit. Choose another destination or revise the advertised terms.`,
+      `The team-member disclosure, dealership mention, or required compliance disclosures exceed this destination's ${maxChars}-character limit. Choose another destination or revise the advertised terms.`,
     );
   }
   const fittedBody = fitCaptionToBudget(body, bodyBudget);
@@ -540,10 +587,10 @@ export const fitPublishCaptionToBudget = (
       "The caption cannot fit alongside its dealership mention and required compliance disclosures. Revise it before sharing.",
     );
   }
-  const combined = `${fittedBody}\n\n${protectedSuffix}`;
+  const combined = withPrefix(`${fittedBody}\n\n${protectedSuffix}`);
   if (combined.length > maxChars) {
     throw new Error(
-      "The caption cannot fit without truncating its dealership mention or required compliance disclosures.",
+      "The caption cannot fit without truncating its team-member disclosure, dealership mention, or required compliance disclosures.",
     );
   }
   return combined;

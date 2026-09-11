@@ -67,9 +67,13 @@ migrate(
       events = dao.findCollectionByNameOrId("generation_events");
     } catch (_error) {}
     if (!events) return;
-    events.schema = Array.from(events.schema).filter(
-      (field) => USAGE_FIELDS.indexOf(field.name) === -1,
-    );
+    // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on PocketBase
+    // 0.22: the migration reports "Applied" and the columns stay. `removeField`
+    // takes the field id, not its name.
+    USAGE_FIELDS.forEach((name) => {
+      const field = events.schema.getFieldByName(name);
+      if (field) events.schema.removeField(field.id);
+    });
     dao.saveCollection(events);
   },
 );

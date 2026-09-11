@@ -2472,7 +2472,10 @@ function logCoalescedAuthEvent(kind, opts, windowSeconds, globalMaxPerWindow) {
   const windowMs = seconds * 1000;
   const ip = (options.ip || "").toString().slice(0, 64);
   const localKey = "auth-sample:" + kind + ":" + (ip || "unknown");
-  const localGate = checkProxyRateLimit(localKey, 1, windowMs);
+  // ipKeyed: localKey embeds the client IP. The global sibling below is a
+  // fixed key per kind and stays with the tenant buckets, so a flood cannot
+  // evict the ceiling that bounds it.
+  const localGate = checkProxyRateLimit(localKey, 1, windowMs, { ipKeyed: true });
   if (!localGate.ok) return true;
 
   const globalLimit = Math.max(1, Math.min(1000, Number(globalMaxPerWindow) || 30));
@@ -2861,43 +2864,216 @@ function verifyTurnstileToken(token, remoteIp) {
 // keys include client IPs and must not become a process-memory exhaustion path.
 const MAX_PROXY_RATE_BUCKETS = 2048;
 const PROXY_RATE_EVICTION_BATCH = 128;
+/**
+ * Unauthenticated, IP-keyed buckets get their own table with its own ceiling.
+ *
+ * The bucket cap used to be per-VM, so a flood of source IPs could crowd out
+ * one runtime's map and the other 24 kept counting normally. Sharing the table
+ * across the pool made the cap pool-wide, and eviction sorts ascending by
+ * resetAt and drops the lowest first — which is every 60-second bucket, i.e.
+ * exactly the per-dealer proxy, OpenAI, Anthropic and image throttles. A
+ * distributed flood against the unauthenticated telemetry endpoint could
+ * therefore clear paying dealerships' per-minute limits as a side effect.
+ *
+ * Splitting the namespaces means a flood can only evict other flood buckets.
+ * 512 is deliberately smaller than the tenant table: these keys are attacker-
+ * controlled and exist only to bound abuse, not to protect a quota anyone paid
+ * for.
+ */
+const MAX_PROXY_IP_RATE_BUCKETS = 512;
 const MAX_PROXY_CONCURRENCY_BUCKETS = 512;
-var _proxyHits = Object.create(null);
-var _proxyHitOperations = 0;
-var _proxyConcurrency = Object.create(null);
+/**
+ * PocketBase 0.22 serves each hook callback from a pooled JSVM runtime
+ * (`--hooksPool`, default 25) and every runtime gets its own `require()`
+ * instance of this file. Module-level counters are therefore PER-VM: a
+ * "global" provider concurrency cap of 12 was really up to 12 x 25, and the
+ * per-minute buckets were as many times too permissive. pb_hooks/walkarounds.js
+ * already documents this for replay nonces and keeps them in `$app.store()`,
+ * which is shared across the pool; these counters now do the same.
+ *
+ * Check-then-set through the store is not atomic, so two perfectly simultaneous
+ * requests can both pass a boundary. That is acceptable here: these are
+ * throttles, not authorization. Being off by one beats being off by 25x.
+ *
+ * The module-level maps remain as the fallback when `$app.store()` is
+ * unavailable (the unit-test harness, or a future runtime change). Falling back
+ * to per-VM counting preserves today's behavior; it never fails open.
+ */
+const PROXY_RATE_STORE_PREFIX = "proxyRate:";
+const PROXY_IP_RATE_STORE_PREFIX = "proxyIpRate:";
+const PROXY_CONCURRENCY_STORE_PREFIX = "proxyConc:";
+/**
+ * Concurrency slots expire. Rate buckets always carried a `resetAt`; slots were
+ * a bare count, and a count that is never decremented is a count that never
+ * recovers. That was survivable while the counter was per-VM — a leaked slot
+ * poisoned one of 25 runtimes and the other 24 kept serving. Now that the count
+ * is shared across the whole pool, one leak is a leak for every dealership
+ * until the process restarts: `provider:global` is capped at 12
+ * (pb_hooks/main.pb.js), so twelve leaks turn every generation into a 503
+ * "Provider capacity is temporarily busy" with nothing in the logs to explain
+ * it and no way back except a redeploy.
+ *
+ * `release()` runs from a `finally`, so the ordinary path was never the worry.
+ * The paths that are: a pool runtime torn down between acquire and release, a
+ * host-side panic inside $http.send, or a store write that lands in the shared
+ * store while the matching read falls back to the per-VM map. A slot held
+ * longer than any request could legitimately run is a leak, so it is reclaimed.
+ *
+ * Six minutes is deliberately generous. The upstream call is allowed 300s for
+ * Veo (pb_hooks/main.pb.js), and a TTL that expires a slot a live request is
+ * still using would quietly raise the cap it exists to enforce. Erring long
+ * costs a slower recovery from a rare leak; erring short breaks the limit.
+ */
+const PROXY_CONCURRENCY_TTL_MS = 6 * 60 * 1000;
 
-function pruneProxyRateBuckets(now, reserveSlot) {
-  _proxyHitOperations += 1;
-  let keys = Object.keys(_proxyHits);
-  if (keys.length < MAX_PROXY_RATE_BUCKETS && _proxyHitOperations % 128 !== 0) {
-    return;
-  }
-  keys.forEach(function (key) {
-    const bucket = _proxyHits[key];
-    if (!bucket || now >= bucket.resetAt) delete _proxyHits[key];
-  });
-  keys = Object.keys(_proxyHits);
-  // When the map is full, evict a small batch rather than sorting the entire
-  // map again for every new attacker-controlled key.
-  const target = Math.max(
-    0,
-    MAX_PROXY_RATE_BUCKETS - (reserveSlot ? PROXY_RATE_EVICTION_BATCH : 0),
-  );
-  if (keys.length <= target) return;
-  keys.sort(function (left, right) {
-    return (_proxyHits[left].resetAt || 0) - (_proxyHits[right].resetAt || 0);
-  });
-  for (let index = 0; index < keys.length - target; index++) {
-    delete _proxyHits[keys[index]];
+/**
+ * One rate-limit table. `map` is the per-VM fallback used when $app.store() is
+ * unavailable; `ops` paces the periodic sweep so it does not run on every
+ * request. Which table a caller lands in is decided at the call site, not by
+ * sniffing the key: a key-prefix rule would have put the fixed-cardinality
+ * "telemetry:ingress" and "telemetry:global" ceilings in the attacker-
+ * controlled table alongside "telemetry:<ip>", where a flood could evict the
+ * very ceiling meant to contain it.
+ */
+function makeRateNamespace(prefix, cap) {
+  return { prefix: prefix, cap: cap, map: Object.create(null), ops: 0 };
+}
+/** Keys derived from a tenant: dealer ids, action names, fixed ceilings. */
+const TENANT_RATE_NS = makeRateNamespace(
+  PROXY_RATE_STORE_PREFIX,
+  MAX_PROXY_RATE_BUCKETS,
+);
+/** Keys derived from a client IP, so unbounded and attacker-chosen. */
+const IP_RATE_NS = makeRateNamespace(
+  PROXY_IP_RATE_STORE_PREFIX,
+  MAX_PROXY_IP_RATE_BUCKETS,
+);
+const RATE_NAMESPACES = [TENANT_RATE_NS, IP_RATE_NS];
+var _proxyConcurrency = Object.create(null);
+// Distinguishes this VM's holders from another pool runtime's, so a release
+// drops exactly the slot it took and never someone else's.
+var _proxyConcurrencyHolderSeq = 0;
+
+function sharedStore() {
+  try {
+    if (typeof $app === "undefined" || !$app || typeof $app.store !== "function") {
+      return null;
+    }
+    const store = $app.store();
+    return store && typeof store.get === "function" ? store : null;
+  } catch (_e) {
+    return null;
   }
 }
 
-function checkProxyRateLimit(key, maxPerWindow, windowMs) {
+/**
+ * Read a bucket from the pool-shared store, falling back to the per-VM map.
+ * Values are JSON so the shape survives whatever the store does with objects.
+ *
+ * A store miss falls through to the per-VM map rather than returning
+ * undefined. writeSharedBucket parks a value in that map when `store.set`
+ * throws; if reads never looked there, a store that accepts reads but
+ * rejects writes would make every rate limit and concurrency cap start a
+ * fresh bucket on every request — fully open, with nothing logged. That is
+ * the one asymmetry that contradicted the "never fails open" promise above.
+ */
+function readSharedBucket(prefix, localMap, key) {
+  const store = sharedStore();
+  if (!store) return localMap[key];
+  try {
+    const raw = store.get(prefix + key);
+    if (!raw) return localMap[key];
+    return typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch (_e) {
+    return localMap[key];
+  }
+}
+
+function writeSharedBucket(prefix, localMap, key, value) {
+  const store = sharedStore();
+  if (!store) {
+    localMap[key] = value;
+    return;
+  }
+  try {
+    store.set(prefix + key, JSON.stringify(value));
+  } catch (_e) {
+    localMap[key] = value;
+  }
+}
+
+function deleteSharedBucket(prefix, localMap, key) {
+  const store = sharedStore();
+  delete localMap[key];
+  if (!store) return;
+  try {
+    if (typeof store.remove === "function") store.remove(prefix + key);
+  } catch (_e) {}
+}
+
+/** Keys currently held for one prefix, across the pool when the store is up. */
+function sharedBucketKeys(prefix, localMap) {
+  const store = sharedStore();
+  if (!store || typeof store.getAll !== "function") return Object.keys(localMap);
+  try {
+    const all = store.getAll() || {};
+    const keys = [];
+    Object.keys(all).forEach(function (candidate) {
+      if (candidate.indexOf(prefix) === 0) keys.push(candidate.slice(prefix.length));
+    });
+    return keys;
+  } catch (_e) {
+    return Object.keys(localMap);
+  }
+}
+
+function readRateBucket(ns, key) {
+  return readSharedBucket(ns.prefix, ns.map, key);
+}
+
+function pruneRateBuckets(ns, now, reserveSlot) {
+  ns.ops += 1;
+  let keys = sharedBucketKeys(ns.prefix, ns.map);
+  if (keys.length < ns.cap && ns.ops % 128 !== 0) {
+    return;
+  }
+  keys.forEach(function (key) {
+    const bucket = readRateBucket(ns, key);
+    if (!bucket || now >= bucket.resetAt) {
+      deleteSharedBucket(ns.prefix, ns.map, key);
+    }
+  });
+  keys = sharedBucketKeys(ns.prefix, ns.map);
+  // When the map is full, evict a small batch rather than sorting the entire
+  // map again for every new attacker-controlled key.
+  const target = Math.max(0, ns.cap - (reserveSlot ? PROXY_RATE_EVICTION_BATCH : 0));
+  if (keys.length <= target) return;
+  const resetAtFor = {};
+  keys.forEach(function (key) {
+    const bucket = readRateBucket(ns, key);
+    resetAtFor[key] = (bucket && bucket.resetAt) || 0;
+  });
+  keys.sort(function (left, right) {
+    return resetAtFor[left] - resetAtFor[right];
+  });
+  for (let index = 0; index < keys.length - target; index++) {
+    deleteSharedBucket(ns.prefix, ns.map, keys[index]);
+  }
+}
+
+/**
+ * `options.ipKeyed` marks a key whose cardinality is chosen by whoever is
+ * calling — a client IP — so it is counted and evicted separately from tenant
+ * keys. Pass it at every IP-keyed call site; __tests__/rateLimitAcrossVmPool
+ * pins which those are.
+ */
+function checkProxyRateLimit(key, maxPerWindow, windowMs, options) {
   if (!key) return { ok: true };
+  const ns = options && options.ipKeyed ? IP_RATE_NS : TENANT_RATE_NS;
   const now = Date.now();
   const normalizedKey = key.toString().slice(0, 256);
-  pruneProxyRateBuckets(now, !_proxyHits[normalizedKey]);
-  const bucket = _proxyHits[normalizedKey] || {
+  pruneRateBuckets(ns, now, !readRateBucket(ns, normalizedKey));
+  const bucket = readRateBucket(ns, normalizedKey) || {
     count: 0,
     resetAt: now + windowMs,
   };
@@ -2906,7 +3082,7 @@ function checkProxyRateLimit(key, maxPerWindow, windowMs) {
     bucket.resetAt = now + windowMs;
   }
   bucket.count += 1;
-  _proxyHits[normalizedKey] = bucket;
+  writeSharedBucket(ns.prefix, ns.map, normalizedKey, bucket);
   if (bucket.count > maxPerWindow) {
     return {
       ok: false,
@@ -2917,52 +3093,112 @@ function checkProxyRateLimit(key, maxPerWindow, windowMs) {
   return { ok: true, count: bucket.count, resetAt: bucket.resetAt };
 }
 
+/** Both tables together: the number a memory ceiling has to reason about. */
 function proxyRateLimitStateSize() {
-  pruneProxyRateBuckets(Date.now(), false);
-  return Object.keys(_proxyHits).length;
+  const now = Date.now();
+  return RATE_NAMESPACES.reduce(function (total, ns) {
+    pruneRateBuckets(ns, now, false);
+    return total + sharedBucketKeys(ns.prefix, ns.map).length;
+  }, 0);
 }
 
 /**
- * Acquire a bounded process-local provider slot. Every successful acquisition
- * returns an idempotent release callback so handlers can use try/finally.
+ * The holders of one slot key that are still inside their expiry.
+ *
+ * Anything past its expiry belonged to a request that never released, so it is
+ * dropped here instead of counted. A bucket written by an older build has no
+ * `holders` array at all; treating that as empty is the self-healing reading,
+ * and it costs nothing in practice because the store lives in process memory
+ * and any deploy that changes this shape restarts the process anyway.
+ */
+function liveConcurrencyHolders(bucket, now) {
+  if (!bucket || !Array.isArray(bucket.holders)) return [];
+  return bucket.holders.filter(function (holder) {
+    return holder && Number(holder.expiresAt) > now;
+  });
+}
+
+/**
+ * Acquire a bounded provider slot shared across the JSVM pool. Every successful
+ * acquisition returns an idempotent release callback so handlers can use
+ * try/finally, and every slot carries an expiry so a release that never happens
+ * cannot ratchet the cap down permanently.
  */
 function acquireProxyConcurrency(key, maxConcurrent) {
   const normalizedKey = (key || "").toString().slice(0, 256);
   const limit = Math.max(1, Math.min(100, Number(maxConcurrent) || 1));
   if (!normalizedKey) return { ok: false, retryAfterMs: 1000 };
-  let keys = Object.keys(_proxyConcurrency);
-  if (
-    !_proxyConcurrency[normalizedKey] &&
-    keys.length >= MAX_PROXY_CONCURRENCY_BUCKETS
-  ) {
-    keys = keys.filter(function (candidate) {
-      return !_proxyConcurrency[candidate] || _proxyConcurrency[candidate].count <= 0;
-    });
-    keys.forEach(function (candidate) {
-      delete _proxyConcurrency[candidate];
-    });
-    if (Object.keys(_proxyConcurrency).length >= MAX_PROXY_CONCURRENCY_BUCKETS) {
+  const now = Date.now();
+  const readSlot = (candidate) =>
+    readSharedBucket(PROXY_CONCURRENCY_STORE_PREFIX, _proxyConcurrency, candidate);
+
+  let keys = sharedBucketKeys(PROXY_CONCURRENCY_STORE_PREFIX, _proxyConcurrency);
+  if (!readSlot(normalizedKey) && keys.length >= MAX_PROXY_CONCURRENCY_BUCKETS) {
+    keys
+      .filter(function (candidate) {
+        return liveConcurrencyHolders(readSlot(candidate), now).length === 0;
+      })
+      .forEach(function (candidate) {
+        deleteSharedBucket(
+          PROXY_CONCURRENCY_STORE_PREFIX,
+          _proxyConcurrency,
+          candidate,
+        );
+      });
+    if (
+      sharedBucketKeys(PROXY_CONCURRENCY_STORE_PREFIX, _proxyConcurrency).length >=
+      MAX_PROXY_CONCURRENCY_BUCKETS
+    ) {
       return { ok: false, retryAfterMs: 1000 };
     }
   }
 
-  const bucket = _proxyConcurrency[normalizedKey] || { count: 0 };
-  if (bucket.count >= limit) {
-    return { ok: false, retryAfterMs: 1000, count: bucket.count };
+  const holders = liveConcurrencyHolders(readSlot(normalizedKey), now);
+  if (holders.length >= limit) {
+    return { ok: false, retryAfterMs: 1000, count: holders.length };
   }
-  bucket.count += 1;
-  _proxyConcurrency[normalizedKey] = bucket;
+  _proxyConcurrencyHolderSeq += 1;
+  const token =
+    _proxyConcurrencyHolderSeq.toString(36) +
+    ":" +
+    now.toString(36) +
+    ":" +
+    Math.random().toString(36).slice(2, 10);
+  holders.push({ token: token, expiresAt: now + PROXY_CONCURRENCY_TTL_MS });
+  writeSharedBucket(PROXY_CONCURRENCY_STORE_PREFIX, _proxyConcurrency, normalizedKey, {
+    holders: holders,
+  });
   let released = false;
   return {
     ok: true,
-    count: bucket.count,
+    count: holders.length,
     release: function () {
       if (released) return;
       released = true;
-      const current = _proxyConcurrency[normalizedKey];
-      if (!current) return;
-      current.count = Math.max(0, current.count - 1);
-      if (current.count === 0) delete _proxyConcurrency[normalizedKey];
+      // Re-read rather than closing over the array above: another pool VM may
+      // have acquired or released against this key in between. Dropping this
+      // one token, rather than decrementing a shared number, is what makes two
+      // simultaneous releases safe.
+      const remaining = liveConcurrencyHolders(
+        readSlot(normalizedKey),
+        Date.now(),
+      ).filter(function (holder) {
+        return holder.token !== token;
+      });
+      if (remaining.length === 0) {
+        deleteSharedBucket(
+          PROXY_CONCURRENCY_STORE_PREFIX,
+          _proxyConcurrency,
+          normalizedKey,
+        );
+      } else {
+        writeSharedBucket(
+          PROXY_CONCURRENCY_STORE_PREFIX,
+          _proxyConcurrency,
+          normalizedKey,
+          { holders: remaining },
+        );
+      }
     },
   };
 }
@@ -3005,6 +3241,9 @@ function assertEnum(val, allowedValues) {
 
 const DEALER_TEXT_FIELD_LIMITS = {
   name: 200,
+  // Optional override of the FTC 16 CFR 255 team-member disclosure wording;
+  // must match the max in migration 1751900000.
+  employee_disclosure_text: 280,
   brand_voice: 1500,
   banned_phrases: 1500,
   oem_affiliation: 120,
@@ -3146,6 +3385,9 @@ const DEALER_BOOL_FIELDS = [
   "requires_approval",
   "required_hashtags_locked",
   "creative_system_v2",
+  // Opt-OUT of the FTC team-member disclosure. Unset reads false in
+  // PocketBase, which is the compliant side: the disclosure is applied.
+  "employee_disclosure_disabled",
 ];
 /** Byte caps; must match the json field maxSize in migration 1751500000. */
 const DEALER_JSON_FIELD_LIMITS = {
@@ -3858,6 +4100,8 @@ function serializeDealer(record) {
     image_quality_tier: record.getString("image_quality_tier"),
     // Phase 2 resolver flag. False/unset keeps every legacy creative default.
     creative_system_v2: recordBool(record, "creative_system_v2"),
+    employee_disclosure_text: record.getString("employee_disclosure_text"),
+    employee_disclosure_disabled: recordBool(record, "employee_disclosure_disabled"),
   };
 }
 

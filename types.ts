@@ -142,6 +142,8 @@ export interface GeneratedPost {
   postId?: string;
   /** `submission_failed` is client-only and keeps delivery locked safely. */
   approvalStatus?: "n_a" | "pending" | "approved" | "rejected" | "submission_failed";
+  /** What the manager asked to be changed. Set only when rejected. */
+  rejectionReason?: string;
   /**
    * A captured signature is not considered usable until the protected release
    * record has been saved. Failed persistence locks all delivery actions so a
@@ -321,6 +323,17 @@ export interface Dealer {
    * prescribes no destinations, so only a piloted dealership changes behavior.
    */
   creative_system_v2?: boolean;
+  /**
+   * Optional override of the FTC 16 CFR 255 team-member disclosure wording.
+   * Empty or unset uses DEFAULT_EMPLOYEE_DISCLOSURE_TEMPLATE.
+   */
+  employee_disclosure_text?: string;
+  /**
+   * Opt-OUT of the team-member disclosure, not an opt-in: unset/false means
+   * the disclosure is applied. PocketBase reports an unset bool as false, so
+   * this polarity keeps every pre-existing dealership on the compliant side.
+   */
+  employee_disclosure_disabled?: boolean;
 }
 
 // FIX: Added User interface to resolve import error in UserModal.tsx.

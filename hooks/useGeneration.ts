@@ -15,6 +15,7 @@ import {
 } from "../types";
 import { useToast } from "../components/ui/Toast";
 import { normalizeError, recoveryHint } from "../utils/errorHandler";
+import { toUiMessage } from "../utils/errorMessages";
 // The publish/compliance pipeline (posts, photo releases, platform copy,
 // export rendering, caption compliance, website drafting) is loaded lazily so
 // the login screen's entry chunk never carries it. Only type-level imports of
@@ -446,10 +447,10 @@ export const useGeneration = () => {
           brandKitFromDealer(currentDealer),
         );
       } catch (err) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : "The generated caption contains a prohibited advertising claim.";
+        const message = toUiMessage(
+          err,
+          "The generated caption contains a prohibited advertising claim.",
+        );
         logEvent("compliance.prohibited_detected", {
           blocked: true,
         });

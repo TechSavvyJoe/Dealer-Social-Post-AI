@@ -328,3 +328,71 @@ export const prepareCaptionForDelivery = (
   }
   return result;
 };
+
+/**
+ * FTC 16 CFR 255 (Endorsement Guides) material-connection disclosure.
+ *
+ * A salesperson posting about their own employer's inventory has a material
+ * connection to the dealership. The Guides require that connection to be
+ * disclosed clearly and conspicuously *in the post itself*, which is why this
+ * line is prepended to the caption body rather than appended to the small-print
+ * footer: the footer can be truncated by a destination's character budget, and
+ * on several networks it falls below the "see more" fold.
+ *
+ * `{dealer}` is substituted case-insensitively so a dealer can write their own
+ * wording without learning a template syntax.
+ */
+export const DEFAULT_EMPLOYEE_DISCLOSURE_TEMPLATE = "Posted by a {dealer} team member.";
+
+export interface EmployeeDisclosureDealer {
+  name?: string;
+  employee_disclosure_text?: string;
+  /** Opt-out. Unset/false keeps the disclosure on. */
+  employee_disclosure_disabled?: boolean;
+}
+
+/**
+ * The disclosure line for a dealership, or "" when the dealer has opted out.
+ * An empty dealership name falls back to "our dealership" so the sentence
+ * still reads as a disclosure rather than a broken template.
+ */
+export const buildEmployeeDisclosure = (
+  dealer: EmployeeDisclosureDealer | null | undefined,
+): string => {
+  if (!dealer || dealer.employee_disclosure_disabled === true) return "";
+  const template =
+    (dealer.employee_disclosure_text || "").trim() ||
+    DEFAULT_EMPLOYEE_DISCLOSURE_TEMPLATE;
+  const dealerName = (dealer.name || "").trim() || "our dealership";
+  return template.replace(/\{dealer\}/gi, dealerName).trim();
+};
+
+/**
+ * Prepend the disclosure to a caption body, idempotently: a caption that
+ * already opens with the line is returned unchanged, so re-running delivery
+ * preparation (regenerate, edit, per-destination recompose) never stacks it.
+ */
+export const prependEmployeeDisclosure = (
+  caption: string,
+  dealer: EmployeeDisclosureDealer | null | undefined,
+): string => {
+  const disclosure = buildEmployeeDisclosure(dealer);
+  const body = caption.trim();
+  if (!disclosure) return body;
+  if (captionIncludesEmployeeDisclosure(body, disclosure)) return body;
+  return body ? `${disclosure}\n\n${body}` : disclosure;
+};
+
+/**
+ * True when the caption already carries the disclosure. Compared on collapsed
+ * whitespace and case so a hand-edited caption is not double-stamped.
+ */
+export const captionIncludesEmployeeDisclosure = (
+  caption: string,
+  disclosure: string,
+): boolean => {
+  const normalize = (value: string) => value.replace(/\s+/g, " ").trim().toLowerCase();
+  const needle = normalize(disclosure);
+  if (!needle) return false;
+  return normalize(caption).startsWith(needle);
+};

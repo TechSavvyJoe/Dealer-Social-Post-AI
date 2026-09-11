@@ -25,29 +25,43 @@
  * Stored as a text field (PB doesn't have first-class JSON), parsed/
  * stringified on the way in/out. Validation happens client-side.
  */
+const DEALER_CUSTOM_SCENARIO_FIELDS = ["custom_scenarios"];
+
 migrate(
   (db) => {
     const dao = new Dao(db);
-    let dealers = null; try { dealers = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
+    let dealers = null;
+    try {
+      dealers = dao.findCollectionByNameOrId("dealers");
+    } catch (e) {}
     if (!dealers) return;
-    if (!(function(s, n){ for(let i=0;i<s.length;i++){ if(s[i].name === n) return s[i]; } return null; })(dealers.schema, "custom_scenarios")) {
-      dealers.schema.addField(new SchemaField({
-        name: "custom_scenarios",
-        type: "text",
-        required: false,
-        // Generous ceiling — 32KB lets a dealer keep ~30-50 custom scenarios.
-        options: { max: 32000 },
-      }));
+    if (!dealers.schema.getFieldByName("custom_scenarios")) {
+      dealers.schema.addField(
+        new SchemaField({
+          name: "custom_scenarios",
+          type: "text",
+          required: false,
+          // Generous ceiling — 32KB lets a dealer keep ~30-50 custom scenarios.
+          options: { max: 32000 },
+        }),
+      );
       dao.saveCollection(dealers);
     }
   },
   (db) => {
     const dao = new Dao(db);
-    let dealers = null; try { dealers = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
+    let dealers = null;
+    try {
+      dealers = dao.findCollectionByNameOrId("dealers");
+    } catch (e) {}
     if (!dealers) return;
-    dealers.schema = Array.from(dealers.schema).filter(
-      (f) => f.name !== "custom_scenarios"
-    );
+    // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on PocketBase
+    // 0.22: the migration reports "Applied" and the column is still there.
+    // `removeField` takes the field id, not its name.
+    DEALER_CUSTOM_SCENARIO_FIELDS.forEach((name) => {
+      const field = dealers.schema.getFieldByName(name);
+      if (field) dealers.schema.removeField(field.id);
+    });
     dao.saveCollection(dealers);
-  }
+  },
 );

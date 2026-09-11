@@ -263,7 +263,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
         setError(
           msg.toLowerCase().includes("permission")
             ? "Camera permission was denied. Use Manual entry instead."
-            : `Camera unavailable: ${msg}`,
+            : `Camera unavailable: ${toUiMessage(err, "Could not start the camera.")}`,
         );
         logError("vin.scanner.camera_error", { message: msg });
       }
@@ -434,7 +434,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
               role="status"
               aria-live="polite"
               aria-atomic="true"
-              className="flex items-start gap-3 bg-success-900/40 border border-success-700/50 rounded-xl p-3 text-success-100"
+              className="flex items-start gap-3 bg-success-900/40 border border-success-700/50 rounded-xl p-3 text-success-100 [.theme-light_&]:text-success-900"
             >
               <Check className="h-5 w-5 text-success-400 flex-shrink-0 mt-0.5" />
               <div className="text-sm">
@@ -455,14 +455,14 @@ export const VinScanner: React.FC<VinScannerProps> = ({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               role="alert"
-              className="flex items-start gap-3 bg-error-900/40 border border-error-700/50 rounded-xl p-3 text-error-100 text-sm"
+              className="flex items-start gap-3 bg-error-900/40 border border-error-700/50 rounded-xl p-3 text-error-100 text-sm [.theme-light_&]:text-error-800"
             >
               <AlertCircle className="h-5 w-5 text-error-400 flex-shrink-0 mt-0.5" />
               <div className="flex-1">{error}</div>
               <button
                 type="button"
                 onClick={() => setError(null)}
-                className="text-error-300 hover:text-error-100"
+                className="text-error-300 hover:text-error-100 [.theme-light_&]:text-error-800"
                 aria-label="Dismiss"
               >
                 <X className="h-4 w-4" />

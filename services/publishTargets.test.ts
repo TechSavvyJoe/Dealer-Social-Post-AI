@@ -312,3 +312,103 @@ describe("publishTargets handoff strategy", () => {
     },
   );
 });
+
+describe("team-member disclosure survives destination budgets", () => {
+  const DISCLOSURE = "Posted by a Bob Maxey Ford team member.";
+
+  it("keeps the disclosure at the top when a long caption is fitted", () => {
+    const fitted = fitPublishCaptionToBudget(
+      {
+        text: `${DISCLOSURE}\n\n${"A polished dealership delivery. ".repeat(30)}`,
+        requiredPrefix: DISCLOSURE,
+      },
+      280,
+    );
+
+    expect(fitted.startsWith(DISCLOSURE)).toBe(true);
+    expect(fitted.length).toBeLessThanOrEqual(280);
+  });
+
+  it("protects the disclosure, the mention and the compliance footer together", () => {
+    const fitted = fitPublishCaptionToBudget(
+      {
+        text: `${DISCLOSURE}\n\n${"Drive home today. ".repeat(40)}\n\n@BobMaxeyFord`,
+        disclosures: "Offer requires approved credit. See dealer for details.",
+        requiredPrefix: DISCLOSURE,
+      },
+      560,
+    );
+
+    expect(fitted.startsWith(DISCLOSURE)).toBe(true);
+    expect(fitted).toContain("@BobMaxeyFord");
+    expect(fitted).toContain("Offer requires approved credit.");
+    expect(fitted.length).toBeLessThanOrEqual(560);
+  });
+
+  it("fails closed instead of publishing a truncated disclosure", () => {
+    expect(() =>
+      fitPublishCaptionToBudget(
+        {
+          text: `${DISCLOSURE}\n\nDrive home today.`,
+          disclosures: "Offer requires approved credit. See dealer for details.",
+          requiredPrefix: DISCLOSURE,
+        },
+        60,
+      ),
+    ).toThrow(/exceed|cannot fit/i);
+  });
+
+  it("still fits a caption when no prefix is required", () => {
+    const fitted = fitPublishCaptionToBudget(
+      { text: `${"Drive home today. ".repeat(30)}` },
+      280,
+    );
+    expect(fitted.length).toBeLessThanOrEqual(280);
+    expect(fitted.startsWith(DISCLOSURE)).toBe(false);
+  });
+});
+
+describe("the disclosure is added exactly once", () => {
+  /**
+   * An earlier version split requiredPrefix back off the caption with an exact
+   * startsWith. That comparison ran against text normalizeCaptionHashtags had
+   * already rewritten, so a disclosure containing "#ad" failed to match, was
+   * treated as body, and came back doubled — the second copy fused to the
+   * caption as "#AdGreat truck!". `text` is now the body alone and the fitter
+   * is the single place the prefix is applied.
+   */
+  const countOccurrences = (haystack: string, needle: string) =>
+    haystack.split(needle).length - 1;
+
+  it("does not duplicate a disclosure containing a hashtag", () => {
+    const disclosure = "Posted by a Bob Maxey Ford team member. #ad";
+    const fitted = fitPublishCaptionToBudget(
+      { text: "Great truck, come see it today!", requiredPrefix: disclosure },
+      2000,
+    );
+
+    expect(countOccurrences(fitted, "Posted by a Bob Maxey Ford team member.")).toBe(1);
+    expect(fitted.startsWith(disclosure)).toBe(true);
+    // And it must not be fused to the body.
+    expect(fitted).toContain(`${disclosure}\n\nGreat truck`);
+  });
+
+  it("does not duplicate one wrapped in markdown emphasis", () => {
+    const disclosure = "*Posted by a Bob Maxey Ford team member.*";
+    const fitted = fitPublishCaptionToBudget(
+      { text: "Great truck!", requiredPrefix: disclosure },
+      2000,
+    );
+    expect(countOccurrences(fitted, "Posted by a Bob Maxey Ford team member.")).toBe(1);
+  });
+
+  it("charges the disclosure to the budget exactly once", () => {
+    const disclosure = "Posted by a Bob Maxey Ford team member.";
+    const fitted = fitPublishCaptionToBudget(
+      { text: "x".repeat(400), requiredPrefix: disclosure },
+      280,
+    );
+    expect(fitted.length).toBeLessThanOrEqual(280);
+    expect(countOccurrences(fitted, disclosure)).toBe(1);
+  });
+});

@@ -136,7 +136,7 @@ export const TurnstileChallenge: React.FC<TurnstileChallengeProps> = ({
   return (
     <div className="rounded-2xl border border-primary-400/20 bg-primary-500/[0.06] p-4 sm:p-5">
       <div className="mb-4 flex items-start gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary-400/20 bg-primary-500/10 text-primary-300">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary-400/20 bg-primary-500/10 text-primary-300 [.theme-light_&]:text-primary-800">
           <ShieldCheck className="h-5 w-5" aria-hidden="true" />
         </span>
         <div>
@@ -162,7 +162,10 @@ export const TurnstileChallenge: React.FC<TurnstileChallengeProps> = ({
         data-action="turnstile-spin-v2"
       />
       {loadError ? (
-        <p className="mt-3 text-sm text-error-300" role="alert">
+        <p
+          className="mt-3 text-sm text-error-300 [.theme-light_&]:text-error-800"
+          role="alert"
+        >
           The security check could not load. Check your connection and try again.
         </p>
       ) : null}
@@ -187,7 +190,7 @@ export const TurnstileChallenge: React.FC<TurnstileChallengeProps> = ({
           <button
             type="button"
             onClick={retry}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-primary-400/30 bg-primary-500/15 px-4 text-sm font-semibold text-primary-100 transition-colors hover:bg-primary-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-primary-400/30 bg-primary-500/15 px-4 text-sm font-semibold text-primary-100 transition-colors hover:bg-primary-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 [.theme-light_&]:text-primary-950"
           >
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
             Retry security check

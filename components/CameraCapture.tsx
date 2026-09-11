@@ -3,6 +3,7 @@ import { Camera, Upload } from "lucide-react";
 import { fileToNormalizedDataUrl } from "../utils/imageUtils";
 import { WebcamCapture } from "./WebcamCapture";
 import { triggerHapticFeedback } from "../utils/haptics";
+import { toUiMessage } from "../utils/errorMessages";
 import { Button } from "./ui/Button";
 import { ErrorBanner } from "./ui/ErrorBanner";
 import { useAppStore } from "../stores/appStore";
@@ -68,10 +69,15 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
       } catch (err) {
         console.error("Error reading file:", err);
         const message = err instanceof Error ? err.message : "";
+        // HEIC/HEIF gets its own curated copy rather than the raw decoder
+        // message, which named the unsupported MIME type, not a next step.
         setError(
           /HEI[CF]/i.test(message)
-            ? message
-            : "Could not read the selected image file. Please try again.",
+            ? "This photo is in Apple's HEIC/HEIF format, which this browser cannot read. Take the photo again with 'Most Compatible' format enabled, or use a JPEG/PNG."
+            : toUiMessage(
+                err,
+                "Could not read the selected image file. Please try again.",
+              ),
         );
       } finally {
         setIsProcessing(false);

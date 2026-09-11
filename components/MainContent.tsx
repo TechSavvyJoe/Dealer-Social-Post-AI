@@ -408,12 +408,14 @@ export const MainContent: React.FC<MainContentProps> = ({
               <m.div
                 initial={{ opacity: 0, y: -8 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mx-auto flex max-w-3xl flex-col gap-3 rounded-xl border border-error-500/30 bg-error-500/10 p-4 text-error-100 sm:flex-row sm:items-center sm:justify-between"
+                className="mx-auto flex max-w-3xl flex-col gap-3 rounded-xl border border-error-500/30 bg-error-500/10 p-4 text-error-100 sm:flex-row sm:items-center sm:justify-between [.theme-light_&]:text-error-800"
                 role="alert"
               >
                 <div>
                   <p className="font-semibold">Generation was interrupted</p>
-                  <p className="mt-1 text-sm text-error-200">{error}</p>
+                  <p className="mt-1 text-sm text-error-200 [.theme-light_&]:text-error-800">
+                    {error}
+                  </p>
                 </div>
                 <Button
                   variant="outline"

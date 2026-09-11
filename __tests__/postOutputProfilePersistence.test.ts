@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { fakeCollection, fieldsOf } from "../test/fakePocketBaseSchema";
 import { logPost } from "../services/posts";
 
 afterEach(() => {
@@ -19,16 +20,12 @@ describe("post output-profile persistence", () => {
     type MigrationHandler = (db: unknown) => unknown;
     let up: MigrationHandler | undefined;
     let down: MigrationHandler | undefined;
-    const fields: Array<Record<string, unknown>> = [];
-    const schema = {
-      getFieldByName: (name: string) =>
-        fields.find((field) => field.name === name) || null,
-      addField: (field: Record<string, unknown>) => fields.push(field),
-      *[Symbol.iterator]() {
-        yield* fields;
-      },
-    };
-    const posts: { schema: unknown } = { schema };
+    // The real contract: removeField(id) exists and `schema` cannot be
+    // reassigned. The earlier inline fake accepted `schema = filteredArray`,
+    // so the no-op down idiom passed.
+    const posts = fakeCollection();
+    const schema = posts.schema;
+    const fields = () => fieldsOf(schema);
     const saveCollection = vi.fn();
     const dao = {
       findCollectionByNameOrId: vi.fn(() => posts),
@@ -54,16 +51,16 @@ describe("post output-profile persistence", () => {
     expect(down).toBeTypeOf("function");
     up?.(dao);
 
-    expect(fields.map((field) => field.name)).toEqual([
+    expect(fields().map((field) => field.name)).toEqual([
       "platform_ids",
       "primary_format_id",
       "image_aspect_ratio",
     ]);
-    expect(fields[0]).toMatchObject({
+    expect(fields()[0]).toMatchObject({
       type: "text",
       options: { max: 400 },
     });
-    expect(fields[1]).toMatchObject({
+    expect(fields()[1]).toMatchObject({
       type: "select",
       options: {
         maxSelect: 1,
@@ -76,7 +73,7 @@ describe("post output-profile persistence", () => {
         ],
       },
     });
-    expect(fields[2]).toMatchObject({
+    expect(fields()[2]).toMatchObject({
       type: "select",
       options: {
         maxSelect: 1,
@@ -85,7 +82,9 @@ describe("post output-profile persistence", () => {
     });
 
     down?.(dao);
-    expect(posts.schema).toEqual([]);
+    // Removed through the API, not by swapping the schema object out.
+    expect(posts.schema).toBe(schema);
+    expect(fields()).toEqual([]);
     expect(saveCollection).toHaveBeenCalledTimes(2);
   });
 
@@ -290,7 +289,11 @@ describe("post output-profile persistence", () => {
     expect(source).toContain('values: ["photo", "video", "both"]');
     expect(source).toContain('primaryValues.indexOf("feed_portrait")');
     expect(source).toContain('aspectValues.indexOf("4:5")');
-    expect(source).toContain('field.name !== "media_output_mode"');
+    // The rollback must use the API that works on 0.22: getFieldByName +
+    // removeField(field.id). The old `field.name !== ...` filter was a no-op.
+    expect(source).toContain('getFieldByName("media_output_mode")');
+    expect(source).toMatch(/removeField\(\s*\w+\.id\s*\)/);
+    expect(source).not.toMatch(/\w+\.schema\s*=\s*Array\.from\(/);
   });
 
   it("repairs already-applied dirty schemas with an idempotent later migration", () => {
@@ -355,16 +358,9 @@ describe("post output-profile persistence", () => {
     type MigrationHandler = (db: unknown) => unknown;
     let up: MigrationHandler | undefined;
     let down: MigrationHandler | undefined;
-    const fields: Array<Record<string, unknown>> = [];
-    const schema = {
-      getFieldByName: (name: string) =>
-        fields.find((field) => field.name === name) || null,
-      addField: (field: Record<string, unknown>) => fields.push(field),
-      *[Symbol.iterator]() {
-        yield* fields;
-      },
-    };
-    const dealers: { schema: unknown } = { schema };
+    const dealers = fakeCollection();
+    const schema = dealers.schema;
+    const fields = () => fieldsOf(schema);
     const saveCollection = vi.fn();
     const dao = {
       findCollectionByNameOrId: vi.fn(() => dealers),
@@ -388,7 +384,7 @@ describe("post output-profile persistence", () => {
 
     up?.(dao);
     up?.(dao);
-    expect(fields).toEqual([
+    expect(fields()).toEqual([
       expect.objectContaining({
         name: "facebook_page_tag",
         type: "text",
@@ -405,7 +401,8 @@ describe("post output-profile persistence", () => {
     expect(saveCollection).toHaveBeenCalledTimes(2);
 
     down?.(dao);
-    expect(dealers.schema).toEqual([]);
+    expect(dealers.schema).toBe(schema);
+    expect(fields()).toEqual([]);
   });
 
   it("requires the dirty-upgrade release drill to prove the exact post output schema", () => {

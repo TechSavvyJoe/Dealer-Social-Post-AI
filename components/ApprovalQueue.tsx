@@ -16,6 +16,7 @@ import { Input } from "./ui/Input";
 import { EmptyState } from "./ui/EmptyState";
 import { ErrorBanner } from "./ui/ErrorBanner";
 import { listPendingPosts, setApprovalStatus, PostRecord } from "../services/posts";
+import { cn } from "../utils/classNames";
 import { useAppStore } from "../stores/appStore";
 import { PUBLISH_TARGETS } from "../services/publishTargets";
 import { toPublicCustomerLabel } from "../utils/customerIdentity";
@@ -71,6 +72,20 @@ export const ApprovalQueue: React.FC = () => {
     void load();
   }, [load]);
 
+  // Rejecting opens a note field for that one post. A rejection with no note
+  // leaves the salesperson reading "make the requested changes" with nothing
+  // requested, so the backend requires one and the UI collects it here.
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+
+  /** The reasons managers actually give, so the common case is one tap. */
+  const QUICK_REASONS = [
+    "Pricing claim needs a disclosure",
+    "Wrong or unclear photo",
+    "Customer name should not appear",
+    "Caption is off-brand",
+  ];
+
   const handleAction = async (post: PostRecord, status: "approved" | "rejected") => {
     if (status === "approved" && post.image_review_required) {
       setError(
@@ -88,13 +103,24 @@ export const ApprovalQueue: React.FC = () => {
       setError("Enter your manager name first so the approval is logged.");
       return;
     }
+    if (status === "rejected" && !reason.trim()) {
+      setError("Tell the salesperson what to change before rejecting this post.");
+      return;
+    }
     setError(null);
     setBusy((b) => ({ ...b, [post.id]: true }));
     try {
-      await setApprovalStatus(post.id, status, approver.trim());
+      await setApprovalStatus(
+        post.id,
+        status,
+        approver.trim(),
+        status === "rejected" ? reason.trim() : undefined,
+      );
       setPending((prev) => prev.filter((p) => p.id !== post.id));
+      setRejectingId(null);
+      setReason("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(toUiMessage(err, "Could not load the approval queue."));
     } finally {
       setBusy((b) => ({ ...b, [post.id]: false }));
     }
@@ -229,7 +255,7 @@ export const ApprovalQueue: React.FC = () => {
                       )}
                       {post.scheduled_for && (
                         <span className="flex items-center gap-1 text-emerald-300">
-                          <Calendar className="h-3 w-3" /> scheduled
+                          <Calendar className="h-3 w-3" /> share time set
                         </span>
                       )}
                     </div>
@@ -243,7 +269,7 @@ export const ApprovalQueue: React.FC = () => {
                         className="aspect-square w-full rounded-lg border border-hairline bg-surface-950 object-contain"
                       />
                     ) : (
-                      <div className="flex aspect-square w-full items-center justify-center rounded-lg border border-dashed border-error-500/30 bg-error-500/5 px-3 text-center text-xs text-error-200">
+                      <div className="flex aspect-square w-full items-center justify-center rounded-lg border border-dashed border-error-500/30 bg-error-500/5 px-3 text-center text-xs text-error-200 [.theme-light_&]:text-error-800">
                         Review image unavailable
                       </div>
                     )}
@@ -290,14 +316,14 @@ export const ApprovalQueue: React.FC = () => {
                         </div>
                       ) : null}
                       {!hasReviewCreative ? (
-                        <p className="text-xs font-medium text-error-200">
+                        <p className="text-xs font-medium text-error-200 [.theme-light_&]:text-error-800">
                           This legacy item cannot be approved without reviewable
                           creative. Reject it and have the salesperson resubmit.
                         </p>
                       ) : null}
                       {!releaseReady ? (
                         <p
-                          className="rounded-lg border border-warning-500/25 bg-warning-500/10 px-3 py-2 text-xs font-medium text-warning-100"
+                          className="rounded-lg border border-warning-500/25 bg-warning-500/10 px-3 py-2 text-xs font-medium text-warning-100 [.theme-light_&]:text-warning-900"
                           role="alert"
                         >
                           Approval is locked until the customer photo release is
@@ -307,7 +333,7 @@ export const ApprovalQueue: React.FC = () => {
                       ) : null}
                       {identityReviewRequired ? (
                         <p
-                          className="rounded-lg border border-error-500/25 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100"
+                          className="rounded-lg border border-error-500/25 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100 [.theme-light_&]:text-error-800"
                           role="alert"
                         >
                           Customer-name review required. This legacy copy was
@@ -317,7 +343,7 @@ export const ApprovalQueue: React.FC = () => {
                       ) : null}
                       {imageReviewRequired ? (
                         <p
-                          className="rounded-lg border border-error-500/25 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100"
+                          className="rounded-lg border border-error-500/25 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100 [.theme-light_&]:text-error-800"
                           role="alert"
                         >
                           Image safety review required. This creative predates the
@@ -327,7 +353,7 @@ export const ApprovalQueue: React.FC = () => {
                       ) : null}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
                     <Button
                       variant="outline"
                       size="sm"
@@ -338,11 +364,72 @@ export const ApprovalQueue: React.FC = () => {
                           <X className="h-3.5 w-3.5" />
                         )
                       }
-                      onClick={() => handleAction(post, "rejected")}
+                      onClick={() => {
+                        setError(null);
+                        setReason("");
+                        setRejectingId(rejectingId === post.id ? null : post.id);
+                      }}
                       disabled={busy[post.id]}
+                      aria-expanded={rejectingId === post.id}
                     >
                       Reject
                     </Button>
+                    {rejectingId === post.id ? (
+                      <div className="order-first w-full space-y-2 rounded-lg border border-error-500/30 bg-error-500/10 p-3">
+                        <label
+                          htmlFor={`reject-reason-${post.id}`}
+                          className="block text-xs font-semibold text-error-100 [.theme-light_&]:text-error-800"
+                        >
+                          What should they change?
+                        </label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {QUICK_REASONS.map((quick) => (
+                            <button
+                              key={quick}
+                              type="button"
+                              onClick={() => setReason(quick)}
+                              className={cn(
+                                "rounded-full border px-2.5 py-1 text-[11px] transition-colors",
+                                reason === quick
+                                  ? "border-error-400 bg-error-500/20 text-error-100 [.theme-light_&]:text-error-900"
+                                  : "border-hairline bg-fill-subtle text-surface-300 hover:border-error-400/40",
+                              )}
+                            >
+                              {quick}
+                            </button>
+                          ))}
+                        </div>
+                        <textarea
+                          id={`reject-reason-${post.id}`}
+                          value={reason}
+                          onChange={(e) => setReason(e.target.value.slice(0, 280))}
+                          maxLength={280}
+                          rows={2}
+                          placeholder="The salesperson sees this, so be specific."
+                          className="w-full rounded-lg border border-hairline bg-fill-subtle px-3 py-2 text-sm text-surface-100 placeholder:text-surface-400 focus:border-error-400"
+                        />
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setRejectingId(null);
+                              setReason("");
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            variant="filled"
+                            size="sm"
+                            onClick={() => handleAction(post, "rejected")}
+                            disabled={busy[post.id] || !reason.trim()}
+                          >
+                            Send rejection
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
                     <Button
                       variant="filled"
                       size="sm"

@@ -8,6 +8,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { triggerHapticFeedback } from "../utils/haptics";
+import { toUiMessage } from "../utils/errorMessages";
 import { Modal } from "./ui/Modal";
 import {
   isMobilePhotoDevice,
@@ -167,10 +168,10 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
     } catch (error) {
       setReviewError({
         imageSrc,
-        message:
-          error instanceof Error
-            ? error.message
-            : "This photo could not be prepared. Choose another photo and try again.",
+        message: toUiMessage(
+          error,
+          "This photo could not be prepared. Choose another photo and try again.",
+        ),
       });
     } finally {
       setIsExporting(false);
@@ -206,7 +207,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
             onClick={() => void handleSaveOriginal()}
             disabled={!preparedOriginal || isPreparingOriginal || isSavingOriginal}
             aria-busy={isPreparingOriginal || isSavingOriginal}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-success-400/30 bg-success-500/10 px-5 py-3 text-sm font-semibold text-success-100 transition-colors hover:border-success-300/50 hover:bg-success-500/15 disabled:cursor-not-allowed disabled:opacity-50 sm:justify-self-center"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-success-400/30 bg-success-500/10 px-5 py-3 text-sm font-semibold text-success-100 transition-colors hover:border-success-300/50 hover:bg-success-500/15 disabled:cursor-not-allowed disabled:opacity-50 sm:justify-self-center [.theme-light_&]:text-success-900"
           >
             {isPreparingOriginal || isSavingOriginal ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -283,7 +284,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
 
         {previewError ? (
           <p
-            className="flex items-start gap-2 rounded-xl border border-error-500/30 bg-error-500/10 px-4 py-3 text-sm text-error-200"
+            className="flex items-start gap-2 rounded-xl border border-error-500/30 bg-error-500/10 px-4 py-3 text-sm text-error-200 [.theme-light_&]:text-error-800"
             role="alert"
           >
             <ImageIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />

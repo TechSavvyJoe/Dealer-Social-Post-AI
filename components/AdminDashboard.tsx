@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dealer } from "../types";
 import * as db from "../services/database";
+import { toUiMessage } from "../utils/errorMessages";
 import { logError } from "../utils/telemetry";
 import { m } from "framer-motion";
 import { Button } from "./ui/Button";
@@ -193,7 +194,7 @@ export const AdminDashboard: React.FC = () => {
       resetDealerForm();
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to create dealer.");
+      toast.error(toUiMessage(err, "Failed to create dealer."));
     },
   });
 
@@ -206,7 +207,7 @@ export const AdminDashboard: React.FC = () => {
       resetDealerForm();
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to update dealer.");
+      toast.error(toUiMessage(err, "Failed to update dealer."));
     },
   });
 
@@ -220,7 +221,7 @@ export const AdminDashboard: React.FC = () => {
       logError("admin.dealer.delete.failed", {
         message: err instanceof Error ? err.message : String(err),
       });
-      toast.error(err instanceof Error ? err.message : "Failed to delete dealer.");
+      toast.error(toUiMessage(err, "Failed to delete dealer."));
     },
   });
 
@@ -298,7 +299,7 @@ export const AdminDashboard: React.FC = () => {
       setPersonForm({ name: "" });
       await refetchPeople();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to add person.");
+      toast.error(toUiMessage(err, "Failed to add person."));
     } finally {
       setSavingPerson(false);
     }
@@ -309,7 +310,7 @@ export const AdminDashboard: React.FC = () => {
       await updatePerson(person.id, { active: !person.active });
       await refetchPeople();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Update failed.");
+      toast.error(toUiMessage(err, "Update failed."));
     }
   };
 
@@ -323,9 +324,7 @@ export const AdminDashboard: React.FC = () => {
       await impersonatePerson(person.id);
       toast.success(`Now viewing as ${person.name}.`);
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Could not open as this person.",
-      );
+      toast.error(toUiMessage(err, "Could not open as this person."));
     } finally {
       setImpersonatingId(null);
     }
@@ -784,7 +783,7 @@ export const AdminDashboard: React.FC = () => {
                 className={cn(
                   "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition-colors",
                   codesToShare
-                    ? "border-warning-400/30 bg-warning-500/15 text-warning-100"
+                    ? "border-warning-400/30 bg-warning-500/15 text-warning-100 [.theme-light_&]:text-warning-900"
                     : "border-surface-700 bg-surface-900/80 text-surface-300 hover:border-surface-600",
                 )}
               >
@@ -880,11 +879,7 @@ export const AdminDashboard: React.FC = () => {
                         toast.success("Code marked as shared.");
                       })
                       .catch((err) =>
-                        toast.error(
-                          err instanceof Error
-                            ? err.message
-                            : "Could not update code status.",
-                        ),
+                        toast.error(toUiMessage(err, "Could not update code status.")),
                       );
                   }}
                 >
@@ -905,14 +900,12 @@ export const AdminDashboard: React.FC = () => {
           {peopleLoading && <Skeleton className="h-32 w-full rounded-2xl" />}
           {peopleError ? (
             <div
-              className="rounded-2xl border border-error-500/25 bg-error-500/10 p-4 text-sm text-error-100"
+              className="rounded-2xl border border-error-500/25 bg-error-500/10 p-4 text-sm text-error-100 [.theme-light_&]:text-error-800"
               role="alert"
             >
               <p className="font-semibold">Roster unavailable</p>
-              <p className="mt-1 text-error-200">
-                {peopleError instanceof Error
-                  ? peopleError.message
-                  : "Try refreshing this view."}
+              <p className="mt-1 text-error-200 [.theme-light_&]:text-error-800">
+                {toUiMessage(peopleError, "Try refreshing this view.")}
               </p>
             </div>
           ) : null}
@@ -941,9 +934,9 @@ export const AdminDashboard: React.FC = () => {
                       className={cn(
                         "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
                         person.pinNeedsDistribution
-                          ? "bg-warning-500/10 text-warning-200 ring-1 ring-warning-500/20"
+                          ? "bg-warning-500/10 text-warning-200 ring-1 ring-warning-500/20 [.theme-light_&]:text-warning-800"
                           : person.hasPin
-                            ? "bg-success-500/10 text-success-300 ring-1 ring-success-500/20"
+                            ? "bg-success-500/10 text-success-300 ring-1 ring-success-500/20 [.theme-light_&]:text-success-900"
                             : "bg-surface-800 text-surface-400 ring-1 ring-hairline",
                       )}
                     >
@@ -958,7 +951,7 @@ export const AdminDashboard: React.FC = () => {
                         className={cn(
                           "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
                           person.hasManagerLogin
-                            ? "bg-primary-500/10 text-primary-200 ring-1 ring-primary-400/25"
+                            ? "bg-primary-500/10 text-primary-200 ring-1 ring-primary-400/25 [.theme-light_&]:text-primary-900"
                             : "bg-surface-800 text-surface-400 ring-1 ring-hairline",
                         )}
                       >

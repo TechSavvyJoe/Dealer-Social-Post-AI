@@ -170,9 +170,11 @@ export const WebcamCapture: React.FC<WebcamCaptureProps> = ({
       >
         <div className="flex flex-col items-center justify-center text-center">
           <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-error-500/30 bg-error-500/10">
-            <AlertTriangle className="w-8 h-8 text-error-300" />
+            <AlertTriangle className="w-8 h-8 text-error-300 [.theme-light_&]:text-error-800" />
           </div>
-          <p className="text-error-100 text-base leading-relaxed">{error}</p>
+          <p className="text-error-100 text-base leading-relaxed [.theme-light_&]:text-error-800">
+            {error}
+          </p>
           <Button onClick={handleClose} className="mt-6">
             Go back
           </Button>

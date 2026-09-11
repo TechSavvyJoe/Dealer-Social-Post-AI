@@ -23,11 +23,22 @@ Quick reference:
 
 ### Non-obvious setup caveats
 
-- **PocketBase is pinned to 0.22.37** on purpose — the hooks and migrations use the
+- **PocketBase is pinned to 0.22.55** on purpose — the hooks and migrations use the
   0.22 JSVM API (`$app.dao()`, `new Dao(db)`, `$apis.requestInfo`, `collection.schema`,
   `c.pathParam(...)`, `c.request()`) which changed in PB 0.23+. Do NOT bump PocketBase
   without porting all hooks and migrations. `start-pocketbase.sh` downloads the binary on
   first run (gitignored).
+- **`collection.schema` is a Go struct, not a JS array.** Two idioms that look right are
+  silent no-ops on 0.22 — the CLI prints "Applied"/"Reverted" and nothing changes:
+  `collection.schema = Array.from(collection.schema).filter(...)` to remove a field, and
+  any helper that reads `schema.length` or `schema[i]` to look one up. Use the methods:
+  `collection.schema.getFieldByName(name)` to find, `collection.schema.addField(new
+SchemaField(...))` to add, and `collection.schema.removeField(field.id)` — the **id**,
+  never the name — to remove. `__tests__/backendCompliancePolicy.test.ts` rejects the
+  no-op shapes repository-wide; 21 migrations were converted and proven against the real
+  binary on 2026-09-10 after a plaintext-credential column one of them "dropped" turned
+  out to still be in production. Verify any new down-migration against a copy of
+  `pb_data` rather than trusting the CLI output.
 - **`.env.local` is required for the backend to start.** `start-pocketbase.sh` sources
   it. Minimum useful contents: `ADMIN_LOGIN_USERNAME` + `ADMIN_LOGIN_PASSWORD` (the
   system-admin account is provisioned/rotated from these at boot; rotation invalidates

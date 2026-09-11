@@ -41,7 +41,7 @@ const stateClasses: Record<
   over: {
     dot: "bg-error-400",
     bar: "bg-error-500/80",
-    label: "text-error-200 font-semibold",
+    label: "text-error-200 font-semibold [.theme-light_&]:text-error-800",
   },
 };
 
@@ -125,7 +125,9 @@ export const PlatformLimitMeter: React.FC<PlatformLimitMeterProps> = ({
                 <p
                   className={cn(
                     "pl-3.5 text-[10px] leading-snug",
-                    hashtagWarning ? "text-error-300" : "text-surface-400",
+                    hashtagWarning
+                      ? "text-error-300 [.theme-light_&]:text-error-800"
+                      : "text-surface-400",
                   )}
                 >
                   Tags: {hashtags}

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { LogOut, UserRound } from "lucide-react";
 import { useAppStore } from "../stores/appStore";
 import { Button } from "./ui/Button";
+import { toUiMessage } from "../utils/errorMessages";
 
 /**
  * Fixed banner while a super-admin is viewing the app as a store person.
@@ -24,7 +25,7 @@ export const ImpersonationBanner: React.FC = () => {
     try {
       await exitImpersonation();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not exit");
+      setError(toUiMessage(err, "Could not exit impersonation."));
     } finally {
       setBusy(false);
     }

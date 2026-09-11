@@ -151,7 +151,7 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
           <div className="flex items-center gap-2">
             <span
               className={cn(
-                "grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-primary-400/30 bg-primary-500/10 text-primary-200",
+                "grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-primary-400/30 bg-primary-500/10 text-primary-200 [.theme-light_&]:text-primary-900",
                 compact && "lg:h-7 lg:w-7",
               )}
             >

@@ -7,6 +7,13 @@
  * customers. Managers and the submitting session receive it only through the
  * session-authorized hook route; PocketBase's public file route stays closed.
  */
+const POST_APPROVAL_CREATIVE_FIELDS = [
+  "caption",
+  "disclosures",
+  "creative_image",
+  "owner_session_hash",
+];
+
 migrate(
   (db) => {
     const dao = new Dao(db);
@@ -74,13 +81,13 @@ migrate(
     } catch (_e) {}
     if (!posts) return;
 
-    posts.schema = Array.from(posts.schema).filter(
-      (field) =>
-        field.name !== "caption" &&
-        field.name !== "disclosures" &&
-        field.name !== "creative_image" &&
-        field.name !== "owner_session_hash",
-    );
+    // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on PocketBase
+    // 0.22: the migration reports "Applied" and the columns stay. `removeField`
+    // takes the field id, not its name.
+    POST_APPROVAL_CREATIVE_FIELDS.forEach((name) => {
+      const field = posts.schema.getFieldByName(name);
+      if (field) posts.schema.removeField(field.id);
+    });
     dao.saveCollection(posts);
   },
 );

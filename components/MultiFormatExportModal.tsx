@@ -154,7 +154,7 @@ export const MultiFormatExportModal: React.FC<MultiFormatExportModalProps> = ({
     >
       <div className="space-y-5">
         {renderError && (
-          <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-4 py-3 text-error-100 text-sm">
+          <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-4 py-3 text-error-100 text-sm [.theme-light_&]:text-error-800">
             {renderError}
           </div>
         )}

@@ -102,9 +102,13 @@ migrate(
         collection = dao.findCollectionByNameOrId(collectionName);
       } catch (_error) {}
       if (!collection) return;
-      collection.schema = Array.from(collection.schema).filter(
-        (field) => names.indexOf(field.name) === -1,
-      );
+      // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on
+      // PocketBase 0.22: the migration reports "Applied" and the columns stay.
+      // `removeField` takes the field id, not its name.
+      names.forEach((name) => {
+        const field = collection.schema.getFieldByName(name);
+        if (field) collection.schema.removeField(field.id);
+      });
       dao.saveCollection(collection);
     };
     removeFields("dealers", DEALER_BRAND_FIELDS);

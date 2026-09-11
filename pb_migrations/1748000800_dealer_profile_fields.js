@@ -31,42 +31,123 @@
 migrate(
   (db) => {
     const dao = new Dao(db);
-    let dealers = null; try { dealers = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
+    let dealers = null;
+    try {
+      dealers = dao.findCollectionByNameOrId("dealers");
+    } catch (e) {}
     if (!dealers) return;
     const ensure = (name, field) => {
-      if (!(function(s, n){ for(let i=0;i<s.length;i++){ if(s[i].name === n) return s[i]; } return null; })(dealers.schema, name)) {
+      if (!dealers.schema.getFieldByName(name)) {
         dealers.schema.addField(new SchemaField(field));
       }
     };
 
     // Contact + identity
-    ensure("website", { name: "website", type: "text", required: false, options: { max: 500 } });
-    ensure("phone", { name: "phone", type: "text", required: false, options: { max: 40 } });
-    ensure("address", { name: "address", type: "text", required: false, options: { max: 500 } });
-    ensure("hours", { name: "hours", type: "text", required: false, options: { max: 500 } });
-    ensure("tagline", { name: "tagline", type: "text", required: false, options: { max: 200 } });
+    ensure("website", {
+      name: "website",
+      type: "text",
+      required: false,
+      options: { max: 500 },
+    });
+    ensure("phone", {
+      name: "phone",
+      type: "text",
+      required: false,
+      options: { max: 40 },
+    });
+    ensure("address", {
+      name: "address",
+      type: "text",
+      required: false,
+      options: { max: 500 },
+    });
+    ensure("hours", {
+      name: "hours",
+      type: "text",
+      required: false,
+      options: { max: 500 },
+    });
+    ensure("tagline", {
+      name: "tagline",
+      type: "text",
+      required: false,
+      options: { max: 200 },
+    });
 
     // Social handles
-    ensure("facebook_url", { name: "facebook_url", type: "text", required: false, options: { max: 500 } });
-    ensure("instagram_handle", { name: "instagram_handle", type: "text", required: false, options: { max: 100 } });
-    ensure("tiktok_handle", { name: "tiktok_handle", type: "text", required: false, options: { max: 100 } });
-    ensure("x_handle", { name: "x_handle", type: "text", required: false, options: { max: 100 } });
-    ensure("gbp_url", { name: "gbp_url", type: "text", required: false, options: { max: 500 } });
+    ensure("facebook_url", {
+      name: "facebook_url",
+      type: "text",
+      required: false,
+      options: { max: 500 },
+    });
+    ensure("instagram_handle", {
+      name: "instagram_handle",
+      type: "text",
+      required: false,
+      options: { max: 100 },
+    });
+    ensure("tiktok_handle", {
+      name: "tiktok_handle",
+      type: "text",
+      required: false,
+      options: { max: 100 },
+    });
+    ensure("x_handle", {
+      name: "x_handle",
+      type: "text",
+      required: false,
+      options: { max: 100 },
+    });
+    ensure("gbp_url", {
+      name: "gbp_url",
+      type: "text",
+      required: false,
+      options: { max: 500 },
+    });
 
     // Generation defaults
-    ensure("default_hashtags", { name: "default_hashtags", type: "text", required: false, options: { max: 1500 } });
-    ensure("default_footer", { name: "default_footer", type: "text", required: false, options: { max: 500 } });
+    ensure("default_hashtags", {
+      name: "default_hashtags",
+      type: "text",
+      required: false,
+      options: { max: 1500 },
+    });
+    ensure("default_footer", {
+      name: "default_footer",
+      type: "text",
+      required: false,
+      options: { max: 500 },
+    });
 
     // Overlay preferences
-    ensure("enabled_styles", { name: "enabled_styles", type: "text", required: false, options: { max: 500 } });
-    ensure("default_style", { name: "default_style", type: "text", required: false, options: { max: 60 } });
-    ensure("enabled_fun_styles", { name: "enabled_fun_styles", type: "text", required: false, options: { max: 2000 } });
+    ensure("enabled_styles", {
+      name: "enabled_styles",
+      type: "text",
+      required: false,
+      options: { max: 500 },
+    });
+    ensure("default_style", {
+      name: "default_style",
+      type: "text",
+      required: false,
+      options: { max: 60 },
+    });
+    ensure("enabled_fun_styles", {
+      name: "enabled_fun_styles",
+      type: "text",
+      required: false,
+      options: { max: 2000 },
+    });
 
     dao.saveCollection(dealers);
   },
   (db) => {
     const dao = new Dao(db);
-    let dealers = null; try { dealers = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
+    let dealers = null;
+    try {
+      dealers = dao.findCollectionByNameOrId("dealers");
+    } catch (e) {}
     if (!dealers) return;
     const drop = [
       "website",
@@ -85,7 +166,13 @@ migrate(
       "default_style",
       "enabled_fun_styles",
     ];
-    dealers.schema = Array.from(dealers.schema).filter((f) => !drop.includes(f.name));
+    // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on PocketBase
+    // 0.22 — the migration reports "Applied" and the columns stay. `removeField`
+    // takes the field id, not its name.
+    drop.forEach((name) => {
+      const field = dealers.schema.getFieldByName(name);
+      if (field) dealers.schema.removeField(field.id);
+    });
     dao.saveCollection(dealers);
-  }
+  },
 );

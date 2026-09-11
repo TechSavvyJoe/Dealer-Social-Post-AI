@@ -33,6 +33,7 @@ import confetti from "canvas-confetti";
 import { Tooltip } from "./ui/Tooltip";
 import { GeneratedPost, VideoStyle, VideoRequestOptions } from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
+import { toUiMessage } from "../utils/errorMessages";
 import { Badge } from "./ui/Badge";
 import { cn } from "../utils/classNames";
 import { ProgressBar } from "./ui/ProgressBar";
@@ -64,6 +65,8 @@ import {
   analyzeCaptionForDelivery,
   analyzeCaptionSetForDelivery,
   prohibitedClaimsMessage,
+  buildEmployeeDisclosure,
+  prependEmployeeDisclosure,
 } from "../utils/complianceDisclosures";
 import { captionUsesOnlyExpectedCustomer } from "../utils/captionQuality";
 import { toPublicCustomerLabel } from "../utils/customerIdentity";
@@ -279,9 +282,11 @@ const ActionTile: React.FC<{
         onClick();
       }}
       disabled={disabled}
-      aria-label={ariaLabel}
+      // The visible label is hidden on the narrowest phones (see below), so the
+      // tile must always carry an accessible name of its own.
+      aria-label={ariaLabel || label}
       aria-busy={busy || undefined}
-      className={cn(TILE_BASE, TILE_NEUTRAL)}
+      className={cn(TILE_BASE, TILE_NEUTRAL, "max-[399px]:justify-center")}
       whileHover={shouldReduceMotion ? undefined : { x: disabled ? 0 : 2 }}
       whileTap={shouldReduceMotion ? undefined : { scale: disabled ? 1 : 0.98 }}
     >
@@ -296,7 +301,20 @@ const ActionTile: React.FC<{
       ) : (
         <Icon className={cn("w-4 h-4 shrink-0", iconClassName)} />
       )}
-      <span className="truncate">{label}</span>
+      {/* These tiles sit in a 3-column grid on phones, and `truncate` rendered
+          "Video", "Fun mode" and "Schedule" as "Vi…", "Fu…" and "Sc…". An
+          icon-only tile with the name on aria-label and the Tooltip reads
+          better than two characters.
+
+          The 400px cutoff is verified against a real 390px render, not a model
+          of the grid. A synthetic 3-column row suggests the labels fit from
+          375px up, which is wrong: this grid shares its row with the "More"
+          control (~85px), so each column gets roughly (390 - 32 - 85 - 12) / 3
+          = 87px, leaving ~37px for a label that needs 58px. Lowering the cutoff
+          to 375px brought the "Vi…/Fu…/Sc…" truncation straight back at 390px.
+          If this row is ever given its full width, re-measure before raising
+          the cutoff. */}
+      <span className="truncate max-[399px]:hidden">{label}</span>
     </m.button>
   );
   return tooltip ? (
@@ -541,6 +559,12 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [leaveConfirm, setLeaveConfirm] = useState<"startOver" | "remix" | null>(null);
   const [hasSavedMedia, setHasSavedMedia] = useState(false);
   const [hasCopiedCaption, setHasCopiedCaption] = useState(false);
+  // What the manager asked to be changed. The rejection message used to say
+  // "create another post with the requested changes" while nothing carried the
+  // requested changes; this is them.
+  const [rejectionReason, setRejectionReason] = useState<string>(
+    post.rejectionReason || "",
+  );
   const [approvalStatus, setApprovalStatus] = useState<
     NonNullable<GeneratedPost["approvalStatus"]>
   >(
@@ -1168,7 +1192,9 @@ export const PostResult: React.FC<PostResultProps> = ({
     approvalStatus === "approved"
       ? "Manager approved this exact creative. Save, share, and export are unlocked; start a new post to make changes."
       : approvalStatus === "rejected"
-        ? "A manager rejected this creative. Delivery remains locked; create another post with the requested changes."
+        ? rejectionReason
+          ? `A manager asked for a change: ${rejectionReason} Delivery stays locked until you create another post.`
+          : "A manager rejected this creative. Delivery remains locked; create another post with the requested changes."
         : approvalStatus === "submission_failed"
           ? "This creative could not be submitted for approval. Delivery remains locked; check your connection and create another post to retry."
           : "This exact image and caption are awaiting manager approval. Save, share, and export unlock automatically after approval.";
@@ -1279,12 +1305,17 @@ export const PostResult: React.FC<PostResultProps> = ({
         setApprovalCheckError(null);
         setImageReviewRequired(Boolean(result.image_review_required));
         setApprovalStatus(result.approval_status);
+        setRejectionReason(result.rejection_reason || "");
         if (result.approval_status === "approved") {
           toast.success("Manager approved this post. Delivery is unlocked.");
           return;
         }
         if (result.approval_status === "rejected") {
-          toast.warning("Manager requested changes. Delivery remains locked.");
+          toast.warning(
+            result.rejection_reason
+              ? `Manager asked for a change: ${result.rejection_reason}`
+              : "Manager requested changes. Delivery remains locked.",
+          );
           return;
         }
         schedule();
@@ -1420,9 +1451,7 @@ export const PostResult: React.FC<PostResultProps> = ({
           : "Private website draft queued again.",
       );
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Website draft could not be retried.",
-      );
+      toast.error(toUiMessage(err, "Website draft could not be retried."));
     } finally {
       setWebsiteRetrying(false);
     }
@@ -1566,11 +1595,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         // Preserve the original, more useful send error below.
       }
       if (!restored) {
-        toast.error(
-          err instanceof Error
-            ? err.message
-            : "The final website draft could not be sent.",
-        );
+        toast.error(toUiMessage(err, "The final website draft could not be sent."));
       }
     } finally {
       websiteSendingRef.current = false;
@@ -1822,9 +1847,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         setPreparedSave(null);
         setPreparedSaveForKey(null);
         setMediaPreparationError(
-          err instanceof Error
-            ? err.message
-            : "The exact platform file could not be prepared.",
+          toUiMessage(err, "The exact platform file could not be prepared."),
         );
       })
       .finally(() => {
@@ -1968,6 +1991,14 @@ export const PostResult: React.FC<PostResultProps> = ({
   const captionWasEdited = editedText !== sourceCaptionForActive;
   // Always derive the footer from the actual visible caption. Platform
   // variants and salesperson edits may advertise different terms.
+  // The FTC team-member disclosure travels with every PublishContent as a
+  // protected prefix, so destination character budgets truncate body copy
+  // instead of the disclosure. Empty string when the dealership opted out.
+  const employeeDisclosure = React.useMemo(
+    () => buildEmployeeDisclosure(currentDealer),
+    [currentDealer],
+  );
+
   const activeDisclosures = captionAnalysis.disclosures.trim();
   const activeDisclosureCategories = captionAnalysis.disclosureCategories;
   const appendDisclosureText = (caption: string, disclosures: string): string => {
@@ -1981,6 +2012,24 @@ export const PostResult: React.FC<PostResultProps> = ({
     }`;
   };
   const captionWithDisclosures = appendDisclosureText(editedText, activeDisclosures);
+
+  /**
+   * What actually reaches the destination, including the FTC team-member
+   * disclosure that every delivery path prepends as a protected prefix.
+   *
+   * `captionWithDisclosures` is body + compliance footer and stops there, so
+   * anything measuring or previewing it was short by the length of the
+   * disclosure plus its blank line — around 45 characters for a typical
+   * dealership name, which is 16% of X's 280-character budget. The meter told
+   * a salesperson they had room the destination was never going to give them,
+   * and the phone preview showed a caption missing the one line that is there
+   * for legal reasons. Idempotent, so a salesperson who typed the disclosure
+   * themselves does not see it twice.
+   */
+  const deliveredCaption = prependEmployeeDisclosure(
+    captionWithDisclosures,
+    currentDealer,
+  );
 
   // Persist textarea edits into the active pack slot so Share uses salesperson edits.
   useEffect(() => {
@@ -2001,11 +2050,34 @@ export const PostResult: React.FC<PostResultProps> = ({
       // Active platform: use live editor text (includes in-progress edits)
       const base = id === activeCaptionPlatform ? editedText.trim() : cap?.trim();
       if (!base) continue;
+      // The disclosure is applied AFTER the compliance/normalisation pass, never
+      // before. analyzeCaptionForDelivery runs cleanSocialCaption, whose
+      // assistant-preamble heuristic drops an entire first line starting with
+      // "I have", "I've", "Here's" or "Sure" — exactly how a compliance officer
+      // words a material-connection line. Prepending first silently deleted the
+      // disclosure for four of five realistic wordings.
       const attributed = appendDealershipMention(base, id, currentDealer);
-      const prepared = analyzeCaptionForDelivery(attributed, bannedPhrases);
+      const scanned = analyzeCaptionForDelivery(attributed, bannedPhrases);
+      // Scan the disclosure-prepended text (unchanged from before), so the
+      // identity-safety and prohibited-claims checks see exactly what the
+      // caption will look like once a delivery path adds requiredPrefix.
+      const prepared = {
+        ...scanned,
+        caption: prependEmployeeDisclosure(scanned.caption, currentDealer),
+      };
       const identitySafe = customerIdentityIsSafe(prepared.caption);
       out[id] = {
-        text: prepared.caption,
+        // Body only — `scanned.caption`, NOT `prepared.caption`. Every
+        // consumer of this pack (handleShareDelivery's comment two screens
+        // down, contentForTarget in ShareDialog, the fitter in
+        // services/publishTargets.ts) already treats requiredPrefix as the
+        // one channel for the disclosure. Storing the prepended string here
+        // duplicated it: ShareDialog spreads `...content` (which still
+        // carries requiredPrefix) and only overrides `text`, so the fitter
+        // added the disclosure a second time on top of a caption that
+        // already opened with it, corrupting both the published post and the
+        // budget it was fit against.
+        text: scanned.caption,
         disclosures: prepared.disclosures || undefined,
         blockedReason: !identitySafe
           ? identityGateMessage
@@ -2111,8 +2183,11 @@ export const PostResult: React.FC<PostResultProps> = ({
       toast.warning(prohibitedClaimsMessage(preparedCopy.compliance.prohibited));
       return;
     }
+    // Prepend after the scan (see the note in sharePlatformCaptions). This path
+    // pastes straight into Facebook and has no budget fitter behind it, so a
+    // disclosure lost here is simply absent from the published post.
     const textToCopy = appendDisclosureText(
-      preparedCopy.caption,
+      prependEmployeeDisclosure(preparedCopy.caption, currentDealer),
       preparedCopy.disclosures,
     );
     if (navigator.clipboard) {
@@ -2170,6 +2245,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     setFocusedShareContent({
       text: editedText,
       disclosures: activeDisclosures || undefined,
+      requiredPrefix: employeeDisclosure || undefined,
       videoUrl,
       preparedFile: activePreparedSave.file,
     });
@@ -2590,6 +2666,8 @@ export const PostResult: React.FC<PostResultProps> = ({
       typeof captionVariant === "string"
         ? captionVariant
         : captionVariant?.text || editedText;
+    // Body only. requiredPrefix on the PublishContent below carries the
+    // disclosure, so it never passes through the sanitizer.
     const caption = appendDealershipMention(
       baseCaption,
       delivery.destinationId,
@@ -2615,8 +2693,10 @@ export const PostResult: React.FC<PostResultProps> = ({
 
     setFocusedShareDeliveryId(delivery.id);
     setFocusedShareContent({
+      // Body only; requiredPrefix carries the disclosure into the fitter.
       text: caption,
       disclosures,
+      requiredPrefix: employeeDisclosure || undefined,
       preparedFile: activePreparedSave.file,
       ...(delivery.mediaKind === "video"
         ? { videoUrl: job?.url }
@@ -3028,7 +3108,7 @@ export const PostResult: React.FC<PostResultProps> = ({
             isDesktopLayout && "lg:min-h-9 lg:px-3 lg:py-1",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
             activeCaptionPlatform === null
-              ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
+              ? "border-primary-400/50 bg-primary-500/20 text-primary-100 [.theme-light_&]:text-primary-950"
               : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
           )}
         >
@@ -3053,7 +3133,7 @@ export const PostResult: React.FC<PostResultProps> = ({
               isDesktopLayout && "lg:min-h-9 lg:px-3 lg:py-1",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
               activeCaptionPlatform === tab.id
-                ? "border-primary-400/50 bg-primary-500/20 text-primary-100"
+                ? "border-primary-400/50 bg-primary-500/20 text-primary-100 [.theme-light_&]:text-primary-950"
                 : "border-white/10 bg-white/[0.04] text-surface-300 hover:border-white/20 hover:bg-white/[0.08]",
             )}
           >
@@ -3362,14 +3442,14 @@ export const PostResult: React.FC<PostResultProps> = ({
                 setVideoMuted(false);
                 void element.play().catch(() => undefined);
               }}
-              className="flex min-h-11 w-full items-center justify-center rounded-xl border border-primary-400/40 bg-primary-500/15 px-3 text-sm font-semibold text-primary-50"
+              className="flex min-h-11 w-full items-center justify-center rounded-xl border border-primary-400/40 bg-primary-500/15 px-3 text-sm font-semibold text-primary-50 [.theme-light_&]:text-primary-950"
             >
               Turn on sound
             </button>
           ) : null}
           {videoPlayError ? (
             <div
-              className="space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 p-3 text-xs text-error-100"
+              className="space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 p-3 text-xs text-error-100 [.theme-light_&]:text-error-800"
               role="alert"
             >
               <p>{videoPlayError}</p>
@@ -3490,6 +3570,7 @@ export const PostResult: React.FC<PostResultProps> = ({
           focusedShareContent || {
             text: editedText,
             disclosures: activeDisclosures || undefined,
+            requiredPrefix: employeeDisclosure || undefined,
             imageDataUrl: post.image,
             videoUrl: videoUrl || undefined,
           }
@@ -3622,19 +3703,20 @@ export const PostResult: React.FC<PostResultProps> = ({
               try {
                 await schedulePost(post.postId, isoString);
                 toast.success(
-                  "Post scheduled for " + new Date(isoString).toLocaleString(),
+                  "Share time saved for " + new Date(isoString).toLocaleString(),
                 );
                 setIsScheduleOpen(false);
               } catch (err) {
-                toast.error(
-                  err instanceof Error ? err.message : "Failed to schedule post",
-                );
+                toast.error(toUiMessage(err, "Could not save that share time."));
               } finally {
                 setIsScheduling(false);
               }
             } else {
+              // Without a saved post there is nothing to attach the time to, so
+              // the request never happens. Reporting success here told the
+              // salesperson their post was handled when nothing was stored.
               setIsScheduleOpen(false);
-              toast.success("Scheduled for " + new Date(isoString).toLocaleString());
+              toast.warning("Save this post first, then plan a share time.");
             }
           }}
         />
@@ -3732,7 +3814,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                           "grid h-6 w-6 shrink-0 place-items-center rounded-full border text-[11px] font-bold",
                           active
                             ? "border-primary-300 bg-primary-500 text-white shadow-[0_0_18px_rgba(59,130,246,0.3)]"
-                            : "border-primary-400/45 bg-primary-500/15 text-primary-200",
+                            : "border-primary-400/45 bg-primary-500/15 text-primary-200 [.theme-light_&]:text-primary-900",
                         )}
                         aria-hidden="true"
                       >
@@ -3764,7 +3846,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 <button
                   type="button"
                   onClick={handleRemixRequest}
-                  className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border border-primary-400/35 bg-primary-500/10 px-3 text-xs font-semibold text-primary-100 transition-colors hover:border-primary-400/55 hover:bg-primary-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
+                  className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border border-primary-400/35 bg-primary-500/10 px-3 text-xs font-semibold text-primary-100 transition-colors hover:border-primary-400/55 hover:bg-primary-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 [.theme-light_&]:text-primary-950"
                 >
                   <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
                   Remix
@@ -3783,7 +3865,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         ) : null}
         {post.isBasicFallback || post.captionSource === "basic_fallback" ? (
           <m.div
-            className="mx-auto flex max-w-3xl flex-col gap-3 rounded-2xl border border-warning-500/30 bg-warning-500/10 px-4 py-4 text-warning-100 shadow-lg shadow-black/10 sm:flex-row sm:items-center"
+            className="mx-auto flex max-w-3xl flex-col gap-3 rounded-2xl border border-warning-500/30 bg-warning-500/10 px-4 py-4 text-warning-100 shadow-lg shadow-black/10 sm:flex-row sm:items-center [.theme-light_&]:text-warning-900"
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
@@ -3824,7 +3906,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         ) : null}
         {imageReviewRequired && (
           <m.div
-            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10"
+            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10 [.theme-light_&]:text-error-800"
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
@@ -3849,7 +3931,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         {identityLocked && (
           <m.div
             id="caption-identity-alert"
-            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10"
+            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10 [.theme-light_&]:text-error-800"
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
@@ -3874,7 +3956,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         {claimLocked && (
           <m.div
             id="caption-compliance-alert"
-            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10"
+            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10 [.theme-light_&]:text-error-800"
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
@@ -3898,7 +3980,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         )}
         {releaseLocked && (
           <m.div
-            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10"
+            className="mx-auto flex max-w-3xl gap-3 rounded-2xl border border-error-500/30 bg-error-500/10 px-4 py-4 text-error-100 shadow-lg shadow-black/10 [.theme-light_&]:text-error-800"
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.25 }}
@@ -3953,10 +4035,10 @@ export const PostResult: React.FC<PostResultProps> = ({
             className={cn(
               "mx-auto flex max-w-3xl flex-col gap-3 rounded-2xl px-4 py-4 shadow-lg shadow-black/10 sm:flex-row sm:items-start",
               approvalStatus === "approved"
-                ? "border border-success-500/30 bg-success-500/10 text-success-100"
+                ? "border border-success-500/30 bg-success-500/10 text-success-100 [.theme-light_&]:text-success-900"
                 : approvalStatus === "pending"
-                  ? "border border-warning-500/30 bg-warning-500/10 text-warning-100"
-                  : "border border-error-500/30 bg-error-500/10 text-error-100",
+                  ? "border border-warning-500/30 bg-warning-500/10 text-warning-100 [.theme-light_&]:text-warning-900"
+                  : "border border-error-500/30 bg-error-500/10 text-error-100 [.theme-light_&]:text-error-800",
             )}
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
@@ -4012,13 +4094,13 @@ export const PostResult: React.FC<PostResultProps> = ({
             className={cn(
               "relative mx-auto flex min-h-14 w-full max-w-3xl items-center gap-2 rounded-xl border px-2.5 py-2 shadow-lg shadow-black/10 sm:px-3",
               websiteStatusCopy.tone === "success"
-                ? "border-success-500/30 bg-success-500/10 text-success-100"
+                ? "border-success-500/30 bg-success-500/10 text-success-100 [.theme-light_&]:text-success-900"
                 : websiteStatusCopy.tone === "warning"
-                  ? "border-warning-500/30 bg-warning-500/10 text-warning-100"
+                  ? "border-warning-500/30 bg-warning-500/10 text-warning-100 [.theme-light_&]:text-warning-900"
                   : websiteStatusCopy.tone === "error"
-                    ? "border-error-500/30 bg-error-500/10 text-error-100"
+                    ? "border-error-500/30 bg-error-500/10 text-error-100 [.theme-light_&]:text-error-800"
                     : websiteStatusCopy.tone === "info"
-                      ? "border-info-500/30 bg-info-500/10 text-info-100"
+                      ? "border-info-500/30 bg-info-500/10 text-info-100 [.theme-light_&]:text-info-900"
                       : "border-white/10 bg-white/[0.04] text-surface-100",
             )}
             initial={shouldReduceMotion ? false : { opacity: 0, y: -6 }}
@@ -4159,7 +4241,7 @@ export const PostResult: React.FC<PostResultProps> = ({
             outputs={deliveryOutputs}
             title={publishTitle}
             mediaPreview={renderMobileFocusedMedia()}
-            caption={captionWithDisclosures}
+            caption={deliveredCaption}
             postingAs={currentPersonName || undefined}
             captionNote={
               historyReadOnly
@@ -4328,7 +4410,7 @@ export const PostResult: React.FC<PostResultProps> = ({
             {(deliveryPlan.unsupported.length > 0 ||
               deliveryPlan.unknown.length > 0) && (
               <div
-                className="w-full rounded-xl border border-warning-500/25 bg-warning-500/10 px-4 py-3 text-sm text-warning-100"
+                className="w-full rounded-xl border border-warning-500/25 bg-warning-500/10 px-4 py-3 text-sm text-warning-100 [.theme-light_&]:text-warning-900"
                 role="status"
               >
                 <p className="font-semibold">Some saved destinations need attention</p>
@@ -4397,7 +4479,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                           {draftSyncStatus === "error" ? (
                             <button
                               type="button"
-                              className="min-h-8 rounded-lg border border-error-400/30 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100"
+                              className="min-h-8 rounded-lg border border-error-400/30 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 [.theme-light_&]:text-error-800"
                               onClick={() => void flushPendingDraft()}
                             >
                               Retry
@@ -4500,7 +4582,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                               setVideoMuted(false);
                               void el.play().catch(() => undefined);
                             }}
-                            className="flex w-full min-h-11 items-center justify-center gap-2 rounded-xl border border-primary-400/40 bg-primary-500/15 px-3 py-2 text-sm font-semibold text-primary-50"
+                            className="flex w-full min-h-11 items-center justify-center gap-2 rounded-xl border border-primary-400/40 bg-primary-500/15 px-3 py-2 text-sm font-semibold text-primary-50 [.theme-light_&]:text-primary-950"
                           >
                             Turn on sound
                           </button>
@@ -4526,7 +4608,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                         ) : null}
                         {videoPlayError ? (
                           <div
-                            className="space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 px-3 py-2 text-xs text-error-100"
+                            className="space-y-2 rounded-xl border border-error-500/40 bg-error-500/10 px-3 py-2 text-xs text-error-100 [.theme-light_&]:text-error-800"
                             role="alert"
                           >
                             <p>{videoPlayError}</p>
@@ -5168,7 +5250,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                           "inline-flex min-h-11 items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition-colors",
                           isDesktopLayout &&
                             "lg:min-h-9 lg:rounded-lg lg:px-3 lg:py-1.5 lg:text-xs",
-                          "border-primary-400/45 bg-primary-500/15 text-primary-50",
+                          "border-primary-400/45 bg-primary-500/15 text-primary-50 [.theme-light_&]:text-primary-950",
                           "hover:border-primary-400/65 hover:bg-primary-500/25",
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70",
                           "disabled:cursor-not-allowed disabled:opacity-40",
@@ -5336,7 +5418,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                 ) : null}
 
                 <PlatformLimitMeter
-                  text={captionWithDisclosures}
+                  text={deliveredCaption}
                   platformIds={post.platformIds}
                   className={isDesktopLayout ? "mb-3" : "mb-4"}
                 />
@@ -5381,7 +5463,17 @@ export const PostResult: React.FC<PostResultProps> = ({
       {!isDesktopLayout && typeof document !== "undefined"
         ? createPortal(
             <div
-              className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-surface-950/95 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur-md"
+              /* `publish-studio-theme` is repeated here on purpose. This bar is
+                 part of the result studio, but it renders through a portal into
+                 document.body, so it lands OUTSIDE the wrapper in App.tsx that
+                 normally applies that class. Without it the bar inherits
+                 Sunlight Mode, where the surface ramp is inverted and
+                 `bg-surface-950/95` resolves to near-white — measured in a real
+                 browser against the built CSS, the "Delivery locked" notice
+                 came out at 1.19:1, i.e. invisible, on exactly the phone layout
+                 this bar exists for. With the class the same notice measures
+                 14.94:1. Any theme-aware class added below depends on this. */
+              className="publish-studio-theme fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-surface-950/95 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur-md"
               style={{
                 paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))",
                 paddingLeft: "env(safe-area-inset-left)",

@@ -5,6 +5,8 @@
  * authorize cross-session reads or writes merely because the displayed id
  * matches the current person.
  */
+const POST_OWNERSHIP_FIELDS = ["owner_person_id", "attribution_authoritative"];
+
 migrate(
   (db) => {
     const dao = new Dao(db);
@@ -45,13 +47,21 @@ migrate(
       posts = dao.findCollectionByNameOrId("posts");
     } catch (_e) {}
     if (!posts) return;
-    posts.schema = Array.from(posts.schema).filter(
-      (field) =>
-        field.name !== "owner_person_id" && field.name !== "attribution_authoritative",
-    );
-    dao.saveCollection(posts);
+    // The index first. The up created it with raw SQL, so PocketBase does not
+    // track it in `posts.indexes` and cannot drop it for us; dropping the
+    // columns while it still references them fails the whole revert with
+    // "error in index ... after drop column". This used to run after the field
+    // removal and only worked because that removal was a no-op.
     db.newQuery(
       "DROP INDEX IF EXISTS `idx_posts_authoritative_owner_history`",
     ).execute();
+    // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on PocketBase
+    // 0.22: the migration reports "Applied" and the columns stay. `removeField`
+    // takes the field id, not its name.
+    POST_OWNERSHIP_FIELDS.forEach((name) => {
+      const field = posts.schema.getFieldByName(name);
+      if (field) posts.schema.removeField(field.id);
+    });
+    dao.saveCollection(posts);
   },
 );

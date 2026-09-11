@@ -61,6 +61,7 @@ import {
   PublishTarget,
 } from "../services/publishTargets";
 import { triggerHapticFeedback } from "../utils/haptics";
+import { toUiMessage } from "../utils/errorMessages";
 import { logEvent } from "../utils/telemetry";
 import { cn } from "../utils/classNames";
 import { captionIncludesDealershipMention } from "../utils/socialAttribution";
@@ -229,10 +230,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         ) {
           return;
         }
-        const detail =
-          err instanceof Error && err.message
-            ? err.message
-            : "Check your connection and try again.";
+        const detail = toUiMessage(err, "Check your connection and try again.");
         setPreparation((current) => ({
           ...current,
           [target.id]: {
@@ -358,8 +356,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         targetId: selectedTargetId,
         status: {
           kind: "error",
-          message:
-            err instanceof Error ? err.message : "Sharing could not start. Try again.",
+          message: toUiMessage(err, "Sharing could not start. Try again."),
         },
       });
     } finally {
@@ -611,7 +608,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
 
         {failedTargetCount > 0 && selectedPreparation?.status !== "error" ? (
           <p
-            className="rounded-xl border border-warning-500/25 bg-warning-500/10 px-3 py-2.5 text-xs text-warning-100"
+            className="rounded-xl border border-warning-500/25 bg-warning-500/10 px-3 py-2.5 text-xs text-warning-100 [.theme-light_&]:text-warning-900"
             role="status"
           >
             {failedTargetCount === 1
@@ -635,7 +632,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                       : "Share now opens the system sheet immediately."}
                 </p>
                 {focusedTagGuidance ? (
-                  <p className="mt-2 max-w-prose rounded-lg border border-primary-400/25 bg-primary-500/10 px-2.5 py-2 text-xs leading-relaxed text-primary-100">
+                  <p className="mt-2 max-w-prose rounded-lg border border-primary-400/25 bg-primary-500/10 px-2.5 py-2 text-xs leading-relaxed text-primary-100 [.theme-light_&]:text-primary-950">
                     {focusedTagGuidance}
                   </p>
                 ) : null}
@@ -690,7 +687,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
           </div>
         ) : selectedPreparation?.status === "error" && selectedTarget ? (
           <div
-            className="rounded-xl border border-error-500/30 bg-error-500/10 p-4 text-sm text-error-100"
+            className="rounded-xl border border-error-500/30 bg-error-500/10 p-4 text-sm text-error-100 [.theme-light_&]:text-error-800"
             role="alert"
           >
             <div className="flex items-start gap-2">
@@ -711,7 +708,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
           </div>
         ) : selectedTarget ? (
           <div
-            className="rounded-xl border border-warning-500/25 bg-warning-500/10 p-4 text-sm text-warning-100"
+            className="rounded-xl border border-warning-500/25 bg-warning-500/10 p-4 text-sm text-warning-100 [.theme-light_&]:text-warning-900"
             role="alert"
           >
             Media preparation did not start.
@@ -731,7 +728,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
 
         {operationError ? (
           <p
-            className="rounded-xl border border-error-500/30 bg-error-500/10 px-3 py-2.5 text-xs text-error-100"
+            className="rounded-xl border border-error-500/30 bg-error-500/10 px-3 py-2.5 text-xs text-error-100 [.theme-light_&]:text-error-800"
             role="alert"
           >
             {operationError}
@@ -747,10 +744,10 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
               className={cn(
                 "rounded-xl border px-3 py-2.5 text-xs leading-relaxed space-y-2",
                 status.status.kind === "error"
-                  ? "border-error-500/40 bg-error-500/10 text-error-100"
+                  ? "border-error-500/40 bg-error-500/10 text-error-100 [.theme-light_&]:text-error-800"
                   : status.status.kind === "cancelled"
                     ? "border-surface-600 bg-surface-900/60 text-surface-300"
-                    : "border-success-500/40 bg-success-500/10 text-success-100",
+                    : "border-success-500/40 bg-success-500/10 text-success-100 [.theme-light_&]:text-success-900",
               )}
               role={status.status.kind === "error" ? "alert" : "status"}
             >
@@ -825,7 +822,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                     <button
                       type="button"
                       onClick={() => openPreparedTarget(selectedPrepared)}
-                      className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-primary-400/30 bg-primary-500/15 px-3 py-2 text-xs font-semibold text-primary-100"
+                      className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-primary-400/30 bg-primary-500/15 px-3 py-2 text-xs font-semibold text-primary-100 [.theme-light_&]:text-primary-950"
                     >
                       <ExternalLink className="h-3.5 w-3.5" />
                       Open {selectedPrepared.target.label}

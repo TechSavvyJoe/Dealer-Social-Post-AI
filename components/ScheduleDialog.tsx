@@ -28,14 +28,14 @@ export const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Schedule for later"
+      title="Plan a share time"
       size="sm"
       className="bg-surface-900 border-surface-800"
     >
       <div className="space-y-4 mb-4">
         <p className="text-sm text-surface-300">
-          Pick a date and time to automatically publish this post to your linked
-          channels.
+          We save this time with the post so you can come back and share it then.
+          Nothing posts on its own.
         </p>
 
         <div className="space-y-2">
@@ -43,7 +43,7 @@ export const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
             htmlFor="schedule-datetime"
             className="text-xs font-semibold text-surface-200 uppercase tracking-wider"
           >
-            Publish Date & Time
+            Share date &amp; time
           </label>
           <div className="relative">
             <input
@@ -52,7 +52,7 @@ export const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
               value={dateStr}
               onChange={(e) => setDateStr(e.target.value)}
               min={new Date().toISOString().slice(0, 16)} // Only allow future dates
-              className="w-full bg-surface-800/80 border border-surface-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent transition-all"
+              className="w-full bg-surface-800/80 border border-surface-700 rounded-lg px-4 py-3 text-surface-50 focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-transparent transition-all"
             />
           </div>
         </div>
@@ -70,7 +70,7 @@ export const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
           fullWidth
           leftIcon={<Calendar className="w-4 h-4" />}
         >
-          Schedule Post
+          Save time
         </Button>
       </div>
     </Modal>

@@ -77,6 +77,26 @@ export class PanelErrorBoundary extends ErrorBoundary {
   }
 }
 
+/**
+ * True from the first time `open` goes true, and never false again.
+ *
+ * A React.lazy component starts its dynamic import when it first renders, not
+ * when it becomes visible. Rendering the Settings and Photo-review modals
+ * unconditionally with isOpen={false} therefore pulled SettingsModal,
+ * ImageCropModal, mediaSave, imageUtils and their icon chunks on the
+ * unauthenticated login screen — verified in the production network log. Gating
+ * on this latch defers those chunks until the panel is actually opened, while
+ * still leaving the component mounted afterwards so its close animation runs
+ * and a second open is instant.
+ */
+const useMountedOnce = (open: boolean): boolean => {
+  const [mounted, setMounted] = React.useState(open);
+  React.useEffect(() => {
+    if (open) setMounted(true);
+  }, [open]);
+  return mounted || open;
+};
+
 // Lazy load heavyweight modals
 const LazySettingsModal = React.lazy(() =>
   import("./components/SettingsModal").then((mod) => ({
@@ -140,6 +160,42 @@ const AppContent: React.FC = () => {
     generateCaptionVariant,
   } = useAppController();
 
+  // Defer the heavyweight panel chunks until each panel is first opened.
+  const settingsEverOpened = useMountedOnce(isSettingsOpen);
+  const cropEverOpened = useMountedOnce(cropModalOpen);
+  const historyEverOpened = useMountedOnce(isHistoryOpen);
+
+  // Warm the photo-review chunk once signed in and idle. Settings and History
+  // are optional panels, so first-open loading is the right trade for them.
+  // The crop step is not optional: every image selection opens it and
+  // handleCropConfirm is the only route into CUSTOMIZE. Before the panels
+  // were deferred this chunk was fetched at boot as a side effect of
+  // rendering the modal closed, and the service worker cached it then. Gating
+  // alone removed that warm-up and left a first-time, cold-cache salesperson
+  // with a tap that showed nothing until the network answered. Prefetching
+  // after login keeps the login-screen win and restores the warm-up on the
+  // path that actually needs it. Same import specifier as LazyImageCropModal,
+  // so Vite resolves it to the same chunk.
+  const isSignedIn = Boolean(currentDealer);
+  useEffect(() => {
+    if (!isSignedIn) return;
+    const warm = () => {
+      void import("./components/ImageCropModal");
+    };
+    const idle = (
+      window as Window & { requestIdleCallback?: typeof requestIdleCallback }
+    ).requestIdleCallback;
+    if (idle) {
+      const handle = idle(warm, { timeout: 3000 });
+      return () => {
+        (
+          window as Window & { cancelIdleCallback?: typeof cancelIdleCallback }
+        ).cancelIdleCallback?.(handle);
+      };
+    }
+    const timer = window.setTimeout(warm, 1500);
+    return () => window.clearTimeout(timer);
+  }, [isSignedIn]);
   // Must run before any conditional return — React requires a stable hook order.
   const isImpersonating = useAppStore((s) => s.isImpersonating);
   const currentPerson = useAppStore((s) => s.currentPerson);
@@ -373,30 +429,56 @@ const AppContent: React.FC = () => {
         onDismiss={() => setIsSettingsOpen(false)}
       >
         <Suspense fallback={null}>
-          <LazySettingsModal
-            isOpen={isSettingsOpen}
-            onClose={() => setIsSettingsOpen(false)}
-            imageQualityTier={imageQualityTier}
-            theme={theme}
-            onImageQualityTierChange={(value) =>
-              setPreferences({ imageQualityTier: value })
-            }
-            onThemeChange={(value) => setPreferences({ theme: value })}
-          />
+          {settingsEverOpened && (
+            <LazySettingsModal
+              isOpen={isSettingsOpen}
+              onClose={() => setIsSettingsOpen(false)}
+              imageQualityTier={imageQualityTier}
+              theme={theme}
+              onImageQualityTierChange={(value) =>
+                setPreferences({ imageQualityTier: value })
+              }
+              onThemeChange={(value) => setPreferences({ theme: value })}
+            />
+          )}
         </Suspense>
       </PanelErrorBoundary>
 
       <PanelErrorBoundary panelName="Photo review" onDismiss={handleCropClose}>
-        <Suspense fallback={null}>
-          <LazyImageCropModal
-            isOpen={cropModalOpen}
-            onClose={handleCropClose}
-            imageSrc={tempImageForCrop}
-            originalSource={tempOriginalForBackup}
-            originalFilename={tempOriginalFilename}
-            onConfirm={handleCropConfirm}
-            originalBackupStatus={originalBackupStatus}
-          />
+        {/* Not `null`: if the chunk is still downloading when the salesperson
+            picks a photo, a blank screen reads as a dead tap. The overlay is
+            deliberately minimal and theme-aware; it is gone the moment the
+            module resolves, which on a warmed cache is before it paints. */}
+        <Suspense
+          fallback={
+            cropModalOpen ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="fixed inset-0 z-50 flex items-center justify-center"
+                style={{ backgroundColor: "rgb(var(--color-surface-base) / 0.85)" }}
+              >
+                <p
+                  className="text-sm font-medium"
+                  style={{ color: "rgb(var(--color-text-secondary))" }}
+                >
+                  Opening photo review…
+                </p>
+              </div>
+            ) : null
+          }
+        >
+          {cropEverOpened && (
+            <LazyImageCropModal
+              isOpen={cropModalOpen}
+              onClose={handleCropClose}
+              imageSrc={tempImageForCrop}
+              originalSource={tempOriginalForBackup}
+              originalFilename={tempOriginalFilename}
+              onConfirm={handleCropConfirm}
+              originalBackupStatus={originalBackupStatus}
+            />
+          )}
         </Suspense>
       </PanelErrorBoundary>
 
@@ -422,7 +504,9 @@ const AppContent: React.FC = () => {
               </div>
             }
           >
-            <LazyPostHistory onOpenCreative={() => setIsHistoryOpen(false)} />
+            {historyEverOpened && (
+              <LazyPostHistory onOpenCreative={() => setIsHistoryOpen(false)} />
+            )}
           </Suspense>
         </PanelErrorBoundary>
       </Modal>

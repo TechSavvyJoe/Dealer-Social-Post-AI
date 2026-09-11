@@ -110,10 +110,13 @@ function contextOrResponse(c, helpers) {
   // Single choke point for every walkaround app route. Same in-process bucket
   // semantics as /api/proxy/*.
   try {
+    // ipKeyed: one bucket per source IP, so this belongs in the table sized
+    // for attacker-chosen keys rather than the tenant one.
     const rate = helpers.checkProxyRateLimit(
       "walkaround-app:" + helpers.clientIP(c),
       120,
       60 * 1000,
+      { ipKeyed: true },
     );
     if (!rate.ok) {
       try {
@@ -1763,11 +1766,14 @@ function internalAuth(c, rawBody) {
   };
   try {
     // The internal surface is publicly reachable (Fly origin + Vercel /api
-    // rewrite); throttle before any comparison work.
+    // rewrite); throttle before any comparison work. ipKeyed: the key is a
+    // client IP, so it belongs in the table sized for attacker-chosen keys,
+    // not the tenant one a flood could otherwise evict.
     const rate = helpers.checkProxyRateLimit(
       "walkaround-internal:" + helpers.clientIP(c),
       300,
       60 * 1000,
+      { ipKeyed: true },
     );
     if (!rate.ok) return deny("rate limited");
   } catch (_e) {

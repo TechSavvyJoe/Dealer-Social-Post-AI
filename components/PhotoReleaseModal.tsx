@@ -186,7 +186,7 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}
                     role="alert"
-                    className="flex items-start gap-2 rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs"
+                    className="flex items-start gap-2 rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs [.theme-light_&]:text-error-800"
                   >
                     <AlertCircle className="h-4 w-4 text-error-400 flex-shrink-0 mt-0.5" />
                     {error}

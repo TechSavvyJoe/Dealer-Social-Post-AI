@@ -10,14 +10,20 @@
  *   pattern as salesperson_name).
  * - posts.approved_at (date): approval timestamp.
  */
+const DEALER_APPROVAL_FIELDS = ["requires_approval", "brand_color"];
+const POST_APPROVAL_FIELDS = ["approval_status", "approved_by", "approved_at"];
+
 migrate(
   (db) => {
     const dao = new Dao(db);
 
-    let dealers = null; try { dealers = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
+    let dealers = null;
+    try {
+      dealers = dao.findCollectionByNameOrId("dealers");
+    } catch (e) {}
     if (dealers) {
       const ensureDealer = (name, field) => {
-        if (!(function(s, n){ for(let i=0;i<s.length;i++){ if(s[i].name === n) return s[i]; } return null; })(dealers.schema, name)) {
+        if (!dealers.schema.getFieldByName(name)) {
           dealers.schema.addField(new SchemaField(field));
         }
       };
@@ -37,10 +43,13 @@ migrate(
       dao.saveCollection(dealers);
     }
 
-    let posts = null; try { posts = dao.findCollectionByNameOrId("posts"); } catch(e) {}
+    let posts = null;
+    try {
+      posts = dao.findCollectionByNameOrId("posts");
+    } catch (e) {}
     if (posts) {
       const ensure = (name, field) => {
-        if (!(function(s, n){ for(let i=0;i<s.length;i++){ if(s[i].name === n) return s[i]; } return null; })(posts.schema, name)) {
+        if (!posts.schema.getFieldByName(name)) {
           posts.schema.addField(new SchemaField(field));
         }
       };
@@ -70,22 +79,31 @@ migrate(
   (db) => {
     const dao = new Dao(db);
 
-    let dealers = null; try { dealers = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
+    let dealers = null;
+    try {
+      dealers = dao.findCollectionByNameOrId("dealers");
+    } catch (e) {}
     if (dealers) {
-      dealers.schema = Array.from(dealers.schema).filter(
-        (f) => f.name !== "requires_approval" && f.name !== "brand_color"
-      );
+      // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on
+      // PocketBase 0.22 — the CLI prints "Applied" and the column stays.
+      // `removeField` takes the field id, not its name.
+      DEALER_APPROVAL_FIELDS.forEach((name) => {
+        const field = dealers.schema.getFieldByName(name);
+        if (field) dealers.schema.removeField(field.id);
+      });
       dao.saveCollection(dealers);
     }
-    let posts = null; try { posts = dao.findCollectionByNameOrId("posts"); } catch(e) {}
+    let posts = null;
+    try {
+      posts = dao.findCollectionByNameOrId("posts");
+    } catch (e) {}
     if (posts) {
-      posts.schema = Array.from(posts.schema).filter(
-        (f) =>
-          f.name !== "approval_status" &&
-          f.name !== "approved_by" &&
-          f.name !== "approved_at"
-      );
+      // Same 0.22 silent no-op trap as above — remove by field id.
+      POST_APPROVAL_FIELDS.forEach((name) => {
+        const field = posts.schema.getFieldByName(name);
+        if (field) posts.schema.removeField(field.id);
+      });
       dao.saveCollection(posts);
     }
-  }
+  },
 );

@@ -108,6 +108,12 @@ jobs:
           R2_BACKUP_PREFIX: ${{ vars.R2_BACKUP_PREFIX }}
         run: |
           set -o pipefail
+          # The backup manifest records the PocketBase version. Read it from
+          # the Dockerfile ARG so it cannot drift from the running image the
+          # way a second hardcoded literal did (archives were stamped 0.22.37
+          # for a release after the runtime moved to 0.22.55).
+          PB_VERSION="$(sed -n 's/^ARG PB_VERSION=//p' Dockerfile)"
+          export PB_VERSION
           node scripts/pocketbase-r2-backup.mjs backup | tee /tmp/backup-result.json
           backup_key="$(node -e '
             const fs = require("node:fs");

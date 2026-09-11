@@ -6,6 +6,24 @@
  * module inside their own callback and call these exported functions.
  */
 
+/**
+ * PocketBase persists datetimes as `YYYY-MM-DD HH:MM:SS.mmmZ` (space, not "T"),
+ * and SQLite compares them as text. A raw `toISOString()` parameter therefore
+ * sorts AFTER every stored value from the same UTC day, because ' ' (0x20)
+ * precedes 'T' (0x54) at index 10 — verified in SQLite:
+ * `'2026-09-10 23:00:00.000Z' <= '2026-09-10T00:30:00.000Z'` is TRUE.
+ *
+ * The consequence: `next_attempt_at <= {:now}` matched rows scheduled up to a
+ * day in the future, so the one-minute cron retried a failing delivery every
+ * minute instead of backing off, burning all 8 attempts in ~8 minutes and
+ * parking the draft as failed.
+ *
+ * Use this for every comparison parameter AND for raw-SQL SET values, which
+ * bypass the normalisation that record.set()/saveRecord applies.
+ * Mirrors databaseTimestamp() in helpers.js.
+ */
+const dbTimestamp = (value) => (value || "").toString().replace("T", " ");
+
 const WEBSITE_DRAFT_SCHEMA_VERSION = 1;
 const WEBSITE_PAYLOAD_SCHEMA_VERSION = 1;
 const WEBSITE_DESTINATION_LABEL = "Joe Gallant Customer Hub";
@@ -1717,7 +1735,11 @@ function freezeOrVerifyPayloadHash(publication, bodyHash) {
       "UPDATE website_publications SET payload_hash = {:hash}, updated = {:updated} " +
         "WHERE id = {:id} AND (payload_hash = '' OR payload_hash IS NULL)",
     )
-    .bind({ hash: bodyHash, updated: new Date().toISOString(), id: publication.id })
+    .bind({
+      hash: bodyHash,
+      updated: dbTimestamp(new Date().toISOString()),
+      id: publication.id,
+    })
     .execute();
   if (result && result.rowsAffected() === 1) {
     // Keep the in-memory Record in sync so the later status save cannot write
@@ -2072,7 +2094,7 @@ function deliverClaimedPublication(publication) {
 }
 
 function claimDuePublication(publication) {
-  const now = new Date().toISOString();
+  const now = dbTimestamp(new Date().toISOString());
   const result = $app
     .dao()
     .db()
@@ -2113,7 +2135,7 @@ function reconcileWaitingPublications(limit) {
 }
 
 function recoverStaleDeliveries() {
-  const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const cutoff = dbTimestamp(new Date(Date.now() - 10 * 60 * 1000).toISOString());
   let rows = [];
   try {
     rows = $app
@@ -2143,7 +2165,7 @@ function processDuePublications(limit) {
   recoverStaleDeliveries();
   reconcileWaitingPublications(200);
   const max = Math.min(Math.max(limit || 10, 1), 25);
-  const now = new Date().toISOString();
+  const now = dbTimestamp(new Date().toISOString());
   let rows = [];
   try {
     const deliveryRows = $app

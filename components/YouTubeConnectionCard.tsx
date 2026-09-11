@@ -8,6 +8,7 @@ import {
   startYouTubeConnection,
 } from "../services/walkarounds";
 import { Modal } from "./ui/Modal";
+import { toUiMessage } from "../utils/errorMessages";
 
 export const YouTubeConnectionCard: React.FC = () => {
   const [status, setStatus] = React.useState<{
@@ -27,10 +28,7 @@ export const YouTubeConnectionCard: React.FC = () => {
         if (active) setStatus(result);
       })
       .catch((cause) => {
-        if (active)
-          setError(
-            cause instanceof Error ? cause.message : "YouTube status is unavailable.",
-          );
+        if (active) setError(toUiMessage(cause, "YouTube status is unavailable."));
       });
     return () => {
       active = false;
@@ -43,9 +41,7 @@ export const YouTubeConnectionCard: React.FC = () => {
     try {
       await task();
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : "YouTube connection failed safely.",
-      );
+      setError(toUiMessage(cause, "YouTube connection failed safely."));
     } finally {
       setBusy(false);
     }
@@ -55,7 +51,7 @@ export const YouTubeConnectionCard: React.FC = () => {
     <section className="rounded-2xl border border-hairline bg-surface-900/65 p-5 sm:p-6">
       <div className="flex items-start gap-3">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-error-500/15">
-          <Video className="h-5 w-5 text-error-300" />
+          <Video className="h-5 w-5 text-error-300 [.theme-light_&]:text-error-800" />
         </span>
         <div>
           <h2 className="text-lg font-semibold text-surface-50">YouTube channel</h2>
@@ -67,14 +63,14 @@ export const YouTubeConnectionCard: React.FC = () => {
       {error && (
         <p
           role="alert"
-          className="mt-4 rounded-xl border border-error-400/30 bg-error-500/10 p-3 text-sm text-error-100"
+          className="mt-4 rounded-xl border border-error-400/30 bg-error-500/10 p-3 text-sm text-error-100 [.theme-light_&]:text-error-800"
         >
           {error}
         </p>
       )}
       {status?.connected ? (
         <div className="mt-4 space-y-3">
-          <p className="flex items-center gap-2 rounded-xl border border-success-400/30 bg-success-500/10 p-3 text-sm font-semibold text-success-200">
+          <p className="flex items-center gap-2 rounded-xl border border-success-400/30 bg-success-500/10 p-3 text-sm font-semibold text-success-200 [.theme-light_&]:text-success-800">
             <CheckCircle2 className="h-5 w-5" />
             Connected to {status.channelTitle || "verified dealership channel"}
           </p>

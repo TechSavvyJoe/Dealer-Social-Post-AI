@@ -56,7 +56,7 @@ export const LoadingOverlay: React.FC<LoadingOverlayProps> = ({
       >
         <div className="mb-6 flex items-start gap-4">
           <m.div
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-primary-400/20 bg-primary-500/10 text-primary-300"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-primary-400/20 bg-primary-500/10 text-primary-300 [.theme-light_&]:text-primary-800"
             animate={shouldReduceMotion ? undefined : { scale: [1, 1.04, 1] }}
             transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
             aria-hidden="true"

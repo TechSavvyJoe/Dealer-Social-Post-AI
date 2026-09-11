@@ -7,6 +7,8 @@
  * idempotency identity; the immutable website copy and final creative stay on
  * the related post until the worker builds the signed request.
  */
+const POST_WEBSITE_FIELDS = ["website_draft"];
+
 migrate(
   (db) => {
     const dao = new Dao(db);
@@ -162,9 +164,13 @@ migrate(
       posts = dao.findCollectionByNameOrId("posts");
     } catch (_e) {}
     if (!posts) return;
-    posts.schema = Array.from(posts.schema).filter(
-      (field) => field.name !== "website_draft",
-    );
+    // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on PocketBase
+    // 0.22: the migration reports "Applied" and the column is still there.
+    // `removeField` takes the field id, not its name.
+    POST_WEBSITE_FIELDS.forEach((name) => {
+      const field = posts.schema.getFieldByName(name);
+      if (field) posts.schema.removeField(field.id);
+    });
     dao.saveCollection(posts);
   },
 );

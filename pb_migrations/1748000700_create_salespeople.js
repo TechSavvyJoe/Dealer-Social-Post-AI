@@ -15,17 +15,23 @@
  * Posts get an optional salesperson_id field on top so historical attribution
  * survives a renaming.
  */
+const POST_SALESPERSON_FIELDS = ["salesperson_id"];
+
 migrate(
   (db) => {
     const dao = new Dao(db);
 
     let spCol = null;
-    try { spCol = dao.findCollectionByNameOrId("salespeople"); } catch(e) {}
+    try {
+      spCol = dao.findCollectionByNameOrId("salespeople");
+    } catch (e) {}
 
     // 1. salespeople collection
     if (!spCol) {
       let dealers = null;
-      try { dealers = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
+      try {
+        dealers = dao.findCollectionByNameOrId("dealers");
+      } catch (e) {}
       if (!dealers) throw new Error("dealers collection missing");
 
       const collection = new Collection({
@@ -83,31 +89,51 @@ migrate(
 
     // 2. posts.salesperson_id (relation) — optional; legacy posts keep the
     //    free-text salesperson_name field for backward compat.
-    let posts = null; try { posts = dao.findCollectionByNameOrId("posts"); } catch(e) {}
-    let salespeople = null; try { salespeople = dao.findCollectionByNameOrId("salespeople"); } catch(e) {}
-    if (posts && salespeople && !(function(s, n){ for(let i=0;i<s.length;i++){ if(s[i].name === n) return s[i]; } return null; })(posts.schema, "salesperson_id")) {
-      posts.schema.addField(new SchemaField({
-        name: "salesperson_id",
-        type: "relation",
-        required: false,
-        options: {
-          collectionId: salespeople.id,
-          cascadeDelete: false,
-          maxSelect: 1,
-          minSelect: 0,
-        },
-      }));
+    let posts = null;
+    try {
+      posts = dao.findCollectionByNameOrId("posts");
+    } catch (e) {}
+    let salespeople = null;
+    try {
+      salespeople = dao.findCollectionByNameOrId("salespeople");
+    } catch (e) {}
+    if (posts && salespeople && !posts.schema.getFieldByName("salesperson_id")) {
+      posts.schema.addField(
+        new SchemaField({
+          name: "salesperson_id",
+          type: "relation",
+          required: false,
+          options: {
+            collectionId: salespeople.id,
+            cascadeDelete: false,
+            maxSelect: 1,
+            minSelect: 0,
+          },
+        }),
+      );
       dao.saveCollection(posts);
     }
   },
   (db) => {
     const dao = new Dao(db);
-    let posts = null; try { posts = dao.findCollectionByNameOrId("posts"); } catch(e) {}
+    let posts = null;
+    try {
+      posts = dao.findCollectionByNameOrId("posts");
+    } catch (e) {}
     if (posts) {
-      posts.schema = Array.from(posts.schema).filter((f) => f.name !== "salesperson_id");
+      // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on PocketBase
+      // 0.22 — it reports "Applied" and the column stays. `removeField` takes the
+      // field id, not its name.
+      POST_SALESPERSON_FIELDS.forEach((name) => {
+        const field = posts.schema.getFieldByName(name);
+        if (field) posts.schema.removeField(field.id);
+      });
       dao.saveCollection(posts);
     }
-    let sp = null; try { sp = dao.findCollectionByNameOrId("salespeople"); } catch(e) {}
+    let sp = null;
+    try {
+      sp = dao.findCollectionByNameOrId("salespeople");
+    } catch (e) {}
     if (sp) dao.deleteCollection(sp);
-  }
+  },
 );

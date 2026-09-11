@@ -134,7 +134,10 @@ export const WalkaroundReleaseModal: React.FC<WalkaroundReleaseModalProps> = ({
           onChange={setSignatureEmpty}
         />
         {error && (
-          <p role="alert" className="text-sm text-error-300">
+          <p
+            role="alert"
+            className="text-sm text-error-300 [.theme-light_&]:text-error-800"
+          >
             {error}
           </p>
         )}

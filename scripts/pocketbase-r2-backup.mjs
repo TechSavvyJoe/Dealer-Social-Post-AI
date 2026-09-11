@@ -12,6 +12,23 @@ import { promisify } from "node:util";
 
 import { createR2ClientFromEnv, hashFile } from "./lib/r2-s3.mjs";
 
+/**
+ * The PocketBase version recorded in backup metadata and manifests.
+ *
+ * This used to be the literal "0.22.37", left behind when the runtime moved
+ * to 0.22.55, so every archive was stamped with a version that was no longer
+ * running. A restore drill that reads the manifest to pick a compatible binary
+ * would have chosen the wrong one. The Dockerfile and start-pocketbase.sh
+ * both take the version from PB_VERSION; this reads the same variable so
+ * there is one place to bump. The fallback names the line rather than a
+ * patch, which is what entrypoint.sh's metadata-layout probe actually depends
+ * on, so it can be wrong about the patch without being misleading.
+ */
+const pocketBaseVersion = () => {
+  const fromEnv = (process.env.PB_VERSION || "").trim();
+  return /^0\.22\.\d+$/.test(fromEnv) ? fromEnv : "0.22.x";
+};
+
 const execFileAsync = promisify(execFile);
 const BACKUP_RETENTION = 30;
 const DEFAULT_PREFIX = "dealer-social-post-ai/pocketbase";
@@ -417,7 +434,7 @@ async function backupToR2() {
       outputPath,
       metadata: {
         sha256: await hashFile(outputPath),
-        source: "pocketbase-0.22.37",
+        source: `pocketbase-${pocketBaseVersion()}`,
       },
       createManifest: (uploaded) => ({
         formatVersion: 2,
@@ -425,7 +442,7 @@ async function backupToR2() {
         createdAt: new Date().toISOString(),
         sha256: uploaded.sha256,
         size: uploaded.size,
-        source: "PocketBase 0.22.37 full pb_data backup",
+        source: `PocketBase ${pocketBaseVersion()} full pb_data backup`,
         sourceOrigin,
         sourceReleaseSha: sourceRelease.sourceReleaseSha,
         sourceIdentity: sourceRelease.sourceIdentity,

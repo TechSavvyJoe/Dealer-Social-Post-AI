@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Modal } from "./ui/Modal";
+import { toUiMessage } from "../utils/errorMessages";
 import {
   approveWalkaround,
   completeYouTubeConnection,
@@ -198,7 +199,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
     try {
       await task();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The request failed safely.");
+      setError(toUiMessage(cause, "The request failed safely."));
     } finally {
       setBusy(false);
     }
@@ -512,7 +513,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
       {error && (
         <div
           role="alert"
-          className="rounded-xl border border-error-500/35 bg-error-500/10 p-4 text-sm text-error-100"
+          className="rounded-xl border border-error-500/35 bg-error-500/10 p-4 text-sm text-error-100 [.theme-light_&]:text-error-800"
         >
           <strong className="block">Nothing was published.</strong>
           {error}
@@ -533,7 +534,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
                     type="button"
                     aria-pressed={audience === value}
                     onClick={() => setAudience(value)}
-                    className={`min-h-12 rounded-xl border px-3 text-sm font-semibold capitalize ${audience === value ? "border-primary-400 bg-primary-500/20 text-primary-100" : "border-hairline text-surface-300"}`}
+                    className={`min-h-12 rounded-xl border px-3 text-sm font-semibold capitalize ${audience === value ? "border-primary-400 bg-primary-500/20 text-primary-100 [.theme-light_&]:text-primary-950" : "border-hairline text-surface-300"}`}
                   >
                     {value}
                   </button>
@@ -558,7 +559,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
                       if (value === "one_take")
                         setClips((current) => current.slice(0, 1));
                     }}
-                    className={`min-h-12 rounded-xl border px-3 text-sm font-semibold ${captureMode === value ? "border-primary-400 bg-primary-500/20 text-primary-100" : "border-hairline text-surface-300"}`}
+                    className={`min-h-12 rounded-xl border px-3 text-sm font-semibold ${captureMode === value ? "border-primary-400 bg-primary-500/20 text-primary-100 [.theme-light_&]:text-primary-950" : "border-hairline text-surface-300"}`}
                   >
                     {value === "one_take" ? "One take" : "Multiple clips"}
                   </button>
@@ -786,7 +787,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
               </div>
             )}
             {project.productionState === "terminal_failed" && (
-              <div className="mt-4 rounded-xl border border-error-400/35 bg-error-500/10 p-4 text-sm text-error-100">
+              <div className="mt-4 rounded-xl border border-error-400/35 bg-error-500/10 p-4 text-sm text-error-100 [.theme-light_&]:text-error-800">
                 <strong className="block">
                   This project cannot be retried automatically.
                 </strong>
@@ -795,7 +796,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
               </div>
             )}
             {project.publicationState === "reconciliation_required" && (
-              <div className="mt-4 rounded-xl border border-warning-400/35 bg-warning-500/10 p-4 text-sm text-warning-100">
+              <div className="mt-4 rounded-xl border border-warning-400/35 bg-warning-500/10 p-4 text-sm text-warning-100 [.theme-light_&]:text-warning-900">
                 <strong className="block">YouTube reconciliation is required.</strong>A
                 manager must verify the existing YouTube upload before any new
                 publication attempt. Do not upload it again.
@@ -1063,7 +1064,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
                 </p>
               </div>
               <div
-                className={`rounded-xl border p-3 text-sm ${youtubeConnection?.connected ? "border-success-400/30 bg-success-500/10 text-success-200" : "border-warning-400/30 bg-warning-500/10 text-warning-100"}`}
+                className={`rounded-xl border p-3 text-sm ${youtubeConnection?.connected ? "border-success-400/30 bg-success-500/10 text-success-200 [.theme-light_&]:text-success-800" : "border-warning-400/30 bg-warning-500/10 text-warning-100 [.theme-light_&]:text-warning-900"}`}
               >
                 {youtubeConnection === null
                   ? "Checking the dealership YouTube channel…"
@@ -1119,7 +1120,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
                 </div>
               )}
               {project.audience === "customer" ? (
-                <div className="rounded-xl border border-warning-400/30 bg-warning-500/10 p-3 text-sm text-warning-100">
+                <div className="rounded-xl border border-warning-400/30 bg-warning-500/10 p-3 text-sm text-warning-100 [.theme-light_&]:text-warning-900">
                   Customer walkarounds are always unlisted. Anyone with the link can
                   forward it.
                 </div>
@@ -1139,7 +1140,7 @@ export const WalkaroundStudio: React.FC<WalkaroundStudioProps> = ({
                     </select>
                   </label>
                   {visibility === "public" && (
-                    <label className="flex items-start gap-3 rounded-xl border border-warning-400/30 bg-warning-500/10 p-3 text-sm text-warning-100">
+                    <label className="flex items-start gap-3 rounded-xl border border-warning-400/30 bg-warning-500/10 p-3 text-sm text-warning-100 [.theme-light_&]:text-warning-900">
                       <input
                         type="checkbox"
                         className="mt-1"

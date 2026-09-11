@@ -196,7 +196,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
       </div>
 
       {error && (
-        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs">
+        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs [.theme-light_&]:text-error-800">
           {error}
         </div>
       )}
@@ -464,7 +464,7 @@ export const CustomScenarioManager: React.FC<CustomScenarioManagerProps> = ({
                   onClick={() => setPendingDeleteId(s.id)}
                   className={cn(
                     "text-[11px] px-2 py-1 rounded-md transition-colors",
-                    "bg-error-500/10 hover:bg-error-500/20 text-error-200",
+                    "bg-error-500/10 hover:bg-error-500/20 text-error-200 [.theme-light_&]:text-error-800",
                     "flex items-center gap-1",
                   )}
                   title="Delete scenario"

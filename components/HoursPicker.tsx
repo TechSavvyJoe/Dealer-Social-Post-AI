@@ -126,7 +126,7 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
                   className={cn(
                     "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
                     row.open
-                      ? "bg-success-500/15 text-success-300"
+                      ? "bg-success-500/15 text-success-300 [.theme-light_&]:text-success-900"
                       : "bg-surface-800 text-surface-400",
                   )}
                 >

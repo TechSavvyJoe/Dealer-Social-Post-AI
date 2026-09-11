@@ -118,7 +118,7 @@ const statusBadge = (status?: ApprovalStatus): React.ReactElement | null => {
       );
     case "rejected":
       return (
-        <span className="inline-flex items-center gap-1 text-error-200 text-[11px]">
+        <span className="inline-flex items-center gap-1 text-error-200 text-[11px] [.theme-light_&]:text-error-800">
           <XCircle className="h-3 w-3" /> rejected
         </span>
       );
@@ -145,7 +145,7 @@ const websiteStatusBadge = (
         ready
           ? "text-success-200"
           : failed
-            ? "text-error-200"
+            ? "text-error-200 [.theme-light_&]:text-error-800"
             : withdrawn
               ? "text-surface-400"
               : "text-info-200",
@@ -350,6 +350,10 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
           disclosures: post.disclosures || undefined,
           postId: post.id,
           approvalStatus: approval,
+          // The reason travels with the rejection, or the reopened result
+          // screen falls back to the generic "a manager rejected this" copy
+          // and the salesperson is back to guessing what to change.
+          rejectionReason: post.rejection_reason || undefined,
           releaseStatus: post.has_release
             ? "saved"
             : post.release_required && post.release_status !== "saved"
@@ -387,9 +391,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
         onOpenCreative?.();
         toastSuccess("Creative reopened — share or export without regenerating.");
       } catch (err) {
-        toastError(
-          err instanceof Error ? err.message : "Could not open this creative.",
-        );
+        toastError(toUiMessage(err, "Could not open this creative."));
       } finally {
         setOpeningId(null);
       }
@@ -435,9 +437,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
             : "Private website draft queued again.",
         );
       } catch (err) {
-        toastError(
-          err instanceof Error ? err.message : "Website draft could not be retried.",
-        );
+        toastError(toUiMessage(err, "Website draft could not be retried."));
       } finally {
         setWebsiteRetryingId(null);
       }
@@ -565,7 +565,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
               className={cn(
                 "px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap",
                 statusFilter === f.key
-                  ? "bg-primary-500/30 text-primary-100"
+                  ? "bg-primary-500/30 text-primary-100 [.theme-light_&]:text-primary-950"
                   : "text-surface-400 hover:text-surface-200",
               )}
             >
@@ -730,7 +730,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                               )}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[10px] font-semibold text-success-100"
+                              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[10px] font-semibold text-success-100 [.theme-light_&]:text-success-900"
                             >
                               <Globe2 className="h-3 w-3" /> Site draft
                             </a>
@@ -743,7 +743,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                               type="button"
                               disabled={Boolean(websiteRetryingId)}
                               onClick={() => void retryWebsite(post)}
-                              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-error-400/25 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 disabled:opacity-50"
+                              className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-error-400/25 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 disabled:opacity-50 [.theme-light_&]:text-error-800"
                             >
                               <RefreshCw
                                 className={cn(
@@ -869,7 +869,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                             )}
                             {p.scheduled_for && (
                               <span className="inline-flex items-center gap-1 text-emerald-300">
-                                <Calendar className="h-3 w-3" /> scheduled
+                                <Calendar className="h-3 w-3" /> share time set
                               </span>
                             )}
                             {websiteStatusBadge(p.website_publication)}
@@ -877,6 +877,13 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                         </td>
                         <td className="py-2 px-2">
                           {statusBadge(p.approval_status)}
+                          {p.approval_status === "rejected" && p.rejection_reason ? (
+                            // Without this the row says "rejected" and the
+                            // salesperson has to go ask why.
+                            <span className="mt-0.5 block max-w-[22rem] text-[11px] leading-snug text-error-200 [.theme-light_&]:text-error-800">
+                              {p.rejection_reason}
+                            </span>
+                          ) : null}
                           {p.approved_by && (
                             <div className="text-[10px] text-surface-400">
                               by {p.approved_by}
@@ -903,7 +910,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                                 )}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[10px] font-semibold text-success-100"
+                                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[10px] font-semibold text-success-100 [.theme-light_&]:text-success-900"
                                 title="Review private website draft"
                               >
                                 <Globe2 className="h-3 w-3" /> Site
@@ -917,7 +924,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                                 type="button"
                                 disabled={Boolean(websiteRetryingId)}
                                 onClick={() => void retryWebsite(p)}
-                                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-error-400/25 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 disabled:opacity-50"
+                                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-error-400/25 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 disabled:opacity-50 [.theme-light_&]:text-error-800"
                               >
                                 <RefreshCw
                                   className={cn(

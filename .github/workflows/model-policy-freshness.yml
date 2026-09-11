@@ -1,0 +1,50 @@
+name: Gemini model policy freshness
+
+# The model policy carries a `verifiedAt` date and scripts/check-model-policy.mjs
+# hard-fails once it is 45 days old. That check runs inside `typecheck-and-test`,
+# which playwright, container-smoke and the entire deploy workflow depend on, so
+# the day it trips every release stops — usually discovered by whoever is trying
+# to ship something unrelated and urgent.
+#
+# This job runs the same script daily with MODEL_POLICY_FRESHNESS_STRICT=true, so
+# it fails from day 31 instead of day 45. That failure blocks nothing: it exists
+# purely to put a red mark on a scheduled run two weeks before deploys are at
+# risk, giving someone time to re-check Google's live catalog deliberately.
+#
+# When this job goes red: re-verify the model ids and request fields in
+# config/gemini-model-policy.json against Google's current catalog and the
+# official SDK converters, mirror any change into pb_hooks/requestPolicies.js,
+# then move `verifiedAt` forward. Do NOT bump the policy `version` to clear it —
+# the version is an exact-match contract with installed clients and changing it
+# forces an app update for every dealership.
+
+on:
+  schedule:
+    # 07:41 UTC daily, offset from the 07:17 backup job so the two do not queue
+    # against each other.
+    - cron: "41 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: model-policy-freshness
+  cancel-in-progress: false
+
+jobs:
+  freshness:
+    name: policy verifiedAt is inside the warning window
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Fail early so deploys never hit the 45-day cliff unannounced
+        env:
+          MODEL_POLICY_FRESHNESS_STRICT: "true"
+        run: npm run model-policy:check

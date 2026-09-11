@@ -14,14 +14,19 @@
  *                      "Independent"). Used to enforce OEM brand-guideline
  *                      defaults.
  */
+const DEALER_BRAND_VOICE_FIELDS = ["brand_voice", "banned_phrases", "oem_affiliation"];
+
 migrate(
   (db) => {
     const dao = new Dao(db);
-    let collection = null; try { collection = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
+    let collection = null;
+    try {
+      collection = dao.findCollectionByNameOrId("dealers");
+    } catch (e) {}
     if (!collection) throw new Error("dealers collection not found");
 
     const ensure = (name, field) => {
-      if (!(function(s, n){ for(let i=0;i<s.length;i++){ if(s[i].name === n) return s[i]; } return null; })(collection.schema, name)) {
+      if (!collection.schema.getFieldByName(name)) {
         collection.schema.addField(new SchemaField(field));
       }
     };
@@ -49,14 +54,18 @@ migrate(
   },
   (db) => {
     const dao = new Dao(db);
-    let collection = null; try { collection = dao.findCollectionByNameOrId("dealers"); } catch(e) {}
+    let collection = null;
+    try {
+      collection = dao.findCollectionByNameOrId("dealers");
+    } catch (e) {}
     if (!collection) return;
-    collection.schema = Array.from(collection.schema).filter(
-      (f) =>
-        f.name !== "brand_voice" &&
-        f.name !== "banned_phrases" &&
-        f.name !== "oem_affiliation"
-    );
+    // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on PocketBase
+    // 0.22 — the migration reports "Applied" and the columns stay. `removeField`
+    // takes the field id, not its name.
+    DEALER_BRAND_VOICE_FIELDS.forEach((name) => {
+      const field = collection.schema.getFieldByName(name);
+      if (field) collection.schema.removeField(field.id);
+    });
     return dao.saveCollection(collection);
-  }
+  },
 );

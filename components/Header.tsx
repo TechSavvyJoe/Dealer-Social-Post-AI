@@ -197,7 +197,7 @@ export const Header: React.FC<HeaderProps> = ({
                 aria-label={`Posting as ${person.name}`}
               >
                 <span
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary-500/20 text-[10px] font-bold text-primary-100 ring-1 ring-primary-300/25"
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary-500/20 text-[10px] font-bold text-primary-100 ring-1 ring-primary-300/25 [.theme-light_&]:text-primary-950"
                   aria-hidden="true"
                 >
                   {person.name
@@ -252,7 +252,7 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={handleLogout}
                 className={cn(
                   "transition-all duration-200",
-                  "hover:bg-error-500/15 hover:border-error-500/40 hover:text-error-300",
+                  "hover:bg-error-500/15 hover:border-error-500/40 hover:text-error-300 [.theme-light_&]:hover:text-error-800",
                   "active:bg-error-500/25",
                 )}
                 aria-label="Log out"

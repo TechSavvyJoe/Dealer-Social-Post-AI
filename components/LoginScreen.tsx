@@ -623,7 +623,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       Sign-in is temporarily locked. Try again after the on-screen
                       countdown.
                     </p>
-                    <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-error-400/25 bg-error-500/10 text-error-300">
+                    <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-error-400/25 bg-error-500/10 text-error-300 [.theme-light_&]:text-error-800">
                       <ShieldAlert className="h-6 w-6" aria-hidden="true" />
                     </span>
                     <h2 className="mt-4 text-lg font-semibold text-surface-100">
@@ -695,7 +695,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                     <p
                       className={cn(
                         "shrink-0 text-center text-sm",
-                        personalCodeError ? "text-error-300" : "text-surface-400",
+                        personalCodeError
+                          ? "text-error-300 [.theme-light_&]:text-error-800"
+                          : "text-surface-400",
                       )}
                       role={personalCodeError ? "alert" : undefined}
                     >
@@ -719,7 +721,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   >
                     <div className="rounded-2xl border border-hairline bg-surface-elevated p-4 sm:p-5">
                       <div className="mb-4 flex items-start gap-3">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300 [.theme-light_&]:text-primary-800">
                           <KeyRound className="h-5 w-5" aria-hidden="true" />
                         </div>
                         <div>
@@ -824,7 +826,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       {managerLoginError ? (
                         <p
                           id="manager-login-error"
-                          className="mt-2 px-1 text-sm text-error-300"
+                          className="mt-2 px-1 text-sm text-error-300 [.theme-light_&]:text-error-800"
                           role="alert"
                         >
                           {managerLoginError}
@@ -857,7 +859,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   >
                     <div className="rounded-2xl border border-hairline bg-surface-elevated p-4 sm:p-5">
                       <div className="mb-4 flex items-start gap-3">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300 [.theme-light_&]:text-primary-800">
                           <KeyRound className="h-5 w-5" aria-hidden="true" />
                         </div>
                         <div>
@@ -964,7 +966,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                       {adminLoginError ? (
                         <p
                           id="admin-login-error"
-                          className="mt-2 px-1 text-sm text-error-300"
+                          className="mt-2 px-1 text-sm text-error-300 [.theme-light_&]:text-error-800"
                           role="alert"
                         >
                           {adminLoginError}

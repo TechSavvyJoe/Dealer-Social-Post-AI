@@ -274,7 +274,7 @@ const CapabilityToggle: React.FC<{
       className={cn(
         "grid h-10 w-10 shrink-0 place-items-center rounded-xl border",
         pressed
-          ? "border-primary-300/40 bg-primary-400/20 text-primary-100"
+          ? "border-primary-300/40 bg-primary-400/20 text-primary-100 [.theme-light_&]:text-primary-950"
           : "border-hairline bg-surface-950/50 text-surface-400",
       )}
       aria-hidden="true"
@@ -1096,7 +1096,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               className="flex items-center gap-3 rounded-xl border border-primary-400/20 bg-primary-500/[0.07] px-3 py-2.5"
               aria-label={`Posting as ${currentPerson?.name || "signed-in team member"}`}
             >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-primary-400/20 bg-primary-500/10 text-primary-300">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-primary-400/20 bg-primary-500/10 text-primary-300 [.theme-light_&]:text-primary-800">
                 <Users className="h-4 w-4" aria-hidden="true" />
               </span>
               <div className="min-w-0 flex-1">
@@ -1229,7 +1229,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       type="button"
                       aria-label="Remove captured release"
                       onClick={() => setCapturedRelease(null)}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-error-400/25 bg-error-500/10 text-error-100 transition-colors hover:bg-error-500/20"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-error-400/25 bg-error-500/10 text-error-100 transition-colors hover:bg-error-500/20 [.theme-light_&]:text-error-800"
                     >
                       <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>
@@ -1253,7 +1253,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               )}
               {releaseValidationError && !capturedRelease ? (
                 <p
-                  className="rounded-lg border border-error-500/30 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100"
+                  className="rounded-lg border border-error-500/30 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100 [.theme-light_&]:text-error-800"
                   role="alert"
                 >
                   This customer-focused post needs a signed photo release before the
@@ -1329,7 +1329,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       <info.icon
                         className={cn(
                           "h-5 w-5 flex-shrink-0 relative z-10 transition-colors",
-                          isActive ? "text-primary-300" : "text-surface-400",
+                          isActive
+                            ? "text-primary-300 [.theme-light_&]:text-primary-800"
+                            : "text-surface-400",
                         )}
                       />
                       <div className="flex-1 min-w-0 relative z-10">
@@ -1337,7 +1339,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                           <span
                             className={cn(
                               "text-sm font-semibold truncate transition-colors",
-                              isActive ? "text-primary-100" : "text-surface-50",
+                              isActive
+                                ? "text-primary-100 [.theme-light_&]:text-primary-950"
+                                : "text-surface-50",
                             )}
                           >
                             {option.split(" ")[0]}
@@ -1351,7 +1355,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         <span
                           className={cn(
                             "text-[11px] block leading-snug transition-colors",
-                            isActive ? "text-primary-200/80" : "text-surface-400",
+                            isActive
+                              ? "text-primary-200/80 [.theme-light_&]:text-primary-900"
+                              : "text-surface-400",
                           )}
                         >
                           {info.desc}
@@ -1359,7 +1365,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         <span
                           className={cn(
                             "mt-0.5 text-[10px] block leading-snug transition-colors",
-                            isActive ? "text-primary-200/60" : "text-surface-400",
+                            isActive
+                              ? "text-primary-200/60 [.theme-light_&]:text-primary-900/80"
+                              : "text-surface-400",
                           )}
                         >
                           {info.detail}
@@ -1471,7 +1479,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   className={cn(
                     "grid h-10 w-10 shrink-0 place-items-center rounded-xl border",
                     websiteSelected
-                      ? "border-primary-300/40 bg-primary-400/20 text-primary-100"
+                      ? "border-primary-300/40 bg-primary-400/20 text-primary-100 [.theme-light_&]:text-primary-950"
                       : "border-hairline bg-surface-950/50 text-surface-400",
                   )}
                   aria-hidden="true"
@@ -1833,7 +1841,10 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   className="bg-fill-subtle border-hairline focus:border-primary-400 focus:bg-fill-hover transition-colors"
                 />
                 {captionIdentityError ? (
-                  <p className="text-xs font-medium text-error-200" role="alert">
+                  <p
+                    className="text-xs font-medium text-error-200 [.theme-light_&]:text-error-800"
+                    role="alert"
+                  >
                     {captionIdentityError}
                   </p>
                 ) : null}
@@ -1917,7 +1928,10 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                     className="bg-fill-subtle border-hairline focus:border-primary-400"
                   />
                   {captionIdentityError ? (
-                    <p className="mt-2 text-xs font-medium text-error-200" role="alert">
+                    <p
+                      className="mt-2 text-xs font-medium text-error-200 [.theme-light_&]:text-error-800"
+                      role="alert"
+                    >
                       {captionIdentityError}
                     </p>
                   ) : null}
@@ -1925,7 +1939,10 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               )}
             </AnimatePresence>
             {!creativeEnabled && captionSource !== "custom" && captionIdentityError ? (
-              <p className="text-xs font-medium text-error-200" role="alert">
+              <p
+                className="text-xs font-medium text-error-200 [.theme-light_&]:text-error-800"
+                role="alert"
+              >
                 {captionIdentityError}
               </p>
             ) : null}

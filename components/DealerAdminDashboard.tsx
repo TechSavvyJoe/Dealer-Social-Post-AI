@@ -28,6 +28,10 @@ import { DealerSetupWizard } from "./DealerSetupWizard";
 import { useAppStore } from "../stores/appStore";
 import * as db from "../services/database";
 import { cn } from "../utils/classNames";
+import {
+  DEFAULT_EMPLOYEE_DISCLOSURE_TEMPLATE,
+  buildEmployeeDisclosure,
+} from "../utils/complianceDisclosures";
 import { toUiMessage } from "../utils/errorMessages";
 import { triggerHapticFeedback } from "../utils/haptics";
 import {
@@ -435,7 +439,7 @@ export const DealerAdminDashboard: React.FC = () => {
                 className={cn(
                   "flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors sm:min-h-0 sm:flex-none sm:gap-2 sm:px-4",
                   tab === t.key
-                    ? "bg-primary-500/30 text-primary-100"
+                    ? "bg-primary-500/30 text-primary-100 [.theme-light_&]:text-primary-950"
                     : "text-surface-400 hover:text-surface-200",
                 )}
               >
@@ -612,6 +616,14 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
   const [color, setColor] = useState(dealer.brand_color || "");
   const [oem, setOem] = useState(dealer.oem_affiliation || "");
   const [approval, setApproval] = useState(!!dealer.requires_approval);
+  // Opt-OUT semantics: the stored field is `disabled`, so unset keeps the
+  // disclosure on. The control is phrased positively for the manager.
+  const [disclosureOn, setDisclosureOn] = useState(
+    !dealer.employee_disclosure_disabled,
+  );
+  const [disclosureText, setDisclosureText] = useState(
+    dealer.employee_disclosure_text || "",
+  );
 
   // Contact + identity
   const [website, setWebsite] = useState(dealer.website || "");
@@ -696,6 +708,8 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
     color !== (dealer.brand_color || "") ||
     oem !== (dealer.oem_affiliation || "") ||
     approval !== !!dealer.requires_approval ||
+    disclosureOn === !!dealer.employee_disclosure_disabled ||
+    disclosureText !== (dealer.employee_disclosure_text || "") ||
     website !== (dealer.website || "") ||
     phone !== (dealer.phone || "") ||
     address !== (dealer.address || "") ||
@@ -824,6 +838,8 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
         brand_color: color.trim(),
         oem_affiliation: oem.trim(),
         requires_approval: approval,
+        employee_disclosure_disabled: !disclosureOn,
+        employee_disclosure_text: disclosureText.trim(),
         website: website.trim(),
         phone: phone.trim(),
         address: address.trim(),
@@ -1209,7 +1225,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
                   className={cn(
                     "min-h-11 rounded-lg border px-3 py-2 text-sm transition-colors",
                     selected
-                      ? "border-primary-500/40 bg-primary-500/5 text-primary-100"
+                      ? "border-primary-500/40 bg-primary-500/5 text-primary-100 [.theme-light_&]:text-primary-950"
                       : "border-hairline bg-fill-subtle text-surface-300 hover:bg-fill-hover",
                   )}
                 >
@@ -1287,7 +1303,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
                   className={cn(
                     "min-h-11 rounded-lg border px-3 py-2 text-sm transition-colors",
                     selected
-                      ? "border-primary-500/40 bg-primary-500/5 text-primary-100"
+                      ? "border-primary-500/40 bg-primary-500/5 text-primary-100 [.theme-light_&]:text-primary-950"
                       : "border-hairline bg-fill-subtle text-surface-300 hover:bg-fill-hover",
                   )}
                 >
@@ -1461,7 +1477,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
                       "text-[10px] px-2 py-1 rounded-md transition-colors",
                       enabled
                         ? "bg-fill-subtle hover:bg-fill-hover text-surface-300"
-                        : "bg-success-500/20 hover:bg-success-500/30 text-success-100",
+                        : "bg-success-500/20 hover:bg-success-500/30 text-success-100 [.theme-light_&]:text-success-900",
                     )}
                   >
                     {enabled ? "Disable" : "Enable"}
@@ -1482,7 +1498,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
 
       <section className="space-y-2">
         <div className="flex items-center gap-2 text-sm font-semibold text-surface-50">
-          <Ban className="w-4 h-4 text-error-300" />
+          <Ban className="w-4 h-4 text-error-300 [.theme-light_&]:text-error-800" />
           Banned phrases
         </div>
         <Textarea
@@ -1565,7 +1581,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             className={cn(
               "px-3 py-2 rounded-lg text-sm transition-colors border",
               !approval
-                ? "border-success-500/40 bg-success-500/10 text-success-100"
+                ? "border-success-500/40 bg-success-500/10 text-success-100 [.theme-light_&]:text-success-900"
                 : "border-hairline bg-fill-subtle text-surface-300",
             )}
           >
@@ -1581,7 +1597,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             className={cn(
               "px-3 py-2 rounded-lg text-sm transition-colors border",
               approval
-                ? "border-warning-500/40 bg-warning-500/10 text-warning-100"
+                ? "border-warning-500/40 bg-warning-500/10 text-warning-100 [.theme-light_&]:text-warning-900"
                 : "border-hairline bg-fill-subtle text-surface-300",
             )}
           >
@@ -1590,10 +1606,90 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
         </div>
       </section>
 
+      <section className="space-y-2">
+        <div className="text-sm font-semibold text-surface-50">
+          Team-member disclosure
+        </div>
+        <p className="text-xs text-surface-300">
+          The FTC requires a salesperson posting about your inventory to say they work
+          here. This line is added to the top of every post, where it stays visible
+          above the &ldquo;see more&rdquo; fold.
+        </p>
+        <div
+          role="radiogroup"
+          aria-label="Team-member disclosure"
+          className="flex flex-col gap-2 sm:flex-row sm:items-center"
+        >
+          <button
+            type="button"
+            role="radio"
+            aria-checked={disclosureOn}
+            tabIndex={disclosureOn ? 0 : -1}
+            onClick={() => setDisclosureOn(true)}
+            className={cn(
+              "px-3 py-2 rounded-lg text-sm transition-colors border",
+              disclosureOn
+                ? "border-success-500/40 bg-success-500/10 text-success-100 [.theme-light_&]:text-success-900"
+                : "border-hairline bg-fill-subtle text-surface-300",
+            )}
+          >
+            Add the disclosure
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={!disclosureOn}
+            tabIndex={!disclosureOn ? 0 : -1}
+            onClick={() => setDisclosureOn(false)}
+            className={cn(
+              "px-3 py-2 rounded-lg text-sm transition-colors border",
+              !disclosureOn
+                ? "border-warning-500/40 bg-warning-500/10 text-warning-100 [.theme-light_&]:text-warning-900"
+                : "border-hairline bg-fill-subtle text-surface-300",
+            )}
+          >
+            Turn it off
+          </button>
+        </div>
+        {!disclosureOn && (
+          <p
+            role="alert"
+            className="rounded-lg border border-warning-500/40 bg-warning-500/10 px-3 py-2 text-xs text-warning-100 [.theme-light_&]:text-warning-900"
+          >
+            Your team&rsquo;s posts will carry no material-connection disclosure.
+            Confirm this with your compliance officer before saving.
+          </p>
+        )}
+        <label
+          htmlFor="employee-disclosure-text"
+          className="block text-xs text-surface-300"
+        >
+          Wording (optional). Use <code>{"{dealer}"}</code> for your dealership name.
+        </label>
+        <textarea
+          id="employee-disclosure-text"
+          value={disclosureText}
+          onChange={(e) => setDisclosureText(e.target.value.slice(0, 280))}
+          maxLength={280}
+          rows={2}
+          disabled={!disclosureOn}
+          placeholder={DEFAULT_EMPLOYEE_DISCLOSURE_TEMPLATE}
+          className="w-full rounded-lg border border-hairline bg-fill-subtle px-3 py-2 text-sm text-surface-100 placeholder:text-surface-400 focus:border-primary-400 disabled:opacity-50"
+        />
+        <p className="text-xs text-surface-400">
+          Preview:{" "}
+          {buildEmployeeDisclosure({
+            name: dealer.name,
+            employee_disclosure_text: disclosureText,
+            employee_disclosure_disabled: !disclosureOn,
+          }) || "No disclosure will be added."}
+        </p>
+      </section>
+
       {error && (
         <div
           role="alert"
-          className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs"
+          className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs [.theme-light_&]:text-error-800"
         >
           {error}
         </div>
@@ -1834,9 +1930,7 @@ export const DealerTeamCard: React.FC = () => {
       handlePersonCommitted(updated);
       setOneTimeCode(null);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Could not mark the code as shared.",
-      );
+      setError(toUiMessage(err, "Could not mark the code as shared."));
     } finally {
       setCodeBusy(false);
     }
@@ -1903,7 +1997,7 @@ export const DealerTeamCard: React.FC = () => {
 
       {oneTimeCode && (
         <div
-          className="rounded-xl border border-warning-400/30 bg-warning-500/10 px-3 py-3 text-sm text-warning-50"
+          className="rounded-xl border border-warning-400/30 bg-warning-500/10 px-3 py-3 text-sm text-warning-50 [.theme-light_&]:text-warning-900"
           role="status"
           aria-label="Access code ready to share"
         >
@@ -1955,7 +2049,7 @@ export const DealerTeamCard: React.FC = () => {
       )}
 
       {error && (
-        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs">
+        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs [.theme-light_&]:text-error-800">
           {error}
         </div>
       )}
@@ -2000,9 +2094,9 @@ export const DealerTeamCard: React.FC = () => {
                       className={cn(
                         "text-[10px] uppercase tracking-wide font-semibold rounded-full px-2 py-0.5",
                         p.pinNeedsDistribution
-                          ? "bg-warning-500/15 text-warning-200"
+                          ? "bg-warning-500/15 text-warning-200 [.theme-light_&]:text-warning-800"
                           : p.hasPin
-                            ? "bg-success-500/10 text-success-300"
+                            ? "bg-success-500/10 text-success-300 [.theme-light_&]:text-success-900"
                             : "bg-surface-800 text-surface-400",
                       )}
                     >
@@ -2057,7 +2151,7 @@ export const DealerTeamCard: React.FC = () => {
                         "min-h-11 text-[11px] px-3 py-2 rounded-md transition-colors",
                         p.active
                           ? "bg-fill-subtle hover:bg-fill-hover text-surface-300"
-                          : "bg-success-500/20 hover:bg-success-500/30 text-success-100",
+                          : "bg-success-500/20 hover:bg-success-500/30 text-success-100 [.theme-light_&]:text-success-900",
                       )}
                       title={p.active ? "Deactivate" : "Reactivate"}
                     >
@@ -2069,7 +2163,7 @@ export const DealerTeamCard: React.FC = () => {
                     type="button"
                     onClick={() => handlePromoteLoose(p.name)}
                     disabled={saving}
-                    className="min-h-11 text-[11px] px-3 py-2 rounded-md bg-primary-500/20 hover:bg-primary-500/30 text-primary-100 transition-colors disabled:opacity-50"
+                    className="min-h-11 text-[11px] px-3 py-2 rounded-md bg-primary-500/20 hover:bg-primary-500/30 text-primary-100 transition-colors disabled:opacity-50 [.theme-light_&]:text-primary-950"
                     title="Add this person to the formal roster"
                   >
                     Add to roster
