@@ -350,6 +350,10 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
           disclosures: post.disclosures || undefined,
           postId: post.id,
           approvalStatus: approval,
+          // The reason travels with the rejection, or the reopened result
+          // screen falls back to the generic "a manager rejected this" copy
+          // and the salesperson is back to guessing what to change.
+          rejectionReason: post.rejection_reason || undefined,
           releaseStatus: post.has_release
             ? "saved"
             : post.release_required && post.release_status !== "saved"

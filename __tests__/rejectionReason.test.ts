@@ -103,6 +103,25 @@ describe("the reason reaches the salesperson", () => {
     expect(history).toContain("p.rejection_reason");
   });
 
+  it("survives reopening the post from My work", () => {
+    // PostResult seeds its state from post.rejectionReason, but the History
+    // reopen mapping built a full GeneratedPost with approvalStatus and never
+    // set rejectionReason, so reopening a rejected post showed the generic
+    // "a manager rejected this" copy with the actual reason dropped on the
+    // floor — while the same record rendered it in the list two hundred lines
+    // down.
+    const history = read("components/PostHistory.tsx");
+    const mapping = history.slice(
+      history.indexOf("const generated: GeneratedPost = {"),
+      history.indexOf(
+        "releaseStatus:",
+        history.indexOf("const generated: GeneratedPost = {"),
+      ),
+    );
+    expect(mapping).toContain("approvalStatus: approval");
+    expect(mapping).toContain("rejectionReason: post.rejection_reason || undefined");
+  });
+
   it("gives the manager quick picks for the common cases", () => {
     const queue = read("components/ApprovalQueue.tsx");
     expect(queue).toContain("QUICK_REASONS");
