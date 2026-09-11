@@ -669,7 +669,14 @@ in that subset, and nothing reverses them. The volume keeps the newer schema.
 
 **`migrate down` is not part of this procedure, and three migrations make it a one-way
 door regardless.** Every down-migration that drops schema fields now uses the API that
-actually works on this PocketBase line:
+actually works on this PocketBase line — which means **`migrate down` is now
+destructive**. Until 2026-09-10 it was a harmless no-op on 21 of these files, and an
+operator could run it against production and lose nothing. That is no longer true: a
+reverted migration really drops its columns, and their data with them. Never run it
+against a live volume; if you believe you need to, you want a restore
+(`docs/production-backups-and-release.md`), not a revert.
+
+The working API:
 
 ```js
 const field = dealers.schema.getFieldByName(name);
