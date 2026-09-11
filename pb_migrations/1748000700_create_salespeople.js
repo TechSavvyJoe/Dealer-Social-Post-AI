@@ -97,16 +97,7 @@ migrate(
     try {
       salespeople = dao.findCollectionByNameOrId("salespeople");
     } catch (e) {}
-    if (
-      posts &&
-      salespeople &&
-      !(function (s, n) {
-        for (let i = 0; i < s.length; i++) {
-          if (s[i].name === n) return s[i];
-        }
-        return null;
-      })(posts.schema, "salesperson_id")
-    ) {
+    if (posts && salespeople && !posts.schema.getFieldByName("salesperson_id")) {
       posts.schema.addField(
         new SchemaField({
           name: "salesperson_id",

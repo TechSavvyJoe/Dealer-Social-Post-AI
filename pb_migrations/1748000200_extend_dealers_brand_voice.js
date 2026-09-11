@@ -26,14 +26,7 @@ migrate(
     if (!collection) throw new Error("dealers collection not found");
 
     const ensure = (name, field) => {
-      if (
-        !(function (s, n) {
-          for (let i = 0; i < s.length; i++) {
-            if (s[i].name === n) return s[i];
-          }
-          return null;
-        })(collection.schema, name)
-      ) {
+      if (!collection.schema.getFieldByName(name)) {
         collection.schema.addField(new SchemaField(field));
       }
     };

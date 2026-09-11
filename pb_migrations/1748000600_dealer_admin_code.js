@@ -18,14 +18,7 @@ migrate(
       dealers = dao.findCollectionByNameOrId("dealers");
     } catch (e) {}
     if (!dealers) return;
-    if (
-      !(function (s, n) {
-        for (let i = 0; i < s.length; i++) {
-          if (s[i].name === n) return s[i];
-        }
-        return null;
-      })(dealers.schema, "admin_code")
-    ) {
+    if (!dealers.schema.getFieldByName("admin_code")) {
       dealers.schema.addField(
         new SchemaField({
           name: "admin_code",

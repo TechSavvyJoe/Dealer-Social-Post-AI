@@ -274,18 +274,57 @@ describe("PocketBase migrations remove schema fields with an API that works", ()
   });
 
   it("only ever calls removeField with a field id, never a name", () => {
-    // removeField("name") is the other way to write a no-op removal.
+    // removeField(field.name), removeField("name") and removeField(field) are
+    // three other ways to write a no-op or a wrong removal. The original
+    // version of this rule only caught the string-literal case, so
+    // removeField(field.name) — the mistake this codebase's own
+    // getFieldByName(name) return value most invites — sailed through.
     const offenders: string[] = [];
     for (const name of migrations) {
       const code = withoutComments(readFileSync(resolve(dir, name), "utf8"));
-      for (const match of code.matchAll(/\.removeField\(\s*(["'`])/g)) {
+      for (const match of code.matchAll(/\.removeField\(\s*([^)]*?)\s*\)/g)) {
+        if (/^\w+\.id$/.test(match[1])) continue;
         const line = code.slice(0, match.index).split("\n").length;
-        offenders.push(`pb_migrations/${name}:${line}`);
+        offenders.push(`pb_migrations/${name}:${line}  removeField(${match[1]})`);
       }
     }
     expect(
       offenders,
-      `removeField called with a string literal:\n${offenders.join("\n")}`,
+      `removeField must be called with exactly <field>.id:\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("never reads a collection schema as a JS array", () => {
+    // `collection.schema` is a Go struct with no JS-visible length or index
+    // access — `schema.length` reads `undefined` and `schema[i]` reads
+    // `undefined`. A hand-rolled `for (let i = 0; i < s.length; i++)` helper
+    // fed `collection.schema` therefore always returns "not found", so
+    // `addField` runs even when the field already exists. On a database where
+    // the migration is not recorded as applied but the column already exists
+    // (a history-sync repair, a snapshot restore, a rebuilt volume) that
+    // fails the whole `migrate up` with "duplicate column name" — a container
+    // that never starts serving, since migrations run at boot. Reproduced
+    // against the real 0.22.37 binary on 2026-09-11: an already-applied
+    // migration written this way, re-run after its `_migrations` row was
+    // deleted, failed exactly that way; converted to getFieldByName, it did
+    // not.
+    //
+    // Passing `.schema` as an argument to anything is itself the signal: a
+    // scan of every migration in this repo found zero legitimate uses of
+    // `X.schema` followed by `,` or `)` — every real use is a method call
+    // (`.getFieldByName(`, `.addField(`, `.removeField(`), never a value
+    // handed to a helper.
+    const offenders: string[] = [];
+    for (const name of migrations) {
+      const code = withoutComments(readFileSync(resolve(dir, name), "utf8"));
+      for (const match of code.matchAll(/\w+\.schema\s*[,)]/g)) {
+        const line = code.slice(0, match.index).split("\n").length;
+        offenders.push(`pb_migrations/${name}:${line}  ${match[0]}`);
+      }
+    }
+    expect(
+      offenders,
+      `a collection schema is passed as a value rather than called as a method on:\n${offenders.join("\n")}`,
     ).toEqual([]);
   });
 

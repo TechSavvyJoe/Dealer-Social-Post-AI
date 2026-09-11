@@ -17,12 +17,7 @@ migrate(
     } catch (e) {}
     if (!releases) return;
 
-    const exists = (function (s, n) {
-      for (let i = 0; i < s.length; i++) {
-        if (s[i].name === n) return s[i];
-      }
-      return null;
-    })(releases.schema, "post_id");
+    const exists = releases.schema.getFieldByName("post_id");
     if (!exists) {
       releases.schema.addField(
         new SchemaField({

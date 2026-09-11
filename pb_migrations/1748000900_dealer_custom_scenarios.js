@@ -35,14 +35,7 @@ migrate(
       dealers = dao.findCollectionByNameOrId("dealers");
     } catch (e) {}
     if (!dealers) return;
-    if (
-      !(function (s, n) {
-        for (let i = 0; i < s.length; i++) {
-          if (s[i].name === n) return s[i];
-        }
-        return null;
-      })(dealers.schema, "custom_scenarios")
-    ) {
+    if (!dealers.schema.getFieldByName("custom_scenarios")) {
       dealers.schema.addField(
         new SchemaField({
           name: "custom_scenarios",

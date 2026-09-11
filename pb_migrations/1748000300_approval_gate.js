@@ -23,14 +23,7 @@ migrate(
     } catch (e) {}
     if (dealers) {
       const ensureDealer = (name, field) => {
-        if (
-          !(function (s, n) {
-            for (let i = 0; i < s.length; i++) {
-              if (s[i].name === n) return s[i];
-            }
-            return null;
-          })(dealers.schema, name)
-        ) {
+        if (!dealers.schema.getFieldByName(name)) {
           dealers.schema.addField(new SchemaField(field));
         }
       };
@@ -56,14 +49,7 @@ migrate(
     } catch (e) {}
     if (posts) {
       const ensure = (name, field) => {
-        if (
-          !(function (s, n) {
-            for (let i = 0; i < s.length; i++) {
-              if (s[i].name === n) return s[i];
-            }
-            return null;
-          })(posts.schema, name)
-        ) {
+        if (!posts.schema.getFieldByName(name)) {
           posts.schema.addField(new SchemaField(field));
         }
       };

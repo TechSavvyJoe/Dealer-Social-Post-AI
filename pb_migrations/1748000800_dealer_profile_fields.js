@@ -37,14 +37,7 @@ migrate(
     } catch (e) {}
     if (!dealers) return;
     const ensure = (name, field) => {
-      if (
-        !(function (s, n) {
-          for (let i = 0; i < s.length; i++) {
-            if (s[i].name === n) return s[i];
-          }
-          return null;
-        })(dealers.schema, name)
-      ) {
+      if (!dealers.schema.getFieldByName(name)) {
         dealers.schema.addField(new SchemaField(field));
       }
     };
