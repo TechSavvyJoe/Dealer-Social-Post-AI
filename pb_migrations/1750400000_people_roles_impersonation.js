@@ -6,6 +6,12 @@
  * - sessions.person / is_impersonation / impersonator_session for Open-as
  * - dealers.code no longer required for store login (optional legacy field)
  */
+const SESSION_IMPERSONATION_FIELDS = [
+  "person",
+  "is_impersonation",
+  "impersonator_session",
+];
+
 migrate(
   (db) => {
     const dao = new Dao(db);
@@ -147,12 +153,13 @@ migrate(
       sessions = dao.findCollectionByNameOrId("sessions");
     } catch (_e) {}
     if (sessions) {
-      sessions.schema = Array.from(sessions.schema).filter(
-        (f) =>
-          f.name !== "person" &&
-          f.name !== "is_impersonation" &&
-          f.name !== "impersonator_session",
-      );
+      // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on
+      // PocketBase 0.22 (verified on 0.22.55): it reports "Applied" and the
+      // column is still there. `removeField` takes the field id, not its name.
+      SESSION_IMPERSONATION_FIELDS.forEach((name) => {
+        const field = sessions.schema.getFieldByName(name);
+        if (field) sessions.schema.removeField(field.id);
+      });
       dao.saveCollection(sessions);
     }
 
@@ -161,9 +168,9 @@ migrate(
       salespeople = dao.findCollectionByNameOrId("salespeople");
     } catch (_e) {}
     if (salespeople) {
-      salespeople.schema = Array.from(salespeople.schema).filter(
-        (f) => f.name !== "role",
-      );
+      // Same 0.22 silent no-op as above: drop `role` by field id, not by name.
+      const roleField = salespeople.schema.getFieldByName("role");
+      if (roleField) salespeople.schema.removeField(roleField.id);
       salespeople.indexes = Array.from(salespeople.indexes || []).filter(
         (i) => String(i).indexOf("idx_salespeople_pin") === -1,
       );

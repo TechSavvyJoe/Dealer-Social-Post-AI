@@ -66,35 +66,35 @@ migrate(
         type: "base",
         system: false,
         schema: [
-        {
-          name: "name",
-          type: "text",
-          required: true,
-          options: { min: 1, max: 120 },
-        },
-        {
-          name: "payload",
-          type: "text",
-          required: false,
-          options: { max: 2000 },
-        },
-        {
-          name: "release_sha",
-          type: "text",
-          required: false,
-          options: { max: 64 },
-        },
-        {
-          name: "api_contract_version",
-          type: "text",
-          required: false,
-          options: { max: 64 },
-        },
-        {
-          name: "occurred_at",
-          type: "date",
-          required: true,
-        },
+          {
+            name: "name",
+            type: "text",
+            required: true,
+            options: { min: 1, max: 120 },
+          },
+          {
+            name: "payload",
+            type: "text",
+            required: false,
+            options: { max: 2000 },
+          },
+          {
+            name: "release_sha",
+            type: "text",
+            required: false,
+            options: { max: 64 },
+          },
+          {
+            name: "api_contract_version",
+            type: "text",
+            required: false,
+            options: { max: 64 },
+          },
+          {
+            name: "occurred_at",
+            type: "date",
+            required: true,
+          },
         ],
         indexes: [
           "CREATE INDEX `idx_client_error_events_time` ON `client_error_events` (`occurred_at`)",
@@ -232,8 +232,7 @@ migrate(
       if (errors) dao.deleteCollection(errors);
     } catch (_e) {}
     try {
-      const generationEvents =
-        dao.findCollectionByNameOrId("generation_events");
+      const generationEvents = dao.findCollectionByNameOrId("generation_events");
       if (generationEvents) dao.deleteCollection(generationEvents);
     } catch (_e) {}
 
@@ -250,9 +249,13 @@ migrate(
       generation_last_success_at: true,
       model_policy_version: true,
     };
-    posts.schema = Array.from(posts.schema).filter(
-      (field) => !fields[field.name],
-    );
+    // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on PocketBase
+    // 0.22: the migration reports "Applied" and the columns stay. `removeField`
+    // takes the field id, not its name.
+    Object.keys(fields).forEach((name) => {
+      const field = posts.schema.getFieldByName(name);
+      if (field) posts.schema.removeField(field.id);
+    });
     dao.saveCollection(posts);
   },
 );

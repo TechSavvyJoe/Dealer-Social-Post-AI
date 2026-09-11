@@ -57,12 +57,13 @@ migrate(
     } catch (_e) {}
     if (!posts) return;
 
-    posts.schema = Array.from(posts.schema).filter(
-      (field) =>
-        field.name !== "platform_ids" &&
-        field.name !== "primary_format_id" &&
-        field.name !== "image_aspect_ratio",
-    );
+    // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on
+    // PocketBase 0.22 (reports "Applied", column stays). `removeField` takes
+    // the field id, not its name.
+    ["platform_ids", "primary_format_id", "image_aspect_ratio"].forEach((name) => {
+      const field = posts.schema.getFieldByName(name);
+      if (field) posts.schema.removeField(field.id);
+    });
     dao.saveCollection(posts);
   },
 );

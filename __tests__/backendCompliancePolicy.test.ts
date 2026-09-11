@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -192,8 +192,8 @@ describe("PocketBase post compliance policy", () => {
     // And it must ROLL BACK for real. `schema = Array.from(schema).filter(...)`
     // reports "Applied" and leaves the column in place on 0.22 (verified
     // against 0.22.55 on a copy of production data); removeField takes the
-    // field id. 22 older migrations still carry the broken idiom and are
-    // tracked separately; every new one must use this API.
+    // field id. The repo-wide rule below covers every migration; this keeps
+    // the reference implementation pinned by name.
     expect(migration).toContain("dealers.schema.removeField(field.id)");
     // Match the assignment as it appears in code (collection-qualified), so the
     // migration's own comment naming the broken idiom does not trip this.
@@ -222,5 +222,94 @@ describe("PocketBase post compliance policy", () => {
     );
     expect(prepared.disclosures).not.toContain("team member");
     expect(prepared.disclosures).toBeTruthy();
+  });
+});
+
+/**
+ * Schema removal in PocketBase 0.22 migrations.
+ *
+ * `collection.schema = Array.from(collection.schema).filter(...)` is a SILENT
+ * NO-OP: the CLI prints "Applied", the migration is recorded as run, and the
+ * column stays in both the table and the collection schema. Proven on 0.22.55
+ * against a copy of real pb_data, twice — once when the idiom was first found
+ * and again when the 21 files that carried it were converted. The rollback
+ * path for every one of those schema changes had never worked.
+ *
+ * Worse than a broken rollback: one migration used the idiom in the UP
+ * direction to drop a plaintext credential column, and believed it had.
+ *
+ * The working API takes the field ID: getFieldByName(name) then
+ * removeField(field.id). This test makes the broken idiom unmergeable.
+ */
+describe("PocketBase migrations remove schema fields with an API that works", () => {
+  const dir = resolve(process.cwd(), "pb_migrations");
+  const migrations = readdirSync(dir)
+    .filter((name) => name.endsWith(".js"))
+    .sort();
+
+  /** Strip comments so a migration may still DESCRIBE the broken idiom. */
+  const withoutComments = (source: string) =>
+    source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
+  it("has migrations to check", () => {
+    expect(migrations.length).toBeGreaterThan(50);
+  });
+
+  it("never assigns a filtered copy back onto a collection schema", () => {
+    const offenders: string[] = [];
+    for (const name of migrations) {
+      const code = withoutComments(readFileSync(resolve(dir, name), "utf8"));
+      // The assignment as it appears in code: `<anything>.schema = Array.from(`.
+      // `.indexes = Array.from(...)` is a different mechanism (a plain string
+      // array) and is not in scope.
+      for (const match of code.matchAll(/\b\w+\.schema\s*=\s*Array\.from\(/g)) {
+        const line = code.slice(0, match.index).split("\n").length;
+        offenders.push(`pb_migrations/${name}:${line}`);
+      }
+    }
+    expect(
+      offenders,
+      `these assign a filtered schema back, which PocketBase 0.22 ignores; use getFieldByName + removeField(field.id):\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("only ever calls removeField with a field id, never a name", () => {
+    // removeField("name") is the other way to write a no-op removal.
+    const offenders: string[] = [];
+    for (const name of migrations) {
+      const code = withoutComments(readFileSync(resolve(dir, name), "utf8"));
+      for (const match of code.matchAll(/\.removeField\(\s*(["'`])/g)) {
+        const line = code.slice(0, match.index).split("\n").length;
+        offenders.push(`pb_migrations/${name}:${line}`);
+      }
+    }
+    expect(
+      offenders,
+      `removeField called with a string literal:\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("finishes the credential-column drop that the original migration only believed it did", () => {
+    // 1750200000 dropped `code_attempted` with the no-op idiom, so the column
+    // survived in production with the migration marked applied. A later
+    // migration has to do it for real, and both must use the working API.
+    const original = withoutComments(
+      readFileSync(resolve(dir, "1750200000_harden_auth_events.js"), "utf8"),
+    );
+    expect(original).toContain('getFieldByName("code_attempted")');
+    expect(original).toMatch(/removeField\(\s*\w+\.id\s*\)/);
+
+    const purge = migrations.find((name) => /purge_code_attempted/.test(name));
+    expect(
+      purge,
+      "a follow-up migration must drop code_attempted for real",
+    ).toBeTruthy();
+    const source = withoutComments(readFileSync(resolve(dir, purge!), "utf8"));
+    expect(source).toContain('getFieldByName("code_attempted")');
+    expect(source).toMatch(/removeField\(\s*field\.id\s*\)/);
+    // Blank before drop, so the data is gone even if a drop ever no-ops again.
+    expect(source).toMatch(/UPDATE auth_events SET code_attempted = ''/);
+    // And rolling back must never recreate the credential sink.
+    expect(source).toMatch(/\(_db\)\s*=>\s*\{\s*\}/);
   });
 });

@@ -32,9 +32,11 @@ migrate(
       ).execute();
 
       events = dao.findCollectionByNameOrId("auth_events");
-      events.schema = Array.from(events.schema).filter(
-        (field) => field.name !== "code_attempted",
-      );
+      // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on
+      // PocketBase 0.22: the migration reports "Applied" and the plaintext
+      // column stays behind. `removeField` takes the field id, not its name.
+      const field = events.schema.getFieldByName("code_attempted");
+      if (field) events.schema.removeField(field.id);
       dao.saveCollection(events);
     }
   },

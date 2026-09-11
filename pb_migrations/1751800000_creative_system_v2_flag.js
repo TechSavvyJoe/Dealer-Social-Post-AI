@@ -35,9 +35,13 @@ migrate(
       dealers = dao.findCollectionByNameOrId("dealers");
     } catch (_error) {}
     if (!dealers) return;
-    dealers.schema = Array.from(dealers.schema).filter(
-      (field) => DEALER_FLAG_FIELDS.indexOf(field.name) === -1,
-    );
+    // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on PocketBase
+    // 0.22: the migration reports "Applied" and the column is still there.
+    // `removeField` takes the field id, not its name.
+    DEALER_FLAG_FIELDS.forEach((name) => {
+      const field = dealers.schema.getFieldByName(name);
+      if (field) dealers.schema.removeField(field.id);
+    });
     dao.saveCollection(dealers);
   },
 );

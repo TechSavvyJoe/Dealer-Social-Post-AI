@@ -4,6 +4,8 @@
  * metadata only: they help a salesperson tag the dealership from a personal
  * post and do not grant or imply publishing access to the business account.
  */
+const DEALER_SOCIAL_TAG_FIELDS = ["facebook_page_tag", "linkedin_company_tag"];
+
 migrate(
   (db) => {
     const dao = new Dao(db);
@@ -31,10 +33,13 @@ migrate(
       dealers = dao.findCollectionByNameOrId("dealers");
     } catch (_error) {}
     if (!dealers) return;
-    dealers.schema = Array.from(dealers.schema).filter(
-      (field) =>
-        field.name !== "facebook_page_tag" && field.name !== "linkedin_company_tag",
-    );
+    // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on PocketBase
+    // 0.22: the migration reports "Applied" and the columns stay. `removeField`
+    // takes the field id, not its name.
+    DEALER_SOCIAL_TAG_FIELDS.forEach((name) => {
+      const field = dealers.schema.getFieldByName(name);
+      if (field) dealers.schema.removeField(field.id);
+    });
     dao.saveCollection(dealers);
   },
 );

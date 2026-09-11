@@ -2,6 +2,11 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
+import {
+  FakePocketBaseSchema,
+  fakeCollection,
+  fieldsOf as fakeFieldsOf,
+} from "../test/fakePocketBaseSchema";
 
 type Collection = {
   schema: {
@@ -84,21 +89,10 @@ describe("brand-consistent creative foundations migration", () => {
     options?: Record<string, unknown>;
   };
 
-  class FakeSchema {
-    fields: BrandField[];
-    constructor(fields: BrandField[]) {
-      this.fields = [...fields];
-    }
-    getFieldByName(name: string) {
-      return this.fields.find((field) => field.name === name) ?? null;
-    }
-    addField(field: BrandField) {
-      this.fields.push(field);
-    }
-    [Symbol.iterator]() {
-      return this.fields[Symbol.iterator]();
-    }
-  }
+  // fakeCollection / FakePocketBaseSchema model the real API, including
+  // removeField(id) and a schema that cannot be reassigned. The hand-rolled
+  // fakes this replaced accepted `schema = filteredArray`, which is exactly the
+  // no-op idiom these rollback assertions exist to catch.
 
   const loadMigration = () => {
     const source = readFileSync(
@@ -150,14 +144,10 @@ describe("brand-consistent creative foundations migration", () => {
   ];
 
   const buildDao = () => {
-    const dealers = {
-      schema: new FakeSchema([{ name: "name", type: "text" }]) as
-        FakeSchema | BrandField[],
-    };
-    const people = {
-      schema: new FakeSchema([{ name: "pin_hash", type: "text" }]) as
-        FakeSchema | BrandField[],
-    };
+    // fakeCollection: `schema` is read-only, as it is on the real Go struct,
+    // so a down that tries `schema = filteredArray` changes nothing.
+    const dealers = fakeCollection<BrandField>([{ name: "name", type: "text" }]);
+    const people = fakeCollection<BrandField>([{ name: "pin_hash", type: "text" }]);
     const saveCollection = vi.fn();
     return {
       dealers,
@@ -174,7 +164,7 @@ describe("brand-consistent creative foundations migration", () => {
     };
   };
 
-  const fieldsOf = (schema: FakeSchema | BrandField[]) => Array.from(schema);
+  const fieldsOf = (schema: FakePocketBaseSchema<BrandField>) => fakeFieldsOf(schema);
 
   it("adds every spec §6 field as optional, typed, and size-capped", () => {
     const { up } = loadMigration();
@@ -298,22 +288,6 @@ describe("generation usage accounting migration", () => {
     options?: Record<string, unknown>;
   };
 
-  class FakeSchema {
-    fields: UsageField[];
-    constructor(fields: UsageField[]) {
-      this.fields = [...fields];
-    }
-    getFieldByName(name: string) {
-      return this.fields.find((field) => field.name === name) ?? null;
-    }
-    addField(field: UsageField) {
-      this.fields.push(field);
-    }
-    [Symbol.iterator]() {
-      return this.fields[Symbol.iterator]();
-    }
-  }
-
   const usageFieldNames = [
     "prompt_tokens",
     "candidate_tokens",
@@ -351,12 +325,10 @@ describe("generation usage accounting migration", () => {
   };
 
   const buildDao = () => {
-    const events = {
-      schema: new FakeSchema([
-        { name: "dealer", type: "text" },
-        { name: "task", type: "select" },
-      ]) as FakeSchema | UsageField[],
-    };
+    const events = fakeCollection<UsageField>([
+      { name: "dealer", type: "text" },
+      { name: "task", type: "select" },
+    ]);
     const saveCollection = vi.fn();
     return {
       events,
@@ -371,7 +343,7 @@ describe("generation usage accounting migration", () => {
     };
   };
 
-  const fieldsOf = (schema: FakeSchema | UsageField[]) => Array.from(schema);
+  const fieldsOf = (schema: FakePocketBaseSchema<UsageField>) => fakeFieldsOf(schema);
 
   it("adds optional counters and short tokens to generation_events, idempotently", () => {
     const { up } = loadMigration();

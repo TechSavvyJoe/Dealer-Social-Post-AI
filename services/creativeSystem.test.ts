@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
+import { fakeCollection, fieldsOf } from "../test/fakePocketBaseSchema";
 
 import {
   StyleOption,
@@ -623,21 +624,10 @@ describe("creative_system_v2 backend allowlist", () => {
 describe("creative_system_v2 migration", () => {
   type Field = { name: string; type: string; required?: boolean };
 
-  class FakeSchema {
-    fields: Field[];
-    constructor(fields: Field[]) {
-      this.fields = [...fields];
-    }
-    getFieldByName(name: string) {
-      return this.fields.find((field) => field.name === name) ?? null;
-    }
-    addField(field: Field) {
-      this.fields.push(field);
-    }
-    [Symbol.iterator]() {
-      return this.fields[Symbol.iterator]();
-    }
-  }
+  // fakeCollection models the real contract: removeField(id) exists and
+  // `schema` cannot be reassigned. The hand-rolled fake this replaced accepted
+  // `schema = filteredArray`, which is the no-op idiom the rollback assertion
+  // below exists to catch.
 
   const loadMigration = () => {
     const source = readFileSync(
@@ -664,9 +654,7 @@ describe("creative_system_v2 migration", () => {
   };
 
   const buildDao = () => {
-    const dealers = {
-      schema: new FakeSchema([{ name: "name", type: "text" }]) as FakeSchema | Field[],
-    };
+    const dealers = fakeCollection<Field>([{ name: "name", type: "text" }]);
     const saveCollection = vi.fn();
     return {
       dealers,
@@ -686,16 +674,16 @@ describe("creative_system_v2 migration", () => {
     const { dealers, dao } = buildDao();
 
     up(dao);
-    let fields = Array.from(dealers.schema);
+    let fields = fieldsOf(dealers.schema);
     expect(fields.map((field) => field.name)).toEqual(["name", "creative_system_v2"]);
     expect(fields[1]).toMatchObject({ type: "bool", required: false });
 
     // Deploy retries must not duplicate the column.
     up(dao);
-    expect(Array.from(dealers.schema)).toHaveLength(2);
+    expect(fieldsOf(dealers.schema)).toHaveLength(2);
 
     down(dao);
-    fields = Array.from(dealers.schema);
+    fields = fieldsOf(dealers.schema);
     expect(fields.map((field) => field.name)).toEqual(["name"]);
   });
 

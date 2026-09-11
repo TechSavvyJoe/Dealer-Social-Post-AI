@@ -4,6 +4,13 @@
  * release link. This is intentionally a forward migration because the output
  * profile migration was already applied in local/staging databases.
  */
+const POST_RELEASE_STATE_FIELDS = [
+  "scenario_id",
+  "release_required",
+  "release_status",
+  "platform_captions",
+];
+
 migrate(
   (db) => {
     const dao = new Dao(db);
@@ -67,13 +74,13 @@ migrate(
     } catch (_e) {}
     if (!posts) return;
 
-    posts.schema = Array.from(posts.schema).filter(
-      (field) =>
-        field.name !== "scenario_id" &&
-        field.name !== "release_required" &&
-        field.name !== "release_status" &&
-        field.name !== "platform_captions",
-    );
+    // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on PocketBase
+    // 0.22: the migration reports "Applied" and the columns stay. `removeField`
+    // takes the field id, not its name.
+    POST_RELEASE_STATE_FIELDS.forEach((name) => {
+      const field = posts.schema.getFieldByName(name);
+      if (field) posts.schema.removeField(field.id);
+    });
     dao.saveCollection(posts);
   },
 );

@@ -5,6 +5,8 @@
  * legal/audit records and remain governed by the dealership's retention
  * policy; only never-linked signatures expire automatically.
  */
+const PHOTO_RELEASE_OWNERSHIP_FIELDS = ["owner_session_hash", "expires_at"];
+
 migrate(
   (db) => {
     const dao = new Dao(db);
@@ -58,9 +60,13 @@ migrate(
     releases.indexes = Array.from(releases.indexes || []).filter(
       (index) => String(index).indexOf("idx_photo_releases_unlinked_expiry") === -1,
     );
-    releases.schema = Array.from(releases.schema).filter(
-      (field) => field.name !== "owner_session_hash" && field.name !== "expires_at",
-    );
+    // `schema = Array.from(schema).filter(...)` is a SILENT NO-OP on PocketBase
+    // 0.22: the migration reports "Applied" and the columns stay. `removeField`
+    // takes the field id, not its name.
+    PHOTO_RELEASE_OWNERSHIP_FIELDS.forEach((name) => {
+      const field = releases.schema.getFieldByName(name);
+      if (field) releases.schema.removeField(field.id);
+    });
     dao.saveCollection(releases);
   },
 );
