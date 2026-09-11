@@ -13,13 +13,23 @@ const trackedFiles = execFileSync(
   .split("\0")
   .filter(Boolean);
 
-// A printf conversion (`%s`, optionally trailed by an escape) is a format
-// specifier, never a credential. Runbooks pipe secrets to `flyctl secrets
-// import` as `printf 'NAME=%s\n' "$VALUE"` precisely so the value never appears
-// in argv or shell history, so this shape is the SAFE one and must not be
-// flagged.
 const placeholders =
-  /^(?:|<[^>]+>|\$\{[^}]+\}|\$[A-Z_][A-Z0-9_]*|process\.env\..*|%[sd](?:\\[nrt])*|your[-_].*|example.*|placeholder.*|redacted.*|hidden|fake.*|test.*|changeme|admin@example\.com)$/i;
+  /^(?:|<[^>]+>|\$\{[^}]+\}|\$[A-Z_][A-Z0-9_]*|process\.env\..*|your[-_].*|example.*|placeholder.*|redacted.*|hidden|fake.*|test.*|changeme|admin@example\.com)$/i;
+
+// A printf conversion (`%s`, optionally trailed by an escape) is a format
+// specifier, never a credential itself. Runbooks pipe secrets to `flyctl
+// secrets import` as `printf 'NAME=%s\n' "$VALUE"` precisely so the value
+// never appears in argv or shell history — the SAFE shape.
+//
+// But the conversion only moves the value one shell word to the right. An
+// earlier version of this scanner allowlisted `%s` as a plain placeholder and
+// stopped looking, so `printf 'NAME=%s\n' "9f3c2a77..."` — the literal an
+// operator would slip into that exact runbook line — passed clean while the
+// scanner on main caught it. The value is now read from the argument that
+// follows the format string: a variable expansion is safe, a quoted literal
+// is the leak.
+const printfConversion = /^%[sd](?:\\[nrt])*$/;
+const printfLiteralArgument = /(?:"[^"$][^"]{7,}"|'[^'$][^']{7,}')/;
 
 const secretValuePatterns = [
   { label: "Google API key", pattern: /AIza[0-9A-Za-z_-]{20,}/ },
@@ -64,8 +74,16 @@ for (const file of trackedFiles) {
     }
 
     const assigned = line.match(assignment);
-    if (assigned && !placeholders.test(assigned[1])) {
-      findings.push({ file, line: index + 1, label: "literal credential" });
+    if (assigned) {
+      const value = assigned[1];
+      if (printfConversion.test(value)) {
+        const afterFormat = line.slice((assigned.index ?? 0) + assigned[0].length);
+        if (printfLiteralArgument.test(afterFormat)) {
+          findings.push({ file, line: index + 1, label: "literal credential" });
+        }
+      } else if (!placeholders.test(value)) {
+        findings.push({ file, line: index + 1, label: "literal credential" });
+      }
     }
 
     const objectValue = line.match(objectCredential);
