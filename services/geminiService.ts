@@ -75,6 +75,7 @@ import { cleanSocialCaption, ensureUsableCaption } from "../utils/captionQuality
 import { toPublicCustomerLabel } from "../utils/customerIdentity";
 import { z } from "zod";
 import {
+  deliveryLanguageAllowedForBrief,
   editTextPromptPartsV2,
   editTextPromptV2,
   generateTextPromptPartsV2,
@@ -1769,6 +1770,14 @@ export const generateSocialPostTextDetailed = async (
     style,
     customerIdentityRequired,
   ] as const;
+  // Reused by every ensureUsableCaption call below so the deterministic
+  // fallback template never contradicts what the live prompt was told —
+  // e.g. it must not claim a vehicle handoff for a Recall Completion or
+  // Customer Testimonial post just because a customer is involved.
+  const deliveryLanguageAllowed = deliveryLanguageAllowedForBrief(
+    creativeBrief,
+    customerIdentityRequired,
+  );
   // Flattened prompt: the cache key, the Claude fallback, and the legacy
   // transport all still take one string.
   const textPrompt = generateTextPrompt(...promptArgs);
@@ -1837,6 +1846,7 @@ export const generateSocialPostTextDetailed = async (
         storeName: dealershipName,
         customerName,
         customerIdentityRequired,
+        deliveryLanguageAllowed,
       });
       if (qualityChecked.usedFallback) {
         throw new Error("AI caption blocked by quality gate");
@@ -1922,6 +1932,7 @@ export const generateSocialPostTextDetailed = async (
     storeName: dealershipName,
     customerName,
     customerIdentityRequired,
+    deliveryLanguageAllowed,
   });
   text = usable.caption;
   if (usable.usedFallback) {
@@ -1952,6 +1963,7 @@ export const generateSocialPostTextDetailed = async (
       storeName: dealershipName || "our dealership",
       customerName,
       customerIdentityRequired,
+      deliveryLanguageAllowed,
     }).caption;
     captionSource = "basic_fallback";
     aiMeta = recordExecution(

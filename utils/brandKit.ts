@@ -37,6 +37,19 @@ export const AGENCY_DISCOVERY_HASHTAGS = [
   "#NewRide",
 ] as const;
 
+/**
+ * A real customer is involved but no vehicle purchase/delivery happened (a
+ * Recall Completion visit, a Customer Testimonial quote) — every
+ * AGENCY_DISCOVERY_HASHTAGS entry (#NewCarDelivery, #JustDelivered,
+ * #KeysInHand, #NewRide, #CarShopping) makes exactly that false claim.
+ */
+export const CUSTOMER_TRUST_HASHTAGS = [
+  "#HappyCustomer",
+  "#CustomerLove",
+  "#TrustedService",
+  "#ThankYou",
+] as const;
+
 /** Soft floor for body prose so paste-ready posts never look unfinished. */
 export const MIN_MARKETING_BODY_CHARS = 120;
 
@@ -98,13 +111,36 @@ const splitBodyAndTags = (caption: string): { body: string; tags: string[] } => 
 /**
  * If the model returned a stub, append a warm agency CTA that names the store.
  * Does not invent vehicle facts — only store-visit invitation language.
+ *
+ * `deliveryLanguageAllowed` defaults to true so every pre-existing caller
+ * keeps today's vehicle-shopping phrasing unchanged. A caller for a
+ * customer-story scenario that is NOT a vehicle handoff (a Recall Completion
+ * visit, a Customer Testimonial quote) must pass false — otherwise a short,
+ * correctly-scoped caption (AI-written or a salesperson's own typed text)
+ * gets a "let's get you behind the wheel" shopping CTA tacked onto it.
  */
-const ensureMarketingBodyFloor = (body: string, storeName?: string): string => {
+const ensureMarketingBodyFloor = (
+  body: string,
+  storeName?: string,
+  deliveryLanguageAllowed = true,
+): string => {
   const trimmed = (body ?? "").trim();
   const proseLen = trimmed.replace(/\s+/g, " ").length;
   if (proseLen >= MIN_MARKETING_BODY_CHARS) return trimmed;
 
   const name = storeName?.trim();
+
+  if (!deliveryLanguageAllowed) {
+    if (!name) {
+      return trimmed
+        ? `${trimmed} Thank you for being part of our story.`
+        : "We're grateful for the trust our customers place in us every day.";
+    }
+    return trimmed
+      ? `${trimmed} Thank you for being part of the ${name} family.`
+      : `We're grateful for the trust our customers place in ${name} every day.`;
+  }
+
   if (!name) {
     if (!trimmed) {
       return "Another great delivery day in the books. Ready for your keys? Visit us this week and find the ride that feels like yours.";
@@ -130,12 +166,13 @@ const ensureMarketingBodyFloor = (body: string, storeName?: string): string => {
 export const applyDealerBrandKit = (
   caption: string,
   kit?: DealerBrandKit | null,
+  deliveryLanguageAllowed = true,
 ): string => {
   let { body, tags } = splitBodyAndTags(caption ?? "");
   const footer = (kit?.default_footer || "").trim();
   const storeName = kit?.name?.trim();
 
-  body = ensureMarketingBodyFloor(body, storeName);
+  body = ensureMarketingBodyFloor(body, storeName, deliveryLanguageAllowed);
 
   // Strip existing footer if already present (avoid doubles on re-apply)
   if (footer) {
@@ -153,6 +190,14 @@ export const applyDealerBrandKit = (
   }
   required.push(...parseHashtagList(kit?.default_hashtags));
 
+  // Same gate as ensureMarketingBodyFloor above: a Recall Completion or
+  // Customer Testimonial caption is not a vehicle purchase/delivery, so
+  // #NewCarDelivery/#JustDelivered/#KeysInHand/#NewRide/#CarShopping would
+  // each make a false claim as a filler tag, exactly like the body copy did.
+  const discoveryHashtags = deliveryLanguageAllowed
+    ? AGENCY_DISCOVERY_HASHTAGS
+    : CUSTOMER_TRUST_HASHTAGS;
+
   const seen = new Set<string>();
   const merged: string[] = [];
   const pushUnique = (tag: string): boolean => {
@@ -169,19 +214,19 @@ export const applyDealerBrandKit = (
     // displaced by discovery tags. Everything else fills the remaining slots.
     required.forEach(pushUnique);
     const cap = Math.max(TARGET_HASHTAG_COUNT, merged.length);
-    for (const t of [...tags, ...AGENCY_DISCOVERY_HASHTAGS]) {
+    for (const t of [...tags, ...discoveryHashtags]) {
       if (merged.length >= cap) break;
       pushUnique(t);
     }
   } else {
-    for (const t of [...required, ...tags, ...AGENCY_DISCOVERY_HASHTAGS]) {
+    for (const t of [...required, ...tags, ...discoveryHashtags]) {
       pushUnique(t);
       if (merged.length >= TARGET_HASHTAG_COUNT) break;
     }
   }
   // Always keep at least brand + 3 discovery if possible
   if (merged.length < 4) {
-    for (const t of AGENCY_DISCOVERY_HASHTAGS) {
+    for (const t of discoveryHashtags) {
       const key = t.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);

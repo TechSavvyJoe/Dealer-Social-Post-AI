@@ -22,6 +22,7 @@ import type { LoginResult, SessionLoginRequest } from "../stores/appStore";
 import { useAppStore } from "../stores/appStore";
 import type { PrimaryImageProfile, PlatformId } from "../services/platformCopy";
 import type { WebsiteDraft } from "../services/websitePublishing";
+import type { DecodedVehicle } from "../services/vinDecoder";
 import { isWalkaroundStudioEnabled } from "../services/walkaroundFlags";
 
 const WALKAROUND_STUDIO_ENABLED = isWalkaroundStudioEnabled(
@@ -117,8 +118,17 @@ interface MainContentProps {
   }) => Promise<WebsiteDraft>;
   onFunMode: (styleName?: string) => Promise<void>;
   onGenerateVideo: (style: VideoStyle, options: VideoRequestOptions) => Promise<string>;
-  /** One-shot caption generator for the alternatives modal. */
-  onGenerateCaptionVariant?: () => Promise<string>;
+  /**
+   * One-shot caption generator for the alternatives modal. Returns the
+   * fully-prepared caption (brand kit + delivery-language gating +
+   * disclosures already applied) — callers must use it as-is, never re-run
+   * prepareCaptionForDelivery on the result.
+   */
+  onGenerateCaptionVariant?: () => Promise<{
+    caption: string;
+    disclosures: string;
+    disclosureCategories: string[];
+  }>;
   onShowSettings?: () => void;
   onShowHistory?: () => void;
   onRequestLogout?: () => void;
@@ -199,6 +209,7 @@ export const MainContent: React.FC<MainContentProps> = ({
         hasRelease?: boolean;
         websiteEnabled?: boolean;
         websiteVehicleDescription?: string;
+        decodedVehicle?: DecodedVehicle;
         capturedRelease?: {
           customerName: string;
           signaturePngDataUrl: string;
@@ -225,6 +236,7 @@ export const MainContent: React.FC<MainContentProps> = ({
         imageAspectRatio: outputProfile?.imageAspectRatio,
         websiteEnabled: meta?.websiteEnabled,
         websiteVehicleDescription: meta?.websiteVehicleDescription,
+        decodedVehicle: meta?.decodedVehicle,
       });
       await onGenerate(
         style,
@@ -270,6 +282,7 @@ export const MainContent: React.FC<MainContentProps> = ({
         postDeliveryParams.websiteEnabled ?? base?.websiteEnabled ?? false,
       websiteVehicleDescription:
         postDeliveryParams.websiteVehicleDescription ?? base?.websiteVehicleDescription,
+      decodedVehicle: base?.decodedVehicle,
     });
     onRemix();
   }, [

@@ -4,15 +4,25 @@ import { Loader2, Check, RefreshCw, Sparkles } from "lucide-react";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
 import { triggerHapticFeedback } from "../utils/haptics";
-import { prepareCaptionForDelivery } from "../utils/complianceDisclosures";
 import { cn } from "../utils/classNames";
 import { toUiMessage } from "../utils/errorMessages";
 
 interface CaptionAlternativesModalProps {
   isOpen: boolean;
   onClose: () => void;
-  /** Returns a single fresh caption; the modal calls this N times in parallel. */
-  generateOne: () => Promise<string>;
+  /**
+   * Returns a single fresh, fully-prepared caption (brand kit +
+   * delivery-language gating + disclosures already applied) — the modal
+   * calls this N times in parallel and must use each result as-is. It
+   * intentionally does NOT re-run prepareCaptionForDelivery itself: a second
+   * pass here has no scenario/brandKit context of its own, so it would drop
+   * the delivery-language gate and re-apply the dealer's brand kit blind.
+   */
+  generateOne: () => Promise<{
+    caption: string;
+    disclosures: string;
+    disclosureCategories: string[];
+  }>;
   /** Caption + (separately) disclosures get merged before being passed back to host. */
   onSelect: (next: {
     text: string;
@@ -21,8 +31,6 @@ interface CaptionAlternativesModalProps {
   }) => void;
   /** How many alternatives to fetch. Default 3. */
   count?: number;
-  /** Dealership-managed words or phrases that must never be delivered. */
-  bannedPhrases?: string;
 }
 
 interface Variant {
@@ -46,7 +54,6 @@ export const CaptionAlternativesModal: React.FC<CaptionAlternativesModalProps> =
   generateOne,
   onSelect,
   count = 3,
-  bannedPhrases,
 }) => {
   const [variants, setVariants] = useState<Variant[]>([]);
   const [picked, setPicked] = useState<number | null>(null);
@@ -59,10 +66,7 @@ export const CaptionAlternativesModal: React.FC<CaptionAlternativesModalProps> =
 
   const runOne = async (id: number): Promise<Variant> => {
     try {
-      const raw = await generateOne();
-      // Split caption from disclosure footer so the editable caption stays
-      // free of the locked compliance block.
-      const prepared = prepareCaptionForDelivery(raw, bannedPhrases);
+      const prepared = await generateOne();
       return {
         id,
         text: prepared.caption,

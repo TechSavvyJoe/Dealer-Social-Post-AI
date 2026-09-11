@@ -414,4 +414,71 @@ describe("ensureUsableCaption", () => {
       },
     );
   });
+
+  describe("deliveryLanguageAllowed", () => {
+    // Recall Completion and Customer Testimonial both require a customer
+    // (customerIdentityRequired: true) but neither is a vehicle
+    // purchase/delivery — the app's own live prompt (services/promptsV2.ts,
+    // deliveryLanguageAllowed: false for both) already forbids "just drove
+    // off in..." language for them. The deterministic fallback used when AI
+    // output fails the quality/identity gate must not contradict that.
+    it("omits delivery/keys-in-hand language and hashtags when false", () => {
+      const caption = buildSafeMarketingCaption({
+        storeName: "Bob Maxey Ford of Howell",
+        customerName: "Sarah",
+        customerIdentityRequired: true,
+        deliveryLanguageAllowed: false,
+      });
+      expect(caption).not.toMatch(/drove off|delivery day|keys in hand/i);
+      expect(caption).not.toMatch(
+        /#(?:NewCarDelivery|JustDelivered|KeysInHand|NewRide)/,
+      );
+      expect(caption).toContain("Sarah");
+    });
+
+    it("keeps today's delivery language when true or unset (customer_delivery, sold_by_salesperson)", () => {
+      const explicit = buildSafeMarketingCaption({
+        storeName: "Bob Maxey Ford of Howell",
+        customerName: "Sarah",
+        vehiclePhrase: "Ford Bronco",
+        customerIdentityRequired: true,
+        deliveryLanguageAllowed: true,
+      });
+      const defaulted = buildSafeMarketingCaption({
+        storeName: "Bob Maxey Ford of Howell",
+        customerName: "Sarah",
+        vehiclePhrase: "Ford Bronco",
+        customerIdentityRequired: true,
+      });
+      for (const caption of [explicit, defaulted]) {
+        expect(caption).toMatch(/drove off/i);
+        expect(caption).toContain("Ford Bronco");
+      }
+    });
+
+    it("end to end via ensureUsableCaption/geminiService's deliveryLanguageAllowedForBrief wiring: a Recall Completion brief never falls back to delivery language", async () => {
+      const { classifyCreativeBrief } = await import("../services/creativeSkills");
+      const { ensureUsableCaption } = await import("./captionQuality");
+      const recallBrief =
+        "Post scenario: Recall Completion.\nScenario: Recall completion — a customer brought their vehicle in for a manufacturer recall and we resolved it the same day.";
+      const scenario = classifyCreativeBrief(recallBrief).scenario;
+      expect(scenario).toBe("recall_complete");
+
+      const { deliveryLanguageAllowedForBrief } = await import("../services/promptsV2");
+      const deliveryLanguageAllowed = deliveryLanguageAllowedForBrief(
+        recallBrief,
+        true,
+      );
+      expect(deliveryLanguageAllowed).toBe(false);
+
+      const result = ensureUsableCaption("HOOK: x", {
+        storeName: "Bob Maxey Ford of Howell",
+        customerName: "Sarah",
+        customerIdentityRequired: true,
+        deliveryLanguageAllowed,
+      });
+      expect(result.usedFallback).toBe(true);
+      expect(result.caption).not.toMatch(/drove off|delivery day/i);
+    });
+  });
 });

@@ -38,6 +38,19 @@ describe("delivery compliance", () => {
     ).toThrow(/Remove prohibited advertising claims?/i);
   });
 
+  it("does not append a vehicle-shopping CTA to a short Recall Completion caption when deliveryLanguageAllowed is false", () => {
+    // A Recall Completion involves a real customer but no vehicle
+    // purchase/delivery — the fourth parameter must reach the body-length
+    // floor filler in utils/brandKit.ts, not just gate the identity check.
+    const result = prepareCaptionForDelivery(
+      "Sarah's recall was completed today. Thanks for trusting our service team!",
+      undefined,
+      { name: "Bob Maxey Ford of Howell" },
+      false,
+    );
+    expect(result.caption).not.toMatch(/behind the wheel|find the ride|delivery day/i);
+  });
+
   it("enforces dealer phrases with normalized, case-insensitive matching", () => {
     const analysis = analyzeCaptionForDelivery(
       "Our BIGGEST—SALE is live now.",
