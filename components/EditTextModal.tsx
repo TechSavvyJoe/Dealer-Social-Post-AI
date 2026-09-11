@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { triggerHapticFeedback } from "../utils/haptics";
+import { toUiMessage } from "../utils/errorMessages";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
 
@@ -36,9 +37,7 @@ export const EditTextModal: React.FC<EditTextModalProps> = ({
         await onSubmit(prompt.trim());
       } catch (error) {
         setSubmitError(
-          error instanceof Error
-            ? error.message
-            : "The caption could not be changed. Try again.",
+          toUiMessage(error, "The caption could not be changed. Try again."),
         );
       }
     }

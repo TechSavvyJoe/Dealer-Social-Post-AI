@@ -8,6 +8,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { triggerHapticFeedback } from "../utils/haptics";
+import { toUiMessage } from "../utils/errorMessages";
 import { Modal } from "./ui/Modal";
 import {
   isMobilePhotoDevice,
@@ -167,10 +168,10 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
     } catch (error) {
       setReviewError({
         imageSrc,
-        message:
-          error instanceof Error
-            ? error.message
-            : "This photo could not be prepared. Choose another photo and try again.",
+        message: toUiMessage(
+          error,
+          "This photo could not be prepared. Choose another photo and try again.",
+        ),
       });
     } finally {
       setIsExporting(false);

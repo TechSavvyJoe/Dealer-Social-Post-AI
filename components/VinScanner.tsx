@@ -263,7 +263,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
         setError(
           msg.toLowerCase().includes("permission")
             ? "Camera permission was denied. Use Manual entry instead."
-            : `Camera unavailable: ${msg}`,
+            : `Camera unavailable: ${toUiMessage(err, "Could not start the camera.")}`,
         );
         logError("vin.scanner.camera_error", { message: msg });
       }

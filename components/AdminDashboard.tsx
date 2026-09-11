@@ -905,9 +905,7 @@ export const AdminDashboard: React.FC = () => {
             >
               <p className="font-semibold">Roster unavailable</p>
               <p className="mt-1 text-error-200 [.theme-light_&]:text-error-800">
-                {peopleError instanceof Error
-                  ? peopleError.message
-                  : "Try refreshing this view."}
+                {toUiMessage(peopleError, "Try refreshing this view.")}
               </p>
             </div>
           ) : null}

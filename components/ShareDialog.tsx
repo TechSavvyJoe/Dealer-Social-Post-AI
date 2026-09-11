@@ -230,10 +230,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         ) {
           return;
         }
-        const detail =
-          err instanceof Error && err.message
-            ? err.message
-            : "Check your connection and try again.";
+        const detail = toUiMessage(err, "Check your connection and try again.");
         setPreparation((current) => ({
           ...current,
           [target.id]: {
