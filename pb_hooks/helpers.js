@@ -2969,13 +2969,20 @@ function sharedStore() {
 /**
  * Read a bucket from the pool-shared store, falling back to the per-VM map.
  * Values are JSON so the shape survives whatever the store does with objects.
+ *
+ * A store miss falls through to the per-VM map rather than returning
+ * undefined. writeSharedBucket parks a value in that map when `store.set`
+ * throws; if reads never looked there, a store that accepts reads but
+ * rejects writes would make every rate limit and concurrency cap start a
+ * fresh bucket on every request — fully open, with nothing logged. That is
+ * the one asymmetry that contradicted the "never fails open" promise above.
  */
 function readSharedBucket(prefix, localMap, key) {
   const store = sharedStore();
   if (!store) return localMap[key];
   try {
     const raw = store.get(prefix + key);
-    if (!raw) return undefined;
+    if (!raw) return localMap[key];
     return typeof raw === "string" ? JSON.parse(raw) : raw;
   } catch (_e) {
     return localMap[key];

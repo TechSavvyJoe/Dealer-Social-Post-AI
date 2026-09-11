@@ -397,3 +397,48 @@ describe("an unauthenticated flood cannot evict a dealership's throttle", () => 
     );
   });
 });
+
+/**
+ * The per-VM fallback exists so a broken store degrades to per-runtime
+ * counting instead of no counting. The write side always honoured that; the
+ * read side did not. writeSharedBucket parked a value in the local map when
+ * `store.set` threw, but readSharedBucket returned undefined on a store miss
+ * without ever consulting that map, so a store that accepted reads and
+ * rejected writes made every limit start a fresh bucket on every request —
+ * fully open, silently. Found by a pre-merge review that built exactly that
+ * store; these tests keep it built.
+ */
+describe("a store that reads but will not write still enforces every limit", () => {
+  const makeReadOnlyStore = () => {
+    const data = new Map<string, unknown>();
+    return {
+      get: (k: string) => data.get(k),
+      set: () => {
+        throw new Error("store is read-only");
+      },
+      remove: (k: string) => data.delete(k),
+      getAll: () => Object.fromEntries(data),
+    };
+  };
+
+  it("keeps the per-minute rate limit closed", () => {
+    runtime.$app = { store: () => makeReadOnlyStore() };
+    const vm = loadVm();
+    let allowed = 0;
+    for (let i = 0; i < 50; i += 1) {
+      if (vm.checkProxyRateLimit("dealer:ro", 3, 60_000).ok) allowed += 1;
+    }
+    // A limit of 3 means 3, not 50.
+    expect(allowed).toBe(3);
+  });
+
+  it("keeps the provider concurrency cap closed", () => {
+    runtime.$app = { store: () => makeReadOnlyStore() };
+    const vm = loadVm();
+    let granted = 0;
+    for (let i = 0; i < 20; i += 1) {
+      if (vm.acquireProxyConcurrency("provider:ro", 2).ok) granted += 1;
+    }
+    expect(granted).toBe(2);
+  });
+});
