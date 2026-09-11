@@ -197,4 +197,221 @@ describe("ensureUsableCaption", () => {
       ),
     ).toBe(false);
   });
+
+  describe("shortened references to a multi-word dealership name", () => {
+    // Bob Maxey Ford of Howell (a real dealer name shape): a caption almost
+    // never repeats the configured dealer name verbatim. "Ford" or "Maxey
+    // Ford" alone, immediately followed by a verb like "is"/"has", has the
+    // exact grammar this scan exists to catch in a real customer name — so
+    // without allowing the dealer's own name words, every delivery caption
+    // for this dealer failed the identity check, whether or not a customer
+    // name was ever supplied.
+    const dealerName = "Bob Maxey Ford of Howell";
+
+    it.each([
+      "Our team at Bob Maxey Ford of Howell is proud to hand over the keys.",
+      "Big smiles today! Our team at Bob Maxey Ford is proud to hand over the keys.",
+      "Big smiles today! Ford is proud to help another family find their next ride.",
+      "Maxey Ford has done it again — another vehicle delivered with a smile.",
+    ])(
+      "allows the dealership's own name however the caption shortens it: %s",
+      (caption) => {
+        expect(
+          captionUsesOnlyExpectedCustomer(caption, undefined, {
+            allowedPhrases: [dealerName],
+            rejectAnyCustomerIdentity: true,
+          }),
+        ).toBe(true);
+      },
+    );
+
+    it("still rejects a genuine unauthorized customer name for that same dealer", () => {
+      expect(
+        captionUsesOnlyExpectedCustomer(
+          "Congrats to Sarah Jenkins on her brand new Bronco!",
+          undefined,
+          { allowedPhrases: [dealerName], rejectAnyCustomerIdentity: true },
+        ),
+      ).toBe(false);
+    });
+
+    it("does not let adjacent dealer-name-word placeholders collide into a false leftover-name match", () => {
+      // Three consecutive allowed words ("Bob", "Maxey", "Ford") each scrub to
+      // the same placeholder; a naive implementation can make those
+      // placeholders themselves look like "Customer <Capitalized>", the
+      // pattern that is supposed to catch a real leaked surname.
+      expect(
+        captionUsesOnlyExpectedCustomer(
+          "Bob Maxey Ford is proud to help every driver in town.",
+          undefined,
+          { allowedPhrases: [dealerName], rejectAnyCustomerIdentity: true },
+        ),
+      ).toBe(true);
+    });
+
+    it("end to end: the exact model behavior that blocked every delivery post falls back cleanly when it still fails", () => {
+      const shortened =
+        "Big smiles today! Ford is proud to help another family find their next ride home.\n\n#BobMaxeyFordOfHowell";
+      const result = ensureUsableCaption(shortened, {
+        storeName: dealerName,
+        customerIdentityRequired: true,
+      });
+      expect(result.usedFallback).toBe(false);
+      expect(result.caption).toBe(shortened);
+    });
+
+    it.each([
+      // A dealership is routinely named after real people, so a bare word
+      // wide enough to excuse "Ford is proud..." is also a plausible real
+      // first or last name. These must still be rejected: the exemption
+      // above is scoped to the bare "word, then verb" shape only, never to
+      // the deliberate customer-naming patterns below.
+      "Congrats to Bob Maxey on his brand new Explorer!",
+      "Congrats to Ford on his brand new Explorer!",
+      "Meet Maxey! The whole team is excited to celebrate this delivery day.",
+    ])(
+      "still rejects a real customer whose name collides with a dealer-name word: %s",
+      (caption) => {
+        expect(
+          captionUsesOnlyExpectedCustomer(caption, undefined, {
+            allowedPhrases: [dealerName],
+            rejectAnyCustomerIdentity: true,
+          }),
+        ).toBe(false);
+      },
+    );
+
+    it("still rejects a real customer whose name collides with a vehicle-phrase word", () => {
+      expect(
+        captionUsesOnlyExpectedCustomer(
+          "Congrats to Explorer on the big purchase today!",
+          undefined,
+          {
+            allowedPhrases: [dealerName, "2025 Ford Explorer"],
+            rejectAnyCustomerIdentity: true,
+          },
+        ),
+      ).toBe(false);
+    });
+
+    // A dealer-name word forgiven in the bare "word, then verb" shape must not
+    // shield an unrelated name joined next to it in the same list — the
+    // exemption has to be applied per-token against the unmodified caption,
+    // never by erasing the dealer word from the text before matching (that
+    // breaks the list match itself and loses the other name along with it).
+    it.each([
+      "Jordan and Ford are picking up their new Explorer today.",
+      "For Jordan and Ford are celebrating today.",
+    ])(
+      "still catches an unrelated unauthorized name list-joined next to a forgiven dealer word: %s",
+      (caption) => {
+        expect(
+          captionUsesOnlyExpectedCustomer(caption, undefined, {
+            allowedPhrases: [dealerName],
+            rejectAnyCustomerIdentity: true,
+          }),
+        ).toBe(false);
+      },
+    );
+
+    it("still catches a real two-word personal name with no list separator ('Sarah Ford is...')", () => {
+      // CUSTOMER_NAME_TOKEN only spans a single capitalized word for the
+      // bare-action pattern — a plain space never joins two words into one
+      // candidate the way "and"/"&" does. So "Sarah Ford is thrilled..."
+      // only ever yields "Ford" as a candidate, and "Sarah" is invisible to
+      // the match entirely; forgiving "Ford" there would ship the whole real
+      // name. This is the single most ordinary way to phrase a name, and the
+      // surname alone coinciding with a dealer/vehicle word is realistic.
+      expect(
+        captionUsesOnlyExpectedCustomer(
+          "Sarah Ford is thrilled with her new Explorer!",
+          undefined,
+          { allowedPhrases: [dealerName], rejectAnyCustomerIdentity: true },
+        ),
+      ).toBe(false);
+    });
+
+    it("still forgives two consecutive dealer-name words together ('Maxey Ford has...')", () => {
+      // The preceding-word check must not reject a legitimate two-word (or
+      // longer) run of the dealer's OWN name just because it is more than
+      // one word — only an unrelated word ahead of the forgiven one should
+      // block the exemption.
+      expect(
+        captionUsesOnlyExpectedCustomer(
+          "Maxey Ford has done it again — another vehicle delivered with a smile.",
+          undefined,
+          { allowedPhrases: [dealerName], rejectAnyCustomerIdentity: true },
+        ),
+      ).toBe(true);
+    });
+
+    it("still catches a real name hiding behind a legitimate two-word dealer-name chain ('Sarah Maxey Ford is...')", () => {
+      // "[Founder first] [Founder last] [Brand]" is a standard car-dealer
+      // naming convention, so the allowed dealer name is itself routinely
+      // two consecutive words ("Maxey Ford"). A single lookback hop isn't
+      // enough to guard that: a genuinely unrelated third word one step
+      // further back ("Sarah") must still be caught, not hidden behind the
+      // already-legitimate two-word run sitting right in front of it.
+      expect(
+        captionUsesOnlyExpectedCustomer(
+          "Sarah Maxey Ford is thrilled with her new Explorer!",
+          undefined,
+          { allowedPhrases: [dealerName], rejectAnyCustomerIdentity: true },
+        ),
+      ).toBe(false);
+    });
+
+    it("still catches a comma-separated direct address before a forgiven dealer word ('Sarah, Ford is...')", () => {
+      // A vocative opener ("Name, sentence.") is at least as natural a
+      // caption shape as the plain-space "Firstname Lastname" case above,
+      // and the comma broke the original lookback (it only tolerated plain
+      // whitespace between the preceding word and the match).
+      expect(
+        captionUsesOnlyExpectedCustomer(
+          "Sarah, Ford is proud to help you find your next vehicle.",
+          undefined,
+          { allowedPhrases: [dealerName], rejectAnyCustomerIdentity: true },
+        ),
+      ).toBe(false);
+    });
+
+    it("does not misread a comma-separated opener from the OTHER customer-naming patterns as an unrelated name ('Helping, Ford is...')", () => {
+      // Tolerating a comma before the forgiven word means a caption opener
+      // like "Helping," or "Congratulations," can now sit right before it
+      // too. Those words are the same opener vocabulary every OTHER pattern
+      // in this file already matches on — treating them as an unrelated
+      // customer would falsely reject a caption naming no one.
+      expect(
+        captionUsesOnlyExpectedCustomer(
+          "Helping, Ford is thrilled to be part of your family!",
+          undefined,
+          { allowedPhrases: [dealerName], rejectAnyCustomerIdentity: true },
+        ),
+      ).toBe(true);
+    });
+
+    // The comma fix above only tolerated a comma before the forgiven word.
+    // This file already trusts a wider headline-punctuation set elsewhere
+    // (customerContextPatterns[6]/[7]: comma, colon, "!", en/em dash, hyphen —
+    // "Jordan — new car day!" is an existing test), so a vocative opener
+    // written with any of THOSE separators must be caught too, not just a
+    // comma.
+    it.each([
+      "Sarah — Ford is proud to help you find your next vehicle.",
+      "Sarah: Ford is proud to help you find your next vehicle.",
+      "Sarah! Ford is proud to help you find your next vehicle.",
+      "Sarah – Ford is proud to help you find your next vehicle.",
+      "Sarah - Ford is proud to help you find your next vehicle.",
+    ])(
+      "still catches a direct address opener punctuated with something other than a comma: %s",
+      (caption) => {
+        expect(
+          captionUsesOnlyExpectedCustomer(caption, undefined, {
+            allowedPhrases: [dealerName],
+            rejectAnyCustomerIdentity: true,
+          }),
+        ).toBe(false);
+      },
+    );
+  });
 });

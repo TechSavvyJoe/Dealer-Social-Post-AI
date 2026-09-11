@@ -220,7 +220,11 @@ export interface CaptionCustomerIdentityOptions {
   rejectAnyCustomerIdentity?: boolean;
 }
 
-const replaceAllowedIdentityPhrase = (text: string, phrase?: string): string => {
+const replaceAllowedIdentityPhrase = (
+  text: string,
+  phrase?: string,
+  placeholder = " Customer ",
+): string => {
   const normalized = (phrase || "").normalize("NFKC").replace(/\s+/g, " ").trim();
   if (!normalized) return text;
   return text.replace(
@@ -228,27 +232,172 @@ const replaceAllowedIdentityPhrase = (text: string, phrase?: string): string => 
       `(^|[^\\p{L}\\p{N}])${escapeIdentityPattern(normalized)}(?=$|[^\\p{L}\\p{N}])`,
       "giu",
     ),
-    "$1 Customer ",
+    `$1${placeholder}`,
   );
 };
 
-const namesFromCustomerContext = (caption: string): string[] => {
+const ALLOWED_PHRASE_STOPWORDS = new Set([
+  "of",
+  "the",
+  "and",
+  "at",
+  "in",
+  "a",
+  "an",
+  "inc",
+  "llc",
+  "co",
+  "corp",
+]);
+
+/**
+ * A caption almost never repeats a dealership's or vehicle's full configured
+ * name verbatim — "Bob Maxey Ford of Howell" becomes "Ford" or "Maxey Ford"
+ * in natural prose. Individual words are grounded because they came from the
+ * dealer's own configured name/vehicle description, not from caption text —
+ * but a dealership is routinely named after real people ("Bob Maxey Ford"),
+ * so a bare word this loose ("Maxey", "Ford") is also a plausible real
+ * customer name and must not be whitelisted everywhere. It is only widened
+ * for the one pattern below that actually needs it.
+ */
+const allowedPhraseTokens = (phrase?: string): string[] => {
+  const normalized = (phrase || "").normalize("NFKC").trim();
+  if (!normalized) return [];
+  return normalized
+    .split(/\s+/)
+    .filter(
+      (word) => word.length > 1 && !ALLOWED_PHRASE_STOPWORDS.has(word.toLowerCase()),
+    );
+};
+
+/**
+ * Index into `customerContextPatterns` of the plain "X is/has/drove ..."
+ * shape: any capitalized word immediately before a common verb, with no
+ * "Congrats/Meet/Welcome/For/With" framing. It is the most generic pattern —
+ * the only one ordinary prose about the dealership itself naturally
+ * triggers ("Ford is proud to...", "Maxey Ford has done it again") — so it
+ * is the only pattern where a dealer/vehicle word is forgiven below. Every
+ * other, more deliberate customer-naming pattern ("Congratulations to X",
+ * "Meet X", "Welcome home, X") keeps requiring the allowed phrase's exact
+ * configured text, unchanged, so a real customer who happens to share a
+ * word with the dealer's own name is still caught wherever a caption
+ * actually goes out of its way to name someone.
+ */
+const BARE_ACTION_PATTERN_INDEX = 2;
+
+/**
+ * `CUSTOMER_NAME_TOKEN` only ever spans a single capitalized word for this
+ * pattern — a plain space (as opposed to "and"/"&"/"+"/"/") never joins two
+ * tokens into one candidate. So a real two-word name with no list separator
+ * — "Sarah Ford is thrilled..." — only ever yields "Ford" as a candidate;
+ * "Sarah" is invisible to the match entirely. Forgiving "Ford" there would
+ * silently ship "Sarah Ford" whole. This checks whether a DIFFERENT
+ * (non-dealer/vehicle, non-filler) capitalized word sits somewhere before
+ * the matched token — if so, it's a real personal name, not the dealer's
+ * own name, and the token must not be forgiven. The trailing separator
+ * reuses the exact headline-punctuation class `customerContextPatterns[6]`
+ * and `[7]` already trust ("Jordan — new car day!") — not just a plain
+ * space — so a vocative opener written with a colon, dash, or exclamation
+ * point ("Sarah — Ford is proud...") is caught too.
+ */
+const CHAIN_WORD_PATTERN = new RegExp(
+  `(?:^|[^\\p{L}\\p{N}])(${CUSTOMER_NAME_TOKEN})[,:!\\s–—-]*$`,
+  "u",
+);
+
+/**
+ * The literal opener vocabulary every OTHER `customerContextPatterns` entry
+ * matches on ("Congrats to X", "Meet X", "Welcome home, X", ...). Punctuation
+ * tolerance above means one of these words can now sit immediately before a
+ * forgiven token too ("Congratulations, Ford is thrilled...") — without
+ * this, that would misread as a "Congratulations" customer and reject a
+ * caption naming no one. Reusing this already-audited set (rather than a
+ * new heuristic) keeps the exemption from becoming its own surface to get
+ * wrong. Includes bare "shout" alongside "shoutout"/"shout-out" since
+ * pattern[0]'s own regex (`[Ss]hout(?:-?out)?`) treats it the same way.
+ */
+const CUSTOMER_CONTEXT_TRIGGER_WORDS = new Set([
+  "congratulations",
+  "congrats",
+  "cheers",
+  "shout",
+  "shoutout",
+  "shout-out",
+  "meet",
+  "welcoming",
+  "welcome",
+  "celebrate",
+  "helping",
+  "thanking",
+  "congratulating",
+  "for",
+  "with",
+  "from",
+  "delivered",
+]);
+
+/**
+ * "[Founder first] [Founder last] [Brand]" is the standard car-dealer
+ * naming convention this feature exists to support — the ALLOWED dealer
+ * name itself is routinely two or more consecutive capitalized words
+ * ("Bob Maxey Ford"). So a single lookback hop isn't enough: it must walk
+ * backward through however many consecutive ALLOWED words precede the
+ * match before concluding nothing unrelated is there — otherwise a third,
+ * genuinely unrelated word ("Sarah Maxey Ford is thrilled...") hides behind
+ * the already-legitimate two-word dealer run right in front of it.
+ */
+const precededByUnrelatedName = (
+  caption: string,
+  matchIndex: number,
+  allowedWords: ReadonlySet<string>,
+): boolean => {
+  let remaining = caption.slice(0, matchIndex);
+  for (;;) {
+    const match = remaining.match(CHAIN_WORD_PATTERN);
+    if (!match) return false;
+    const lower = match[1].toLocaleLowerCase("en-US");
+    if (NON_CUSTOMER_CONTEXT_WORDS.has(lower)) return false;
+    if (CUSTOMER_CONTEXT_TRIGGER_WORDS.has(lower)) return false;
+    if (!allowedWords.has(lower)) return true;
+    remaining = remaining.slice(0, match.index);
+  }
+};
+
+/**
+ * Extracts every name-shaped candidate `customerContextPatterns` finds in
+ * the UNMODIFIED caption, then drops a candidate only if it is individually
+ * an allowed dealer/vehicle word AND came from the bare-action pattern AND
+ * is not itself part of a longer, unrelated personal name. Filtering after
+ * matching (rather than blanking the word out of the text first) matters: a
+ * name list like "Jordan and Ford are picking up..." must still catch
+ * "Jordan" even though "Ford" is forgiven — pre-erasing "Ford" from the text
+ * would break the list match itself and lose "Jordan" too.
+ */
+const namesFromCustomerContext = (
+  caption: string,
+  allowedWords: ReadonlySet<string> = new Set(),
+): string[] => {
   const found: string[] = [];
-  for (const pattern of customerContextPatterns) {
+  customerContextPatterns.forEach((pattern, patternIndex) => {
     pattern.lastIndex = 0;
     for (const match of caption.matchAll(pattern)) {
       const group = match[1] || "";
+      const isBareAction = patternIndex === BARE_ACTION_PATTERN_INDEX;
+      const precededByForeignName =
+        isBareAction &&
+        precededByUnrelatedName(caption, match.index ?? 0, allowedWords);
       for (const token of group.split(/\s+and\s+|\s*(?:&|\+|\/)\s*/i)) {
         const normalized = token.normalize("NFKC").trim();
-        if (
-          normalized &&
-          !NON_CUSTOMER_CONTEXT_WORDS.has(normalized.toLocaleLowerCase("en-US"))
-        ) {
-          found.push(normalized);
+        if (!normalized) continue;
+        const lower = normalized.toLocaleLowerCase("en-US");
+        if (NON_CUSTOMER_CONTEXT_WORDS.has(lower)) continue;
+        if (isBareAction && allowedWords.has(lower) && !precededByForeignName) {
+          continue;
         }
+        found.push(normalized);
       }
     }
-  }
+  });
   return found;
 };
 
@@ -300,7 +449,19 @@ export const captionUsesOnlyExpectedCustomer = (
   ) {
     return false;
   }
-  return namesFromCustomerContext(identityScan).length === 0;
+
+  // The bare-action exemption is applied by filtering candidates found
+  // against the caption AFTER the full-phrase-only scrub above, never by
+  // blanking a dealer/vehicle word out of the text — a text edit here would
+  // corrupt an adjacent, unrelated multi-name match (see
+  // BARE_ACTION_PATTERN_INDEX's docstring).
+  const allowedWords = new Set<string>();
+  for (const phrase of options.allowedPhrases || []) {
+    for (const token of allowedPhraseTokens(phrase)) {
+      allowedWords.add(token.toLowerCase());
+    }
+  }
+  return namesFromCustomerContext(identityScan, allowedWords).length === 0;
 };
 
 /**
