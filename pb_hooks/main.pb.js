@@ -4052,16 +4052,22 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
     // A rejection without a reason leaves the salesperson guessing: the result
     // screen tells them to "create another post with the requested changes",
     // so there have to be requested changes to show. Approvals need none.
+    //
+    // Enforced client-side (components/ApprovalQueue.tsx), not here. Fly
+    // ships this backend before Vercel ships the frontend that sends
+    // rejection_reason (.github/workflows/fly-deploy.yml: release-frontend
+    // needs: deploy), and the manager console the field replaced sent none at
+    // all. A hard 400 here would break every rejection for the length of that
+    // window, and again for any dealer stuck on a cached bundle past it. A
+    // missing reason instead falls back to the exact copy the salesperson saw
+    // before this feature existed (components/PostResult.tsx's
+    // approvalGateMessage: "A manager rejected this creative..."), so nothing
+    // breaks — a rejection without a reason is simply as informative as every
+    // rejection used to be.
     const rejectionReason = helpers.assertString(
       (body.rejection_reason || "").toString().trim(),
       280,
     );
-    if (decision === "rejected" && !rejectionReason) {
-      return c.json(400, {
-        error: "Tell the salesperson what to change before rejecting this post.",
-        code: "REJECTION_REASON_REQUIRED",
-      });
-    }
 
     if (
       decision === "approved" &&

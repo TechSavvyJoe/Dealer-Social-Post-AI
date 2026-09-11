@@ -13,9 +13,38 @@ const read = (p: string) => readFileSync(resolve(process.cwd(), p), "utf8");
 describe("a rejection has to say what to change", () => {
   const hook = read("pb_hooks/main.pb.js");
 
-  it("refuses a rejection with no reason", () => {
-    expect(hook).toContain('code: "REJECTION_REASON_REQUIRED"');
-    expect(hook).toContain('if (decision === "rejected" && !rejectionReason)');
+  it("requires a reason in the manager UI, not on the wire", () => {
+    // The backend used to hard-fail a rejection with no reason
+    // (400 REJECTION_REASON_REQUIRED). That broke during every deploy: Fly
+    // ships this backend before Vercel ships the frontend that sends
+    // rejection_reason (release-frontend `needs: deploy` in
+    // .github/workflows/fly-deploy.yml), and the manager console this feature
+    // replaced never sent the field at all — a manager on the old bundle, or
+    // anyone on a cached one past that window, got a broken reject button
+    // until the new bundle was live everywhere. The requirement now lives
+    // only where a human enters it.
+    expect(hook).not.toContain("REJECTION_REASON_REQUIRED");
+    const queue = read("components/ApprovalQueue.tsx");
+    expect(queue).toContain('if (status === "rejected" && !reason.trim())');
+  });
+
+  it("accepts a rejection with no reason rather than failing the request", () => {
+    // The fallback that makes the above safe: components/PostResult.tsx's
+    // approvalGateMessage already renders sensible copy when
+    // rejectionReason is empty ("A manager rejected this creative...") — the
+    // exact message a salesperson saw before this feature existed. A missing
+    // reason must reach that branch, not a 400.
+    const anchor = [
+      "if (",
+      '      decision === "approved" &&',
+      '      (!record.getString("caption")',
+    ].join("\n");
+    const decisionBlock = hook.slice(
+      hook.indexOf("const decision = helpers.assertEnum(body.approval_status"),
+      hook.indexOf(anchor),
+    );
+    expect(decisionBlock).not.toContain("return c.json(400");
+    expect(decisionBlock).toContain("const rejectionReason = helpers.assertString(");
   });
 
   it("does not require one to approve", () => {
