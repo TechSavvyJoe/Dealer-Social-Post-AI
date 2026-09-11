@@ -1847,9 +1847,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         setPreparedSave(null);
         setPreparedSaveForKey(null);
         setMediaPreparationError(
-          err instanceof Error
-            ? err.message
-            : "The exact platform file could not be prepared.",
+          toUiMessage(err, "The exact platform file could not be prepared."),
         );
       })
       .finally(() => {
@@ -2060,13 +2058,26 @@ export const PostResult: React.FC<PostResultProps> = ({
       // disclosure for four of five realistic wordings.
       const attributed = appendDealershipMention(base, id, currentDealer);
       const scanned = analyzeCaptionForDelivery(attributed, bannedPhrases);
+      // Scan the disclosure-prepended text (unchanged from before), so the
+      // identity-safety and prohibited-claims checks see exactly what the
+      // caption will look like once a delivery path adds requiredPrefix.
       const prepared = {
         ...scanned,
         caption: prependEmployeeDisclosure(scanned.caption, currentDealer),
       };
       const identitySafe = customerIdentityIsSafe(prepared.caption);
       out[id] = {
-        text: prepared.caption,
+        // Body only — `scanned.caption`, NOT `prepared.caption`. Every
+        // consumer of this pack (handleShareDelivery's comment two screens
+        // down, contentForTarget in ShareDialog, the fitter in
+        // services/publishTargets.ts) already treats requiredPrefix as the
+        // one channel for the disclosure. Storing the prepended string here
+        // duplicated it: ShareDialog spreads `...content` (which still
+        // carries requiredPrefix) and only overrides `text`, so the fitter
+        // added the disclosure a second time on top of a caption that
+        // already opened with it, corrupting both the published post and the
+        // budget it was fit against.
+        text: scanned.caption,
         disclosures: prepared.disclosures || undefined,
         blockedReason: !identitySafe
           ? identityGateMessage

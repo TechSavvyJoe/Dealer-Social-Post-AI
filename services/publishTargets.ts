@@ -26,6 +26,7 @@ import {
   invokeWebShareNow,
   prepareMediaForSave,
 } from "../utils/mediaSave";
+import { captionIncludesEmployeeDisclosure } from "../utils/complianceDisclosures";
 
 export type PublishStatus =
   | {
@@ -534,9 +535,19 @@ export const fitPublishCaptionToBudget = (
     .filter(Boolean)
     .join("\n\n");
   const separator = "\n\n";
+  // Defense in depth: `text` is supposed to be body-only by the time it
+  // reaches here, and every known caller now honours that. A caller that
+  // slips and hands over text with the disclosure already baked in (the
+  // shape of a real bug found and fixed once already — see PostResult.tsx's
+  // sharePlatformCaptions) must not get it added a second time. This never
+  // STRIPS anything, only skips one insertion, so it carries none of the risk
+  // of the startsWith-splitting approach abandoned above: nothing here tries
+  // to separate a combined string back into (prefix, body).
   const withPrefix = (value: string) =>
     requiredPrefix && value
-      ? `${requiredPrefix}${separator}${value}`
+      ? captionIncludesEmployeeDisclosure(value, requiredPrefix)
+        ? value
+        : `${requiredPrefix}${separator}${value}`
       : requiredPrefix || value;
 
   if (!protectedSuffix) {

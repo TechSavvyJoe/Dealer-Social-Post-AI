@@ -282,3 +282,61 @@ describe("the meter measures what is actually delivered", () => {
     );
   });
 });
+
+/**
+ * A destination-specific caption that already carries the disclosure, combined
+ * with `requiredPrefix` for the same disclosure, must never publish it twice.
+ *
+ * The share flow builds one caption per destination (PostResult.tsx's
+ * sharePlatformCaptions) and separately threads `requiredPrefix` through
+ * every PublishContent so the fitter can protect it from truncation. Those
+ * two channels briefly disagreed: the per-destination caption had the
+ * disclosure baked in AND `requiredPrefix` carried it too, so
+ * fitPublishCaptionToBudget added it a second time — corrupting the
+ * published post and silently truncating real caption content to make room
+ * for the duplicate.
+ */
+describe("a caption and requiredPrefix never publish the disclosure twice", () => {
+  const dealer = { name: "Bob Maxey Ford" };
+  const disclosure = buildEmployeeDisclosure(dealer);
+
+  it("does not double the disclosure when the caption text already carries it", () => {
+    const body = "Brand-new 2026 F-150 XLT just rolled onto the lot. ".repeat(4);
+    // This is the exact shape a regressed caller would produce: a
+    // destination caption built with the disclosure already prepended,
+    // handed to the fitter alongside requiredPrefix for the same disclosure.
+    const textAlreadyPrefixed = prependEmployeeDisclosure(body, dealer);
+    const fitted = fitPublishCaptionToBudget(
+      { text: textAlreadyPrefixed, requiredPrefix: disclosure },
+      280,
+    );
+    expect(fitted.split(disclosure).length - 1).toBe(1);
+    expect(fitted.length).toBeLessThanOrEqual(280);
+  });
+
+  it("still adds the disclosure exactly once for the correct body-only shape", () => {
+    const body = "Brand-new 2026 F-150 XLT just rolled onto the lot.";
+    const fitted = fitPublishCaptionToBudget(
+      { text: body, requiredPrefix: disclosure },
+      280,
+    );
+    expect(fitted.split(disclosure).length - 1).toBe(1);
+    expect(fitted).toContain(body);
+  });
+
+  it("keeps components/PostResult.tsx's share-caption pack body-only", () => {
+    // A source guard for the actual regression site: sharePlatformCaptions
+    // must store the pre-prepend caption, not the disclosure-prepended one,
+    // because requiredPrefix is the single channel every downstream consumer
+    // (ShareDialog's contentForTarget, the fitter) already relies on.
+    const source = readFileSync(
+      resolve(process.cwd(), "components/PostResult.tsx"),
+      "utf8",
+    );
+    const memoStart = source.indexOf("const sharePlatformCaptions = useMemo");
+    const memoEnd = source.indexOf("selectCaptionPlatform", memoStart);
+    const memo = source.slice(memoStart, memoEnd);
+    expect(memo).toContain("text: scanned.caption");
+    expect(memo).not.toContain("text: prepared.caption");
+  });
+});
