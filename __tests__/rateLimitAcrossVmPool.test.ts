@@ -286,24 +286,97 @@ describe("an unauthenticated flood cannot evict a dealership's throttle", () => 
 
   it("names every IP-keyed call site, so a new one cannot land in the tenant table", () => {
     // A key built from a client IP has cardinality an attacker picks. Adding
-    // one without `ipKeyed` silently reopens the eviction path, and nothing
-    // else in the suite would notice.
-    const sources = [
-      ["pb_hooks/main.pb.js", '"telemetry:" + helpers.clientIP(c)'],
-      ["pb_hooks/walkarounds.js", '"walkaround-app:" + helpers.clientIP(c)'],
-      ["pb_hooks/helpers.js", '"auth-sample:" + kind + ":" + (ip || "unknown")'],
-    ] as const;
-    for (const [file, keyExpression] of sources) {
+    // one without `ipKeyed` silently reopens the eviction path.
+    //
+    // A hardcoded list of call sites was tried here first, and it went stale
+    // the same day it was written: a fourth call
+    // (pb_hooks/walkarounds.js, "walkaround-internal:" + helpers.clientIP(c))
+    // already existed, unconverted, and this test's own title — "names every
+    // IP-keyed call site" — was false while it passed. Discovering every
+    // checkProxyRateLimit call whose key argument mentions clientIP(c), by
+    // scanning the real files rather than naming sites in advance, is the
+    // only way this test's claim can stay true as new call sites are added.
+    const files = [
+      "pb_hooks/main.pb.js",
+      "pb_hooks/walkarounds.js",
+      "pb_hooks/helpers.js",
+    ];
+    const CALL = "checkProxyRateLimit(";
+    let ipKeyedCallsFound = 0;
+    for (const file of files) {
       const source = readFileSync(resolve(process.cwd(), file), "utf8");
-      const at = source.indexOf(keyExpression);
-      expect(at, `${file} no longer builds ${keyExpression}`).toBeGreaterThan(-1);
-      // The option belongs to the same call; 400 characters covers the widest
-      // of these three after prettier wraps them.
-      expect(
-        source.slice(at, at + 400),
-        `${file}: ${keyExpression} is rate-limited without { ipKeyed: true }`,
-      ).toContain("ipKeyed: true");
+      let searchFrom = 0;
+      for (;;) {
+        const callStart = source.indexOf(CALL, searchFrom);
+        if (callStart === -1) break;
+        const argsStart = callStart + CALL.length;
+        let depth = 1;
+        let i = argsStart;
+        for (; i < source.length && depth > 0; i++) {
+          if (source[i] === "(") depth++;
+          else if (source[i] === ")") depth--;
+        }
+        const call = source.slice(callStart, i);
+        searchFrom = i;
+        const keyArg = call.slice(
+          0,
+          call.indexOf(",") === -1 ? call.length : call.indexOf(","),
+        );
+        if (!keyArg.includes("clientIP(c)")) continue;
+        ipKeyedCallsFound += 1;
+        const line = source.slice(0, callStart).split("\n").length;
+        expect(
+          call,
+          `${file}:${line}: an IP-keyed key is rate-limited without { ipKeyed: true }`,
+        ).toContain("ipKeyed: true");
+      }
     }
+    // The `auth-sample:` key in helpers.js is IP-keyed too (it embeds `ip`,
+    // a caller-supplied client IP) but is not built with `clientIP(c)`
+    // textually, so the scan above cannot see it; pin it by its own shape so
+    // it is not silently dropped from coverage.
+    const helpersSource = readFileSync(
+      resolve(process.cwd(), "pb_hooks/helpers.js"),
+      "utf8",
+    );
+    const authSampleKey = '"auth-sample:" + kind + ":" + (ip || "unknown")';
+    const at = helpersSource.indexOf(authSampleKey);
+    expect(
+      at,
+      "pb_hooks/helpers.js no longer builds the auth-sample key",
+    ).toBeGreaterThan(-1);
+    expect(
+      helpersSource.slice(at, at + 400),
+      "pb_hooks/helpers.js: the auth-sample key is rate-limited without { ipKeyed: true }",
+    ).toContain("ipKeyed: true");
+
+    // A guard on the guard: if clientIP(c) stops appearing as a key anywhere,
+    // this test would trivially pass having checked nothing.
+    expect(ipKeyedCallsFound).toBeGreaterThanOrEqual(3);
+  });
+
+  it("would fail this enumeration for a genuinely unconverted clientIP call site", () => {
+    // Proves the scan above does not just pass by construction: a
+    // deliberately broken source string reproduces exactly the pre-fix shape
+    // of pb_hooks/walkarounds.js's walkaround-internal call.
+    const source = `
+      const rate = helpers.checkProxyRateLimit(
+        "walkaround-internal:" + helpers.clientIP(c),
+        300,
+        60 * 1000,
+      );
+    `;
+    const CALL = "checkProxyRateLimit(";
+    const callStart = source.indexOf(CALL);
+    let depth = 1;
+    let i = callStart + CALL.length;
+    for (; i < source.length && depth > 0; i++) {
+      if (source[i] === "(") depth++;
+      else if (source[i] === ")") depth--;
+    }
+    const call = source.slice(callStart, i);
+    expect(call).toContain("clientIP(c)");
+    expect(call).not.toContain("ipKeyed: true");
   });
 
   it("still separates the tables when the shared store is unavailable", () => {

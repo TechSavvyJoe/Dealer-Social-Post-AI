@@ -1766,11 +1766,14 @@ function internalAuth(c, rawBody) {
   };
   try {
     // The internal surface is publicly reachable (Fly origin + Vercel /api
-    // rewrite); throttle before any comparison work.
+    // rewrite); throttle before any comparison work. ipKeyed: the key is a
+    // client IP, so it belongs in the table sized for attacker-chosen keys,
+    // not the tenant one a flood could otherwise evict.
     const rate = helpers.checkProxyRateLimit(
       "walkaround-internal:" + helpers.clientIP(c),
       300,
       60 * 1000,
+      { ipKeyed: true },
     );
     if (!rate.ok) return deny("rate limited");
   } catch (_e) {
