@@ -421,6 +421,9 @@ describe("website draft post-log contract", () => {
     await logPost({
       customerName: "Jane",
       customerIdentityRequired: true,
+      // Every real caller passes this; without it the identity guard has no
+      // way to know "Example Motors" is the store and not two people.
+      grounding: { dealerName: "Example Motors" },
       caption: "Delivery day",
       disclosures: "Offer subject to approved credit.",
       imageDataUrl: "data:image/png;base64,AQID",

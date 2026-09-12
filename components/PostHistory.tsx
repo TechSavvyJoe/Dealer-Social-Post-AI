@@ -56,10 +56,17 @@ const STATUS_FILTERS: Array<{ key: ApprovalStatus | "all"; label: string }> = [
 ];
 const HISTORY_PAGE_SIZE = 50;
 
-const savedPostIdentityIsSafe = (post: PostRecord, dealerName?: string): boolean => {
+const savedPostIdentityIsSafe = (
+  post: PostRecord,
+  grounding?: { dealerName?: string; oemAffiliation?: string },
+): boolean => {
   if (post.identity_review_required) return false;
   const publicCustomer = toPublicCustomerLabel(post.customer_name);
-  const allowedPhrases = [dealerName, post.website_draft?.vehicleDescription];
+  const allowedPhrases = [
+    grounding?.dealerName,
+    grounding?.oemAffiliation,
+    post.website_draft?.vehicleDescription,
+  ];
   const copy = [
     post.caption,
     ...Object.values(post.platform_captions || {}),
@@ -74,9 +81,16 @@ const savedPostIdentityIsSafe = (post: PostRecord, dealerName?: string): boolean
   ) {
     return false;
   }
+  // The record's own salesperson is legitimate in its prose ("Ask for Joe"),
+  // never the celebrated customer — the same split the server applies.
+  const maskedPhrases = [
+    post.salesperson_name,
+    toPublicCustomerLabel(post.salesperson_name),
+  ];
   return copy.every((caption) =>
     captionUsesOnlyExpectedCustomer(caption, publicCustomer, {
       allowedPhrases,
+      maskedPhrases,
       rejectAnyCustomerIdentity: Boolean(post.release_required && !publicCustomer),
     }),
   );
@@ -199,6 +213,10 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
 
   const reqIdRef = useRef(0);
   const websitePollTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const identityGrounding = useMemo(
+    () => ({ dealerName: dealer?.name, oemAffiliation: dealer?.oem_affiliation }),
+    [dealer?.name, dealer?.oem_affiliation],
+  );
   const load = useCallback(
     async (cursor?: string) => {
       if (!dealer) return;
@@ -217,6 +235,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
           limit: HISTORY_PAGE_SIZE,
           approvalStatus: statusFilter,
           cursor,
+          grounding: identityGrounding,
         });
         if (reqIdRef.current === myId) {
           setItems((current) => {
@@ -236,7 +255,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
         }
       }
     },
-    [dealer, statusFilter],
+    [dealer, identityGrounding, statusFilter],
   );
 
   useEffect(() => {
@@ -308,14 +327,14 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
         p.style,
         p.tone,
         p.approved_by,
-        savedPostIdentityIsSafe(p, dealer?.name) ? p.caption : undefined,
+        savedPostIdentityIsSafe(p, identityGrounding) ? p.caption : undefined,
       ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [dealer?.name, items, query]);
+  }, [identityGrounding, items, query]);
 
   const openCreative = useCallback(
     async (post: PostRecord) => {
@@ -329,7 +348,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
         );
         return;
       }
-      if (!savedPostIdentityIsSafe(post, dealer?.name)) {
+      if (!savedPostIdentityIsSafe(post, identityGrounding)) {
         toastError(
           "This saved post is quarantined because its copy may name a different customer. Create a corrected caption before sharing it.",
         );
@@ -399,7 +418,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
     [
       onOpenCreative,
       currentPersonId,
-      dealer?.name,
+      identityGrounding,
       role,
       setGeneratedPost,
       setGenerationParams,
@@ -702,7 +721,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
                       <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-surface-300">
                         {post.image_review_required
                           ? "Image held for current on-pixel safety review"
-                          : savedPostIdentityIsSafe(post, dealer?.name)
+                          : savedPostIdentityIsSafe(post, identityGrounding)
                             ? post.caption ||
                               `${post.style || "Post"} · ${post.tone || ""}`
                             : "Caption held for customer-name review"}

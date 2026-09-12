@@ -33,6 +33,7 @@ import {
   type SessionErrorCode,
 } from "../services/apiErrors";
 import { AUTH_SESSION_REJECTED_EVENT, setActiveAuthEpoch } from "../utils/authBoundary";
+import { setActiveSalespersonName } from "../utils/identityContext";
 
 export interface LoginResult {
   ok: boolean;
@@ -739,9 +740,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 }));
 
 setActiveAuthEpoch(useAppStore.getState().authEpoch);
+setActiveSalespersonName(useAppStore.getState().currentPerson?.name);
 useAppStore.subscribe((state, previousState) => {
   if (state.authEpoch !== previousState.authEpoch) {
     setActiveAuthEpoch(state.authEpoch);
+  }
+  if (state.currentPerson?.name !== previousState.currentPerson?.name) {
+    setActiveSalespersonName(state.currentPerson?.name);
   }
 });
 

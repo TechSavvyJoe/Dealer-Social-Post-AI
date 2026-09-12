@@ -23,7 +23,11 @@ import {
   releaseAuthorizesPublicLabel,
   toPublicCustomerLabel,
 } from "../utils/customerIdentity";
-import { captionUsesOnlyExpectedCustomer } from "../utils/captionQuality";
+import {
+  captionUsesOnlyExpectedCustomer,
+  describeUnauthorizedNames,
+  unauthorizedCustomerNames,
+} from "../utils/captionQuality";
 
 export type ApprovalStatus = "n_a" | "pending" | "approved" | "rejected";
 
@@ -68,6 +72,8 @@ export interface LogPostInput {
   scheduledFor?: string;
   /** Private Customer Hub draft metadata; server controls any delivery. */
   websiteDraft?: WebsiteDraft;
+  /** Dealer name / OEM so the copy check never mistakes them for a customer. */
+  grounding?: DealerIdentityGrounding;
 }
 
 export interface PostRecord {
@@ -186,6 +192,54 @@ const recallPostIdentity = (postId: string): PostIdentityEntry | undefined => {
   return entry;
 };
 
+/**
+ * Grounded, non-customer proper nouns the identity guard must never mistake
+ * for a person: the dealership's configured name and the OEM it sells. Every
+ * copy check below needs these — without them "Ford is proud...", "Congrats,
+ * Ford family!" and "Bob Maxey Ford's team" read as unauthorized customers
+ * and a perfectly good post is refused at save time (or, on reopen, has its
+ * caption replaced with a review placeholder) even though the generation
+ * guard already accepted the very same text.
+ */
+export interface DealerIdentityGrounding {
+  dealerName?: string;
+  oemAffiliation?: string;
+  /**
+   * The VIN-decoded vehicle as it was grounded at generation. Saved posts
+   * only carry it inside a website draft, so without this a caption that
+   * generated fine with a scanned VIN ("Bronco is ready…") refused to save
+   * whenever the website toggle was off.
+   */
+  vehicleDescription?: string;
+  /** Named in prose freely, never accepted as the celebrated customer. */
+  salespersonName?: string;
+}
+
+const groundedPhrases = (
+  grounding: DealerIdentityGrounding | undefined,
+  vehicleDescription?: string,
+): Array<string | undefined> => [
+  grounding?.dealerName,
+  grounding?.oemAffiliation,
+  grounding?.vehicleDescription,
+  vehicleDescription,
+];
+
+/**
+ * The signed-in salesperson AND whoever the record credits — History and the
+ * approval queue show other people's posts, and their salesperson is just as
+ * legitimate in their prose.
+ */
+const maskedPhrases = (
+  grounding: DealerIdentityGrounding | undefined,
+  recordSalesperson?: string,
+): Array<string | undefined> => [
+  grounding?.salespersonName,
+  toPublicCustomerLabel(grounding?.salespersonName),
+  recordSalesperson,
+  toPublicCustomerLabel(recordSalesperson),
+];
+
 const assertCustomerCopyIsSafe = (input: {
   customerName?: string;
   caption?: string;
@@ -193,6 +247,7 @@ const assertCustomerCopyIsSafe = (input: {
   platformCaptions?: Record<string, string>;
   websiteDraft?: WebsiteDraft;
   customerIdentityRequired?: boolean;
+  grounding?: DealerIdentityGrounding;
 }): void => {
   const publicCustomer = toPublicCustomerLabel(input.customerName);
   const customerIdentityRequired = Boolean(
@@ -203,17 +258,21 @@ const assertCustomerCopyIsSafe = (input: {
     input.disclosures,
     ...Object.values(input.platformCaptions || {}),
   ].filter((value): value is string => Boolean(value?.trim()));
-  if (
-    copy.some(
-      (caption) =>
-        !captionUsesOnlyExpectedCustomer(caption, publicCustomer, {
-          allowedPhrases: [input.websiteDraft?.vehicleDescription],
-          rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
-        }),
-    )
-  ) {
+  const offending = copy.flatMap((caption) =>
+    unauthorizedCustomerNames(caption, publicCustomer, {
+      allowedPhrases: groundedPhrases(
+        input.grounding,
+        input.websiteDraft?.vehicleDescription,
+      ),
+      maskedPhrases: maskedPhrases(input.grounding),
+      rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
+    }),
+  );
+  if (offending.length > 0) {
     throw new Error(
-      "The saved caption contains a customer name that is not authorized for this post.",
+      `The saved caption contains a customer name that is not authorized for this post (${describeUnauthorizedNames(
+        offending,
+      )}).`,
     );
   }
   if (input.websiteDraft?.kind === "customer_story") {
@@ -238,7 +297,11 @@ const assertCustomerCopyIsSafe = (input: {
       websiteCopy.some(
         (caption) =>
           !captionUsesOnlyExpectedCustomer(caption, publicCustomer, {
-            allowedPhrases: [input.websiteDraft?.vehicleDescription],
+            allowedPhrases: groundedPhrases(
+              input.grounding,
+              input.websiteDraft?.vehicleDescription,
+            ),
+            maskedPhrases: maskedPhrases(input.grounding),
             rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
           }),
       )
@@ -255,7 +318,10 @@ const assertCustomerCopyIsSafe = (input: {
  * approval screens receive a public projection so legal names cannot leak
  * through History cards, search, CSV, approval copy, or reopened drafts.
  */
-export const projectPostRecordForUi = (record: PostRecord): PostRecord => {
+export const projectPostRecordForUi = (
+  record: PostRecord,
+  grounding?: DealerIdentityGrounding,
+): PostRecord => {
   const protectedName = record.customer_name || "";
   const publicCustomer = toPublicCustomerLabel(protectedName);
   if (record.id) {
@@ -278,13 +344,21 @@ export const projectPostRecordForUi = (record: PostRecord): PostRecord => {
   const captionIdentitySafe =
     !caption ||
     captionUsesOnlyExpectedCustomer(caption, publicCustomer, {
-      allowedPhrases: [record.website_draft?.vehicleDescription],
+      allowedPhrases: groundedPhrases(
+        grounding,
+        record.website_draft?.vehicleDescription,
+      ),
+      maskedPhrases: maskedPhrases(grounding, record.salesperson_name),
       rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
     });
   const disclosureIdentitySafe =
     !disclosures ||
     captionUsesOnlyExpectedCustomer(disclosures, publicCustomer, {
-      allowedPhrases: [record.website_draft?.vehicleDescription],
+      allowedPhrases: groundedPhrases(
+        grounding,
+        record.website_draft?.vehicleDescription,
+      ),
+      maskedPhrases: maskedPhrases(grounding, record.salesperson_name),
       rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
     });
   let identityReviewRequired = Boolean(record.identity_review_required);
@@ -299,7 +373,11 @@ export const projectPostRecordForUi = (record: PostRecord): PostRecord => {
             projectedCaption,
             publicCustomer,
             {
-              allowedPhrases: [record.website_draft?.vehicleDescription],
+              allowedPhrases: groundedPhrases(
+                grounding,
+                record.website_draft?.vehicleDescription,
+              ),
+              maskedPhrases: maskedPhrases(grounding, record.salesperson_name),
               rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
             },
           );
@@ -336,7 +414,11 @@ export const projectPostRecordForUi = (record: PostRecord): PostRecord => {
       [projectedDraft.title, projectedDraft.body, projectedDraft.altText].every(
         (copy) =>
           captionUsesOnlyExpectedCustomer(copy, publicCustomer, {
-            allowedPhrases: [projectedDraft.vehicleDescription],
+            allowedPhrases: groundedPhrases(
+              grounding,
+              projectedDraft.vehicleDescription,
+            ),
+            maskedPhrases: maskedPhrases(grounding, record.salesperson_name),
             rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
           }),
       );
@@ -362,6 +444,7 @@ export interface UpdatePostDraftInput {
   disclosures?: string;
   imageDataUrl?: string;
   platformCaptions?: Record<string, string>;
+  grounding?: DealerIdentityGrounding;
 }
 
 const jsonRequest = async <T>(url: string, init: RequestInit = {}): Promise<T> => {
@@ -394,6 +477,7 @@ export const logPost = async (
     disclosures: input.disclosures,
     platformCaptions: input.platformCaptions,
     websiteDraft: input.websiteDraft,
+    grounding: input.grounding,
   });
   assertAuthEpoch(requestAuthEpoch);
   try {
@@ -489,7 +573,7 @@ export const logPost = async (
     }
     const post = (await res.json()) as PostRecord;
     assertAuthEpoch(requestAuthEpoch);
-    return projectPostRecordForUi(post);
+    return projectPostRecordForUi(post, input.grounding);
   } catch (err) {
     // For approval-gated posts, a failed persist means the manager has nothing
     // to review — the caller MUST know so it can lock share/save and alert.
@@ -539,6 +623,7 @@ export const updatePostDraft = async (
     caption: input.caption,
     disclosures: input.disclosures,
     platformCaptions: input.platformCaptions,
+    grounding: input.grounding,
   });
   const requestAuthEpoch = captureAuthEpoch();
   const form = new FormData();
@@ -641,6 +726,7 @@ export const setApprovalStatus = async (
 export const listPendingPosts = async (
   _dealerId: string,
   limit = 50,
+  grounding?: DealerIdentityGrounding,
 ): Promise<PostRecord[]> => {
   const qs = new URLSearchParams({
     approval_status: "pending",
@@ -649,7 +735,7 @@ export const listPendingPosts = async (
   const res = await jsonRequest<{ items: PostRecord[] }>(
     `/api/app/posts?${qs.toString()}`,
   );
-  return (res.items || []).map(projectPostRecordForUi);
+  return (res.items || []).map((item) => projectPostRecordForUi(item, grounding));
 };
 
 export interface PostListPage {
@@ -662,6 +748,7 @@ export const listPostsPage = async (
     limit?: number;
     approvalStatus?: ApprovalStatus | "all";
     cursor?: string;
+    grounding?: DealerIdentityGrounding;
   } = {},
 ): Promise<PostListPage> => {
   const qs = new URLSearchParams({
@@ -675,7 +762,9 @@ export const listPostsPage = async (
   }
   const res = await jsonRequest<PostListPage>(`/api/app/posts?${qs.toString()}`);
   return {
-    items: (res.items || []).map(projectPostRecordForUi),
+    items: (res.items || []).map((item) =>
+      projectPostRecordForUi(item, options.grounding),
+    ),
     nextCursor: res.nextCursor || undefined,
   };
 };
@@ -684,6 +773,7 @@ export const listPosts = async (
   options: {
     limit?: number;
     approvalStatus?: ApprovalStatus | "all";
+    grounding?: DealerIdentityGrounding;
   } = {},
 ): Promise<PostRecord[]> => (await listPostsPage(options)).items;
 

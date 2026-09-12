@@ -2590,14 +2590,17 @@ routerAdd("POST", "/api/app/posts", (c) => {
       protectedCustomerName,
       identityValues,
       [
-        dealer.getString("name"),
+        websitePublications.groundedIdentityPhrase(dealer.getString("name")),
+        websitePublications.groundedIdentityPhrase(dealer.getString("oem_affiliation")),
         salespersonName,
         websitePublications.publicCustomerLabel(salespersonName),
-        websiteDraft && websiteDraft.enabled
-          ? websitePublications.groundedVehicleIdentityPhrase(
-              websiteDraft.vehicleDescription || "",
-            )
-          : "",
+        websitePublications.groundedIdentityPhrase(
+          websiteDraft && websiteDraft.enabled
+            ? websitePublications.groundedVehicleIdentityPhrase(
+                websiteDraft.vehicleDescription || "",
+              )
+            : "",
+        ),
       ],
       scenarioPolicy.releaseRequired && !publicCustomerName,
     );
@@ -3059,12 +3062,15 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
         }),
       ),
       [
-        context.dealer.getString("name"),
+        websitePublications.groundedIdentityPhrase(context.dealer.getString("name")),
+        websitePublications.groundedIdentityPhrase(
+          context.dealer.getString("oem_affiliation"),
+        ),
         context.person ? context.person.getString("name") : "System Admin",
         websitePublications.publicCustomerLabel(
           context.person ? context.person.getString("name") : "System Admin",
         ),
-        websiteVehicleDescription,
+        websitePublications.groundedIdentityPhrase(websiteVehicleDescription),
       ],
       (record.getBool
         ? record.getBool("release_required")
@@ -3353,6 +3359,7 @@ routerAdd("GET", "/api/app/posts/:id/website-publication", (c) => {
     const publicDraft = websitePublications.publicWebsiteDraftForPost(
       post,
       context.dealer.getString("name"),
+      context.dealer.getString("oem_affiliation"),
     );
     if (publicDraft.websiteDraft) {
       summary.websiteDraft = publicDraft.websiteDraft;
@@ -3453,6 +3460,7 @@ routerAdd("POST", "/api/app/posts/:id/website-publication", (c) => {
     const publicDraft = websitePublications.publicWebsiteDraftForPost(
       claim.post,
       context.dealer.getString("name"),
+      context.dealer.getString("oem_affiliation"),
     );
     if (publicDraft.websiteDraft) {
       summary.websiteDraft = publicDraft.websiteDraft;
@@ -3548,6 +3556,7 @@ routerAdd("POST", "/api/app/posts/:id/website-publication/retry", (c) => {
     const publicDraft = websitePublications.publicWebsiteDraftForPost(
       post,
       context.dealer.getString("name"),
+      context.dealer.getString("oem_affiliation"),
     );
     if (publicDraft.websiteDraft) {
       summary.websiteDraft = publicDraft.websiteDraft;
@@ -3845,14 +3854,17 @@ routerAdd("GET", "/api/app/posts", (c) => {
           ? storedWebsiteDraft.value
           : null;
       const allowedIdentityPhrases = [
-        dealer.getString("name"),
+        websitePublications.groundedIdentityPhrase(dealer.getString("name")),
+        websitePublications.groundedIdentityPhrase(dealer.getString("oem_affiliation")),
         r.getString("salesperson_name"),
         websitePublications.publicCustomerLabel(r.getString("salesperson_name")),
-        rawWebsiteDraft
-          ? websitePublications.groundedVehicleIdentityPhrase(
-              rawWebsiteDraft.vehicleDescription || "",
-            )
-          : "",
+        websitePublications.groundedIdentityPhrase(
+          rawWebsiteDraft
+            ? websitePublications.groundedVehicleIdentityPhrase(
+                rawWebsiteDraft.vehicleDescription || "",
+              )
+            : "",
+        ),
       ];
       const reviewValue = function (value) {
         return websitePublications.reviewPostCustomerIdentity(
@@ -4153,14 +4165,19 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
         record.getString("customer_name"),
         identityValues,
         [
-          dealer.getString("name"),
+          websitePublications.groundedIdentityPhrase(dealer.getString("name")),
+          websitePublications.groundedIdentityPhrase(
+            dealer.getString("oem_affiliation"),
+          ),
           record.getString("salesperson_name"),
           websitePublications.publicCustomerLabel(record.getString("salesperson_name")),
-          websiteDraft
-            ? websitePublications.groundedVehicleIdentityPhrase(
-                websiteDraft.vehicleDescription || "",
-              )
-            : "",
+          websitePublications.groundedIdentityPhrase(
+            websiteDraft
+              ? websitePublications.groundedVehicleIdentityPhrase(
+                  websiteDraft.vehicleDescription || "",
+                )
+              : "",
+          ),
         ],
         (record.getBool
           ? record.getBool("release_required")

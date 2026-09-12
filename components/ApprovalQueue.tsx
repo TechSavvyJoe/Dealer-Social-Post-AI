@@ -58,7 +58,10 @@ export const ApprovalQueue: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const items = await listPendingPosts(currentDealer.id);
+      const items = await listPendingPosts(currentDealer.id, undefined, {
+        dealerName: currentDealer.name,
+        oemAffiliation: currentDealer.oem_affiliation,
+      });
       if (reqIdRef.current === myId) setPending(items);
     } catch (err) {
       if (reqIdRef.current === myId)

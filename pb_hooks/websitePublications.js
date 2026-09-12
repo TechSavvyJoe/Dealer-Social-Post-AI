@@ -61,6 +61,7 @@ const AUTOMOTIVE_BRAND_TOKENS = {
   buick: true,
   cadillac: true,
   chevrolet: true,
+  chevy: true,
   chrysler: true,
   dodge: true,
   ford: true,
@@ -77,6 +78,7 @@ const AUTOMOTIVE_BRAND_TOKENS = {
   lincoln: true,
   mazda: true,
   mercedes: true,
+  mercedesbenz: true,
   mini: true,
   mitsubishi: true,
   nissan: true,
@@ -976,7 +978,7 @@ function replaceAllowedCustomerPhrase(text, phrase) {
   return text.replace(
     new RegExp(
       "(^|[^A-Za-zÀ-ÖØ-öø-ÿ0-9])" +
-        escapeRegExp(normalized) +
+        escapeRegExp(normalized).replace(/ /g, "\\s+") +
         "(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ0-9])",
       "gi",
     ),
@@ -984,77 +986,755 @@ function replaceAllowedCustomerPhrase(text, phrase) {
   );
 }
 
+/**
+ * Mark an allowed phrase as grounded business identity (the dealership's
+ * configured name, the OEM it sells, a VIN-decoded vehicle description). Every
+ * WORD of a grounded phrase may stand alone in customer-name grammar ("Ford is
+ * proud", "Congrats, Ford family!", "Welcome to the family, Howell!") as long
+ * as no unrelated capitalized word is attached to it. A plain string entry
+ * (the salesperson's name) is only ever masked as a whole phrase, and only
+ * outside the deliberate "Congratulations to X" patterns — a salesperson must
+ * never be accepted as the celebrated customer. Mirrors
+ * utils/captionQuality.ts on the client; the two are parity-tested.
+ */
+function groundedIdentityPhrase(phrase) {
+  return { phrase: (phrase || "").toString(), grounded: true };
+}
+
+const ALLOWED_PHRASE_STOPWORDS = {
+  of: true,
+  the: true,
+  and: true,
+  at: true,
+  in: true,
+  a: true,
+  an: true,
+  inc: true,
+  llc: true,
+  co: true,
+  corp: true,
+};
+
+// Kept identical to NON_CUSTOMER_CONTEXT_WORDS in utils/captionQuality.ts.
+const IDENTITY_NON_CUSTOMER_WORDS = {};
+[
+  "customer",
+  "customers",
+  "family",
+  "families",
+  "they",
+  "we",
+  "he",
+  "she",
+  "it",
+  "this",
+  "that",
+  "these",
+  "those",
+  "there",
+  "here",
+  "now",
+  "then",
+  "everyone",
+  "someone",
+  "nobody",
+  "who",
+  "what",
+  "how",
+  "when",
+  "where",
+  "why",
+  "which",
+  "everything",
+  "everybody",
+  "anyone",
+  "anybody",
+  "anything",
+  "something",
+  "somebody",
+  "nothing",
+  "none",
+  "all",
+  "more",
+  "big",
+  "huge",
+  "ready",
+  "yes",
+  "well",
+  "hello",
+  "hi",
+  "hey",
+  "home",
+  "congratulations",
+  "congrats",
+  "thanks",
+  "cheers",
+  "kudos",
+  "today",
+  "tonight",
+  "tomorrow",
+  "yesterday",
+  "day",
+  "days",
+  "night",
+  "morning",
+  "afternoon",
+  "evening",
+  "week",
+  "month",
+  "year",
+  "season",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
+  "spring",
+  "summer",
+  "fall",
+  "autumn",
+  "winter",
+  "weekend",
+  "christmas",
+  "thanksgiving",
+  "halloween",
+  "easter",
+  "holiday",
+  "holidays",
+  "keys",
+  "delivery",
+  "adventure",
+  "owner",
+  "owners",
+  "team",
+  "crew",
+  "staff",
+  "nation",
+  "fans",
+  "community",
+  "dealership",
+  "store",
+  "showroom",
+  "department",
+  "sales",
+  "parts",
+  "finance",
+  "inventory",
+  "lot",
+  "safety",
+  "trust",
+  "happiness",
+  "paperwork",
+  "sunshine",
+  "service",
+  "time",
+  "another",
+  "enjoy",
+  "welcome",
+  "smiles",
+  "life",
+  "road",
+  "ride",
+  "drivers",
+].forEach(function (word) {
+  IDENTITY_NON_CUSTOMER_WORDS[word] = true;
+});
+
+const IDENTITY_COLLECTIVE_FOLLOWERS = {};
+[
+  "family",
+  "families",
+  "team",
+  "crew",
+  "staff",
+  "nation",
+  "fans",
+  "community",
+  "dealership",
+  "store",
+  "showroom",
+  "customers",
+  "drivers",
+  "owners",
+].forEach(function (word) {
+  IDENTITY_COLLECTIVE_FOLLOWERS[word] = true;
+});
+
+const IDENTITY_HANDOFF_CONNECTORS = {};
+[
+  "to",
+  "for",
+  "own",
+  "owner",
+  "owners",
+  "customer",
+  "customers",
+  "buyer",
+  "buyers",
+  "driver",
+  "drivers",
+  "member",
+  "members",
+  "wife",
+  "husband",
+  "spouse",
+  "partner",
+  "son",
+  "daughter",
+  "mom",
+  "mother",
+  "dad",
+  "father",
+  "friend",
+  "brother",
+  "sister",
+].forEach(function (word) {
+  IDENTITY_HANDOFF_CONNECTORS[word] = true;
+});
+
+const IDENTITY_TRIGGER_WORDS = {};
+[
+  "congratulations",
+  "congrats",
+  "cheers",
+  "shout",
+  "shoutout",
+  "shout-out",
+  "thanks",
+  "thank",
+  "kudos",
+  "meet",
+  "welcoming",
+  "welcome",
+  "celebrate",
+  "helping",
+  "thanking",
+  "congratulating",
+  "for",
+  "with",
+  "from",
+  "delivered",
+  "sold",
+].forEach(function (word) {
+  IDENTITY_TRIGGER_WORDS[word] = true;
+});
+
+const IDENTITY_NOUN_DETERMINERS = {};
+[
+  "this",
+  "these",
+  "those",
+  "your",
+  "our",
+  "their",
+  "his",
+  "her",
+  "its",
+  "my",
+  "a",
+  "an",
+  "another",
+  "every",
+  "each",
+].forEach(function (word) {
+  IDENTITY_NOUN_DETERMINERS[word] = true;
+});
+
+const IDENTITY_PERSON_CAPABLE_DETERMINERS = {
+  our: true,
+  their: true,
+  his: true,
+  her: true,
+  its: true,
+  my: true,
+};
+
+// Kept identical to DETERMINER_ADJECTIVES in utils/captionQuality.ts: words
+// that describe THINGS. Words that praise people ("our very own Sarah") are
+// deliberately absent.
+const IDENTITY_DETERMINER_ADJECTIVES = {};
+[
+  "new",
+  "brand",
+  "shiny",
+  "stunning",
+  "beautiful",
+  "gorgeous",
+  "sleek",
+  "gleaming",
+  "sparkling",
+  "first",
+  "next",
+  "dream",
+  "perfect",
+  "fresh",
+  "latest",
+  "newest",
+  "bold",
+  "loaded",
+  "certified",
+  "preowned",
+  "used",
+  "custom",
+  "black",
+  "white",
+  "blue",
+  "red",
+  "silver",
+  "gray",
+  "grey",
+  "green",
+  "orange",
+  "yellow",
+  "bronze",
+  "gold",
+  "copper",
+  "pearl",
+  "metallic",
+  "sporty",
+  "rugged",
+  "everyday",
+  "electric",
+  "hybrid",
+  "lifted",
+  "spotless",
+  "immaculate",
+  "clean",
+  "sharp",
+  "capable",
+  "tough",
+  "fully",
+  "gently",
+  "redesigned",
+  "upgraded",
+].forEach(function (word) {
+  IDENTITY_DETERMINER_ADJECTIVES[word] = true;
+});
+
+const IDENTITY_LETTER = "A-Za-zÀ-ÖØ-öø-ÿ";
+const IDENTITY_UPPER = "A-ZÀ-ÖØ-Þ";
+const IDENTITY_LOWER = "a-zà-öø-ÿ";
+// A personal-name token is never directly followed by a digit or a hyphen
+// into a digit ("F-150", "Model 3").
+const IDENTITY_NAME_TOKEN =
+  "[" + IDENTITY_UPPER + "][" + IDENTITY_LETTER + "'’-]{1,39}(?![0-9-])";
+const IDENTITY_STOPWORD_GROUP = "of|the|and|at|in|a|an|inc|llc|co|corp";
+const IDENTITY_CHAIN_WORD = new RegExp(
+  "(?:^|[^" +
+    IDENTITY_LETTER +
+    "0-9])(" +
+    IDENTITY_NAME_TOKEN +
+    ")(?:\\s+(" +
+    IDENTITY_STOPWORD_GROUP +
+    "))?[,:!\\s–—-]*$",
+);
+const IDENTITY_NEXT_WORD = new RegExp(
+  "^\\s+(?:(" + IDENTITY_STOPWORD_GROUP + ")\\s+)?(" + IDENTITY_NAME_TOKEN + ")",
+);
+const IDENTITY_PREVIOUS_WORD = new RegExp(
+  "(?:^|[^" +
+    IDENTITY_LETTER +
+    "0-9'’-])([" +
+    IDENTITY_LETTER +
+    "0-9][" +
+    IDENTITY_LETTER +
+    "0-9'’-]*)(?:\\s+['’]s)?[^\\S\\n]+$",
+);
+const IDENTITY_FOLLOWING_WORD = new RegExp(
+  "^\\s+([" + IDENTITY_LETTER + "][" + IDENTITY_LETTER + "'’-]*)",
+);
+const IDENTITY_HANDOFF_WORD = new RegExp(
+  "^[\\s,:;–—-]+([" + IDENTITY_LETTER + "0-9][" + IDENTITY_LETTER + "0-9'’-]*)",
+);
+const IDENTITY_COLLECTIVE_POSSESSIVE = new RegExp(
+  "^\\s+([" + IDENTITY_LETTER + "]+)(['’]s?)",
+);
+const IDENTITY_HEADLINE_TAIL = new RegExp(
+  "^\\s*[,:–—-]+\\s*([" + IDENTITY_UPPER + "][" + IDENTITY_LETTER + "'’-]*)",
+);
+const IDENTITY_CAPITAL = new RegExp("^[" + IDENTITY_UPPER + "]");
+const IDENTITY_DIGIT = /[0-9]/;
+// Up to five lowercase words may sit between "to" and the person.
+const IDENTITY_OPENER_LEAD_IN =
+  "(?:\\s+[" + IDENTITY_LOWER + "][" + IDENTITY_LOWER + "'’-]*){0,5}?[,:]?";
+const IDENTITY_HEADLINE_OPENERS =
+  "[Ww]elcome\\s+home|[Ww]elcome\\s+to\\s+the\\s+family|[Nn]ew\\s+car\\s+day|[Dd]elivered|[Ss]old";
+// A congratulation opener still governing the clause just before a match.
+const IDENTITY_CONGRATULATION_OPENER =
+  /\b(?:[Cc]ongratulations|[Cc]ongrats|[Cc]heers|[Ss]hout(?:-?out)?|[Tt]hanks|[Tt]hank\s+you|[Kk]udos|[Mm]eet|[Ww]elcome)\b[^.!?\n]*$/;
+
+const IDENTITY_BARE_ACTION_INDEX = 2;
+const IDENTITY_PROSE_INDEXES = [3, 5];
+
+function stripIdentityPossessive(token) {
+  return (token || "").toString().replace(/['’]s?$/, "");
+}
+
+function identityLower(token) {
+  return stripIdentityPossessive(token).toLowerCase();
+}
+
+function identityHasDigit(token) {
+  return IDENTITY_DIGIT.test(token || "");
+}
+
+function normalizeAllowedIdentityPhrases(allowedPhrases) {
+  const list = Array.isArray(allowedPhrases) ? allowedPhrases : [];
+  const out = [];
+  for (let i = 0; i < list.length; i++) {
+    const entry = list[i];
+    const isObject = entry && typeof entry === "object";
+    const raw = isObject ? entry.phrase : entry === null ? "" : entry;
+    const phrase = (raw || "").toString().trim().replace(/\s+/g, " ");
+    if (!phrase) continue;
+    // A plain string is a MASK (the salesperson): legitimate in prose, never
+    // the celebrated customer. Only an explicit groundedIdentityPhrase() is
+    // business identity — inferring it from a brand token inside the string
+    // re-grounded "Joe Ford" and forgave "Congrats to <salesperson>".
+    out.push({ phrase: phrase, grounded: !!(isObject && entry.grounded) });
+  }
+  return out;
+}
+
+function identityPhraseTokens(phrase) {
+  const words = (phrase || "").toString().trim().split(/\s+/);
+  const out = [];
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    if (word.length > 1 && !ALLOWED_PHRASE_STOPWORDS[word.toLowerCase()]) {
+      out.push(word);
+    }
+  }
+  return out;
+}
+
+function buildIdentityGrounding(allowed) {
+  const words = {};
+  const pairs = {};
+  const modelWords = {};
+  for (let i = 0; i < allowed.length; i++) {
+    if (!allowed[i].grounded) continue;
+    const tokens = identityPhraseTokens(allowed[i].phrase);
+    for (let j = 0; j < tokens.length; j++) {
+      const lower = identityLower(tokens[j]);
+      words[lower] = true;
+      if (j > 0) pairs[identityLower(tokens[j - 1]) + ">" + lower] = true;
+    }
+    // Model words walk the RAW tokens so the phrase's own stopword breaks the
+    // run: "2025 Ford Bronco Big Bend" yields bronco/big/bend, but "Bob Maxey
+    // Ford of Howell" yields nothing — the town after "of" is not a model.
+    const raws = allowed[i].phrase.trim().split(/\s+/);
+    let afterBrand = false;
+    for (let j = 0; j < raws.length; j++) {
+      if (!raws[j]) continue;
+      if (ALLOWED_PHRASE_STOPWORDS[raws[j].toLowerCase()]) afterBrand = false;
+      else if (isAutomotiveBrandToken(raws[j])) afterBrand = true;
+      else if (afterBrand) modelWords[identityLower(raws[j])] = true;
+    }
+  }
+  return { words: words, pairs: pairs, modelWords: modelWords };
+}
+
+function identityPrecededByDeterminer(scan, tokenIndex, token, grounding) {
+  let remaining = scan.slice(0, tokenIndex);
+  let crossedUnknownCapital = false;
+  let crossedAdjective = false;
+  for (let hops = 0; hops <= 6; hops++) {
+    const match = IDENTITY_PREVIOUS_WORD.exec(remaining);
+    if (!match) return false;
+    const raw = match[1];
+    const word = identityLower(raw);
+    const possessive =
+      /['’]s?$/.test(raw) || /['’]s\s*$/.test(match[0].replace(/\s+$/, ""));
+    if (word === "customer" && possessive) return true;
+    if (IDENTITY_NOUN_DETERMINERS[word]) {
+      return !(
+        crossedUnknownCapital &&
+        !crossedAdjective &&
+        IDENTITY_PERSON_CAPABLE_DETERMINERS[word]
+      );
+    }
+    if (word === "the") return !/['’]/.test(token) && !/s$/i.test(token);
+    if (identityHasDigit(raw)) return true;
+    const capitalized = IDENTITY_CAPITAL.test(raw);
+    const knownVehicleWord =
+      capitalized && (!!grounding.words[word] || isAutomotiveBrandToken(raw));
+    if (capitalized && possessive && !knownVehicleWord) return false;
+    const walkable =
+      !!IDENTITY_DETERMINER_ADJECTIVES[word] ||
+      /-/.test(raw) ||
+      (capitalized && !IDENTITY_TRIGGER_WORDS[word]);
+    if (!walkable) return false;
+    if (IDENTITY_DETERMINER_ADJECTIVES[word]) crossedAdjective = true;
+    if (capitalized && !knownVehicleWord && !IDENTITY_NON_CUSTOMER_WORDS[word]) {
+      crossedUnknownCapital = true;
+    }
+    remaining = remaining.slice(0, match.index + match[0].indexOf(raw));
+  }
+  return false;
+}
+
+function identityPrecedingRun(scan, matchIndex, token, grounding) {
+  let remaining = scan.slice(0, matchIndex);
+  let current = identityLower(token);
+  let tokenCount = 0;
+  let containsBrand = false;
+  for (;;) {
+    const match = IDENTITY_CHAIN_WORD.exec(remaining);
+    if (!match) {
+      return { unrelated: false, tokenCount: tokenCount, containsBrand: containsBrand };
+    }
+    const lower = identityLower(match[1]);
+    if (
+      IDENTITY_NON_CUSTOMER_WORDS[lower] ||
+      IDENTITY_TRIGGER_WORDS[lower] ||
+      IDENTITY_NOUN_DETERMINERS[lower] ||
+      lower === "the"
+    ) {
+      return { unrelated: false, tokenCount: tokenCount, containsBrand: containsBrand };
+    }
+    if (!grounding.pairs[lower + ">" + current]) {
+      return { unrelated: true, tokenCount: tokenCount, containsBrand: containsBrand };
+    }
+    tokenCount += 1;
+    if (isAutomotiveBrandToken(match[1])) containsBrand = true;
+    current = lower;
+    remaining = remaining.slice(0, match.index);
+  }
+}
+
+function identityGroundedRun(scan, tokenEnd, token, grounding, brandMayLeadModelRun) {
+  let remaining = scan.slice(tokenEnd);
+  let current = identityLower(token);
+  let afterBrand = brandMayLeadModelRun && isAutomotiveBrandToken(token);
+  let end = tokenEnd;
+  let tokenCount = 1;
+  let endsWithPossessive = /['’]s?$/.test(token);
+  let lastIsBrand = isAutomotiveBrandToken(token);
+  let containsBrand = lastIsBrand;
+  for (;;) {
+    const match = IDENTITY_NEXT_WORD.exec(remaining);
+    if (!match) break;
+    const raw = match[2];
+    const lower = identityLower(raw);
+    if (IDENTITY_NON_CUSTOMER_WORDS[lower]) break;
+    if (grounding.pairs[current + ">" + lower]) {
+      current = lower;
+      afterBrand = brandMayLeadModelRun && isAutomotiveBrandToken(raw);
+      lastIsBrand = isAutomotiveBrandToken(raw);
+      if (lastIsBrand) containsBrand = true;
+    } else if (afterBrand && !match[1]) {
+      lastIsBrand = false;
+    } else {
+      return {
+        ok: false,
+        end: end,
+        tokenCount: tokenCount,
+        endsWithPossessive: endsWithPossessive,
+        lastIsBrand: lastIsBrand,
+        containsBrand: containsBrand,
+      };
+    }
+    tokenCount += 1;
+    endsWithPossessive = /['’]s?$/.test(raw);
+    remaining = remaining.slice(match[0].length);
+    end += match[0].length;
+  }
+  return {
+    ok: true,
+    end: end,
+    tokenCount: tokenCount,
+    endsWithPossessive: endsWithPossessive,
+    lastIsBrand: lastIsBrand,
+    containsBrand: containsBrand,
+  };
+}
+
+function identityDeliberateRunIsBusiness(scan, run, loneTokenAllowed) {
+  if (run.endsWithPossessive) return true;
+  const next = IDENTITY_FOLLOWING_WORD.exec(scan.slice(run.end));
+  if (!next) return loneTokenAllowed || run.containsBrand;
+  return !!IDENTITY_COLLECTIVE_FOLLOWERS[identityLower(next[1])];
+}
+
+function identityHandoffTargetAfter(scan, run, grounding) {
+  let remaining = scan.slice(run.end);
+  if (!run.endsWithPossessive) {
+    const collective = IDENTITY_COLLECTIVE_POSSESSIVE.exec(remaining);
+    if (!collective || !IDENTITY_COLLECTIVE_FOLLOWERS[identityLower(collective[1])]) {
+      return null;
+    }
+    remaining = remaining.slice(collective[0].length);
+  }
+  let afterBrand = false;
+  for (let hops = 0; hops < 12; hops++) {
+    const match = IDENTITY_HANDOFF_WORD.exec(remaining);
+    if (!match) return null;
+    const raw = match[1];
+    const lower = identityLower(raw);
+    const rest = remaining.slice(match[0].length);
+    remaining = rest;
+    if (!IDENTITY_CAPITAL.test(raw) || identityHasDigit(raw) || /-/.test(raw)) {
+      afterBrand = false;
+      continue;
+    }
+    if (IDENTITY_TRIGGER_WORDS[lower]) return null;
+    if (isAutomotiveBrandToken(raw)) {
+      afterBrand = true;
+      continue;
+    }
+    if (
+      afterBrand ||
+      grounding.words[lower] ||
+      IDENTITY_NON_CUSTOMER_WORDS[lower] ||
+      IDENTITY_DETERMINER_ADJECTIVES[lower]
+    ) {
+      continue;
+    }
+    const following = IDENTITY_FOLLOWING_WORD.exec(rest);
+    if (following) {
+      const followingLower = identityLower(following[1]);
+      if (
+        IDENTITY_CAPITAL.test(following[1]) ||
+        IDENTITY_HANDOFF_CONNECTORS[followingLower] ||
+        IDENTITY_NON_CUSTOMER_WORDS[followingLower]
+      ) {
+        if (!IDENTITY_CAPITAL.test(following[1])) continue;
+        const third = IDENTITY_FOLLOWING_WORD.exec(rest.slice(following[0].length));
+        if (
+          third &&
+          (IDENTITY_HANDOFF_CONNECTORS[identityLower(third[1])] ||
+            IDENTITY_NON_CUSTOMER_WORDS[identityLower(third[1])])
+        ) {
+          continue;
+        }
+      }
+    }
+    return stripIdentityPossessive(raw);
+  }
+  return null;
+}
+
+function identityHeadlineTailAfter(scan, run, grounding) {
+  const tail = IDENTITY_HEADLINE_TAIL.exec(scan.slice(run.end));
+  if (!tail) return null;
+  const lower = identityLower(tail[1]);
+  if (
+    grounding.words[lower] ||
+    IDENTITY_NON_CUSTOMER_WORDS[lower] ||
+    IDENTITY_TRIGGER_WORDS[lower] ||
+    isAutomotiveBrandToken(tail[1])
+  ) {
+    return null;
+  }
+  return stripIdentityPossessive(tail[1]);
+}
+
+function identityLeadInTargetIsThing(scan, tokenStart, tokenEnd, token) {
+  const following = IDENTITY_FOLLOWING_WORD.exec(scan.slice(tokenEnd));
+  const followingLower = following ? identityLower(following[1]) : "";
+  if (following && IDENTITY_HANDOFF_CONNECTORS[followingLower]) return true;
+  if (following && IDENTITY_CAPITAL.test(following[1])) return false;
+  if (following && IDENTITY_COLLECTIVE_FOLLOWERS[followingLower]) return false;
+  const the = /\bthe\s+$/.test(scan.slice(0, tokenStart));
+  return the && !/['’]/.test(token) && !/s$/i.test(token);
+}
+
+function identityVehicleSlotPattern(patternIndex, matchText) {
+  return (
+    patternIndex === IDENTITY_BARE_ACTION_INDEX ||
+    patternIndex === 7 ||
+    patternIndex === 8 ||
+    (patternIndex === 6 &&
+      /^(?:[Dd]elivered|[Nn]ew\s+car\s+day|[Ss]old)/.test(matchText))
+  );
+}
+
+/**
+ * Mirror of unauthorizedCustomerNames() in utils/captionQuality.ts — same
+ * patterns, same word lists, same walks, same order. Returns true when the
+ * text names someone who is not the authorized customer.
+ */
 function containsUnexpectedCustomerIdentity(text, expectedCustomer, allowedPhrases) {
   const expected = publicCustomerLabel(expectedCustomer);
-  const rawScan = (text || "").toString().trim().replace(/\s+/g, " ");
-  const allowed = allowedPhrases || [];
+  // Every whitespace run collapses to one character, but a line break stays
+  // a line break so a new sentence on the next line is a hard boundary.
+  const rawScan = (text || "")
+    .toString()
+    .trim()
+    .replace(/\s+/g, function (ws) {
+      return ws.indexOf("\n") >= 0 ? "\n" : " ";
+    });
+  const allowed = normalizeAllowedIdentityPhrases(allowedPhrases);
   if (
     expected &&
     new RegExp(
-      "(^|[^A-Za-zÀ-ÖØ-öø-ÿ0-9])" +
+      "(^|[^" +
+        IDENTITY_LETTER +
+        "0-9])" +
         escapeRegExp(expected) +
-        "[A-Za-zÀ-ÖØ-öø-ÿ]+(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ0-9])",
+        "[" +
+        IDENTITY_LETTER +
+        "]+(?=$|[^" +
+        IDENTITY_LETTER +
+        "0-9])",
       "i",
     ).test(rawScan)
   ) {
     return true;
   }
-  const name = "[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{1,39}";
+  const name = IDENTITY_NAME_TOKEN;
   const separator = "(?:\\s+and\\s+|\\s*(?:&|\\+|/)\\s*)";
   const names = name + "(?:" + separator + name + ")*";
+  // Participles only ("Sarah smiling beside her Bronco"). The finite forms
+  // ("smiles", "stands", "pose") read as nouns in the captions the model
+  // actually writes — "Big smiles today!", "All smiles!" — and every one of
+  // those flagged the sentence-opening word as a customer. Kept identical to
+  // utils/captionQuality.ts on the client (parity-tested).
   const directAction =
-    "drove|drives|found|chose|chooses|picked|purchased|bought|is|are|has|have|loves|love|celebrated|celebrates|celebrate|shared|shares|takes|took|starts|started|received|receives|standing|stands|posing|pose|smiling|smiles";
+    "drove|drives|found|chose|chooses|picked|purchased|bought|is|are|was|were|has|have|got|went|left|joined|became|owns|loves|love|celebrated|celebrates|celebrate|shared|shares|takes|took|starts|started|received|receives|standing|posing|smiling";
   const action = directAction + "|just\\s+(?:" + directAction + ")";
-  const nonCustomerWords = {
-    customer: true,
-    customers: true,
-    family: true,
-    families: true,
-    they: true,
-    we: true,
-    he: true,
-    she: true,
-    it: true,
-    this: true,
-    that: true,
-    these: true,
-    those: true,
-    everyone: true,
-    someone: true,
-    nobody: true,
-    who: true,
-    what: true,
-  };
-  const hasIdentityMatch = function (scan, patterns) {
-    for (let i = 0; i < patterns.length; i++) {
-      let match = null;
-      while ((match = patterns[i].exec(scan)) !== null) {
-        const candidates = (match[1] || "").split(/\s+and\s+|\s*(?:&|\+|\/)\s*/i);
-        for (let j = 0; j < candidates.length; j++) {
-          const candidate = candidates[j].trim().toLowerCase();
-          if (candidate && !nonCustomerWords[candidate]) return true;
-        }
-      }
-    }
-    return false;
-  };
-  const strictCustomerTargetPatterns = [
+
+  const grounding = buildIdentityGrounding(allowed);
+
+  const patterns = [
     new RegExp(
-      "\\b(?:[Cc]ongratulations|[Cc]ongrats|[Cc]heers|[Ss]hout(?:-?out)?)(?:\\s+to)?[,:!]?\\s+(" +
+      "\\b(?:[Cc]ongratulations|[Cc]ongrats|[Cc]heers|[Ss]hout(?:-?out)?|[Tt]hanks|[Tt]hank\\s+you|[Kk]udos)(?:\\s+again)?(?:\\s+to" +
+        IDENTITY_OPENER_LEAD_IN +
+        "|[,:]?)\\s+(" +
         names +
         ")",
       "g",
     ),
     new RegExp(
-      "\\b(?:[Mm]eet|[Ww]elcoming|[Cc]elebrate(?:\\s+with)?|[Ww]elcome(?!\\s+to\\b))[,:!]?\\s+(" +
+      "\\b(?:[Mm]eet|[Ww]elcoming|[Cc]elebrate(?:\\s+with)?|[Ww]elcome(?!\\s+(?:to|aboard)\\b))[,:]?\\s+(" +
         names +
         ")",
       "g",
     ),
+    new RegExp("\\b(" + names + ")(?=\\s+(?:" + action + ")\\b)", "g"),
     new RegExp(
-      "\\b(?:[Ff]or|[Ww]ith|[Ff]rom)\\s+(" +
+      "\\b(?:[Ff]or|[Ww]ith|[Ff]rom)\\s+(?:the\\s+)?(" +
         names +
-        ")(?=$|[,!.?]|\\s+(?:at|during|today|this|on|after|before|who)\\b)",
+        ")(?=(?:\\s+" +
+        name +
+        ")*(?:[,!.?]|\\s+(?:" +
+        action +
+        ")\\b))",
       "g",
     ),
     new RegExp(
@@ -1062,54 +1742,192 @@ function containsUnexpectedCustomerIdentity(text, expectedCustomer, allowedPhras
       "g",
     ),
     new RegExp(
-      "\\b(?:[Ww]elcome\\s+home|[Ww]elcome\\s+to\\s+the\\s+family|[Nn]ew\\s+car\\s+day|[Dd]elivered)[,:!\\s–—-]+(" +
+      "\\b(?:[Ff]or|[Ww]ith|[Ff]rom)\\s+(?:the\\s+)?(" +
         names +
-        ")(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ])",
+        ")(?=(?:\\s+" +
+        name +
+        ")*(?:$|[,!.?]|\\s+(?:at|during|today|this|on|after|before|who)\\b))",
+      "g",
+    ),
+    new RegExp(
+      "\\b(?:(?:" +
+        IDENTITY_HEADLINE_OPENERS +
+        ")(?:\\s+to" +
+        IDENTITY_OPENER_LEAD_IN +
+        "\\s+|[,:\\s–—-]+)|[Ww]elcome\\s+(?:aboard|to\\s+[^,:!\\n–—]{1,80}?)\\s*[,:–—-]+\\s*)(" +
+        names +
+        ")(?=$|[^" +
+        IDENTITY_LETTER +
+        "])",
       "g",
     ),
     new RegExp(
       "\\b(" +
         names +
-        ")\\s*(?:[,!]|[–—-])\\s*(?:[Ww]elcome\\s+home|[Ww]elcome\\s+to\\s+the\\s+family|[Nn]ew\\s+car\\s+day|[Dd]elivered)\\b",
+        ")\\s*(?:[,!]|[–—-])\\s*(?:[Ww]elcome\\s+(?:home|aboard|to\\s+[^.!?\\n]{1,60})|[Nn]ew\\s+car\\s+day|[Dd]elivered|[Ss]old)\\b",
       "g",
     ),
+    new RegExp(",\\s*(" + names + ")(?:\\s+" + name + ")*\\s*[!.?]*\\s*(?=$|\\n)", "g"),
   ];
 
-  // A salesperson name may be grounded elsewhere in a post, but must never be
-  // accepted as the congratulated/welcomed customer. Only dealer/vehicle
-  // phrases with an authoritative automotive grounding are masked here.
-  let strictScan = rawScan;
-  if (expected) strictScan = replaceAllowedCustomerPhrase(strictScan, expected);
-  for (let i = 0; i < allowed.length; i++) {
-    const grounded = groundedVehicleIdentityPhrase(allowed[i]);
-    if (!grounded) continue;
-    strictScan = replaceAllowedCustomerPhrase(strictScan, grounded);
-    const groundedTokens = grounded.split(/[^A-Za-zÀ-ÖØ-öø-ÿ0-9'’-]+/);
-    for (let j = 0; j < groundedTokens.length; j++) {
-      if (groundedTokens[j].length > 1) {
-        strictScan = replaceAllowedCustomerPhrase(strictScan, groundedTokens[j]);
+  const evaluateCandidate = function (scan, token, tokenStart, tokenEnd, context) {
+    const lower = identityLower(token);
+    if (IDENTITY_NON_CUSTOMER_WORDS[lower]) return false;
+    const isBareAction = context.patternIndex === IDENTITY_BARE_ACTION_INDEX;
+
+    if (grounding.words[lower]) {
+      const run = identityGroundedRun(
+        scan,
+        tokenEnd,
+        token,
+        grounding,
+        context.vehicleSlot,
+      );
+      const before = identityPrecedingRun(scan, tokenStart, token, grounding);
+      if (run.ok && !before.unrelated) {
+        const totalTokens = run.tokenCount + before.tokenCount;
+        const anyBrand = run.containsBrand || before.containsBrand;
+        if (isBareAction) {
+          if (
+            totalTokens >= 2 ||
+            anyBrand ||
+            grounding.modelWords[lower] ||
+            identityPrecededByDeterminer(scan, tokenStart, token, grounding)
+          ) {
+            return false;
+          }
+          return true;
+        }
+        if (identityDeliberateRunIsBusiness(scan, run, context.loneTokenAllowed)) {
+          if (identityHandoffTargetAfter(scan, run, grounding)) return true;
+          if (context.vehicleSlot && identityHeadlineTailAfter(scan, run, grounding)) {
+            return true;
+          }
+          return false;
+        }
+        return true;
+      }
+      if (
+        isBareAction &&
+        identityPrecededByDeterminer(scan, tokenStart, token, grounding)
+      ) {
+        return false;
+      }
+      return true;
+    }
+
+    if (isBareAction) {
+      if (identityPrecededByDeterminer(scan, tokenStart, token, grounding))
+        return false;
+      if (
+        !context.isNameList &&
+        !/s$/i.test(stripIdentityPossessive(token)) &&
+        /(?:^|[.!?\n:;—–-])\s*$/.test(scan.slice(0, tokenStart)) &&
+        /^\s+(?:just\s+)?love\b/i.test(scan.slice(tokenEnd))
+      ) {
+        return false;
+      }
+      return true;
+    }
+
+    if (
+      context.viaLeadIn &&
+      identityLeadInTargetIsThing(scan, tokenStart, tokenEnd, token)
+    ) {
+      return false;
+    }
+    return true;
+  };
+
+  const hasIdentityMatch = function (scan, patternIndexes) {
+    for (let i = 0; i < patternIndexes.length; i++) {
+      const patternIndex = patternIndexes[i];
+      const pattern = patterns[patternIndex];
+      pattern.lastIndex = 0;
+      let match = null;
+      while ((match = pattern.exec(scan)) !== null) {
+        const group = match[1] || "";
+        const groupOffset = match[0].lastIndexOf(group);
+        const groupStart = match.index + groupOffset;
+        const opener = match[0].slice(0, groupOffset);
+        const vehicleSlot = identityVehicleSlotPattern(patternIndex, match[0]);
+        const context = {
+          patternIndex: patternIndex,
+          vehicleSlot: vehicleSlot,
+          loneTokenAllowed:
+            vehicleSlot ||
+            patternIndex === 8 ||
+            (/^[Ff]rom\b/.test(match[0]) &&
+              !IDENTITY_CONGRATULATION_OPENER.test(scan.slice(0, match.index))),
+          isNameList: /\s+and\s+|[&+/]/i.test(group),
+          viaLeadIn:
+            (patternIndex === 0 ||
+              patternIndex === 3 ||
+              patternIndex === 5 ||
+              patternIndex === 6) &&
+            /\bto\s+[a-zà-öø-ÿ]|\bthe\s+$/.test(opener),
+        };
+        const candidates = group.split(/\s+and\s+|\s*(?:&|\+|\/)\s*/i);
+        let cursor = 0;
+        for (let j = 0; j < candidates.length; j++) {
+          const raw = candidates[j];
+          const token = raw.trim();
+          if (!token) continue;
+          const tokenStart = groupStart + group.indexOf(raw, cursor);
+          cursor = group.indexOf(raw, cursor) + raw.length;
+          if (
+            evaluateCandidate(scan, token, tokenStart, tokenStart + raw.length, context)
+          ) {
+            return true;
+          }
+        }
+        if (pattern.lastIndex === match.index) pattern.lastIndex += 1;
       }
     }
-  }
-  if (hasIdentityMatch(strictScan, strictCustomerTargetPatterns)) return true;
+    return false;
+  };
 
-  let scan = rawScan;
-  if (expected) scan = replaceAllowedCustomerPhrase(scan, expected);
-  for (let i = 0; i < allowed.length; i++) {
-    scan = replaceAllowedCustomerPhrase(scan, allowed[i]);
-  }
+  // The approved label is blanked and checked for a glued-on surname
+  // ("Michelle Smith" -> "Customer Smith"). Nothing else is ever blanked:
+  // grounded business phrases are forgiven per word by the run walkers, so
+  // the person they hand off to stays visible.
+  let strictScan = rawScan;
+  if (expected) strictScan = replaceAllowedCustomerPhrase(strictScan, expected);
   if (
-    /\bCustomer\s+(?:[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{1,39}|[A-ZÀ-ÖØ-Þ]\.)(?=$|[^A-Za-zÀ-ÖØ-öø-ÿ])/g.test(
-      scan,
-    )
+    strictScan !== rawScan &&
+    new RegExp(
+      "\\bCustomer\\s+(?:[" +
+        IDENTITY_UPPER +
+        "][" +
+        IDENTITY_LETTER +
+        "'’-]{1,39}|[" +
+        IDENTITY_UPPER +
+        "]\\.)(?=$|[^" +
+        IDENTITY_LETTER +
+        "])",
+    ).test(strictScan)
   ) {
     return true;
   }
+  // A salesperson's name is masked only out of the generic "X is/has…" and
+  // "for/with/from" prose scans. "Congratulations to <salesperson>" stays a
+  // refusal.
+  let looseScan = strictScan;
+  for (let i = 0; i < allowed.length; i++) {
+    if (allowed[i].grounded) continue;
+    looseScan = replaceAllowedCustomerPhrase(looseScan, allowed[i].phrase);
+  }
+
+  const deliberateIndexes = [];
+  for (let i = 0; i < patterns.length; i++) {
+    if (i === IDENTITY_BARE_ACTION_INDEX) continue;
+    if (IDENTITY_PROSE_INDEXES.indexOf(i) !== -1) continue;
+    deliberateIndexes.push(i);
+  }
+  if (hasIdentityMatch(strictScan, deliberateIndexes)) return true;
   return hasIdentityMatch(
-    scan,
-    strictCustomerTargetPatterns.concat([
-      new RegExp("\\b(" + names + ")(?=\\s+(?:" + action + ")\\b)", "g"),
-    ]),
+    looseScan,
+    [IDENTITY_BARE_ACTION_INDEX].concat(IDENTITY_PROSE_INDEXES),
   );
 }
 
@@ -1126,10 +1944,9 @@ function projectProtectedCustomerNamePreservingAllowed(
 ) {
   let protectedValue = (value || "").toString();
   const restorations = [];
-  const allowed = allowedPhrases || [];
+  const allowed = normalizeAllowedIdentityPhrases(allowedPhrases);
   for (let i = 0; i < allowed.length; i++) {
-    const phrase = (allowed[i] || "").toString().trim().replace(/\s+/g, " ");
-    if (!phrase) continue;
+    const phrase = allowed[i].phrase;
     protectedValue = protectedValue.replace(
       new RegExp(
         "(^|[^A-Za-zÀ-ÖØ-öø-ÿ0-9])" +
@@ -1312,7 +2129,7 @@ function groundedVehicleIdentityPhrase(value) {
   return "";
 }
 
-function publicWebsiteDraftForPost(post, dealerName) {
+function publicWebsiteDraftForPost(post, dealerName, oemAffiliation) {
   const parsed = parseWebsiteDraft(recordString(post, "website_draft"));
   if (!parsed.ok || !parsed.value || !parsed.value.enabled) {
     return { websiteDraft: null, identityReviewRequired: false };
@@ -1328,10 +2145,11 @@ function publicWebsiteDraftForPost(post, dealerName) {
     protectedName,
     [draft.title || "", draft.body || "", draft.altText || ""],
     [
-      dealerName || "",
+      groundedIdentityPhrase(dealerName || ""),
+      groundedIdentityPhrase(oemAffiliation || ""),
       salespersonName,
       publicCustomerLabel(salespersonName),
-      vehicleDescription,
+      groundedIdentityPhrase(vehicleDescription),
     ],
     (recordBool(post, "release_required") || draft.kind === "customer_story") &&
       !publicLabel,
@@ -1401,18 +2219,22 @@ function buildOutboundContent(post, draft, media, dao) {
   }
   vehicleDescription = groundedVehicleDescription;
   let dealerName = "";
+  let oemAffiliation = "";
   const effectiveDao =
     dao || (typeof $app !== "undefined" && $app && $app.dao ? $app.dao() : null);
   if (effectiveDao) {
     try {
-      dealerName = recordString(
-        effectiveDao.findRecordById("dealers", recordString(post, "dealer")),
-        "name",
+      const dealer = effectiveDao.findRecordById(
+        "dealers",
+        recordString(post, "dealer"),
       );
+      dealerName = recordString(dealer, "name");
+      oemAffiliation = recordString(dealer, "oem_affiliation");
     } catch (_e) {}
   }
   const groundedIdentityPhrases = [
     dealerName,
+    oemAffiliation,
     vehicleDescription,
     mapping.scenarioLabel,
   ];
@@ -1440,19 +2262,22 @@ function buildOutboundContent(post, draft, media, dao) {
   if (
     draft.kind === "customer_story" &&
     (containsUnexpectedCustomerIdentity(title, customerDisplayName, [
-      vehicleDescription,
+      groundedIdentityPhrase(vehicleDescription),
       mapping.scenarioLabel,
-      dealerName,
+      groundedIdentityPhrase(dealerName),
+      groundedIdentityPhrase(oemAffiliation),
     ]) ||
       containsUnexpectedCustomerIdentity(body, customerDisplayName, [
-        vehicleDescription,
+        groundedIdentityPhrase(vehicleDescription),
         mapping.scenarioLabel,
-        dealerName,
+        groundedIdentityPhrase(dealerName),
+        groundedIdentityPhrase(oemAffiliation),
       ]) ||
       containsUnexpectedCustomerIdentity(altText, customerDisplayName, [
-        vehicleDescription,
+        groundedIdentityPhrase(vehicleDescription),
         mapping.scenarioLabel,
-        dealerName,
+        groundedIdentityPhrase(dealerName),
+        groundedIdentityPhrase(oemAffiliation),
       ]))
   ) {
     throw new Error("customer_identity_conflict");
@@ -2253,6 +3078,7 @@ function retryPublication(post) {
 }
 
 module.exports = {
+  groundedIdentityPhrase,
   WEBSITE_DRAFT_SCHEMA_VERSION,
   WEBSITE_BODY_LIMITS,
   parseWebsiteDraft,
