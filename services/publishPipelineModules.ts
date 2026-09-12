@@ -16,7 +16,11 @@ export {
   shouldGenerateCaptionPack,
 } from "./platformCopy";
 export { EXPORT_FORMATS, renderFormat } from "../utils/multiFormatExport";
-export { captionUsesOnlyExpectedCustomer } from "../utils/captionQuality";
+export {
+  captionUsesOnlyExpectedCustomer,
+  describeUnauthorizedNames,
+  unauthorizedCustomerNames,
+} from "../utils/captionQuality";
 export { toPublicCustomerLabel } from "../utils/customerIdentity";
 export { deliveryLanguageAllowedForBrief } from "./promptsV2";
 export {

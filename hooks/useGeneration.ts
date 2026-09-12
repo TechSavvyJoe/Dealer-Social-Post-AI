@@ -60,27 +60,54 @@ const brandKitFromDealer = (dealer?: Dealer | null): DealerBrandKit | null => {
  * inside async flows that have already awaited loadPublishPipeline(), so
  * passing the resolved module keeps this helper synchronous.
  */
-const customerIdentityIsSafe = (
+const unauthorizedCustomerIdentities = (
   pipeline: Pick<
     PublishPipelineModule,
-    "toPublicCustomerLabel" | "captionUsesOnlyExpectedCustomer"
+    "toPublicCustomerLabel" | "unauthorizedCustomerNames"
   >,
   input: {
     caption: string;
     customerName?: string;
     dealerName?: string;
+    /** The OEM the dealer sells ("Ford") — a brand word, never a customer. */
+    oemAffiliation?: string;
     vehicleDescription?: string;
     requireExpected?: boolean;
     identityRequired?: boolean;
   },
-): boolean => {
+): string[] => {
   const publicCustomer = pipeline.toPublicCustomerLabel(input.customerName);
-  return pipeline.captionUsesOnlyExpectedCustomer(input.caption, publicCustomer, {
-    allowedPhrases: [input.dealerName, input.vehicleDescription],
+  // The signed-in salesperson may be named in prose ("Ask for Joe") but is
+  // never the celebrated customer — the same split the server applies.
+  const salesperson = useAppStore.getState().currentPerson?.name;
+  return pipeline.unauthorizedCustomerNames(input.caption, publicCustomer, {
+    allowedPhrases: [input.dealerName, input.oemAffiliation, input.vehicleDescription],
+    maskedPhrases: [salesperson, pipeline.toPublicCustomerLabel(salesperson)],
     requireExpected: Boolean(publicCustomer && input.requireExpected),
     rejectAnyCustomerIdentity: Boolean(input.identityRequired && !publicCustomer),
   });
 };
+
+const customerIdentityIsSafe = (
+  pipeline: Parameters<typeof unauthorizedCustomerIdentities>[0],
+  input: Parameters<typeof unauthorizedCustomerIdentities>[1],
+): boolean => unauthorizedCustomerIdentities(pipeline, input).length === 0;
+
+/**
+ * The refusal names the word that tripped the guard. A salesperson who reads
+ * "not authorized for this post" with no further detail cannot tell whether
+ * the model invented a person, read a name off a plate frame, or the guard
+ * simply misread the town — and neither can anyone debugging their report.
+ */
+const customerIdentityErrorFor = (
+  pipeline: Pick<PublishPipelineModule, "describeUnauthorizedNames">,
+  offending: string[],
+): string =>
+  offending.length > 0
+    ? `The caption introduced a customer name that is not authorized for this post (${pipeline.describeUnauthorizedNames(
+        offending,
+      )}). The previous caption was kept.`
+    : customerIdentityError;
 
 const customerIdentityError =
   "The caption introduced a customer name that is not authorized for this post. The previous caption was kept.";
@@ -424,17 +451,18 @@ export const useGeneration = () => {
         toPublicCustomerLabel,
       } = pipeline;
 
-      if (
-        !customerIdentityIsSafe(pipeline, {
-          caption: result.text,
-          customerName: variables.customerName,
-          dealerName: currentDealer?.name,
-          vehicleDescription: variables.meta?.websiteVehicleDescription,
-          identityRequired: variables.meta?.customerIdentityRequired ?? true,
-        })
-      ) {
-        setError(customerIdentityError);
-        toastError(customerIdentityError);
+      const offendingIdentities = unauthorizedCustomerIdentities(pipeline, {
+        caption: result.text,
+        customerName: variables.customerName,
+        dealerName: currentDealer?.name,
+        oemAffiliation: currentDealer?.oem_affiliation,
+        vehicleDescription: variables.meta?.websiteVehicleDescription,
+        identityRequired: variables.meta?.customerIdentityRequired ?? true,
+      });
+      if (offendingIdentities.length > 0) {
+        const message = customerIdentityErrorFor(pipeline, offendingIdentities);
+        setError(message);
+        toastError(message);
         setStep(AppStep.CUSTOMIZE);
         return;
       }
@@ -548,6 +576,7 @@ export const useGeneration = () => {
                   caption: prepared.caption,
                   customerName: finalPost.customerDisplayName,
                   dealerName: currentDealer.name,
+                  oemAffiliation: currentDealer.oem_affiliation,
                   vehicleDescription: variables.meta?.websiteVehicleDescription,
                   identityRequired: finalPost.customerIdentityRequired,
                 })
@@ -577,6 +606,7 @@ export const useGeneration = () => {
           scenarioId: variables.meta?.scenarioId,
           customScenariosJson: currentDealer.custom_scenarios,
           dealerName: currentDealer.name,
+          oemAffiliation: currentDealer.oem_affiliation,
           caption: preparedCaption.caption,
           customerDisplayName: finalPost.customerDisplayName,
           vehicleDescription: variables.meta?.websiteVehicleDescription,
@@ -677,6 +707,12 @@ export const useGeneration = () => {
               primaryFormatId: finalPost.primaryFormatId,
               imageAspectRatio: finalPost.imageAspectRatio,
               websiteDraft: finalPost.websiteDraft,
+              grounding: {
+                dealerName: currentDealer.name,
+                oemAffiliation: currentDealer.oem_affiliation,
+                vehicleDescription: variables.meta?.websiteVehicleDescription,
+                salespersonName: useAppStore.getState().currentPerson?.name,
+              },
             },
             variables.authEpoch,
           );
@@ -1146,6 +1182,7 @@ export const useGeneration = () => {
                 caption: prepared.caption,
                 customerName: publicCustomer,
                 dealerName: currentDealer.name,
+                oemAffiliation: currentDealer.oem_affiliation,
                 vehicleDescription: generationParams?.websiteVehicleDescription,
                 identityRequired: resolveCustomerIdentityRequired(
                   useAppStore.getState().generatedPost?.customerIdentityRequired,
@@ -1230,19 +1267,19 @@ export const useGeneration = () => {
           customerIdentityRequired,
         ),
       );
-      if (
-        !customerIdentityIsSafe(pipeline, {
-          caption: prepared.caption,
-          customerName: sourcePost.customerDisplayName || generationParams.customerName,
-          dealerName: currentDealer.name,
-          vehicleDescription: generationParams.websiteVehicleDescription,
-          identityRequired: resolveCustomerIdentityRequired(
-            sourcePost.customerIdentityRequired,
-            generationParams.customerIdentityRequired,
-          ),
-        })
-      ) {
-        throw new Error(customerIdentityError);
+      const offendingRegenerated = unauthorizedCustomerIdentities(pipeline, {
+        caption: prepared.caption,
+        customerName: sourcePost.customerDisplayName || generationParams.customerName,
+        dealerName: currentDealer.name,
+        oemAffiliation: currentDealer.oem_affiliation,
+        vehicleDescription: generationParams.websiteVehicleDescription,
+        identityRequired: resolveCustomerIdentityRequired(
+          sourcePost.customerIdentityRequired,
+          generationParams.customerIdentityRequired,
+        ),
+      });
+      if (offendingRegenerated.length > 0) {
+        throw new Error(customerIdentityErrorFor(pipeline, offendingRegenerated));
       }
       const platformIds = generationParams.platformIds ?? sourcePost.platformIds ?? [];
       const pack = await rebuildCaptionPack(
@@ -1357,18 +1394,18 @@ export const useGeneration = () => {
         customerIdentityRequired,
       ),
     );
-    if (
-      !customerIdentityIsSafe(pipeline, {
-        caption: prepared.caption,
-        customerName:
-          useAppStore.getState().generatedPost?.customerDisplayName ||
-          generationParams.customerName,
-        dealerName: currentDealer.name,
-        vehicleDescription: generationParams.websiteVehicleDescription,
-        identityRequired: customerIdentityRequired,
-      })
-    ) {
-      throw new Error(customerIdentityError);
+    const offendingVariant = unauthorizedCustomerIdentities(pipeline, {
+      caption: prepared.caption,
+      customerName:
+        useAppStore.getState().generatedPost?.customerDisplayName ||
+        generationParams.customerName,
+      dealerName: currentDealer.name,
+      oemAffiliation: currentDealer.oem_affiliation,
+      vehicleDescription: generationParams.websiteVehicleDescription,
+      identityRequired: customerIdentityRequired,
+    });
+    if (offendingVariant.length > 0) {
+      throw new Error(customerIdentityErrorFor(pipeline, offendingVariant));
     }
     if (operationAuthEpoch !== useAppStore.getState().authEpoch) {
       throw new Error("Your signed-in workspace changed during caption generation.");
@@ -1420,6 +1457,7 @@ export const useGeneration = () => {
           caption: sourceText,
           customerName: publicCustomer,
           dealerName: currentDealer?.name,
+          oemAffiliation: currentDealer?.oem_affiliation,
           vehicleDescription: generationParams?.websiteVehicleDescription,
           identityRequired: customerIdentityRequired,
         })
@@ -1470,6 +1508,7 @@ export const useGeneration = () => {
           caption: prepared.caption,
           customerName: publicCustomer,
           dealerName: currentDealer?.name,
+          oemAffiliation: currentDealer?.oem_affiliation,
           vehicleDescription: generationParams?.websiteVehicleDescription,
           identityRequired: customerIdentityRequired,
           requireExpected: Boolean(
@@ -1478,6 +1517,7 @@ export const useGeneration = () => {
               caption: sourceText,
               customerName: publicCustomer,
               dealerName: currentDealer?.name,
+              oemAffiliation: currentDealer?.oem_affiliation,
               vehicleDescription: generationParams?.websiteVehicleDescription,
               identityRequired: resolveCustomerIdentityRequired(
                 sourcePost.customerIdentityRequired,
@@ -1600,6 +1640,7 @@ export const useGeneration = () => {
       const source: FinalWebsiteDraftSource = {
         currentDraft: input.currentDraft,
         dealerName: dealer.name,
+        oemAffiliation: dealer.oem_affiliation,
         caption: input.caption,
         customerName:
           state.generatedPost?.customerDisplayName ||

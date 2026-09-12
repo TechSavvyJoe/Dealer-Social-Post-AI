@@ -410,7 +410,18 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     restoredCustomText,
     restoredCustomerName,
     {
-      allowedPhrases: [dealershipName],
+      allowedPhrases: [
+        dealershipName,
+        currentDealer?.oem_affiliation,
+        [
+          initialGenerationParams?.decodedVehicle?.year,
+          initialGenerationParams?.decodedVehicle?.make,
+          initialGenerationParams?.decodedVehicle?.model,
+          initialGenerationParams?.decodedVehicle?.trim,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      ],
       rejectAnyCustomerIdentity:
         restoredScenarioNeedsCustomerRelease && !restoredCustomerName,
     },
@@ -828,7 +839,11 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     if (trimmedPersonalLine) {
       if (
         !captionUsesOnlyExpectedCustomer(trimmedPersonalLine, customerName, {
-          allowedPhrases: [dealershipName, vehiclePhrase],
+          allowedPhrases: [
+            dealershipName,
+            currentDealer?.oem_affiliation,
+            vehiclePhrase,
+          ],
           rejectAnyCustomerIdentity: scenarioNeedsCustomerRelease && !customerName,
         })
       ) {
@@ -961,7 +976,11 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     if (!creativeEnabled && captionSource === "custom" && customMessage.trim()) {
       if (
         !captionUsesOnlyExpectedCustomer(customMessage, customerName, {
-          allowedPhrases: [dealershipName, vehiclePhrase],
+          allowedPhrases: [
+            dealershipName,
+            currentDealer?.oem_affiliation,
+            vehiclePhrase,
+          ],
           rejectAnyCustomerIdentity: scenarioNeedsCustomerRelease && !customerName,
         })
       ) {

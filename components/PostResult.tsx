@@ -437,6 +437,9 @@ export const PostResult: React.FC<PostResultProps> = ({
   const generationStyle = useAppStore((s) => s.generationParams?.style);
   const generationTone = useAppStore((s) => s.generationParams?.tone);
   const generationCreativeBrief = useAppStore((s) => s.generationParams?.creativeBrief);
+  const generationVehicleDescription = useAppStore(
+    (s) => s.generationParams?.websiteVehicleDescription,
+  );
   // `generationParams` and `post` are saved/restored together as a pair (see
   // appStore's restoreSession), so this is safe even after a reload — it is
   // never a stale brief from some earlier, different generation.
@@ -953,7 +956,12 @@ export const PostResult: React.FC<PostResultProps> = ({
   const customerIdentityIsSafe = useCallback(
     (caption: string): boolean =>
       captionUsesOnlyExpectedCustomer(caption, post.customerDisplayName, {
-        allowedPhrases: [currentDealer?.name, websiteDraft?.vehicleDescription],
+        allowedPhrases: [
+          currentDealer?.name,
+          currentDealer?.oem_affiliation,
+          websiteDraft?.vehicleDescription,
+        ],
+        maskedPhrases: [currentPersonName, toPublicCustomerLabel(currentPersonName)],
         rejectAnyCustomerIdentity: Boolean(
           (post.customerIdentityRequired || websiteDraft?.kind === "customer_story") &&
           !toPublicCustomerLabel(post.customerDisplayName),
@@ -961,6 +969,8 @@ export const PostResult: React.FC<PostResultProps> = ({
       }),
     [
       currentDealer?.name,
+      currentDealer?.oem_affiliation,
+      currentPersonName,
       post.customerDisplayName,
       post.customerIdentityRequired,
       websiteDraft?.kind,
@@ -1120,7 +1130,16 @@ export const PostResult: React.FC<PostResultProps> = ({
 
     const operation = draftSyncChainRef.current.then(async () => {
       try {
-        const updated = await updatePostDraft(post.postId as string, draft);
+        const updated = await updatePostDraft(post.postId as string, {
+          ...draft,
+          grounding: {
+            dealerName: currentDealer?.name,
+            oemAffiliation: currentDealer?.oem_affiliation,
+            vehicleDescription:
+              websiteDraft?.vehicleDescription || generationVehicleDescription,
+            salespersonName: currentPersonName,
+          },
+        });
         lastPostRevisionRef.current = updated.post_revision;
         lastSyncedDraftRef.current = {
           caption: draft.caption,
@@ -1146,7 +1165,15 @@ export const PostResult: React.FC<PostResultProps> = ({
     });
     draftSyncChainRef.current = operation.then(() => undefined);
     return operation;
-  }, [editableDraft, post.postId]);
+  }, [
+    currentDealer?.name,
+    currentDealer?.oem_affiliation,
+    currentPersonName,
+    editableDraft,
+    generationVehicleDescription,
+    post.postId,
+    websiteDraft?.vehicleDescription,
+  ]);
 
   useEffect(() => {
     if (!post.postId || !editableDraft) return;
@@ -1578,6 +1605,7 @@ export const PostResult: React.FC<PostResultProps> = ({
         : buildFinalWebsiteDraftFallback({
             currentDraft: websiteDraft,
             dealerName: currentDealer?.name || "the dealership",
+            oemAffiliation: currentDealer?.oem_affiliation,
             caption: finalCaptionAnalysis.caption,
           });
       const liveCreative = latestWebsiteCreativeRef.current;
@@ -1651,6 +1679,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     activeCaptionPlatform,
     bannedPhrases,
     currentDealer?.name,
+    currentDealer?.oem_affiliation,
     captionSetAnalysis.disclosures,
     deliveryGateMessage,
     deliveryLanguageAllowed,

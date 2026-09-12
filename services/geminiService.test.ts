@@ -574,7 +574,10 @@ describe("GeminiService model routing", () => {
     expect(generationPrompt).toContain("Compose for 9:16");
   });
 
-  it("fails closed after every correction remains over the image-text budget", async () => {
+  it("ships the best render when every correction remains over the image-text budget", async () => {
+    // A leftover length finding is a craft opinion about a real styled
+    // render. Discarding it handed the salesperson an untouched photo with
+    // no explanation, which reads as "the app did nothing".
     let imageCalls = 0;
     let reviewCalls = 0;
     const noncompliantReview: GeneratedImageTextReview = {
@@ -607,8 +610,8 @@ describe("GeminiService model routing", () => {
       "Test Dealer",
     );
 
-    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
-    expect(result.aiMeta.image.provider).toBe("original");
+    expect(result.image).not.toBe("data:image/jpeg;base64,original-photo");
+    expect(result.aiMeta.image.provider).toBe("gemini");
     expect(imageCalls).toBe(3);
     expect(reviewCalls).toBe(3);
     const reductionCall = mockGenerateContent.mock.calls.find(([request]) =>
@@ -619,7 +622,7 @@ describe("GeminiService model routing", () => {
     expect(reductionCall).toBeDefined();
   });
 
-  it("rejects a text-correction render that introduces a blocking craft defect", async () => {
+  it("keeps the better earlier render when a text-correction pass turns bland", async () => {
     let imageCalls = 0;
     let reviewCalls = 0;
     const lengthReview: GeneratedImageTextReview = {
@@ -661,8 +664,10 @@ describe("GeminiService model routing", () => {
       "Test Dealer",
     );
 
-    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
-    expect(result.aiMeta.image.provider).toBe("original");
+    // The corrected render scored lower (bland, 2/5) than the second styled
+    // render, which only had a length finding — so the second render ships.
+    expect(result.image).toBe("data:image/png;base64,craft-2");
+    expect(result.aiMeta.image.provider).toBe("gemini");
     expect(imageCalls).toBe(3);
     expect(reviewCalls).toBe(3);
   });
@@ -735,7 +740,10 @@ describe("GeminiService model routing", () => {
     expect(imageCalls).toBeGreaterThan(1);
   });
 
-  it("never returns a known substandard render when a retry review is unavailable", async () => {
+  it("ships the one reviewed render when every retry review is unavailable", async () => {
+    // A missing store lockup is a craft finding, not an identity or brand
+    // fabrication one. With no retry reviewable, the reviewed render is the
+    // only candidate whose safety is actually known, so that is what ships.
     let imageCalls = 0;
     let reviewCalls = 0;
     const missingDealerReview: GeneratedImageTextReview = {
@@ -769,8 +777,8 @@ describe("GeminiService model routing", () => {
       "Test Dealer",
     );
 
-    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
-    expect(result.aiMeta.image.provider).toBe("original");
+    expect(result.image).toBe("data:image/png;base64,unverified-retry-1");
+    expect(result.aiMeta.image.provider).toBe("gemini");
     expect(imageCalls).toBe(3);
     expect(reviewCalls).toBeGreaterThanOrEqual(3);
   });
@@ -907,7 +915,7 @@ describe("GeminiService model routing", () => {
     errorSpy.mockRestore();
   });
 
-  it("retries and then rejects a merely usable score-three creative", async () => {
+  it("retries and then ships a merely usable score-three creative", async () => {
     let imageCalls = 0;
     let reviewCalls = 0;
     mockGenerateContent.mockImplementation((request) => {
@@ -936,8 +944,8 @@ describe("GeminiService model routing", () => {
       "Test Dealer",
     );
 
-    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
-    expect(result.aiMeta.image.provider).toBe("original");
+    expect(result.image).not.toBe("data:image/jpeg;base64,original-photo");
+    expect(result.aiMeta.image.provider).toBe("gemini");
     expect(imageCalls).toBe(3);
     expect(reviewCalls).toBe(3);
     expect(
@@ -1011,7 +1019,11 @@ describe("GeminiService model routing", () => {
     expect(imageCalls).toBe(1);
   });
 
-  it("fails closed when repeated visual review remains uncertain", async () => {
+  it("ships an uncertain review that names no concrete violation", async () => {
+    // The reviewer is instructed to set uncertain=true whenever it cannot
+    // tell overlay copy from text photographed in the scene — i.e. any real
+    // photo taken in front of the store's own signage — and to fail a render
+    // only for a concrete violation. "Not sure" is not a violation.
     let imageCalls = 0;
     const uncertainReview: GeneratedImageTextReview = {
       ...compliantImageTextReview,
@@ -1042,9 +1054,9 @@ describe("GeminiService model routing", () => {
       "Test Dealer",
     );
 
-    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
-    expect(result.aiMeta.image.provider).toBe("original");
-    expect(imageCalls).toBeGreaterThan(1);
+    expect(result.image).toBe("data:image/png;base64,stylized-type-image");
+    expect(result.aiMeta.image.provider).toBe("gemini");
+    expect(imageCalls).toBe(1);
   });
 
   it("accepts a headline with display punctuation and a badge as separate blocks", async () => {
@@ -1191,7 +1203,10 @@ describe("GeminiService model routing", () => {
     ).not.toBeNull();
   });
 
-  it("fails closed when a supplied logo is still missing after repair", async () => {
+  it("ships the styled render when a supplied logo is still missing after one repair", async () => {
+    // The dealer's own logo drawn wrong (or not at all) is a brand-polish
+    // finding about a render that already passed identity review. One repair
+    // pass, then the better of the two renders ships — never the raw photo.
     let imageCalls = 0;
     let reviewCalls = 0;
     const logoStillMissing: GeneratedImageTextReview = {
@@ -1238,10 +1253,172 @@ describe("GeminiService model routing", () => {
       "/api/files/dealers/dealer-id/logo.png",
     );
 
-    expect(result.image).toBe("data:image/jpeg;base64,original-photo");
-    expect(result.aiMeta.image.provider).toBe("original");
+    // Both renders reviewed identically, so the repair (second) render wins
+    // the tie and ships. The raw photo is never the answer to a logo miss.
+    expect(result.image).toBe("data:image/png;base64,missing-logo-2");
+    expect(result.aiMeta.image.provider).toBe("gemini");
     expect(imageCalls).toBe(2);
     expect(reviewCalls).toBe(2);
+  });
+
+  it("never lets an unsafe logo-repair pass replace the reviewed render", async () => {
+    // The repair render is only preferred when the reviewer could confirm it
+    // is at least as safe. A repair that changed the people in the photo
+    // must lose to the first render, which passed identity review.
+    let imageCalls = 0;
+    let reviewCalls = 0;
+    const logoMissing: GeneratedImageTextReview = {
+      ...compliantImageTextReview,
+      compliant: true,
+      logoPresent: false,
+      logoMatchesSuppliedAsset: false,
+      violations: [],
+    };
+    const repairChangedPeople: GeneratedImageTextReview = {
+      ...compliantImageTextReview,
+      compliant: false,
+      logoPresent: true,
+      logoMatchesSuppliedAsset: true,
+      preservesSourceSubjects: false,
+      violations: ["subject_identity_changed"],
+    };
+    const bytes = new Uint8Array([1, 2, 3]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        blob: async () => ({
+          type: "image/png",
+          arrayBuffer: async () => bytes.buffer,
+        }),
+      })),
+    );
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        reviewCalls += 1;
+        return imageTextReviewResponse(
+          reviewCalls === 1 ? logoMissing : repairChangedPeople,
+        );
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        imageCalls += 1;
+        return Promise.resolve(generatedImageResponse(`logo-repair-${imageCalls}`));
+      }
+      return Promise.resolve({
+        text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,original-photo",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Test Dealer",
+      undefined,
+      "/api/files/dealers/dealer-id/logo.png",
+    );
+
+    expect(result.image).toBe("data:image/png;base64,logo-repair-1");
+    expect(result.aiMeta.image.provider).toBe("gemini");
+    expect(imageCalls).toBe(2);
+    expect(reviewCalls).toBe(2);
+  });
+
+  it("ships the reviewed render when the logo-repair generation itself fails", async () => {
+    let imageCalls = 0;
+    const logoMissing: GeneratedImageTextReview = {
+      ...compliantImageTextReview,
+      compliant: true,
+      logoPresent: false,
+      logoMatchesSuppliedAsset: false,
+      violations: [],
+    };
+    const bytes = new Uint8Array([1, 2, 3]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        blob: async () => ({
+          type: "image/png",
+          arrayBuffer: async () => bytes.buffer,
+        }),
+      })),
+    );
+    const telemetry = await import("../utils/telemetry");
+    const errorSpy = vi.spyOn(telemetry, "logError");
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        return imageTextReviewResponse(logoMissing);
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        imageCalls += 1;
+        if (imageCalls > 1) return Promise.reject(new Error("upstream 503"));
+        return Promise.resolve(generatedImageResponse("reviewed-render"));
+      }
+      return Promise.resolve({
+        text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,original-photo",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Test Dealer",
+      undefined,
+      "/api/files/dealers/dealer-id/logo.png",
+    );
+
+    expect(result.image).toBe("data:image/png;base64,reviewed-render");
+    expect(result.aiMeta.image.provider).toBe("gemini");
+    const degraded = errorSpy.mock.calls.find(
+      ([name]) => name === "image.accepted_degraded",
+    );
+    expect(degraded?.[1]).toMatchObject({
+      task: "image_standard",
+      kind: "logo_restore_failed",
+    });
+    errorSpy.mockRestore();
+  });
+
+  it("reports a render shipped below the craft bar at error level so the server sees it", async () => {
+    const telemetry = await import("../utils/telemetry");
+    const errorSpy = vi.spyOn(telemetry, "logError");
+    mockGenerateContent.mockImplementation((request) => {
+      if (isImageTextReviewRequest(request)) {
+        return imageTextReviewResponse({
+          ...compliantImageTextReview,
+          compliant: true,
+          visualQualityScore: 3,
+          violations: [],
+        });
+      }
+      if (request.generationConfig?.responseModalities?.includes("IMAGE")) {
+        return Promise.resolve(generatedImageResponse("score-three"));
+      }
+      return Promise.resolve({
+        text: () => "A compliant delivery caption for Test Dealer. #DeliveryDay",
+      });
+    });
+
+    const result = await generateSocialPost(
+      "data:image/jpeg;base64,original-photo",
+      StyleOption.Modern,
+      ToneOption.Professional,
+      "Test Dealer",
+    );
+
+    expect(result.aiMeta.image.provider).toBe("gemini");
+    const degraded = errorSpy.mock.calls.find(
+      ([name]) => name === "image.accepted_degraded",
+    );
+    expect(degraded?.[1]).toMatchObject({
+      task: "image_standard",
+      kind: "below_campaign_quality",
+    });
+    errorSpy.mockRestore();
   });
 
   it("keeps website metadata requests inside the server text-policy contract", async () => {

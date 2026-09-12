@@ -9,6 +9,7 @@ import {
 } from "./postScenarios";
 import { toPublicCustomerLabel } from "../utils/customerIdentity";
 import { captionUsesOnlyExpectedCustomer } from "../utils/captionQuality";
+import { isAutomotiveBrandToken } from "../utils/automotiveBrands";
 
 export type WebsiteDraftKind = "customer_story" | "site_update";
 
@@ -54,6 +55,8 @@ export interface WebsiteDraftSource {
   scenarioId?: string;
   customScenariosJson?: string;
   dealerName: string;
+  /** The OEM the dealer sells ("Ford") — a brand word, never a customer. */
+  oemAffiliation?: string;
   caption: string;
   customerDisplayName?: string;
   vehicleDescription?: string;
@@ -221,46 +224,6 @@ export const cleanWebsiteMarketingCopy = (text: string): string =>
 const escapeRegExp = (value: string): string =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const AUTOMOTIVE_BRAND_TOKENS = new Set([
-  "acura",
-  "audi",
-  "bmw",
-  "buick",
-  "cadillac",
-  "chevrolet",
-  "chrysler",
-  "dodge",
-  "ford",
-  "genesis",
-  "gmc",
-  "honda",
-  "hyundai",
-  "infiniti",
-  "jaguar",
-  "jeep",
-  "kia",
-  "landrover",
-  "lexus",
-  "lincoln",
-  "mazda",
-  "mercedes",
-  "mini",
-  "mitsubishi",
-  "nissan",
-  "porsche",
-  "ram",
-  "rivian",
-  "rover",
-  "subaru",
-  "tesla",
-  "toyota",
-  "volkswagen",
-  "volvo",
-]);
-
-const isAutomotiveBrandToken = (token: string): boolean =>
-  AUTOMOTIVE_BRAND_TOKENS.has(token.toLowerCase().replace(/[^a-z]/g, ""));
-
 /** Replace the protected/full form value anywhere it leaks into public copy. */
 export const replaceFullCustomerName = (
   text: string,
@@ -380,7 +343,7 @@ export const buildFallbackWebsiteDraft = (source: WebsiteDraftSource): WebsiteDr
     publicCaption,
     customerDisplayName,
     {
-      allowedPhrases: [source.dealerName, vehicleDescription],
+      allowedPhrases: [source.dealerName, source.oemAffiliation, vehicleDescription],
       rejectAnyCustomerIdentity:
         mapping.kind === "customer_story" && !customerDisplayName,
     },
@@ -587,6 +550,7 @@ Rules:
 export interface FinalWebsiteDraftSource {
   currentDraft: WebsiteDraft;
   dealerName: string;
+  oemAffiliation?: string;
   caption: string;
   /** Protected form value used only to remove a full customer name from copy. */
   customerName?: string;
@@ -628,7 +592,11 @@ export const buildFinalWebsiteDraftFallback = (
     safeBody,
     customerDisplayName,
     {
-      allowedPhrases: [source.dealerName, current.vehicleDescription],
+      allowedPhrases: [
+        source.dealerName,
+        source.oemAffiliation,
+        current.vehicleDescription,
+      ],
       rejectAnyCustomerIdentity:
         current.kind === "customer_story" && !customerDisplayName,
     },

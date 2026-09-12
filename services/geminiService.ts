@@ -22,6 +22,7 @@ import {
   generateVideoPrompt,
 } from "./promptConfig";
 import { generateVideoNegativePrompt } from "./promptsV2";
+import { classifyCreativeBrief } from "./creativeSkills";
 import {
   createBlockedContentError,
   isBlockedContentError,
@@ -73,6 +74,7 @@ import {
 } from "../utils/telemetry";
 import { cleanSocialCaption, ensureUsableCaption } from "../utils/captionQuality";
 import { toPublicCustomerLabel } from "../utils/customerIdentity";
+import { activeSalespersonPhrases } from "../utils/identityContext";
 import { z } from "zod";
 import {
   deliveryLanguageAllowedForBrief,
@@ -444,6 +446,39 @@ const optionalLogoImagePart = async (source?: string, signal?: AbortSignal) => {
 /** Clean model text; never return labeled/XML junk to the UI. */
 const cleanGeneratedText = (inputText: string): string => {
   return cleanSocialCaption(inputText ?? "");
+};
+
+/**
+ * OEM affiliation and VIN-decoded vehicle phrase as the creative brief
+ * carries them (PostCustomizer's oemBlock / vehicleToCreativeBrief), so the
+ * in-service caption gate forgives the same grounded words the browser and
+ * server identity guards do.
+ */
+const captionIdentityGroundingFromBrief = (
+  creativeBrief?: string,
+): {
+  oemAffiliation?: string;
+  vehiclePhrase?: string;
+  maskedPhrases: Array<string | undefined>;
+} => {
+  // Both the allowlisted label ("Chevrolet") and the dealer's own spelling
+  // in the brief ("Chevy") — the caption uses whichever the store configured.
+  const configuredOem = /\bOEM affiliation:\s*([^.\n]{1,80})\./u
+    .exec(creativeBrief || "")?.[1]
+    ?.trim();
+  const oemAffiliation = [
+    ...classifyCreativeBrief(creativeBrief).oemAffiliations,
+    ...(configuredOem ? [configuredOem] : []),
+  ].join(" ");
+  const vehiclePhrase = /\bVehicle:\s*([^.\n]{1,80})\./u
+    .exec(creativeBrief || "")?.[1]
+    ?.trim();
+  const salesperson = activeSalespersonPhrases();
+  return {
+    ...(oemAffiliation ? { oemAffiliation } : {}),
+    ...(vehiclePhrase ? { vehiclePhrase } : {}),
+    maskedPhrases: [...salesperson, ...salesperson.map(toPublicCustomerLabel)],
+  };
 };
 
 /** Pull a data-URL image out of a generateContent response, if any. */
@@ -1204,13 +1239,29 @@ const concreteViolations = (
   review.violations.filter((violation) => violation !== "unreadable_or_uncertain");
 
 /**
- * Identity, brand, source-fidelity, dignity, and unreadable/uncertain findings
- * must never ship. Length and sentence findings are craft issues that can use
- * the bounded correction ladder without discarding an otherwise sound render.
+ * Identity, brand-fabrication, source-fidelity, and dignity findings must
+ * never ship. Everything else the reviewer can say is a craft opinion — and
+ * a craft opinion is never a reason to throw a real render away and hand the
+ * salesperson their untouched photo (see the end of
+ * enforceGeneratedImageTextCompliance).
+ *
+ * Deliberately NOT unsafe:
+ * - `uncertain`: the reviewer is told to set this whenever it cannot tell
+ *   designed overlay text from text photographed in the scene — which is
+ *   every real delivery photo taken in front of the store's own signage. It
+ *   is also told to only fail a render for a CONCRETE violation. Treating
+ *   "I'm not sure" as "unsafe" made the `uncertain_pass` branch below
+ *   unreachable and shipped the original photo for whole dealerships.
+ * - `supplied_logo_altered_or_replaced`: the image model redraws the whole
+ *   frame, so a detailed logo is often a close-but-inexact rendition. That
+ *   is the dealer's own mark, not a fabricated or OEM one; the logo-restore
+ *   pass gets one try and the better render ships either way.
+ * - `overdone_or_platform_inappropriate`: taste. The regeneration ladder
+ *   tries again; if it still disagrees, the salesperson gets a styled image
+ *   to judge for themselves rather than nothing.
  */
 const hasUnsafeOverlayContent = (review: GeneratedImageTextReview): boolean =>
   review.safetyReviewComplete === false ||
-  review.uncertain ||
   review.hasUrlOrPhone ||
   review.hasHashtag ||
   review.violations.includes("url_or_phone") ||
@@ -1223,15 +1274,13 @@ const hasUnsafeOverlayContent = (review: GeneratedImageTextReview): boolean =>
   review.violations.includes("unexpected_personal_name") ||
   review.violations.includes("incorrect_dealership_name") ||
   review.violations.includes("fabricated_brand_mark") ||
-  review.violations.includes("supplied_logo_altered_or_replaced") ||
   review.violations.includes("instruction_text") ||
   review.violations.includes("social_ui_chrome") ||
   review.violations.includes("unrequested_illustration") ||
   review.violations.includes("subject_identity_changed") ||
   review.violations.includes("vehicle_identity_changed") ||
   review.violations.includes("source_composition_changed") ||
-  review.violations.includes("unflattering_or_disrespectful") ||
-  review.violations.includes("overdone_or_platform_inappropriate");
+  review.violations.includes("unflattering_or_disrespectful");
 
 const hasCorrectableOverlayLengthViolation = (
   review: GeneratedImageTextReview,
@@ -1353,6 +1402,18 @@ const enforceGeneratedImageTextCompliance = async ({
     }
   };
 
+  // Error level on purpose: only error events are beaconed to /api/telemetry
+  // and counted in the server's recent-errors view. A render that shipped
+  // with a craft, length, or logo finding is a product degradation the
+  // server must be able to see, exactly like an original-photo fallback.
+  // `task` and `kind` are on the server payload allowlist; no review text.
+  const reportDegradedShip = (kind: string) => {
+    logImageDegraded("image.accepted_degraded", {
+      task: imageTaskForTier(imageTier),
+      kind,
+    });
+  };
+
   const restoreLogoIfMissing = async (
     result: ModelRun<string>,
     review: GeneratedImageTextReview | null,
@@ -1375,9 +1436,19 @@ const enforceGeneratedImageTextCompliance = async ({
       );
     } catch (error) {
       if (isAbortError(error)) throw error;
+      // Same policy as the review-failure branch below: the render in hand
+      // already passed identity/brand review apart from the logo, so it
+      // ships rather than the raw photo. Only an unsafe or unreviewed render
+      // still fails closed.
+      const reviewedSafe = review !== null && !hasUnsafeOverlayContent(review);
       logTelemetry("image.text_compliance.logo_restore_failed", {
         reason: error instanceof Error ? error.message : String(error),
+        shipped: reviewedSafe ? "original_render" : "none",
       });
+      if (reviewedSafe) {
+        reportDegradedShip("logo_restore_failed");
+        return result;
+      }
       throw new Error("The supplied dealership logo could not be restored safely.");
     }
 
@@ -1385,10 +1456,24 @@ const enforceGeneratedImageTextCompliance = async ({
     if (restoredReview?.compliant && !hasUnsafeOverlayContent(restoredReview)) {
       return restored;
     }
+    // The restore pass gets one try. Whatever it produced, the render that
+    // reached this point already passed identity/brand review apart from the
+    // logo, so it ships — a dealership's own logo drawn slightly off is not
+    // a reason to hand the salesperson an untouched photo. Prefer the
+    // restored render only when the reviewer could confirm it is at least as
+    // safe; an unreviewable restore never replaces a reviewed original.
+    const restoredIsSafe =
+      restoredReview !== null && !hasUnsafeOverlayContent(restoredReview);
+    const keepRestored =
+      restoredIsSafe &&
+      (review === null ||
+        generatedImageReviewScore(restoredReview) >= generatedImageReviewScore(review));
     logTelemetry("image.text_compliance.logo_restore_rejected", {
       reason: restoredReview ? "review_noncompliant" : "review_failed",
+      shipped: keepRestored ? "restored" : "original_render",
     });
-    throw new Error("The supplied dealership logo could not be verified after repair.");
+    reportDegradedShip("logo_unverified");
+    return keepRestored ? restored : result;
   };
 
   const firstReview = await reviewOrNull(candidate.value, "initial");
@@ -1532,9 +1617,25 @@ The previous attempt still failed campaign review. Build a visibly different, se
   }
 
   if (needsFullCreativeRerender(bestReview)) {
-    throw new Error(
-      "Generated image did not meet the campaign-quality and source-fidelity review.",
+    if (hasUnsafeOverlayContent(bestReview)) {
+      throw new Error(
+        "Generated image did not meet the campaign-quality and source-fidelity review.",
+      );
+    }
+    // Every remaining finding is a craft opinion (score, style signature,
+    // typography, 3D integration, missing store lockup). Two full renders
+    // disagreed with the reviewer's taste; a third would too. The
+    // salesperson can regenerate or edit a styled image — they cannot do
+    // anything with an untouched photo except conclude the app did nothing.
+    logTelemetry("image.text_compliance.accepted_below_craft_bar", {
+      violations: bestReview.violations,
+      requestedStyle,
+      visualQualityScore: bestReview.visualQualityScore,
+    });
+    reportDegradedShip(
+      bestReview.violations[0] ?? `score_${bestReview.visualQualityScore}`,
     );
+    return restoreLogoIfMissing(bestCandidate, bestReview);
   }
 
   // A second text-reduction edit can remove unsafe pixel copy, but it cannot
@@ -1575,6 +1676,18 @@ The previous attempt still failed campaign review. Build a visibly different, se
     return restoreLogoIfMissing(corrected, correctedReview);
   }
   if (correctedReview === null) {
+    // The correction pass could not be reviewed. The best reviewed render is
+    // the only candidate whose safety is known; ship it unless it carries an
+    // identity/brand/fidelity/dignity finding.
+    if (!hasUnsafeOverlayContent(bestReview)) {
+      logTelemetry("image.text_compliance.accepted_with_length_findings", {
+        violations: bestReview.violations,
+        wordCount: bestReview.marketingWordCount,
+        characterCount: bestReview.marketingCharacterCount,
+      });
+      reportDegradedShip("correction_unreviewed");
+      return restoreLogoIfMissing(bestCandidate, bestReview);
+    }
     throw new Error(
       "Corrected image could not be verified for customer identity and branding.",
     );
@@ -1584,6 +1697,23 @@ The previous attempt still failed campaign review. Build a visibly different, se
     !hasUnsafeOverlayContent(correctedReview)
   ) {
     return restoreLogoIfMissing(corrected, correctedReview);
+  }
+
+  // Last rung. Only an identity/brand/fidelity/dignity finding is worth
+  // discarding a real render over; a leftover length or craft finding on the
+  // best available candidate ships with telemetry instead of nothing.
+  const finalCandidate =
+    generatedImageReviewScore(correctedReview) >= generatedImageReviewScore(bestReview)
+      ? { run: corrected, review: correctedReview }
+      : { run: bestCandidate, review: bestReview };
+  if (!hasUnsafeOverlayContent(finalCandidate.review)) {
+    logTelemetry("image.text_compliance.accepted_with_length_findings", {
+      violations: finalCandidate.review.violations,
+      wordCount: finalCandidate.review.marketingWordCount,
+      characterCount: finalCandidate.review.marketingCharacterCount,
+    });
+    reportDegradedShip(finalCandidate.review.violations[0] ?? "length");
+    return restoreLogoIfMissing(finalCandidate.run, finalCandidate.review);
   }
 
   logTelemetry("image.text_compliance.rejected", {
@@ -1778,6 +1908,11 @@ export const generateSocialPostTextDetailed = async (
     creativeBrief,
     customerIdentityRequired,
   );
+  // The same grounding the browser and server identity guards get: the OEM
+  // the store sells and the VIN-decoded vehicle, both already in the brief.
+  // Without them this gate rejected "This Bronco is ready…" as a customer
+  // name and quietly swapped in the template caption.
+  const identityGrounding = captionIdentityGroundingFromBrief(creativeBrief);
   // Flattened prompt: the cache key, the Claude fallback, and the legacy
   // transport all still take one string.
   const textPrompt = generateTextPrompt(...promptArgs);
@@ -1847,6 +1982,7 @@ export const generateSocialPostTextDetailed = async (
         customerName,
         customerIdentityRequired,
         deliveryLanguageAllowed,
+        ...identityGrounding,
       });
       if (qualityChecked.usedFallback) {
         throw new Error("AI caption blocked by quality gate");
@@ -1933,6 +2069,7 @@ export const generateSocialPostTextDetailed = async (
     customerName,
     customerIdentityRequired,
     deliveryLanguageAllowed,
+    ...identityGrounding,
   });
   text = usable.caption;
   if (usable.usedFallback) {
@@ -1964,6 +2101,7 @@ export const generateSocialPostTextDetailed = async (
       customerName,
       customerIdentityRequired,
       deliveryLanguageAllowed,
+      ...identityGrounding,
     }).caption;
     captionSource = "basic_fallback";
     aiMeta = recordExecution(
