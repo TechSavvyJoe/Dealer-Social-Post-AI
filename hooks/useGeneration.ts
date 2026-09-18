@@ -514,6 +514,7 @@ export const useGeneration = () => {
         text: preparedCaption.caption,
         customerDisplayName: toPublicCustomerLabel(variables.customerName),
         customerIdentityRequired: variables.meta?.customerIdentityRequired ?? true,
+        scenarioId: variables.meta?.scenarioId,
         isBasicFallback: result.captionSource === "basic_fallback",
         disclosures: preparedCaption.disclosures,
         disclosureCategories: preparedCaption.disclosureCategories,

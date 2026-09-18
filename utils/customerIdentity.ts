@@ -33,7 +33,19 @@ export const toPublicCustomerLabel = (value?: string): string => {
   ) {
     tokens.shift();
   }
-  return tokens[0] || "";
+  // The label is the first token that has letters, with stray punctuation
+  // ("Sarah.", "\"Sarah\"", "Sarah,") and smart apostrophes folded away, so
+  // the guard on both sides compares the same word. Mirrors
+  // publicCustomerLabel() in pb_hooks/websitePublications.js.
+  for (const token of tokens) {
+    const clean = token
+      .replace(/[’‘ʼ]/gu, "'")
+      .replace(/[^\p{L}\p{M}'-]/gu, "")
+      .replace(/^['-]+|['-]+$/gu, "")
+      .slice(0, 40);
+    if (clean) return clean;
+  }
+  return "";
 };
 
 export const releaseAuthorizesPublicLabel = (

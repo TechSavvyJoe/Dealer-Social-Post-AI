@@ -132,7 +132,9 @@ describe("ensureUsableCaption", () => {
       captionUsesOnlyExpectedCustomer(
         "Joe just helped Lisa find the perfect vehicle at Lakeside Auto.",
         "Lisa",
-        { allowedPhrases: ["Lakeside Auto"] },
+        // Production always masks the signed-in salesperson; an unmasked
+        // "Joe" helping someone is a person the guard cannot vouch for.
+        { allowedPhrases: ["Lakeside Auto"], maskedPhrases: ["Joe"] },
       ),
     ).toBe(true);
   });

@@ -59,8 +59,9 @@ type WebsiteModule = {
   containsUnexpectedCustomerIdentity(
     value: string,
     expectedCustomer?: string,
-    allowedPhrases?: string[],
+    allowedPhrases?: Array<string | { phrase: string; grounded: true }>,
   ): boolean;
+  groundedIdentityPhrase(phrase: string): { phrase: string; grounded: true };
   base64EncodeBytes(value: number[]): string;
   hmacHeaders(
     rawBody: string,
@@ -872,20 +873,41 @@ describe("Customer Hub website publication contract", () => {
   });
 
   it("keeps a grounded salesperson helper and vehicle/dealer nouns out of customer review", () => {
+    // Production always passes the dealer name and the VIN-decoded vehicle
+    // as groundedIdentityPhrase() (business identity) and the salesperson as
+    // a plain string (a mask). A plain-string vehicle would only mask the
+    // exact phrase, so a lone model word before a verb ("Bronco just
+    // arrived") would read as a person — exactly what a VIN grounds away.
     expect(
       website.containsUnexpectedCustomerIdentity(
         "Joe just helped Lisa find a 2025 Ford Explorer at Bob Maxey Ford.",
         "Lisa",
-        ["Bob Maxey Ford", "Joe Gallant", "Joe", "2025 Ford Explorer"],
+        [
+          website.groundedIdentityPhrase("Bob Maxey Ford"),
+          "Joe Gallant",
+          "Joe",
+          website.groundedIdentityPhrase("2025 Ford Explorer"),
+        ],
       ),
     ).toBe(false);
     expect(
       website.containsUnexpectedCustomerIdentity(
         "Bronco just arrived at Bob Maxey Ford.",
         "",
-        ["Bob Maxey Ford", "2025 Ford Bronco"],
+        [
+          website.groundedIdentityPhrase("Bob Maxey Ford"),
+          website.groundedIdentityPhrase("2025 Ford Bronco"),
+        ],
       ),
     ).toBe(false);
+    // Without the VIN the same word is a person in that slot.
+    expect(
+      website.containsUnexpectedCustomerIdentity(
+        "Bronco just arrived at Bob Maxey Ford.",
+        "",
+        [website.groundedIdentityPhrase("Bob Maxey Ford")],
+      ),
+    ).toBe(true);
   });
 
   it("rejects a customer-like name when no public customer label is authorized", () => {
