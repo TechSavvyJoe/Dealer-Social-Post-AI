@@ -52,6 +52,7 @@ import { MobilePublishStudio } from "./MobilePublishStudio";
 import { CaptionAlternativesModal } from "./CaptionAlternativesModal";
 import { isBrandCategoryId, resolveCreative } from "../services/creativeSystem";
 import { deliveryLanguageAllowedForBrief } from "../services/promptsV2";
+import { scenarioToCreativeBrief } from "../services/postScenarios";
 import { ProgressiveImage } from "./ui/ProgressiveImage";
 import { useToast } from "./ui/Toast";
 import { Modal } from "./ui/Modal";
@@ -440,16 +441,29 @@ export const PostResult: React.FC<PostResultProps> = ({
   const generationVehicleDescription = useAppStore(
     (s) => s.generationParams?.websiteVehicleDescription,
   );
+  const customScenariosJson = useAppStore((s) => s.currentDealer?.custom_scenarios);
   // `generationParams` and `post` are saved/restored together as a pair (see
-  // appStore's restoreSession), so this is safe even after a reload — it is
-  // never a stale brief from some earlier, different generation.
+  // appStore's restoreSession), so the live brief is never stale. A creative
+  // reopened from History deliberately has NO generationParams (there is no
+  // source capture to remix), so it falls back to the scenario the post was
+  // generated for — otherwise a short Customer Delivery caption reopened
+  // from History got customer-trust filler instead of delivery filler.
+  const effectiveScenarioId = generationScenarioId ?? post.scenarioId;
   const deliveryLanguageAllowed = useMemo(
     () =>
       deliveryLanguageAllowedForBrief(
-        generationCreativeBrief,
+        generationCreativeBrief ??
+          (post.scenarioId
+            ? scenarioToCreativeBrief(post.scenarioId, customScenariosJson)
+            : undefined),
         post.customerIdentityRequired ?? true,
       ),
-    [generationCreativeBrief, post.customerIdentityRequired],
+    [
+      customScenariosJson,
+      generationCreativeBrief,
+      post.customerIdentityRequired,
+      post.scenarioId,
+    ],
   );
 
   /**
@@ -468,13 +482,13 @@ export const PostResult: React.FC<PostResultProps> = ({
         categoryId: isBrandCategoryId(post.websiteDraft?.category)
           ? post.websiteDraft?.category
           : undefined,
-        scenarioId: generationScenarioId,
+        scenarioId: effectiveScenarioId,
         fallbackStyle: generationStyle,
         fallbackTone: generationTone,
       }),
     [
       currentDealer,
-      generationScenarioId,
+      effectiveScenarioId,
       generationStyle,
       generationTone,
       post.websiteDraft?.category,

@@ -364,6 +364,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
           text: (post.caption || "").trim() || "—",
           customerDisplayName: toPublicCustomerLabel(post.customer_name),
           customerIdentityRequired: Boolean(post.release_required),
+          scenarioId: post.scenario_id || undefined,
           captionSource: post.caption_source || undefined,
           isBasicFallback: post.caption_source === "basic_fallback",
           disclosures: post.disclosures || undefined,

@@ -139,6 +139,13 @@ export interface GeneratedPost {
   customerDisplayName?: string;
   /** True only when the selected post type requires a release-bound customer identity. */
   customerIdentityRequired?: boolean;
+  /**
+   * The post type this creative was generated for. Travels with the post
+   * (and is persisted as `scenario_id`) so a creative reopened from History —
+   * which deliberately has no live generationParams — still knows whether
+   * delivery language belongs in its caption filler and which Look applies.
+   */
+  scenarioId?: string;
   /** Server record used for owner-scoped approval status polling. */
   postId?: string;
   /** `submission_failed` is client-only and keeps delivery locked safely. */

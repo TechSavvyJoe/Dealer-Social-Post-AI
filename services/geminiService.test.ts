@@ -1173,6 +1173,16 @@ describe("GeminiService model routing", () => {
         (part: { text?: string }) => typeof part.text === "string",
       ),
     ).toHaveLength(1);
+    // A delivery photo is taken in front of the store's own OEM signage. The
+    // reviewer compared those photographed ovals against the supplied
+    // dealership logo file and flagged "altered" on nearly every Customer
+    // Delivery render, burning up to three image generations per post.
+    const reviewPrompt: string = logoReviewCall?.[0].contents.parts.find(
+      (part: { text?: string }) => typeof part.text === "string",
+    ).text;
+    expect(reviewPrompt).toContain("physically part of the photographed scene");
+    expect(reviewPrompt).toContain("must never be compared against it");
+    expect(reviewPrompt).toContain("only when a DESIGNED dealership logo graphic");
     const reviewImageChars = logoReviewCall?.[0].contents.parts
       .filter((part: { inlineData?: { data?: string } }) => part.inlineData)
       .reduce(
