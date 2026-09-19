@@ -57,7 +57,8 @@
     --brand-primary-500: #f0f2f4;
     --brand-primary-400: #f0f2f4;
     --brand-primary-300: #f0f2f4;
-    --brand-foreground: #141618; /* text on a brand fill */
+    --brand-fill: 240 242 244; /* the solid accent (buttons, selected states) */
+    --brand-foreground: #141618; /* text on --brand-fill */
     --brand-ink: 240 242 244; /* brand as text/icon on --panel, ≥ 4.5:1 */
     --brand-300-rgb: 240 242 244;
     --brand-400-rgb: 240 242 244;
@@ -185,6 +186,7 @@
     --brand-primary-500: #141618;
     --brand-primary-400: #141618;
     --brand-primary-300: #141618;
+    --brand-fill: 20 22 24;
     --brand-foreground: #ffffff;
     --brand-ink: 20 22 24;
     --brand-300-rgb: 20 22 24;

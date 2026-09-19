@@ -42,7 +42,9 @@ export default {
           hint: "rgb(var(--ink-hint) / <alpha-value>)",
         },
         brand: {
+          fill: "rgb(var(--brand-fill) / <alpha-value>)",
           ink: "rgb(var(--brand-ink) / <alpha-value>)",
+          tint: "rgb(var(--brand-ink) / 0.12)",
           foreground: "var(--brand-foreground)",
         },
         primary: {
@@ -163,7 +165,6 @@ export default {
       backgroundColor: {
         "fill-subtle": "var(--fill-subtle)",
         "fill-hover": "var(--fill-hover)",
-        "brand-fill": "rgb(var(--brand-ink) / 0.12)",
         "surface-base": "rgb(var(--color-surface-base) / <alpha-value>)",
         "surface-elevated": "rgb(var(--color-surface-elevated) / <alpha-value>)",
         "surface-overlay": "rgb(var(--color-surface-overlay) / <alpha-value>)",
