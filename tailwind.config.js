@@ -47,18 +47,24 @@ export default {
           tint: "rgb(var(--brand-ink) / 0.12)",
           foreground: "var(--brand-foreground)",
         },
+        // The off-ramp steps (50–200 were static light tints, 800–950 static
+        // dark navies) are used almost only as ink in not-yet-migrated screens:
+        // light ink on dark fills, and dark ink inside Sunlight overrides. Both
+        // resolve to --brand-ink, which useDealerTheme steps until it reads at
+        // >= 4.5:1 on the current theme's panel, so no legacy text goes
+        // under-contrast while PR2/PR3 migrate those files.
         primary: {
-          50: "rgb(var(--brand-300-rgb) / <alpha-value>)",
-          100: "rgb(var(--brand-300-rgb) / <alpha-value>)",
-          200: "rgb(var(--brand-300-rgb) / <alpha-value>)",
+          50: "rgb(var(--brand-ink) / <alpha-value>)",
+          100: "rgb(var(--brand-ink) / <alpha-value>)",
+          200: "rgb(var(--brand-ink) / <alpha-value>)",
           300: "rgb(var(--brand-300-rgb) / <alpha-value>)",
           400: "rgb(var(--brand-400-rgb) / <alpha-value>)",
           500: "rgb(var(--brand-500-rgb) / <alpha-value>)",
           600: "rgb(var(--brand-600-rgb) / <alpha-value>)",
           700: "rgb(var(--brand-700-rgb) / <alpha-value>)",
-          800: "rgb(var(--brand-700-rgb) / <alpha-value>)",
-          900: "rgb(var(--brand-700-rgb) / <alpha-value>)",
-          950: "rgb(var(--brand-700-rgb) / <alpha-value>)",
+          800: "rgb(var(--brand-ink) / <alpha-value>)",
+          900: "rgb(var(--brand-ink) / <alpha-value>)",
+          950: "rgb(var(--brand-ink) / <alpha-value>)",
         },
 
         // Secondary is a calm slate, not purple — per the DEALER TRUST system.
@@ -165,6 +171,8 @@ export default {
       backgroundColor: {
         "fill-subtle": "var(--fill-subtle)",
         "fill-hover": "var(--fill-hover)",
+        hairline: "rgb(var(--color-border) / <alpha-value>)",
+        strong: "rgb(var(--color-border-strong) / <alpha-value>)",
         "surface-base": "rgb(var(--color-surface-base) / <alpha-value>)",
         "surface-elevated": "rgb(var(--color-surface-elevated) / <alpha-value>)",
         "surface-overlay": "rgb(var(--color-surface-overlay) / <alpha-value>)",
@@ -281,6 +289,9 @@ export default {
       transitionDuration: {
         75: "75ms",
         100: "100ms",
+        120: "120ms",
+        180: "180ms",
+        320: "320ms",
         150: "150ms",
         200: "200ms",
         300: "300ms",

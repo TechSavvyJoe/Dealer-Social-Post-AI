@@ -430,7 +430,7 @@ export const PlatformDeliveryBoard: React.FC<PlatformDeliveryBoardProps> = ({
                       >
                         <span
                           className={cn(
-                            "mt-1 block text-[11px] tabular-nums text-surface-400",
+                            "mt-1 block text-[11px] tabular-nums text-surface-300",
                             compact && "lg:mt-0",
                           )}
                         >

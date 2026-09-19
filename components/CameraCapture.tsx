@@ -192,16 +192,12 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
 
       <div className="capture-intro mb-5 flex flex-col gap-4 lg:mb-8 lg:flex-row lg:items-end lg:justify-between">
         <div className="max-w-2xl">
-          <div className="mb-3 flex items-center gap-3 text-xs font-semibold tracking-[0.14em] text-primary-300">
-            <span className="h-px w-10 bg-primary-400" aria-hidden="true" />
-            SHOWROOM STUDIO
-          </div>
-          <h1 className="text-3xl font-semibold tracking-[-0.035em] text-surface-50 sm:text-5xl">
-            Capture the handoff.
+          <h1 className="font-display text-3xl font-semibold text-ink sm:text-4xl">
+            Start with a photo
           </h1>
-          <p className="capture-intro-copy mt-3 max-w-xl text-sm leading-6 text-surface-300 sm:text-base">
-            Start with one clear customer or vehicle photo. We’ll prepare the framing,
-            caption, and channel-ready creative next.
+          <p className="capture-intro-copy mt-3 max-w-[64ch] text-base text-ink-2">
+            Take a new photo or choose one from your device. You&apos;ll review it
+            before anything is created.
           </p>
         </div>
       </div>
@@ -220,71 +216,54 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
         />
       )}
 
-      <div className="capture-studio-grid grid min-h-0 overflow-hidden rounded-[1.5rem] border border-hairline bg-surface-900 shadow-2xl shadow-black/25 sm:min-h-[480px] sm:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.65fr)] lg:min-h-[540px] lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.7fr)] lg:rounded-[1.75rem]">
-        <aside className="capture-studio-sidebar flex flex-col justify-between bg-surface-900 p-4 sm:col-start-2 sm:row-start-1 sm:p-6 lg:p-10">
-          <div>
-            <span className="text-xs font-semibold tracking-[0.14em] text-primary-300">
-              PHOTO SOURCE
-            </span>
-            <h2 className="mt-3 text-2xl font-semibold tracking-tight text-surface-50">
-              Add a photo
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-surface-300">
-              Shoot the handoff with the rear camera, or pick a photo already on this
-              device.
-            </p>
-
-            <div className="mt-7 space-y-3">
-              <Button
-                onClick={handleOpenCamera}
-                disabled={isProcessing}
-                fullWidth
-                size="lg"
-                leftIcon={<Camera className="h-5 w-5" />}
-              >
-                Take photo
-              </Button>
-              <Button
-                onClick={handleUploadPhoto}
-                disabled={isProcessing}
-                variant="outline"
-                fullWidth
-                size="lg"
-                leftIcon={<Upload className="h-5 w-5" />}
-              >
-                Choose from device
-              </Button>
-            </div>
+      <div className="capture-studio-grid flex flex-col gap-4 sm:grid sm:min-h-[480px] sm:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.65fr)] lg:min-h-[540px] lg:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.7fr)]">
+        <aside className="capture-studio-sidebar flex flex-col sm:col-start-2 sm:row-start-1">
+          <div className="space-y-3">
+            <Button
+              onClick={handleOpenCamera}
+              disabled={isProcessing}
+              variant="primary"
+              fullWidth
+              size="lg"
+              leftIcon={<Camera className="h-5 w-5" />}
+            >
+              Take photo
+            </Button>
+            <Button
+              onClick={handleUploadPhoto}
+              disabled={isProcessing}
+              variant="secondary"
+              fullWidth
+              size="lg"
+              leftIcon={<Upload className="h-5 w-5" />}
+            >
+              Choose from device
+            </Button>
           </div>
 
-          <div className="capture-studio-tips mt-8 hidden border-t border-hairline pt-6 sm:block">
-            <p className="text-xs font-semibold text-surface-200">
-              For the cleanest result
-            </p>
-            <ul className="mt-3 space-y-2 text-sm text-surface-400">
-              <li>Keep faces and the vehicle fully in frame.</li>
-              <li>Avoid harsh backlight and visible paperwork.</li>
-              <li>You’ll review the photo before anything is generated.</li>
-              <li>* HEIC opens when the current device/browser supports it.</li>
+          <div className="capture-studio-tips mt-6 hidden border-t border-hairline pt-6 sm:block">
+            <ul className="space-y-2 text-caption text-ink-2">
+              <li>Keep the customer and the vehicle fully in frame.</li>
+              <li>Avoid backlight and visible paperwork.</li>
+              <li>You&apos;ll review the photo before anything is created.</li>
             </ul>
           </div>
         </aside>
-
         <section
-          className={`capture-studio-preview relative flex min-h-[260px] items-center justify-center overflow-hidden border-t border-hairline bg-surface-950 p-4 transition-colors sm:col-start-1 sm:row-start-1 sm:min-h-[480px] sm:border-r sm:border-t-0 sm:p-5 lg:min-h-[640px] lg:p-6 ${
-            isDraggingOver ? "border-primary-400 bg-primary-950/30" : ""
+          className={`capture-studio-preview table-lit relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-lg border border-hairline p-4 transition-colors sm:col-start-1 sm:row-start-1 sm:aspect-[3/2] sm:p-5 lg:p-6 ${
+            isDraggingOver ? "border-strong" : ""
           }`}
           aria-label="Photo preview area"
         >
           {isProcessing && (
             <div
-              className="absolute inset-0 z-20 grid place-items-center bg-surface-950/90"
+              className="absolute inset-0 z-20 grid place-items-center bg-panel/90"
               role="status"
               aria-live="polite"
             >
               <div className="text-center">
-                <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-strong border-t-primary-300" />
-                <p className="mt-4 font-medium text-surface-50">
+                <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-strong border-t-brand-ink" />
+                <p className="mt-4 text-base font-medium text-ink">
                   Preparing your photo…
                 </p>
               </div>
@@ -292,39 +271,17 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
           )}
 
           {isDraggingOver && (
-            <div className="absolute inset-4 z-10 grid place-items-center rounded-2xl border-2 border-dashed border-primary-300 bg-primary-950/85 pointer-events-none">
+            <div className="pointer-events-none absolute inset-4 z-10 grid place-items-center rounded-lg border-2 border-dashed border-strong bg-panel/90">
               <div className="text-center">
-                <Upload className="mx-auto h-10 w-10 text-primary-200" />
-                <p className="mt-3 text-lg font-semibold text-white">Drop image here</p>
+                <Upload className="mx-auto h-10 w-10 text-ink-3" aria-hidden="true" />
+                <p className="mt-3 text-lg font-semibold text-ink">Drop a photo here</p>
               </div>
             </div>
           )}
 
-          <div className="absolute left-6 right-6 top-6 flex items-center justify-between text-[11px] font-medium tracking-[0.12em] text-surface-400">
-            <span>MEDIA BAY 01</span>
-            <span>JPG · PNG · WEBP · HEIC*</span>
-          </div>
-
-          <div
-            className="absolute inset-x-[8%] top-[42%] h-px bg-primary-300/55 shadow-[0_0_22px_rgba(96,165,250,0.7)]"
-            aria-hidden="true"
-          />
           <div className="relative max-w-sm text-center">
-            <div className="mx-auto grid h-20 w-20 place-items-center rounded-full border border-strong bg-fill-subtle shadow-[0_20px_70px_rgba(0,0,0,0.5)]">
-              <Camera className="h-8 w-8 text-primary-200" />
-            </div>
-            <p className="mt-6 text-xl font-semibold tracking-tight text-surface-50">
-              Ready for the delivery moment
-            </p>
-            <p className="mt-2 text-sm leading-6 text-surface-400">
-              Take the photo now, or choose one already saved on this device.
-            </p>
-            {/* Drag-and-drop is a desktop-only convenience. The window-level
-                listeners above stay active for every viewport, but the hint is
-                hidden on the phones salespeople actually shoot from. */}
-            <p className="mt-2 hidden text-xs leading-5 text-surface-500 sm:block">
-              On a computer you can also drag a photo anywhere onto this studio.
-            </p>
+            <Camera className="mx-auto h-8 w-8 text-ink-3" aria-hidden="true" />
+            <p className="mt-4 text-base font-medium text-ink">Add a photo to start</p>
           </div>
         </section>
       </div>

@@ -7,3 +7,4 @@ test-results/
 .vercel/
 pocketbase
 *.zip
+__tests__/__scratch__/

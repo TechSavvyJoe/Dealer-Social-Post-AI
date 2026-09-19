@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Archive, Loader2, RotateCcw, Trash2 } from "lucide-react";
+import { Loader2, RotateCcw, Trash2 } from "lucide-react";
 import {
   MEDIA_ARCHIVE_CHANGED_EVENT,
   archivedMediaToDataUrl,
@@ -8,6 +8,8 @@ import {
   type ArchivedMediaRecord,
 } from "../utils/creativeStorage";
 import { triggerHapticFeedback } from "../utils/haptics";
+import { Badge } from "./ui/Badge";
+import { Button } from "./ui/Button";
 import type { ImageSelection } from "../types";
 
 interface RecentCaptureShelfProps {
@@ -77,28 +79,22 @@ export const RecentCaptureShelf: React.FC<RecentCaptureShelfProps> = ({
 
   return (
     <section
-      className="mt-5 rounded-2xl border border-hairline bg-surface-900/65 p-4 shadow-xl shadow-black/15 sm:p-5"
+      className="mt-6 border-t border-hairline pt-5"
       aria-labelledby="recovery-shelf-heading"
     >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="flex items-center gap-2 text-primary-200">
-            <Archive className="h-4 w-4" aria-hidden="true" />
-            <h2
-              id="recovery-shelf-heading"
-              className="text-sm font-semibold text-surface-50"
-            >
-              Recent originals
-            </h2>
-          </div>
-          <p className="mt-1 text-xs leading-relaxed text-surface-400">
+          <h2 id="recovery-shelf-heading" className="text-lg font-semibold text-ink">
+            Recent originals
+          </h2>
+          <p className="mt-1 text-caption text-ink-2">
             Private rescue copies on this device for up to 48 hours. They clear sooner
             when you log out.
           </p>
         </div>
-        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-success-300">
-          Backed up in app
-        </span>
+        <Badge variant="success" uppercase={false}>
+          Backed up
+        </Badge>
       </div>
 
       <div className="mt-3 flex gap-3 overflow-x-auto pb-1" role="list">
@@ -126,7 +122,7 @@ export const RecentCaptureShelf: React.FC<RecentCaptureShelfProps> = ({
                   }
                 }}
                 disabled={Boolean(openingId)}
-                className="relative block h-24 w-28 overflow-hidden rounded-xl border border-strong bg-surface-950 text-left transition-colors hover:border-primary-400/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                className="print relative block h-24 w-28 overflow-hidden rounded-sm bg-panel-raised text-left transition-colors hover:border-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink"
                 aria-label={`Reuse original photo ${index + 1} from ${formatCaptureTime(
                   record.createdAt,
                 )}`}
@@ -137,7 +133,7 @@ export const RecentCaptureShelf: React.FC<RecentCaptureShelfProps> = ({
                   className="h-full w-full object-cover"
                   loading="lazy"
                 />
-                <span className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-gradient-to-t from-black/90 to-transparent px-2 pb-1.5 pt-6 text-[10px] font-semibold text-white">
+                <span className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-overlay/80 px-2 pb-1.5 pt-2 text-2xs font-semibold text-ink">
                   {isOpening ? (
                     <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
                   ) : (
@@ -146,19 +142,21 @@ export const RecentCaptureShelf: React.FC<RecentCaptureShelfProps> = ({
                   {isOpening ? "Opening" : "Reuse"}
                 </span>
               </button>
-              <button
+              <Button
                 type="button"
                 onClick={async () => {
                   triggerHapticFeedback();
                   await deleteArchivedMedia(record.id);
                 }}
-                className="absolute right-1.5 top-1.5 grid h-8 w-8 place-items-center rounded-full border border-strong bg-black/75 text-surface-100 shadow-md transition-colors hover:border-error-300/60 hover:bg-error-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-300"
+                variant="ghost"
+                size="icon"
+                className="absolute right-1 top-1 bg-overlay/80"
                 aria-label={`Delete original photo ${index + 1}`}
                 title="Delete recovery copy"
               >
                 <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
-              <p className="mt-1 truncate text-[10px] text-surface-400">
+              </Button>
+              <p className="mt-1 truncate text-2xs text-ink-2">
                 {formatCaptureTime(record.createdAt)}
               </p>
             </article>

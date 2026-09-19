@@ -164,10 +164,8 @@ describe("installable product identity", () => {
     const symbol = read("public/dsp-brand-mark-v4.svg").toString("utf8");
 
     expect(logo).toContain('aria-label="Dealer Social Post AI"');
-    expect(logo).toContain('href="/dsp-brand-mark-v4.svg"');
-    expect(logo).toContain("DEALER SOCIAL");
-    expect(logo).toContain("POST ");
-    expect(logo).toContain(">AI</tspan>");
+    expect(logo).toContain("M37 25H59");
+    expect(logo).toContain("Dealer Social Post AI");
     expect(symbol).toContain(">Dealer Social Post AI</title>");
     expect(symbol).toContain("photo print");
   });

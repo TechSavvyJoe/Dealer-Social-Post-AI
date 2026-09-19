@@ -5,7 +5,7 @@ export const contentSecurityPolicy = [
   // The sha256 allows exactly one inline script: the pre-paint theme snippet
   // in index.html. Its hash is pinned by __tests__/prePaintTheme.test.ts, so
   // editing the snippet without updating this value fails CI, not production.
-  "script-src 'self' 'sha256-JPRzJy1ZJFiT889VGwZTmb4NJoJxo5BneGlZaLKKzaU=' https://challenges.cloudflare.com",
+  "script-src 'self' 'sha256-/BDi79xyTr9R8ICV6KALUbYxT0VtDgKXMM8oqBgzp2M=' https://challenges.cloudflare.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob: https:",

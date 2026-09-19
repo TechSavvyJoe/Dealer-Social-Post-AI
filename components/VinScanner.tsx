@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { m, AnimatePresence, useReducedMotion } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import { Loader2, ScanLine, AlertCircle, Check, X, Camera } from "lucide-react";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
@@ -99,7 +99,6 @@ export const VinScanner: React.FC<VinScannerProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [scanStatus, setScanStatus] = useState<string>("Point at the VIN barcode");
   const [lastDecoded, setLastDecoded] = useState<DecodedVehicle | null>(null);
-  const reduceMotion = useReducedMotion();
 
   const stopCamera = useCallback(() => {
     if (detectionTimerRef.current !== null) {
@@ -302,19 +301,15 @@ export const VinScanner: React.FC<VinScannerProps> = ({
     <Modal isOpen={isOpen} onClose={handleClose} title="Scan VIN" size="md">
       <div className="space-y-4">
         {/* Mode toggle */}
-        <div
-          className="flex gap-2 bg-surface-950/30 p-1 rounded-xl border border-hairline"
-          role="group"
-          aria-label="VIN entry method"
-        >
+        <div className="flex gap-2" role="group" aria-label="VIN entry method">
           <Button
-            variant={mode === "scanner" ? "filled" : "ghost"}
-            size="sm"
+            variant={mode === "scanner" ? "primary" : "ghost"}
+            size="md"
             leftIcon={<ScanLine className="h-3.5 w-3.5" />}
             onClick={() => setMode("scanner")}
             aria-pressed={mode === "scanner"}
             disabled={!hasNativeDetector}
-            className="flex-1 rounded-lg"
+            className="flex-1"
             title={
               hasNativeDetector
                 ? "Scan VIN barcode with camera"
@@ -324,12 +319,12 @@ export const VinScanner: React.FC<VinScannerProps> = ({
             Scan
           </Button>
           <Button
-            variant={mode === "manual" ? "filled" : "ghost"}
-            size="sm"
+            variant={mode === "manual" ? "primary" : "ghost"}
+            size="md"
             leftIcon={<Camera className="h-3.5 w-3.5" />}
             onClick={() => setMode("manual")}
             aria-pressed={mode === "manual"}
-            className="flex-1 rounded-lg"
+            className="flex-1"
           >
             Type VIN
           </Button>
@@ -345,7 +340,7 @@ export const VinScanner: React.FC<VinScannerProps> = ({
               exit={{ opacity: 0 }}
               className="space-y-3"
             >
-              <div className="relative aspect-[4/3] w-full overflow-hidden rounded-xl border border-hairline bg-black">
+              <div className="relative aspect-[4/3] w-full overflow-hidden rounded-lg border border-hairline bg-black">
                 <video
                   ref={videoRef}
                   className="w-full h-full object-cover"
@@ -353,35 +348,19 @@ export const VinScanner: React.FC<VinScannerProps> = ({
                   muted
                   aria-label="Live camera view for VIN barcode scanning"
                 />
-                {/* Targeting overlay */}
-                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                  <div className="w-4/5 h-1/4 border-2 border-primary-400/80 rounded-lg shadow-[0_0_24px_rgba(56,189,248,0.4)]" />
+                {/* Targeting rails — a static frame, no sweep and no glow. */}
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <div className="h-1/4 w-4/5 rounded-sm border border-strong" />
                 </div>
-                {/* Scan line */}
-                <m.div
-                  className="absolute left-[10%] right-[10%] h-[2px] bg-primary-400 shadow-[0_0_12px_rgba(56,189,248,0.8)]"
-                  animate={
-                    reduceMotion ? { top: "50%" } : { top: ["38%", "62%", "38%"] }
-                  }
-                  transition={
-                    reduceMotion
-                      ? { duration: 0 }
-                      : {
-                          duration: 2.5,
-                          repeat: Infinity,
-                          ease: "easeInOut",
-                        }
-                  }
-                />
               </div>
               <p
                 role="status"
                 aria-live="polite"
-                className="text-xs text-surface-300 text-center"
+                className="text-center text-sm text-ink-2"
               >
                 {scanStatus}
               </p>
-              <p className="text-[10px] text-surface-400 text-center leading-relaxed">
+              <p className="text-center text-caption leading-relaxed text-ink-hint">
                 Tip: the VIN barcode is usually on the driver-side door jamb or
                 lower-left corner of the windshield. Hold steady, fill the frame.
               </p>
@@ -403,10 +382,10 @@ export const VinScanner: React.FC<VinScannerProps> = ({
                 placeholder="1FMSK8DH5NGA12345"
                 maxLength={17}
                 fullWidth
-                className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono uppercase tracking-wider"
+                className="font-mono"
               />
               <Button
-                variant="filled"
+                variant="primary"
                 size="md"
                 fullWidth
                 disabled={!isValidVin(manualVin) || isDecoding}
@@ -434,14 +413,12 @@ export const VinScanner: React.FC<VinScannerProps> = ({
               role="status"
               aria-live="polite"
               aria-atomic="true"
-              className="flex items-start gap-3 bg-success-900/40 border border-success-700/50 rounded-xl p-3 text-success-100 [.theme-light_&]:text-success-900"
+              className="flex items-start gap-3 rounded-md border border-hairline bg-success-fill p-3 text-success-ink"
             >
-              <Check className="h-5 w-5 text-success-400 flex-shrink-0 mt-0.5" />
+              <Check className="mt-0.5 h-5 w-5 flex-shrink-0" aria-hidden="true" />
               <div className="text-sm">
                 <div className="font-semibold">{lastDecoded.summary}</div>
-                <div className="text-[11px] text-success-300 mt-0.5 font-mono">
-                  {lastDecoded.vin}
-                </div>
+                <div className="mt-0.5 font-mono text-caption">{lastDecoded.vin}</div>
               </div>
             </m.div>
           )}
@@ -455,17 +432,20 @@ export const VinScanner: React.FC<VinScannerProps> = ({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               role="alert"
-              className="flex items-start gap-3 bg-error-900/40 border border-error-700/50 rounded-xl p-3 text-error-100 text-sm [.theme-light_&]:text-error-800"
+              className="flex items-start gap-3 rounded-md border border-error-ink/40 bg-error-fill p-3 text-sm text-error-ink"
             >
-              <AlertCircle className="h-5 w-5 text-error-400 flex-shrink-0 mt-0.5" />
+              <AlertCircle
+                className="mt-0.5 h-5 w-5 flex-shrink-0"
+                aria-hidden="true"
+              />
               <div className="flex-1">{error}</div>
               <button
                 type="button"
                 onClick={() => setError(null)}
-                className="text-error-300 hover:text-error-100 [.theme-light_&]:text-error-800"
+                className="grid h-11 w-11 -my-1 shrink-0 place-items-center rounded-sm transition-colors duration-120 ease-out hover:bg-fill-subtle"
                 aria-label="Dismiss"
               >
-                <X className="h-4 w-4" />
+                <X className="h-4 w-4" aria-hidden="true" />
               </button>
             </m.div>
           )}

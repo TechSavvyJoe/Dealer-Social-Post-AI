@@ -1,5 +1,4 @@
-import React, { useState } from "react";
-import { m, AnimatePresence } from "framer-motion";
+import React from "react";
 import { AlertCircle } from "lucide-react";
 import { cn } from "../../utils/classNames";
 
@@ -21,8 +20,7 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
 }
 
 /**
- * Input component with floating labels and Apple-style design.
- * Features smooth animations, error states, and icon support.
+ * Input component: label above the control, light-table tokens.
  *
  * @example
  * <Input label="Email" type="email" />
@@ -45,19 +43,12 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
       value,
       defaultValue,
       onChange,
-      onFocus,
-      onBlur,
-      placeholder,
       "aria-describedby": ariaDescribedBy,
       "aria-invalid": ariaInvalid,
       ...props
     },
     ref,
   ) => {
-    const [isFocused, setIsFocused] = useState(false);
-    const [uncontrolledHasValue, setUncontrolledHasValue] = useState(
-      () => defaultValue !== undefined && String(defaultValue).length > 0,
-    );
     const generatedId = React.useId().replace(/:/g, "");
 
     const inputId = id || `input-${generatedId}`;
@@ -66,24 +57,22 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
       [ariaDescribedBy, error || helperText ? messageId : undefined]
         .filter(Boolean)
         .join(" ") || undefined;
-    const hasValue =
-      value !== undefined ? String(value ?? "").length > 0 : uncontrolledHasValue;
-    const showFloatingLabel = isFocused || hasValue;
-
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (value === undefined) {
-        setUncontrolledHasValue(e.target.value.length > 0);
-      }
-      onChange?.(e);
-    };
 
     return (
       <div className={cn("relative", fullWidth && "w-full")}>
-        {/* Input container */}
+        {label && (
+          <label
+            htmlFor={inputId}
+            className="mb-1.5 block text-sm font-medium text-ink-2"
+          >
+            {label}
+          </label>
+        )}
+
         <div className="relative">
           {/* Left icon */}
           {leftIcon && (
-            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-surface-400 pointer-events-none">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-hint pointer-events-none">
               <span className="[&>svg]:h-5 [&>svg]:w-5">{leftIcon}</span>
             </div>
           )}
@@ -99,98 +88,55 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             aria-describedby={describedBy}
             aria-invalid={error ? true : ariaInvalid}
             className={cn(
-              // Base styles
-              "w-full rounded-xl",
-              "bg-surface-900/60 border-2",
-              "px-4 py-3",
-              "text-base text-surface-50",
-              "placeholder:text-surface-400",
-              "transition-all duration-200 ease-apple",
+              "w-full min-h-11 rounded-sm",
+              "bg-panel-raised border",
+              "px-3",
+              "text-base text-ink",
+              "placeholder:text-ink-hint",
+              "transition-colors duration-120 ease-out",
 
-              // Focus state
-              "focus:outline-none focus:ring-0",
-              error
-                ? "border-error-500/50 focus:border-error-500"
-                : "border-surface-700 focus:border-primary-500",
+              error ? "border-error-ink" : "border-strong focus:border-brand-ink",
 
-              // Disabled state
               "disabled:opacity-50 disabled:cursor-not-allowed",
 
-              // With icons padding
               leftIcon && "pl-11",
               (rightIcon || rightAction || error) && "pr-12",
 
-              // With floating label
-              label && (showFloatingLabel ? "pt-6 pb-2" : "pt-3 pb-3"),
-
               className,
             )}
-            onFocus={(e) => {
-              setIsFocused(true);
-              onFocus?.(e);
-            }}
-            onBlur={(e) => {
-              setIsFocused(false);
-              onBlur?.(e);
-            }}
-            onChange={handleChange}
-            placeholder={
-              label ? (showFloatingLabel ? placeholder : undefined) : placeholder
-            }
+            onChange={onChange}
           />
-
-          {/* Floating label */}
-          {label && (
-            <label
-              htmlFor={inputId}
-              className={cn(
-                "absolute left-4 transition-all duration-200 ease-apple pointer-events-none",
-                leftIcon && "left-11",
-                showFloatingLabel
-                  ? "top-1.5 text-xs text-primary-400 font-medium"
-                  : "top-1/2 -translate-y-1/2 text-base text-surface-400",
-              )}
-            >
-              {label}
-            </label>
-          )}
 
           {/* Right icon or error icon */}
           {(error || rightIcon) && !rightAction && (
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 pointer-events-none">
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-hint pointer-events-none">
               {error ? (
-                <AlertCircle className="h-5 w-5 text-error-500" aria-hidden="true" />
+                <AlertCircle className="h-5 w-5 text-error-ink" aria-hidden="true" />
               ) : (
                 <span className="[&>svg]:h-5 [&>svg]:w-5">{rightIcon}</span>
               )}
             </div>
           )}
           {rightAction && !error ? (
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 text-surface-300">
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-hint">
               {rightAction}
             </div>
           ) : null}
         </div>
 
         {/* Helper text or error message */}
-        <AnimatePresence mode="wait">
-          {(error || helperText) && (
-            <m.p
-              id={messageId}
-              role={error ? "alert" : undefined}
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.2 }}
-              className={cn(
-                "mt-1.5 text-sm px-1",
-                error ? "text-error-400" : "text-surface-400",
-              )}
-            >
-              {error || helperText}
-            </m.p>
-          )}
-        </AnimatePresence>
+        {(error || helperText) && (
+          <p
+            id={messageId}
+            role={error ? "alert" : undefined}
+            className={cn(
+              "mt-1.5 text-caption px-1",
+              error ? "text-error-ink" : "text-ink-hint",
+            )}
+          >
+            {error || helperText}
+          </p>
+        )}
       </div>
     );
   },
@@ -227,19 +173,12 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       value,
       defaultValue,
       onChange,
-      onFocus,
-      onBlur,
-      placeholder,
       "aria-describedby": ariaDescribedBy,
       "aria-invalid": ariaInvalid,
       ...props
     },
     ref,
   ) => {
-    const [isFocused, setIsFocused] = useState(false);
-    const [uncontrolledHasValue, setUncontrolledHasValue] = useState(
-      () => defaultValue !== undefined && String(defaultValue).length > 0,
-    );
     const generatedId = React.useId().replace(/:/g, "");
 
     const textareaId = id || `textarea-${generatedId}`;
@@ -248,15 +187,8 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       [ariaDescribedBy, error || helperText ? messageId : undefined]
         .filter(Boolean)
         .join(" ") || undefined;
-    const hasValue =
-      value !== undefined ? String(value ?? "").length > 0 : uncontrolledHasValue;
-    const showFloatingLabel = isFocused || hasValue;
 
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      if (value === undefined) {
-        setUncontrolledHasValue(e.target.value.length > 0);
-      }
-
       // Auto-resize
       if (autoResize) {
         e.target.style.height = "auto";
@@ -268,6 +200,15 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
 
     return (
       <div className={cn("relative", fullWidth && "w-full")}>
+        {label && (
+          <label
+            htmlFor={textareaId}
+            className="mb-1.5 block text-sm font-medium text-ink-2"
+          >
+            {label}
+          </label>
+        )}
+
         <div className="relative">
           <textarea
             {...props}
@@ -278,86 +219,46 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
             aria-describedby={describedBy}
             aria-invalid={error ? true : ariaInvalid}
             className={cn(
-              // Base styles
-              "w-full rounded-xl",
-              "bg-surface-900/60 border-2",
-              "px-4 py-3",
-              "text-base text-surface-50",
-              "placeholder:text-surface-400",
-              "transition-all duration-200 ease-apple",
+              "w-full min-h-11 rounded-sm",
+              "bg-panel-raised border",
+              "px-3 py-2.5",
+              "text-base text-ink",
+              "placeholder:text-ink-hint",
+              "transition-colors duration-120 ease-out",
               "resize-none",
 
-              // Focus state
-              "focus:outline-none focus:ring-0",
-              error
-                ? "border-error-500/50 focus:border-error-500"
-                : "border-surface-700 focus:border-primary-500",
+              error ? "border-error-ink" : "border-strong focus:border-brand-ink",
 
-              // Disabled state
               "disabled:opacity-50 disabled:cursor-not-allowed",
 
-              // With floating label
-              label && (showFloatingLabel ? "pt-6 pb-2" : "pt-3 pb-3"),
               error && "pr-11",
 
               className,
             )}
-            onFocus={(e) => {
-              setIsFocused(true);
-              onFocus?.(e);
-            }}
-            onBlur={(e) => {
-              setIsFocused(false);
-              onBlur?.(e);
-            }}
             onChange={handleChange}
-            placeholder={
-              label ? (showFloatingLabel ? placeholder : undefined) : placeholder
-            }
           />
-
-          {/* Floating label */}
-          {label && (
-            <label
-              htmlFor={textareaId}
-              className={cn(
-                "absolute left-4 transition-all duration-200 ease-apple pointer-events-none",
-                showFloatingLabel
-                  ? "top-1.5 text-xs text-primary-400 font-medium"
-                  : "top-3 text-base text-surface-400",
-              )}
-            >
-              {label}
-            </label>
-          )}
 
           {/* Error icon */}
           {error && (
-            <div className="absolute right-3 top-3 text-error-500">
+            <div className="absolute right-3 top-3 text-error-ink">
               <AlertCircle className="h-5 w-5" aria-hidden="true" />
             </div>
           )}
         </div>
 
         {/* Helper text or error message */}
-        <AnimatePresence mode="wait">
-          {(error || helperText) && (
-            <m.p
-              id={messageId}
-              role={error ? "alert" : undefined}
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.2 }}
-              className={cn(
-                "mt-1.5 text-sm px-1",
-                error ? "text-error-400" : "text-surface-400",
-              )}
-            >
-              {error || helperText}
-            </m.p>
-          )}
-        </AnimatePresence>
+        {(error || helperText) && (
+          <p
+            id={messageId}
+            role={error ? "alert" : undefined}
+            className={cn(
+              "mt-1.5 text-caption px-1",
+              error ? "text-error-ink" : "text-ink-hint",
+            )}
+          >
+            {error || helperText}
+          </p>
+        )}
       </div>
     );
   },
@@ -388,15 +289,12 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
       value,
       defaultValue,
       onChange,
-      onFocus,
-      onBlur,
       "aria-describedby": ariaDescribedBy,
       "aria-invalid": ariaInvalid,
       ...props
     },
     ref,
   ) => {
-    const [isFocused, setIsFocused] = useState(false);
     const generatedId = React.useId().replace(/:/g, "");
 
     const selectId = id || `select-${generatedId}`;
@@ -412,6 +310,15 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
 
     return (
       <div className={cn("relative", fullWidth && "w-full")}>
+        {label && (
+          <label
+            htmlFor={selectId}
+            className="mb-1.5 block text-sm font-medium text-ink-2"
+          >
+            {label}
+          </label>
+        )}
+
         <div className="relative">
           <select
             {...props}
@@ -422,38 +329,25 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
             aria-describedby={describedBy}
             aria-invalid={error ? true : ariaInvalid}
             className={cn(
-              // Base styles
-              "w-full rounded-xl appearance-none",
-              "bg-surface-900/60 border-2",
-              "px-4 py-3",
-              "text-base text-surface-50",
-              "transition-all duration-200 ease-apple",
-              // Focus state
-              "focus:outline-none focus:ring-0",
-              error
-                ? "border-error-500/50 focus:border-error-500"
-                : "border-surface-700 focus:border-primary-500",
-              // Disabled state
+              "w-full min-h-11 rounded-sm appearance-none",
+              "bg-panel-raised border",
+              "px-3 pr-10",
+              "text-base text-ink",
+              "transition-colors duration-120 ease-out",
+
+              error ? "border-error-ink" : "border-strong focus:border-brand-ink",
+
               "disabled:opacity-50 disabled:cursor-not-allowed",
-              // With floating label
-              label && "pt-6 pb-2",
+
               className,
             )}
-            onFocus={(e) => {
-              setIsFocused(true);
-              onFocus?.(e);
-            }}
-            onBlur={(e) => {
-              setIsFocused(false);
-              onBlur?.(e);
-            }}
             onChange={handleChange}
           >
             {children}
           </select>
 
           {/* Custom Chevron icon for select */}
-          <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-surface-400">
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-ink-hint">
             <svg
               width="12"
               height="8"
@@ -471,47 +365,27 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
             </svg>
           </div>
 
-          {/* Floating label */}
-          {label && (
-            <label
-              htmlFor={selectId}
-              className={cn(
-                "absolute left-4 transition-all duration-200 ease-apple pointer-events-none",
-                "top-1.5 text-xs font-medium",
-                isFocused ? "text-primary-400" : "text-surface-400",
-              )}
-            >
-              {label}
-            </label>
-          )}
-
           {/* Error icon */}
           {error && (
-            <div className="absolute right-10 top-1/2 -translate-y-1/2 text-error-500 pointer-events-none">
+            <div className="absolute right-9 top-1/2 -translate-y-1/2 text-error-ink pointer-events-none">
               <AlertCircle className="h-5 w-5" aria-hidden="true" />
             </div>
           )}
         </div>
 
         {/* Helper text or error message */}
-        <AnimatePresence mode="wait">
-          {(error || helperText) && (
-            <m.p
-              id={messageId}
-              role={error ? "alert" : undefined}
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.2 }}
-              className={cn(
-                "mt-1.5 text-sm px-1",
-                error ? "text-error-400" : "text-surface-400",
-              )}
-            >
-              {error || helperText}
-            </m.p>
-          )}
-        </AnimatePresence>
+        {(error || helperText) && (
+          <p
+            id={messageId}
+            role={error ? "alert" : undefined}
+            className={cn(
+              "mt-1.5 text-caption px-1",
+              error ? "text-error-ink" : "text-ink-hint",
+            )}
+          >
+            {error || helperText}
+          </p>
+        )}
       </div>
     );
   },

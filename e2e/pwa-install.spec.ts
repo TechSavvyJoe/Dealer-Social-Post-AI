@@ -342,7 +342,7 @@ test.describe("Home Screen PWA contracts", () => {
     try {
       await page.goto("/#/capture");
       await expect(
-        page.getByRole("heading", { name: "Capture the handoff." }),
+        page.getByRole("heading", { name: "Start with a photo" }),
       ).toBeVisible();
       expect(
         await page.evaluate(

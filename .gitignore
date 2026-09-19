@@ -60,3 +60,6 @@ credentials.json
 .vercel
 .superpowers/
 .playwright-mcp/
+
+# Session scratch (screenshot scripts, probes) — never committed
+__tests__/__scratch__/

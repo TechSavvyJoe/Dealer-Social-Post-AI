@@ -125,8 +125,8 @@ export const Modal: React.FC<ModalProps> = ({
             initial={shouldReduceMotion ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: shouldReduceMotion ? 0 : 0.2 }}
-            className="absolute inset-0 bg-surface-950/80 backdrop-blur-sm"
+            transition={{ duration: shouldReduceMotion ? 0 : 0.18 }}
+            className="absolute inset-0 bg-black/60"
             onClick={disableClose ? undefined : onClose}
             aria-hidden="true"
           />
@@ -141,17 +141,13 @@ export const Modal: React.FC<ModalProps> = ({
             aria-describedby={description ? descriptionId : undefined}
             aria-busy={disableClose || undefined}
             tabIndex={-1}
-            initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.95, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={
-              shouldReduceMotion
-                ? { duration: 0 }
-                : { type: "spring", duration: 0.4, bounce: 0 }
-            }
+            initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.18 }}
             className={cn(
-              "relative w-full bg-surface-900 border border-hairline shadow-2xl overflow-hidden flex flex-col",
-              "rounded-t-2xl sm:rounded-2xl", // Sheet-like on mobile
+              "on-overlay relative w-full bg-overlay border border-hairline shadow-dialog overflow-hidden flex flex-col",
+              "rounded-t-xl sm:rounded-lg", // Sheet-like on mobile
               "max-h-[calc(100dvh_-_var(--header-safe-top))] sm:max-h-[90vh]",
               sizeClasses[size],
               className,
@@ -168,16 +164,13 @@ export const Modal: React.FC<ModalProps> = ({
                   {title && (
                     <h2
                       id={titleId}
-                      className="text-lg font-semibold text-surface-50 sm:text-xl"
+                      className="text-2xl font-display font-semibold text-ink"
                     >
                       {title}
                     </h2>
                   )}
                   {description && (
-                    <p
-                      id={descriptionId}
-                      className="mt-0.5 text-xs text-surface-400 sm:mt-1 sm:text-sm"
-                    >
+                    <p id={descriptionId} className="mt-0.5 text-sm text-ink-2 sm:mt-1">
                       {description}
                     </p>
                   )}
@@ -188,7 +181,7 @@ export const Modal: React.FC<ModalProps> = ({
                     onClick={onClose}
                     disabled={disableClose}
                     aria-label="Close dialog"
-                    className="min-h-11 min-w-11 shrink-0 -mr-1 rounded-full p-2 text-surface-400 transition-colors hover:bg-fill-subtle hover:text-surface-50 disabled:cursor-wait disabled:opacity-45 sm:-mr-2"
+                    className="min-h-11 min-w-11 shrink-0 -mr-1 rounded-full p-2 text-ink-2 transition-colors duration-120 ease-out hover:bg-fill-subtle hover:text-ink disabled:cursor-wait disabled:opacity-45 sm:-mr-2"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -208,7 +201,7 @@ export const Modal: React.FC<ModalProps> = ({
 
             {/* Footer */}
             {footer && (
-              <div className="flex flex-wrap justify-end gap-2 rounded-b-2xl border-t border-hairline bg-surface-950/30 px-4 pt-3 pb-[max(1rem,var(--sab))] sm:gap-3 sm:px-6 sm:pt-4">
+              <div className="flex flex-wrap justify-end gap-2 sm:rounded-b-lg border-t border-hairline px-4 pt-3 pb-[max(1rem,var(--sab))] sm:gap-3 sm:px-6 sm:pt-4">
                 {footer}
               </div>
             )}

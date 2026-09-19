@@ -8,23 +8,25 @@ interface ShimmerProps {
   rounded?: string;
 }
 
+/**
+ * A quiet loading placeholder — a flat panel-raised block with a soft CSS
+ * opacity pulse. No shimmer sweep.
+ */
 export const Shimmer: React.FC<ShimmerProps> = ({
   className,
   width,
   height,
-  rounded = "rounded-lg",
+  rounded = "rounded-md",
 }) => {
   return (
     <div
-      className={cn("relative overflow-hidden bg-surface-800/50", rounded, className)}
+      className={cn("animate-pulse-soft bg-panel-raised", rounded, className)}
       style={{
         width: width,
         height: height,
       }}
       role="status"
-      aria-label="Loading..."
-    >
-      <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-    </div>
+      aria-label="Loading"
+    />
   );
 };

@@ -24,7 +24,9 @@ describe("ImageInput Drag and Drop", () => {
   it("should send a dropped photo to the single global review flow", async () => {
     render(<ImageInput onImageSelected={mockOnImageSelected} />);
 
-    const dropZone = screen.getByText("Add a photo").closest("div")?.parentElement;
+    const dropZone = screen
+      .getByText("Add a photo to start")
+      .closest("div")?.parentElement;
     expect(dropZone).toBeInTheDocument();
 
     const file = new File(["dummy content"], "test.png", { type: "image/png" });
@@ -37,7 +39,7 @@ describe("ImageInput Drag and Drop", () => {
     });
 
     // Expect visual feedback
-    expect(screen.getByText("Drop image here")).toBeInTheDocument();
+    expect(screen.getByText("Drop a photo here")).toBeInTheDocument();
 
     // Simulate drop on window
     await act(async () => {

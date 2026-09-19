@@ -158,11 +158,16 @@ config for untouched screens; PR1 removes them from every file it touches.
 Brand accent. `useDealerTheme` derives the whole accent from
 `dealer.brand_color` with these rules:
 
-1. Achromatic default. With no dealer or no `brand_color`, the ramp is
-   `--ink`: white buttons with graphite text in Graphite (16.2:1), graphite
-   buttons with white text in Sunlight (18.1:1). Login, system admin and a
-   store with no colour look like a pro tool, not a demo. The CSS defaults are
-   theme-scoped; the hook clears its inline overrides when there is no brand.
+1. Product accent. With no dealer or no `brand_color`, the accent is the
+   product's own deep navy (`#1e40af`, the app's colour before the redesign),
+   expressed as exactly the values the hook derives for it so "no colour" and
+   "navy" render identically: `--brand-fill` 30 64 175, foreground white,
+   `--brand-ink` 85 130 247 in Graphite / 30 64 175 in Sunlight. (v1 of this
+   spec made the product achromatic; the first screenshot pass showed a login
+   with no colour at all reads as a wireframe, and the invariant in rule 5 —
+   selection never carried by colour alone — already protects a dealer whose
+   colour happens to be near-grey.) The CSS defaults are theme-scoped; the
+   hook clears its inline overrides when there is no brand.
 2. `--brand-fill` and `--brand-foreground` are chosen per brand colour,
    independent of theme. Foreground is whichever of `#ffffff` and
    `rgb(20 22 24)` contrasts more with the fill (the crossover is at relative
@@ -171,8 +176,10 @@ Brand accent. `useDealerTheme` derives the whole accent from
    the foreground, hue and chroma held, until it clears 4.5:1, by at most
    ±0.25 L. The raw `dealer.brand_color` is never painted directly; the
    adjusted fill is what the ramp and buttons use.
-3. `--brand-ink` (brand as text/icon on `--panel`) moves the brand colour
-   toward the theme's ink until ≥ 4.5:1 on `--panel`, recomputed per theme.
+3. `--brand-ink` (brand as text/icon) moves the brand colour toward the
+   theme's ink until it is ≥ 4.5:1 on `--panel` AND on the panel under a 15 %
+   brand tint (selected rows and chips sit on such fills), recomputed per
+   theme.
 4. The hook reads the app store's `theme` field ("dark" | "light" |
    "system"), resolves "system" through a `matchMedia("(prefers-color-scheme:
 light)")` listener, and its effect depends on `[brand_color,
@@ -260,6 +267,10 @@ have none. Everything else answers a user action.
   on the well with a 180 ms opacity swap, an action response). Post details —
   none. Result (PR2) — the prints fade in once.
 - Button press: CSS `transform: scale(.98)` 120 ms.
+- Indeterminate loading placeholders (Skeleton, Shimmer, the Suspense boot
+  label) may use the slow `animate-pulse-soft` opacity pulse: they stand in
+  for content that has not arrived. Nothing else pulses; Badge's `pulse` prop
+  is a no-op.
 - `prefers-reduced-motion`: the global rule stays; framer variants also pass
   `initial={false}` when `useReducedMotion()` is true.
 - Removal criterion (PR1 files, then PR2/PR3): no `type: "spring"`, no
@@ -391,6 +402,10 @@ named in the row; the implementer updates it in the same commit.
 | Customizer VIN                                                          | "Scan VIN (optional — boosts accuracy)"                                                                                                                                                   | "Scan VIN" with helper "Optional. Adds the exact model to the caption."                                                                                |
 | Create button (all three media modes)                                   | "Create photo outputs" / "Create video plan" / "Create photo + video set" (+ ⌘↵); busy "Creating platform outputs..."; infinite shimmer                                                   | "Create post"; busy "Creating your post…"; shimmer removed; the existing `aria-label` pattern kept                                                     |
 | Toggles                                                                 | "Add video", "Make it playful"                                                                                                                                                            | unchanged; they remain `aria-pressed` toggle buttons (no role change)                                                                                  |
+| Caption mode ⚑ `__tests__/PostCustomizer.test.tsx`                      | "AI Caption" / "Write My Own"                                                                                                                                                             | "Suggested caption" / "Write my own"                                                                                                                   |
+| Caption field                                                           | placeholder "Write your caption here..."                                                                                                                                                  | kept (only the customer-name placeholder is removed)                                                                                                   |
+| Photo release label                                                     | "Photo release · required" / "· optional"                                                                                                                                                 | label "Photo release" with a "Required" or "Optional" tag beside it — no middle dot                                                                    |
+| Capture shelf                                                           | "BACKED UP IN APP" eyebrow, "Recent originals" card                                                                                                                                       | success tag "Backed up"; shelf becomes a plain section under the well                                                                                  |
 | Settings                                                                | "Tune the workspace for your sales floor." / "Theme (Sunlight Mode)"                                                                                                                      | "Appearance and image quality on this device." / "Appearance" — Dark · Sunlight · Match device; "Image quality" kept                                   |
 | My work dialog                                                          | "Reopen prior creatives, captions, and customer posts without regenerating."                                                                                                              | "Reopen a post to share it again or copy its caption."                                                                                                 |
 | Log out dialog — in BOTH `Header.tsx` and `App.tsx`                     | "This generated result is not fully preserved yet." + body                                                                                                                                | "This post hasn't been saved yet." / "Save the image and copy the caption first if you want to keep them."                                             |
@@ -429,7 +444,17 @@ Desktop (≥ 1024):
         5/12                                7/12
 ```
 
-Left-aligned throughout. The only moment is the 320 ms group fade-up.
+Left-aligned throughout. The grid fills the viewport (`min-h-[100dvh]`): the
+brand panel is `--brand-fill` (login is the one screen with no photo and no
+dealership, so the product's colour carries it) with the white lockup
+(`<Logo tone="onBrand" size={48} />`) top-left and the display-size tagline
+"Dealership photos, ready to post." plus one body line at the bottom; the
+access column centres its content vertically; the pair is capped at 1120 px
+and centred in wider viewports. Phones show the full lockup (mark 36 px +
+wordmark), not a lone tile. Keypad keys use the Button `key` variant
+(`--panel-raised`, hairline edge, brand tint on press) so the keypad reads as
+keys, not a calculator's outlined boxes. The only moment is the 320 ms
+group fade-up.
 
 ### 5.2 Capture
 
@@ -447,8 +472,13 @@ Take a new photo or choose one from your device…    (body, ink-2, ≤64ch)
 └───────────────────────────────────────┘ └──────────────────────┘
 ```
 
-On phones the well is full-width and the two buttons sit under it, full
-width, primary first. Class names `.capture-studio-grid`,
+On phones the two buttons come first, full width, primary first, and the
+well sits under them at 4:3: the primary action must be reachable without
+scrolling, and on a phone the well is a preview, not a drop target (this
+reverses the v1 order after the first screenshot pass). On desktop the tips
+sit directly under the buttons, not at the bottom of the column. In Sunlight
+the well has no lift (`--table-lift: none`) — a grey glow on white reads as
+a smudge; the raised tone and hairline are enough. Class names `.capture-studio-grid`,
 `.capture-studio-sidebar`, `.capture-studio-preview` stay on the same roles
 (e2e and the landscape CSS depend on them); aria-labels "Upload photo from
 your device", "Take photo using device camera", "Photo preview area" stay.
@@ -510,8 +540,11 @@ current is also the only filled segment, so it survives the achromatic
 default). Mapping: `CAPTURE → 1`, `CUSTOMIZE → 2`, `GENERATING` and `RESULT →
 3`; the stepper is not rendered on `LOGIN`, and on `RESULT` the studio owns
 the page (the stepper is hidden there as today's studio header is). Phones
-show "Step 2 of 3 · Details" and the segments. `aria-current="step"` stays; no
-check icons, no springs.
+show "Step 2 of 3 · Details" and the segments; the per-segment labels stay in
+the accessibility tree at every width (`sr-only` below `sm`) and the phone
+summary is `aria-hidden`, so the current step always has a name and is never
+announced twice. `aria-current="step"` stays; no check icons, no springs. The
+header is full-bleed; the stepper is the first content-column element.
 
 ### 5.6 Settings
 
@@ -572,7 +605,8 @@ options with their existing helper text. One icon per group at most, or none.
 7. Guard rewrite: `__tests__/sunlightThemeContrast.test.ts` currently
    requires `[.theme-light_&]:text-*-800` literals. It is rewritten to assert
    the new invariants: no `[.theme-light_&]:text-{primary,success,warning,
-error,info}-` literal anywhere in `components/` (the token system makes
+error,info}-` literal anywhere in the migrated file set (PR1's §8.2 list; the
+   set grows with PR2 and PR3 until it is all of `components/`; the token system makes
    them unnecessary), no `text-{success,warning,error,info}-(50|100|200|300)`
    ink, no `text-white` on a theme-aware fill, no `text-ink-3` inside a Modal
    subtree, and the studio-invariants case updated to the Graphite values. A
@@ -597,7 +631,8 @@ PR1 (`design/light-table`): `styles/globals.css`, `tailwind.config.js`,
 `scripts/render-og-image.mjs`, `components/ui/*`, `components/Logo.tsx`,
 `components/Header.tsx`, `components/ProgressSteps.tsx`,
 `components/SettingsModal.tsx`, `components/LoginScreen.tsx`,
-`components/CameraCapture.tsx`, `components/ImageCropModal.tsx`,
+`components/CameraCapture.tsx`, `components/RecentCaptureShelf.tsx`,
+`components/ImageCropModal.tsx`,
 `components/PostCustomizer.tsx`, `components/ScenarioPicker.tsx`,
 `components/VinScanner.tsx` and `components/PhotoReleaseModal.tsx` (tokens
 and primitives only, no copy change), `components/MainContent.tsx`
@@ -653,7 +688,8 @@ Per PR, all green before merge:
 
 Pinned e2e strings and selectors PR1 keeps or updates together
 (`e2e/flow.spec.ts`, `pwa-install.spec.ts`, `staged-release.spec.ts`,
-`real-pocketbase.spec.ts`): heading /^sign in$/i; button /my code/i; group
+`real-pocketbase.spec.ts` — the last also pins the capture heading): heading
+/^sign in$/i; button /my code/i; group
 "Four digit access code keypad"; status "N of 4 digits entered"; buttons
 "Digit N"; text "Code not recognized. Check the code and try again."; heading
 "Security check"; buttons "Manager username and password", "System admin",

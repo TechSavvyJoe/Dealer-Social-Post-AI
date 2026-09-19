@@ -1,5 +1,4 @@
 import React from "react";
-import { m } from "framer-motion";
 import { cn } from "../../utils/classNames";
 
 interface ProgressBarProps {
@@ -9,7 +8,8 @@ interface ProgressBarProps {
   className?: string;
   loadingLabel?: string;
   /**
-   * Show animated shimmer effect
+   * Deprecated: the fill is a flat token colour now, no shimmer. Accepted
+   * and ignored for call-site compatibility.
    */
   showShimmer?: boolean;
   /**
@@ -28,34 +28,26 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
   message,
   estimatedTime,
   className = "",
-  loadingLabel = "Working...",
-  showShimmer = true,
+  loadingLabel = "Working",
+  showShimmer: _showShimmer = true,
   showPercentage = true,
   size = "md",
 }) => {
   const clampedValue = Math.min(100, Math.max(0, value));
 
   const sizeStyles = {
-    sm: "h-1.5",
-    md: "h-2.5",
-    lg: "h-3",
+    sm: "h-1",
+    md: "h-1",
+    lg: "h-1.5",
   };
 
   return (
     <div className={cn("w-full", className)}>
-      {message && (
-        <m.div
-          initial={{ opacity: 0, y: -5 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-3 text-sm font-medium text-surface-100"
-        >
-          {message}
-        </m.div>
-      )}
+      {message && <div className="mb-3 text-sm font-medium text-ink">{message}</div>}
 
       <div
         className={cn(
-          "relative bg-surface-800/50 rounded-full overflow-hidden backdrop-blur-sm border border-hairline",
+          "relative bg-panel-raised rounded-full overflow-hidden",
           sizeStyles[size],
         )}
         role="progressbar"
@@ -64,36 +56,16 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
         aria-valuemax={100}
         aria-label={loadingLabel}
       >
-        <m.div
-          className="absolute inset-y-0 left-0 bg-gradient-to-r from-primary-500 via-primary-400 to-primary-500 rounded-full"
-          initial={{ width: "0%" }}
-          animate={{ width: `${clampedValue}%` }}
-          transition={{
-            duration: 0.5,
-            ease: [0.4, 0.0, 0.2, 1], // easeOut
-          }}
-        >
-          {showShimmer && (
-            <m.div
-              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent"
-              animate={{ x: ["-100%", "100%"] }}
-              transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-            />
-          )}
-        </m.div>
+        <div
+          className="absolute inset-y-0 left-0 bg-brand-fill rounded-full transition-[width] duration-180 ease-out"
+          style={{ width: `${clampedValue}%` }}
+        />
       </div>
 
       {(showPercentage || estimatedTime) && (
-        <div className="mt-2 flex justify-between text-xs text-surface-400">
+        <div className="mt-2 flex justify-between text-xs text-ink-hint">
           {showPercentage ? (
-            <m.span
-              key={clampedValue}
-              initial={{ opacity: 0, y: 5 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="font-mono"
-            >
-              {Math.round(clampedValue)}%
-            </m.span>
+            <span className="tabular-nums">{Math.round(clampedValue)}%</span>
           ) : (
             <span />
           )}

@@ -1,5 +1,4 @@
 import React, { Suspense } from "react";
-import { m } from "framer-motion";
 import { Camera, Video } from "lucide-react";
 import {
   AppStep,
@@ -310,9 +309,7 @@ export const MainContent: React.FC<MainContentProps> = ({
           <Shimmer className="h-24 rounded-xl" />
         </div>
       </div>
-      <span className="text-xs font-semibold uppercase tracking-[0.2em] text-primary-300/70 animate-pulse">
-        {label}
-      </span>
+      <span className="text-sm font-medium text-ink-2 animate-pulse-soft">{label}</span>
     </div>
   );
 
@@ -349,17 +346,17 @@ export const MainContent: React.FC<MainContentProps> = ({
           <div className="mx-auto w-full max-w-5xl space-y-4">
             {WALKAROUND_STUDIO_ENABLED && (
               <div
-                className="mx-auto grid w-full max-w-xl grid-cols-2 gap-2 rounded-2xl border border-hairline bg-surface-900/70 p-2"
+                className="mx-auto grid w-full max-w-xl grid-cols-2 gap-2 rounded-md border border-hairline bg-panel-raised p-2"
                 aria-label="Creation mode"
               >
                 <button
                   type="button"
                   aria-pressed={captureWorkspace === "photo"}
                   onClick={() => setCaptureWorkspace("photo")}
-                  className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors ${
+                  className={`flex min-h-12 items-center justify-center gap-2 rounded-sm px-3 text-sm font-semibold transition-colors ${
                     captureWorkspace === "photo"
-                      ? "bg-primary-500 text-white shadow-lg"
-                      : "text-surface-300 hover:bg-fill-subtle hover:text-surface-100"
+                      ? "bg-brand-fill text-brand-foreground"
+                      : "text-ink-2 hover:bg-fill-subtle hover:text-ink"
                   }`}
                 >
                   <Camera className="h-5 w-5" aria-hidden="true" />
@@ -369,10 +366,10 @@ export const MainContent: React.FC<MainContentProps> = ({
                   type="button"
                   aria-pressed={captureWorkspace === "walkaround"}
                   onClick={() => setCaptureWorkspace("walkaround")}
-                  className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors ${
+                  className={`flex min-h-12 items-center justify-center gap-2 rounded-sm px-3 text-sm font-semibold transition-colors ${
                     captureWorkspace === "walkaround"
-                      ? "bg-primary-500 text-white shadow-lg"
-                      : "text-surface-300 hover:bg-fill-subtle hover:text-surface-100"
+                      ? "bg-brand-fill text-brand-foreground"
+                      : "text-ink-2 hover:bg-fill-subtle hover:text-ink"
                   }`}
                 >
                   <Video className="h-5 w-5" aria-hidden="true" />
@@ -418,27 +415,23 @@ export const MainContent: React.FC<MainContentProps> = ({
         return selectedImage ? (
           <div className="mx-auto w-full max-w-screen-2xl space-y-4">
             {error ? (
-              <m.div
-                initial={{ opacity: 0, y: -8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="mx-auto flex max-w-3xl flex-col gap-3 rounded-xl border border-error-500/30 bg-error-500/10 p-4 text-error-100 sm:flex-row sm:items-center sm:justify-between [.theme-light_&]:text-error-800"
+              <div
+                className="mx-auto flex max-w-3xl flex-col gap-3 rounded-md border border-hairline bg-error-fill p-4 text-error-ink transition-opacity duration-180 ease-out sm:flex-row sm:items-center sm:justify-between"
                 role="alert"
               >
                 <div>
                   <p className="font-semibold">Generation was interrupted</p>
-                  <p className="mt-1 text-sm text-error-200 [.theme-light_&]:text-error-800">
-                    {error}
-                  </p>
+                  <p className="mt-1 text-sm text-error-ink">{error}</p>
                 </div>
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   onClick={onDismissError}
                   className="shrink-0"
                 >
                   Back to editor
                 </Button>
-              </m.div>
+              </div>
             ) : null}
             <Suspense fallback={suspenseFallback("Loading editor")}>
               <LazyPostCustomizer {...customizerProps} />
@@ -493,7 +486,11 @@ export const MainContent: React.FC<MainContentProps> = ({
   const contentLayout = ownsViewportHeight ? "viewport" : "content";
 
   return (
-    <PageTransition pageKey={String(displayedStep)} layout={contentLayout}>
+    <PageTransition
+      pageKey={String(displayedStep)}
+      layout={contentLayout}
+      skipInitial={displayedStep === AppStep.LOGIN}
+    >
       <div
         className={
           ownsViewportHeight

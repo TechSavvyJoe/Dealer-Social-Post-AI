@@ -48,23 +48,37 @@
     --info-ink: var(--ink-2);
     --info-fill: var(--fill-subtle);
 
-    /* --- Brand accent. Achromatic by default: the product has no colour of
-       its own. hooks/useDealerTheme.ts overrides every --brand-* below from
-       dealer.brand_color, per theme, and clears them when there is none. --- */
-    --brand-primary: #f0f2f4;
-    --brand-primary-700: #dfe3e7;
-    --brand-primary-600: #f0f2f4;
-    --brand-primary-500: #f0f2f4;
-    --brand-primary-400: #f0f2f4;
-    --brand-primary-300: #f0f2f4;
-    --brand-fill: 240 242 244; /* the solid accent (buttons, selected states) */
-    --brand-foreground: #141618; /* text on --brand-fill */
-    --brand-ink: 240 242 244; /* brand as text/icon on --panel, ≥ 4.5:1 */
-    --brand-300-rgb: 240 242 244;
-    --brand-400-rgb: 240 242 244;
-    --brand-500-rgb: 240 242 244;
-    --brand-600-rgb: 240 242 244;
-    --brand-700-rgb: 223 227 231;
+    /* --- Brand accent. The product's own colour is a deep navy, used
+       wherever no dealership is signed in (login, system admin) and for a
+       store that has not set a brand colour. hooks/useDealerTheme.ts
+       overrides every --brand-* below from dealer.brand_color, per theme, and
+       clears them when there is none. The values are exactly what the hook
+       derives for #1e40af, so "no colour" and "navy" render identically. --- */
+    --brand-primary: #1e40af;
+    --brand-primary-700: #618fff;
+    --brand-primary-600: #527ff3;
+    --brand-primary-500: #456fe2;
+    --brand-primary-400: #3760d1;
+    --brand-primary-300: #2a50c0;
+    --brand-fill: 30 64 175; /* the solid accent (buttons, selected states) */
+    /* Dark-theme-derived twin of the brand set, consumed only inside
+       .publish-studio-theme (which stays dark in both themes). useDealerTheme
+       writes both sets; without a dealer both are the achromatic default. */
+    --brand-fill-studio: 30 64 175;
+    --brand-foreground-studio: #ffffff;
+    --brand-ink-studio: 85 130 247;
+    --brand-300-rgb-studio: 42 80 192;
+    --brand-400-rgb-studio: 55 96 209;
+    --brand-500-rgb-studio: 69 111 226;
+    --brand-600-rgb-studio: 82 127 243;
+    --brand-700-rgb-studio: 97 143 255;
+    --brand-foreground: #ffffff; /* text on --brand-fill */
+    --brand-ink: 85 130 247; /* brand as text/icon on --panel, ≥ 4.5:1 */
+    --brand-300-rgb: 42 80 192;
+    --brand-400-rgb: 55 96 209;
+    --brand-500-rgb: 69 111 226;
+    --brand-600-rgb: 82 127 243;
+    --brand-700-rgb: 97 143 255;
     --color-primary: var(--brand-600-rgb);
     --color-primary-hover: var(--brand-700-rgb);
 
@@ -171,6 +185,7 @@
     --ink: 20 22 24; /* #141618 */
     --ink-2: 72 78 84; /* #484e54 */
     --ink-3: 104 111 118; /* #686f76 */
+    --ink-hint: var(--ink-3);
 
     --fill-subtle: rgba(20, 22, 24, 0.05);
     --fill-hover: rgba(20, 22, 24, 0.09);
@@ -180,20 +195,20 @@
     --error-ink: 150 46 38;
     --error-fill: rgba(150, 46, 38, 0.1);
 
-    --brand-primary: #141618;
-    --brand-primary-700: #000000;
-    --brand-primary-600: #141618;
-    --brand-primary-500: #141618;
-    --brand-primary-400: #141618;
-    --brand-primary-300: #141618;
-    --brand-fill: 20 22 24;
+    --brand-primary: #1e40af;
+    --brand-primary-700: #0a005e;
+    --brand-primary-600: #06006e;
+    --brand-primary-500: #05057e;
+    --brand-primary-400: #091e8e;
+    --brand-primary-300: #13309e;
+    --brand-fill: 30 64 175;
     --brand-foreground: #ffffff;
-    --brand-ink: 20 22 24;
-    --brand-300-rgb: 20 22 24;
-    --brand-400-rgb: 20 22 24;
-    --brand-500-rgb: 20 22 24;
-    --brand-600-rgb: 20 22 24;
-    --brand-700-rgb: 0 0 0;
+    --brand-ink: 30 64 175;
+    --brand-300-rgb: 19 48 158;
+    --brand-400-rgb: 9 30 142;
+    --brand-500-rgb: 5 5 126;
+    --brand-600-rgb: 6 0 110;
+    --brand-700-rgb: 10 0 94;
 
     --color-border-light: 232 233 234;
 
@@ -212,11 +227,9 @@
 
     --shadow-md: 0 16px 40px rgba(20, 22, 24, 0.18);
     --shadow-lg: var(--shadow-md);
-    --table-lift: radial-gradient(
-      ellipse 70% 60% at 50% 58%,
-      rgba(20, 22, 24, 0.035),
-      transparent 70%
-    );
+    /* No lift in Sunlight: a grey glow on white reads as a smudge. The well is
+       the raised tone plus its hairline. */
+    --table-lift: none;
   }
 
   /* Dialog bodies: tertiary ink is 4.2:1 on --overlay, so helper text there
@@ -241,9 +254,23 @@
     --ink: 240 242 244;
     --ink-2: 178 186 194;
     --ink-3: 136 145 154;
+    --ink-hint: var(--ink-3);
 
     --fill-subtle: rgba(255, 255, 255, 0.05);
     --fill-hover: rgba(255, 255, 255, 0.09);
+
+    /* The studio ground is Graphite in both themes, so the accent must be the
+       dark-theme derivation whatever <html> currently carries. */
+    --brand-fill: var(--brand-fill-studio);
+    --brand-foreground: var(--brand-foreground-studio);
+    --brand-ink: var(--brand-ink-studio);
+    --brand-300-rgb: var(--brand-300-rgb-studio);
+    --brand-400-rgb: var(--brand-400-rgb-studio);
+    --brand-500-rgb: var(--brand-500-rgb-studio);
+    --brand-600-rgb: var(--brand-600-rgb-studio);
+    --brand-700-rgb: var(--brand-700-rgb-studio);
+    --color-primary: var(--brand-600-rgb);
+    --color-primary-hover: var(--brand-700-rgb);
 
     --success-ink: var(--ink);
     --success-fill: var(--fill-hover);
@@ -570,7 +597,7 @@
     .backdrop-blur-lg,
     .backdrop-blur-xl,
     .backdrop-blur-2xl {
-      background-color: rgba(15, 23, 42, 0.95);
+      background-color: rgb(var(--overlay));
     }
   }
 
@@ -608,13 +635,14 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-surface-700/50 rounded-full;
+    background-color: rgb(var(--border-strong) / 0.5);
+    border-radius: 9999px;
     border: 3px solid transparent;
     background-clip: padding-box;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-surface-600/70;
+    background-color: rgb(var(--border-strong) / 0.7);
   }
 
   /* Corner styling */
@@ -662,13 +690,14 @@
 
   /* Code blocks */
   code {
-    @apply font-mono text-sm bg-surface-800/80 px-1.5 py-0.5 rounded;
+    @apply font-mono text-sm px-1.5 py-0.5 rounded;
+    background-color: rgb(var(--panel-raised) / 0.8);
     font-feature-settings: "calt" 0;
   }
 
   pre {
-    @apply font-mono text-sm bg-surface-800/60 p-4 rounded-2xl overflow-x-auto;
-    backdrop-filter: blur(8px);
+    @apply font-mono text-sm p-4 rounded-lg overflow-x-auto;
+    background-color: rgb(var(--panel-raised) / 0.6);
   }
 
   pre code {
@@ -725,6 +754,9 @@
   .table-lit {
     background-color: rgb(var(--panel));
     background-image: var(--table-lift);
+  }
+  .theme-light .table-lit {
+    background-color: rgb(var(--panel-raised));
   }
   .print {
     border: var(--print-edge, 1px solid rgb(var(--border-strong) / 0.6));
@@ -809,7 +841,7 @@
   .card-interactive {
     @apply cursor-pointer;
     @apply transition-colors duration-200 ease-apple;
-    @apply hover:border-strong hover:bg-surface-raised;
+    @apply hover:border-strong hover:bg-overlay;
     @apply active:scale-[0.98];
   }
 

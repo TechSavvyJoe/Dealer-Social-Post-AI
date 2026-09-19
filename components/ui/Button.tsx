@@ -1,21 +1,17 @@
 import React from "react";
-import { m, type HTMLMotionProps } from "framer-motion";
 import { Loader2 } from "lucide-react";
 import { cn } from "../../utils/classNames";
 import { triggerHapticFeedback } from "../../utils/haptics";
-import { SPRING_CONFIGS, shouldReduceMotion } from "../../utils/animations";
 
 /**
- * Button variants — DEALER TRUST system: flat fills, hairline borders, no
- * gradients, no glow, motion limited to a tap compression. The historical
- * variant names are kept as aliases so no call site churns:
+ * Button variants — Light Table system: flat token fills, hairline borders,
+ * no gradients, no glow, motion limited to a CSS tap compression. The
+ * historical variant names are kept as aliases so no call site churns:
  * - filled / primary: solid brand action
- * - tinted / secondary: brand-tinted secondary action
+ * - tinted / outline / secondary: raised panel with a strong border
  * - plain / ghost: text-only tertiary action
- * - outline: hairline-bordered alternative action
- * - danger: destructive action (solid red)
- * - gradient-sky: legacy alias of filled
- * - gradient-teal: legacy alias — now a solid success button
+ * - danger: destructive action (error fill)
+ * - gradient-sky / gradient-teal: legacy aliases of primary
  */
 type Variant =
   | "filled"
@@ -27,14 +23,19 @@ type Variant =
   | "gradient-teal"
   | "primary"
   | "secondary"
-  | "ghost";
+  | "ghost"
+  | "key";
 
 /**
- * Size options following Apple HIG (44px minimum touch target)
+ * Size options. `md` and `lg` meet the 44px minimum touch target; `xl` is
+ * the 64px keypad numeral size.
  */
-type Size = "sm" | "md" | "lg" | "icon" | "xs";
+type Size = "sm" | "md" | "lg" | "icon" | "xs" | "xl";
 
-interface ButtonProps extends Omit<HTMLMotionProps<"button">, "size"> {
+interface ButtonProps extends Omit<
+  React.ButtonHTMLAttributes<HTMLButtonElement>,
+  "size"
+> {
   /** Button style variant */
   variant?: Variant;
   /** Button size */
@@ -55,78 +56,59 @@ interface ButtonProps extends Omit<HTMLMotionProps<"button">, "size"> {
 // brand-aware *:focus-visible rule in globals.css — no per-component ring.
 const baseStyles = cn(
   "inline-flex items-center justify-center gap-2",
-  "font-semibold tracking-tight",
-  "rounded-lg",
-  "transition-colors duration-[var(--duration-fast)] ease-apple",
+  "rounded-sm",
+  "transition-[color,background-color,border-color,opacity,transform] duration-120 ease-out",
+  "active:scale-[0.98] motion-reduce:transform-none",
   "disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none",
   "select-none touch-manipulation",
 );
 
-const solidBrand = cn(
-  "bg-primary-600 text-white shadow-sm",
-  "hover:bg-primary-700",
-  "active:scale-[0.98]",
+const primaryStyles = cn("bg-brand-fill text-brand-foreground", "hover:opacity-90");
+
+const secondaryStyles = cn(
+  "bg-panel-raised border border-strong text-ink",
+  "hover:border-strong hover:opacity-90",
 );
 
-const tintedBrand = cn(
-  "bg-primary-500/15",
-  // Light-blue ink reads on dark surfaces; Sunlight Mode needs the deep ramp.
-  "text-primary-300 [.theme-light_&]:text-primary-700",
-  "border border-primary-500/25",
-  "hover:bg-primary-500/25 hover:border-primary-500/35",
-  "active:scale-[0.98]",
-);
+const ghostStyles = cn("bg-transparent text-ink-2", "hover:bg-fill-subtle");
 
-const plainBrand = cn(
-  "text-primary-300 [.theme-light_&]:text-primary-700",
-  "hover:bg-primary-500/10",
-  "active:bg-primary-500/15",
-  "active:scale-[0.98]",
-);
+const dangerStyles = cn("bg-error-fill text-error-ink border border-error-ink/40");
 
-// Variant styles — flat DEALER TRUST fills.
+// Variant styles — flat token fills, aliased so no call site churns.
+// Keypad keys: a raised key with a quiet edge; the press shows in the brand tint.
+const keyStyles =
+  "bg-panel-raised border border-hairline text-ink hover:border-strong active:bg-brand-tint";
+
 const variantStyles: Record<Variant, string> = {
-  filled: solidBrand,
-  primary: solidBrand,
-  tinted: tintedBrand,
-  secondary: tintedBrand,
-  plain: plainBrand,
-  ghost: plainBrand,
-  outline: cn(
-    "border border-hairline",
-    "text-content-primary",
-    "hover:border-strong hover:bg-fill-hover",
-    "active:scale-[0.98]",
-  ),
-  danger: cn(
-    "bg-error-600 text-white shadow-sm",
-    "hover:bg-error-700",
-    "active:scale-[0.98]",
-  ),
-  // Legacy gradient names — flat now, kept so call sites don't churn.
-  "gradient-sky": solidBrand,
-  "gradient-teal": cn(
-    "bg-success-600 text-white shadow-sm",
-    "hover:bg-success-700",
-    "active:scale-[0.98]",
-  ),
+  primary: primaryStyles,
+  filled: primaryStyles,
+  "gradient-sky": primaryStyles,
+  "gradient-teal": primaryStyles,
+  secondary: secondaryStyles,
+  tinted: secondaryStyles,
+  outline: secondaryStyles,
+  ghost: ghostStyles,
+  plain: ghostStyles,
+  danger: dangerStyles,
+  key: keyStyles,
 };
 
-// Size styles with proper touch targets (Apple HIG: min 44px)
+// Size styles with proper touch targets.
 const sizeStyles: Record<Size, string> = {
   xs: "text-xs px-3 py-1.5 min-h-[32px]",
-  sm: "text-sm px-4 py-2 min-h-[36px]",
-  md: "text-base px-5 py-2.5 min-h-[44px]",
-  lg: "text-lg px-6 py-3 min-h-[52px]",
+  sm: "text-sm font-semibold px-4 py-2 min-h-[36px]",
+  md: "text-base font-semibold px-5 py-2.5 min-h-[44px]",
+  lg: "text-base font-semibold px-6 py-3 min-h-[52px]",
   icon: "p-2 min-h-[44px] min-w-[44px]",
+  xl: "font-display text-3xl font-medium tabular-nums min-h-[64px] min-w-[64px] px-6",
 };
 
 /**
- * Button component with Apple-inspired design and smooth animations.
+ * Button component: plain element, tokens only.
  *
  * @example
- * <Button variant="filled" leftIcon={<Plus />}>
- *   Create Post
+ * <Button variant="primary" leftIcon={<Plus />}>
+ *   Create post
  * </Button>
  *
  * @example
@@ -138,7 +120,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   (
     {
       className,
-      variant = "filled",
+      variant = "primary",
       size = "md",
       loading = false,
       leftIcon,
@@ -161,7 +143,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     };
 
     return (
-      <m.button
+      <button
         ref={ref}
         className={cn(
           baseStyles,
@@ -173,23 +155,16 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={disabled || loading}
         aria-busy={loading || undefined}
         onClick={handleClick}
-        whileTap={
-          !disabled && !loading && !shouldReduceMotion() ? { scale: 0.98 } : undefined
-        }
-        transition={{
-          type: "spring",
-          ...SPRING_CONFIGS.standard,
-        }}
         {...rest}
       >
-        {/* Loading spinner */}
+        {/* Loading spinner replaces the left icon; the label stays visible */}
         {loading && (
           <Loader2
             className={cn(
               "animate-spin",
               size === "sm" && "h-4 w-4",
-              size === "md" && "h-5 w-5",
-              size === "lg" && "h-6 w-6",
+              (size === "md" || size === "lg") && "h-5 w-5",
+              size === "xl" && "h-6 w-6",
             )}
             aria-hidden="true"
           />
@@ -211,7 +186,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         )}
 
         {/* Button text */}
-        <m.span className={cn(loading && "opacity-0")}>{children}</m.span>
+        <span>{children}</span>
 
         {/* Right icon */}
         {!loading && rightIcon && (
@@ -227,7 +202,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             {rightIcon}
           </span>
         )}
-      </m.button>
+      </button>
     );
   },
 );

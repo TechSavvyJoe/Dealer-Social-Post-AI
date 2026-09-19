@@ -47,12 +47,12 @@ export class PanelErrorBoundary extends ErrorBoundary {
     return (
       <div
         role="alert"
-        className="mx-auto my-3 w-full max-w-md rounded-xl border border-error-500/30 bg-surface-900 px-4 py-3"
+        className="mx-auto my-3 w-full max-w-md rounded-xl border border-strong bg-panel px-4 py-3"
       >
-        <p className="text-sm font-semibold text-surface-50">
+        <p className="text-sm font-semibold text-error-ink">
           {panelName} could not open
         </p>
-        <p className="mt-1 text-sm leading-relaxed text-surface-300">
+        <p className="mt-1 text-sm leading-relaxed text-ink-2">
           The rest of your workspace is untouched. Try opening it again.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
@@ -294,19 +294,19 @@ const AppContent: React.FC = () => {
   if (isRestoringSession) {
     return (
       <main
-        className="flex min-h-0 flex-1 items-center justify-center bg-surface-950 p-6 text-surface-50"
+        className="flex min-h-0 flex-1 items-center justify-center bg-canvas p-6 text-ink"
         aria-busy="true"
       >
         <div className="flex items-center gap-4" role="status" aria-live="polite">
           <span
-            className="h-10 w-10 rounded-xl border border-primary-400/40 bg-primary-500/10 grid place-items-center"
+            className="h-10 w-10 rounded-xl border border-strong bg-brand-tint grid place-items-center"
             aria-hidden="true"
           >
-            <span className="h-2.5 w-2.5 rounded-full bg-primary-300 animate-pulse" />
+            <span className="h-2.5 w-2.5 rounded-full bg-brand-fill animate-pulse-soft" />
           </span>
           <div>
             <p className="font-semibold tracking-tight">Dealer Social</p>
-            <p className="text-sm text-surface-300">Preparing your studio…</p>
+            <p className="text-sm text-ink-2">Preparing your studio…</p>
           </div>
         </div>
       </main>
@@ -341,12 +341,12 @@ const AppContent: React.FC = () => {
       <div className="flex min-h-0 flex-1">
         {step === AppStep.RESULT && isDesktopLayout ? (
           <aside
-            className="flex w-[5.25rem] shrink-0 flex-col items-center border-r border-hairline bg-surface-950/35 px-2 py-4"
+            className="flex w-[5.25rem] shrink-0 flex-col items-center border-r border-hairline bg-panel px-2 py-4"
             aria-label="Publishing workspace navigation"
           >
             <nav className="flex w-full flex-1 flex-col gap-2">
               <span
-                className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-primary-400/45 bg-primary-500/15 px-1 text-[10px] font-semibold text-primary-100 shadow-[0_8px_24px_rgba(0,0,0,0.18)]"
+                className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl bg-brand-fill px-1 text-2xs font-semibold text-brand-foreground"
                 aria-current="page"
               >
                 <LayoutDashboard className="h-5 w-5" aria-hidden="true" />
@@ -355,7 +355,7 @@ const AppContent: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsHistoryOpen(true)}
-                className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-transparent px-1 text-[10px] font-medium text-surface-400 transition-colors hover:border-hairline hover:bg-fill-subtle hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-strong px-1 text-2xs font-medium text-ink transition-colors hover:bg-panel-raised"
               >
                 <History className="h-5 w-5" aria-hidden="true" />
                 My work
@@ -364,7 +364,7 @@ const AppContent: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsSettingsOpen(true)}
-              className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-transparent px-1 text-[10px] font-medium text-surface-400 transition-colors hover:border-hairline hover:bg-fill-subtle hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+              className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-strong px-1 text-2xs font-medium text-ink transition-colors hover:bg-panel-raised"
             >
               <Settings className="h-5 w-5" aria-hidden="true" />
               Settings
@@ -487,7 +487,7 @@ const AppContent: React.FC = () => {
         onClose={() => setIsHistoryOpen(false)}
         size="full"
         title="My work"
-        description="Reopen prior creatives, captions, and customer posts without regenerating."
+        description="Reopen a post to share it again or copy its caption."
         className="mx-2 w-[calc(100%-1rem)] sm:mx-4 sm:w-[min(72rem,calc(100%-2rem))]"
       >
         <PanelErrorBoundary
@@ -497,7 +497,7 @@ const AppContent: React.FC = () => {
           <Suspense
             fallback={
               <div
-                className="flex min-h-48 items-center justify-center text-sm text-surface-300"
+                className="flex min-h-48 items-center justify-center text-sm text-ink-2"
                 role="status"
               >
                 Loading your work…
@@ -516,7 +516,7 @@ const AppContent: React.FC = () => {
         onClose={() => setIsMobileLogoutConfirmOpen(false)}
         size="sm"
         title="Log out and discard this post?"
-        description="This generated result is not fully preserved yet."
+        description="This post hasn't been saved yet."
         footer={
           <>
             <Button
@@ -539,9 +539,8 @@ const AppContent: React.FC = () => {
           </>
         }
       >
-        <p className="text-sm leading-relaxed text-surface-300">
-          Save the media and copy the caption first if you want to keep both. Logging
-          out clears this workspace.
+        <p className="text-sm leading-relaxed text-ink-2">
+          Save the image and copy the caption first if you want to keep them.
         </p>
       </Modal>
 

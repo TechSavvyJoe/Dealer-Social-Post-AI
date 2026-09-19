@@ -9,8 +9,8 @@
   "dir": "ltr",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#090d17",
-  "theme_color": "#090d17",
+  "background_color": "#121416",
+  "theme_color": "#121416",
   "categories": ["business", "productivity", "photo"],
   "prefer_related_applications": false,
   "launch_handler": {

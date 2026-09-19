@@ -12,7 +12,7 @@ import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 Object.assign(global.navigator, { vibrate: vi.fn() });
 
 describe("frontend production pass", () => {
-  it("keeps controlled field labels floated and associates supporting text", () => {
+  it("keeps controlled field labels above the control and associates supporting text", () => {
     const ControlledFields = () => {
       const [name, setName] = useState("Alex");
       const [caption, setCaption] = useState("Ready for delivery");
@@ -41,8 +41,8 @@ describe("frontend production pass", () => {
     fireEvent.blur(input);
     fireEvent.blur(textarea);
 
-    expect(screen.getByText("Salesperson")).toHaveClass("top-1.5");
-    expect(screen.getByText("Caption")).toHaveClass("top-1.5");
+    expect(screen.getByText("Salesperson").tagName).toBe("LABEL");
+    expect(screen.getByText("Caption").tagName).toBe("LABEL");
     expect(input).toHaveAccessibleDescription("Shown on the post");
     expect(textarea).toHaveAccessibleDescription("Caption needs review");
     expect(textarea).toHaveAttribute("aria-invalid", "true");
@@ -203,7 +203,7 @@ describe("frontend production pass", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Review photo" });
     expect(dialog).toHaveAccessibleDescription(
-      "Check the framing before creating the post. The original aspect ratio is preserved.",
+      "Check the framing. The photo is kept at its original size.",
     );
     const usePhotoButton = screen.getByRole("button", { name: "Use photo" });
     expect(usePhotoButton).toBeDisabled();

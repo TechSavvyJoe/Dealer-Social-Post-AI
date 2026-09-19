@@ -1,12 +1,7 @@
 import React, { useCallback, useEffect, useId, useMemo, useState } from "react";
-import { m, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
-  Edit3,
-  FileText,
   Check,
-  Camera,
-  ChevronRight,
   ChevronDown,
   ScanLine,
   Car,
@@ -21,8 +16,6 @@ import {
   Users,
   Smile,
   Megaphone,
-  Command,
-  CornerDownLeft,
   RefreshCw,
   ShieldCheck,
   Trash2,
@@ -41,7 +34,6 @@ import {
 } from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Button } from "./ui/Button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/Card";
 import { Badge } from "./ui/Badge";
 import { Input, Textarea, Select } from "./ui/Input";
 import {
@@ -64,7 +56,7 @@ import {
   getScenariosForDealer,
   stripIdMarkerSpoof,
 } from "../services/postScenarios";
-import { LOOK_DEFINITIONS, resolveCreative } from "../services/creativeSystem";
+import { resolveCreative } from "../services/creativeSystem";
 import { logEvent } from "../utils/telemetry";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { ProgressiveImage } from "./ui/ProgressiveImage";
@@ -266,36 +258,26 @@ const CapabilityToggle: React.FC<{
       onToggle();
     }}
     className={cn(
-      "flex min-h-16 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
+      "flex min-h-11 w-full items-center gap-3 rounded-sm border px-3 py-2.5 text-left transition-colors duration-120 ease-out",
       pressed
-        ? "border-primary-300 bg-primary-500/25 text-primary-50 [.theme-light_&]:text-primary-950"
-        : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/35",
+        ? "border-brand-fill bg-brand-fill text-brand-foreground"
+        : "border-hairline bg-panel text-ink hover:bg-fill-subtle",
     )}
   >
-    <span
-      className={cn(
-        "grid h-10 w-10 shrink-0 place-items-center rounded-xl border",
-        pressed
-          ? "border-primary-300/40 bg-primary-400/20 text-primary-100 [.theme-light_&]:text-primary-950"
-          : "border-hairline bg-surface-950/50 text-surface-400",
-      )}
-      aria-hidden="true"
-    >
-      <Icon className="h-5 w-5" />
-    </span>
+    <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
     <span className="min-w-0 flex-1">
       <span className="block text-sm font-semibold">{label}</span>
-      <span className="mt-0.5 block text-[10px] leading-relaxed text-surface-400">
+      <span
+        className={cn(
+          "mt-0.5 block text-2xs font-medium leading-relaxed",
+          pressed ? "text-brand-foreground/80" : "text-ink-2",
+        )}
+      >
         {hint}
       </span>
     </span>
     {pressed ? (
-      <span
-        className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary-300 text-primary-950"
-        aria-hidden="true"
-      >
-        <Check className="h-3.5 w-3.5" strokeWidth={3} />
-      </span>
+      <Check className="h-4 w-4 shrink-0" strokeWidth={3} aria-hidden="true" />
     ) : null}
   </button>
 );
@@ -375,7 +357,6 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   defaultStyle,
   defaultTone,
   onStyleToneChange,
-  isDesktopLayout,
   isGenerating = false,
   initialGenerationParams,
 }) => {
@@ -385,6 +366,8 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   // A bare <label> with no `for` announces nothing, so the section headings are
   // plain text nodes wired to a role="group" wrapper by id.
   const groupId = useId();
+  const typeGroupId = `${groupId}-post-type`;
+  const whoGroupId = `${groupId}-who`;
   const vehicleGroupId = `${groupId}-vehicle`;
   const releaseGroupId = `${groupId}-release`;
   const styleGroupId = `${groupId}-style`;
@@ -618,7 +601,6 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     [currentDealer, scenarioId, style, tone],
   );
   const creativeEnabled = resolved.enabled;
-  const lookDefinition = resolved.look ? LOOK_DEFINITIONS[resolved.look] : null;
   // Joined keys keep the derived memos below stable across renders: the
   // resolver returns fresh arrays every call.
   const prescribedPlatformKey = resolved.platformIds.join("|");
@@ -1072,100 +1054,68 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   });
 
   return (
-    <div className="flex flex-1 items-start justify-center px-0 py-2 sm:px-2 sm:py-4">
-      <m.div
-        className={cn(
-          "mx-auto w-full",
-          isDesktopLayout
-            ? "max-w-6xl grid grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)] gap-6 items-start"
-            : "max-w-2xl",
-        )}
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-      >
-        {isDesktopLayout && (
-          <section className="sticky top-24 overflow-hidden rounded-[1.75rem] border border-hairline bg-surface-950 shadow-2xl shadow-black/30">
-            <div className="flex items-center justify-between border-b border-hairline px-5 py-4 text-xs font-semibold tracking-[0.12em] text-surface-400">
-              <span>PHOTO STAGE</span>
-              <span className="text-primary-300">02 DETAILS</span>
-            </div>
-            <div className="relative grid min-h-[560px] place-items-center bg-black p-5">
+    <div className="w-full pb-28 sm:pb-2">
+      <div className="mx-auto w-full max-w-[45rem] px-4 pt-2 sm:px-0">
+        {/* Photo strip: the print, what it is, and the way back to Capture.
+            This replaces the desktop photo-stage panel; the change-photo
+            action it carried lives here for every layout. */}
+        <div className="space-y-4">
+          <h2 className="font-display text-2xl font-semibold text-ink">Post details</h2>
+          <div className="flex items-center gap-3 border-b border-hairline pb-5">
+            <div className="print h-14 w-14 shrink-0 overflow-hidden rounded-sm">
               <ProgressiveImage
                 src={imageSrc}
                 alt="Selected post photo"
-                className="max-h-[620px] w-full rounded-2xl object-contain shadow-2xl"
-              />
-              <div
-                className="pointer-events-none absolute inset-x-8 top-1/2 h-px bg-primary-300/40 shadow-[0_0_16px_rgba(96,165,250,0.45)]"
-                aria-hidden="true"
+                className="h-full w-full object-cover"
               />
             </div>
-            <div className="flex items-center justify-between border-t border-hairline px-5 py-4 text-xs text-surface-400">
-              <span>Review the full frame before generating.</span>
-              <button
-                type="button"
-                onClick={onBack}
-                className="font-semibold text-content-secondary hover:text-content-primary"
-              >
-                Change photo
-              </button>
-            </div>
-          </section>
-        )}
+            <p className="min-w-0 flex-1 truncate text-sm text-ink-2">
+              {activeScenario.label}
+            </p>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                triggerHapticFeedback();
+                onBack();
+              }}
+              className="shrink-0"
+            >
+              Change photo
+            </Button>
+          </div>
+        </div>
 
-        <Card
-          elevation={2}
-          className="relative overflow-hidden border-hairline bg-surface-900"
-        >
-          <CardHeader className="relative pb-3">
-            <div className="flex items-center gap-3">
-              {/* Compact image preview */}
-              <m.div
-                className={cn(
-                  "h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-strong shadow-lg sm:h-20 sm:w-20",
-                  isDesktopLayout && "hidden",
-                )}
-                whileHover={{ scale: 1.05 }}
-              >
-                <ProgressiveImage
-                  src={imageSrc}
-                  alt="Preview"
-                  className="h-full w-full object-cover"
-                />
-              </m.div>
-              <div className="min-w-0 flex-1">
-                <CardTitle className="text-lg sm:text-xl">Create your post</CardTitle>
-                <CardDescription className="text-xs sm:text-sm">
-                  {lookDefinition
-                    ? `${lookDefinition.label} look — ${lookDefinition.description}`
-                    : "Pick a style — AI handles the rest"}
-                </CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-
-          <CardContent className="relative space-y-5 pt-0">
-            {/* Post scenario — selects which kind of post this is (delivery,
-                pre-owned spotlight, service promo, etc). Tunes prompt + defaults. */}
+        <div className="space-y-8 pt-8">
+          {/* What kind of post — scenario drives prompt context + defaults. */}
+          <div className="space-y-3" role="group" aria-labelledby={typeGroupId}>
+            <h3 id={typeGroupId} className="text-lg font-semibold text-ink">
+              What kind of post
+            </h3>
             <ScenarioPicker
               value={scenarioId}
               onChange={handleScenarioChange}
               categoryFirst={creativeEnabled}
             />
+          </div>
+
+          {/* Who and what — the person posting, the customer, the vehicle and
+              the signed release that governs all three. */}
+          <div className="space-y-4" role="group" aria-labelledby={whoGroupId}>
+            <h3 id={whoGroupId} className="text-lg font-semibold text-ink">
+              Who and what
+            </h3>
 
             <div
-              className="flex items-center gap-3 rounded-xl border border-primary-400/20 bg-primary-500/[0.07] px-3 py-2.5"
+              className="flex items-center gap-3 rounded-md border border-hairline bg-panel px-3 py-2.5"
               aria-label={`Posting as ${currentPerson?.name || "signed-in team member"}`}
             >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-primary-400/20 bg-primary-500/10 text-primary-300 [.theme-light_&]:text-primary-800">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-sm border border-hairline bg-panel-raised text-ink-2">
                 <Users className="h-4 w-4" aria-hidden="true" />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-primary-300">
-                  Posting as
-                </p>
-                <p className="truncate text-sm font-semibold text-surface-100">
+                <p className="text-caption text-ink-2">Posting as</p>
+                <p className="truncate text-sm font-semibold text-ink">
                   {currentPerson?.name || "Signed-in team member"}
                 </p>
               </div>
@@ -1174,12 +1124,13 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               </Badge>
             </div>
 
-            {/* Customer Name - Compact */}
+            {/* The customer's first name is the only identity social copy ever
+                sees; the release holds the legal name. */}
             <Input
-              label={`Customer's name (${scenarioNeedsCustomerRelease ? "required" : "optional"})`}
+              label="Customer first name"
               value={customerName}
               onChange={(e) => handleCustomerNameChange(e.target.value)}
-              placeholder="First name"
+              aria-required={scenarioNeedsCustomerRelease || undefined}
               disabled={Boolean(capturedRelease)}
               helperText={
                 capturedRelease
@@ -1187,7 +1138,6 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   : undefined
               }
               fullWidth
-              className="bg-fill-subtle border-hairline focus:border-primary-400 focus:bg-fill-hover transition-colors"
             />
 
             {/* VIN Scanner — show pill if vehicle decoded, otherwise show CTA.
@@ -1201,22 +1151,21 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               <div className="space-y-2" role="group" aria-labelledby={vehicleGroupId}>
                 <span
                   id={vehicleGroupId}
-                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+                  className="block text-sm font-medium text-ink-2"
                 >
                   Vehicle
                 </span>
                 {decodedVehicle && !decodedVehicle.empty ? (
-                  <m.div
-                    initial={{ opacity: 0, scale: 0.98 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="flex items-start gap-3 rounded-xl border border-success-500/40 bg-success-500/10 px-3 py-2.5"
-                  >
-                    <Car className="h-4 w-4 text-success-300 flex-shrink-0 mt-0.5" />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-semibold text-success-100 truncate">
+                  <div className="flex items-start gap-3 rounded-md border border-hairline bg-panel-raised px-3 py-2.5">
+                    <Car
+                      className="mt-0.5 h-4 w-4 flex-shrink-0 text-ink-2"
+                      aria-hidden="true"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold text-ink">
                         {decodedVehicle.summary}
                       </div>
-                      <div className="text-[10px] font-mono text-success-300/80 truncate">
+                      <div className="truncate font-mono text-2xs text-ink-hint">
                         VIN {decodedVehicle.vin}
                       </div>
                     </div>
@@ -1233,53 +1182,59 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         triggerHapticFeedback();
                         setDecodedVehicle(null);
                       }}
-                      className="p-1 -mr-1 text-success-300/80 hover:text-success-100 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                      className="-mr-2 -my-1 grid h-11 w-11 shrink-0 place-items-center rounded-sm text-ink-2 transition-colors duration-120 ease-out hover:bg-fill-subtle hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      <X className="h-3.5 w-3.5" />
+                      <X className="h-4 w-4" aria-hidden="true" />
                     </button>
-                  </m.div>
+                  </div>
                 ) : (
-                  <Button
-                    variant="outline"
-                    size="md"
-                    leftIcon={<ScanLine className="h-4 w-4" />}
-                    onClick={() => {
-                      triggerHapticFeedback();
-                      setVinScannerOpen(true);
-                    }}
-                    fullWidth
-                    className="border-dashed border-strong bg-fill-subtle hover:bg-fill-hover"
-                    disabled={Boolean(capturedRelease)}
-                  >
-                    Scan VIN (optional — boosts accuracy)
-                  </Button>
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="md"
+                      leftIcon={<ScanLine className="h-4 w-4" />}
+                      onClick={() => {
+                        triggerHapticFeedback();
+                        setVinScannerOpen(true);
+                      }}
+                      fullWidth
+                      disabled={Boolean(capturedRelease)}
+                    >
+                      Scan VIN
+                    </Button>
+                    <p className="text-caption text-ink-hint">
+                      Optional. Adds the exact model to the caption.
+                    </p>
+                  </>
                 )}
               </div>
             )}
 
             {/* Photo release — capture customer's signed consent before posting their photo */}
             <div className="space-y-2" role="group" aria-labelledby={releaseGroupId}>
-              <span
-                id={releaseGroupId}
-                className="text-xs font-medium text-surface-300 uppercase tracking-wide"
-              >
-                Photo release · {scenarioNeedsCustomerRelease ? "required" : "optional"}
+              <span className="flex items-center gap-2 text-sm font-medium text-ink-2">
+                <span id={releaseGroupId}>Photo release</span>
+                <Badge
+                  variant={scenarioNeedsCustomerRelease ? "warning" : "neutral"}
+                  uppercase={false}
+                >
+                  {scenarioNeedsCustomerRelease ? "Required" : "Optional"}
+                </Badge>
               </span>
               {capturedRelease ? (
-                <m.div
-                  initial={{ opacity: 0, scale: 0.98 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="flex items-start gap-3 rounded-xl border border-success-500/40 bg-success-500/10 px-3 py-2.5"
-                >
-                  <ShieldCheck className="h-4 w-4 text-success-300 flex-shrink-0 mt-0.5" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-success-100">
+                <div className="flex items-start gap-3 rounded-md border border-hairline bg-panel-raised px-3 py-2.5">
+                  <ShieldCheck
+                    className="mt-0.5 h-4 w-4 flex-shrink-0 text-ink-2"
+                    aria-hidden="true"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-ink">
                       Release captured for
                       {toPublicCustomerLabel(capturedRelease.customerName)
                         ? ` ${toPublicCustomerLabel(capturedRelease.customerName)}`
                         : " this customer"}
                     </div>
-                    <div className="text-[10px] text-success-300/80">
+                    <div className="text-2xs text-ink-hint">
                       Identity and vehicle are locked to this signature.
                     </div>
                   </div>
@@ -1290,7 +1245,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         setCapturedRelease(null);
                         setReleaseModalOpen(true);
                       }}
-                      className="inline-flex min-h-11 items-center gap-1 rounded-lg border border-success-400/25 bg-success-500/10 px-2 text-[11px] font-semibold text-success-100 transition-colors hover:bg-success-500/20 [.theme-light_&]:text-success-900"
+                      className="inline-flex min-h-11 items-center gap-1.5 rounded-sm border border-strong px-3 text-2xs font-semibold text-ink transition-colors duration-120 ease-out hover:bg-fill-subtle"
                     >
                       <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
                       Replace
@@ -1299,15 +1254,15 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                       type="button"
                       aria-label="Remove captured release"
                       onClick={() => setCapturedRelease(null)}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-error-400/25 bg-error-500/10 text-error-100 transition-colors hover:bg-error-500/20 [.theme-light_&]:text-error-800"
+                      className="grid h-11 w-11 place-items-center rounded-sm border border-strong text-ink transition-colors duration-120 ease-out hover:bg-fill-subtle"
                     >
                       <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>
                   </div>
-                </m.div>
+                </div>
               ) : (
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="md"
                   leftIcon={<ShieldCheck className="h-4 w-4" />}
                   onClick={() => {
@@ -1315,7 +1270,6 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                     setReleaseModalOpen(true);
                   }}
                   fullWidth
-                  className="border-dashed border-strong bg-fill-subtle hover:bg-fill-hover"
                   disabled={!currentDealer}
                 >
                   Capture customer release
@@ -1323,7 +1277,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
               )}
               {releaseValidationError && !capturedRelease ? (
                 <p
-                  className="rounded-lg border border-error-500/30 bg-error-500/10 px-3 py-2 text-xs font-medium text-error-100 [.theme-light_&]:text-error-800"
+                  className="rounded-sm border border-error-ink/40 bg-error-fill px-3 py-2 text-caption font-medium text-error-ink"
                   role="alert"
                 >
                   This customer-focused post needs a signed photo release before the
@@ -1331,523 +1285,483 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                 </p>
               ) : null}
             </div>
+          </div>
 
-            {/* Style Selection - Simplified Grid. Hidden (never deleted) once
-                the Look owns the image treatment (spec §4.1). */}
-            <div
-              className="space-y-2"
-              role="group"
-              aria-labelledby={styleGroupId}
-              hidden={creativeEnabled}
-            >
-              <div className="flex justify-between items-baseline">
-                <span
-                  id={styleGroupId}
-                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
-                >
-                  Design Style
-                </span>
-                <span className="text-[10px] text-surface-400 opacity-60">
-                  Select one
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {allowedStyles.map((option) => {
-                  const info = STYLE_INFO[option];
-                  const isActive = option === style;
-                  return (
-                    <m.button
-                      key={option}
-                      type="button"
-                      aria-pressed={isActive}
-                      onClick={(e) => {
-                        triggerHapticFeedback();
-                        setStyle(option);
-
-                        // Ripple effect
-                        const button = e.currentTarget;
-                        const ripple = document.createElement("span");
-                        const rect = button.getBoundingClientRect();
-                        const size = Math.max(rect.width, rect.height);
-                        const x = e.clientX - rect.left - size / 2;
-                        const y = e.clientY - rect.top - size / 2;
-
-                        ripple.style.width = ripple.style.height = `${size}px`;
-                        ripple.style.left = `${x}px`;
-                        ripple.style.top = `${y}px`;
-                        ripple.className = "ripple";
-
-                        button.appendChild(ripple);
-                        setTimeout(() => ripple.remove(), 600);
-                      }}
-                      className={cn(
-                        "relative flex items-center gap-2 rounded-xl border px-3 py-3 text-left transition-all overflow-hidden",
-                        isActive
-                          ? "border-primary-400 bg-primary-500/20"
-                          : "border-hairline bg-fill-subtle hover:border-primary-400/30 hover:bg-fill-hover",
-                      )}
-                      whileTap={{ scale: 0.98 }}
-                    >
-                      {isActive && (
-                        <m.div
-                          className="absolute inset-0 bg-primary-400/10"
-                          initial={{ opacity: 0, scale: 0.98 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          transition={{ duration: 0.2 }}
-                        />
-                      )}
-                      <info.icon
+          {/* Look — the design style. Hidden (never deleted) once the Look
+              owns the image treatment (spec §4.1). */}
+          <div
+            className="space-y-3"
+            role="group"
+            aria-labelledby={styleGroupId}
+            hidden={creativeEnabled}
+          >
+            <h3 id={styleGroupId} className="text-lg font-semibold text-ink">
+              Look
+            </h3>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {allowedStyles.map((option) => {
+                const info = STYLE_INFO[option];
+                const isActive = option === style;
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    aria-pressed={isActive}
+                    onClick={() => {
+                      triggerHapticFeedback();
+                      setStyle(option);
+                    }}
+                    className={cn(
+                      "flex min-h-11 items-start gap-2 rounded-sm border px-3 py-3 text-left transition-colors duration-120 ease-out",
+                      isActive
+                        ? "border-brand-fill bg-brand-fill text-brand-foreground"
+                        : "border-hairline bg-panel text-ink hover:bg-fill-subtle",
+                    )}
+                  >
+                    <info.icon
+                      className="mt-0.5 h-5 w-5 flex-shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold">
+                        {option.split(" ")[0]}
+                      </span>
+                      <span
                         className={cn(
-                          "h-5 w-5 flex-shrink-0 relative z-10 transition-colors",
-                          isActive
-                            ? "text-primary-300 [.theme-light_&]:text-primary-800"
-                            : "text-surface-400",
+                          "mt-0.5 block text-2xs font-medium leading-snug",
+                          isActive ? "text-brand-foreground/80" : "text-ink-2",
                         )}
-                      />
-                      <div className="flex-1 min-w-0 relative z-10">
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={cn(
-                              "text-sm font-semibold truncate transition-colors",
-                              isActive
-                                ? "text-primary-100 [.theme-light_&]:text-primary-950"
-                                : "text-surface-50",
-                            )}
-                          >
-                            {option.split(" ")[0]}
-                          </span>
-                          {isActive && (
-                            <m.div initial={{ scale: 0 }} animate={{ scale: 1 }}>
-                              <Check className="h-3.5 w-3.5 text-primary-400 flex-shrink-0" />
-                            </m.div>
-                          )}
-                        </div>
-                        <span
-                          className={cn(
-                            "text-[11px] block leading-snug transition-colors",
-                            isActive
-                              ? "text-primary-200/80 [.theme-light_&]:text-primary-900"
-                              : "text-surface-400",
-                          )}
-                        >
-                          {info.desc}
-                        </span>
-                        <span
-                          className={cn(
-                            "mt-0.5 text-[10px] block leading-snug transition-colors",
-                            isActive
-                              ? "text-primary-200/60 [.theme-light_&]:text-primary-900/80"
-                              : "text-surface-400",
-                          )}
-                        >
-                          {info.detail}
-                        </span>
-                      </div>
-                    </m.button>
+                      >
+                        {info.desc}
+                      </span>
+                      <span
+                        className={cn(
+                          "mt-0.5 block text-2xs font-medium leading-snug",
+                          isActive ? "text-brand-foreground/80" : "text-ink-2",
+                        )}
+                      >
+                        {info.detail}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Where it goes — drives caption length + export bias */}
+          <div className="space-y-3" role="group" aria-labelledby={destinationGroupId}>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 id={destinationGroupId} className="text-lg font-semibold text-ink">
+                Where it goes
+              </h3>
+              <span className="text-caption text-ink-hint">
+                {creativeEnabled ? "Set by your category" : "Pick all that apply"}
+              </span>
+            </div>
+            {/* Prescribed destinations + canvases replace the chips, the
+                "More platforms" accordion, and the size grid (spec §4.4). */}
+            {creativeEnabled ? (
+              <p className="rounded-md border border-hairline bg-panel px-3 py-2.5 text-sm leading-relaxed text-ink-2">
+                {destinationSummary || "No social destinations for this category."}
+                <span className="mt-0.5 block text-caption text-ink-hint">
+                  {effectiveImageProfile.label} master · every destination still gets
+                  its own exact file.
+                </span>
+              </p>
+            ) : null}
+            {/* Conditionally rendered rather than [hidden]: .mobile-h-scroll
+                declares `display: flex` later in the base layer than
+                Preflight's `[hidden]` rule at equal specificity, so the
+                attribute alone would leave these chips on screen. */}
+            {creativeEnabled ? null : (
+              <div className="mobile-h-scroll -mx-1 px-1 pb-1 sm:flex-wrap sm:overflow-visible">
+                {primaryPlatformOptions.map((p) => {
+                  const on = selectedPlatforms.includes(p.id);
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => togglePlatform(p.id)}
+                      className={cn(
+                        "min-h-11 shrink-0 snap-start rounded-full border px-4 py-2 text-left transition-colors duration-120 ease-out",
+                        on
+                          ? "border-brand-fill bg-brand-fill text-brand-foreground"
+                          : "border-hairline bg-panel text-ink hover:bg-fill-subtle",
+                      )}
+                    >
+                      <span className="flex items-center gap-1.5 text-sm font-semibold">
+                        {on ? (
+                          <Check
+                            className="h-3.5 w-3.5 shrink-0"
+                            strokeWidth={3}
+                            aria-hidden="true"
+                          />
+                        ) : null}
+                        {p.shortLabel}
+                      </span>
+                      <span
+                        className={cn(
+                          "block text-2xs font-medium leading-tight",
+                          on ? "text-brand-foreground/80" : "text-ink-2",
+                        )}
+                      >
+                        {p.verticalPreferred ? "9:16 story-ready" : "Feed"}
+                      </span>
+                    </button>
                   );
                 })}
               </div>
-            </div>
-
-            {/* Where they'll post — drives caption length + export bias */}
-            <div
-              className="space-y-2"
-              role="group"
-              aria-labelledby={destinationGroupId}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span
-                  id={destinationGroupId}
-                  className="text-xs font-medium text-surface-300 uppercase tracking-wide"
-                >
-                  {creativeEnabled ? "Where this posts" : "Share to"}
-                </span>
-                <span className="text-[10px] text-surface-400">
-                  {creativeEnabled ? "Set by your category" : "Pick all that apply"}
-                </span>
-              </div>
-              {/* Prescribed destinations + canvases replace the chips, the
-                  "More platforms" accordion, and the size grid (spec §4.4). */}
-              {creativeEnabled ? (
-                <p className="rounded-xl border border-hairline bg-fill-subtle px-3 py-2.5 text-xs leading-relaxed text-surface-300">
-                  {destinationSummary || "No social destinations for this category."}
-                  <span className="mt-0.5 block text-[10px] text-surface-400">
-                    {effectiveImageProfile.label} master · every destination still gets
-                    its own exact file.
-                  </span>
-                </p>
-              ) : null}
-              {/* Conditionally rendered rather than [hidden]: .mobile-h-scroll
-                  declares `display: flex` later in the base layer than
-                  Preflight's `[hidden]` rule at equal specificity, so the
-                  attribute alone would leave these chips on screen. */}
-              {creativeEnabled ? null : (
-                <div className="mobile-h-scroll -mx-1 px-1 pb-1 sm:flex-wrap sm:overflow-visible">
-                  {primaryPlatformOptions.map((p) => {
-                    const on = selectedPlatforms.includes(p.id);
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        aria-pressed={on}
-                        onClick={() => togglePlatform(p.id)}
-                        className={cn(
-                          "min-h-11 shrink-0 snap-start rounded-full border px-3.5 py-2 text-left transition-colors",
-                          on
-                            ? "border-primary-400 bg-primary-500/25 text-primary-50 [.theme-light_&]:text-primary-950"
-                            : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/40",
-                        )}
-                      >
-                        <span className="flex items-center gap-1.5 text-sm font-semibold">
-                          {on ? (
-                            <span
-                              className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-primary-300 text-primary-950"
-                              aria-hidden="true"
-                            >
-                              <Check className="h-3 w-3" strokeWidth={3} />
-                            </span>
-                          ) : null}
-                          {p.shortLabel}
-                        </span>
-                        <span className="block text-[10px] leading-tight opacity-80">
-                          {p.verticalPreferred ? "9:16 story-ready" : "Feed"}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+            )}
+            <button
+              type="button"
+              aria-pressed={websiteSelected}
+              aria-describedby="website-destination-description"
+              disabled={websiteAvailability !== "ready"}
+              onClick={() => {
+                triggerHapticFeedback();
+                setWebsiteSelected((selected) => {
+                  const next = !selected;
+                  // The social chips begin with convenient defaults. If the
+                  // salesperson has not touched them, choosing Website means
+                  // Website only—not an implicit TikTok/Facebook/Instagram
+                  // selection. Social destinations can still be added after.
+                  if (next && !platformSelectionTouched) {
+                    setSelectedPlatforms([]);
+                  }
+                  return next;
+                });
+              }}
+              className={cn(
+                "flex min-h-11 w-full items-center gap-3 rounded-sm border px-3 py-2.5 text-left transition-colors duration-120 ease-out",
+                websiteSelected
+                  ? "border-brand-fill bg-brand-fill text-brand-foreground"
+                  : "border-hairline bg-panel text-ink hover:bg-fill-subtle",
+                websiteAvailability !== "ready" &&
+                  "cursor-not-allowed opacity-60 hover:bg-panel",
               )}
-              <button
-                type="button"
-                aria-pressed={websiteSelected}
-                aria-describedby="website-destination-description"
-                disabled={websiteAvailability !== "ready"}
-                onClick={() => {
-                  triggerHapticFeedback();
-                  setWebsiteSelected((selected) => {
-                    const next = !selected;
-                    // The social chips begin with convenient defaults. If the
-                    // salesperson has not touched them, choosing Website means
-                    // Website only—not an implicit TikTok/Facebook/Instagram
-                    // selection. Social destinations can still be added after.
-                    if (next && !platformSelectionTouched) {
-                      setSelectedPlatforms([]);
-                    }
-                    return next;
-                  });
-                }}
-                className={cn(
-                  "flex min-h-16 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
-                  websiteSelected
-                    ? "border-primary-300 bg-primary-500/25 text-primary-50 [.theme-light_&]:text-primary-950"
-                    : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/35 hover:bg-fill-subtle",
-                  websiteAvailability !== "ready" &&
-                    "cursor-not-allowed opacity-60 hover:border-hairline hover:bg-fill-subtle",
-                )}
-              >
-                <span
-                  className={cn(
-                    "grid h-10 w-10 shrink-0 place-items-center rounded-xl border",
-                    websiteSelected
-                      ? "border-primary-300/40 bg-primary-400/20 text-primary-100 [.theme-light_&]:text-primary-950"
-                      : "border-hairline bg-surface-950/50 text-surface-400",
-                  )}
-                  aria-hidden="true"
-                >
-                  <Globe2 className="h-5 w-5" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold">Website</span>
-                    <span className="inline-flex items-center gap-1 rounded-full border border-primary-400/25 bg-primary-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-primary-200 [.theme-light_&]:text-primary-900">
-                      <LockKeyhole className="h-2.5 w-2.5" />
-                      Draft only
-                    </span>
-                  </span>
+            >
+              <Globe2 className="h-5 w-5 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1">
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold">Website</span>
                   <span
-                    id="website-destination-description"
-                    className="mt-0.5 block text-[10px] leading-relaxed text-surface-400"
-                  >
-                    {websiteAvailability === "loading"
-                      ? "Checking the private website connection…"
-                      : websiteAvailability === "ready"
-                        ? `Private draft for ${(() => {
-                            try {
-                              return new URL(
-                                websiteDestination?.siteUrl || "https://joegallant.me",
-                              ).hostname;
-                            } catch {
-                              return "joegallant.me";
-                            }
-                          })()}. AI prepares it; you publish later in Customer Hub.`
-                        : websiteDestination?.reason ||
-                          "Website drafts are not configured for this dealership yet."}
-                  </span>
-                </span>
-                {websiteSelected ? (
-                  <span
-                    className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary-300 text-primary-950"
-                    aria-hidden="true"
-                  >
-                    <Check className="h-3.5 w-3.5" strokeWidth={3} />
-                  </span>
-                ) : null}
-              </button>
-              {/* Spec §4.3: the Photo/Video/Both matrix becomes one yes/no,
-                  and only for a category and a person allowed to use it. */}
-              {videoOffered ? (
-                <CapabilityToggle
-                  label="Add video"
-                  hint="9:16 · 6s · music on, in your dealership's motion style."
-                  icon={Film}
-                  pressed={addVideo}
-                  onToggle={() => setAddVideo((current) => !current)}
-                />
-              ) : null}
-              {playfulOffered ? (
-                <CapabilityToggle
-                  label="Make it playful"
-                  hint="Adds your dealership's Playful image beside the house-style master."
-                  icon={PartyPopper}
-                  pressed={playfulRequested}
-                  onToggle={() => setPlayfulRequested((current) => !current)}
-                />
-              ) : null}
-              <div
-                className="overflow-hidden rounded-xl border border-hairline bg-surface-950/25"
-                hidden={creativeEnabled}
-              >
-                <button
-                  type="button"
-                  aria-expanded={showMorePlatforms}
-                  aria-controls="secondary-platform-options"
-                  aria-label={`More platforms, ${selectedSecondaryCount} selected`}
-                  onClick={() => {
-                    triggerHapticFeedback();
-                    setShowMorePlatforms((current) => !current);
-                  }}
-                  className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-fill-subtle"
-                >
-                  <span>
-                    <span className="block text-xs font-semibold text-surface-200">
-                      More platforms
-                    </span>
-                    <span className="block text-[10px] text-surface-400">
-                      Reels, Marketplace, LinkedIn, X, and device share
-                    </span>
-                  </span>
-                  <span className="flex shrink-0 items-center gap-2">
-                    {selectedSecondaryCount > 0 ? (
-                      <span className="rounded-full border border-primary-400/25 bg-primary-500/15 px-2 py-0.5 text-[10px] font-semibold text-primary-200 [.theme-light_&]:text-primary-900">
-                        {selectedSecondaryCount} selected
-                      </span>
-                    ) : null}
-                    <ChevronDown
-                      className={cn(
-                        "h-4 w-4 text-surface-400 transition-transform",
-                        showMorePlatforms && "rotate-180",
-                      )}
-                      aria-hidden="true"
-                    />
-                  </span>
-                </button>
-                <AnimatePresence initial={false}>
-                  {showMorePlatforms ? (
-                    <m.div
-                      id="secondary-platform-options"
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.18 }}
-                      className="overflow-hidden border-t border-hairline"
-                    >
-                      <div className="grid grid-cols-2 gap-2 p-2.5 sm:grid-cols-3 xl:grid-cols-5">
-                        {secondaryPlatformOptions.map((platform) => {
-                          const selected = selectedPlatforms.includes(platform.id);
-                          return (
-                            <button
-                              key={platform.id}
-                              type="button"
-                              aria-pressed={selected}
-                              onClick={() => togglePlatform(platform.id)}
-                              className={cn(
-                                "min-h-16 rounded-xl border px-2.5 py-2 text-left transition-colors",
-                                selected
-                                  ? "border-primary-400 bg-primary-500/20 text-primary-50 [.theme-light_&]:text-primary-950"
-                                  : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/35 hover:bg-fill-subtle",
-                              )}
-                            >
-                              <span className="flex items-center gap-1.5 text-xs font-semibold">
-                                {selected ? (
-                                  <span
-                                    className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-primary-300 text-primary-950"
-                                    aria-hidden="true"
-                                  >
-                                    <Check className="h-3 w-3" strokeWidth={3} />
-                                  </span>
-                                ) : null}
-                                {platform.shortLabel}
-                              </span>
-                              <span className="mt-1 line-clamp-2 block text-[9px] leading-snug opacity-75">
-                                {platform.hint}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </m.div>
-                  ) : null}
-                </AnimatePresence>
-              </div>
-              <fieldset
-                className="rounded-xl border border-hairline bg-surface-950/30 p-1.5"
-                hidden={creativeEnabled}
-              >
-                <legend className="sr-only">
-                  Media to create for each destination
-                </legend>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {(
-                    [
-                      {
-                        value: "photo",
-                        label: "Photo",
-                        Icon: ImageIcon,
-                        hint: "Exact images",
-                      },
-                      {
-                        value: "video",
-                        label: "Video",
-                        Icon: Film,
-                        hint: "Motion posts",
-                      },
-                      {
-                        value: "both",
-                        label: "Both",
-                        Icon: Sparkles,
-                        hint: "Full campaign",
-                      },
-                    ] as const
-                  ).map(({ value, label, Icon, hint }) => {
-                    const selected = mediaOutputMode === value;
-                    return (
-                      <button
-                        key={value}
-                        type="button"
-                        aria-pressed={selected}
-                        onClick={() => {
-                          triggerHapticFeedback();
-                          setMediaOutputMode(value);
-                        }}
-                        className={cn(
-                          "min-h-12 rounded-lg border px-2 py-2 text-left transition-colors",
-                          selected
-                            ? "border-primary-300 bg-primary-500/30 text-primary-50 [.theme-light_&]:text-primary-950"
-                            : "border-transparent bg-fill-subtle text-surface-300 hover:border-primary-400/35",
-                        )}
-                      >
-                        <span className="flex items-center gap-1.5 text-xs font-semibold">
-                          <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-                          {label}
-                        </span>
-                        <span className="mt-0.5 block text-[9px] leading-tight opacity-70">
-                          {hint}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="px-1 pt-1.5 text-[10px] leading-relaxed text-surface-400">
-                  {mediaOutputMode === "photo"
-                    ? "Creates one exact, unstretched image file for every selected destination."
-                    : mediaOutputMode === "video"
-                      ? "Creates the protected photo master first, then guides you through the supported video ratios."
-                      : "Creates the exact photo set and a video-ready delivery plan without hiding extra paid renders."}
-                </p>
-              </fieldset>
-              <fieldset
-                className="space-y-2 rounded-xl border border-primary-400/20 bg-primary-500/10 p-3"
-                hidden={creativeEnabled}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <legend className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-300">
-                      Main image size
-                    </legend>
-                    <p className="mt-0.5 text-xs text-surface-300">
-                      This is the first composition. Every destination still gets its
-                      own exact file in the delivery board.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      triggerHapticFeedback();
-                      setPrimaryFormatOverride(null);
-                    }}
-                    aria-pressed={primaryFormatOverride === null}
                     className={cn(
-                      "min-h-9 shrink-0 rounded-lg border px-2.5 text-[10px] font-semibold uppercase tracking-wide transition-colors",
-                      primaryFormatOverride === null
-                        ? "border-primary-300 bg-primary-500/30 text-primary-50 [.theme-light_&]:text-primary-950"
-                        : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/40",
+                      "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-2xs font-medium",
+                      websiteSelected ? "border-current" : "border-hairline text-ink-2",
                     )}
                   >
-                    Auto
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-                  {OUTPUT_FORMAT_CHOICES.map((format) => {
-                    const selected = primaryImageProfile.primaryFormatId === format.id;
+                    <LockKeyhole className="h-2.5 w-2.5" aria-hidden="true" />
+                    Draft only
+                  </span>
+                </span>
+                <span
+                  id="website-destination-description"
+                  className={cn(
+                    "mt-0.5 block text-2xs font-medium leading-relaxed",
+                    websiteSelected ? "text-brand-foreground/80" : "text-ink-2",
+                  )}
+                >
+                  {websiteAvailability === "loading"
+                    ? "Checking the private website connection…"
+                    : websiteAvailability === "ready"
+                      ? `Private draft for ${(() => {
+                          try {
+                            return new URL(
+                              websiteDestination?.siteUrl || "https://joegallant.me",
+                            ).hostname;
+                          } catch {
+                            return "joegallant.me";
+                          }
+                        })()}. AI prepares it; you publish later in Customer Hub.`
+                      : websiteDestination?.reason ||
+                        "Website drafts are not configured for this dealership yet."}
+                </span>
+              </span>
+              {websiteSelected ? (
+                <Check
+                  className="h-4 w-4 shrink-0"
+                  strokeWidth={3}
+                  aria-hidden="true"
+                />
+              ) : null}
+            </button>
+            {/* Spec §4.3: the Photo/Video/Both matrix becomes one yes/no,
+                and only for a category and a person allowed to use it. */}
+            {videoOffered ? (
+              <CapabilityToggle
+                label="Add video"
+                hint="9:16 · 6s · music on, in your dealership's motion style."
+                icon={Film}
+                pressed={addVideo}
+                onToggle={() => setAddVideo((current) => !current)}
+              />
+            ) : null}
+            {playfulOffered ? (
+              <CapabilityToggle
+                label="Make it playful"
+                hint="Adds your dealership's Playful image beside the house-style master."
+                icon={PartyPopper}
+                pressed={playfulRequested}
+                onToggle={() => setPlayfulRequested((current) => !current)}
+              />
+            ) : null}
+            <div hidden={creativeEnabled}>
+              <button
+                type="button"
+                aria-expanded={showMorePlatforms}
+                aria-controls="secondary-platform-options"
+                aria-label={`More platforms, ${selectedSecondaryCount} selected`}
+                onClick={() => {
+                  triggerHapticFeedback();
+                  setShowMorePlatforms((current) => !current);
+                }}
+                className="flex min-h-11 w-full items-center justify-between gap-3 rounded-sm px-2 text-left text-ink-2 transition-colors duration-120 ease-out hover:bg-fill-subtle hover:text-ink"
+              >
+                <span>
+                  <span className="block text-sm font-medium">More platforms</span>
+                  <span className="block text-2xs font-medium text-ink-2">
+                    Reels, Marketplace, LinkedIn, X, and device share
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  {selectedSecondaryCount > 0 ? (
+                    <span className="rounded-full border border-hairline px-2 py-0.5 text-2xs font-medium text-ink-2">
+                      {selectedSecondaryCount} selected
+                    </span>
+                  ) : null}
+                  <ChevronDown
+                    className={cn(
+                      "h-4 w-4 transition-transform duration-120 ease-out",
+                      showMorePlatforms && "rotate-180",
+                    )}
+                    aria-hidden="true"
+                  />
+                </span>
+              </button>
+              {showMorePlatforms ? (
+                <div
+                  id="secondary-platform-options"
+                  className="grid grid-cols-2 gap-2 pt-2 sm:grid-cols-3 xl:grid-cols-5"
+                >
+                  {secondaryPlatformOptions.map((platform) => {
+                    const selected = selectedPlatforms.includes(platform.id);
                     return (
                       <button
-                        key={format.id}
+                        key={platform.id}
                         type="button"
                         aria-pressed={selected}
-                        onClick={() => {
-                          triggerHapticFeedback();
-                          setPrimaryFormatOverride(format.id);
-                        }}
+                        onClick={() => togglePlatform(platform.id)}
                         className={cn(
-                          "min-h-12 rounded-lg border px-2 py-1.5 text-left transition-colors",
+                          "min-h-11 rounded-sm border px-2.5 py-2 text-left transition-colors duration-120 ease-out",
                           selected
-                            ? "border-primary-300 bg-primary-500/30 text-primary-50 shadow-sm [.theme-light_&]:text-primary-950"
-                            : "border-hairline bg-surface-950/25 text-surface-300 hover:border-primary-400/40",
+                            ? "border-brand-fill bg-brand-fill text-brand-foreground"
+                            : "border-hairline bg-panel text-ink hover:bg-fill-subtle",
                         )}
                       >
-                        <span className="block text-[11px] font-semibold leading-tight">
-                          {format.label}
+                        <span className="flex items-center gap-1.5 text-2xs font-semibold">
+                          {selected ? (
+                            <Check
+                              className="h-3 w-3 shrink-0"
+                              strokeWidth={3}
+                              aria-hidden="true"
+                            />
+                          ) : null}
+                          {platform.shortLabel}
                         </span>
-                        <span className="mt-0.5 block text-[10px] tabular-nums opacity-75">
-                          {format.size}
+                        <span
+                          className={cn(
+                            "mt-1 line-clamp-2 block text-2xs font-medium leading-snug",
+                            selected ? "text-brand-foreground/80" : "text-ink-2",
+                          )}
+                        >
+                          {platform.hint}
                         </span>
                       </button>
                     );
                   })}
                 </div>
-                <p
-                  className="text-[10px] leading-relaxed text-surface-400"
-                  aria-live="polite"
-                >
-                  {primaryFormatOverride
-                    ? `${primaryImageProfile.label} selected as the starting composition. Destination files remain independent.`
-                    : `${suggestedImageProfile.label} recommended from your destinations. Choose a starting composition above only when needed.`}
-                </p>
-              </fieldset>
+              ) : null}
             </div>
-
-            {/* Tone Selection - Horizontal Scroll on Mobile with Snap. Hidden
-                (never deleted) once the Look owns the caption voice. */}
-            <div
-              className="space-y-2"
-              role="group"
-              aria-labelledby={toneGroupId}
-              hidden={creativeEnabled}
-            >
-              <span
-                id={toneGroupId}
-                className="text-xs font-medium text-surface-300 uppercase tracking-wide"
+            <fieldset className="space-y-2" hidden={creativeEnabled}>
+              <legend className="sr-only">Media to create for each destination</legend>
+              <div className="grid grid-cols-3 gap-2">
+                {(
+                  [
+                    {
+                      value: "photo",
+                      label: "Photo",
+                      Icon: ImageIcon,
+                      hint: "Exact images",
+                    },
+                    {
+                      value: "video",
+                      label: "Video",
+                      Icon: Film,
+                      hint: "Motion posts",
+                    },
+                    {
+                      value: "both",
+                      label: "Both",
+                      Icon: Sparkles,
+                      hint: "Full campaign",
+                    },
+                  ] as const
+                ).map(({ value, label, Icon, hint }) => {
+                  const selected = mediaOutputMode === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => {
+                        triggerHapticFeedback();
+                        setMediaOutputMode(value);
+                      }}
+                      className={cn(
+                        "min-h-11 rounded-sm border px-2 py-2 text-left transition-colors duration-120 ease-out",
+                        selected
+                          ? "border-brand-fill bg-brand-fill text-brand-foreground"
+                          : "border-hairline bg-panel text-ink hover:bg-fill-subtle",
+                      )}
+                    >
+                      <span className="flex items-center gap-1.5 text-2xs font-semibold">
+                        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                        {label}
+                      </span>
+                      <span
+                        className={cn(
+                          "mt-0.5 block text-2xs font-medium leading-tight",
+                          selected ? "text-brand-foreground/80" : "text-ink-2",
+                        )}
+                      >
+                        {hint}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-caption leading-relaxed text-ink-hint">
+                {mediaOutputMode === "photo"
+                  ? "Creates one exact, unstretched image file for every selected destination."
+                  : mediaOutputMode === "video"
+                    ? "Creates the protected photo master first, then guides you through the supported video ratios."
+                    : "Creates the exact photo set and a video-ready delivery plan without hiding extra paid renders."}
+              </p>
+            </fieldset>
+            <fieldset className="space-y-2" hidden={creativeEnabled}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <legend className="text-sm font-medium text-ink-2">
+                    Main image size
+                  </legend>
+                  <p className="mt-0.5 text-caption text-ink-hint">
+                    This is the first composition. Every destination still gets its own
+                    exact file in the delivery board.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHapticFeedback();
+                    setPrimaryFormatOverride(null);
+                  }}
+                  aria-pressed={primaryFormatOverride === null}
+                  className={cn(
+                    "min-h-11 shrink-0 rounded-sm border px-3 text-sm font-semibold transition-colors duration-120 ease-out",
+                    primaryFormatOverride === null
+                      ? "border-brand-fill bg-brand-fill text-brand-foreground"
+                      : "border-hairline bg-panel text-ink hover:bg-fill-subtle",
+                  )}
+                >
+                  Auto
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                {OUTPUT_FORMAT_CHOICES.map((format) => {
+                  const selected = primaryImageProfile.primaryFormatId === format.id;
+                  return (
+                    <button
+                      key={format.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => {
+                        triggerHapticFeedback();
+                        setPrimaryFormatOverride(format.id);
+                      }}
+                      className={cn(
+                        "min-h-11 rounded-sm border px-2 py-1.5 text-left transition-colors duration-120 ease-out",
+                        selected
+                          ? "border-brand-fill bg-brand-fill text-brand-foreground"
+                          : "border-hairline bg-panel text-ink hover:bg-fill-subtle",
+                      )}
+                    >
+                      <span className="block text-2xs font-semibold leading-tight">
+                        {format.label}
+                      </span>
+                      <span
+                        className={cn(
+                          "mt-0.5 block text-2xs font-medium tabular-nums",
+                          selected ? "text-brand-foreground/80" : "text-ink-2",
+                        )}
+                      >
+                        {format.size}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p
+                className="text-caption leading-relaxed text-ink-hint"
+                aria-live="polite"
               >
+                {primaryFormatOverride
+                  ? `${primaryImageProfile.label} selected as the starting composition. Destination files remain independent.`
+                  : `${suggestedImageProfile.label} recommended from your destinations. Choose a starting composition above only when needed.`}
+              </p>
+            </fieldset>
+          </div>
+
+          {/* Spec §4.5: one optional appended line replaces "Write my own"
+              and the 10 templates for a creative-system dealership. */}
+          {creativeEnabled ? (
+            <div className="space-y-2">
+              <Textarea
+                label="Add a personal line (optional)"
+                value={personalLine}
+                onChange={(e) => {
+                  setPersonalLine(e.target.value.slice(0, PERSONAL_LINE_MAX));
+                  setCaptionIdentityError("");
+                }}
+                rows={2}
+                maxLength={PERSONAL_LINE_MAX}
+                helperText={`Appended after the caption — never replaces it. ${
+                  PERSONAL_LINE_MAX - personalLine.length
+                } characters left.`}
+                fullWidth
+              />
+              {captionIdentityError ? (
+                <p className="text-caption font-medium text-error-ink" role="alert">
+                  {captionIdentityError}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* Caption — tone, who writes it, and the copy itself. */}
+          <div
+            className="space-y-4"
+            role="group"
+            aria-labelledby={captionGroupId}
+            hidden={creativeEnabled}
+          >
+            <h3 id={captionGroupId} className="text-lg font-semibold text-ink">
+              Caption
+            </h3>
+
+            <div className="space-y-2" role="group" aria-labelledby={toneGroupId}>
+              <span id={toneGroupId} className="block text-sm font-medium text-ink-2">
                 Tone
               </span>
               <div className="mobile-h-scroll -mx-1 px-1 pb-2">
@@ -1855,7 +1769,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   const info = TONE_INFO[option];
                   const isActive = option === tone;
                   return (
-                    <m.button
+                    <button
                       key={option}
                       type="button"
                       aria-pressed={isActive}
@@ -1864,163 +1778,84 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                         setTone(option);
                       }}
                       className={cn(
-                        "relative flex items-center gap-1.5 rounded-full border px-4 py-2 whitespace-nowrap transition-all flex-shrink-0 snap-center",
+                        "flex min-h-11 flex-shrink-0 snap-center items-center gap-1.5 whitespace-nowrap rounded-full border px-4 py-2 transition-colors duration-120 ease-out",
                         isActive
-                          ? "border-success-400 bg-success-500/20"
-                          : "border-hairline bg-fill-subtle hover:border-success-400/30 hover:bg-fill-hover",
+                          ? "border-brand-fill bg-brand-fill text-brand-foreground"
+                          : "border-hairline bg-panel text-ink hover:bg-fill-subtle",
                       )}
-                      whileTap={{ scale: 0.95 }}
                     >
-                      <info.icon
-                        className={cn(
-                          "h-4 w-4 flex-shrink-0 transition-colors",
-                          isActive ? "text-success-300" : "text-surface-400",
-                        )}
-                      />
-                      <span
-                        className={cn(
-                          "text-xs font-semibold",
-                          isActive ? "text-success-100" : "text-surface-300",
-                        )}
-                      >
-                        {option}
-                      </span>
-                    </m.button>
+                      <info.icon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                      <span className="text-sm font-semibold">{option}</span>
+                    </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* Spec §4.5: one optional appended line replaces "Write my own"
-                and the 10 templates for a creative-system dealership. */}
-            {creativeEnabled ? (
-              <div className="space-y-2">
-                <Input
-                  label="Add a personal line (optional)"
-                  value={personalLine}
+            <div className="flex gap-2">
+              <Button
+                variant={captionSource === "ai" ? "primary" : "secondary"}
+                aria-pressed={captionSource === "ai"}
+                size="md"
+                onClick={() => {
+                  triggerHapticFeedback();
+                  setCaptionSource("ai");
+                  setCaptionIdentityError("");
+                }}
+                className="flex-1"
+              >
+                Suggested caption
+              </Button>
+              <Button
+                variant={captionSource === "custom" ? "primary" : "secondary"}
+                aria-pressed={captionSource === "custom"}
+                size="md"
+                onClick={() => {
+                  triggerHapticFeedback();
+                  setCaptionSource("custom");
+                }}
+                className="flex-1"
+              >
+                Write my own
+              </Button>
+            </div>
+
+            {captionSource === "custom" ? (
+              <div>
+                <Textarea
+                  label="Your caption"
+                  placeholder="Write your caption here..."
+                  value={customMessage}
                   onChange={(e) => {
-                    setPersonalLine(e.target.value.slice(0, PERSONAL_LINE_MAX));
+                    // A manual edit intentionally detaches this copy from the
+                    // template selector. Subsequent name changes still replace
+                    // the exact prior identity through handleCustomerNameChange.
+                    setSelectedTemplateId("");
+                    setCustomMessage(e.target.value);
                     setCaptionIdentityError("");
                   }}
-                  maxLength={PERSONAL_LINE_MAX}
-                  placeholder="Something only you would say"
-                  helperText={`Appended after the caption — never replaces it. ${
-                    PERSONAL_LINE_MAX - personalLine.length
-                  } characters left.`}
+                  rows={3}
                   fullWidth
-                  className="bg-fill-subtle border-hairline focus:border-primary-400 focus:bg-fill-hover transition-colors"
                 />
                 {captionIdentityError ? (
                   <p
-                    className="text-xs font-medium text-error-200 [.theme-light_&]:text-error-800"
+                    className="mt-2 text-caption font-medium text-error-ink"
                     role="alert"
                   >
                     {captionIdentityError}
                   </p>
                 ) : null}
               </div>
-            ) : null}
-
-            {/* Caption Mode Toggle */}
-            <div
-              className="space-y-2"
-              role="group"
-              aria-labelledby={captionGroupId}
-              hidden={creativeEnabled}
-            >
-              <span
-                id={captionGroupId}
-                className="text-xs font-medium text-surface-300 uppercase tracking-wide"
-              >
-                Caption
-              </span>
-              <div className="flex gap-2 bg-surface-950/30 p-1 rounded-xl border border-hairline">
-                <Button
-                  variant={captionSource === "ai" ? "filled" : "ghost"}
-                  aria-pressed={captionSource === "ai"}
-                  size="sm"
-                  leftIcon={<Sparkles className="h-3.5 w-3.5" />}
-                  onClick={() => {
-                    triggerHapticFeedback();
-                    setCaptionSource("ai");
-                    setCaptionIdentityError("");
-                  }}
-                  className={cn(
-                    "flex-1 rounded-lg",
-                    captionSource !== "ai" && "text-surface-400 hover:text-surface-200",
-                  )}
-                >
-                  AI Caption
-                </Button>
-                <Button
-                  variant={captionSource === "custom" ? "filled" : "ghost"}
-                  aria-pressed={captionSource === "custom"}
-                  size="sm"
-                  leftIcon={<Edit3 className="h-3.5 w-3.5" />}
-                  onClick={() => {
-                    triggerHapticFeedback();
-                    setCaptionSource("custom");
-                  }}
-                  className={cn(
-                    "flex-1 rounded-lg",
-                    captionSource !== "custom" &&
-                      "text-surface-400 hover:text-surface-200",
-                  )}
-                >
-                  Write My Own
-                </Button>
-              </div>
-            </div>
-
-            {/* Custom Message Input */}
-            <AnimatePresence mode="wait">
-              {!creativeEnabled && captionSource === "custom" && (
-                <m.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <Textarea
-                    label="Your caption"
-                    value={customMessage}
-                    onChange={(e) => {
-                      // A manual edit intentionally detaches this copy from the
-                      // template selector. Subsequent name changes still replace
-                      // the exact prior identity through handleCustomerNameChange.
-                      setSelectedTemplateId("");
-                      setCustomMessage(e.target.value);
-                      setCaptionIdentityError("");
-                    }}
-                    rows={3}
-                    placeholder="Write your caption here..."
-                    fullWidth
-                    className="bg-fill-subtle border-hairline focus:border-primary-400"
-                  />
-                  {captionIdentityError ? (
-                    <p
-                      className="mt-2 text-xs font-medium text-error-200 [.theme-light_&]:text-error-800"
-                      role="alert"
-                    >
-                      {captionIdentityError}
-                    </p>
-                  ) : null}
-                </m.div>
-              )}
-            </AnimatePresence>
-            {!creativeEnabled && captionSource !== "custom" && captionIdentityError ? (
-              <p
-                className="text-xs font-medium text-error-200 [.theme-light_&]:text-error-800"
-                role="alert"
-              >
+            ) : captionIdentityError ? (
+              <p className="text-caption font-medium text-error-ink" role="alert">
                 {captionIdentityError}
               </p>
             ) : null}
 
-            {/* Advanced Options - Collapsible. The 10 templates and the AI
-                instruction preview are salesperson-facing option sprawl, so
-                they are hidden (never deleted) under the creative system. */}
-            <div className="border-t border-hairline pt-3" hidden={creativeEnabled}>
+            {/* Advanced Options — the 10 templates and the instruction
+                preview are salesperson-facing option sprawl, so they stay
+                behind a disclosure. */}
+            <div className="border-t border-hairline pt-3">
               <button
                 type="button"
                 aria-expanded={showAdvanced}
@@ -2029,153 +1864,94 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
                   triggerHapticFeedback();
                   setShowAdvanced(!showAdvanced);
                 }}
-                className="flex items-center gap-2 text-xs text-surface-400 hover:text-surface-200 transition-colors w-full group"
+                className="flex min-h-11 w-full items-center gap-2 rounded-sm px-2 text-sm font-medium text-ink-2 transition-colors duration-120 ease-out hover:bg-fill-subtle hover:text-ink"
               >
                 <ChevronDown
                   className={cn(
-                    "h-3.5 w-3.5 transition-transform group-hover:text-primary-400",
+                    "h-4 w-4 transition-transform duration-120 ease-out",
                     showAdvanced && "rotate-180",
                   )}
+                  aria-hidden="true"
                 />
-                <span className="group-hover:text-primary-400 transition-colors">
-                  Advanced options
-                </span>
+                <span>Advanced options</span>
               </button>
 
-              <AnimatePresence>
-                {showAdvanced && (
-                  <m.div
-                    id="advanced-post-options"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="pt-3 space-y-3"
-                  >
-                    {/* Template Selection */}
-                    <div className="space-y-2 pb-2">
-                      <Select
-                        label="Use a template"
-                        aria-label="Select template"
-                        value={selectedTemplateId}
-                        onChange={(e) => {
-                          const nextTemplateId = e.target.value;
-                          setSelectedTemplateId(nextTemplateId);
-                          const template = templateOptions.find(
-                            (t) => t.id === nextTemplateId,
-                          );
-                          if (template) {
-                            setCustomMessage(
-                              renderPostTemplate(template.content, {
-                                customerName,
-                                dealershipName,
-                              }),
-                            );
-                            setCaptionSource("custom");
-                            setCaptionIdentityError("");
-                          }
-                        }}
-                      >
-                        <option value="">Select a template...</option>
-                        {templateOptions.map((template) => (
-                          <option key={template.id} value={template.id}>
-                            {template.name}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-
-                    {/* Style Preview */}
-                    <div className="rounded-xl border border-primary-400/20 bg-primary-500/10 px-4 py-3">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Sparkles className="w-3 h-3 text-primary-300" />
-                        <div className="text-[10px] uppercase tracking-wide text-primary-300 font-semibold">
-                          AI Instruction
-                        </div>
-                      </div>
-                      <p className="text-xs text-surface-200 leading-relaxed font-mono">
-                        <TypewriterText text={STYLE_INFO[style].aiHint} />
-                      </p>
-                    </div>
-                  </m.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            {/* Generate Button - Full Width & Prominent */}
-            <div className="flex flex-col gap-3 pt-2">
-              <Button
-                variant="filled"
-                size="lg"
-                leftIcon={<Sparkles className={cn(isBusy && "animate-pulse")} />}
-                rightIcon={!isBusy && <ChevronRight />}
-                onClick={handleGenerate}
-                disabled={
-                  isBusy || (effectivePlatformIds.length === 0 && !websiteSelected)
-                }
-                aria-label={`Generate Post — ${
-                  effectiveMediaMode === "photo"
-                    ? "create photo outputs"
-                    : effectiveMediaMode === "video"
-                      ? "create video plan"
-                      : "create photo and video set"
-                }`}
-                fullWidth
-                className="relative overflow-hidden h-14 text-base"
-              >
-                {isBusy && (
-                  <m.div
-                    className="absolute inset-0 bg-white/20"
-                    initial={{ x: "-100%" }}
-                    animate={{ x: "100%" }}
-                    transition={{
-                      repeat: Infinity,
-                      duration: 1.5,
-                      ease: "linear",
+              {showAdvanced ? (
+                <div id="advanced-post-options" className="space-y-3 pt-3">
+                  <Select
+                    label="Use a template"
+                    aria-label="Select template"
+                    value={selectedTemplateId}
+                    onChange={(e) => {
+                      const nextTemplateId = e.target.value;
+                      setSelectedTemplateId(nextTemplateId);
+                      const template = templateOptions.find(
+                        (t) => t.id === nextTemplateId,
+                      );
+                      if (template) {
+                        setCustomMessage(
+                          renderPostTemplate(template.content, {
+                            customerName,
+                            dealershipName,
+                          }),
+                        );
+                        setCaptionSource("custom");
+                        setCaptionIdentityError("");
+                      }
                     }}
-                  />
-                )}
-                <span className="relative z-10 flex items-center gap-2">
-                  {isBusy
-                    ? "Creating platform outputs..."
-                    : effectiveMediaMode === "photo"
-                      ? "Create photo outputs"
-                      : effectiveMediaMode === "video"
-                        ? "Create video plan"
-                        : "Create photo + video set"}
-                  {!isBusy && (
-                    <kbd className="hidden sm:inline-flex items-center gap-1 px-1.5 py-1 rounded bg-fill-hover border border-strong text-content-secondary">
-                      <Command className="w-3 h-3" />
-                      <CornerDownLeft className="w-3 h-3" />
-                    </kbd>
-                  )}
-                </span>
-              </Button>
-              {effectivePlatformIds.length === 0 && !websiteSelected ? (
-                <p
-                  className="text-center text-xs font-medium text-warning-200"
-                  role="status"
-                >
-                  Choose Website or at least one social destination.
-                </p>
+                  >
+                    <option value="">Select a template...</option>
+                    {templateOptions.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.name}
+                      </option>
+                    ))}
+                  </Select>
+
+                  <div className="rounded-md border border-hairline bg-panel px-4 py-3">
+                    <div className="mb-1.5 text-caption font-medium text-ink-2">
+                      AI instruction
+                    </div>
+                    <p className="font-mono text-caption leading-relaxed text-ink-2">
+                      <TypewriterText text={STYLE_INFO[style].aiHint} />
+                    </p>
+                  </div>
+                </div>
               ) : null}
-              <Button
-                variant="plain"
-                size="sm"
-                leftIcon={<Camera className="h-3.5 w-3.5" />}
-                onClick={() => {
-                  triggerHapticFeedback();
-                  onBack();
-                }}
-                fullWidth
-                className="text-surface-400 hover:text-surface-200"
-              >
-                Change photo
-              </Button>
             </div>
-          </CardContent>
-        </Card>
-      </m.div>
+          </div>
+        </div>
+      </div>
+
+      {/* Create — sticky above the home indicator on phones, inline on
+          tablet and desktop. */}
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-hairline bg-panel px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:static sm:mx-auto sm:mt-8 sm:max-w-[45rem] sm:border-0 sm:bg-transparent sm:p-0">
+        <Button
+          variant="primary"
+          size="lg"
+          loading={isBusy}
+          onClick={handleGenerate}
+          disabled={isBusy || (effectivePlatformIds.length === 0 && !websiteSelected)}
+          aria-label={`Generate Post — ${
+            effectiveMediaMode === "photo"
+              ? "create photo outputs"
+              : effectiveMediaMode === "video"
+                ? "create video plan"
+                : "create photo and video set"
+          }`}
+          fullWidth
+        >
+          {isBusy ? "Creating your post…" : "Create post"}
+        </Button>
+        {effectivePlatformIds.length === 0 && !websiteSelected ? (
+          <p
+            className="pt-2 text-center text-caption font-medium text-warning-ink"
+            role="status"
+          >
+            Choose Website or at least one social destination.
+          </p>
+        ) : null}
+      </div>
 
       <VinScanner
         isOpen={vinScannerOpen}
