@@ -317,7 +317,9 @@ names stay; new variants are added and old ones alias onto them.
   on phones (`--radius-xl` top corners) and centred on desktop; backdrop
   rgba(0,0,0,.6) with no blur; title 24/28 Semi Condensed; applies
   `.on-overlay` to its content so helper text inside dialogs uses `--ink-2`.
-- **Toast** — `--overlay`, hairline, 180 ms; icon only for success/error.
+- **Toast** — `--overlay`, hairline, 180 ms; icon for success/error/warning
+  (the warning icon is what separates a prohibited-claims or delivery-gate
+  warning from an info notice); info has no icon.
 - **EmptyState** — 48 px icon tile on `--panel-raised`, title-2, one line of
   body, one primary button; no glow, no stagger.
 - **ProgressBar** — 4 px track (`--panel-raised`), brand fill, no shimmer, no

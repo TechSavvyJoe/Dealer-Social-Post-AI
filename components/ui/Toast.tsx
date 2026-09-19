@@ -8,7 +8,7 @@ import React, {
   ReactNode,
 } from "react";
 import { m, AnimatePresence } from "framer-motion";
-import { Check, AlertCircle, X } from "lucide-react";
+import { Check, AlertCircle, AlertTriangle, X } from "lucide-react";
 import { cn } from "../../utils/classNames";
 import { triggerHapticFeedback } from "../../utils/haptics";
 
@@ -379,6 +379,9 @@ const ToastItem: React.FC<ToastItemProps> = ({
   const icons: Partial<Record<ToastType, ReactNode>> = {
     success: <Check className="w-5 h-5 text-success-ink" />,
     error: <AlertCircle className="w-5 h-5 text-error-ink" />,
+    // A warning (prohibited-claims, delivery/share gates) must not read as an
+    // info notice; the icon is what separates them, the surface stays neutral.
+    warning: <AlertTriangle className="w-5 h-5 text-warning-ink" />,
   };
 
   return (

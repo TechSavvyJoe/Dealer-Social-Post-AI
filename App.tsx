@@ -224,7 +224,7 @@ const AppContent: React.FC = () => {
       // RESULT publish studio. Colors mirror index.html's pre-paint script.
       document
         .querySelector('meta[name="theme-color"]')
-        ?.setAttribute("content", isDark ? "#090d17" : "#f8fafc");
+        ?.setAttribute("content", isDark ? "#121416" : "#f4f4f2");
     };
 
     updateTheme();

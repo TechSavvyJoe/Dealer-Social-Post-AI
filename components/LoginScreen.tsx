@@ -428,11 +428,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       <div
         className={cn(
           "grid h-full min-h-0 w-full flex-1 grid-rows-[minmax(0,1fr)]",
-          // Desktop: the pair fills the viewport height (respecting #root's
-          // own safe-area/padding, which is zeroed out at this breakpoint —
-          // see index.html), capped and centred so it never stretches edge to
-          // edge on very wide screens (spec §5.1).
-          "lg:min-h-[100dvh] lg:max-w-[70rem] lg:mx-auto lg:grid-cols-12",
+          // Desktop: the pair fills the viewport height minus <main>'s lg:py-6
+          // (App.tsx, 1.5rem top + bottom) so the panel's bottom edge and radius
+          // stay inside that overflow-hidden scrollport; #root's own
+          // safe-area/padding is zeroed out at this breakpoint (see index.html).
+          // Capped and centred so it never stretches edge to edge on very wide
+          // screens (spec §5.1).
+          "lg:min-h-[calc(100dvh-3rem)] lg:max-w-[70rem] lg:mx-auto lg:grid-cols-12",
         )}
       >
         {/* Brand panel — desktop only, 5/12, full height. Login is the one

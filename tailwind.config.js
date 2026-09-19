@@ -190,6 +190,16 @@ export default {
         "content-primary": "rgb(var(--color-text-primary) / <alpha-value>)",
         "content-secondary": "rgb(var(--color-text-secondary) / <alpha-value>)",
         "content-tertiary": "rgb(var(--color-text-tertiary) / <alpha-value>)",
+        // Legacy `text-primary-300/400/500` labels and icons in not-yet-migrated
+        // screens: the dark ramp steps read 2.45-3.77:1 on --panel, so *text* on
+        // those steps resolves to --brand-ink (>= 4.5:1 on panel and 15% tint)
+        // while bg-/border-/ring-primary-* keep the ramp they were designed for.
+        // 600/700 clear 4.5:1 in both themes and stay on the ramp.
+        primary: {
+          300: "rgb(var(--brand-ink) / <alpha-value>)",
+          400: "rgb(var(--brand-ink) / <alpha-value>)",
+          500: "rgb(var(--brand-ink) / <alpha-value>)",
+        },
       },
 
       // Spacing scale - 4px base unit (consistent with Apple HIG)
