@@ -9,7 +9,7 @@ const requiredPatterns = [
   /["']https:\/\/dealer-social-post-ai-production\.fly\.dev\/api\/\$1["']/,
   /apiProxyRoute/,
   /continuingHeaderRoute\(["']\^\/assets\/\(\.\*\)\$["']/,
-  /dsp-brand-mark-v3/,
+  /dsp-brand-mark-v4/,
   /continuingHeaderRoute\(["']\^\/sw\\\\\.js\$["']/,
   /continuingHeaderRoute\(["']\^\/\(\.\*\)\$["'],\s*securityHeaders\)/,
 ];
@@ -73,11 +73,11 @@ if (assetHeaders.get("cache-control") !== "public, max-age=31536000, immutable")
 }
 
 const identityRoute = config.routes.find((route) =>
-  String(route?.src || "").includes("dsp-brand-mark-v3"),
+  String(route?.src || "").includes("dsp-brand-mark-v4"),
 );
 const identityHeaders = headerMap(identityRoute);
 if (identityHeaders.get("cache-control") !== "public, max-age=31536000, immutable") {
-  throw new Error("Versioned v3 identity assets must receive immutable caching.");
+  throw new Error("Versioned v4 identity assets must receive immutable caching.");
 }
 
 const workerRoute = headerRule("^/sw\\.js$");

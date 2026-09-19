@@ -20,13 +20,13 @@ type InstallManifest = {
 };
 
 const installPngs = [
-  { src: "/dealer-social-dsp-v3-180.png", size: 180 },
-  { src: "/dealer-social-dsp-v3-192.png", size: 192 },
-  { src: "/dealer-social-dsp-v3-512.png", size: 512 },
-  { src: "/dealer-social-dsp-v3-1024.png", size: 1024 },
-  { src: "/dealer-social-dsp-v3-maskable-192.png", size: 192 },
-  { src: "/dealer-social-dsp-v3-maskable-512.png", size: 512 },
-  { src: "/dealer-social-dsp-v3-maskable-1024.png", size: 1024 },
+  { src: "/dealer-social-dsp-v4-180.png", size: 180 },
+  { src: "/dealer-social-dsp-v4-192.png", size: 192 },
+  { src: "/dealer-social-dsp-v4-512.png", size: 512 },
+  { src: "/dealer-social-dsp-v4-1024.png", size: 1024 },
+  { src: "/dealer-social-dsp-v4-maskable-192.png", size: 192 },
+  { src: "/dealer-social-dsp-v4-maskable-512.png", size: 512 },
+  { src: "/dealer-social-dsp-v4-maskable-1024.png", size: 1024 },
 ] as const;
 
 async function expectPng(
@@ -191,7 +191,7 @@ test.describe("Home Screen PWA contracts", () => {
     await expect(manifestLink).toHaveAttribute("href", "/manifest.webmanifest");
     await expect(appleTouchIcon).toHaveAttribute(
       "href",
-      "/dealer-social-dsp-v3-180.png",
+      "/dealer-social-dsp-v4-180.png",
     );
     await expect(appleTouchIcon).toHaveAttribute("sizes", "180x180");
     await expect(
@@ -221,37 +221,37 @@ test.describe("Home Screen PWA contracts", () => {
 
     const requiredManifestIcons: ManifestIcon[] = [
       {
-        src: "/dealer-social-dsp-v3-192.png",
+        src: "/dealer-social-dsp-v4-192.png",
         sizes: "192x192",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/dealer-social-dsp-v3-512.png",
+        src: "/dealer-social-dsp-v4-512.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/dealer-social-dsp-v3-1024.png",
+        src: "/dealer-social-dsp-v4-1024.png",
         sizes: "1024x1024",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/dealer-social-dsp-v3-maskable-192.png",
+        src: "/dealer-social-dsp-v4-maskable-192.png",
         sizes: "192x192",
         type: "image/png",
         purpose: "maskable",
       },
       {
-        src: "/dealer-social-dsp-v3-maskable-512.png",
+        src: "/dealer-social-dsp-v4-maskable-512.png",
         sizes: "512x512",
         type: "image/png",
         purpose: "maskable",
       },
       {
-        src: "/dealer-social-dsp-v3-maskable-1024.png",
+        src: "/dealer-social-dsp-v4-maskable-1024.png",
         sizes: "1024x1024",
         type: "image/png",
         purpose: "maskable",
@@ -273,20 +273,20 @@ test.describe("Home Screen PWA contracts", () => {
       installPngs.map(({ src, size }) => expectPng(request, src, size)),
     );
     await expectFullBleedArtwork(page, [
-      "/dealer-social-dsp-v3-180.png",
-      "/dealer-social-dsp-v3-maskable-192.png",
-      "/dealer-social-dsp-v3-maskable-512.png",
-      "/dealer-social-dsp-v3-maskable-1024.png",
+      "/dealer-social-dsp-v4-180.png",
+      "/dealer-social-dsp-v4-maskable-192.png",
+      "/dealer-social-dsp-v4-maskable-512.png",
+      "/dealer-social-dsp-v4-maskable-1024.png",
     ]);
     await expectMaskableSafeZone(page, [
-      "/dealer-social-dsp-v3-maskable-192.png",
-      "/dealer-social-dsp-v3-maskable-512.png",
-      "/dealer-social-dsp-v3-maskable-1024.png",
+      "/dealer-social-dsp-v4-maskable-192.png",
+      "/dealer-social-dsp-v4-maskable-512.png",
+      "/dealer-social-dsp-v4-maskable-1024.png",
     ]);
     for (const size of [192, 512, 1024]) {
       const [regular, maskable] = await Promise.all([
-        request.get(`/dealer-social-dsp-v3-${size}.png`),
-        request.get(`/dealer-social-dsp-v3-maskable-${size}.png`),
+        request.get(`/dealer-social-dsp-v4-${size}.png`),
+        request.get(`/dealer-social-dsp-v4-maskable-${size}.png`),
       ]);
       expect((await regular.body()).equals(await maskable.body())).toBe(false);
     }

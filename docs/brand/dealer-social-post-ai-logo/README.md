@@ -1,5 +1,31 @@
 # Dealer Social Post AI identity package
 
+## v4 — 2026-09-18
+
+The identity was redesigned as original work: a bold `D` whose open counter is
+a photo print, set on a graphite (`#191c1f`) tile. It replaces the v3
+Campaign Aperture `DSP` monogram below as the active mark.
+
+Five canonical SVG sources live at the public root:
+
+- `public/dsp-brand-mark-v4.svg` — rounded tile, transparent corners, 120x120
+- `public/dsp-brand-mark-v4-app.svg` — full-bleed square, opaque `#191c1f`;
+  the source for launcher and Apple touch icons
+- `public/dsp-brand-mark-v4-maskable.svg` — full-bleed, glyph inside the 80%
+  maskable safe zone
+- `public/dsp-brand-mark-v4-micro.svg` — `viewBox="0 0 16 16"`, for the 16px
+  favicon
+- `public/dsp-brand-mark-v4-monochrome.svg` — `currentColor` glyph
+
+`scripts/export-dsp-logo-assets.sh` renders every raster size (app, maskable,
+and favicon PNGs, plus the unversioned `favicon-*.png` and
+`apple-touch-icon.png`) from those five sources with `sharp-cli`, flattening
+to `#191c1f`. `scripts/render-og-image.mjs` renders the separate 1200x630
+`public/dealer-social-og-v4.png` link-preview card from the same mark and the
+app's own webfont.
+
+## Retired v3 package
+
 Identity version: **v3**
 Artwork status: **production-candidate**
 

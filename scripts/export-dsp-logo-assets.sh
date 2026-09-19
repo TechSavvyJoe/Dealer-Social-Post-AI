@@ -14,7 +14,7 @@ render_opaque() {
     -o "$output" \
     -f png \
     resize "$size" "$size" -- \
-    flatten "#07182b" -- \
+    flatten "#191c1f" -- \
     removeAlpha
 }
 
@@ -31,26 +31,26 @@ render_transparent() {
 
 for size in 180 192 512 1024; do
   render_opaque \
-    "$public_dir/dsp-brand-mark-v3-app.svg" \
-    "$public_dir/dealer-social-dsp-v3-${size}.png" \
+    "$public_dir/dsp-brand-mark-v4-app.svg" \
+    "$public_dir/dealer-social-dsp-v4-${size}.png" \
     "$size"
 done
 
 for size in 192 512 1024; do
   render_opaque \
-    "$public_dir/dsp-brand-mark-v3-maskable.svg" \
-    "$public_dir/dealer-social-dsp-v3-maskable-${size}.png" \
+    "$public_dir/dsp-brand-mark-v4-maskable.svg" \
+    "$public_dir/dealer-social-dsp-v4-maskable-${size}.png" \
     "$size"
 done
 
 for size in 16 32 48; do
-  favicon_source="$public_dir/dsp-brand-mark-v3.svg"
+  favicon_source="$public_dir/dsp-brand-mark-v4.svg"
   if [[ "$size" == "16" ]]; then
-    favicon_source="$public_dir/dsp-brand-mark-v3-micro.svg"
+    favicon_source="$public_dir/dsp-brand-mark-v4-micro.svg"
   fi
   render_transparent \
     "$favicon_source" \
-    "$public_dir/dealer-social-favicon-v3-${size}.png" \
+    "$public_dir/dealer-social-favicon-v4-${size}.png" \
     "$size"
   render_transparent \
     "$favicon_source" \
@@ -59,8 +59,8 @@ for size in 16 32 48; do
 done
 
 render_opaque \
-  "$public_dir/dsp-brand-mark-v3-app.svg" \
+  "$public_dir/dsp-brand-mark-v4-app.svg" \
   "$public_dir/apple-touch-icon.png" \
   180
 
-echo "Exported Dealer Social Post AI v3 logo assets."
+echo "Exported Dealer Social Post AI v4 logo assets."

@@ -15,7 +15,7 @@ export const Logo: React.FC<{ className?: string }> = ({
     role="img"
     aria-label="Dealer Social Post AI"
   >
-    <image href="/dsp-brand-mark-v3.svg" width="44" height="44" aria-hidden="true" />
+    <image href="/dsp-brand-mark-v4.svg" width="44" height="44" aria-hidden="true" />
     <text
       x="56"
       y="16"
