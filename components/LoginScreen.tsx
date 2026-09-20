@@ -51,13 +51,31 @@ const MODES: readonly {
   { mode: "system", label: "System", ariaLabel: "System admin" },
 ];
 
+/**
+ * One line under "Sign in" that says what this mode asks for. The system line
+ * is also the copy FrontendProductionPass pins, so the mode's requirement is
+ * stated once, at the top of the column, instead of twice.
+ */
+const MODE_INSTRUCTIONS: Record<EntryMode, string> = {
+  personal: "Enter your personal 4-digit code.",
+  manager: "Sign in with your manager username and password.",
+  system: "Use your system administrator username and password.",
+};
+
+/**
+ * Segments of a single track, not three separate buttons: the track carries
+ * the raised fill and the selected segment carries the brand. Each segment is
+ * 44px tall inside the 52px track, so the touch target survives — Sunlight's
+ * edge on the track is an inset ring (`.login-switch` in globals.css), not a
+ * border, precisely so it takes none of that 44px.
+ */
 const segmentStyles = (selected: boolean) =>
   cn(
-    "min-h-11 rounded-sm border px-2 text-sm font-semibold",
+    "rounded-[6px] px-2 text-sm",
     "transition-colors duration-120 ease-out",
     selected
-      ? "border-brand-fill bg-brand-fill text-brand-foreground"
-      : "border-strong bg-panel-raised text-ink hover:bg-fill-hover",
+      ? "bg-brand-fill font-semibold text-brand-foreground"
+      : "bg-transparent font-medium text-ink-2 hover:text-ink",
   );
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
@@ -414,67 +432,99 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   ]);
 
   const digitsEntered = `${dealerCode.length} of ${PERSON_CODE_LENGTH} digits entered`;
+  const instruction = pendingAttempt
+    ? "Complete the security check to continue."
+    : MODE_INSTRUCTIONS[entryMode];
 
   return (
     // The one moment on this screen (spec §4.4): the mark and the access panel
     // fade up 8px together, once per mount, 320ms. Nothing else animates.
     <m.section
-      className="mx-auto flex h-full min-h-0 w-full max-w-6xl flex-1 flex-col"
+      // Desktop releases the mobile viewport pin (index.html), so percentage
+      // heights stop resolving there: the stage claims the viewport minus
+      // <main>'s lg:py-6 explicitly, and centres the card inside it.
+      className="flex h-full min-h-0 w-full flex-1 flex-col lg:min-h-[calc(100dvh-3rem)] lg:items-center lg:justify-center"
       initial={shouldReduceMotion ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.32, ease: [0.2, 0.8, 0.2, 1] }}
       aria-label="Dealer access"
     >
+      {/* Desktop: one key card centred on the lit stage (<main> carries
+          .login-stage). 1040 x 640 minimum, a 432px brand column beside the
+          access column, clipped to one 16px radius. Below lg the card's chrome
+          drops away entirely and the access column is the whole screen. */}
       <div
         className={cn(
-          "grid h-full min-h-0 w-full flex-1 grid-rows-[minmax(0,1fr)]",
-          // Desktop: the pair fills the viewport height minus <main>'s lg:py-6
-          // (App.tsx, 1.5rem top + bottom) so the panel's bottom edge and radius
-          // stay inside that overflow-hidden scrollport; #root's own
-          // safe-area/padding is zeroed out at this breakpoint (see index.html).
-          // Capped and centred so it never stretches edge to edge on very wide
-          // screens (spec §5.1).
-          "lg:min-h-[calc(100dvh-3rem)] lg:max-w-[70rem] lg:mx-auto lg:grid-cols-12",
+          "flex min-h-0 w-full flex-1 flex-col",
+          "lg:grid lg:max-w-[65rem] lg:flex-none lg:grid-cols-[27rem_minmax(0,1fr)]",
+          // Never taller than <main>'s scrollport (100dvh minus its lg:py-6).
+          // The single implicit row has to be clamped to the card box too
+          // (`minmax(0,1fr)`), or it sizes to its content, ignores max-height
+          // and the card clips the access column with no way to reach it.
+          "lg:grid-rows-[minmax(0,1fr)]",
+          "lg:min-h-[min(40rem,calc(100dvh-3rem))] lg:max-h-[calc(100dvh-3rem)]",
+          "lg:overflow-hidden lg:rounded-lg lg:border lg:border-hairline lg:bg-panel lg:shadow-dialog",
         )}
       >
-        {/* Brand panel — desktop only, 5/12, full height. Login is the one
-            screen with no photo and no dealership, so the product's own
-            colour carries it (spec §5.1). */}
-        <aside className="hidden bg-brand-fill p-10 text-brand-foreground lg:col-span-5 lg:flex lg:flex-col lg:justify-between">
+        {/* Brand column — desktop only. Login is the one screen with no photo
+            and no dealership, so the product's own colour carries it, with the
+            mark blown up as a graphic and cropped by the card edge. */}
+        <aside className="login-card-brand relative hidden overflow-hidden bg-brand-fill p-10 text-brand-foreground lg:flex lg:flex-col lg:justify-between">
+          {/* Theme-independent white/black scrims on the brand fill: the only
+              literal colours in this file, and correct under any dealer hue. */}
+          <svg
+            aria-hidden="true"
+            viewBox="31 25 63 70"
+            width="486"
+            height="540"
+            className="pointer-events-none absolute -bottom-24 -right-[150px]"
+          >
+            <rect
+              x="47"
+              y="40"
+              width="32"
+              height="40"
+              rx="4"
+              fill="rgba(255,255,255,.10)"
+            />
+            <path
+              fill="rgba(0,0,0,.20)"
+              fillRule="evenodd"
+              d="M37 25H59A35 35 0 0 1 94 60A35 35 0 0 1 59 95H37A6 6 0 0 1 31 89V31A6 6 0 0 1 37 25ZM51 40H75A4 4 0 0 1 79 44V76A4 4 0 0 1 75 80H51A4 4 0 0 1 47 76V44A4 4 0 0 1 51 40Z"
+            />
+          </svg>
+
           <Logo
             tone="onBrand"
-            size={48}
-            className="inline-flex items-center gap-3 self-start"
+            size={40}
+            className="relative inline-flex items-center gap-3 self-start"
           />
-          <div>
-            <p className="max-w-[18rem] font-display text-4xl font-semibold leading-tight">
+
+          <div className="relative max-w-[300px]">
+            <p className="font-display text-[36px] font-semibold leading-[40px] tracking-[-0.01em]">
               Dealership photos, ready to post.
             </p>
-            <p className="mt-4 max-w-[22rem] text-base text-brand-foreground opacity-75">
+            <p className="mt-3.5 text-base leading-6 text-brand-foreground opacity-80">
               Take the photo, pick the post, and share it to every channel in a minute.
             </p>
           </div>
         </aside>
 
-        {/* Access panel — 7/12 on desktop, the whole screen on a phone. On
-            lg+ its content is vertically centred within the full-height pane
-            (spec §5.1); below lg the mobile single-column layout is
-            untouched. */}
+        {/* Access column. One 352px stack on desktop, vertically centred; the
+            whole phone screen below lg. Every control in it is exactly that
+            width, so nothing steps in or out along the left edge. */}
         <div
-          className={cn(
-            "login-access-pane grid h-full min-h-0 w-full grid-rows-[auto_minmax(0,1fr)]",
-            "px-4 py-4 sm:px-6 lg:col-span-7 lg:flex lg:flex-col lg:justify-center lg:px-10 lg:py-10",
-          )}
+          className="login-access-pane flex min-h-0 w-full flex-1 flex-col overflow-y-auto overscroll-contain px-6 pb-6 pt-6 lg:min-h-0 lg:flex-none lg:items-center lg:justify-center lg:px-14 lg:py-12"
           aria-busy={isLoading}
         >
           <Logo
             size={36}
-            className="login-mobile-logo mb-5 inline-flex shrink-0 items-center gap-2.5 self-start lg:hidden"
+            className="login-mobile-logo mb-7 inline-flex shrink-0 items-center gap-2.5 self-start lg:hidden"
           />
 
           {isSuccess ? (
             <div
-              className="flex min-h-0 flex-col items-center justify-center text-center"
+              className="flex min-h-0 w-full flex-1 flex-col items-center justify-center text-center lg:w-[22rem] lg:flex-none"
               role="status"
               aria-live="polite"
             >
@@ -488,7 +538,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             </div>
           ) : isLoading ? (
             <div
-              className="flex min-h-0 flex-col items-center justify-center text-center"
+              className="flex min-h-0 w-full flex-1 flex-col items-center justify-center text-center lg:w-[22rem] lg:flex-none"
               role="status"
             >
               <Loader2 className="h-7 w-7 animate-spin text-ink-2" aria-hidden="true" />
@@ -500,16 +550,20 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           ) : (
             // Exactly three children, in this order: the short-landscape layout
             // in styles/globals.css places them by :nth-child.
-            <div className="login-form grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 lg:max-w-[28rem]">
-              <h1
-                id="login-heading"
-                className="font-display text-3xl font-semibold text-ink sm:text-4xl"
-              >
-                Sign in
-              </h1>
+            <div className="login-form grid min-h-0 w-full flex-1 grid-rows-[auto_auto_minmax(min-content,1fr)] gap-5 lg:w-[22rem] lg:flex-none lg:grid-rows-[auto_auto_auto] lg:gap-6">
+              <div className="flex shrink-0 flex-col gap-1.5">
+                <h1
+                  id="login-heading"
+                  className="font-display text-[28px] font-semibold leading-8 tracking-[-0.01em] text-ink lg:text-[32px] lg:leading-9"
+                >
+                  Sign in
+                </h1>
+                <p className="text-[15px] leading-[22px] text-ink-2">{instruction}</p>
+              </div>
 
+              {/* One segmented track, not three buttons sitting side by side. */}
               <div
-                className="grid shrink-0 grid-cols-3 gap-2"
+                className="login-switch grid h-[52px] shrink-0 grid-cols-3 gap-1 rounded-sm bg-panel-raised p-1"
                 role="group"
                 aria-label="Access type"
               >
@@ -528,7 +582,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               </div>
 
               {lockoutSeconds > 0 ? (
-                <div className="flex min-h-0 flex-col items-start justify-center rounded-md border border-hairline bg-panel p-5">
+                <div className="login-mode-panel flex min-h-0 flex-col items-start justify-center rounded-md border border-hairline bg-panel-raised p-5">
                   <p className="sr-only" role="alert">
                     Sign-in is temporarily locked. Try again after the on-screen
                     countdown.
@@ -571,96 +625,117 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   onBack={returnToCodeEntry}
                 />
               ) : entryMode === "personal" ? (
-                <div className="flex min-h-0 flex-col gap-2">
-                  <div
-                    className="flex shrink-0 items-center gap-3"
-                    role="status"
-                    aria-label={digitsEntered}
-                  >
-                    {/* Live regions announce text-content changes, not attribute
-                        changes — this hidden text gives VoiceOver per-digit feedback
-                        while aria-label keeps the region's accessible name stable. */}
-                    <span className="sr-only">{digitsEntered}</span>
-                    {Array.from({ length: PERSON_CODE_LENGTH }, (_, index) => (
-                      <span
-                        key={index}
-                        aria-hidden="true"
-                        className={cn(
-                          "h-3.5 w-3.5 rounded-full border transition-colors duration-120 ease-out",
-                          index < dealerCode.length
-                            ? "border-brand-fill bg-brand-fill"
-                            : "border-strong bg-transparent",
-                        )}
-                      />
-                    ))}
+                <div className="login-mode-panel flex min-h-0 flex-col gap-5 lg:gap-6">
+                  <div className="flex shrink-0 flex-col gap-2">
+                    <p className="login-code-label text-[13px] font-medium leading-4 text-ink-2">
+                      4-digit code
+                    </p>
+
+                    {/* Four wells, not four dots: the code reads as a field the
+                        keypad fills, and the next well to take a digit carries
+                        the brand edge. */}
+                    <div
+                      className="relative grid grid-cols-4 gap-3"
+                      role="status"
+                      aria-label={digitsEntered}
+                    >
+                      {/* Live regions announce text-content changes, not attribute
+                          changes — this hidden text gives VoiceOver per-digit feedback
+                          while aria-label keeps the region's accessible name stable.
+                          `sr-only` is out of flow, so it claims no grid cell. */}
+                      <span className="sr-only">{digitsEntered}</span>
+                      {Array.from({ length: PERSON_CODE_LENGTH }, (_, index) => (
+                        <span
+                          key={index}
+                          aria-hidden="true"
+                          className={cn(
+                            "login-code-slot flex h-14 items-center justify-center rounded-sm bg-panel-raised",
+                            "border transition-colors duration-120 ease-out",
+                            index === dealerCode.length
+                              ? "border-[1.5px] border-brand-ink"
+                              : "border-hairline",
+                          )}
+                        >
+                          {index < dealerCode.length ? (
+                            <span className="h-3 w-3 rounded-full bg-ink" />
+                          ) : null}
+                        </span>
+                      ))}
+                    </div>
+
+                    {personalCodeError ? (
+                      <p className="text-sm leading-5 text-error-ink" role="alert">
+                        {personalCodeError}
+                      </p>
+                    ) : null}
                   </div>
 
-                  <div
-                    // Four 64px rows at their natural height (spec §4.6 `xl`):
-                    // 280px total, so the keypad never stretches to fill a tall
-                    // desktop column and never compresses below the touch target.
-                    className="grid w-full max-w-[22rem] gap-2"
-                    role="group"
-                    aria-label="Four digit access code keypad"
-                  >
-                    {KEYPAD_ROWS.map((row, rowIndex) => (
-                      <div key={rowIndex} className="grid grid-cols-3 gap-2">
-                        {row.map((key, cellIndex) =>
-                          key === null ? (
-                            <span key={cellIndex} aria-hidden="true" />
-                          ) : (
-                            <Button
-                              key={cellIndex}
-                              type="button"
-                              variant="key"
-                              size="xl"
-                              fullWidth
-                              disableHaptics
-                              aria-label={
-                                key === "backspace"
-                                  ? "Delete last digit"
-                                  : `Digit ${key}`
-                              }
-                              onClick={() => void handleKeypadPress(key)}
-                            >
-                              {key === "backspace" ? (
-                                <Delete className="h-6 w-6" aria-hidden="true" />
-                              ) : (
-                                key
-                              )}
-                            </Button>
-                          ),
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                  {/* Keys and the one line under them travel together: on a
+                      phone the pair sits at the bottom of the screen, in the
+                      thumb's reach; on desktop it just follows the field. */}
+                  <div className="login-keypad-group mt-auto flex shrink-0 flex-col gap-4 lg:mt-0 lg:gap-6">
+                    <div
+                      // Four 64px rows at their natural height (spec §4.6 `xl`):
+                      // 286px total, so the keypad never stretches to fill a tall
+                      // desktop column and never compresses below the touch target.
+                      className="login-keypad grid gap-2.5"
+                      role="group"
+                      aria-label="Four digit access code keypad"
+                    >
+                      {KEYPAD_ROWS.map((row, rowIndex) => (
+                        <div key={rowIndex} className="grid grid-cols-3 gap-2.5">
+                          {row.map((key, cellIndex) =>
+                            key === null ? (
+                              <span key={cellIndex} aria-hidden="true" />
+                            ) : (
+                              <Button
+                                key={cellIndex}
+                                type="button"
+                                variant="key"
+                                size="xl"
+                                fullWidth
+                                disableHaptics
+                                className="login-key px-0"
+                                aria-label={
+                                  key === "backspace"
+                                    ? "Delete last digit"
+                                    : `Digit ${key}`
+                                }
+                                onClick={() => void handleKeypadPress(key)}
+                              >
+                                {key === "backspace" ? (
+                                  <Delete
+                                    className="h-6 w-6 text-ink-2"
+                                    aria-hidden="true"
+                                  />
+                                ) : (
+                                  key
+                                )}
+                              </Button>
+                            ),
+                          )}
+                        </div>
+                      ))}
+                    </div>
 
-                  <p
-                    className={cn(
-                      "shrink-0 text-caption",
-                      personalCodeError ? "text-error-ink" : "text-ink-hint",
-                    )}
-                    role={personalCodeError ? "alert" : undefined}
-                  >
-                    {personalCodeError || "Enter your 4-digit code."}
-                  </p>
+                    <p className="login-footer-note text-sm leading-5 text-ink-hint">
+                      Don&apos;t have a code? Ask your dealership manager.
+                    </p>
+                  </div>
                 </div>
               ) : entryMode === "manager" ? (
                 <form
-                  className="flex min-h-0 flex-col justify-start gap-4 overflow-y-auto overscroll-contain"
+                  className="login-mode-panel flex min-h-0 flex-col justify-start gap-4 overflow-y-auto overscroll-contain"
                   onSubmit={(event) => {
                     event.preventDefault();
                     void submitManagerLogin();
                   }}
                 >
-                  <div>
-                    <h2 className="text-lg font-semibold text-ink">
-                      Dealership manager
-                    </h2>
-                    <p className="mt-1 text-sm text-ink-2">
-                      Use your dealership manager username and password.
-                    </p>
-                  </div>
+                  {/* The mode's requirement is already stated under "Sign in";
+                      this is the section title for the pair of fields. */}
+                  <h2 className="shrink-0 text-sm font-semibold text-ink">
+                    Dealership manager
+                  </h2>
 
                   <Input
                     ref={managerUsernameRef}
@@ -750,13 +825,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   {managerLoginError ? (
                     <p
                       id="manager-login-error"
-                      className="text-caption text-error-ink"
+                      className="text-sm leading-5 text-error-ink"
                       role="alert"
                     >
                       {managerLoginError}
                     </p>
                   ) : (
-                    <p className="text-caption text-ink-hint">
+                    <p className="text-sm leading-5 text-ink-hint">
                       Contact your system administrator if you need access reset.
                     </p>
                   )}
@@ -767,20 +842,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 </form>
               ) : (
                 <form
-                  className="flex min-h-0 flex-col justify-start gap-4 overflow-y-auto overscroll-contain"
+                  className="login-mode-panel flex min-h-0 flex-col justify-start gap-4 overflow-y-auto overscroll-contain"
                   onSubmit={(event) => {
                     event.preventDefault();
                     void submitAdminLogin();
                   }}
                 >
-                  <div>
-                    <h2 className="text-lg font-semibold text-ink">
-                      System administrator
-                    </h2>
-                    <p className="mt-1 text-sm text-ink-2">
-                      Use your system administrator username and password.
-                    </p>
-                  </div>
+                  <h2 className="shrink-0 text-sm font-semibold text-ink">
+                    System administrator
+                  </h2>
 
                   <Input
                     ref={adminUsernameRef}
@@ -872,13 +942,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                   {adminLoginError ? (
                     <p
                       id="admin-login-error"
-                      className="text-caption text-error-ink"
+                      className="text-sm leading-5 text-error-ink"
                       role="alert"
                     >
                       {adminLoginError}
                     </p>
                   ) : (
-                    <p className="text-caption text-ink-hint">
+                    <p className="text-sm leading-5 text-ink-hint">
                       Credentials come from your deployment secrets.
                     </p>
                   )}

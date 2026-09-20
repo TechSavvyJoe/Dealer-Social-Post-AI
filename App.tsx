@@ -376,8 +376,10 @@ const AppContent: React.FC = () => {
           id="main-content"
           className={
             step === AppStep.LOGIN
-              ? // Zero vertical chrome on mobile login — #root already owns safe-area
-                "mx-auto flex h-full min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-0 py-0 sm:px-6 sm:py-4 lg:px-8 lg:py-6"
+              ? // Zero vertical chrome on mobile login — #root already owns
+                // safe-area. On desktop this is the lit stage the access card
+                // is centred on (.login-stage, styles/globals.css).
+                "login-stage mx-auto flex h-full min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-0 py-0 sm:px-6 sm:py-4 lg:px-8 lg:py-6"
               : step === AppStep.RESULT
                 ? // Publishing is a wide, dense studio. It remains one scrollport on
                   // short displays, but uses the available desktop canvas.

@@ -421,42 +421,57 @@ with the strings (it is not in CI, so nothing else will).
 
 ### 5.1 Login
 
-Phone: single column. Mark (40 px) top-left, "Sign in" display heading, a
-segmented control (My code · Manager · System) 44 px, then the mode's form.
-The keypad is a 3 × 4 grid of `xl` (64 px) `secondary` buttons with Semi
-Condensed digits; four 12 px dots above it show progress; the Turnstile
-"Security check" slot sits under the keypad. No brand panel on phones.
-Short-landscape phones keep the two-column arrangement in `globals.css`.
+Phone: single column on the canvas. Full lockup (mark 36 px + wordmark)
+top-left, "Sign in" (28/32 display) with a one-line instruction under it, the
+52 px segmented track (My code · Manager · System), then the code field — a
+"4-digit code" label and four 56 px slots on `--panel-raised` that fill with a
+12 px ink dot, the next slot ringed in `--brand-ink` — and, pushed to the
+bottom of the column so the keys sit in the thumb zone, the 3 × 4 keypad
+(64 px borderless keys on `--panel-raised`, 26 px Semi Condensed digits, 10 px
+gaps) with "Don't have a code? Ask your dealership manager." under it. The
+Turnstile "Security check" slot replaces the field and keypad while pending.
+No brand panel on phones. Short-landscape phones keep the two-column
+arrangement in `globals.css`.
 
-Desktop (≥ 1024):
+Desktop (≥ 1024): one object on the lit table.
 
 ```
-┌──────────────────────────────┬───────────────────────────────────┐
-│  [D] Dealer Social Post AI   │                                   │
-│                              │   Sign in                         │
-│  Dealership photos,          │   [ My code | Manager | System ]  │
-│  ready to post.              │                                   │
-│                              │   ● ● ○ ○                         │
-│                              │   [1] [2] [3]                     │
-│                              │   [4] [5] [6]                     │
-│                              │   [7] [8] [9]                     │
-│                              │       [0] [⌫]                     │
-│  graphite, no image          │   Enter your 4-digit code.        │
-└──────────────────────────────┴───────────────────────────────────┘
-        5/12                                7/12
+┌──────────────────────────────────────────────────────────────────┐
+│                     (graphite, lit from beneath)                 │
+│    ┌──────────────────────┬──────────────────────────────┐       │
+│    │ [D] Dealer Social…   │     Sign in                  │       │
+│    │                      │     Enter your personal…     │       │
+│    │                      │     [ My code | Mgr | Sys ]  │       │
+│    │             ┌───┐    │     4-digit code             │       │
+│    │  Dealership │ D │    │     [●] [●] [ ] [ ]          │       │
+│    │  photos,    │   │    │     [1] [2] [3]              │       │
+│    │  ready to   └───┘    │     [4] [5] [6]              │       │
+│    │  post.    (cropped)  │     [7] [8] [9]              │       │
+│    │  one body line       │         [0] [⌫]              │       │
+│    │                      │     Don't have a code? …     │       │
+│    └──────────────────────┴──────────────────────────────┘       │
+│       432 px brand panel        access panel, one 352 px column  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-Left-aligned throughout. The grid fills the viewport (`min-h-[100dvh]`): the
-brand panel is `--brand-fill` (login is the one screen with no photo and no
-dealership, so the product's colour carries it) with the white lockup
-(`<Logo tone="onBrand" size={48} />`) top-left and the display-size tagline
-"Dealership photos, ready to post." plus one body line at the bottom; the
-access column centres its content vertically; the pair is capped at 1120 px
-and centred in wider viewports. Phones show the full lockup (mark 36 px +
-wordmark), not a lone tile. Keypad keys use the Button `key` variant
-(`--panel-raised`, hairline edge, brand tint on press) so the keypad reads as
-keys, not a calculator's outlined boxes. The only moment is the 320 ms
-group fade-up.
+Card: at most 1040 × 640 (`max-w-[65rem]`, `min-h-[40rem]`, shrinking on
+short viewports), radius 16, `--panel`, hairline edge, `shadow-dialog`,
+centred in the login `<main>` inside its `lg:py-6`. The stage behind it
+carries the light-table radial lift (none in Sunlight). Brand panel:
+`--brand-fill` with the white lockup (`<Logo tone="onBrand" size={40} />`)
+top-left, the mark's D as a graphic block — the same path at 486 px wide,
+`rgba(0,0,0,.20)` with its print counter at `rgba(255,255,255,.10)`, cropped
+by the panel's right and bottom edges — and the tagline block bottom-left
+(display 36/40, max 300 px, one body line at 80 % foreground). Access panel:
+everything sits in ONE 352 px column — heading, instruction line, segmented
+track, code field, keypad, footer — text left-aligned, the column centred in
+the panel. Selection is the filled pill on the track; the keys are borderless
+`--panel-raised` tiles (hover `--overlay`, press brand tint) so the keypad
+reads as keys, not a calculator's outlined boxes. The v2 split (a 5/12
+full-bleed slab, four loose 14 px dots, three boxed mode buttons, three
+different column widths) was rejected on screenshot review on 2026-09-19; the
+canvas with the three explored directions (A key card — chosen, B single
+column, C full bleed) is the design record.
 
 ### 5.2 Capture
 

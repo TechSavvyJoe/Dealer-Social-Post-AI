@@ -75,9 +75,16 @@ const ghostStyles = cn("bg-transparent text-ink-2", "hover:bg-fill-subtle");
 const dangerStyles = cn("bg-error-fill text-error-ink border border-error-ink/40");
 
 // Variant styles — flat token fills, aliased so no call site churns.
-// Keypad keys: a raised key with a quiet edge; the press shows in the brand tint.
-const keyStyles =
-  "bg-panel-raised border border-hairline text-ink hover:border-strong active:bg-brand-tint";
+// Keypad keys: a raised key cut from the panel, no outline. The keypad reads
+// as one block of keys rather than twelve outlined boxes; hover moves the key
+// one tone off the card and the press shows in the brand tint. Which way that
+// tone moves is theme-dependent: `--overlay` is one step UP from the key in
+// dark, but in Sunlight Mode it is the card's own white, so the login keypad
+// overrides hover to step DOWN there and adds the hairline that separates
+// white surfaces (`.login-key` / `.theme-light .login-key:hover` in
+// globals.css). Any future caller of this variant on a white surface needs
+// the same override.
+const keyStyles = "bg-panel-raised text-ink hover:bg-overlay active:bg-brand-tint";
 
 const variantStyles: Record<Variant, string> = {
   primary: primaryStyles,
@@ -100,7 +107,7 @@ const sizeStyles: Record<Size, string> = {
   md: "text-base font-semibold px-5 py-2.5 min-h-[44px]",
   lg: "text-base font-semibold px-6 py-3 min-h-[52px]",
   icon: "p-2 min-h-[44px] min-w-[44px]",
-  xl: "font-display text-3xl font-medium tabular-nums min-h-[64px] min-w-[64px] px-6",
+  xl: "font-display text-[26px] leading-none font-medium tabular-nums min-h-[64px] min-w-[64px] px-6",
 };
 
 /**
