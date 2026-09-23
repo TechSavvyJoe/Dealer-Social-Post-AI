@@ -1,0 +1,1247 @@
+{
+ "blueprint": {
+  "summary": "Blueprint for PR2 (the salesperson flow) in /Users/joegallant/AI App Development Projects/Dealer-Social-Post-AI, on branch design/streamlined-flow from main at 75c4140. I read the approved spec, all six artboards, the Light Table spec and its guard test, the five-area audit, and the code. Five findings shape the plan.\n\n(1) Most of what the store needs already exists on the dealer record: facebook_page_tag, signature_look + alternate_look (two Looks), category_destinations (channels and video per category), feature_permissions (video, playful, freeTextEdit), playful_style, motion_signature, requires_approval, the employee_disclosure_* fields, and custom_scenarios. But services/creativeSystem.ts only applies them when creative_system_v2 is true, and that flag is off by default. The new flow needs one pure resolver, services/storeDefaults.ts. For v2 dealers it passes resolveCreative through unchanged; for everyone else it falls back to sensible values. PR3 then only adds default channels, a list of offered Looks, and Playful per category.\n\n(2) The behaviour that must survive is inlined in two very large files. PostResult.tsx (5,688 lines) holds the locks, approval polling, release repair, autosave with its compare-and-set revision, the Customer Hub handoff, per-destination file preparation, video jobs and the share-caption pack. PostCustomizer.tsx holds the brief composition and the pre-generation guards. These must be pulled out, with no change in behaviour, before any new screen can use them.\n\n(3) services/publishTargets.ts already separates preparePublishShare (async, done before the tap) from sharePrepared (calls navigator.share before its first await). The new Share button can therefore open the OS share sheet in one tap with no dialog, as long as the file is prepared when the channel is selected.\n\n(4) Two things do not exist yet. Nothing records \"Shared to Facebook\" on a post, so PR2 needs an additive PocketBase 0.22 field and an owner-scoped route. Generation progress is faked with timers, so useGeneration needs real stages and a Cancel.\n\n(5) The saved session stores the step as a number, and the e2e suite seeds step:4. The AppStep enum is renamed with explicit numeric values kept (HOME=1, DETAILS=2, CREATING=3, POST=4) and WORK=7 added. Old hashes stay as read-only aliases.\n\nI recommend amending the proposed two-PR split to three: PR2-0 for the extractions and the backend share record, with no visible change and the existing unit tests unchanged as proof; then PR2a (front half) and PR2b (back half) as proposed. There are 22 units in total: 11 design (Opus) and 11 mechanical (Sonnet).",
+  "pr_split": [
+   {
+    "name": "PR2-0 — extractions and share record (no visible change)",
+    "scope": "Move the behaviour-carrying logic out of PostCustomizer.tsx, PostResult.tsx, CameraCapture.tsx, PostHistory.tsx, LocalMediaArchive.tsx and RecentCaptureShelf.tsx into services and hooks that the old screens then consume. Add the share-events field, route and client helper on the backend. Add real generation stages and Cancel to useGeneration, while the old overlay still reads the legacy progress values.",
+    "rationale": "This amends the proposal. PostResult is 5.7k lines of closures sharing refs (currentPostPropRef, latestWebsiteCreativeRef, lastPostRevisionRef). If the extraction ships alone, the existing 58 PostResult and 35 PostCustomizer tests, left unchanged, prove nothing moved. Mixed into PR2a or PR2b, a regression cannot be traced to either the extraction or the redesign. Only source-guard tests that pin a moved string are retargeted, in the same commit. The backend share endpoint lands a release before any frontend calls it, which fits the known Fly-before-Vercel deploy-order trap: the endpoint is additive and nothing old depends on it.",
+    "units": [
+     "U01",
+     "U02",
+     "U03",
+     "U04",
+     "U05",
+     "U06",
+     "U07",
+     "U08"
+    ]
+   },
+   {
+    "name": "PR2a — shell, step machine, Home, Details, Creating",
+    "scope": "New AppStep machine and URL sync. A store draft slice. services/storeDefaults.ts. Home.tsx with the tiles, native camera or file picker, walkaround tile and My work preview. PostDetails.tsx with one signature sheet, VIN sheet in manual mode first, the optional line, and a gated Create post. The rewritten Creating overlay with honest stages and Cancel. Delete CameraCapture, WebcamCapture, ImageCropModal, PostCustomizer, ScenarioPicker, ProgressSteps and templates. Keep the old PostResult as the Post screen for one release, reached as AppStep.POST. RecentCaptureShelf moves into the existing My work modal so recovery stays reachable.",
+    "rationale": "Validated as proposed. The front half is what counts most toward the tap target (capture, the review modal and the 40-control details form go away). It can ship behind the unchanged PostResult because generation still produces the same GeneratedPost and delivery plan. For legacy dealers the channels now come from storeDefaults instead of the picker, and PostResult already renders any platformIds list. Changes that would break e2e are limited to the capture test and two heading pins.",
+    "units": [
+     "U09",
+     "U10",
+     "U11",
+     "U12",
+     "U13",
+     "U14",
+     "U15"
+    ]
+   },
+   {
+    "name": "PR2b — Post, Shared, My work, deletions",
+    "scope": "PostScreen.tsx: preview card, channel chips, Look chips, inline caption editing, Try another, Add video and Playful per the store's allowed options, one lock banner, Share opening the OS sheet, Shared state and Done. hooks/usePostShare.ts and hooks/usePostCreativeTools.ts. MyWork.tsx as a real step (#/work) with statuses and the device recovery grid. Discard guard only for an unsaved post. Delete PostResult and everything only it uses. Retarget the remaining source guards. Rewrite the result and website e2e cases.",
+    "rationale": "Validated as proposed. Post, Shared and My work share the new share and share-record plumbing and the leave guard, so they belong together. Deleting PostResult in the same PR as its replacement avoids two live publish surfaces. Every behaviour PostResult carried has already been extracted in PR2-0, so the deletions are mechanical.",
+    "units": [
+     "U16",
+     "U17",
+     "U18",
+     "U19",
+     "U20",
+     "U21",
+     "U22"
+    ]
+   }
+  ],
+  "units": [
+   {
+    "id": "U01",
+    "pr": "PR2-0",
+    "title": "Extract generation request builder and brief composition from PostCustomizer",
+    "difficulty": "mechanical",
+    "creates": [
+     "services/generationRequest.ts",
+     "services/generationRequest.test.ts"
+    ],
+    "modifies": [
+     "components/PostCustomizer.tsx (handleGenerate delegates to buildGenerationRequest; composeGenerationCreativeBrief is re-exported from services/generationRequest.ts for compatibility; STYLE_INFO.aiHint moves to the service as STYLE_AI_HINTS)",
+     "services/postScenarios.ts and services/promptsV2.ts (comment references only)"
+    ],
+    "retires": [],
+    "reuses": [
+     "scenarioToCreativeBrief and stripIdMarkerSpoof (services/postScenarios.ts)",
+     "platformsToCreativeBrief (services/platformCopy.ts)",
+     "vehicleToCreativeBrief (services/vinDecoder.ts)",
+     "formatHashtag and brandHashtagFromName (utils/hashtags.ts)",
+     "captionUsesOnlyExpectedCustomer (utils/captionQuality.ts)",
+     "releaseAuthorizesPublicLabel and toPublicCustomerLabel (utils/customerIdentity.ts)",
+     "resolveCreative (services/creativeSystem.ts)"
+    ],
+    "behaviours_preserved": [
+     "The brief order is identity, voice, scenario, vehicle, OEM, design, supporting, platform. Grounding facts stay inside the 850/900-character caption window, and the whole brief is cut at 1,400 characters.",
+     "[id:...] marker spoofing is stripped from every dealer-editable field. Only scenarioBlock is exempt.",
+     "Customer categories cannot generate without a captured release (returns release_required).",
+     "A release whose name or VIN no longer matches the post is discarded (returns release_mismatch, and the caller clears it).",
+     "The personal line (140 characters) and a custom caption pass the customer-identity lock, with the same messages as today.",
+     "Banned phrases, required hashtags (#PascalCase plus the brand tag), default footer and dealer facts (tagline, website, address, hours, phone) reach the brief.",
+     "Style and tone come from resolveCreative. For v2 dealers the Look owns them."
+    ],
+    "tests": [
+     "services/generationRequest.test.ts: move the composeGenerationCreativeBrief cases from __tests__/PostCustomizer.test.tsx. Add a snapshot of the brief for 3 fixtures (delivery with VIN, service without a customer, a custom scenario) captured before the move. Add one case per failure reason.",
+     "__tests__/PostCustomizer.test.tsx: unchanged and green."
+    ],
+    "acceptance": [
+     "buildGenerationRequest(input) returns {ok:true,args} where args is exactly the tuple useGeneration.handleGenerate accepts (style, tone, customerName, customText, creativeBrief, meta, platformIds, outputProfile, mediaOutputMode). Otherwise it returns {ok:false,reason:'no_destination'|'release_required'|'release_mismatch'|'identity',message?}.",
+     "The fixture briefs are byte-identical before and after the move.",
+     "npm run typecheck and npm test pass with no existing test edited except the moved cases."
+    ],
+    "depends_on": []
+   },
+   {
+    "id": "U02",
+    "pr": "PR2-0",
+    "title": "Extract the pure delivery-caption and lock derivation from PostResult",
+    "difficulty": "mechanical",
+    "creates": [
+     "services/deliveryCaptions.ts (buildShareCaptions, which is the body of the sharePlatformCaptions memo verbatim; buildCopyText, which is handleCopy's attribute-then-scan-then-prepend-then-append chain; appendDisclosureText; deliveredCaptionFor)",
+     "utils/postLocks.ts (derivePostLocks returning {deliveryLocked, identityLocked, claimLocked, releaseLocked, releaseLinkRepairable, approvalLocked, primary:{kind,label,title,message}}, with every message verbatim)",
+     "services/deliveryCaptions.test.ts",
+     "utils/postLocks.test.ts"
+    ],
+    "modifies": [
+     "components/PostResult.tsx (consumes both modules)",
+     "__tests__/complianceDisclosures.test.ts (the 'body-only share pack' guard retargets to services/deliveryCaptions.ts; the deliveredCaption prop guard stays on PostResult until U21)",
+     "__tests__/rejectionReason.test.ts (the 'A manager asked for a change: ${rejectionReason}' guard retargets to utils/postLocks.ts)"
+    ],
+    "retires": [],
+    "reuses": [
+     "analyzeCaptionForDelivery, analyzeCaptionSetForDelivery, prependEmployeeDisclosure, buildEmployeeDisclosure and prohibitedClaimsMessage (utils/complianceDisclosures.ts)",
+     "appendDealershipMention (utils/socialAttribution.ts)",
+     "captionUsesOnlyExpectedCustomer (utils/captionQuality.ts)"
+    ],
+    "behaviours_preserved": [
+     "The employee disclosure is prepended after the compliance scan, never before (cleanSocialCaption's preamble heuristic).",
+     "The share pack stores the body only; requiredPrefix is the single channel for the disclosure.",
+     "instagram_reel mirrors instagram_feed.",
+     "Every outgoing variant is re-scanned for identity and prohibited claims, with a blockedReason when it fails.",
+     "Lock precedence is image review, then identity, then claims, then release, then approval.",
+     "The two release truths keep their copy: 'not attached yet' (repairable) and 'not saved'.",
+     "The copied text is attributed caption, then scan, then prepended disclosure, then appended compliance disclosures."
+    ],
+    "tests": [
+     "services/deliveryCaptions.test.ts: the disclosure appears exactly once; body-only text; blockedReason for identity and for claims; Facebook mention appended.",
+     "utils/postLocks.test.ts: the precedence matrix and verbatim messages.",
+     "A planted-mutant check on the retargeted guards: swap 'text: scanned.caption' to 'text: prepared.caption' and confirm the guard fails (guard-test failure modes)."
+    ],
+    "acceptance": [
+     "PostResult renders identically. All 58 PostResult tests pass unedited.",
+     "The retargeted guards fail on the planted mutant and pass on the real code."
+    ],
+    "depends_on": []
+   },
+   {
+    "id": "U03",
+    "pr": "PR2-0",
+    "title": "Extract approval polling, release repair, draft autosave and the website handoff into hooks",
+    "difficulty": "mechanical",
+    "creates": [
+     "hooks/useApprovalStatus.ts ({post, requiresApproval} to {reviewRequired, approvalStatus, rejectionReason, imageReviewRequired, approvalCheckError})",
+     "hooks/useReleaseRepair.ts ({post} to {releaseStatus, releaseLinkStatus, releaseLinkRepairable, retrying, notice, retry(trigger)})",
+     "hooks/useDraftAutosave.ts ({post, editable, primaryCaption, captionAnalysis, captionSetAnalysis, effectivePack, identityLocked, grounding} to {status, flush():Promise<boolean>, stage(draft), lastRevisionRef})",
+     "hooks/useWebsiteHandoff.ts ({post, locks, flush, stage, onPrepareFinalWebsiteDraft, captions} to {websiteDraft, publication, checkError, sending, retrying, reviewUrl, handoffStarted, send(), retry()})",
+     "hooks/useApprovalStatus.test.tsx, hooks/useReleaseRepair.test.tsx, hooks/useDraftAutosave.test.tsx, hooks/useWebsiteHandoff.test.tsx"
+    ],
+    "modifies": [
+     "components/PostResult.tsx",
+     "__tests__/rejectionReason.test.ts (the 'Manager asked for a change: ${result.rejection_reason}' toast guard moves to hooks/useApprovalStatus.ts)"
+    ],
+    "retires": [],
+    "reuses": [
+     "getPostApprovalStatus and updatePostDraft (services/posts.ts)",
+     "linkReleaseToPostWithRetry (services/photoReleases.ts)",
+     "connectionManager (utils/connectionManager.ts)",
+     "getWebsitePublication, enqueueWebsitePublication, retryWebsitePublication, websitePublicationNeedsStatusRefresh, websitePublicationPollDelay, safeWebsiteReviewUrl, listWebsiteDestinations and buildFinalWebsiteDraftFallback (services/websitePublishing.ts)"
+    ],
+    "behaviours_preserved": [
+     "Approval is polled every 10 s, paused while document.hidden, aborted on unmount. The approve and reject toasts are verbatim, and the rejection reason is shown verbatim.",
+     "Release repair retries automatically once per mount when the connection comes back. The button stays available. Nothing is re-signed.",
+     "Autosave debounces 600 ms and runs as a serialized promise chain. It flushes on unmount and never saves a caption with prohibited claims or an identity failure. The server's post_revision is kept as the compare-and-set token.",
+     "Website: status is hydrated once per dealer:post. Polling follows the status. Send first writes the exact visible creative, then enqueues with expectedPostRevision. If the creative changed during preparation the send aborts. On failure the authoritative status is restored, including WEBSITE_DRAFT_ALREADY_SENT.",
+     "The creative is frozen for review (reviewRequired, then contentEditingLocked)."
+    ],
+    "tests": [
+     "One hook test file per hook using fake timers. Cover the 10 s poll and hidden-tab pause, the reconnect auto-retry firing once, the autosave debounce and serialized ordering (an older response can never overwrite a newer draft), and the website compare-and-set send with changed-creative abort.",
+     "__tests__/PostResult.test.tsx unchanged and green."
+    ],
+    "acceptance": [
+     "PostResult contains no inline setTimeout or poll loop for approval, release, autosave or website. Each concern is one hook call.",
+     "The full vitest suite passes with only the rejectionReason guard retargeted."
+    ],
+    "depends_on": [
+     "U02"
+    ]
+   },
+   {
+    "id": "U04",
+    "pr": "PR2-0",
+    "title": "Extract exact per-destination file preparation and the video job machinery",
+    "difficulty": "design",
+    "creates": [
+     "hooks/usePreparedDelivery.ts (deliveryPlan through derivePlatformDeliveryPlan, selectedDeliveryId, preparation key, preparedSave for the active key only, formattedPreviewUrl object-URL lifecycle, a retry nonce, and selectDelivery(destinationId, mediaKind))",
+     "hooks/useVideoJobs.ts (startVideoJob with a synchronous videoGenerationActiveRef, retainNewestVideoJobs, currentVideoCreativeKey, videoJobForDelivery, blob-URL ownership and unmount revocation, markPostVideoGenerated, and houseMotionOptions(resolved.motion))",
+     "hooks/usePreparedDelivery.test.tsx",
+     "hooks/useVideoJobs.test.tsx"
+    ],
+    "modifies": [
+     "components/PostResult.tsx (consumes both hooks; the batch and share-queue state stays inline because it is retired in U21)"
+    ],
+    "retires": [],
+    "reuses": [
+     "derivePlatformDeliveryPlan (services/platformOutputs.ts)",
+     "EXPORT_FORMATS and renderFormatIfNeeded (utils/multiFormatExport.ts)",
+     "prepareMediaForSave, validateVideoMetadata and savePreparedMediaToLibrary (utils/mediaSave.ts)",
+     "resolvePrimaryImageProfile (services/platformCopy.ts)",
+     "retainNewestVideoJobs (utils/videoJobRetention.ts)"
+    ],
+    "behaviours_preserved": [
+     "The file prepared is the exact size and aspect for the selected destination.",
+     "A prepared file is never used under a different delivery row (the preparation key check).",
+     "Video metadata is validated before save or share, and a still image is never substituted for a selected video.",
+     "Only one prepared File is kept in memory, to avoid iPhone memory pressure.",
+     "Blob URLs are revoked only on removal or unmount.",
+     "Two taps cannot start two video renders.",
+     "Video jobs are bound to the creative revision."
+    ],
+    "tests": [
+     "usePreparedDelivery: switching destination drops the old prepared file; the key mismatch returns null; a website-only plan has no deliveries.",
+     "useVideoJobs: the duplicate-start guard; retention; revocation on unmount only.",
+     "PostResult.test.tsx and __tests__/PlatformDeliveryBoard.test.tsx green and unedited."
+    ],
+    "acceptance": [
+     "No behaviour change is visible on the result screen at 390 and 1440 (screenshot matrix from __tests__/__scratch__/shots.mjs).",
+     "e2e 'keeps the responsive result workspace job-first' passes unchanged on all 16 projects."
+    ],
+    "depends_on": [
+     "U02",
+     "U03"
+    ]
+   },
+   {
+    "id": "U05",
+    "pr": "PR2-0",
+    "title": "Extract photo intake from CameraCapture",
+    "difficulty": "mechanical",
+    "creates": [
+     "hooks/usePhotoIntake.ts (processFile(file) to ImageSelection | error; checks type and extension including heic/heif and the 12 MB limit; fileToNormalizedDataUrl; the curated HEIC copy; isProcessing; optional window-level drag and drop behind an enableDrop flag)",
+     "hooks/usePhotoIntake.test.tsx"
+    ],
+    "modifies": [
+     "components/CameraCapture.tsx (uses the hook)"
+    ],
+    "retires": [],
+    "reuses": [
+     "fileToNormalizedDataUrl (utils/imageUtils.ts)",
+     "toUiMessage (utils/errorMessages.ts)"
+    ],
+    "behaviours_preserved": [
+     "The pipeline receives an EXIF-normalized 2048 px JPEG, and the original File is kept as originalSource.",
+     "Invalid type, oversize and HEIC errors keep today's copy and stay inline.",
+     "Drag-and-drop listeners are removed on unmount."
+    ],
+    "tests": [
+     "hooks/usePhotoIntake.test.tsx: type, size and HEIC branches, and the drop path.",
+     "__tests__/DragDropReproduction.test.tsx and __tests__/errorCopyHygiene.test.ts green (the CameraCapture strings now live in the hook; retarget the file list there)."
+    ],
+    "acceptance": [
+     "CameraCapture has no processFile body of its own.",
+     "The capture e2e test is unchanged and green."
+    ],
+    "depends_on": []
+   },
+   {
+    "id": "U06",
+    "pr": "PR2-0",
+    "title": "Extract history reopen and the device-media archive into hooks",
+    "difficulty": "mechanical",
+    "creates": [
+     "utils/historyPost.ts (savedPostIdentityIsSafe; toGeneratedPostFromRecord(record, {role, currentPersonId, image}); postStatusFor(record) returning 'shared'|'waiting'|'changes'|'draft'|'review_blocked')",
+     "hooks/usePostHistoryList.ts (load and paginate through listPostsPage, statusFilter, query, website publication polling, openCreative(record) through fetchPostCreativeDataUrl then setSelectedImage(null), setGenerationParams(null), setGeneratedPost and setStep)",
+     "hooks/useDeviceMedia.ts (list by kind capture|generated-image|video, object-URL lifecycle, save through mediaSave, delete, reacts to the logout purge)",
+     "utils/historyPost.test.ts",
+     "hooks/useDeviceMedia.test.tsx"
+    ],
+    "modifies": [
+     "components/PostHistory.tsx",
+     "components/LocalMediaArchive.tsx",
+     "components/RecentCaptureShelf.tsx",
+     "__tests__/rejectionReason.test.ts (the reopen-mapping guard moves to utils/historyPost.ts)",
+     "__tests__/postOutputProfilePersistence.test.ts (the PostHistory guards move to utils/historyPost.ts)"
+    ],
+    "retires": [],
+    "reuses": [
+     "listPostsPage and fetchPostCreativeDataUrl (services/posts.ts)",
+     "resolveHistoryPlatformIds (services/platformCopy.ts)",
+     "the archive functions in utils/creativeStorage.ts"
+    ],
+    "behaviours_preserved": [
+     "A post whose saved image needs review, or whose copy may name another customer, is quarantined: it cannot be reopened and its caption is masked in the list and in search.",
+     "A reopened post from another author is read-only (historyReadOnly).",
+     "Reopening clears the stale capture so a remix cannot use the wrong photo.",
+     "The rejection reason and approval status travel with the reopened post.",
+     "An empty platformIds list for a website-only post is kept.",
+     "Local archive records carry no names and no captions: 48 h lifetime, 24 records, 3 videos, cleared on logout."
+    ],
+    "tests": [
+     "utils/historyPost.test.ts: the mapping, quarantine and status derivation.",
+     "hooks/useDeviceMedia.test.tsx: object URLs are revoked.",
+     "__tests__/MediaArchiveObjectUrls.test.tsx green."
+    ],
+    "acceptance": [
+     "PostHistory and LocalMediaArchive render identically. The manager dashboard (DealerAdminDashboard) is unaffected."
+    ],
+    "depends_on": []
+   },
+   {
+    "id": "U07",
+    "pr": "PR2-0",
+    "title": "Backend: record share events on the post",
+    "difficulty": "design",
+    "creates": [
+     "pb_migrations/1752300000_post_share_events.js (up: collection.schema.addField(new SchemaField({name:'share_events',type:'json',options:{maxSize:20000}})); down: find the field with getFieldByName, then removeField(field.id))",
+     "__tests__/postShareEvents.test.ts (source and policy tests in the style of backendHookPolicies)"
+    ],
+    "modifies": [
+     "pb_hooks/main.pb.js (new routerAdd('POST','/api/app/posts/:id/shared'))",
+     "services/posts.ts (recordPostShared(postId,{destinationId,via}); PostRecord.share_events; projectPostRecordForUi)",
+     "types.ts (GeneratedPost.sharedTo?: {destinationId:string; via:'web-share'|'download'; at:string}[])",
+     "utils/historyPost.ts (postStatusFor reads share_events)"
+    ],
+    "retires": [],
+    "reuses": [
+     "the owner-scoped post lookup and session helpers already used by /api/app/posts/:id/schedule (pb_hooks/main.pb.js:3233)",
+     "the rate-limit helpers in pb_hooks/requestPolicies.js"
+    ],
+    "behaviours_preserved": [
+     "The PocketBase 0.22 JSVM API is used as-is: $app.dao(), c.pathParam, $apis.requestInfo.",
+     "The migration uses the addField/removeField(id) methods, never the Array.from filter no-op.",
+     "The route fails closed. It returns 409 when requires_approval is set and approval_status is not 'approved', when release_required is set and release_status is not 'saved', and when image_review_required or identity_review_required is set.",
+     "destination_id must be one of the destinations in services/platformOutputs.ts. via must be 'web-share' or 'download'. The server writes the timestamp. The same destination and via within 60 s are deduplicated. At most 20 events are kept.",
+     "Only the post's author can record. Other roles get 403.",
+     "The change is additive, so an old frontend is unaffected (deploy-order trap)."
+    ],
+    "tests": [
+     "__tests__/postShareEvents.test.ts: the route exists, is owner-scoped, has the 409 gates, the allowlist and the cap.",
+     "services/posts test: recordPostShared sends only destination_id and via.",
+     "The down-migration is proven against a copy of pb_data, never by trusting 'Reverted'."
+    ],
+    "acceptance": [
+     "Against a local copy of pb_data, the up migration adds share_events and the down migration removes it; verified by reading the schema.",
+     "__tests__/backendCompliancePolicy.test.ts green.",
+     "A POST to the route on a pending-approval post returns 409."
+    ],
+    "depends_on": [
+     "U06"
+    ]
+   },
+   {
+    "id": "U08",
+    "pr": "PR2-0",
+    "title": "useGeneration: honest stages and Cancel",
+    "difficulty": "design",
+    "creates": [],
+    "modifies": [
+     "hooks/useGeneration.ts (adds generationStage 'idle'|'signature'|'design'|'checks'|'saving', partsReady {image,caption}, and cancelGeneration())",
+     "services/geminiService.ts (generateSocialPost gains an optional trailing onPartReady?: (part:'caption'|'image') => void, called as each of the two parallel promises settles)",
+     "hooks/useGeneration.test.tsx"
+    ],
+    "retires": [],
+    "reuses": [
+     "runWithPersistedPhotoRelease (services/photoReleases.ts)",
+     "runGeminiTask and its signal (hooks/useGemini.ts)",
+     "enqueueTask signal support (services/requestQueue.ts)"
+    ],
+    "behaviours_preserved": [
+     "The release is persisted before any provider call. The source guard in services/photoReleases.test.ts must stay green.",
+     "Results after an auth change are discarded by the epoch check.",
+     "An identity-guard or prohibited-claims failure returns to DETAILS with its message.",
+     "Approval submission, submission_failed and the release link statuses are unchanged.",
+     "Cancel keeps generationParams and the in-memory release object, so captured.releaseId is reused and nothing is re-signed.",
+     "generationProgress and progressMessage still exist until U13 deletes them."
+    ],
+    "tests": [
+     "hooks/useGeneration.test.tsx: the stages advance signature, design, checks, saving in order; onPartReady marks caption and image separately.",
+     "cancelGeneration aborts the queued task, discards a late onSuccess (no setGeneratedPost, no step change), returns to DETAILS with no error and logs ai.generate.cancelled.",
+     "A cancel after logPost has started still leaves the created post as a Draft; the result is discarded."
+    ],
+    "acceptance": [
+     "No synthetic stage is ever shown: every stage change comes from a real boundary in the mutation.",
+     "A cancelled run never reaches the Post step.",
+     "All existing useGeneration tests pass."
+    ],
+    "depends_on": [
+     "U01"
+    ]
+   },
+   {
+    "id": "U09",
+    "pr": "PR2a",
+    "title": "Step machine, URL sync and the post draft slice",
+    "difficulty": "design",
+    "creates": [],
+    "modifies": [
+     "types.ts (AppStep with explicit numbers: LOGIN=0, HOME=1, DETAILS=2, CREATING=3, POST=4, ADMIN=5, DEALER_ADMIN=6, WORK=7)",
+     "stores/appStore.ts (stepForRole returns HOME; resolveRestoredStep; setStep(HOME) starts a new post and clears generationParams, postDraft and pendingRelease; reset; startRemix goes to DETAILS; new postDraft {categoryId, scenarioId, decodedVehicle?, personalLine?} persisted with the session; pendingRelease: CapturedRelease|null kept in memory only and cleared on reset, logout, identity change and HOME; pendingPhoto for a drop or shelf reuse made before a tile is picked)",
+     "utils/persistence.ts (postDraft field; the signature is never persisted)",
+     "hooks/useUrlStepSync.ts",
+     "hooks/useAppController.ts (handlePhotoPicked({selection, scenarioId, categoryId}) archives the original, sets selectedImage and postDraft, and goes to DETAILS with no crop modal; the gemini and publish-pipeline warm-ups key on HOME and DETAILS)",
+     "components/PostHistory.tsx, hooks/useGeneration.ts and App.tsx (enum renames)",
+     "__tests__/sessionRestore.test.ts",
+     "__tests__/useUrlStepSync.test.tsx",
+     "__tests__/persistence.test.ts"
+    ],
+    "retires": [
+     "the AppStep member names CAPTURE, CUSTOMIZE, GENERATING and RESULT"
+    ],
+    "reuses": [
+     "archiveDealerMedia (utils/creativeStorage.ts)",
+     "saveSession and loadSession (utils/persistence.ts)"
+    ],
+    "behaviours_preserved": [
+     "A saved session's numeric step still restores. e2e seeds step:4 and lands on POST.",
+     "A POST step without a complete generatedPost never restores.",
+     "An interrupted CREATING restores to DETAILS.",
+     "Dashboards stay role-gated. The URL never signs anyone in or out.",
+     "Back steps through the flow instead of exiting the installed PWA.",
+     "CREATING owns the screen: Back is refused while it runs."
+    ],
+    "tests": [
+     "useUrlStepSync: #/home, #/details, #/post and #/work; CREATING writes no history entry of its own; legacy aliases resolve; Back during CREATING is refused; POST requires generatedPost; DETAILS requires selectedImage; WORK is allowed for any signed-in role.",
+     "sessionRestore: numeric compatibility; WORK restores to WORK; step 2 without a photo goes to HOME.",
+     "The signature PNG is never written to localStorage."
+    ],
+    "acceptance": [
+     "grep finds no AppStep.CAPTURE, CUSTOMIZE, GENERATING or RESULT outside the alias table.",
+     "Loading #/capture lands on #/home, and loading #/result with a post lands on #/post.",
+     "typecheck and vitest pass."
+    ],
+    "depends_on": [
+     "U08"
+    ]
+   },
+   {
+    "id": "U10",
+    "pr": "PR2a",
+    "title": "services/storeDefaults.ts — what the store decides, with fallbacks until PR3",
+    "difficulty": "design",
+    "creates": [
+     "services/storeDefaults.ts",
+     "services/storeDefaults.test.ts"
+    ],
+    "modifies": [
+     "types.ts (optional PR3 fields on Dealer, documented as PR3 and read with ?.: default_channels?: string[], offered_looks?: string[], category_slate?: Partial<Record<BrandCategoryId,{playful?:boolean;video?:boolean}>>)"
+    ],
+    "retires": [],
+    "reuses": [
+     "resolveCreative, CATEGORY_OUTPUTS, LOOK_DEFINITIONS, isFeatureAllowed and brandCategoryForScenario (services/creativeSystem.ts)",
+     "getScenariosForDealer (services/postScenarios.ts)",
+     "buildEmployeeDisclosure (utils/complianceDisclosures.ts)",
+     "dealershipMentionFor (utils/socialAttribution.ts)"
+    ],
+    "behaviours_preserved": [
+     "v2 dealers (creative_system_v2 true) get exactly what resolveCreative prescribes: platformIds, formatIds, the signature and alternate Looks, playful style, motion, and the video and playful gates.",
+     "Legacy dealers keep style and tone precedence through the dealer's default_style, now limited to their enabled_styles.",
+     "A customer category, or a scenario with requiresCustomer, requires a release.",
+     "The employee disclosure stays opt-out.",
+     "requires_approval is honoured."
+    ],
+    "tests": [
+     "services/storeDefaults.test.ts: a v2 dealer matches resolveCreative field by field.",
+     "A legacy dealer with no enabled_styles gets 3 Looks; with 1 enabled style it gets 1 Look (no chip row).",
+     "Channels: deliveries give Facebook and Instagram (story folded into Instagram, default Facebook); service gives Facebook and Google; team gives Facebook and LinkedIn.",
+     "Service, community and team never allow video. Playful is hidden without dealer.playful_style.",
+     "The PR3 fields win when present.",
+     "Custom scenarios become extra tiles with category, label and blurb."
+    ],
+    "acceptance": [
+     "HOME_TILES: deliveries = Delivery, 'Customer + their new car', customer_delivery. inventory = New arrival, 'Fresh on the lot', new_arrival. service = Service, 'Service specials', service_promotion. promotions = Promotion, 'Sales & events', model_year_end. community = Community, 'Around {town}' (town parsed from dealer.address, falling back to 'Around town'), community_event. team = Team, 'People of the store', team_anniversary.",
+     "resolveStoreDefaults({dealer, person, categoryId, scenarioId, websiteReady}) returns {releaseRequired, vehicleRelevant, channels, defaultChannelId, generationPlatformIds, primaryProfile, looks (1–3), defaultLookId, videoAllowed, motion, playfulStyleId, facebookTag, employeeDisclosure, requiresApproval, websiteChannel}.",
+     "The module is pure: no React, no network."
+    ],
+    "depends_on": [
+     "U09"
+    ]
+   },
+   {
+    "id": "U11",
+    "pr": "PR2a",
+    "title": "components/Home.tsx — 'What are you posting?'",
+    "difficulty": "design",
+    "creates": [
+     "components/Home.tsx",
+     "components/home/CategoryTiles.tsx",
+     "components/home/MyWorkPreview.tsx",
+     "__tests__/Home.test.tsx"
+    ],
+    "modifies": [
+     "components/Header.tsx (variant 'home' shows the dealer mark and name plus an avatar account menu with My work, Settings and Log out; variant 'flow' shows back chevron, title and avatar; desktop shows 'Posting as {name}' with My work, Settings and Log out as in HomeDesk; studioMode stays until U21)",
+     "__tests__/sunlightThemeContrast.test.ts (add the new files to MIGRATED_FILES)"
+    ],
+    "retires": [],
+    "reuses": [
+     "usePhotoIntake (U05)",
+     "HOME_TILES and resolveStoreDefaults (U10)",
+     "usePostHistoryList with limit 3 and postStatusFor (U06)",
+     "isWalkaroundStudioEnabled (services/walkaroundFlags.ts) and the lazy WalkaroundStudio",
+     "SCENARIO_CATEGORY_ICON (services/postScenarios.ts)",
+     "the Button and EmptyState primitives in components/ui"
+    ],
+    "behaviours_preserved": [
+     "The walkaround studio stays behind VITE_WALKAROUND_STUDIO_ENABLED, now as a 7th tile ('Walkaround video') that opens the existing studio as a sub-view with a back link.",
+     "Drag-and-drop works on desktop only.",
+     "Recoverable intake errors stay inline in an ErrorBanner and never unmount the tiles.",
+     "The walkaround sub-view sits inside a PanelErrorBoundary.",
+     "The person's defaultCategory tile is marked (a 'Your usual' badge); the order does not change."
+    ],
+    "tests": [
+     "__tests__/Home.test.tsx: six tiles plus custom tiles; the walkaround tile appears only with the flag.",
+     "Clicking a tile clicks the matching hidden input synchronously.",
+     "A picked file calls handlePhotoPicked with that tile's scenarioId.",
+     "The desktop drop leads to pendingPhoto and the 'Pick what this photo is for' state.",
+     "My work preview statuses: 'Shared to Facebook · {time}', 'Waiting for approval', 'Draft'; See all goes to WORK."
+    ],
+    "acceptance": [
+     "The h1 is exactly 'What are you posting?' and the subtitle is 'Pick one and the camera opens.' (desktop: 'Pick one, then take or choose the photo.').",
+     "Phones use hidden <input type=file accept='image/*' capture='environment'> per tile, aria-label 'Take a photo for {Label}'. Each tile has a 44 px secondary 'Choose from library' control without the capture attribute. Desktop has no capture attribute and shows the line 'Or drop a photo anywhere on this page.'",
+     "2 columns at 280–440 px and 3 at 768 px or wider; no horizontal overflow at 280 px; every target at least 44 px.",
+     "The page matches Home.dc.html and HomeDesk.dc.html in structure and tokens, uses only Light Table tokens, and passes the MIGRATED_FILES strict rules.",
+     "No review modal and no progress rail."
+    ],
+    "depends_on": [
+     "U05",
+     "U06",
+     "U09",
+     "U10"
+    ]
+   },
+   {
+    "id": "U12",
+    "pr": "PR2a",
+    "title": "components/PostDetails.tsx with the signature sheet, VIN sheet and optional line",
+    "difficulty": "design",
+    "creates": [
+     "components/PostDetails.tsx",
+     "components/details/ReleaseSheet.tsx (the body of PhotoReleaseModal restyled as one sheet: plain-language consent 'Hand the phone to your customer. They agree that {dealer} can share this photo on its social channels and website.', 'Customer's full name', SignaturePad draw or 'Type name instead' with attestation, Done, Cancel)",
+     "__tests__/PostDetails.test.tsx",
+     "__tests__/ReleaseSheet.test.tsx"
+    ],
+    "modifies": [
+     "components/PhotoReleaseModal.tsx (becomes a thin Modal wrapper around ReleaseSheet, or is deleted in U14 once no caller remains)",
+     "components/VinScanner.tsx (initialMode prop that defaults to 'manual' when getBarcodeDetector() is null, so iOS opens in manual mode directly)",
+     "__tests__/PhotoReleaseModal.test.tsx (becomes ReleaseSheet.test.tsx)"
+    ],
+    "retires": [],
+    "reuses": [
+     "buildGenerationRequest (U01), both as a dry-run for the gate reason and for the real request",
+     "resolveStoreDefaults (U10)",
+     "store.postDraft and store.pendingRelease (U09)",
+     "SignaturePad (components/SignaturePad.tsx)",
+     "decodeVin and DecodedVehicle (services/vinDecoder.ts)",
+     "toPublicCustomerLabel (utils/customerIdentity.ts)",
+     "listWebsiteDestinations (services/websitePublishing.ts)",
+     "useKeyboardShortcuts (Cmd/Ctrl+Enter)",
+     "the Modal primitive in sheet mode"
+    ],
+    "behaviours_preserved": [
+     "No AI processing for a customer category without a captured release.",
+     "The customer's name is typed once. The public label is the first name only (toPublicCustomerLabel of the signer's name), and the legal name stays on the release.",
+     "Changing the VIN after signing clears the signature and says why ('Vehicle changed — get the signature again').",
+     "A mismatch at Create post discards the release and reopens the sheet.",
+     "The personal line is capped at 140 characters and passes the identity lock before generation.",
+     "The typed signature needs the attestation.",
+     "Vehicle facts ground the brief, and the vehicle row is hidden for scenarios without a vehicle.",
+     "Retry and Cancel reseed every field from postDraft and pendingRelease.",
+     "The 'Generation was interrupted' error banner with its recovery action stays.",
+     "Cmd/Ctrl+Enter creates the post.",
+     "The sticky bottom bar respects the safe area."
+    ],
+    "tests": [
+     "__tests__/PostDetails.test.tsx: Create post is disabled with 'Needs the customer's signature first' for a delivery, and enabled after signing.",
+     "After signing the row reads 'Signed · {full name}'.",
+     "The VIN change clears the signature. The personal-line identity error is shown.",
+     "Non-customer categories show no signature row.",
+     "The seed survives a CREATING round trip and a Cancel.",
+     "The disabled state uses aria-disabled plus aria-describedby with the reason.",
+     "__tests__/ReleaseSheet.test.tsx: validation copy; the typed signature and attestation; onCaptured payload {customerName, signaturePngDataUrl, vin}."
+    ],
+    "acceptance": [
+     "There is no Look, tone, size, caption source, channel matrix, media mode or Advanced options on this screen.",
+     "The photo is edge-to-edge at 262 px on phones and a 4:3 well on desktop, with 'Change photo'. Change photo reopens the same tile's camera or file picker in place; whether the signature survives is Open question 2, defaulting to clearing it.",
+     "The layout matches all three states of Details.dc.html (idle, sheet, signed) and DetailsDesk.dc.html.",
+     "The sheet is one dialog titled 'Customer photo release' with focus trap and Escape.",
+     "It meets the MIGRATED_FILES rules and axe reports 0 serious."
+    ],
+    "depends_on": [
+     "U01",
+     "U09",
+     "U10"
+    ]
+   },
+   {
+    "id": "U13",
+    "pr": "PR2a",
+    "title": "Rewritten LoadingOverlay: Creating with honest stages and Cancel",
+    "difficulty": "mechanical",
+    "creates": [],
+    "modifies": [
+     "components/LoadingOverlay.tsx (props {photo, stage, partsReady, onCancel}; the photo stays visible with a scrim; heading 'Creating your post…'; list 'Post creation stages' with Design, Caption and Checks, each marked done, active or waiting; a polite live region announces stage changes; secondary Cancel)",
+     "hooks/useGeneration.ts (delete the synthetic progress interval, the timed messages, generationProgress and progressMessage)",
+     "components/MainContent.tsx (CREATING renders the overlay with store.selectedImage)",
+     "__tests__/PostResult.test.tsx (rewrite its LoadingOverlay describe block into __tests__/LoadingOverlay.test.tsx)"
+    ],
+    "retires": [
+     "the synthetic progress percentage and the second message stream"
+    ],
+    "reuses": [
+     "generationStage, partsReady and cancelGeneration (U08)"
+    ],
+    "behaviours_preserved": [
+     "The live region announces politely.",
+     "Reduced motion is respected: no spinner rotation.",
+     "Back is blocked during CREATING (U09)."
+    ],
+    "tests": [
+     "__tests__/LoadingOverlay.test.tsx: stage mapping (signature and design show Design as active; caption done when partsReady.caption; checks and saving show Checks); no progressbar role; Cancel calls onCancel."
+    ],
+    "acceptance": [
+     "No percentage anywhere.",
+     "Cancel returns to Details with the photo, signature, VIN and line intact (covered in U12 tests).",
+     "It meets the MIGRATED_FILES rules."
+    ],
+    "depends_on": [
+     "U08",
+     "U09"
+    ]
+   },
+   {
+    "id": "U14",
+    "pr": "PR2a",
+    "title": "Shell wiring and front-half deletions",
+    "difficulty": "mechanical",
+    "creates": [
+     "__tests__/DetailsDraftPersistence.test.tsx (replaces MainContentCustomizerPersistence)"
+    ],
+    "modifies": [
+     "App.tsx (remove the crop modal, its prefetch and its Suspense; idle-prefetch the PostDetails chunk after sign-in; Escape on DETAILS goes to HOME; the My work modal also renders RecentCaptureShelf so capture recovery stays reachable, and reuse sets pendingPhoto then HOME)",
+     "components/MainContent.tsx (HOME, DETAILS, CREATING and POST cases; POST still lazy-loads PostResult; PostResult.onRemix seeds postDraft and goes to DETAILS; ProgressSteps removed)",
+     "hooks/useAppController.ts (remove the crop state)",
+     "__tests__/lazyPanelBootCost.test.ts (the 'mandatory photo-review chunk' cases become the Details chunk warm-up)",
+     "__tests__/FrontendProductionPass.test.tsx (drop the ImageCropModal dialog cases; keep the imageUtils dimension cap if it tests the utility)",
+     "__tests__/DragDropReproduction.test.tsx (retarget to Home: a drop goes to pendingPhoto)",
+     "__tests__/errorCopyHygiene.test.ts",
+     "__tests__/sunlightThemeContrast.test.ts (remove the deleted files from MIGRATED_FILES; add App.tsx, Home, PostDetails, ReleaseSheet and LoadingOverlay)"
+    ],
+    "retires": [
+     "components/CameraCapture.tsx",
+     "components/WebcamCapture.tsx",
+     "components/ImageCropModal.tsx",
+     "components/PostCustomizer.tsx",
+     "components/ScenarioPicker.tsx",
+     "components/ProgressSteps.tsx",
+     "components/templates.ts and components/templates.test.ts",
+     "__tests__/PostCustomizer.test.tsx (its guard cases are ported to services/generationRequest.test.ts and __tests__/PostDetails.test.tsx first)",
+     "__tests__/ScenarioPicker.test.tsx",
+     "__tests__/MainContentCustomizerPersistence.test.tsx"
+    ],
+    "reuses": [
+     "everything from U09 to U13"
+    ],
+    "behaviours_preserved": [
+     "The PWA update prompt, offline banner and impersonation banner stay in the shell.",
+     "Recovery of the original capture stays reachable from My work.",
+     "Cold-cache protection: the Details Suspense fallback shows the photo with 'Opening details…', never a dead tap.",
+     "The old result screen, PostResult, still works as the Post step, including remix."
+    ],
+    "tests": [
+     "__tests__/DetailsDraftPersistence.test.tsx: remix from PostResult restores the category, VIN and line; a fresh tile start clears the previous draft; a failed generation reseeds the draft.",
+     "Full vitest green."
+    ],
+    "acceptance": [
+     "The capture-to-Details path has zero modals.",
+     "The deleted files have no remaining imports (tsc).",
+     "The Vite build output has no chunk for CameraCapture, ImageCropModal or PostCustomizer."
+    ],
+    "depends_on": [
+     "U11",
+     "U12",
+     "U13"
+    ]
+   },
+   {
+    "id": "U15",
+    "pr": "PR2a",
+    "title": "e2e for PR2a",
+    "difficulty": "mechanical",
+    "creates": [
+     "the 'delivery reaches the post in the fewest taps' case in e2e/flow.spec.ts"
+    ],
+    "modifies": [
+     "e2e/flow.spec.ts ('keeps the authenticated capture studio reachable on a changing phone viewport' becomes 'keeps Home tiles reachable on a changing phone viewport')",
+     "e2e/pwa-install.spec.ts ('/#/capture' becomes '/#/home'; the heading becomes 'What are you posting?')",
+     "e2e/real-pocketbase.spec.ts (salesperson landing heading)"
+    ],
+    "retires": [],
+    "reuses": [
+     "the existing session, telemetry and proxy route stubs and the navigator.share and clipboard init scripts in e2e/flow.spec.ts"
+    ],
+    "behaviours_preserved": [
+     "The 16-project matrix (chromium and webkit across 8 viewports) stays green.",
+     "The safe-area, invalid-login, manager sign-in, result-workspace, website-only and offline cases are untouched in PR2a."
+    ],
+    "tests": [
+     "Home case: heading, six tile buttons, no horizontal overflow, 44 px targets, a tile opens the input with capture='environment' on mobile projects, setInputFiles leads to Details with heading 'Delivery' and disabled 'Create post' plus 'Needs the customer's signature first'.",
+     "Happy path: stub /api/app/photo_releases, /api/proxy/** (caption JSON and an image data URL), /api/app/posts and link-post. Tile, setInputFiles, 'Get customer's signature', 'Type name instead' with attestation, Done, 'Create post', the Creating heading, then land on POST (still PostResult: 'Publish studio' on desktop, 'Facebook Feed' on phones). Assert the release POST happened before the first /api/proxy call."
+    ],
+    "acceptance": [
+     "npx playwright test is green on all 16 projects locally after installing the browsers (Playwright browser trap).",
+     "No output is piped through tail."
+    ],
+    "depends_on": [
+     "U14"
+    ]
+   },
+   {
+    "id": "U16",
+    "pr": "PR2b",
+    "title": "hooks/usePostShare.ts — Share opens the OS sheet in one tap",
+    "difficulty": "design",
+    "creates": [
+     "hooks/usePostShare.ts",
+     "hooks/usePostShare.test.tsx"
+    ],
+    "modifies": [
+     "services/publishTargets.ts (export a channel-to-target helper only if needed; the sharePrepared and preparePublishShare contracts do not change)"
+    ],
+    "retires": [],
+    "reuses": [
+     "preparePublishShare, sharePrepared, copyPreparedCaption and downloadPreparedMedia (services/publishTargets.ts)",
+     "usePreparedDelivery (U04)",
+     "buildShareCaptions and buildCopyText (U02)",
+     "recordPostShared (U07)",
+     "flush from useDraftAutosave (U03)",
+     "connectionManager"
+    ],
+    "behaviours_preserved": [
+     "WebKit activation: share() is a synchronous handler whose first statement calls sharePrepared(prepared), which calls navigator.share before any await. Nothing is awaited earlier in the click, and the draft flush starts after the share call.",
+     "The caption goes to the clipboard in parallel with the share sheet, with an honest fallback message when the clipboard is refused.",
+     "Offline shares fail honestly ('You're offline. Your post is saved on this device — reconnect to share it.').",
+     "Only one PreparedPublishShare is held, and it is released on channel change or unmount.",
+     "A blockedReason on the caption variant or any lock blocks the share and shows the one banner.",
+     "A video delivery is shared only as its exact prepared file.",
+     "The Facebook and LinkedIn page-mention hint is kept as one line of helper text."
+    ],
+    "tests": [
+     "hooks/usePostShare.test.tsx: navigator.share is called synchronously (spy asserts the call before any microtask); nothing is awaited before it; prepare runs on channel select and after caption edits (300 ms debounce); status 'preparing' disables Share.",
+     "Result handling: a shared result calls recordPostShared once and merges into generatedPost.sharedTo; a cancelled result records nothing; a failed record keeps the local status and retries once on reconnect.",
+     "Desktop: download plus copy records via 'download'.",
+     "A planted-mutant source guard fails if 'await' appears before sharePrepared in share()."
+    ],
+    "acceptance": [
+     "An e2e on webkit-phone-390 shows exactly one navigator.share call per Share tap, with a 1080x1350 JPEG file and the fitted caption.",
+     "No 'Share' dialog exists in the DOM."
+    ],
+    "depends_on": [
+     "U02",
+     "U03",
+     "U04",
+     "U07"
+    ]
+   },
+   {
+    "id": "U17",
+    "pr": "PR2b",
+    "title": "components/PostScreen.tsx — preview card, channels, Look, caption, one banner, Share",
+    "difficulty": "design",
+    "creates": [
+     "components/PostScreen.tsx",
+     "components/post/PostPreviewCard.tsx",
+     "components/post/ChannelChips.tsx",
+     "components/post/LockBanner.tsx",
+     "__tests__/PostScreen.test.tsx"
+    ],
+    "modifies": [
+     "components/MainContent.tsx (POST renders PostScreen instead of PostResult)",
+     "components/Header.tsx (flow variant; back goes to Details for a live post or to My work for a reopened one)"
+    ],
+    "retires": [],
+    "reuses": [
+     "useApprovalStatus, useReleaseRepair, useDraftAutosave and useWebsiteHandoff (U03)",
+     "derivePostLocks (U02)",
+     "usePreparedDelivery and useVideoJobs (U04)",
+     "usePostShare (U16)",
+     "usePostCreativeTools (U18)",
+     "resolveStoreDefaults (U10)",
+     "PlatformGlyph for the chip icons",
+     "analyzeCaptionForDelivery and captionUsesOnlyExpectedCustomer for the blur re-check"
+    ],
+    "behaviours_preserved": [
+     "The disclosure stays outside the editable body: the caption textarea edits the body only; the employee disclosure and compliance footer render as a non-editable muted suffix inside the card and go into every outgoing caption.",
+     "The identity guard and prohibited-claims check re-run on blur and again at share and copy time.",
+     "All delivery goes through one gate with the reason in each disabled control's aria-label.",
+     "Manager approval freezes the creative: Look, Try another and Edit are hidden, not merely disabled, and the banner reads 'Waiting for manager approval' until approved.",
+     "Release repair runs from the banner action ('Retry saving release').",
+     "The website-only post's primary action becomes 'Send website draft', then 'Review website draft'; privacy and the compare-and-set send are kept.",
+     "The basic-fallback caption shows as the banner with 'Try AI again' only while no other lock applies.",
+     "A reopened teammate post is read-only; delivery (Share or Download) stays available when unlocked; there are no edit tools.",
+     "A reopened post with no original capture has no Try another, Look or Playful."
+    ],
+    "tests": [
+     "__tests__/PostScreen.test.tsx: one LockBanner whatever the combination of locks, following the precedence, with one action.",
+     "Chips are a single-select group 'Post to' with aria-pressed, and switching Instagram re-prepares the Instagram file; Share is labelled 'Share to {channel}'.",
+     "Desktop shows 'Download for {channel}' and 'Copy caption'.",
+     "A blur with another customer's name locks with the identity message.",
+     "Approval pending hides the secondary row; read-only has no textarea.",
+     "Port the PostResult.test.tsx cases for locks, release repair, approval and website into this file or the hook tests before U21 deletes the old file."
+    ],
+    "acceptance": [
+     "Matches Post.dc.html (ready and shared) and PostDesk.dc.html: avatar, salesperson and store header in the card, 4:5 creative, caption with the muted disclosure, 'Edit caption', 'Post to' chips, 'Look' chips (1–3; the row is hidden with only one), 'Try another' and 'Add video' secondary, and 'Share to Facebook' as the 56 px primary.",
+     "There is no batch checkbox, share queue, 'Preparing' tile for unselected outputs, Export sizes, Schedule, Fun mode browser, Video Director, More panel or platform caption tabs.",
+     "Light Table tokens and MIGRATED_FILES rules; axe reports 0 serious; 44 px targets."
+    ],
+    "depends_on": [
+     "U16",
+     "U18"
+    ]
+   },
+   {
+    "id": "U18",
+    "pr": "PR2b",
+    "title": "hooks/usePostCreativeTools.ts — Try another, Look, Add video, Playful",
+    "difficulty": "design",
+    "creates": [
+     "hooks/usePostCreativeTools.ts",
+     "hooks/usePostCreativeTools.test.tsx"
+    ],
+    "modifies": [
+     "hooks/useGeneration.ts (handleChangeLook(look): update generationParams style and tone, then run the existing regenerate-image mutation; handleTryAnother(): regenerate the image and the caption once)",
+     "types.ts (GeneratedPost.tryAnotherUsed?: boolean and lookRenders?: Record<string,string> persisted with the post so a reload cannot reset the budget)"
+    ],
+    "retires": [],
+    "reuses": [
+     "handleRegenerateImage, handleRegenerateText and handleFunMode (the house Playful) in hooks/useGeneration.ts",
+     "houseMotionOptions and startVideoJob (U04, from PostResult's handleAddHouseVideo)",
+     "the playful-pair logic from PostResult (playfulPendingMasterRef and selectPlayfulVersion)",
+     "resolveStoreDefaults for the looks, motion and playfulStyleId (U10)"
+    ],
+    "behaviours_preserved": [
+     "The one-shot retry budget stays (brand mode's rule, applied to Try another). After use it says 'Already used once on this post. A manager can regenerate it for you.'",
+     "A Look switch renders each Look at most once: renders are cached per Look and switching back costs nothing.",
+     "Playful keeps the house master beside the playful version and switches between them with one tap.",
+     "Add video uses the house motion (9:16, 6 s, 720p, music on) and the duplicate-spend guard.",
+     "Every tool is refused when the creative is locked for review, the website handoff has started, or the post is read-only.",
+     "Tools that need the original capture are hidden when there is none."
+    ],
+    "tests": [
+     "hooks/usePostCreativeTools.test.tsx: the Try another budget is persisted and survives a remount.",
+     "Look cache hit makes no provider call; locked disables every tool; Playful pair toggling; video refused when videoAllowed is false; video is never offered for service, community or team."
+    ],
+    "acceptance": [
+     "The maximum provider spend per post from Post-screen tools is bounded: 1 Try another plus (number of Looks minus 1) renders plus 1 Playful plus 1 video. A test asserts the counts."
+    ],
+    "depends_on": [
+     "U04",
+     "U10"
+    ]
+   },
+   {
+    "id": "U19",
+    "pr": "PR2b",
+    "title": "Shared state, Done and the discard guard only for an unsaved post",
+    "difficulty": "mechanical",
+    "creates": [
+     "__tests__/postLeaveGuard.test.tsx"
+    ],
+    "modifies": [
+     "components/PostScreen.tsx (after a successful share: status 'Shared to {channel} · saved to My work' plus a Done primary; Done calls reset() and goes to HOME; channels already shared show a check; sharing to another channel stays possible)",
+     "hooks/useUrlStepSync.ts (Back from POST is allowed when canLeavePost is true: to DETAILS with a remix seed when a capture exists, otherwise to WORK; when false, the URL is restored and a discard dialog opens)",
+     "App.tsx (Header confirmBeforeLogout is true only when the post is unsaved; Escape on POST follows the same rule)",
+     "stores/appStore.ts (canLeavePost selector: Boolean(generatedPost.postId) || (generatedPost.sharedTo?.length ?? 0) > 0)"
+    ],
+    "retires": [
+     "the 'Unsaved creative in progress…' toast when a post is already saved",
+     "the 'Create another post? … Discard and continue' warning after a share"
+    ],
+    "reuses": [
+     "reset and startRemix (stores/appStore.ts)",
+     "the Modal primitive"
+    ],
+    "behaviours_preserved": [
+     "The discard guard still protects an unsaved creative (no postId, for example when saving to history failed).",
+     "Back never bypasses that guard.",
+     "Logging out with an unsaved post still asks for confirmation."
+    ],
+    "tests": [
+     "__tests__/postLeaveGuard.test.tsx: a saved post goes Back to Details without a prompt; an unsaved post shows the prompt; a shared post goes to Home on Done; a reopened post goes Back to Work.",
+     "__tests__/FrontendResiduals.test.tsx (the 'confirms before logging out with a generated result' case now uses an unsaved post fixture)."
+    ],
+    "acceptance": [
+     "After a share, no dialog appears on Done, Back or Logout."
+    ],
+    "depends_on": [
+     "U17"
+    ]
+   },
+   {
+    "id": "U20",
+    "pr": "PR2b",
+    "title": "components/MyWork.tsx — the list screen (#/work) with the recovery section",
+    "difficulty": "design",
+    "creates": [
+     "components/MyWork.tsx",
+     "components/work/DeviceRecoveryGrid.tsx",
+     "__tests__/MyWork.test.tsx"
+    ],
+    "modifies": [
+     "components/MainContent.tsx (the WORK case)",
+     "App.tsx (Header 'My work' calls setStep(WORK) for salespeople; the My work modal is removed from the salesperson path)",
+     "components/PostHistory.tsx (the manager dashboard mounts DeviceRecoveryGrid instead of LocalMediaArchive)",
+     "components/Home.tsx ('See all' goes to WORK)"
+    ],
+    "retires": [
+     "the App.tsx 'My work' Modal"
+    ],
+    "reuses": [
+     "usePostHistoryList, toGeneratedPostFromRecord and postStatusFor (U06)",
+     "useDeviceMedia (U06)",
+     "the Modal primitive for confirming a delete"
+    ],
+    "behaviours_preserved": [
+     "Quarantined rows are masked and cannot be reopened, with plain-language copy.",
+     "The rejection reason shows on the row on phones as well (fixes the audit's mobile gap).",
+     "Teammate posts reopen read-only.",
+     "Website status badges with Retry stay.",
+     "Recovery copies are device-local only, carry no names, are cleared on logout and need a confirmed delete.",
+     "Loading more is paginated."
+    ],
+    "tests": [
+     "__tests__/MyWork.test.tsx: row shows thumbnail, category, date and status ('Shared to Facebook', 'Waiting for approval', 'Changes requested: {reason}', 'Draft').",
+     "Tapping a row reopens POST, read-only for a teammate's post; quarantined rows cannot be tapped; the recovery delete asks for confirmation; empty state."
+    ],
+    "acceptance": [
+     "A real screen, not a modal, with heading 'My work'. Back goes to Home.",
+     "The device section is titled 'On this device' and uses the same visual language.",
+     "No system-explanation copy (row counters or footer paragraph).",
+     "MIGRATED_FILES rules apply."
+    ],
+    "depends_on": [
+     "U06",
+     "U07",
+     "U17"
+    ]
+   },
+   {
+    "id": "U21",
+    "pr": "PR2b",
+    "title": "Back-half deletions and test retargeting",
+    "difficulty": "mechanical",
+    "creates": [],
+    "modifies": [
+     "App.tsx (remove the forced dark theme for the Post step, the publish-studio-theme class and the desktop studio rail — the default for Open question 1)",
+     "components/Header.tsx (remove studioMode)",
+     "styles/globals.css (delete the .publish-studio-theme block only if Open question 1 resolves to following the theme)",
+     "hooks/useGeneration.ts (delete unused handleEditImage, handleEditText and generateCaptionVariant; keep handleFunMode for Playful and handleGenerateVideo for Add video)",
+     "__tests__/sunlightThemeContrast.test.ts (drop STUDIO_THEMED_FILES and the studio-invariants case; add PostScreen, MyWork and their subcomponents to MIGRATED_FILES; plant the primary and error mutants)",
+     "__tests__/complianceDisclosures.test.ts (the deliveredCaption guard moves to components/post/PostPreviewCard.tsx or services/deliveryCaptions.ts)",
+     "__tests__/rejectionReason.test.ts",
+     "__tests__/scheduleHonesty.test.ts (keep the backend cron and 'never promises auto-publish' checks over the files that remain; drop the ScheduleDialog and PostResult entries)",
+     "__tests__/VideoDirectorFormats.test.tsx (retarget to components/video-director/constants.ts)",
+     "__tests__/FrontendResiduals.test.tsx ('Publish studio' becomes the Post screen chrome)"
+    ],
+    "retires": [
+     "components/PostResult.tsx",
+     "components/MobilePublishStudio.tsx",
+     "components/ShareDialog.tsx",
+     "components/PlatformDeliveryBoard.tsx",
+     "components/CaptionStudio.tsx",
+     "components/MultiFormatExportModal.tsx",
+     "components/ScheduleDialog.tsx (the backend /schedule route stays)",
+     "components/CaptionAlternativesModal.tsx and its test",
+     "components/EditTextModal.tsx",
+     "components/ImagePreviewModal.tsx",
+     "components/PlatformLimitMeter.tsx",
+     "components/FunModeDirectorModal.tsx (the promptConfig catalogue stays for PR3's manager picker)",
+     "components/VideoDirectorModal.tsx (video-director/constants.ts stays as data)",
+     "components/LocalMediaArchive.tsx",
+     "components/RecentCaptureShelf.tsx",
+     "__tests__/PostResult.test.tsx (after its cases are ported in U17 and U03)",
+     "__tests__/MobilePublishStudio.test.tsx",
+     "__tests__/PlatformDeliveryBoard.test.tsx",
+     "__tests__/ShareDialogReliability.test.tsx (invariants ported to hooks/usePostShare.test.tsx)",
+     "__tests__/narrowPhoneActionTiles.test.ts"
+    ],
+    "reuses": [],
+    "behaviours_preserved": [
+     "Every behaviour in the audit's KEEP lists maps to a surviving hook, service or test. U21's PR description carries a checklist from each KEEP item to its new home.",
+     "utils/multiFormatExport.ts stays (EXPORT_FORMATS and renderFormatIfNeeded are used by usePreparedDelivery)."
+    ],
+    "tests": [
+     "Full vitest green.",
+     "Both sunlight mutants fail before the guard is trusted.",
+     "grep shows no import of any retired file."
+    ],
+    "acceptance": [
+     "The PostResult chunk is gone from the Vite build.",
+     "npm run typecheck, format:check, model-policy:check and vercel-config:check all pass."
+    ],
+    "depends_on": [
+     "U17",
+     "U18",
+     "U19",
+     "U20"
+    ]
+   },
+   {
+    "id": "U22",
+    "pr": "PR2b",
+    "title": "e2e for PR2b — Post, Shared, My work",
+    "difficulty": "mechanical",
+    "creates": [],
+    "modifies": [
+     "e2e/flow.spec.ts ('keeps the responsive result workspace job-first' becomes 'shares from the Post screen in one tap'; 'keeps Website-only private and viewport-bound until the final Send' is adapted to the Post screen; the happy path is extended to Shared, then Done, then Home and My work)"
+    ],
+    "retires": [
+     "the e2e assertions for 'Platform delivery' checkboxes, 'Clear all', 'Share all N', 'Share sequence', 'Finish sequence', the 'creative-tools-panel' testid and the 'Share' dialog"
+    ],
+    "reuses": [
+     "the navigator.share and clipboard init stubs",
+     "the seeded session at step 4",
+     "the /api/app/posts/:id/draft stub",
+     "a new stub for POST /api/app/posts/:id/shared"
+    ],
+    "behaviours_preserved": [
+     "16 projects green.",
+     "The website-only case keeps its privacy assertions (no TikTok, 'Private website draft', controls inside the viewport, the send is compare-and-set bound)."
+    ],
+    "tests": [
+     "Seeded Post: the preview card region 'Post preview'; 'Post to' chips; one tap on 'Share to Facebook' gives window.__shareCalls.length === 1 with a 1080x1350 image/jpeg file; the /shared POST body has destination_id 'facebook_feed' and via 'web-share'; the status 'Shared to Facebook'; Done goes to the heading 'What are you posting?'; My work shows 'Shared to Facebook'.",
+     "Desktop-1440 shows 'Download for Facebook' and 'Copy caption' and no navigator.share call.",
+     "Approval-pending seed: one banner, no Share.",
+     "Happy path from the tile to Shared counts at most 7 in-app taps (the other 3 of the 10 are OS camera and share-sheet taps), with the name typed once."
+    ],
+    "acceptance": [
+     "Green across chromium and webkit on all 8 viewports.",
+     "Also verified on the Vercel origin after deploy (CSP), and on real iOS Safari via simctl after pinning the build through /sw.js (PWA traps)."
+    ],
+    "depends_on": [
+     "U21"
+    ]
+   }
+  ],
+  "step_machine": "The AppStep enum keeps its numeric values, because saved sessions and e2e seeds store the number. Values: LOGIN=0, HOME=1 (was CAPTURE), DETAILS=2 (was CUSTOMIZE), CREATING=3 (was GENERATING), POST=4 (was RESULT), ADMIN=5, DEALER_ADMIN=6, WORK=7 (new).\n\nHashes: HOME #/home, DETAILS #/details, POST #/post, WORK #/work, ADMIN #/admin, DEALER_ADMIN #/dealership, LOGIN #/login. CREATING maps to #/details, so it never creates a history entry of its own. Read-only aliases on popstate and boot: #/capture goes to HOME, #/customize and #/generating go to DETAILS, #/result goes to POST. On boot the URL is normalized with replaceState.\n\nTransitions:\n- LOGIN goes to HOME for salespeople (stepForRole). Managers and system admins still land on their dashboards; starting a post from there is PR3.\n- HOME: a tile tap opens the camera or file picker. On a file, handlePhotoPicked archives the original, sets selectedImage and postDraft {categoryId, scenarioId}, and goes to DETAILS (push #/details). There is no review modal.\n- HOME: a desktop drop or a recovery reuse sets pendingPhoto and shows 'Pick what this photo is for'. A tile then goes straight to DETAILS.\n- HOME: 'See all', or My work in the header, goes to WORK (push #/work).\n- DETAILS: Back or Escape goes to HOME, which starts a new post and clears generationParams, postDraft and pendingRelease.\n- DETAILS: Create post runs buildGenerationRequest then handleGenerate. The mutation's onMutate sets CREATING with no URL change.\n- CREATING is a step, not a local state, because it owns the screen and must survive the Back guard and a reload. On a reload it restores to DETAILS. On success it sets generatedPost and goes to POST (push #/post). On an identity or claims failure, or a provider error, it goes to DETAILS with store.error, and the error banner offers Try again. Cancel calls cancelGeneration and goes to DETAILS with no error. Popstate during CREATING is refused and the URL restored.\n- Retry and remix seed Details from the store, not from local component state. postDraft (category, scenario, decodedVehicle, personalLine) is persisted with the session. The captured release (pendingRelease, including releaseId once saved) is kept in memory only. generationParams stays persisted as today. So Cancel, an error, Back from POST (a remix) and Back from DETAILS after an error all remount Details with the same values and nothing retyped. startRemix clears generatedPost (the post itself remains in My work) and goes to DETAILS.\n- POST: canLeavePost is true when generatedPost.postId exists or a share has been recorded. When true, Back goes to DETAILS as a remix if selectedImage exists, otherwise to WORK. When false, the URL is restored and a 'Discard this post?' dialog opens. Done after a share calls reset and goes to HOME (push #/home). Logout asks for confirmation only when canLeavePost is false.\n- A post reopened from history goes WORK, then openCreative, then setSelectedImage(null), setGenerationParams(null), setGeneratedPost(toGeneratedPostFromRecord(record)) with historyReadOnly for a teammate's post, then POST (push #/post). POST renders read-only: no edit tools, and delivery only when the locks allow it. Back goes to WORK.\n- WORK: Back goes to HOME.\n- Role gates on ADMIN and DEALER_ADMIN are unchanged. The URL never signs anyone in or out.\n- Restore rules: step 4 with a complete post restores to POST. Steps 2, 3 or 4 with only a photo restore to DETAILS. Step 7 restores to WORK. Anything else goes to HOME.",
+  "data_flow": "1. Home. HOME_TILES and resolveStoreDefaults(dealer, person, category) supply the tiles and the per-category rules. A tile tap calls input.click() synchronously on a hidden file input. usePhotoIntake.processFile(file) returns an ImageSelection {workingImage: EXIF-normalized 2048 px JPEG data URL, originalSource: File}. useAppController.handlePhotoPicked archives the original with archiveDealerMedia(kind 'capture', no names), then calls store.setSelectedImage (IndexedDB plus session), store.setPostDraft({categoryId, scenarioId}) and setStep(DETAILS). My work preview uses usePostHistoryList({limit:3}) and postStatusFor(record).\n\n2. Details. It reads postDraft, pendingRelease and resolveStoreDefaults. The signature sheet's onCaptured stores {customerName (legal), signaturePngDataUrl, vin} as pendingRelease, in memory only. The public label is toPublicCustomerLabel(release.customerName). The VIN sheet (VinScanner, manual mode first when there is no BarcodeDetector) writes decodedVehicle to postDraft; a changed VIN clears pendingRelease. The personal line goes to postDraft. Website readiness comes from listWebsiteDestinations.\n\n3. Create post. buildGenerationRequest({dealer, person, scenarioId, publicName, capturedRelease: pendingRelease, decodedVehicle, personalLine, platformIds: defaults.generationPlatformIds, outputProfile: defaults.primaryProfile, websiteEnabled: defaults.websiteChannel, mediaOutputMode 'photo', fallback style and tone from the default Look}). It gives either a gate reason, shown on Create post, or the args for useGeneration.handleGenerate, which keeps its current signature. Inside handleGenerate: resolveCreative reconciles again, then onMutate sets CREATING. The stage becomes 'signature' and runWithPersistedPhotoRelease saves the release before any provider call. The stage becomes 'design', with image and caption running in parallel and partsReady fed by onPartReady. The stage becomes 'checks': the customer-identity guard, prepareCaptionForDelivery (disclosures kept outside the caption), the caption pack and the website draft. The stage becomes 'saving': logPost, which submits for approval when required, then linkReleaseToPostWithRetry. Finally setGeneratedPost(finalPost) and setStep(POST).\n\n4. Post. Each part comes from one module:\n- approval state from useApprovalStatus(post)\n- release state from useReleaseRepair(post)\n- locks and the one banner from derivePostLocks, fed by buildShareCaptions (identity and claims re-scanned per channel)\n- the delivery plan from usePreparedDelivery(post, selectedChannel), through derivePlatformDeliveryPlan and renderFormatIfNeeded (validateVideoMetadata for video)\n- caption edits from the inline textarea: the guards re-run on blur, then useDraftAutosave debounces 600 ms and calls updatePostDraft, returning post_revision\n- the share itself from usePostShare, which runs preparePublishShare(targetId, {text: body, disclosures, requiredPrefix: employeeDisclosure, preparedFile}) before the tap\n- the Share tap calls sharePrepared synchronously: navigator.share first, clipboard in parallel. On a 'shared' result, recordPostShared(postId, {destinationId, via}) goes to POST /api/app/posts/:id/shared, which appends to share_events, and generatedPost.sharedTo is updated in the store and saved with the session.\n- Try another, Look, Add video and Playful from usePostCreativeTools, backed by useGeneration's regenerate and fun-mode mutations and useVideoJobs; results are cached per Look and the budget is persisted on the post.\n- the website send from useWebsiteHandoff: flush the draft, get the revision, onPrepareFinalWebsiteDraft, then enqueueWebsitePublication(postId, draft, expectedRevision).\n\n5. Shared and Done. canLeavePost is now true. reset() goes to HOME and clears the draft and pendingRelease.\n\n6. My work. usePostHistoryList calls listPostsPage, which projects share_events, approval_status and rejection_reason; postStatusFor sets each row's status. Tapping a row calls openCreative: fetchPostCreativeDataUrl, then toGeneratedPostFromRecord, then POST. The 'On this device' section uses useDeviceMedia over creativeStorage, with save via mediaSave and a confirmed delete.\n\nServer-owned data untouched: photo releases, posts (plus share_events), the approval routes and website publications. Client-only data: the local media archive and the in-memory signature.",
+  "e2e_plan": "Matrix: playwright.config.ts has 2 browsers (chromium, webkit) times 8 viewports = 16 projects. It must be green at the end of PR2-0, PR2a and PR2b. Install browsers before running (Playwright local browser trap). Never pipe output through tail. Never edit source while a run is in progress.\n\nPR2-0: no e2e change. Every case must pass unchanged; that is the proof the extraction preserved behaviour. e2e/media-persistence-format.spec.ts is untouched in every PR; it exercises utils/mediaSave directly, including the WebKit fresh-click share of a synthetic MP4.\n\nPR2a (U15):\n(a) 'keeps the authenticated capture studio reachable on a changing phone viewport' becomes 'keeps Home tiles reachable on a changing phone viewport'. Same session stub. Check the heading 'What are you posting?', the six tiles as buttons named by label, 44 px targets, no horizontal overflow at 280 px and 844x390 landscape, the phone input having capture='environment', and the desktop input having none.\n(b) New 'delivery reaches the post in the fewest taps'. Stubs: /api/app/session, /api/telemetry, /api/app/website-destinations (disabled), POST /api/app/photo_releases returning an id, /api/proxy/** (the caption model returns a caption; the image model returns an inline data image; reuse the stub shape from the website test), POST /api/app/posts returning id qa-post-2, and /api/app/photo_releases/*/link-post. Steps: setInputFiles on 'Take a photo for Delivery'; assert Details shows disabled 'Create post' with 'Needs the customer's signature first'; 'Get customer's signature'; fill 'Customer's full name'; 'Type name instead' with the attestation; Done; the row shows 'Signed · …'; Create post; the status 'Creating your post…'; land on POST (still PostResult in PR2a: heading 'Publish studio' on desktop-1440, 'Facebook Feed' on phones). Assert the request order: photo_releases before the first /api/proxy request.\n(c) e2e/pwa-install.spec.ts: goto '/#/capture' becomes '/#/home' (the alias is also tested once), and the heading changes.\n(d) e2e/real-pocketbase.spec.ts: the salesperson landing heading changes.\nThe safe-area, invalid-login, manager sign-in, result-workspace, website-only and offline cases are unchanged.\n\nPR2b (U22):\n(e) 'keeps the responsive result workspace job-first' becomes 'shares from the Post screen in one tap'. Keep the seeded session at step 4 with postId qa-post-1 and platformIds [facebook_feed, linkedin]. Add a stub for POST /api/app/posts/qa-post-1/shared. Phones: 'Share to Facebook' is enabled after preparing; one click gives window.__shareCalls.length === 1 with files[0] of type image/jpeg and decoded size 1080x1350, and the clipboard written; the /shared body is {destination_id:'facebook_feed', via:'web-share'}; the status 'Shared to Facebook'; Done leads to 'What are you posting?'. Select the LinkedIn chip and the next share carries the LinkedIn file. With navigator.share removed, the fallback copy is shown. Desktop-1440: 'Download for Facebook' and 'Copy caption'. Remove the assertions for the delivery-board checkboxes, 'Clear all', 'Share all', 'Share sequence', 'Finish sequence', the 'creative-tools-panel' testid and the 'Share' dialog.\n(f) 'keeps Website-only private and viewport-bound until the final Send' is adapted. Same seed. The Post screen's primary is 'Send website draft'. Keep the 'Private website draft' text, the absence of TikTok, controls inside the viewport, the compare-and-set send with expected_post_revision, and 'Review website draft' after sending.\n(g) Approval-pending seed (requires_approval true, approvalStatus pending, with the status route stubbed to pending): one banner 'Waiting for manager approval', no Share and no secondary tools. Stubbing the route to approved unlocks Share after the 10 s poll (use clock.fastForward).\n(h) Happy path (b) extended through Post, Share, Shared, Done, Home and then My work (stub GET /api/app/posts returning qa-post-2 with share_events) showing 'Shared to Facebook'. Count in-app taps: at most 7, with the name typed once.\n(i) A read-only reopen from My work of a teammate's post: no 'Edit caption' and no 'Try another'.\nMock changes overall: add the /shared stub; the proxy stubs are reused; the navigator.share and clipboard init scripts are unchanged.\n\nAfter deploy: capture screenshots on the Vercel origin (CSP differs from Fly), and on iOS Safari via simctl after pinning the build version through /sw.js.",
+  "risks": [
+   {
+    "risk": "WebKit loses the transient activation, so the iOS share sheet does not open, if any await (a draft flush, file preparation or record call) runs before navigator.share in the Share click.",
+    "mitigation": "usePostShare prepares the share when the channel is selected, and share() is synchronous with sharePrepared as its first statement. The flush and the record call are started after it. Add a unit test spying that navigator.share is called before any microtask, plus a planted-mutant source guard, plus the webkit-phone-390 e2e."
+   },
+   {
+    "risk": "Extracting from the 5.7k-line PostResult breaks subtle ref-based invariants: an autosave overwriting a newer draft, the website send racing a creative change, or an approval poll leaking.",
+    "mitigation": "Do it in PR2-0 alone, with the 58 PostResult tests and the e2e left unedited as the oracle. Only source guards that pin a moved string are retargeted, in the same commit, each proven by a planted mutant. Refs move with their hooks (currentPostPropRef and latestWebsiteCreativeRef go into useWebsiteHandoff)."
+   },
+   {
+    "risk": "Renaming the AppStep enum breaks saved sessions and installed-PWA deep links (#/capture, #/result).",
+    "mitigation": "Keep the numeric values, add WORK=7, and keep read-only hash aliases. Cover with sessionRestore and useUrlStepSync tests; e2e seeds step:4."
+   },
+   {
+    "risk": "Legacy dealers (creative_system_v2 off, which is most of them) lose the channel picker and could get destinations or Looks that do not match their settings.",
+    "mitigation": "storeDefaults passes resolveCreative through unchanged for v2 dealers. Legacy fallbacks come from CATEGORY_OUTPUTS and enabled_styles/default_style, and are pinned by tests. PR3 fields are read only when present."
+   },
+   {
+    "risk": "The PocketBase 0.22 migration silently does nothing (the schema array no-op) and share_events never reaches production.",
+    "mitigation": "Use schema.addField and removeField(getFieldByName(...).id). Prove up and down against a copy of pb_data by reading the schema back, never by trusting 'Applied' or 'Reverted'. __tests__/backendCompliancePolicy.test.ts rejects the no-op shapes."
+   },
+   {
+    "risk": "Deploy order: Fly ships the backend before Vercel ships the frontend, and a rollback can pair the new frontend with an old backend.",
+    "mitigation": "The share endpoint is additive and lands in PR2-0, a release before PR2b. recordPostShared treats 404 and 5xx as non-fatal: the status is kept locally and retried once on reconnect. No request field becomes required."
+   },
+   {
+    "risk": "Cancel during generation leaves an orphaned release or post, or a late success overrides the Details screen.",
+    "mitigation": "A per-run abort and token are checked in onSuccess and onError. The captured release keeps its releaseId, so it is reused and never re-signed. A post created by logPost after the cancel stays a Draft in My work (documented). Unit tests cover the late-success discard."
+   },
+   {
+    "risk": "Look switching or Try another becomes an unbounded provider spend loop.",
+    "mitigation": "At most one render per Look, cached on the post; a persisted one-shot for Try another; a single video and a single Playful; everything blocked while a render is in flight. The budget is asserted in tests."
+   },
+   {
+    "risk": "Compliance regression on the Post screen: an editable caption could lose the employee disclosure or compliance footer, or a typed name could skip the identity guard.",
+    "mitigation": "The textarea edits the body only; disclosures render as a non-editable suffix and are added in buildShareCaptions and buildCopyText after the scan. The guards re-run on blur and again at share and copy. The server re-checks on draft save and in the share route's 409 gates."
+   },
+   {
+    "risk": "Approval stores freeze the creative at generation, so Look, Try another and Edit are unavailable on Post, which may surprise salespeople.",
+    "mitigation": "Keep today's invariant: hide the tools and show one banner 'Waiting for manager approval'. Moving submission to the Share tap is raised as an open question, not changed here."
+   },
+   {
+    "risk": "Removing the forced-dark studio changes contrast measurements, and anything portalled into document.body loses its theme.",
+    "mitigation": "PostScreen uses no portal except the Modal primitive, which carries on-overlay. Add the new files to MIGRATED_FILES; delete the studio invariants only together with the theme. Screenshot both Graphite and Sunlight at 390 and 1440."
+   },
+   {
+    "risk": "Features that only break on Vercel (CSP) for blob: previews and object-URL files, and a stale installed PWA hiding the new flow.",
+    "mitigation": "Reproduce on the Vercel origin before sign-off, pin the build through /sw.js, check real iOS Safari via simctl, and tell Joe to update the PWA before debugging."
+   },
+   {
+    "risk": "Capture recovery becomes unreachable between PR2a and PR2b.",
+    "mitigation": "PR2a mounts RecentCaptureShelf inside the existing My work modal, with reuse going to pendingPhoto and then Home. PR2b replaces both with DeviceRecoveryGrid on the My work screen."
+   }
+  ],
+  "open_questions": [
+   "1. Theme on the Post screen: the Light Table spec §6 keeps the studio dark in both themes, but the new Post screen is where salespeople share outdoors on the lot. Default in U21: follow the user's theme (Sunlight mode) and retire publish-studio-theme. The alternative is to keep it forced dark.",
+   "2. 'Change photo' on Details after signing: the consent text covers 'the photo taken today'. Default: clear the signature and ask again. The alternative is to keep it for a same-customer retake.",
+   "3. Try another as a one-shot for every dealer, or only for brand-mode (v2) dealers as today? Default: one-shot for everyone.",
+   "4. Customer Hub website: should it be a channel chip whenever the destination is enabled? That means a website draft is prepared at every generation, costing one extra metadata model call for non-customer posts. The alternative is to prepare it lazily when the chip is picked. Default: a chip, prepared at generation (today's behaviour).",
+   "5. Desktop 'Download for Facebook' is recorded with via 'download' and labelled 'Saved for Facebook' rather than 'Shared'. Confirm the wording.",
+   "6. Approval stores: keep submitting at generation (the creative is frozen, so there are no Look or Try another choices), or submit at the Share tap so salespeople pick a Look first? Default: keep the current behaviour; PR3 can revisit with approval_policy.",
+   "7. Tile-to-scenario mapping: Promotion maps to model_year_end or test_drive_invite? Team maps to team_anniversary or sold_by_salesperson (which needs a customer release)? Built-in scenarios without a tile (pre-owned, trade-in, recall, testimonial) become unreachable. Is that acceptable, or should they appear as extra tiles or a 'More' row?",
+   "8. Look labels for legacy dealers' StyleOptions: the artboard's 'Clean / Bold / Warm' against the enum (Luxury, Modern, Friendly, Sporty, 3D Depth Pop). Proposed mapping: Luxury to Clean, Modern to Bold, Friendly to Warm, Sporty to Sporty, 3D Depth Pop to 3D pop.",
+   "9. Instagram Story output: the Instagram chip maps to the feed file only. Should Story be dropped from the salesperson flow, or offered as a second Instagram chip?"
+  ]
+ },
+ "critique": {
+  "coverage_gaps": [
+   {
+    "behaviour": "A signed release belongs to exactly one post. Today capturedRelease is local state in PostCustomizer, so a remix or retry after the post is saved forces a fresh signature.",
+    "where_in_old_code": "components/PostCustomizer.tsx:534 (local capturedRelease, dropped when the component remounts); services/photoReleases.ts:98-112 (captured.releaseId is set on the object in place); pb_hooks/main.pb.js:2168-2260 (link-post returns 409 'Photo release is already linked to another post')",
+    "what_the_plan_says": "U08/U09 and step_machine: pendingRelease, including releaseId, is kept in memory and reused on Cancel, error, Back-from-POST remix and Back-from-DETAILS, and 'captured.releaseId is reused and nothing is re-signed'. A cancel after logPost leaves the post in place. Nothing clears or invalidates a releaseId that is already linked.",
+    "severity": "high"
+   },
+   {
+    "behaviour": "The legally operative consent text the customer signs: the photo taken today may be used 'on social media, websites, advertising, and other marketing materials', 'the customer may withdraw consent in writing at any time', and the attached VIN is shown to the signer.",
+    "where_in_old_code": "components/PhotoReleaseModal.tsx (consent paragraph, the 'Attached VIN' row, and the description 'stored securely before AI processing … expires within 24 hours')",
+    "what_the_plan_says": "U12 replaces it with 'They agree that {dealer} can share this photo on its social channels and website.' The advertising scope, the withdrawal right and the VIN display are gone, and no legal review step is listed.",
+    "severity": "high"
+   },
+   {
+    "behaviour": "The release gate fails closed. A missing or unknown scenario (including a custom scenario an admin later deleted) falls back to POST_SCENARIOS[0], customer_delivery, which requires a release.",
+    "where_in_old_code": "components/PostCustomizer.tsx:567-584",
+    "what_the_plan_says": "buildGenerationRequest and resolveStoreDefaults take postDraft.scenarioId and categoryId. No rule covers an undefined or unknown scenario. The URL guard lets DETAILS open with only selectedImage (for example Forward after HOME has cleared postDraft, or after the persisted custom scenario is removed), so a customer photo could be generated without the release requirement.",
+    "severity": "high"
+   },
+   {
+    "behaviour": "You cannot leave the result while an image, text or website operation is running ('Wait for the final website handoff to finish…'). Leaving asks for confirmation while work is at risk: unsaved edits, an unfinished image-edit prompt, or paid video jobs.",
+    "where_in_old_code": "components/PostResult.tsx:3071-3096 (hasWorkAtRisk, requestLeaveResult with imageBusy/textBusy/websiteSending)",
+    "what_the_plan_says": "U19: canLeavePost = Boolean(postId) || sharedTo.length > 0. It has no busy-state check, no in-flight or failed autosave check, and no protection for video jobs. Back or Done during a website send, a Look render or a video render goes straight through, and a paid video or an edit whose flush failed is lost silently.",
+    "severity": "high"
+   },
+   {
+    "behaviour": "A new capture clears the previous generatedPost and error (handleCropConfirm calls setGeneratedPost(null) and setError(null)).",
+    "where_in_old_code": "hooks/useAppController.ts:198-211",
+    "what_the_plan_says": "U09 handlePhotoPicked only archives the original, sets selectedImage and postDraft, and goes to DETAILS. The old post stays in the store with the new photo attached. Forward to #/post (allowed because generatedPost exists) then lets Try another or Look regenerate the old post from the new customer's photo and autosave it to the old post, which carries the old customer's release and caption.",
+    "severity": "high"
+   },
+   {
+    "behaviour": "The share status appears in history. GET /api/app/posts builds its response from an explicit field list.",
+    "where_in_old_code": "pb_hooks/main.pb.js:3960-4010 (the items map lists every returned field: scheduled_for, website_publication and so on)",
+    "what_the_plan_says": "U07 adds the migration, the POST route and the client projection in services/posts.ts, but does not add share_events to the server list projection. postStatusFor will never see a share, so Home's preview and My work never show 'Shared to Facebook'.",
+    "severity": "medium"
+   },
+   {
+    "behaviour": "Brand mode's 'Add video' renders the house motion as a manual video. It is shared through the device sheet as native_share:manual and is never labelled as an exact Facebook, Instagram or Google deliverable, and a still is never substituted for it.",
+    "where_in_old_code": "components/PostResult.tsx:2577-2615 (handleGenerateVideo sets manualVideoSelected), 2319-2354 (handleOpenShare manual-video branch); services/platformOutputs.ts (video rows exist only when mediaOutputMode is video or both)",
+    "what_the_plan_says": "Generation always uses mediaOutputMode 'photo', so the plan has no video delivery rows. U16/U17 share only through usePreparedDelivery channel rows with 'Share to {channel}'. How a finished Add video result is selected, labelled and shared is not defined, so it is either unshareable or mislabelled as a channel deliverable.",
+    "severity": "medium"
+   },
+   {
+    "behaviour": "Salesperson edits reach the shared caption. The textarea writes into the active pack slot (packOverrides), and Share uses sharePlatformCaptions[destinationId] built from that edited slot.",
+    "where_in_old_code": "components/PostResult.tsx:2131-2141 (packOverrides effect), 2136-2195 (sharePlatformCaptions), 2757-2775 (handleShareDelivery takes the pack variant before editedText)",
+    "what_the_plan_says": "U17: a single body textarea, with per-channel captions 'derived'. The plan never says how an edit to the body replaces or invalidates the AI per-channel pack variants (platformCaptions). buildShareCaptions used verbatim will ship the unedited pack variant, so the preview card differs from what is shared.",
+    "severity": "medium"
+   },
+   {
+    "behaviour": "A double tap cannot start two generations: isSubmitting disables Generate, and handleGenerate awaits loadPublishPipeline before onMutate switches the step.",
+    "where_in_old_code": "components/PostCustomizer.tsx:1000-1030 (setIsSubmitting), hooks/useGeneration.ts:848-900",
+    "what_the_plan_says": "U12 Create post lists aria-disabled gate reasons and Cmd/Ctrl+Enter, but no synchronous in-flight guard. A double tap or the shortcut in the pre-onMutate await window pays for two generations and creates two posts.",
+    "severity": "medium"
+   },
+   {
+    "behaviour": "Remix is friction-gated. It goes through the 'Discard and continue' confirm when work is at risk, and brand mode's one-shot retry budget exists to stop repeated regeneration spend.",
+    "where_in_old_code": "components/PostResult.tsx:536-543, 2649-2668, 3078-3099",
+    "what_the_plan_says": "U19: Back from a saved POST goes to DETAILS as a remix with no prompt, and Create post starts a fresh full generation with a fresh budget. Two taps per paid generation, unbounded. U18's 'bounded spend per post' acceptance ignores this path.",
+    "severity": "medium"
+   },
+   {
+    "behaviour": "The session survives localStorage quota. saveSession strips only generatedPost.image, and on quota failure drops generatedPost and generationParams entirely.",
+    "where_in_old_code": "utils/persistence.ts:24-31, 77-95",
+    "what_the_plan_says": "U18 persists GeneratedPost.lookRenders (a Record of full-size image data URLs) and tryAnotherUsed on the post in the session. The render map blows the quota, and the fallback then drops generatedPost. The reload restores DETAILS instead of POST and the persisted Try-another budget is lost, which defeats the stated purpose.",
+    "severity": "medium"
+   },
+   {
+    "behaviour": "The mobile share fallback and the app handoff. When navigator.share is missing or cannot share files, sharePrepared returns kind 'fallback' ('Save the media or open the app below'), and ShareDialog provides Download, Copy caption and openPreparedTarget web intents (GBP, LinkedIn, X).",
+    "where_in_old_code": "services/publishTargets.ts:626-720 (fallback kinds, openPreparedTarget, webIntentUrl); components/ShareDialog.tsx:780-820",
+    "what_the_plan_says": "U16/U17 give phones only the 'Share to {channel}' button and show the fallback text, with no Save or Open-app controls on phones and no web intent anywhere. The 'Google' channel U10 prescribes for Service has no practical OS-sheet target on iOS.",
+    "severity": "medium"
+   },
+   {
+    "behaviour": "Leaving is guarded while editing and in the middle of a post: My work was a modal over CUSTOMIZE and RESULT, so opening it never discarded the draft, the signature or an unsaved post.",
+    "where_in_old_code": "App.tsx:487-514 (My work Modal), components/Header.tsx:168-180",
+    "what_the_plan_says": "U20: Header 'My work' calls setStep(WORK), and WORK goes Back to HOME, which clears postDraft and pendingRelease. From DETAILS this wipes a captured signature (the customer must re-sign). From POST it bypasses the canLeavePost discard guard entirely.",
+    "severity": "medium"
+   },
+   {
+    "behaviour": "A reopened creative comes back to the surface it was opened from. DealerAdminDashboard mounts PostHistory, and its openCreative also sets the RESULT step for managers.",
+    "where_in_old_code": "components/DealerAdminDashboard.tsx:463; components/PostHistory.tsx:339-412",
+    "what_the_plan_says": "U19/U09: Back from a reopened POST goes to WORK for any role, and WORK is allowed for every signed-in role. A manager reopening from the dashboard lands on the salesperson My work screen instead of DEALER_ADMIN.",
+    "severity": "low"
+   },
+   {
+    "behaviour": "Cancel semantics for approval stores. logPost submits the post for manager approval (requiresApproval), and the release link runs inside onSuccess after the provider call.",
+    "where_in_old_code": "hooks/useGeneration.ts:665-760, 790-823",
+    "what_the_plan_says": "U08 says 'A cancel after logPost has started still leaves the created post as a Draft'. For requires_approval dealers the orphan is a pending item in the manager's approval queue, not a draft. If the release was already linked, the next attempt's link fails with 409 (see the release gap above).",
+    "severity": "medium"
+   },
+   {
+    "behaviour": "Funnel telemetry: share.attempt {target, kind, handoff}, customizer.decisions, media.capture.backup and photo_release.captured.",
+    "where_in_old_code": "components/ShareDialog.tsx:349; components/PostCustomizer.tsx:982; hooks/useAppController.ts:190-193; components/PhotoReleaseModal.tsx:95",
+    "what_the_plan_says": "No unit mentions telemetry except ai.generate.cancelled (U08). usePostShare, buildGenerationRequest (pure) and handlePhotoPicked do not carry these events.",
+    "severity": "low"
+   },
+   {
+    "behaviour": "The working copy is flattened to JPEG. ImageCropModal re-encodes every source to JPEG at quality 0.9 on a white background, capped at 2048 px. fileToNormalizedDataUrl keeps image/png for PNG inputs.",
+    "where_in_old_code": "components/ImageCropModal.tsx:27-40, 145-162; utils/imageUtils.ts:275-276",
+    "what_the_plan_says": "U05/U14 remove the modal and claim the pipeline receives a 2048 px JPEG. PNG and screenshot inputs will reach the provider, IndexedDB and the session as PNG with alpha (larger payloads, black-backed transparency). constrainImageDimensions is deleted along with the file.",
+    "severity": "low"
+   },
+   {
+    "behaviour": "A share stays prepared after an edit. The old ShareDialog prepared on open and on pick, after the edit was committed.",
+    "where_in_old_code": "components/ShareDialog.tsx:203-300",
+    "what_the_plan_says": "U16 re-prepares after caption edits on a 300 ms debounce and disables Share only while its status is 'preparing'. A tap inside the debounce window, or the blur caused by the tap itself, shares the previously prepared caption, so the last edit is dropped.",
+    "severity": "low"
+   },
+   {
+    "behaviour": "The header warns the salesperson before they start that this store requires approval ('Approval required' / 'Review' badge).",
+    "where_in_old_code": "components/Header.tsx:120-130",
+    "what_the_plan_says": "U11's Header variants (home and flow) do not mention the approval badge.",
+    "severity": "low"
+   },
+   {
+    "behaviour": "Share outcome copy is honest: 'Media sent to the share sheet…'. navigator.share cannot report which app the user picked.",
+    "where_in_old_code": "services/publishTargets.ts:690-700",
+    "what_the_plan_says": "U16/U19 record and display 'Shared to {channel}' on any 'shared' result, including 'Save Image' or 'Copy' chosen in the OS sheet, and persist it server-side as a share event.",
+    "severity": "low"
+   },
+   {
+    "behaviour": "The device archive's 24-item cap per dealer protects captured originals. Every image change on the post archives a generated-image record.",
+    "where_in_old_code": "stores/appStore.ts setGeneratedPost (archiveDealerMedia on each image change); utils/creativeStorage.ts:13-14",
+    "what_the_plan_says": "U18 Look chips switch generatedPost.image back and forth for free, from cache. Each switch writes an archive record and can push the salesperson's crash-recovery originals out of the 24-item cap.",
+    "severity": "low"
+   }
+  ],
+  "sequencing_issues": [
+   "PR2a ships a blank screen. U09 adds the WORK step (#/work, restorable) and U11 wires Home 'See all' to setStep(WORK), but the MainContent WORK case and MyWork.tsx only arrive in U20 (PR2b). U14's MainContent update in PR2a lists only HOME, DETAILS, CREATING and POST.",
+   "PR2a e2e goes red. U15 says the 'result workspace job-first' and 'Website-only' cases are untouched in PR2a, but both first assert the heading 'Start with a photo' after goto('/') (e2e/flow.spec.ts:747-749 and 1098-1100), and that heading is removed in PR2a. U15's pwa-install change also covers only goto and the heading, while 'keeps authenticated Capture usable in iPhone standalone display mode' pins 'Take photo', 'Choose from device' and .capture-studio-grid (e2e/pwa-install.spec.ts:437-470).",
+   "U21 retires components/LocalMediaArchive.tsx and components/RecentCaptureShelf.tsx, but __tests__/MediaArchiveObjectUrls.test.tsx imports both and is neither retargeted nor retired, so tsc and vitest go red. Likewise U14 deletes components/ImageCropModal.tsx while __tests__/FrontendProductionPass.test.tsx imports constrainImageDimensions from it; the utility has to move before the file is deleted.",
+   "The share_events projection in the GET /api/app/posts list route (pb_hooks/main.pb.js ~3960-4010) has to land with U07 in PR2-0. Otherwise the U11 MyWorkPreview (PR2a) and U20 statuses depend on a server change no unit schedules, and the deploy-order benefit of shipping the backend first is lost.",
+   "U19's canLeavePost and the header rewiring in U20 remove the RESULT leave guard in PR2b. The busy-state and video-at-risk checks now inside PostResult.requestLeaveResult are not extracted in PR2-0 (U03 and U04 omit them), so nothing carries them into PostScreen before U21 deletes PostResult."
+  ],
+  "wrong_reuse": [
+   "U18 handleChangeLook reuses regenerateImageMutation after changing only generationParams.style and tone. The mutation resends generationParams.creativeBrief (hooks/useGeneration.ts:916-927), and that brief has the old Look's 'Design DNA: {STYLE_INFO.aiHint}' baked in (PostCustomizer composeGenerationCreativeBrief designBlock). The Look switch sends conflicting design direction; the brief has to be recomposed with buildGenerationRequest for the new Look.",
+   "U07 reuses the /schedule route pattern ($app.dao().saveRecord), which bumps posts.updated. That timestamp is the post_revision the website compare-and-set send checks (expected_post_revision, pb_hooks/websitePublications.js ~740-800; useWebsiteHandoff's lastRevisionRef). A share recorded before 'Send website draft' makes the send fail as a revision conflict. The write must not touch updated, or the client must refresh the revision. The 409 gate should also reuse policies.postImageReviewRequired(record, geminiModelPolicySnapshot()) rather than the stored image_review_required flag.",
+   "U05 and data_flow claim usePhotoIntake and fileToNormalizedDataUrl hand the pipeline a 2048 px JPEG, but utils/imageUtils.ts:275-276 keeps image/png for PNG inputs. The JPEG re-encode and white flatten happened in ImageCropModal.tsx:145-162, which U14 deletes.",
+   "U17's blur re-check reuses bare captionUsesOnlyExpectedCustomer. PostResult wraps it (PostResult.tsx:970-992) with allowedPhrases (dealer name, OEM, vehicle description), maskedPhrases (the salesperson's own name and first name) and rejectAnyCustomerIdentity. The bare call would flag the salesperson's own name and allow other names in non-customer posts; it should use the same wrapper derivePostLocks uses.",
+   "U09/U12 reuse CapturedRelease.releaseId across Cancel, error and remix, assuming a stored release can back another post. The link-post route permanently binds a release to its first post (409 on relink), so after any successful link the reused release can only lock the next post."
+  ],
+  "verdict": "needs-revision",
+  "notes": "The plan needs revision: I found 5 high gaps and 5 sequencing problems.\n\nHigh:\n- **Release reused across posts.** The plan keeps and reuses releaseId after the release is linked to a post, which the server rejects with a 409. The retry or remix then stays release-locked and the customer has to sign again.\n- **Consent text narrowed.** The new wording drops the advertising scope and the right to withdraw consent. This needs legal sign-off, not just restyling.\n- **Release gate no longer fails closed.** An unknown or missing scenario used to default to one that requires a release; the plan does not keep that default.\n- **Leave guard loses its busy checks.** Leaving no longer waits for a running website send or image/text update, and no longer protects paid video jobs or edits whose autosave failed.\n- **Stale post not cleared on a new photo.** handlePhotoPicked does not clear generatedPost or the error. Forward to #/post can then regenerate the old post from the new customer's photo.\n\nThe Pro/PR split and the extraction-first idea are sound.\n\nAll findings come from reading the code, the audit and the e2e specs. I ran nothing: no tests and no servers. The main files are components/PostResult.tsx, components/PostCustomizer.tsx, hooks/useGeneration.ts, hooks/useAppController.ts, services/photoReleases.ts, services/publishTargets.ts, pb_hooks/main.pb.js, utils/persistence.ts and e2e/flow.spec.ts."
+ }
+}
