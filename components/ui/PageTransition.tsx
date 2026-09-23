@@ -1,76 +1,50 @@
 import React from "react";
-import { m, AnimatePresence, Easing } from "framer-motion";
+import { m, AnimatePresence, Easing, useReducedMotion } from "framer-motion";
 
 interface PageTransitionProps {
   children: React.ReactNode;
   pageKey: string;
   direction?: "forward" | "backward";
   layout?: "viewport" | "content";
+  /**
+   * A route that owns its own reveal (e.g. the login mark + panel moment)
+   * passes this so the page transition never overlaps it.
+   */
+  skipInitial?: boolean;
 }
 
-// iOS-style ease curves
-const easeSmooth: Easing = [0.16, 1, 0.3, 1] as unknown as Easing;
-const easeOut: Easing = [0.4, 0, 1, 1] as unknown as Easing;
+const ease: Easing = [0.2, 0.8, 0.2, 1] as unknown as Easing;
+
+const variants = {
+  initial: { opacity: 0 },
+  animate: {
+    opacity: 1,
+    transition: { duration: 0.18, ease },
+  },
+  exit: {
+    opacity: 0,
+    transition: { duration: 0.18, ease },
+  },
+};
 
 /**
- * Premium page transition wrapper
- * Provides smooth, iOS-style page transitions
+ * Opacity-only page transition. Both layouts use the same variants — spatial
+ * motion (slide/scale) is gone.
  */
 export const PageTransition: React.FC<PageTransitionProps> = ({
   children,
   pageKey,
-  direction = "forward",
   layout = "viewport",
+  skipInitial = false,
 }) => {
-  // Long pages live inside #main-content, the app's one scrollport. Safari can
-  // clip or blank overflowing descendants while an ancestor is transformed,
-  // so content-sized pages use an opacity-only transition. Viewport-owned
-  // screens remain bounded and can safely keep the spatial transition.
-  const variants =
-    layout === "content"
-      ? {
-          initial: { opacity: 0 },
-          animate: {
-            opacity: 1,
-            transition: { duration: 0.25, ease: easeSmooth },
-          },
-          exit: {
-            opacity: 0,
-            transition: { duration: 0.18, ease: easeOut },
-          },
-        }
-      : {
-          initial: {
-            opacity: 0,
-            x: direction === "forward" ? 20 : -20,
-            scale: 0.98,
-          },
-          animate: {
-            opacity: 1,
-            x: 0,
-            scale: 1,
-            transition: {
-              duration: 0.35,
-              ease: easeSmooth,
-            },
-          },
-          exit: {
-            opacity: 0,
-            x: direction === "forward" ? -20 : 20,
-            scale: 0.98,
-            transition: {
-              duration: 0.25,
-              ease: easeOut,
-            },
-          },
-        };
+  const prefersReducedMotion = useReducedMotion();
 
   return (
     <AnimatePresence mode="wait">
       <m.div
         key={pageKey}
         variants={variants}
-        initial="initial"
+        initial={skipInitial || prefersReducedMotion ? false : "initial"}
         animate="animate"
         exit="exit"
         className={
@@ -93,12 +67,12 @@ interface FadeTransitionProps {
 }
 
 /**
- * Simple fade transition for overlays and modals
+ * Simple fade transition for overlays and modals — 180ms opacity only.
  */
 export const FadeTransition: React.FC<FadeTransitionProps> = ({
   children,
   show,
-  duration = 0.2,
+  duration = 0.18,
 }) => {
   return (
     <AnimatePresence>
@@ -107,7 +81,7 @@ export const FadeTransition: React.FC<FadeTransitionProps> = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration }}
+          transition={{ duration, ease }}
         >
           {children}
         </m.div>
@@ -123,21 +97,17 @@ interface ScaleTransitionProps {
 }
 
 /**
- * Scale transition for dropdowns and popovers
+ * Scale transition for dropdowns and popovers — 180ms opacity + 2% scale.
  */
-export const ScaleTransition: React.FC<ScaleTransitionProps> = ({
-  children,
-  show,
-  origin = "top",
-}) => {
+export const ScaleTransition: React.FC<ScaleTransitionProps> = ({ children, show }) => {
   return (
     <AnimatePresence>
       {show && (
         <m.div
-          initial={{ opacity: 0, scale: 0.95, y: origin === "top" ? -10 : 10 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: origin === "top" ? -10 : 10 }}
-          transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+          initial={{ opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.98 }}
+          transition={{ duration: 0.18, ease }}
         >
           {children}
         </m.div>

@@ -124,13 +124,11 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
               animate={{ opacity: 1, scale: 1 }}
               className="flex flex-col items-center gap-3 py-8 text-center"
             >
-              <div className="w-14 h-14 rounded-full bg-success-500/20 flex items-center justify-center">
-                <Check className="h-7 w-7 text-success-400" />
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-success-fill text-success-ink">
+                <Check className="h-7 w-7" aria-hidden="true" />
               </div>
-              <div className="text-lg font-semibold text-surface-50">
-                Release captured
-              </div>
-              <div className="text-xs text-surface-400">
+              <div className="text-lg font-semibold text-ink">Release captured</div>
+              <div className="text-caption text-ink-hint">
                 Generate will securely store it before AI processing and link it to this
                 exact customer and vehicle.
               </div>
@@ -143,12 +141,15 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
               className="space-y-4"
             >
               {/* Consent text */}
-              <div className="rounded-xl border border-primary-500/30 bg-primary-500/5 px-4 py-3 text-xs text-surface-200 leading-relaxed">
+              <div className="rounded-md border border-hairline bg-panel-raised px-4 py-3 text-sm leading-relaxed text-ink-2">
                 <div className="flex items-start gap-2">
-                  <ShieldCheck className="h-4 w-4 text-primary-300 mt-0.5 flex-shrink-0" />
+                  <ShieldCheck
+                    className="mt-0.5 h-4 w-4 flex-shrink-0 text-ink-2"
+                    aria-hidden="true"
+                  />
                   <p>
                     By signing below, the customer grants{" "}
-                    <strong className="text-surface-50">{dealershipName}</strong>{" "}
+                    <strong className="font-semibold text-ink">{dealershipName}</strong>{" "}
                     permission to use the photo taken today on social media, websites,
                     advertising, and other marketing materials. The customer may
                     withdraw consent in writing at any time by contacting the
@@ -163,11 +164,10 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
                 onChange={(e) => setCustomerName(e.target.value)}
                 placeholder="Jane Smith"
                 fullWidth
-                className="bg-fill-subtle border-hairline focus:border-primary-400"
               />
 
               {vin && (
-                <div className="text-[11px] text-surface-400 font-mono">
+                <div className="font-mono text-caption text-ink-hint">
                   Attached VIN: {vin}
                 </div>
               )}
@@ -186,9 +186,12 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}
                     role="alert"
-                    className="flex items-start gap-2 rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs [.theme-light_&]:text-error-800"
+                    className="flex items-start gap-2 rounded-sm border border-error-ink/40 bg-error-fill px-3 py-2 text-caption text-error-ink"
                   >
-                    <AlertCircle className="h-4 w-4 text-error-400 flex-shrink-0 mt-0.5" />
+                    <AlertCircle
+                      className="mt-0.5 h-4 w-4 flex-shrink-0"
+                      aria-hidden="true"
+                    />
                     {error}
                   </m.div>
                 )}
@@ -197,7 +200,7 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
               <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-hairline">
                 <div className="flex-1">
                   <Button
-                    variant="filled"
+                    variant="primary"
                     size="md"
                     fullWidth
                     disabled={signatureEmpty || !customerName.trim()}
@@ -219,7 +222,7 @@ export const PhotoReleaseModal: React.FC<PhotoReleaseModalProps> = ({
                   </Button>
                   <p
                     id={backConsequenceId}
-                    className="text-center text-[11px] leading-relaxed text-surface-400"
+                    className="text-center text-caption leading-relaxed text-ink-hint"
                   >
                     No release will be saved. Customer-photo AI generation stays blocked
                     until a signed release is captured.

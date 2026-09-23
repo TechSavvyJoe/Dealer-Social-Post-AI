@@ -145,7 +145,7 @@ test.describe("Hosted staged release", () => {
       const csp = rootResponse.headers()["content-security-policy"] || "";
       for (const directive of [
         "default-src 'self'",
-        "script-src 'self' 'sha256-JPRzJy1ZJFiT889VGwZTmb4NJoJxo5BneGlZaLKKzaU=' https://challenges.cloudflare.com",
+        "script-src 'self' 'sha256-/BDi79xyTr9R8ICV6KALUbYxT0VtDgKXMM8oqBgzp2M=' https://challenges.cloudflare.com",
         "frame-src https://challenges.cloudflare.com",
         "object-src 'none'",
         "base-uri 'self'",
@@ -216,25 +216,25 @@ test.describe("Hosted staged release", () => {
       expect(manifest.icons).toEqual(
         expect.arrayContaining([
           {
-            src: "/dealer-social-dsp-v3-192.png",
+            src: "/dealer-social-dsp-v4-192.png",
             sizes: "192x192",
             type: "image/png",
             purpose: "any",
           },
           {
-            src: "/dealer-social-dsp-v3-512.png",
+            src: "/dealer-social-dsp-v4-512.png",
             sizes: "512x512",
             type: "image/png",
             purpose: "any",
           },
           {
-            src: "/dealer-social-dsp-v3-maskable-512.png",
+            src: "/dealer-social-dsp-v4-maskable-512.png",
             sizes: "512x512",
             type: "image/png",
             purpose: "maskable",
           },
           {
-            src: "/dsp-brand-mark-v3-monochrome.svg",
+            src: "/dsp-brand-mark-v4-monochrome.svg",
             sizes: "any",
             type: "image/svg+xml",
             purpose: "monochrome",
@@ -242,18 +242,18 @@ test.describe("Hosted staged release", () => {
         ]),
       );
       for (const asset of [
-        "/dealer-social-dsp-v3-180.png",
-        "/dealer-social-dsp-v3-192.png",
-        "/dealer-social-dsp-v3-512.png",
-        "/dealer-social-dsp-v3-1024.png",
-        "/dealer-social-dsp-v3-maskable-192.png",
-        "/dealer-social-dsp-v3-maskable-512.png",
-        "/dealer-social-dsp-v3-maskable-1024.png",
-        "/dealer-social-favicon-v3-32.png",
-        "/dsp-brand-mark-v3.svg",
-        "/dsp-brand-mark-v3-micro.svg",
-        "/dsp-brand-mark-v3-maskable.svg",
-        "/dsp-brand-mark-v3-monochrome.svg",
+        "/dealer-social-dsp-v4-180.png",
+        "/dealer-social-dsp-v4-192.png",
+        "/dealer-social-dsp-v4-512.png",
+        "/dealer-social-dsp-v4-1024.png",
+        "/dealer-social-dsp-v4-maskable-192.png",
+        "/dealer-social-dsp-v4-maskable-512.png",
+        "/dealer-social-dsp-v4-maskable-1024.png",
+        "/dealer-social-favicon-v4-32.png",
+        "/dsp-brand-mark-v4.svg",
+        "/dsp-brand-mark-v4-micro.svg",
+        "/dsp-brand-mark-v4-maskable.svg",
+        "/dsp-brand-mark-v4-monochrome.svg",
       ]) {
         const response = await getSameOrigin(asset);
         expect(response.ok()).toBe(true);

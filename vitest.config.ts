@@ -37,6 +37,7 @@ export default defineConfig({
     // silently doubles the local run and reports failures from code that is no
     // longer on main. CI checks out clean and never sees them.
     exclude: [
+      "__tests__/__scratch__/**",
       "**/node_modules/**",
       "**/dist/**",
       "**/e2e/**",

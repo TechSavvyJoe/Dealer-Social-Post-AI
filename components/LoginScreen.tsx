@@ -1,21 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { AnimatePresence, m, useReducedMotion } from "framer-motion";
-import {
-  ArrowRight,
-  Camera,
-  CheckCircle2,
-  Eye,
-  EyeOff,
-  KeyRound,
-  Loader2,
-  ShieldAlert,
-  ShieldCheck,
-  UserRound,
-  WandSparkles,
-} from "lucide-react";
+import { m, useReducedMotion } from "framer-motion";
+import { CheckCircle2, Delete, Eye, EyeOff, Loader2 } from "lucide-react";
 import { Logo } from "./Logo";
 import { triggerHapticFeedback } from "../utils/haptics";
-import { Dialpad, type DialpadKey } from "./Dialpad";
 import { Input } from "./ui/Input";
 import { Button } from "./ui/Button";
 import { useToast } from "./ui/Toast";
@@ -38,12 +25,58 @@ interface LoginScreenProps {
 
 type EntryMode = "personal" | "manager" | "system";
 type ManagerErrorTarget = "username" | "password" | "credentials" | null;
+type KeypadKey =
+  "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "backspace";
 
-const STUDIO_STEPS = [
-  { label: "Capture", detail: "Start with the vehicle", icon: Camera },
-  { label: "Shape", detail: "Build the right story", icon: WandSparkles },
-  { label: "Share", detail: "Publish with confidence", icon: ArrowRight },
-] as const;
+/**
+ * Keypad layout (spec §5.1): a 3 x 4 grid. The last row leaves its first cell
+ * empty so 0 stays under 8 exactly as on a phone dial.
+ */
+const KEYPAD_ROWS: readonly (readonly (KeypadKey | null)[])[] = [
+  ["1", "2", "3"],
+  ["4", "5", "6"],
+  ["7", "8", "9"],
+  [null, "0", "backspace"],
+];
+
+/** Sentence-case labels for the three access modes (spec §4.8 login row). */
+const MODES: readonly {
+  mode: EntryMode;
+  label: string;
+  /** Accessible name pinned by e2e; omitted when the visible label is enough. */
+  ariaLabel?: string;
+}[] = [
+  { mode: "personal", label: "My code" },
+  { mode: "manager", label: "Manager", ariaLabel: "Manager username and password" },
+  { mode: "system", label: "System", ariaLabel: "System admin" },
+];
+
+/**
+ * One line under "Sign in" that says what this mode asks for. The system line
+ * is also the copy FrontendProductionPass pins, so the mode's requirement is
+ * stated once, at the top of the column, instead of twice.
+ */
+const MODE_INSTRUCTIONS: Record<EntryMode, string> = {
+  personal: "Enter your personal 4-digit code.",
+  manager: "Sign in with your manager username and password.",
+  system: "Use your system administrator username and password.",
+};
+
+/**
+ * Segments of a single track, not three separate buttons: the track carries
+ * the raised fill and the selected segment carries the brand. Each segment is
+ * 44px tall inside the 52px track, so the touch target survives — Sunlight's
+ * edge on the track is an inset ring (`.login-switch` in globals.css), not a
+ * border, precisely so it takes none of that 44px.
+ */
+const segmentStyles = (selected: boolean) =>
+  cn(
+    "rounded-[6px] px-2 text-sm",
+    "transition-colors duration-120 ease-out",
+    selected
+      ? "bg-brand-fill font-semibold text-brand-foreground"
+      : "bg-transparent font-medium text-ink-2 hover:text-ink",
+  );
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [entryMode, setEntryMode] = useState<EntryMode>("personal");
@@ -279,16 +312,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     return () => window.clearInterval(interval);
   }, [lockoutUntil]);
 
-  const handleDialpadKeyPress = useCallback(
-    async (key: DialpadKey) => {
+  const handleKeypadPress = useCallback(
+    async (key: KeypadKey) => {
       triggerHapticFeedback();
       if (isLoading || isSuccess) return;
       setPersonalCodeError("");
-
-      if (key === "clear") {
-        setDealerCode("");
-        return;
-      }
 
       const nextCode =
         key === "backspace"
@@ -376,7 +404,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         }
       } else if (event.key === "Backspace" && entryMode === "personal") {
         event.preventDefault();
-        void handleDialpadKeyPress("backspace");
+        void handleKeypadPress("backspace");
       } else if (event.key === "Escape") {
         event.preventDefault();
         if (entryMode === "system") setAdminPassword("");
@@ -384,7 +412,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         if (entryMode === "personal") setDealerCode("");
       } else if (entryMode === "personal" && /^\d$/.test(event.key)) {
         event.preventDefault();
-        void handleDialpadKeyPress(event.key as DialpadKey);
+        void handleKeypadPress(event.key as KeypadKey);
       }
     };
 
@@ -393,7 +421,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   }, [
     dealerCode,
     entryMode,
-    handleDialpadKeyPress,
+    handleKeypadPress,
     isLoading,
     isSuccess,
     pendingAttempt,
@@ -403,596 +431,535 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     submitManagerLogin,
   ]);
 
-  const motionTransition = shouldReduceMotion
-    ? { duration: 0 }
-    : { duration: 0.35, ease: [0.16, 1, 0.3, 1] as const };
+  const digitsEntered = `${dealerCode.length} of ${PERSON_CODE_LENGTH} digits entered`;
+  const instruction = pendingAttempt
+    ? "Complete the security check to continue."
+    : MODE_INSTRUCTIONS[entryMode];
 
   return (
+    // The one moment on this screen (spec §4.4): the mark and the access panel
+    // fade up 8px together, once per mount, 320ms. Nothing else animates.
     <m.section
-      className="relative mx-auto flex h-full min-h-0 w-full max-w-6xl flex-1 flex-col"
-      initial={{ opacity: 0, y: shouldReduceMotion ? 0 : 6 }}
+      // Desktop releases the mobile viewport pin (index.html), so percentage
+      // heights stop resolving there: the stage claims the viewport minus
+      // <main>'s lg:py-6 explicitly, and centres the card inside it.
+      className="flex h-full min-h-0 w-full flex-1 flex-col lg:min-h-[calc(100dvh-3rem)] lg:items-center lg:justify-center"
+      initial={shouldReduceMotion ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={motionTransition}
+      transition={{ duration: 0.32, ease: [0.2, 0.8, 0.2, 1] }}
       aria-label="Dealer access"
     >
+      {/* Desktop: one key card centred on the lit stage (<main> carries
+          .login-stage). 1040 x 640 minimum, a 432px brand column beside the
+          access column, clipped to one 16px radius. Below lg the card's chrome
+          drops away entirely and the access column is the whole screen. */}
       <div
         className={cn(
-          "relative grid h-full min-h-0 w-full flex-1 border border-hairline bg-surface-base shadow-lg",
-          // Fill the #root content box only — never max-h 100dvh (that fights safe-area)
-          "overflow-hidden rounded-none border-x-0",
-          "min-[420px]:mx-2 min-[420px]:rounded-2xl min-[420px]:border-x",
-          "sm:mx-0 sm:rounded-[1.5rem]",
-          "lg:h-auto lg:min-h-[38rem] lg:grid-cols-[minmax(0,1.08fr)_minmax(23rem,0.92fr)]",
+          "flex min-h-0 w-full flex-1 flex-col",
+          "lg:grid lg:max-w-[65rem] lg:flex-none lg:grid-cols-[27rem_minmax(0,1fr)]",
+          // Never taller than <main>'s scrollport (100dvh minus its lg:py-6).
+          // The single implicit row has to be clamped to the card box too
+          // (`minmax(0,1fr)`), or it sizes to its content, ignores max-height
+          // and the card clips the access column with no way to reach it.
+          "lg:grid-rows-[minmax(0,1fr)]",
+          "lg:min-h-[min(40rem,calc(100dvh-3rem))] lg:max-h-[calc(100dvh-3rem)]",
+          "lg:overflow-hidden lg:rounded-lg lg:border lg:border-hairline lg:bg-panel lg:shadow-dialog",
         )}
       >
-        <div
-          className="absolute inset-x-0 top-0 z-20 h-px bg-[var(--brand-primary)] opacity-80"
-          aria-hidden="true"
-        />
-
-        <aside className="relative hidden min-h-[38rem] overflow-hidden border-r border-hairline bg-surface-elevated p-10 lg:flex lg:flex-col">
-          <Logo className="relative z-10 h-auto w-[250px]" />
-
-          <div
-            className="absolute right-10 top-24 h-64 w-52 border border-hairline"
+        {/* Brand column — desktop only. Login is the one screen with no photo
+            and no dealership, so the product's own colour carries it, with the
+            mark blown up as a graphic and cropped by the card edge. */}
+        <aside className="login-card-brand relative hidden overflow-hidden bg-brand-fill p-10 text-brand-foreground lg:flex lg:flex-col lg:justify-between">
+          {/* Theme-independent white/black scrims on the brand fill: the only
+              literal colours in this file, and correct under any dealer hue. */}
+          <svg
             aria-hidden="true"
+            viewBox="31 25 63 70"
+            width="486"
+            height="540"
+            className="pointer-events-none absolute -bottom-24 -right-[150px]"
           >
-            <span className="absolute -left-px -top-px h-10 w-10 border-l-2 border-t-2 border-primary-400/75" />
-            <span className="absolute -right-px -top-px h-10 w-10 border-r-2 border-t-2 border-primary-400/75" />
-            <span className="absolute -bottom-px -left-px h-10 w-10 border-b-2 border-l-2 border-primary-400/75" />
-            <span className="absolute -bottom-px -right-px h-10 w-10 border-b-2 border-r-2 border-primary-400/75" />
-            <span className="absolute left-4 top-4 font-mono text-[10px] tracking-[0.18em] text-surface-400">
-              4:5 · FEED
-            </span>
-            <span className="absolute bottom-4 right-4 h-2 w-2 rounded-full bg-success-400" />
-          </div>
+            <rect
+              x="47"
+              y="40"
+              width="32"
+              height="40"
+              rx="4"
+              fill="rgba(255,255,255,.10)"
+            />
+            <path
+              fill="rgba(0,0,0,.20)"
+              fillRule="evenodd"
+              d="M37 25H59A35 35 0 0 1 94 60A35 35 0 0 1 59 95H37A6 6 0 0 1 31 89V31A6 6 0 0 1 37 25ZM51 40H75A4 4 0 0 1 79 44V76A4 4 0 0 1 75 80H51A4 4 0 0 1 47 76V44A4 4 0 0 1 51 40Z"
+            />
+          </svg>
 
-          <div className="relative z-10 mt-auto max-w-[29rem]">
-            <p className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-primary-300">
-              Built for the showroom floor
-            </p>
-            <p className="max-w-[25rem] text-[2.7rem] font-semibold leading-[1.02] tracking-[-0.045em] text-surface-50">
-              From vehicle photo to social-ready story.
-            </p>
-            <p className="mt-5 max-w-md text-base leading-relaxed text-surface-300">
-              A focused workspace for dealership teams to create polished posts while
-              the delivery moment is still fresh.
-            </p>
+          <Logo
+            tone="onBrand"
+            size={40}
+            className="relative inline-flex items-center gap-3 self-start"
+          />
 
-            <ol className="mt-8 grid grid-cols-3 gap-3 border-t border-hairline pt-5">
-              {STUDIO_STEPS.map(({ label, detail, icon: StepIcon }, index) => (
-                <li key={label} className="min-w-0">
-                  <div className="mb-2 flex items-center gap-2 text-primary-300">
-                    <StepIcon className="h-4 w-4" aria-hidden="true" />
-                    <span className="font-mono text-[10px] tabular-nums">
-                      0{index + 1}
-                    </span>
-                  </div>
-                  <p className="text-sm font-semibold text-surface-100">{label}</p>
-                  <p className="mt-0.5 text-xs leading-snug text-surface-400">
-                    {detail}
-                  </p>
-                </li>
-              ))}
-            </ol>
+          <div className="relative max-w-[300px]">
+            <p className="font-display text-[36px] font-semibold leading-[40px] tracking-[-0.01em]">
+              Dealership photos, ready to post.
+            </p>
+            <p className="mt-3.5 text-base leading-6 text-brand-foreground opacity-80">
+              Take the photo, pick the post, and share it to every channel in a minute.
+            </p>
           </div>
         </aside>
 
-        {/* Right pane: CSS grid — fixed chrome + fluid keypad (no page scroll) */}
+        {/* Access column. One 352px stack on desktop, vertically centred; the
+            whole phone screen below lg. Every control in it is exactly that
+            width, so nothing steps in or out along the left edge. */}
         <div
-          className={cn(
-            "login-access-pane grid h-full min-h-0 w-full grid-rows-[auto_minmax(0,1fr)]",
-            "px-5 pt-4 pb-3 sm:px-8 sm:pt-7 sm:pb-6 lg:min-h-[38rem] lg:px-10 lg:py-8",
-          )}
+          className="login-access-pane flex min-h-0 w-full flex-1 flex-col overflow-y-auto overscroll-contain px-6 pb-6 pt-6 lg:min-h-0 lg:flex-none lg:items-center lg:justify-center lg:px-14 lg:py-12"
           aria-busy={isLoading}
         >
-          <Logo className="login-mobile-logo mb-3 h-auto w-[min(188px,50vw)] shrink-0 justify-self-start lg:hidden" />
+          <Logo
+            size={36}
+            className="login-mobile-logo mb-7 inline-flex shrink-0 items-center gap-2.5 self-start lg:hidden"
+          />
 
-          <AnimatePresence mode="wait">
-            {isSuccess ? (
-              <m.div
-                key="success"
-                className="flex min-h-0 flex-col items-center justify-center text-center"
-                initial={{ opacity: 0, scale: shouldReduceMotion ? 1 : 0.96 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0 }}
-                transition={motionTransition}
-                role="status"
-                aria-live="polite"
-              >
-                <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-success-500/35 bg-success-500/10">
-                  <CheckCircle2
-                    className="h-8 w-8 text-success-400"
-                    aria-hidden="true"
-                  />
-                </div>
-                <h1 className="text-2xl font-semibold tracking-tight text-surface-50">
-                  Access confirmed
-                </h1>
-                <p className="mt-2 text-sm text-surface-400">
-                  Opening your dealership workspace.
-                </p>
-              </m.div>
-            ) : isLoading ? (
-              <m.div
-                key="loading"
-                className="flex min-h-0 flex-col items-center justify-center text-center"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={motionTransition}
-                role="status"
-              >
-                <div className="relative flex h-16 w-16 items-center justify-center rounded-full border border-primary-500/30 bg-primary-500/10">
-                  <Loader2
-                    className="h-7 w-7 animate-spin text-primary-300"
-                    aria-hidden="true"
-                  />
-                </div>
-                <p className="mt-5 text-base font-semibold text-surface-100">
-                  Verifying access
-                </p>
-                <p className="mt-1 text-sm text-surface-400">
-                  Connecting to your dealership workspace.
-                </p>
-              </m.div>
-            ) : (
-              <m.div
-                key="login-form"
-                className="login-form grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 sm:gap-4"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={motionTransition}
-              >
-                <div className="flex shrink-0 items-start gap-3">
-                  <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-hairline bg-fill-subtle">
-                    <ShieldCheck
-                      className="h-5 w-5 text-primary-300"
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <h1
-                      id="login-heading"
-                      className="text-2xl font-semibold tracking-[-0.025em] text-surface-50 sm:text-3xl"
-                    >
-                      Sign in
-                    </h1>
-                    <p className="mt-1 text-sm leading-snug text-surface-300 sm:mt-1.5 sm:text-base sm:leading-relaxed">
-                      {entryMode === "personal"
-                        ? "Tap your 4-digit code. We sign you in automatically."
-                        : entryMode === "manager"
-                          ? "Use your dealership manager username and password."
-                          : "Use your system administrator username and password."}
-                    </p>
-                  </div>
-                </div>
-
-                <div
-                  className="grid shrink-0 grid-cols-3 gap-1 rounded-2xl border border-hairline bg-fill-hover p-1.5"
-                  role="group"
-                  aria-label="Access type"
+          {isSuccess ? (
+            <div
+              className="flex min-h-0 w-full flex-1 flex-col items-center justify-center text-center lg:w-[22rem] lg:flex-none"
+              role="status"
+              aria-live="polite"
+            >
+              <CheckCircle2 className="h-8 w-8 text-ink" aria-hidden="true" />
+              <h1 className="mt-4 font-display text-2xl font-semibold text-ink">
+                Access confirmed
+              </h1>
+              <p className="mt-2 text-sm text-ink-2">
+                Opening your dealership workspace.
+              </p>
+            </div>
+          ) : isLoading ? (
+            <div
+              className="flex min-h-0 w-full flex-1 flex-col items-center justify-center text-center lg:w-[22rem] lg:flex-none"
+              role="status"
+            >
+              <Loader2 className="h-7 w-7 animate-spin text-ink-2" aria-hidden="true" />
+              <p className="mt-4 text-base font-semibold text-ink">Verifying access</p>
+              <p className="mt-1 text-sm text-ink-2">
+                Connecting to your dealership workspace.
+              </p>
+            </div>
+          ) : (
+            // Exactly three children, in this order: the short-landscape layout
+            // in styles/globals.css places them by :nth-child.
+            <div className="login-form grid min-h-0 w-full flex-1 grid-rows-[auto_auto_minmax(min-content,1fr)] gap-5 lg:w-[22rem] lg:flex-none lg:grid-rows-[auto_auto_auto] lg:gap-6">
+              <div className="flex shrink-0 flex-col gap-1.5">
+                <h1
+                  id="login-heading"
+                  className="font-display text-[28px] font-semibold leading-8 tracking-[-0.01em] text-ink lg:text-[32px] lg:leading-9"
                 >
-                  <button
-                    type="button"
-                    onClick={() => selectMode("personal")}
-                    aria-pressed={entryMode === "personal"}
-                    className={cn(
-                      "min-h-11 rounded-xl px-3 text-sm font-semibold transition-colors sm:min-h-12",
-                      entryMode === "personal"
-                        ? "bg-primary-600 text-white shadow-md"
-                        : "text-surface-300 hover:text-surface-100",
-                    )}
-                  >
-                    My code
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => selectMode("manager")}
-                    aria-pressed={entryMode === "manager"}
-                    aria-label="Manager username and password"
-                    className={cn(
-                      "min-h-11 rounded-xl px-2 text-xs font-semibold transition-colors sm:min-h-12 sm:px-3 sm:text-sm",
-                      entryMode === "manager"
-                        ? "bg-primary-600 text-white shadow-md"
-                        : "text-surface-300 hover:text-surface-100",
-                    )}
-                  >
-                    Manager
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => selectMode("system")}
-                    aria-pressed={entryMode === "system"}
-                    aria-label="System admin"
-                    className={cn(
-                      "min-h-11 rounded-xl px-2 text-xs font-semibold transition-colors sm:min-h-12 sm:px-3 sm:text-sm",
-                      entryMode === "system"
-                        ? "bg-primary-600 text-white shadow-md"
-                        : "text-surface-300 hover:text-surface-100",
-                    )}
-                  >
-                    System
-                  </button>
-                </div>
+                  Sign in
+                </h1>
+                <p className="text-[15px] leading-[22px] text-ink-2">{instruction}</p>
+              </div>
 
-                {lockoutSeconds > 0 ? (
-                  <div className="flex min-h-0 flex-col items-center justify-center rounded-2xl border border-error-400/20 bg-error-500/[0.07] p-5 text-center">
-                    <p className="sr-only" role="alert">
-                      Sign-in is temporarily locked. Try again after the on-screen
-                      countdown.
-                    </p>
-                    <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-error-400/25 bg-error-500/10 text-error-300 [.theme-light_&]:text-error-800">
-                      <ShieldAlert className="h-6 w-6" aria-hidden="true" />
-                    </span>
-                    <h2 className="mt-4 text-lg font-semibold text-surface-100">
-                      Sign-in temporarily locked
-                    </h2>
-                    <p className="mt-2 max-w-sm text-sm leading-relaxed text-surface-400">
-                      Too many unsuccessful attempts. You can try again in
-                      <time
-                        dateTime={`PT${lockoutSeconds}S`}
-                        className="ml-1 font-mono font-semibold tabular-nums text-surface-100"
-                      >
-                        {Math.floor(lockoutSeconds / 60)}:
-                        {String(lockoutSeconds % 60).padStart(2, "0")}
-                      </time>
-                      .
-                    </p>
-                  </div>
-                ) : pendingAttempt ? (
-                  <TurnstileChallenge
-                    key={`turnstile-${challengeNonce}`}
-                    onToken={(token) => {
-                      if (pendingAttempt === "manager") {
-                        void submitManagerLogin(token);
-                      } else if (pendingAttempt === "system") {
-                        void submitAdminLogin(token);
-                      } else {
-                        void submitCode(dealerCode, token);
-                      }
-                    }}
-                    onExpired={() =>
-                      toast.info("Security check expired. Complete it again.")
+              {/* One segmented track, not three buttons sitting side by side. */}
+              <div
+                className="login-switch grid h-[52px] shrink-0 grid-cols-3 gap-1 rounded-sm bg-panel-raised p-1"
+                role="group"
+                aria-label="Access type"
+              >
+                {MODES.map(({ mode, label, ariaLabel }) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => selectMode(mode)}
+                    aria-pressed={entryMode === mode}
+                    aria-label={ariaLabel}
+                    className={segmentStyles(entryMode === mode)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {lockoutSeconds > 0 ? (
+                <div className="login-mode-panel flex min-h-0 flex-col items-start justify-center rounded-md border border-hairline bg-panel-raised p-5">
+                  <p className="sr-only" role="alert">
+                    Sign-in is temporarily locked. Try again after the on-screen
+                    countdown.
+                  </p>
+                  <h2 className="text-lg font-semibold text-error-ink">
+                    Sign-in temporarily locked
+                  </h2>
+                  <p className="mt-2 max-w-sm text-sm text-ink-2">
+                    Too many unsuccessful attempts. You can try again in
+                    <time
+                      dateTime={`PT${lockoutSeconds}S`}
+                      className="ml-1 font-display font-semibold tabular-nums text-ink"
+                    >
+                      {Math.floor(lockoutSeconds / 60)}:
+                      {String(lockoutSeconds % 60).padStart(2, "0")}
+                    </time>
+                    .
+                  </p>
+                </div>
+              ) : pendingAttempt ? (
+                <TurnstileChallenge
+                  key={`turnstile-${challengeNonce}`}
+                  onToken={(token) => {
+                    if (pendingAttempt === "manager") {
+                      void submitManagerLogin(token);
+                    } else if (pendingAttempt === "system") {
+                      void submitAdminLogin(token);
+                    } else {
+                      void submitCode(dealerCode, token);
                     }
-                    onError={() =>
-                      toast.error(
-                        "The security check could not load. Check your connection.",
-                      )
-                    }
-                    onBack={returnToCodeEntry}
-                  />
-                ) : entryMode === "personal" ? (
-                  <div className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-2 sm:gap-3">
+                  }}
+                  onExpired={() =>
+                    toast.info("Security check expired. Complete it again.")
+                  }
+                  onError={() =>
+                    toast.error(
+                      "The security check could not load. Check your connection.",
+                    )
+                  }
+                  onBack={returnToCodeEntry}
+                />
+              ) : entryMode === "personal" ? (
+                <div className="login-mode-panel flex min-h-0 flex-col gap-5 lg:gap-6">
+                  <div className="flex shrink-0 flex-col gap-2">
+                    <p className="login-code-label text-[13px] font-medium leading-4 text-ink-2">
+                      4-digit code
+                    </p>
+
+                    {/* Four wells, not four dots: the code reads as a field the
+                        keypad fills, and the next well to take a digit carries
+                        the brand edge. */}
                     <div
-                      className="flex shrink-0 items-center justify-center gap-4 py-1"
+                      className="relative grid grid-cols-4 gap-3"
                       role="status"
-                      aria-label={`${dealerCode.length} of ${PERSON_CODE_LENGTH} digits entered`}
+                      aria-label={digitsEntered}
                     >
                       {/* Live regions announce text-content changes, not attribute
                           changes — this hidden text gives VoiceOver per-digit feedback
-                          while aria-label keeps the region's accessible name stable. */}
-                      <span className="sr-only">
-                        {`${dealerCode.length} of ${PERSON_CODE_LENGTH} digits entered`}
-                      </span>
+                          while aria-label keeps the region's accessible name stable.
+                          `sr-only` is out of flow, so it claims no grid cell. */}
+                      <span className="sr-only">{digitsEntered}</span>
                       {Array.from({ length: PERSON_CODE_LENGTH }, (_, index) => (
                         <span
                           key={index}
                           aria-hidden="true"
                           className={cn(
-                            "h-4 w-4 rounded-full border-2 transition-colors sm:h-5 sm:w-5",
-                            index < dealerCode.length
-                              ? "border-primary-400 bg-primary-400"
-                              : index === dealerCode.length
-                                ? "border-primary-400 bg-transparent ring-4 ring-primary-500/15"
-                                : "border-surface-600 bg-surface-800",
+                            "login-code-slot flex h-14 items-center justify-center rounded-sm bg-panel-raised",
+                            "border transition-colors duration-120 ease-out",
+                            index === dealerCode.length
+                              ? "border-[1.5px] border-brand-ink"
+                              : "border-hairline",
                           )}
-                        />
+                        >
+                          {index < dealerCode.length ? (
+                            <span className="h-3 w-3 rounded-full bg-ink" />
+                          ) : null}
+                        </span>
                       ))}
                     </div>
 
-                    <p
-                      className={cn(
-                        "shrink-0 text-center text-sm",
-                        personalCodeError
-                          ? "text-error-300 [.theme-light_&]:text-error-800"
-                          : "text-surface-400",
-                      )}
-                      role={personalCodeError ? "alert" : undefined}
-                    >
-                      {personalCodeError ||
-                        (dealerCode.length > 0
-                          ? `${PERSON_CODE_LENGTH - dealerCode.length} left`
-                          : "4 digits · from your manager")}
-                    </p>
-
-                    <div className="min-h-0 w-full">
-                      <Dialpad onKeyPress={handleDialpadKeyPress} />
-                    </div>
+                    {personalCodeError ? (
+                      <p className="text-sm leading-5 text-error-ink" role="alert">
+                        {personalCodeError}
+                      </p>
+                    ) : null}
                   </div>
-                ) : entryMode === "manager" ? (
-                  <form
-                    className="flex min-h-0 flex-col justify-start overflow-y-auto overscroll-contain lg:justify-center"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void submitManagerLogin();
-                    }}
-                  >
-                    <div className="rounded-2xl border border-hairline bg-surface-elevated p-4 sm:p-5">
-                      <div className="mb-4 flex items-start gap-3">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300 [.theme-light_&]:text-primary-800">
-                          <KeyRound className="h-5 w-5" aria-hidden="true" />
+
+                  {/* Keys and the one line under them travel together: on a
+                      phone the pair sits at the bottom of the screen, in the
+                      thumb's reach; on desktop it just follows the field. */}
+                  <div className="login-keypad-group mt-auto flex shrink-0 flex-col gap-4 lg:mt-0 lg:gap-6">
+                    <div
+                      // Four 64px rows at their natural height (spec §4.6 `xl`):
+                      // 286px total, so the keypad never stretches to fill a tall
+                      // desktop column and never compresses below the touch target.
+                      className="login-keypad grid gap-2.5"
+                      role="group"
+                      aria-label="Four digit access code keypad"
+                    >
+                      {KEYPAD_ROWS.map((row, rowIndex) => (
+                        <div key={rowIndex} className="grid grid-cols-3 gap-2.5">
+                          {row.map((key, cellIndex) =>
+                            key === null ? (
+                              <span key={cellIndex} aria-hidden="true" />
+                            ) : (
+                              <Button
+                                key={cellIndex}
+                                type="button"
+                                variant="key"
+                                size="xl"
+                                fullWidth
+                                disableHaptics
+                                className="login-key px-0"
+                                aria-label={
+                                  key === "backspace"
+                                    ? "Delete last digit"
+                                    : `Digit ${key}`
+                                }
+                                onClick={() => void handleKeypadPress(key)}
+                              >
+                                {key === "backspace" ? (
+                                  <Delete
+                                    className="h-6 w-6 text-ink-2"
+                                    aria-hidden="true"
+                                  />
+                                ) : (
+                                  key
+                                )}
+                              </Button>
+                            ),
+                          )}
                         </div>
-                        <div>
-                          <h2 className="text-base font-semibold text-surface-100">
-                            Dealership manager
-                          </h2>
-                          <p className="mt-1 text-sm leading-relaxed text-surface-400">
-                            Your account opens only your dealership’s manager workspace.
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <Input
-                          ref={managerUsernameRef}
-                          label="Username"
-                          name="username"
-                          value={managerUsername}
-                          onChange={(event) => {
-                            setManagerLoginError("");
-                            setManagerErrorTarget(null);
-                            setManagerUsername(event.target.value.slice(0, 32));
-                          }}
-                          leftIcon={<UserRound />}
-                          autoComplete="username"
-                          autoCapitalize="none"
-                          autoCorrect="off"
-                          spellCheck={false}
-                          inputMode="text"
-                          enterKeyHint="next"
-                          maxLength={32}
-                          aria-invalid={
-                            managerLoginError &&
-                            (managerErrorTarget === "username" ||
-                              managerErrorTarget === "credentials")
-                              ? true
-                              : undefined
-                          }
-                          aria-describedby={
-                            managerLoginError &&
-                            (managerErrorTarget === "username" ||
-                              managerErrorTarget === "credentials")
-                              ? "manager-login-error"
-                              : undefined
-                          }
-                          fullWidth
-                        />
-                        <Input
-                          ref={managerPasswordRef}
-                          label="Password"
-                          name="password"
-                          value={managerPassword}
-                          type={showManagerPassword ? "text" : "password"}
-                          onChange={(event) => {
-                            setManagerLoginError("");
-                            setManagerErrorTarget(null);
-                            setManagerPassword(event.target.value.slice(0, 128));
-                          }}
-                          leftIcon={<KeyRound />}
-                          rightAction={
-                            <button
-                              type="button"
-                              className="flex h-11 w-11 items-center justify-center rounded-lg text-surface-400 transition hover:bg-fill-subtle hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
-                              onClick={() => setShowManagerPassword((value) => !value)}
-                              aria-label={
-                                showManagerPassword
-                                  ? "Hide manager password"
-                                  : "Show manager password"
-                              }
-                            >
-                              {showManagerPassword ? (
-                                <EyeOff className="h-4 w-4" aria-hidden="true" />
-                              ) : (
-                                <Eye className="h-4 w-4" aria-hidden="true" />
-                              )}
-                            </button>
-                          }
-                          autoComplete="current-password"
-                          autoCapitalize="none"
-                          autoCorrect="off"
-                          spellCheck={false}
-                          enterKeyHint="go"
-                          maxLength={128}
-                          aria-invalid={
-                            managerLoginError &&
-                            (managerErrorTarget === "password" ||
-                              managerErrorTarget === "credentials")
-                              ? true
-                              : undefined
-                          }
-                          aria-describedby={
-                            managerLoginError &&
-                            (managerErrorTarget === "password" ||
-                              managerErrorTarget === "credentials")
-                              ? "manager-login-error"
-                              : undefined
-                          }
-                          fullWidth
-                        />
-                      </div>
-
-                      {managerLoginError ? (
-                        <p
-                          id="manager-login-error"
-                          className="mt-2 px-1 text-sm text-error-300 [.theme-light_&]:text-error-800"
-                          role="alert"
-                        >
-                          {managerLoginError}
-                        </p>
-                      ) : (
-                        <p className="mt-2 px-1 text-xs text-surface-400">
-                          Contact your system administrator if you need access reset.
-                        </p>
-                      )}
-
-                      <Button
-                        type="submit"
-                        variant="primary"
-                        size="lg"
-                        fullWidth
-                        className="mt-4 min-h-12 sm:min-h-14"
-                        rightIcon={<ArrowRight className="h-4 w-4" />}
-                      >
-                        Continue to manager workspace
-                      </Button>
+                      ))}
                     </div>
-                  </form>
-                ) : (
-                  <form
-                    className="flex min-h-0 flex-col justify-start overflow-y-auto overscroll-contain lg:justify-center"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void submitAdminLogin();
+
+                    <p className="login-footer-note text-sm leading-5 text-ink-hint">
+                      Don&apos;t have a code? Ask your dealership manager.
+                    </p>
+                  </div>
+                </div>
+              ) : entryMode === "manager" ? (
+                <form
+                  className="login-mode-panel flex min-h-0 flex-col justify-start gap-4 overflow-y-auto overscroll-contain"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void submitManagerLogin();
+                  }}
+                >
+                  {/* The mode's requirement is already stated under "Sign in";
+                      this is the section title for the pair of fields. */}
+                  <h2 className="shrink-0 text-sm font-semibold text-ink">
+                    Dealership manager
+                  </h2>
+
+                  <Input
+                    ref={managerUsernameRef}
+                    label="Username"
+                    name="username"
+                    value={managerUsername}
+                    onChange={(event) => {
+                      setManagerLoginError("");
+                      setManagerErrorTarget(null);
+                      setManagerUsername(event.target.value.slice(0, 32));
                     }}
-                  >
-                    <div className="rounded-2xl border border-hairline bg-surface-elevated p-4 sm:p-5">
-                      <div className="mb-4 flex items-start gap-3">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300 [.theme-light_&]:text-primary-800">
-                          <KeyRound className="h-5 w-5" aria-hidden="true" />
-                        </div>
-                        <div>
-                          <h2 className="text-base font-semibold text-surface-100">
-                            System administrator
-                          </h2>
-                          <p className="mt-1 text-sm leading-relaxed text-surface-400">
-                            Platform-owner access across every dealership.
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <Input
-                          ref={adminUsernameRef}
-                          label="Username"
-                          name="admin-username"
-                          value={adminUsername}
-                          onChange={(event) => {
-                            setAdminLoginError("");
-                            setAdminErrorTarget(null);
-                            setAdminUsername(event.target.value.slice(0, 32));
-                          }}
-                          leftIcon={<UserRound />}
-                          autoComplete="username"
-                          autoCapitalize="none"
-                          autoCorrect="off"
-                          spellCheck={false}
-                          inputMode="text"
-                          enterKeyHint="next"
-                          maxLength={32}
-                          aria-invalid={
-                            adminLoginError &&
-                            (adminErrorTarget === "username" ||
-                              adminErrorTarget === "credentials")
-                              ? true
-                              : undefined
-                          }
-                          aria-describedby={
-                            adminLoginError &&
-                            (adminErrorTarget === "username" ||
-                              adminErrorTarget === "credentials")
-                              ? "admin-login-error"
-                              : undefined
-                          }
-                          fullWidth
-                        />
-                        <Input
-                          ref={adminPasswordRef}
-                          label="Password"
-                          name="admin-password"
-                          value={adminPassword}
-                          type={showAdminPassword ? "text" : "password"}
-                          onChange={(event) => {
-                            setAdminLoginError("");
-                            setAdminErrorTarget(null);
-                            setAdminPassword(
-                              event.target.value.slice(0, MAX_PASSWORD_LENGTH),
-                            );
-                          }}
-                          leftIcon={<KeyRound />}
-                          rightAction={
-                            <button
-                              type="button"
-                              className="flex h-11 w-11 items-center justify-center rounded-lg text-surface-400 transition hover:bg-fill-subtle hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
-                              onClick={() => setShowAdminPassword((value) => !value)}
-                              aria-label={
-                                showAdminPassword
-                                  ? "Hide administrator password"
-                                  : "Show administrator password"
-                              }
-                            >
-                              {showAdminPassword ? (
-                                <EyeOff className="h-4 w-4" aria-hidden="true" />
-                              ) : (
-                                <Eye className="h-4 w-4" aria-hidden="true" />
-                              )}
-                            </button>
-                          }
-                          autoComplete="current-password"
-                          autoCapitalize="none"
-                          autoCorrect="off"
-                          spellCheck={false}
-                          enterKeyHint="go"
-                          maxLength={MAX_PASSWORD_LENGTH}
-                          aria-invalid={
-                            adminLoginError &&
-                            (adminErrorTarget === "password" ||
-                              adminErrorTarget === "credentials")
-                              ? true
-                              : undefined
-                          }
-                          aria-describedby={
-                            adminLoginError &&
-                            (adminErrorTarget === "password" ||
-                              adminErrorTarget === "credentials")
-                              ? "admin-login-error"
-                              : undefined
-                          }
-                          fullWidth
-                        />
-                      </div>
-
-                      {adminLoginError ? (
-                        <p
-                          id="admin-login-error"
-                          className="mt-2 px-1 text-sm text-error-300 [.theme-light_&]:text-error-800"
-                          role="alert"
-                        >
-                          {adminLoginError}
-                        </p>
-                      ) : (
-                        <p className="mt-2 px-1 text-xs text-surface-400">
-                          Credentials come from your deployment secrets.
-                        </p>
-                      )}
-
-                      <Button
-                        type="submit"
-                        variant="primary"
-                        size="lg"
-                        fullWidth
-                        className="mt-4 min-h-12 sm:min-h-14"
-                        rightIcon={<ArrowRight className="h-4 w-4" />}
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    inputMode="text"
+                    enterKeyHint="next"
+                    maxLength={32}
+                    aria-invalid={
+                      managerLoginError &&
+                      (managerErrorTarget === "username" ||
+                        managerErrorTarget === "credentials")
+                        ? true
+                        : undefined
+                    }
+                    aria-describedby={
+                      managerLoginError &&
+                      (managerErrorTarget === "username" ||
+                        managerErrorTarget === "credentials")
+                        ? "manager-login-error"
+                        : undefined
+                    }
+                    fullWidth
+                  />
+                  <Input
+                    ref={managerPasswordRef}
+                    label="Password"
+                    name="password"
+                    value={managerPassword}
+                    type={showManagerPassword ? "text" : "password"}
+                    onChange={(event) => {
+                      setManagerLoginError("");
+                      setManagerErrorTarget(null);
+                      setManagerPassword(event.target.value.slice(0, 128));
+                    }}
+                    rightAction={
+                      <button
+                        type="button"
+                        className="flex h-11 w-11 items-center justify-center rounded-sm text-ink-2 transition-colors duration-120 ease-out hover:bg-fill-subtle hover:text-ink"
+                        onClick={() => setShowManagerPassword((value) => !value)}
+                        aria-label={
+                          showManagerPassword
+                            ? "Hide manager password"
+                            : "Show manager password"
+                        }
                       >
-                        Continue to system admin
-                      </Button>
-                    </div>
-                  </form>
-                )}
-              </m.div>
-            )}
-          </AnimatePresence>
+                        {showManagerPassword ? (
+                          <EyeOff className="h-5 w-5" aria-hidden="true" />
+                        ) : (
+                          <Eye className="h-5 w-5" aria-hidden="true" />
+                        )}
+                      </button>
+                    }
+                    autoComplete="current-password"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    enterKeyHint="go"
+                    maxLength={128}
+                    aria-invalid={
+                      managerLoginError &&
+                      (managerErrorTarget === "password" ||
+                        managerErrorTarget === "credentials")
+                        ? true
+                        : undefined
+                    }
+                    aria-describedby={
+                      managerLoginError &&
+                      (managerErrorTarget === "password" ||
+                        managerErrorTarget === "credentials")
+                        ? "manager-login-error"
+                        : undefined
+                    }
+                    fullWidth
+                  />
+
+                  {managerLoginError ? (
+                    <p
+                      id="manager-login-error"
+                      className="text-sm leading-5 text-error-ink"
+                      role="alert"
+                    >
+                      {managerLoginError}
+                    </p>
+                  ) : (
+                    <p className="text-sm leading-5 text-ink-hint">
+                      Contact your system administrator if you need access reset.
+                    </p>
+                  )}
+
+                  <Button type="submit" variant="primary" size="lg" fullWidth>
+                    Continue to manager workspace
+                  </Button>
+                </form>
+              ) : (
+                <form
+                  className="login-mode-panel flex min-h-0 flex-col justify-start gap-4 overflow-y-auto overscroll-contain"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void submitAdminLogin();
+                  }}
+                >
+                  <h2 className="shrink-0 text-sm font-semibold text-ink">
+                    System administrator
+                  </h2>
+
+                  <Input
+                    ref={adminUsernameRef}
+                    label="Username"
+                    name="admin-username"
+                    value={adminUsername}
+                    onChange={(event) => {
+                      setAdminLoginError("");
+                      setAdminErrorTarget(null);
+                      setAdminUsername(event.target.value.slice(0, 32));
+                    }}
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    inputMode="text"
+                    enterKeyHint="next"
+                    maxLength={32}
+                    aria-invalid={
+                      adminLoginError &&
+                      (adminErrorTarget === "username" ||
+                        adminErrorTarget === "credentials")
+                        ? true
+                        : undefined
+                    }
+                    aria-describedby={
+                      adminLoginError &&
+                      (adminErrorTarget === "username" ||
+                        adminErrorTarget === "credentials")
+                        ? "admin-login-error"
+                        : undefined
+                    }
+                    fullWidth
+                  />
+                  <Input
+                    ref={adminPasswordRef}
+                    label="Password"
+                    name="admin-password"
+                    value={adminPassword}
+                    type={showAdminPassword ? "text" : "password"}
+                    onChange={(event) => {
+                      setAdminLoginError("");
+                      setAdminErrorTarget(null);
+                      setAdminPassword(
+                        event.target.value.slice(0, MAX_PASSWORD_LENGTH),
+                      );
+                    }}
+                    rightAction={
+                      <button
+                        type="button"
+                        className="flex h-11 w-11 items-center justify-center rounded-sm text-ink-2 transition-colors duration-120 ease-out hover:bg-fill-subtle hover:text-ink"
+                        onClick={() => setShowAdminPassword((value) => !value)}
+                        aria-label={
+                          showAdminPassword
+                            ? "Hide administrator password"
+                            : "Show administrator password"
+                        }
+                      >
+                        {showAdminPassword ? (
+                          <EyeOff className="h-5 w-5" aria-hidden="true" />
+                        ) : (
+                          <Eye className="h-5 w-5" aria-hidden="true" />
+                        )}
+                      </button>
+                    }
+                    autoComplete="current-password"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    enterKeyHint="go"
+                    maxLength={MAX_PASSWORD_LENGTH}
+                    aria-invalid={
+                      adminLoginError &&
+                      (adminErrorTarget === "password" ||
+                        adminErrorTarget === "credentials")
+                        ? true
+                        : undefined
+                    }
+                    aria-describedby={
+                      adminLoginError &&
+                      (adminErrorTarget === "password" ||
+                        adminErrorTarget === "credentials")
+                        ? "admin-login-error"
+                        : undefined
+                    }
+                    fullWidth
+                  />
+
+                  {adminLoginError ? (
+                    <p
+                      id="admin-login-error"
+                      className="text-sm leading-5 text-error-ink"
+                      role="alert"
+                    >
+                      {adminLoginError}
+                    </p>
+                  ) : (
+                    <p className="text-sm leading-5 text-ink-hint">
+                      Credentials come from your deployment secrets.
+                    </p>
+                  )}
+
+                  <Button type="submit" variant="primary" size="lg" fullWidth>
+                    Continue to system admin
+                  </Button>
+                </form>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </m.section>

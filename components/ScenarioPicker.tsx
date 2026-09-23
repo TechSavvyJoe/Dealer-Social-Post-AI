@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { m, AnimatePresence } from "framer-motion";
-import { ChevronDown, Check, Sparkles } from "lucide-react";
+import { ChevronDown, Check } from "lucide-react";
 import {
   POST_SCENARIOS,
   PostScenario,
@@ -209,11 +208,10 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
 
   if (categoryFirst) {
     return (
-      <div className={cn("space-y-1.5", className)}>
-        <span
-          id={labelId}
-          className="text-xs font-medium text-surface-300 uppercase tracking-wide"
-        >
+      <div className={cn("space-y-3", className)}>
+        {/* The visible section heading lives on the screen (spec §5.4); this
+            keeps the group's accessible name and the id wiring intact. */}
+        <span id={labelId} className="sr-only">
           Post type
         </span>
         <div
@@ -231,14 +229,14 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
                 aria-pressed={selected}
                 onClick={() => selectCategory(category)}
                 className={cn(
-                  "flex min-h-20 flex-col items-center justify-center gap-1.5 rounded-xl border px-1 py-2.5 text-center transition-colors",
+                  "flex min-h-20 flex-col items-center justify-center gap-1.5 rounded-sm border px-1 py-2.5 text-center transition-colors duration-120 ease-out",
                   selected
-                    ? "border-primary-400 bg-primary-500/20 text-primary-100 [.theme-light_&]:text-primary-950"
-                    : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/35 hover:bg-fill-hover",
+                    ? "border-brand-fill bg-brand-fill text-brand-foreground"
+                    : "border-hairline bg-panel text-ink hover:bg-fill-subtle",
                 )}
               >
                 <Icon className="h-5 w-5" aria-hidden="true" />
-                <span className="text-[11px] font-semibold leading-tight">
+                <span className="text-2xs font-semibold leading-tight">
                   {SCENARIO_CATEGORY_LABELS[category]}
                 </span>
               </button>
@@ -249,11 +247,11 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
           <div
             role="group"
             aria-labelledby={`${categoryLabelId}-templates`}
-            className="space-y-1.5 pt-1"
+            className="space-y-2"
           >
             <span
               id={`${categoryLabelId}-templates`}
-              className="block text-[10px] uppercase tracking-wide text-surface-400"
+              className="block text-sm font-medium text-ink-2"
             >
               Template (optional)
             </span>
@@ -270,15 +268,19 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
                       onChange(scenario);
                     }}
                     className={cn(
-                      "min-h-11 shrink-0 snap-start rounded-full border px-3.5 py-2 text-xs font-semibold transition-colors",
+                      "min-h-11 shrink-0 snap-start rounded-full border px-4 py-2 text-sm font-semibold transition-colors duration-120 ease-out",
                       selected
-                        ? "border-primary-400 bg-primary-500/25 text-primary-50 [.theme-light_&]:text-primary-950"
-                        : "border-hairline bg-fill-subtle text-surface-300 hover:border-primary-400/40",
+                        ? "border-brand-fill bg-brand-fill text-brand-foreground"
+                        : "border-hairline bg-panel text-ink hover:bg-fill-subtle",
                     )}
                   >
                     <span className="flex items-center gap-1.5">
                       {selected ? (
-                        <Check className="h-3 w-3 shrink-0" strokeWidth={3} />
+                        <Check
+                          className="h-3.5 w-3.5 shrink-0"
+                          strokeWidth={3}
+                          aria-hidden="true"
+                        />
                       ) : null}
                       {scenario.label}
                     </span>
@@ -293,11 +295,10 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
   }
 
   return (
-    <div ref={rootRef} className={cn("space-y-1.5", className)}>
-      <span
-        id={labelId}
-        className="text-xs font-medium text-surface-300 uppercase tracking-wide"
-      >
+    <div ref={rootRef} className={cn("space-y-2", className)}>
+      {/* The visible section heading lives on the screen (spec §5.4); this
+          keeps the trigger's accessible name and the id wiring intact. */}
+      <span id={labelId} className="sr-only">
         Post type
       </span>
       <button
@@ -322,130 +323,126 @@ export const ScenarioPicker: React.FC<ScenarioPickerProps> = ({
           }
         }}
         className={cn(
-          "w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl",
-          "bg-fill-subtle border border-hairline hover:bg-fill-hover transition-colors",
-          "text-left text-sm",
+          "flex min-h-11 w-full items-center justify-between gap-2 rounded-sm px-3 py-2.5",
+          "border border-strong bg-panel-raised text-left",
+          "transition-colors duration-120 ease-out hover:bg-fill-subtle",
         )}
       >
-        <span className="flex items-center gap-2.5 min-w-0">
+        <span className="flex min-w-0 items-center gap-2.5">
           {current &&
             (() => {
               const Icon = SCENARIO_CATEGORY_ICON[current.category];
               return (
-                <span className="flex-shrink-0 flex items-center justify-center w-9 h-9 rounded-lg bg-primary-500/10 border border-primary-500/20">
-                  <Icon className="w-5 h-5 text-primary-300" />
+                <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-sm border border-hairline bg-panel text-ink-2">
+                  <Icon className="h-5 w-5" aria-hidden="true" />
                 </span>
               );
             })()}
           <span className="min-w-0">
             <span
               id={selectedValueId}
-              className="block text-surface-50 truncate font-semibold"
+              className="block truncate text-sm font-semibold text-ink"
             >
               {current?.label}
             </span>
-            <span className="block text-[10px] text-surface-400 truncate">
+            <span className="block truncate text-caption text-ink-hint">
               {current?.blurb}
             </span>
           </span>
         </span>
         <ChevronDown
           className={cn(
-            "h-4 w-4 text-surface-400 flex-shrink-0 transition-transform",
+            "h-4 w-4 flex-shrink-0 text-ink-2 transition-transform duration-120 ease-out",
             open && "rotate-180",
           )}
+          aria-hidden="true"
         />
       </button>
 
-      <AnimatePresence>
-        {open && (
-          <m.div
-            id={listboxId}
-            role="listbox"
-            aria-labelledby={labelId}
-            onKeyDown={handleListboxKeyDown}
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.15 }}
-            className="rounded-xl border border-hairline bg-surface-900/95 backdrop-blur-xl shadow-2xl p-2 max-h-96 overflow-y-auto"
-          >
-            {grouped.map(([category, list]) => (
+      {open ? (
+        <div
+          id={listboxId}
+          role="listbox"
+          aria-labelledby={labelId}
+          onKeyDown={handleListboxKeyDown}
+          className="on-overlay max-h-96 overflow-y-auto rounded-md border border-hairline bg-overlay p-2 shadow-dialog"
+        >
+          {grouped.map(([category, list]) => (
+            <div
+              key={category}
+              role="group"
+              aria-labelledby={`${categoryLabelId}-${category}`}
+              className="mb-3 last:mb-0"
+            >
               <div
-                key={category}
-                role="group"
-                aria-labelledby={`${categoryLabelId}-${category}`}
-                className="mb-2 last:mb-0"
+                id={`${categoryLabelId}-${category}`}
+                className="px-2 pb-1.5 pt-1 text-caption font-medium text-ink-2"
               >
-                <div
-                  id={`${categoryLabelId}-${category}`}
-                  className="text-[10px] uppercase tracking-wide text-surface-400 px-2 pb-1 pt-1.5"
-                >
-                  {SCENARIO_CATEGORY_LABELS[category]}
-                </div>
-                <div role="presentation" className="space-y-0.5">
-                  {list.map((s) => {
-                    const active = (value || POST_SCENARIOS[0].id) === s.id;
-                    const scenarioIndex = allScenarios.findIndex(
-                      (candidate) => candidate.id === s.id,
-                    );
-                    return (
-                      <button
-                        key={s.id}
-                        ref={(element) => {
-                          optionRefs.current[scenarioIndex] = element;
-                        }}
-                        type="button"
-                        role="option"
-                        tabIndex={activeIndex === scenarioIndex ? 0 : -1}
-                        aria-selected={active}
-                        onFocus={() => setActiveIndex(scenarioIndex)}
-                        onClick={() => selectScenario(s)}
-                        className={cn(
-                          "w-full flex items-start gap-2 px-2 py-2 rounded-lg text-left transition-colors",
-                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-900",
-                          active
-                            ? "bg-primary-500/20 text-primary-100 [.theme-light_&]:text-primary-950"
-                            : "hover:bg-fill-subtle text-surface-100",
-                        )}
-                      >
-                        {(() => {
-                          const Icon = SCENARIO_CATEGORY_ICON[s.category];
-                          return (
-                            <span
-                              className={cn(
-                                "flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-lg mt-0.5 transition-colors",
-                                active
-                                  ? "bg-primary-500/20 text-primary-200 [.theme-light_&]:text-primary-900"
-                                  : "bg-fill-subtle text-surface-300",
-                              )}
-                            >
-                              <Icon className="w-4 h-4" />
-                            </span>
-                          );
-                        })()}
-                        <span className="flex-1 min-w-0">
-                          <span className="block font-semibold text-sm">{s.label}</span>
-                          <span className="block text-[11px] text-surface-400">
-                            {s.blurb}
-                          </span>
-                        </span>
-                        {active && (
-                          <Check className="w-3.5 h-3.5 text-primary-300 flex-shrink-0 mt-1" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+                {SCENARIO_CATEGORY_LABELS[category]}
               </div>
-            ))}
-            <div className="border-t border-hairline mt-1 pt-2 px-2 pb-1 text-[10px] text-surface-400 flex items-center gap-1">
-              <Sparkles className="w-3 h-3" />
-              Picking a scenario tunes the prompt + defaults. Override anything below.
+              <div role="presentation" className="grid gap-1 sm:grid-cols-2">
+                {list.map((s) => {
+                  const active = (value || POST_SCENARIOS[0].id) === s.id;
+                  const scenarioIndex = allScenarios.findIndex(
+                    (candidate) => candidate.id === s.id,
+                  );
+                  return (
+                    <button
+                      key={s.id}
+                      ref={(element) => {
+                        optionRefs.current[scenarioIndex] = element;
+                      }}
+                      type="button"
+                      role="option"
+                      tabIndex={activeIndex === scenarioIndex ? 0 : -1}
+                      aria-selected={active}
+                      onFocus={() => setActiveIndex(scenarioIndex)}
+                      onClick={() => selectScenario(s)}
+                      className={cn(
+                        "flex min-h-11 w-full items-start gap-2 rounded-sm border px-2 py-2 text-left",
+                        "transition-colors duration-120 ease-out",
+                        active
+                          ? "border-brand-fill bg-brand-fill text-brand-foreground"
+                          : "border-transparent text-ink hover:bg-fill-subtle",
+                      )}
+                    >
+                      {(() => {
+                        const Icon = SCENARIO_CATEGORY_ICON[s.category];
+                        return (
+                          <Icon
+                            className="mt-0.5 h-4 w-4 flex-shrink-0"
+                            aria-hidden="true"
+                          />
+                        );
+                      })()}
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold">{s.label}</span>
+                        <span
+                          className={cn(
+                            "block text-caption",
+                            active ? "opacity-80" : "text-ink-hint",
+                          )}
+                        >
+                          {s.blurb}
+                        </span>
+                      </span>
+                      {active && (
+                        <Check
+                          className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"
+                          aria-hidden="true"
+                        />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </m.div>
-        )}
-      </AnimatePresence>
+          ))}
+          <p className="mt-1 border-t border-hairline px-2 pb-1 pt-2 text-caption text-ink-hint">
+            Picking a scenario tunes the prompt + defaults. Override anything below.
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 };

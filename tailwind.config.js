@@ -9,46 +9,62 @@ export default {
   ],
   theme: {
     extend: {
-      // Apple-inspired font family with system fallbacks
+      // LIGHT TABLE type (spec §4.2): Barlow for every UI string, Barlow
+      // Semi Condensed for screen titles, dialog titles and large numerals.
       fontFamily: {
-        sans: [
-          "Inter",
-          "-apple-system",
-          "BlinkMacSystemFont",
-          "SF Pro Display",
-          "Segoe UI",
-          "Roboto",
+        sans: ["Barlow", "Helvetica Neue", "Arial", "sans-serif"],
+        display: [
+          "Barlow Semi Condensed",
+          "Barlow",
           "Helvetica Neue",
           "Arial",
           "sans-serif",
         ],
-        display: [
-          "Inter",
-          "-apple-system",
-          "BlinkMacSystemFont",
-          "SF Pro Display",
-          "sans-serif",
-        ],
       },
 
-      // DEALER TRUST palette. `primary` 300-700 resolve through the
-      // --brand-N-rgb custom properties (defaulting to the navy ramp in
-      // styles/globals.css and overridden per-dealer by useDealerTheme), so
-      // every bg-primary-* / text-primary-* / ring-primary-* utility is
-      // white-label-aware without touching call sites.
+      // LIGHT TABLE palette (spec §4.1). The product is achromatic; the
+      // dealer's brand colour is the single accent. Every `primary` step
+      // resolves through the --brand-N-rgb custom properties (achromatic by
+      // default in styles/globals.css, overridden per dealer and per theme by
+      // useDealerTheme), so bg-/text-/ring-primary-* utilities are
+      // white-label-aware without touching call sites. 50–200 and 800–950
+      // collapse onto the lightest/darkest ramp steps so no static blue
+      // survives on an untouched screen.
       colors: {
+        canvas: "rgb(var(--canvas) / <alpha-value>)",
+        panel: "rgb(var(--panel) / <alpha-value>)",
+        "panel-raised": "rgb(var(--panel-raised) / <alpha-value>)",
+        overlay: "rgb(var(--overlay) / <alpha-value>)",
+        ink: {
+          DEFAULT: "rgb(var(--ink) / <alpha-value>)",
+          2: "rgb(var(--ink-2) / <alpha-value>)",
+          3: "rgb(var(--ink-3) / <alpha-value>)",
+          hint: "rgb(var(--ink-hint) / <alpha-value>)",
+        },
+        brand: {
+          fill: "rgb(var(--brand-fill) / <alpha-value>)",
+          ink: "rgb(var(--brand-ink) / <alpha-value>)",
+          tint: "rgb(var(--brand-ink) / 0.12)",
+          foreground: "var(--brand-foreground)",
+        },
+        // The off-ramp steps (50–200 were static light tints, 800–950 static
+        // dark navies) are used almost only as ink in not-yet-migrated screens:
+        // light ink on dark fills, and dark ink inside Sunlight overrides. Both
+        // resolve to --brand-ink, which useDealerTheme steps until it reads at
+        // >= 4.5:1 on the current theme's panel, so no legacy text goes
+        // under-contrast while PR2/PR3 migrate those files.
         primary: {
-          50: "#eff6ff",
-          100: "#dbeafe",
-          200: "#bfdbfe",
+          50: "rgb(var(--brand-ink) / <alpha-value>)",
+          100: "rgb(var(--brand-ink) / <alpha-value>)",
+          200: "rgb(var(--brand-ink) / <alpha-value>)",
           300: "rgb(var(--brand-300-rgb) / <alpha-value>)",
           400: "rgb(var(--brand-400-rgb) / <alpha-value>)",
           500: "rgb(var(--brand-500-rgb) / <alpha-value>)",
           600: "rgb(var(--brand-600-rgb) / <alpha-value>)",
           700: "rgb(var(--brand-700-rgb) / <alpha-value>)",
-          800: "#172554",
-          900: "#111c40",
-          950: "#0b1330",
+          800: "rgb(var(--brand-ink) / <alpha-value>)",
+          900: "rgb(var(--brand-ink) / <alpha-value>)",
+          950: "rgb(var(--brand-ink) / <alpha-value>)",
         },
 
         // Secondary is a calm slate, not purple — per the DEALER TRUST system.
@@ -68,6 +84,8 @@ export default {
 
         // Success (Apple green)
         success: {
+          ink: "rgb(var(--success-ink) / <alpha-value>)",
+          fill: "var(--success-fill)",
           50: "#f0fdf4",
           100: "#dcfce7",
           200: "#bbf7d0",
@@ -83,6 +101,8 @@ export default {
 
         // Warning (Amber)
         warning: {
+          ink: "rgb(var(--warning-ink) / <alpha-value>)",
+          fill: "var(--warning-fill)",
           50: "#fffbeb",
           100: "#fef3c7",
           200: "#fde68a",
@@ -98,6 +118,8 @@ export default {
 
         // Error (Red)
         error: {
+          ink: "rgb(var(--error-ink) / <alpha-value>)",
+          fill: "var(--error-fill)",
           50: "#fef2f2",
           100: "#fee2e2",
           200: "#fecaca",
@@ -113,6 +135,8 @@ export default {
 
         // Info (Cyan)
         info: {
+          ink: "rgb(var(--info-ink) / <alpha-value>)",
+          fill: "var(--info-fill)",
           50: "#ecfeff",
           100: "#cffafe",
           200: "#a5f3fc",
@@ -147,6 +171,8 @@ export default {
       backgroundColor: {
         "fill-subtle": "var(--fill-subtle)",
         "fill-hover": "var(--fill-hover)",
+        hairline: "rgb(var(--color-border) / <alpha-value>)",
+        strong: "rgb(var(--color-border-strong) / <alpha-value>)",
         "surface-base": "rgb(var(--color-surface-base) / <alpha-value>)",
         "surface-elevated": "rgb(var(--color-surface-elevated) / <alpha-value>)",
         "surface-overlay": "rgb(var(--color-surface-overlay) / <alpha-value>)",
@@ -164,6 +190,16 @@ export default {
         "content-primary": "rgb(var(--color-text-primary) / <alpha-value>)",
         "content-secondary": "rgb(var(--color-text-secondary) / <alpha-value>)",
         "content-tertiary": "rgb(var(--color-text-tertiary) / <alpha-value>)",
+        // Legacy `text-primary-300/400/500` labels and icons in not-yet-migrated
+        // screens: the dark ramp steps read 2.45-3.77:1 on --panel, so *text* on
+        // those steps resolves to --brand-ink (>= 4.5:1 on panel and 15% tint)
+        // while bg-/border-/ring-primary-* keep the ramp they were designed for.
+        // 600/700 clear 4.5:1 in both themes and stay on the ramp.
+        primary: {
+          300: "rgb(var(--brand-ink) / <alpha-value>)",
+          400: "rgb(var(--brand-ink) / <alpha-value>)",
+          500: "rgb(var(--brand-ink) / <alpha-value>)",
+        },
       },
 
       // Spacing scale - 4px base unit (consistent with Apple HIG)
@@ -205,19 +241,22 @@ export default {
 
       // Font sizes with proper line heights
       fontSize: {
-        xs: ["0.75rem", { lineHeight: "1rem", letterSpacing: "0.01em" }], // 12px
-        sm: ["0.875rem", { lineHeight: "1.25rem", letterSpacing: "0.01em" }], // 14px
-        base: ["1rem", { lineHeight: "1.5rem", letterSpacing: "0" }], // 16px
-        lg: ["1.125rem", { lineHeight: "1.75rem", letterSpacing: "-0.01em" }], // 18px
-        xl: ["1.25rem", { lineHeight: "1.75rem", letterSpacing: "-0.01em" }], // 20px
-        "2xl": ["1.5rem", { lineHeight: "2rem", letterSpacing: "-0.02em" }], // 24px
-        "3xl": ["1.875rem", { lineHeight: "2.25rem", letterSpacing: "-0.02em" }], // 30px
-        "4xl": ["2.25rem", { lineHeight: "2.5rem", letterSpacing: "-0.02em" }], // 36px
-        "5xl": ["3rem", { lineHeight: "1", letterSpacing: "-0.025em" }], // 48px
-        "6xl": ["3.75rem", { lineHeight: "1", letterSpacing: "-0.025em" }], // 60px
-        "7xl": ["4.5rem", { lineHeight: "1", letterSpacing: "-0.025em" }], // 72px
-        "8xl": ["6rem", { lineHeight: "1", letterSpacing: "-0.025em" }], // 96px
-        "9xl": ["8rem", { lineHeight: "1", letterSpacing: "-0.025em" }], // 128px
+        // Spec §4.2 scale. Barlow needs no tracking below display size.
+        "2xs": ["0.75rem", { lineHeight: "1rem", letterSpacing: "0" }], // 12px micro
+        xs: ["0.75rem", { lineHeight: "1rem", letterSpacing: "0" }], // 12px
+        sm: ["0.875rem", { lineHeight: "1.25rem", letterSpacing: "0" }], // 14px label
+        caption: ["0.8125rem", { lineHeight: "1.125rem", letterSpacing: "0" }], // 13px
+        base: ["1rem", { lineHeight: "1.5rem", letterSpacing: "0" }], // 16px body
+        lg: ["1.125rem", { lineHeight: "1.5rem", letterSpacing: "0" }], // 18px title-2
+        xl: ["1.25rem", { lineHeight: "1.75rem", letterSpacing: "0" }], // 20px
+        "2xl": ["1.5rem", { lineHeight: "1.75rem", letterSpacing: "-0.01em" }], // 24px title-1
+        "3xl": ["1.75rem", { lineHeight: "2rem", letterSpacing: "-0.01em" }], // 28px display (phone)
+        "4xl": ["2.25rem", { lineHeight: "2.5rem", letterSpacing: "-0.01em" }], // 36px display
+        "5xl": ["3rem", { lineHeight: "1", letterSpacing: "-0.015em" }], // 48px
+        "6xl": ["3.75rem", { lineHeight: "1", letterSpacing: "-0.015em" }], // 60px
+        "7xl": ["4.5rem", { lineHeight: "1", letterSpacing: "-0.015em" }], // 72px
+        "8xl": ["6rem", { lineHeight: "1", letterSpacing: "-0.015em" }], // 96px
+        "9xl": ["8rem", { lineHeight: "1", letterSpacing: "-0.015em" }], // 128px
       },
 
       // Box shadows - Apple-inspired natural shadows
@@ -231,9 +270,10 @@ export default {
         "2xl": "0 35px 60px -15px rgb(0 0 0 / 0.3)",
         inner: "inset 0 2px 4px 0 rgb(0 0 0 / 0.05)",
 
-        // DEALER TRUST elevation — flat by default, lift only on raise.
-        // Legacy elevation-N call sites resolve to the calm shadow vars
-        // instead of the retired Material stack (glow shadows are gone).
+        // LIGHT TABLE elevation (spec §4.3): panels cast none, dialogs and
+        // prints do. Legacy elevation-N call sites resolve to the same vars.
+        dialog: "var(--shadow-md)",
+        print: "var(--shadow-print)",
         "elevation-1": "var(--shadow-sm)",
         "elevation-2": "var(--shadow-sm)",
         "elevation-3": "var(--shadow-md)",
@@ -241,15 +281,15 @@ export default {
         "elevation-5": "var(--shadow-lg)",
       },
 
-      // Border radius — DEALER TRUST scale (6/10/14/20) via tokens.
+      // Border radius — LIGHT TABLE scale (8/12/16/20) via tokens.
       borderRadius: {
         none: "0",
-        sm: "var(--radius-sm)", // 6px
-        DEFAULT: "var(--radius-md)", // 10px
-        md: "var(--radius-md)", // 10px
-        lg: "var(--radius-lg)", // 14px
-        xl: "var(--radius-xl)", // 20px
-        "2xl": "1.25rem", // 20px
+        sm: "var(--radius-sm)", // 8px controls
+        DEFAULT: "var(--radius-md)", // 12px
+        md: "var(--radius-md)", // 12px panels
+        lg: "var(--radius-lg)", // 16px photo well, dialogs
+        xl: "var(--radius-xl)", // 20px sheets
+        "2xl": "var(--radius-xl)", // 20px
         "3xl": "1.5rem", // 24px
         "4xl": "2rem", // 32px
         full: "9999px",
@@ -259,6 +299,9 @@ export default {
       transitionDuration: {
         75: "75ms",
         100: "100ms",
+        120: "120ms",
+        180: "180ms",
+        320: "320ms",
         150: "150ms",
         200: "200ms",
         300: "300ms",
@@ -269,11 +312,12 @@ export default {
         1000: "1000ms",
       },
 
-      // Easing — fast, eased, never showy (spring/bounce retired).
+      // Easing — one curve (spec §4.4); legacy names alias onto it.
       transitionTimingFunction: {
-        apple: "cubic-bezier(0.4, 0.0, 0.2, 1)",
+        out: "var(--ease-out)",
+        apple: "var(--ease-out)",
         "apple-in": "cubic-bezier(0.4, 0.0, 1, 1)",
-        "apple-out": "cubic-bezier(0.0, 0.0, 0.2, 1)",
+        "apple-out": "var(--ease-out)",
       },
 
       // Custom animations

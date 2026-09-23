@@ -8,9 +8,8 @@ import React, {
   ReactNode,
 } from "react";
 import { m, AnimatePresence } from "framer-motion";
-import { CheckCircle2, XCircle, AlertCircle, Info, X } from "lucide-react";
+import { Check, AlertCircle, AlertTriangle, X } from "lucide-react";
 import { cn } from "../../utils/classNames";
-import { fadeInUp, ANIMATION_DURATIONS } from "../../utils/animations";
 import { triggerHapticFeedback } from "../../utils/haptics";
 
 type ToastType = "success" | "error" | "warning" | "info";
@@ -377,34 +376,28 @@ const ToastItem: React.FC<ToastItemProps> = ({
   onPause,
   onResume,
 }) => {
-  const icons: Record<ToastType, ReactNode> = {
-    success: <CheckCircle2 className="w-5 h-5 text-success-500" />,
-    error: <XCircle className="w-5 h-5 text-error-500" />,
-    warning: <AlertCircle className="w-5 h-5 text-warning-500" />,
-    info: <Info className="w-5 h-5 text-info-500" />,
-  };
-
-  const typeStyles: Record<ToastType, string> = {
-    success: "border-success-500/40",
-    error: "border-error-500/40",
-    warning: "border-warning-500/40",
-    info: "border-info-500/40",
+  const icons: Partial<Record<ToastType, ReactNode>> = {
+    success: <Check className="w-5 h-5 text-success-ink" />,
+    error: <AlertCircle className="w-5 h-5 text-error-ink" />,
+    // A warning (prohibited-claims, delivery/share gates) must not read as an
+    // info notice; the icon is what separates them, the surface stays neutral.
+    warning: <AlertTriangle className="w-5 h-5 text-warning-ink" />,
   };
 
   return (
     <m.div
-      {...fadeInUp}
-      exit={{ opacity: 0, scale: 0.95, y: -10 }}
-      transition={{ duration: ANIMATION_DURATIONS.standard }}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 8 }}
+      transition={{ duration: 0.18 }}
       onMouseEnter={() => onPause(toast.id)}
       onMouseLeave={() => onResume(toast.id)}
       onFocusCapture={() => onPause(toast.id)}
       onBlurCapture={() => onResume(toast.id)}
       className={cn(
-        "flex items-center gap-3 px-4 py-3 rounded-xl",
-        "border bg-surface-950/95 backdrop-blur-lg pointer-events-auto [.theme-light_&]:bg-white/95",
-        "w-full max-w-md shadow-elevation-3",
-        typeStyles[toast.type],
+        "flex items-center gap-3 px-4 py-3 rounded-md",
+        "border border-hairline bg-overlay pointer-events-auto",
+        "w-full max-w-md shadow-dialog text-ink",
       )}
       role={toast.type === "error" || toast.type === "warning" ? "alert" : "status"}
       aria-live={
@@ -412,8 +405,8 @@ const ToastItem: React.FC<ToastItemProps> = ({
       }
       aria-atomic="true"
     >
-      <div className="flex-shrink-0">{icons[toast.type]}</div>
-      <p className="flex-1 text-sm font-medium text-white [.theme-light_&]:text-slate-950">
+      {icons[toast.type] && <div className="flex-shrink-0">{icons[toast.type]}</div>}
+      <p className="flex-1 text-sm font-medium text-ink">
         {toast.message}
         {toast.revision > 1 ? (
           <span className="sr-only">
@@ -425,7 +418,7 @@ const ToastItem: React.FC<ToastItemProps> = ({
       <button
         type="button"
         onClick={() => onRemove(toast.id)}
-        className="-my-2 -mr-2 inline-flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-lg text-surface-400 transition-colors hover:bg-fill-hover hover:text-surface-200 [.theme-light_&]:text-surface-700"
+        className="-my-2 -mr-2 inline-flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-sm text-ink-hint transition-colors duration-120 ease-out hover:bg-fill-hover hover:text-ink"
         aria-label="Close notification"
       >
         <X className="w-4 h-4" />

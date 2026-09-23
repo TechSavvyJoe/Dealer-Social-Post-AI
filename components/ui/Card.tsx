@@ -1,16 +1,14 @@
 import React from "react";
-import { m, type HTMLMotionProps } from "framer-motion";
 import { cn } from "../../utils/classNames";
 
 /**
- * Card — DEALER TRUST system: solid theme-aware surface with a hairline
- * border. Flat by default; interactive cards get border/background emphasis
- * instead of lift, and elevation maps to the calm shadow tokens.
+ * Card — Light Table system: a flat panel, no shadow, no motion. Interactive
+ * cards get a border-strong emphasis on hover instead of a lift.
  */
-export interface CardProps extends HTMLMotionProps<"div"> {
+export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   /** Enable hover effects for interactive cards */
   interactive?: boolean;
-  /** Elevation level (1-5), mapped onto the flat shadow token scale */
+  /** Deprecated: cards are flat now; accepted and ignored for call-site compatibility */
   elevation?: 1 | 2 | 3 | 4 | 5;
   /** Deprecated: cards are always solid now; kept for call-site compatibility */
   solid?: boolean;
@@ -21,7 +19,7 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(
     {
       className,
       interactive = false,
-      elevation = 2,
+      elevation: _elevation,
       solid: _solid = false,
       children,
       ...props
@@ -29,31 +27,19 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(
     ref,
   ) => {
     return (
-      <m.div
+      <div
         ref={ref}
         className={cn(
-          // Base styles — solid surface, hairline border, token radius
-          "rounded-lg overflow-hidden",
-          "bg-surface-overlay border border-hairline",
-          "transition-colors duration-[var(--duration-base)] ease-apple",
-
-          // Elevation shadows (flat token scale)
-          elevation <= 2 && "shadow-elevation-1",
-          elevation === 3 && "shadow-elevation-3",
-          elevation >= 4 && "shadow-elevation-5",
-
-          // Interactive states — emphasis, not lift
-          interactive && "card-hover cursor-pointer",
-
+          "rounded-md overflow-hidden",
+          "bg-panel border border-hairline",
+          "transition-colors duration-120 ease-out",
+          interactive && "hover:border-strong cursor-pointer",
           className,
         )}
-        initial={false}
-        whileTap={interactive ? { scale: 0.99 } : undefined}
-        transition={{ type: "spring", stiffness: 300, damping: 25 }}
         {...props}
       >
         {children}
-      </m.div>
+      </div>
     );
   },
 );
@@ -96,10 +82,7 @@ export const CardTitle = React.forwardRef<HTMLHeadingElement, CardTitleProps>(
   ({ className, as: Component = "h3", ...props }, ref) => (
     <Component
       ref={ref}
-      className={cn(
-        "font-semibold text-lg text-content-primary tracking-tight",
-        className,
-      )}
+      className={cn("font-semibold text-lg text-ink", className)}
       {...props}
     />
   ),
@@ -116,7 +99,7 @@ export const CardDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <p
     ref={ref}
-    className={cn("text-sm text-content-secondary mt-1.5 leading-relaxed", className)}
+    className={cn("text-sm text-ink-2 mt-1.5 leading-relaxed", className)}
     {...props}
   />
 ));

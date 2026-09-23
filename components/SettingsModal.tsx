@@ -1,5 +1,4 @@
 import React from "react";
-import { Settings, Sparkles } from "lucide-react";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Button } from "./ui/Button";
 import { Modal } from "./ui/Modal";
@@ -23,6 +22,30 @@ interface SettingsModalProps {
   onThemeChange: (value: "dark" | "light" | "system") => void;
 }
 
+const themeOptions: Array<{ value: "dark" | "light" | "system"; label: string }> = [
+  { value: "dark", label: "Dark" },
+  { value: "light", label: "Sunlight" },
+  { value: "system", label: "Match device" },
+];
+
+const imageQualityOptions: Array<{
+  value: ImageQualityTier;
+  label: string;
+  helper: string;
+}> = [
+  {
+    value: "standard",
+    label: "Standard",
+    helper: "Standard (2K) is quicker and looks sharp on social feeds.",
+  },
+  {
+    value: "studio",
+    label: "Studio",
+    helper:
+      "Studio (4K) takes longer to generate — use it when you need maximum detail.",
+  },
+];
+
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
@@ -41,94 +64,80 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       isOpen={isOpen}
       onClose={handleClose}
       title="Settings"
-      description="Tune the workspace for your sales floor."
+      description="Appearance and image quality on this device."
       size="lg"
       footer={
         <>
-          <span className="mr-auto self-center text-xs text-surface-400">
+          <span className="mr-auto self-center text-2xs text-ink-hint">
             Build {releaseSha.slice(0, 7)}
           </span>
-          <Button variant="outline" onClick={handleClose}>
+          <Button variant="secondary" onClick={handleClose}>
             Close
           </Button>
         </>
       }
     >
-      <div className="space-y-5">
-        {/* Sunlight Mode (Theme) */}
-        <div className="rounded-2xl border border-hairline bg-fill-subtle p-4">
-          <div className="flex items-start gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary-500/25 bg-primary-500/10">
-              <Sparkles className="h-5 w-5 text-primary-300" />
-            </div>
-            <div>
-              <p className="font-semibold text-surface-50">Theme (Sunlight Mode)</p>
-              <p className="mt-1 text-sm leading-relaxed text-surface-400">
-                Light theme provides higher contrast for use outdoors in bright
-                sunlight.
-              </p>
-            </div>
-          </div>
+      <div className="space-y-6">
+        <div>
+          <h3 className="text-lg font-semibold text-ink">Appearance</h3>
           <div
-            className="mt-4 grid grid-cols-3 gap-1 rounded-xl border border-hairline bg-surface-950/70 p-1"
+            className="mt-3 divide-y divide-hairline rounded-md border border-hairline"
             role="group"
-            aria-label="Theme"
+            aria-label="Appearance"
           >
-            {(["system", "dark", "light"] as const).map((t) => (
+            {themeOptions.map((option) => (
               <button
-                key={t}
+                key={option.value}
                 type="button"
-                aria-pressed={theme === t}
+                aria-pressed={theme === option.value}
                 onClick={() => {
                   triggerHapticFeedback();
-                  onThemeChange(t);
+                  onThemeChange(option.value);
                 }}
-                className={`min-h-11 rounded-lg px-3 text-sm font-semibold capitalize transition-colors ${
-                  theme === t
-                    ? "bg-primary-600 text-white"
-                    : "text-surface-400 hover:text-surface-100"
+                className={`flex min-h-11 w-full items-center justify-between px-4 text-sm font-medium transition-colors ${
+                  theme === option.value
+                    ? "bg-brand-fill text-brand-foreground"
+                    : "text-ink hover:bg-fill-hover"
                 }`}
               >
-                {t}
+                {option.label}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-hairline bg-fill-subtle p-4">
-          <div className="flex items-start gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary-500/25 bg-primary-500/10">
-              <Sparkles className="h-5 w-5 text-primary-300" />
-            </div>
-            <div>
-              <p className="font-semibold text-surface-50">Image quality</p>
-              <p className="mt-1 text-sm leading-relaxed text-surface-400">
-                Standard (2K) is quicker and looks sharp on social feeds. Studio (4K)
-                takes longer to generate — use it when you need maximum detail.
-              </p>
-            </div>
-          </div>
+        <div>
+          <h3 className="text-lg font-semibold text-ink">Image quality</h3>
           <div
-            className="mt-4 grid grid-cols-2 gap-1 rounded-xl border border-hairline bg-surface-950/70 p-1"
+            className="mt-3 divide-y divide-hairline rounded-md border border-hairline"
             role="group"
             aria-label="Image quality"
           >
-            {(["standard", "studio"] as const).map((tier) => (
+            {imageQualityOptions.map((option) => (
               <button
-                key={tier}
+                key={option.value}
                 type="button"
-                aria-pressed={imageQualityTier === tier}
+                aria-pressed={imageQualityTier === option.value}
                 onClick={() => {
                   triggerHapticFeedback();
-                  onImageQualityTierChange(tier);
+                  onImageQualityTierChange(option.value);
                 }}
-                className={`min-h-11 rounded-lg px-3 text-sm font-semibold transition-colors ${
-                  imageQualityTier === tier
-                    ? "bg-primary-600 text-white"
-                    : "text-surface-400 hover:text-surface-100"
+                className={`flex min-h-11 w-full flex-col items-start justify-center gap-0.5 px-4 py-2 text-left transition-colors ${
+                  imageQualityTier === option.value
+                    ? "bg-brand-fill text-brand-foreground"
+                    : "text-ink hover:bg-fill-hover"
                 }`}
               >
-                {tier === "standard" ? "Standard" : "Studio"}
+                <span className="text-sm font-medium">{option.label}</span>
+                <span
+                  className={`text-2xs ${
+                    imageQualityTier === option.value
+                      ? "text-brand-foreground"
+                      : "text-ink-hint"
+                  }`}
+                >
+                  {option.helper}
+                </span>
               </button>
             ))}
           </div>

@@ -1,15 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import {
-  Check,
-  CheckCircle2,
-  Download,
-  ImageIcon,
-  Loader2,
-  RotateCcw,
-} from "lucide-react";
+import { Check, Download, ImageIcon, Loader2, RotateCcw } from "lucide-react";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { toUiMessage } from "../utils/errorMessages";
 import { Modal } from "./ui/Modal";
+import { Button } from "./ui/Button";
+import { Badge } from "./ui/Badge";
 import {
   isMobilePhotoDevice,
   prepareMediaForSave,
@@ -188,32 +183,34 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
       isOpen={isOpen && Boolean(imageSrc)}
       onClose={onClose}
       title="Review photo"
-      description="Check the framing before creating the post. The original aspect ratio is preserved."
+      description="Check the framing. The photo is kept at its original size."
       size="xl"
-      className="bg-[#0b1017]"
       footer={
         <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-center">
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={handleChooseAnother}
             disabled={isExporting}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-strong bg-fill-subtle px-5 py-3 text-sm font-semibold text-surface-100 transition-colors hover:border-strong hover:bg-fill-hover disabled:cursor-not-allowed disabled:opacity-50"
+            leftIcon={<RotateCcw className="h-4 w-4" />}
           >
-            <RotateCcw className="h-4 w-4" aria-hidden="true" />
             Choose another
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => void handleSaveOriginal()}
             disabled={!preparedOriginal || isPreparingOriginal || isSavingOriginal}
             aria-busy={isPreparingOriginal || isSavingOriginal}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-success-400/30 bg-success-500/10 px-5 py-3 text-sm font-semibold text-success-100 transition-colors hover:border-success-300/50 hover:bg-success-500/15 disabled:cursor-not-allowed disabled:opacity-50 sm:justify-self-center [.theme-light_&]:text-success-900"
+            className="sm:justify-self-center"
+            leftIcon={
+              isPreparingOriginal || isSavingOriginal ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )
+            }
           >
-            {isPreparingOriginal || isSavingOriginal ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Download className="h-4 w-4" aria-hidden="true" />
-            )}
             {isPreparingOriginal
               ? "Preparing original"
               : isSavingOriginal
@@ -221,26 +218,23 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
                 : isMobilePhotoDevice()
                   ? "Save original to Photos"
                   : "Download original"}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="primary"
             onClick={handleConfirm}
             disabled={!isImageReady || isExporting || Boolean(previewError)}
             aria-busy={isExporting}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-black/20 transition-colors hover:bg-primary-500 disabled:cursor-not-allowed disabled:bg-surface-700 disabled:text-surface-400"
+            leftIcon={isExporting ? undefined : <Check className="h-4 w-4" />}
+            loading={isExporting}
           >
-            {isExporting ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Check className="h-4 w-4" aria-hidden="true" />
-            )}
             {isExporting ? "Preparing photo" : "Use photo"}
-          </button>
+          </Button>
         </div>
       }
     >
       <div className="space-y-4">
-        <div className="relative flex min-h-[16rem] items-center justify-center overflow-hidden rounded-xl border border-hairline bg-black sm:min-h-[24rem]">
+        <div className="print relative flex min-h-[16rem] items-center justify-center overflow-hidden bg-panel sm:min-h-[24rem]">
           {imageSrc && (
             <img
               ref={imageRef}
@@ -265,7 +259,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
 
           {!isImageReady && !previewError && (
             <div
-              className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/75 text-surface-300"
+              className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-panel/90 text-ink-2"
               role="status"
             >
               <Loader2 className="h-7 w-7 animate-spin" aria-hidden="true" />
@@ -275,48 +269,45 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
 
           {/* Framing rails echo platform-safe crop guides without applying a crop. */}
           <div className="pointer-events-none absolute inset-4" aria-hidden="true">
-            <span className="absolute left-0 top-0 h-8 w-8 border-l-2 border-t-2 border-white/70" />
-            <span className="absolute right-0 top-0 h-8 w-8 border-r-2 border-t-2 border-white/70" />
-            <span className="absolute bottom-0 left-0 h-8 w-8 border-b-2 border-l-2 border-white/70" />
-            <span className="absolute bottom-0 right-0 h-8 w-8 border-b-2 border-r-2 border-white/70" />
+            <span className="absolute left-0 top-0 h-8 w-8 border-l border-t border-hairline/40" />
+            <span className="absolute right-0 top-0 h-8 w-8 border-r border-t border-hairline/40" />
+            <span className="absolute bottom-0 left-0 h-8 w-8 border-b border-l border-hairline/40" />
+            <span className="absolute bottom-0 right-0 h-8 w-8 border-b border-r border-hairline/40" />
           </div>
         </div>
 
         {previewError ? (
           <p
-            className="flex items-start gap-2 rounded-xl border border-error-500/30 bg-error-500/10 px-4 py-3 text-sm text-error-200 [.theme-light_&]:text-error-800"
+            className="flex items-start gap-2 rounded-sm border border-error-ink/40 bg-error-fill px-4 py-3 text-sm text-error-ink"
             role="alert"
           >
             <ImageIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
             {previewError}
           </p>
         ) : (
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-surface-400">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-caption text-ink-2">
             <span>Original ratio retained · working copy max 2048 px</span>
-            <span
-              className={
-                originalBackupStatus === "saved"
-                  ? "inline-flex items-center gap-1.5 font-semibold text-success-300"
-                  : "text-surface-400"
-              }
-              role="status"
-            >
-              {originalBackupStatus === "saving" ? (
-                <>
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                  Backing up original in app…
-                </>
-              ) : originalBackupStatus === "saved" ? (
-                <>
-                  <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-                  Original backed up in app
-                </>
-              ) : originalBackupStatus === "unavailable" ? (
-                "Local backup unavailable — use Save original"
-              ) : (
-                "Use Save original for your Photos library"
-              )}
-            </span>
+            {originalBackupStatus === "saved" ? (
+              <Badge variant="success" uppercase={false} role="status">
+                Original backed up in app
+              </Badge>
+            ) : (
+              <span className="text-caption text-ink-2" role="status">
+                {originalBackupStatus === "saving" ? (
+                  <>
+                    <Loader2
+                      className="mr-1.5 inline h-3.5 w-3.5 animate-spin"
+                      aria-hidden="true"
+                    />
+                    Backing up original in app…
+                  </>
+                ) : originalBackupStatus === "unavailable" ? (
+                  "Local backup unavailable — use Save original"
+                ) : (
+                  "Use Save original for your Photos library"
+                )}
+              </span>
+            )}
           </div>
         )}
 

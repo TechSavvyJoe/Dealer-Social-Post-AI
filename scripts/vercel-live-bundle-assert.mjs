@@ -30,71 +30,71 @@ const REQUEST_TIMEOUT_MS = 20_000;
 const DEFAULT_PROPAGATION_ATTEMPTS = 10;
 const DEFAULT_PROPAGATION_DELAY_MS = 10_000;
 // These root-level files are copied into both production artifacts without a
-// Vite content hash. Their v3 names are therefore the cache key: proving the
+// Vite content hash. Their v4 names are therefore the cache key: proving the
 // live bytes match the build prevents a stale alias/CDN response from silently
 // mixing a new JavaScript graph with an older installed-app identity.
-export const V3_IDENTITY_ASSETS = [
+export const V4_IDENTITY_ASSETS = [
   {
     path: "/manifest.webmanifest",
     contentType: "application/manifest+json",
     immutable: false,
   },
-  { path: "/dsp-brand-mark-v3.svg", contentType: "image/svg+xml", immutable: true },
+  { path: "/dsp-brand-mark-v4.svg", contentType: "image/svg+xml", immutable: true },
   {
-    path: "/dsp-brand-mark-v3-micro.svg",
+    path: "/dsp-brand-mark-v4-micro.svg",
     contentType: "image/svg+xml",
     immutable: true,
   },
   {
-    path: "/dsp-brand-mark-v3-app.svg",
+    path: "/dsp-brand-mark-v4-app.svg",
     contentType: "image/svg+xml",
     immutable: true,
   },
   {
-    path: "/dsp-brand-mark-v3-maskable.svg",
+    path: "/dsp-brand-mark-v4-maskable.svg",
     contentType: "image/svg+xml",
     immutable: true,
   },
   {
-    path: "/dsp-brand-mark-v3-monochrome.svg",
+    path: "/dsp-brand-mark-v4-monochrome.svg",
     contentType: "image/svg+xml",
     immutable: true,
   },
-  { path: "/dealer-social-dsp-v3-180.png", contentType: "image/png", immutable: true },
-  { path: "/dealer-social-dsp-v3-192.png", contentType: "image/png", immutable: true },
-  { path: "/dealer-social-dsp-v3-512.png", contentType: "image/png", immutable: true },
+  { path: "/dealer-social-dsp-v4-180.png", contentType: "image/png", immutable: true },
+  { path: "/dealer-social-dsp-v4-192.png", contentType: "image/png", immutable: true },
+  { path: "/dealer-social-dsp-v4-512.png", contentType: "image/png", immutable: true },
   {
-    path: "/dealer-social-dsp-v3-1024.png",
+    path: "/dealer-social-dsp-v4-1024.png",
     contentType: "image/png",
     immutable: true,
   },
   {
-    path: "/dealer-social-dsp-v3-maskable-192.png",
+    path: "/dealer-social-dsp-v4-maskable-192.png",
     contentType: "image/png",
     immutable: true,
   },
   {
-    path: "/dealer-social-dsp-v3-maskable-512.png",
+    path: "/dealer-social-dsp-v4-maskable-512.png",
     contentType: "image/png",
     immutable: true,
   },
   {
-    path: "/dealer-social-dsp-v3-maskable-1024.png",
+    path: "/dealer-social-dsp-v4-maskable-1024.png",
     contentType: "image/png",
     immutable: true,
   },
   {
-    path: "/dealer-social-favicon-v3-16.png",
+    path: "/dealer-social-favicon-v4-16.png",
     contentType: "image/png",
     immutable: true,
   },
   {
-    path: "/dealer-social-favicon-v3-32.png",
+    path: "/dealer-social-favicon-v4-32.png",
     contentType: "image/png",
     immutable: true,
   },
   {
-    path: "/dealer-social-favicon-v3-48.png",
+    path: "/dealer-social-favicon-v4-48.png",
     contentType: "image/png",
     immutable: true,
   },
@@ -198,7 +198,7 @@ const headerValue = (headers, name) => {
 };
 
 /**
- * Byte-compares every v3 install/brand asset against the selected build.
+ * Byte-compares every v4 install/brand asset against the selected build.
  *
  * Unlike hashed Vite chunks these files live at root-level semantic paths, so
  * checking only that they return 200 would allow a stale Home Screen icon or
@@ -207,7 +207,7 @@ const headerValue = (headers, name) => {
 export const assertLiveIdentityMatchesBuild = async ({
   staticDirectory,
   fetchPath,
-  assets = V3_IDENTITY_ASSETS,
+  assets = V4_IDENTITY_ASSETS,
 }) => {
   const verified = [];
   for (const asset of assets) {

@@ -7,11 +7,14 @@ import { describe, expect, it } from "vitest";
  * Sunlight Mode exists so a salesperson can read the screen outdoors, which
  * makes a contrast failure there worse than in the dark theme, not better.
  *
- * The token ramps are tuned for dark surfaces: -100/-200/-300 ink sits on a
- * dark fill. In light theme the same 10-30% tinted fills resolve to near-white,
- * so that ink drops to roughly 1.5:1 and the control renders as an empty
- * capsule. Verified in light-theme renders of the customizer and the dealer
- * settings card. The fix is a `[.theme-light_&]` override at -800/-900/-950.
+ * Light Table (2026-09-18) replaces the old fix — a `[.theme-light_&]`
+ * override at -800/-900/-950 on every tinted-fill site — with tokens that
+ * already resolve per theme (`bg-brand-fill`, `text-{success,warning,error,
+ * info}-ink`, etc). PR1 files are migrated onto that system, so for them the
+ * override literal itself becomes the defect: if one is still there, either
+ * the migration missed a site or someone reintroduced a hardcoded ramp. Files
+ * not yet migrated (PR2/PR3) keep the old override-based rule below, so they
+ * stay protected until they migrate too.
  */
 const read = (p: string) => readFileSync(resolve(process.cwd(), p), "utf8");
 
@@ -28,6 +31,44 @@ const componentFiles = (): string[] => {
 };
 
 /**
+ * PR1: every file already migrated onto the Light Table token system. These
+ * get the strict guard (no legacy literal at all, on any ramp or number),
+ * because the token system makes the literal unnecessary rather than merely
+ * overridable.
+ */
+const MIGRATED_FILES = [
+  "components/ui/Badge.tsx",
+  "components/ui/Button.tsx",
+  "components/ui/Card.tsx",
+  "components/ui/EmptyState.tsx",
+  "components/ui/ErrorBanner.tsx",
+  "components/ui/Input.tsx",
+  "components/ui/Modal.tsx",
+  "components/ui/PageTransition.tsx",
+  "components/ui/ProgressBar.tsx",
+  "components/ui/ProgressiveImage.tsx",
+  "components/ui/Shimmer.tsx",
+  "components/ui/Skeleton.tsx",
+  "components/ui/Toast.tsx",
+  "components/ui/Tooltip.tsx",
+  "components/Logo.tsx",
+  "components/Header.tsx",
+  "components/ProgressSteps.tsx",
+  "components/SettingsModal.tsx",
+  "components/LoginScreen.tsx",
+  "components/CameraCapture.tsx",
+  "components/RecentCaptureShelf.tsx",
+  "components/ImageCropModal.tsx",
+  "components/PostCustomizer.tsx",
+  "components/ScenarioPicker.tsx",
+  "components/VinScanner.tsx",
+  "components/PhotoReleaseModal.tsx",
+  "components/MainContent.tsx",
+  "App.tsx",
+];
+const MIGRATED_FILE_SET = new Set(MIGRATED_FILES);
+
+/**
  * The one subtree these rules must not police.
  *
  * The publish result is deliberately dark in both themes: App.tsx puts
@@ -37,9 +78,9 @@ const componentFiles = (): string[] => {
  * site this exempts is 8.13:1 on the studio ground and would drop to roughly
  * 1.5:1 if "fixed" for Sunlight Mode.
  *
- * "studioThemeInvariants" below pins the three facts this exemption rests on,
- * so if the studio theme is ever removed or the portal loses it, that test
- * fails rather than this exemption silently hiding a real defect.
+ * "studioThemeInvariants" below pins the facts this exemption rests on, so if
+ * the studio theme is ever removed or the portal loses it, that test fails
+ * rather than this exemption silently hiding a real defect.
  */
 const STUDIO_THEMED_FILES = new Set(["components/PostResult.tsx"]);
 
@@ -57,65 +98,103 @@ const STUDIO_THEMED_FILES = new Set(["components/PostResult.tsx"]);
 const hasLightOverride = (literal: string, ramp: string): boolean =>
   new RegExp(`theme-light_&\\]:(?:[a-z-]+:)*text-${ramp}`).test(literal);
 
+const lineOf = (source: string, index: number): number =>
+  source.slice(0, index).split("\n").length;
+
 describe("Sunlight Mode keeps selected controls readable", () => {
-  it("gives every Badge variant light-theme ink", () => {
-    const badge = read("components/ui/Badge.tsx");
-    for (const variant of ["primary", "success", "warning", "error", "info"]) {
-      expect(badge).toContain(`[.theme-light_&]:text-${variant}-800`);
+  it("keeps migrated (Light Table) files free of the legacy override system and the motion it replaced", () => {
+    // The strict guard for PR1. A `[.theme-light_&]` override on any ramp or
+    // number is now a defect on these files, not a fix: the token system
+    // (bg-brand-fill, text-*-ink, on-overlay) already resolves per theme, so
+    // the literal's only remaining job would be to hide a hardcoded ramp that
+    // should not be there at all. The ink check and the motion check ride
+    // along on the same file loop because both are Light Table migration
+    // invariants for this same file set (spec 8.1 items 4 and 7).
+    const offenders: string[] = [];
+
+    const overridePattern = /\[\.theme-light_&/g;
+    const rampInkPattern =
+      /\btext-(?:success|warning|error|info|primary)-(?:50|100|200|300|400)\b/g;
+    const plainNeedles = [
+      "text-white",
+      'type: "spring"',
+      "whileHover",
+      "whileTap",
+      "repeat: Infinity",
+    ];
+
+    for (const file of MIGRATED_FILES) {
+      const source = read(file);
+
+      for (const match of source.matchAll(overridePattern)) {
+        offenders.push(
+          `${file}:${lineOf(source, match.index)} — leftover [.theme-light_&] override; the token system makes it unnecessary`,
+        );
+      }
+
+      for (const match of source.matchAll(rampInkPattern)) {
+        offenders.push(
+          `${file}:${lineOf(source, match.index)} — leftover hardcoded ink "${match[0]}"`,
+        );
+      }
+
+      for (const needle of plainNeedles) {
+        let from = 0;
+        for (;;) {
+          const at = source.indexOf(needle, from);
+          if (at === -1) break;
+          offenders.push(
+            `${file}:${lineOf(source, at)} — leftover ${JSON.stringify(needle)}`,
+          );
+          from = at + needle.length;
+        }
+      }
     }
+
+    expect(
+      offenders,
+      `Light Table migration leftovers:\n${offenders.join("\n")}`,
+    ).toEqual([]);
   });
 
-  it("keeps the selected design-style card legible", () => {
-    const customizer = read("components/PostCustomizer.tsx");
-    // Title, description and detail lines of the active card.
-    expect(customizer).toContain("[.theme-light_&]:text-primary-950");
-    expect(customizer).toContain("[.theme-light_&]:text-primary-900");
-    expect(customizer).toContain("[.theme-light_&]:text-primary-800");
-  });
-
-  it("keeps completed steps legible in the stepper", () => {
-    const steps = read("components/ProgressSteps.tsx");
-    expect(steps.match(/\[\.theme-light_&\]:text-success-800/g)?.length).toBe(2);
+  it("gives Modal's dialog panel the on-overlay class so ink resolves correctly inside dialogs", () => {
+    const modal = read("components/ui/Modal.tsx");
+    expect(modal).toContain("on-overlay");
   });
 
   it("keeps the dealer settings selected pills legible", () => {
+    // DealerAdminDashboard.tsx is PR3, not yet migrated: it still carries the
+    // override literal, so this per-file pin stays until it migrates too.
     const dashboard = read("components/DealerAdminDashboard.tsx");
     expect(dashboard).toContain("[.theme-light_&]:text-success-900");
     expect(dashboard).toContain("[.theme-light_&]:text-warning-900");
   });
 
   it("uses no hardcoded text-white on a theme-aware fill in the schedule dialog", () => {
+    // ScheduleDialog.tsx is PR2, not yet migrated: keep the regression guard.
     const dialog = read("components/ScheduleDialog.tsx");
     expect(dialog).not.toContain("text-white");
   });
 
-  it("gives tinted-fill text a light-theme override on every ramp", () => {
-    // The generalised rule. Every semantic ramp is static hex, so -50 through
-    // -300 ink is tuned for a dark surface; on its own 10-40% tinted fill in
-    // Sunlight Mode that fill resolves near-white and the text measures 1.19
-    // to 1.60:1. Error copy was the worst case (53 sites) because it appears
-    // when something has already gone wrong, but the brand pills (33), warning
-    // and success states (37) all had it too.
-    //
-    // -300 was added after -50/-100/-200 shipped. Stopping at -200 left 12
-    // live sites the rule could not see, including a success pill measured at
-    // 1.24:1 sitting directly beside a warning pill the same commit had fixed.
-    // -400 is deliberately still out: the tree has no such sites, so including
-    // it would prove nothing.
+  it("gives tinted-fill text a light-theme override on every ramp (PR2/PR3 files not yet migrated)", () => {
+    // The generalised rule, scoped to files Light Table has not reached yet.
+    // Migrated files are covered by the strict guard above instead — for
+    // them the override itself is banned, so this rule would never trigger
+    // there anyway, but excluding them keeps this test's failure messages
+    // about the files it actually protects.
     const offenders: string[] = [];
     const files = componentFiles();
     for (const ramp of ["error", "primary", "warning", "success", "info"]) {
       // `[^"\n]` rather than `[^"]`: the character class must not cross a line
       // break, or a match can start at the quote closing an unrelated line and
       // end several lines later, reporting a line number that points at the
-      // wrong code. Proven in a sandbox: an offender was reported as line 1,
-      // the `import React from "react";` above it.
+      // wrong code.
       const tintedFillWithLightInk = new RegExp(
         `"[^"\\n]*\\bbg-${ramp}-\\d{2,3}\\/\\d+\\b[^"\\n]*\\btext-${ramp}-(?:50|100|200|300)\\b[^"\\n]*"`,
         "g",
       );
       for (const file of files) {
-        if (STUDIO_THEMED_FILES.has(file)) continue;
+        if (STUDIO_THEMED_FILES.has(file) || MIGRATED_FILE_SET.has(file)) continue;
         const source = read(file);
         for (const match of source.matchAll(tintedFillWithLightInk)) {
           if (hasLightOverride(match[0], ramp)) continue;
@@ -131,14 +210,12 @@ describe("Sunlight Mode keeps selected controls readable", () => {
     ).toEqual([]);
   });
 
-  it("still flags plain error ink outside a tinted fill, which the ramp rule misses", () => {
+  it("still flags plain error ink outside a tinted fill, which the ramp rule misses (PR2/PR3 files not yet migrated)", () => {
     // Kept separate: an error message on a plain surface has no bg-error-* to
-    // match on, and those were the majority of the original 53. On the three
-    // Sunlight surfaces (#f8fafc, #f1f5f9, #ffffff) text-error-300 measures
-    // 1.73 to 1.90:1; the -800 override takes it to 7.59 to 8.31:1.
+    // match on. Scoped the same way as the rule above.
     const offenders: string[] = [];
     for (const file of componentFiles()) {
-      if (STUDIO_THEMED_FILES.has(file)) continue;
+      if (STUDIO_THEMED_FILES.has(file) || MIGRATED_FILE_SET.has(file)) continue;
       const source = read(file);
       for (const match of source.matchAll(
         /"[^"\n]*\btext-error-(?:100|200|300)\b[^"\n]*"/g,
@@ -156,17 +233,20 @@ describe("Sunlight Mode keeps selected controls readable", () => {
 
   it("pins the studio-theme invariants the PostResult exemption rests on", () => {
     // STUDIO_THEMED_FILES exempts the result screen because it is dark in both
-    // themes. That is only true while all three of these hold. If any stops
+    // themes. That is only true while all of these hold. If any stops
     // holding, the exemption starts hiding real defects, so fail here instead.
     const app = read("App.tsx");
     expect(app).toContain("publish-studio-theme");
     expect(app).toContain("AppStep.RESULT");
 
-    // globals.css must re-darken the surface ramp inside the studio, otherwise
-    // the ramp stays inverted under .theme-light and the screen goes light.
+    // globals.css must re-darken the surface ramp inside the studio (both the
+    // Light Table canvas token and the legacy surface-950 alias PR2/PR3 files
+    // still read), otherwise the ramp stays inverted under .theme-light and
+    // the screen goes light.
     const css = read("styles/globals.css");
     const studio = css.slice(css.indexOf(".publish-studio-theme"));
-    expect(studio).toMatch(/--surface-950:\s*2 6 23/);
+    expect(studio).toMatch(/--surface-950:\s*18 20 22/);
+    expect(studio).toMatch(/--canvas:\s*18 20 22/);
 
     // The sticky delivery bar renders through createPortal into document.body,
     // so it lands outside the wrapper App.tsx themes and has to carry the class
@@ -186,15 +266,7 @@ describe("Sunlight Mode keeps selected controls readable", () => {
     // light fill. Overriding it UNDOES that swap. On the Badge neutral variant
     // it produced text-surface-800 on bg-surface-800 — 1.00:1, a blank capsule,
     // where the untouched class was 8.40:1.
-    const dir = resolve(process.cwd(), "components");
-    const files = [
-      ...readdirSync(dir)
-        .filter((f) => f.endsWith(".tsx"))
-        .map((f) => `components/${f}`),
-      ...readdirSync(resolve(dir, "ui"))
-        .filter((f) => f.endsWith(".tsx"))
-        .map((f) => `components/ui/${f}`),
-    ];
+    const files = componentFiles();
 
     const offenders: string[] = [];
     for (const file of files) {
@@ -213,6 +285,39 @@ describe("Sunlight Mode keeps selected controls readable", () => {
     expect(
       offenders,
       `surface already inverts; these overrides undo it:\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
+
+  it("keeps dialog helper text off text-ink-3, which under-contrasts on the dialog surface", () => {
+    // --ink-3 measures 4.22:1 on the page surface but only on the page surface.
+    // Inside a dialog, helper text must use text-ink-hint instead, which
+    // .on-overlay re-points to --ink-2 for the dialog's surface. Modal.tsx and
+    // the primitives dialogs compose (ProgressBar, Toast, Input, ErrorBanner)
+    // are covered here alongside the dialog components themselves.
+    const DIALOG_FILES = [
+      "components/SettingsModal.tsx",
+      "components/PhotoReleaseModal.tsx",
+      "components/ImageCropModal.tsx",
+      "components/VinScanner.tsx",
+      "components/ui/Modal.tsx",
+      "components/ui/ProgressBar.tsx",
+      "components/ui/Toast.tsx",
+      "components/ui/Input.tsx",
+      "components/ui/ErrorBanner.tsx",
+    ];
+
+    const offenders: string[] = [];
+    for (const file of DIALOG_FILES) {
+      const source = read(file);
+      for (const match of source.matchAll(/\btext-ink-3\b/g)) {
+        const line = source.slice(0, match.index).split("\n").length;
+        offenders.push(`${file}:${line}`);
+      }
+    }
+
+    expect(
+      offenders,
+      `text-ink-3 under-contrasts on dialog surfaces; use text-ink-hint instead:\n${offenders.join("\n")}`,
     ).toEqual([]);
   });
 });

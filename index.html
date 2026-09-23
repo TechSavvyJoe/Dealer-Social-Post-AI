@@ -10,7 +10,7 @@
       name="description"
       content="Create dealership-ready social posts with AI-assisted captions, branded images, video, compliance controls, and fast multi-format sharing."
     />
-    <meta name="theme-color" content="#090d17" />
+    <meta name="theme-color" content="#121416" />
     <!-- Pre-paint theme: applies the persisted Sunlight Mode class before the
          first frame so light-theme users never see a dark flash. The React
          store stays the runtime authority. Plain (non-module) script so Vite
@@ -35,7 +35,7 @@
           ) {
             document.documentElement.classList.add("theme-light");
             var m = document.querySelector('meta[name="theme-color"]');
-            if (m) m.setAttribute("content", "#f8fafc");
+            if (m) m.setAttribute("content", "#f4f4f2");
           }
         } catch (e) {}
       })();
@@ -47,8 +47,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Dealer Social" />
     <!-- Link previews. The og:image must be an absolute URL on the canonical
-         production origin; the 1024px v3 launcher artwork is opaque and served
-         immutable, so scrapers always get stable brand bytes. -->
+         production origin; the 1200x630 v4 link-preview artwork is opaque and
+         served immutable, so scrapers always get stable brand bytes. -->
     <meta property="og:title" content="Dealer Social Post AI" />
     <meta
       property="og:description"
@@ -58,24 +58,24 @@
     <meta property="og:url" content="https://dealer-social-post-ai.vercel.app/" />
     <meta
       property="og:image"
-      content="https://dealer-social-post-ai.vercel.app/dealer-social-dsp-v3-1024.png"
+      content="https://dealer-social-post-ai.vercel.app/dealer-social-og-v4.png"
     />
-    <meta property="og:image:width" content="1024" />
-    <meta property="og:image:height" content="1024" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="Dealer Social Post AI brand mark on a deep navy background"
+      content="Dealer Social Post AI mark and wordmark on a graphite background"
     />
     <meta name="twitter:card" content="summary_large_image" />
-    <link rel="icon" type="image/svg+xml" href="/dsp-brand-mark-v3-micro.svg" />
+    <link rel="icon" type="image/svg+xml" href="/dsp-brand-mark-v4-micro.svg" />
     <link
       rel="icon"
       type="image/png"
       sizes="32x32"
-      href="/dealer-social-favicon-v3-32.png"
+      href="/dealer-social-favicon-v4-32.png"
     />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/dealer-social-dsp-v3-180.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/dealer-social-dsp-v4-180.png" />
     <title>Dealer Social Post AI</title>
     <style>
       /* Critical above-the-fold styles */
@@ -139,7 +139,7 @@
         height: 100%;
         max-height: 100%;
         min-height: 0;
-        background-color: #090d17; /* matches --color-surface-base */
+        background-color: #121416; /* matches --color-surface-base */
         overflow: hidden;
         position: relative;
         isolation: isolate;
@@ -149,7 +149,7 @@
 
       /* Sunlight Mode boot surface — set pre-paint by the head script. */
       .theme-light .app-container {
-        background-color: #f8fafc;
+        background-color: #f4f4f2;
       }
 
       #root {
@@ -180,7 +180,7 @@
         }
       }
 
-      /* Desktop styles - add subtle bezel; no decorative indigo glow. */
+      /* Desktop styles - the canvas is the page; no bezel. */
       @media (min-width: 769px) and (min-height: 600px) {
         /* Release the mobile viewport pin so the document scrolls normally. */
         html {
@@ -196,18 +196,18 @@
           overflow-x: hidden;
           overflow-y: visible;
           overscroll-behavior: auto;
-          padding: clamp(1rem, 2vw, 2rem);
+          padding: 0;
           height: auto;
           min-height: 100dvh;
         }
         .app-container {
           height: auto;
           max-height: none;
-          min-height: calc(100dvh - clamp(2rem, 4vw, 4rem));
+          min-height: 100dvh;
           overflow: visible;
-          border-radius: 1.25rem;
-          border: 1px solid rgba(255, 255, 255, 0.06);
-          box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+          border-radius: 0;
+          border: none;
+          box-shadow: none;
         }
         #root {
           height: auto;
@@ -219,36 +219,19 @@
           padding-right: 0;
         }
       }
-
-      /* iPad specific optimization */
-      @media (min-width: 769px) and (max-width: 1024px) and (min-height: 600px) {
-        body {
-          padding: clamp(0.75rem, 1.5vw, 1.25rem);
-        }
-        .app-container {
-          border-radius: 1.25rem;
-        }
-      }
-
-      /* Desktop */
-      @media (min-width: 1025px) and (min-height: 600px) {
-        body {
-          padding: clamp(1.5rem, 2vw, 2rem);
-        }
-      }
     </style>
   </head>
   <body>
     <!-- Skip navigation for accessibility -->
     <a
       href="#main-content"
-      class="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-primary-600 focus:text-white focus:rounded-lg focus:shadow-lg"
+      class="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-brand-fill focus:text-brand-foreground focus:rounded-sm"
     >
       Skip to main content
     </a>
     <div class="app-container">
       <noscript>
-        <p style="margin: auto; padding: 2rem; text-align: center; color: #e2e8f0">
+        <p style="margin: auto; padding: 2rem; text-align: center; color: #c8ccd0">
           Dealer Social Post AI needs JavaScript. Please enable it and reload.
         </p>
       </noscript>

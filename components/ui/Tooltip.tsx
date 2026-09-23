@@ -73,7 +73,7 @@ export const Tooltip: React.FC<TooltipProps> = ({ label, children, side = "top" 
       {open ? (
         <div
           className={cn(
-            "pointer-events-none absolute z-40 max-w-[min(18rem,calc(100vw-2rem))] whitespace-normal rounded-md bg-slate-950/90 px-2 py-1 text-center text-xs font-medium text-white shadow-lg",
+            "pointer-events-none absolute z-40 max-w-[min(18rem,calc(100vw-2rem))] whitespace-normal rounded-md border border-hairline bg-overlay px-2 py-1 text-center text-2xs font-medium text-ink",
             positionClasses[side],
           )}
           role="tooltip"

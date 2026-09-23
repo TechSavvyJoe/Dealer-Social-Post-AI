@@ -439,13 +439,13 @@ if (!manifestResponse.headers.get("content-type")?.includes("manifest+json")) {
 }
 const manifest = JSON.parse(manifestText);
 const expectedManifestIcons = [
-  ["/dealer-social-dsp-v3-192.png", "192x192", "image/png", "any"],
-  ["/dealer-social-dsp-v3-512.png", "512x512", "image/png", "any"],
-  ["/dealer-social-dsp-v3-1024.png", "1024x1024", "image/png", "any"],
-  ["/dealer-social-dsp-v3-maskable-192.png", "192x192", "image/png", "maskable"],
-  ["/dealer-social-dsp-v3-maskable-512.png", "512x512", "image/png", "maskable"],
-  ["/dealer-social-dsp-v3-maskable-1024.png", "1024x1024", "image/png", "maskable"],
-  ["/dsp-brand-mark-v3-monochrome.svg", "any", "image/svg+xml", "monochrome"],
+  ["/dealer-social-dsp-v4-192.png", "192x192", "image/png", "any"],
+  ["/dealer-social-dsp-v4-512.png", "512x512", "image/png", "any"],
+  ["/dealer-social-dsp-v4-1024.png", "1024x1024", "image/png", "any"],
+  ["/dealer-social-dsp-v4-maskable-192.png", "192x192", "image/png", "maskable"],
+  ["/dealer-social-dsp-v4-maskable-512.png", "512x512", "image/png", "maskable"],
+  ["/dealer-social-dsp-v4-maskable-1024.png", "1024x1024", "image/png", "maskable"],
+  ["/dsp-brand-mark-v4-monochrome.svg", "any", "image/svg+xml", "monochrome"],
 ];
 if (
   manifest.name !== "Dealer Social Post AI" ||
@@ -464,14 +464,14 @@ if (
   throw new Error(`${label} web app manifest is incomplete.`);
 }
 for (const icon of [
-  "/dealer-social-dsp-v3-180.png",
-  "/dealer-social-dsp-v3-192.png",
-  "/dealer-social-dsp-v3-512.png",
-  "/dealer-social-dsp-v3-1024.png",
-  "/dealer-social-dsp-v3-maskable-192.png",
-  "/dealer-social-dsp-v3-maskable-512.png",
-  "/dealer-social-dsp-v3-maskable-1024.png",
-  "/dealer-social-favicon-v3-32.png",
+  "/dealer-social-dsp-v4-180.png",
+  "/dealer-social-dsp-v4-192.png",
+  "/dealer-social-dsp-v4-512.png",
+  "/dealer-social-dsp-v4-1024.png",
+  "/dealer-social-dsp-v4-maskable-192.png",
+  "/dealer-social-dsp-v4-maskable-512.png",
+  "/dealer-social-dsp-v4-maskable-1024.png",
+  "/dealer-social-favicon-v4-32.png",
 ]) {
   const { response, bytes } = await fetchBytes(icon);
   if (
@@ -483,10 +483,10 @@ for (const icon of [
   }
 }
 for (const mark of [
-  "/dsp-brand-mark-v3.svg",
-  "/dsp-brand-mark-v3-micro.svg",
-  "/dsp-brand-mark-v3-maskable.svg",
-  "/dsp-brand-mark-v3-monochrome.svg",
+  "/dsp-brand-mark-v4.svg",
+  "/dsp-brand-mark-v4-micro.svg",
+  "/dsp-brand-mark-v4-maskable.svg",
+  "/dsp-brand-mark-v4-monochrome.svg",
 ]) {
   const { response, bytes } = await fetchBytes(mark);
   if (

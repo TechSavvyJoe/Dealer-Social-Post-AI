@@ -5,7 +5,7 @@ export const contentSecurityPolicy = [
   // The sha256 allows exactly one inline script: the pre-paint theme snippet
   // in index.html. Its hash is pinned by __tests__/prePaintTheme.test.ts, so
   // editing the snippet without updating this value fails CI, not production.
-  "script-src 'self' 'sha256-JPRzJy1ZJFiT889VGwZTmb4NJoJxo5BneGlZaLKKzaU=' https://challenges.cloudflare.com",
+  "script-src 'self' 'sha256-/BDi79xyTr9R8ICV6KALUbYxT0VtDgKXMM8oqBgzp2M=' https://challenges.cloudflare.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob: https:",
@@ -97,7 +97,7 @@ export const config: VercelConfig = {
       },
     ]),
     continuingHeaderRoute(
-      "^/(?:dsp-brand-mark-v3(?:-app|-maskable|-micro|-monochrome)?\\.svg|dealer-social-(?:dsp|favicon)-v3(?:-maskable)?-[0-9]+\\.png)$",
+      "^/(?:dsp-brand-mark-v4(?:-app|-maskable|-micro|-monochrome)?\\.svg|dealer-social-(?:dsp|favicon)-v4(?:-maskable)?-[0-9]+\\.png)$",
       [
         {
           key: "Cache-Control",

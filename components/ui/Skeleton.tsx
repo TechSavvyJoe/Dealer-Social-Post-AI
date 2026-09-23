@@ -30,7 +30,11 @@ export const Skeleton = React.forwardRef<HTMLDivElement, SkeletonProps>(
     return (
       <div
         ref={ref}
-        className={cn("shimmer bg-surface-800", variantStyles[variant], className)}
+        className={cn(
+          "animate-pulse-soft bg-panel-raised",
+          variantStyles[variant],
+          className,
+        )}
         style={{
           width: width,
           height: height || (variant === "text" ? undefined : height),

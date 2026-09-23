@@ -1,5 +1,4 @@
 import React from "react";
-import { m } from "framer-motion";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { cn } from "../../utils/classNames";
 
@@ -21,36 +20,29 @@ export const ErrorBanner: React.FC<ErrorBannerProps> = ({
   onRetry,
   className,
 }) => (
-  <m.div
+  <div
     role="alert"
-    initial={{ opacity: 0, y: -4 }}
-    animate={{ opacity: 1, y: 0 }}
     className={cn(
-      "flex items-start gap-2.5 rounded-xl border border-error-500/30 bg-error-500/10",
-      // The error scale is static hex, not theme-inverted; light ink needs the
-      // deep ramp in Sunlight Mode.
-      "px-3.5 py-2.5 text-xs text-error-200 [.theme-light_&]:text-error-800",
+      "flex items-start gap-2.5 rounded-md border border-error-ink/30 bg-error-fill",
+      "px-3.5 py-2.5 text-xs text-error-ink",
       className,
     )}
   >
-    <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-error-400 [.theme-light_&]:text-error-600" />
+    <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-error-ink" />
     <span className="flex-1 leading-relaxed">{message}</span>
     {onRetry && (
       <button
         type="button"
         onClick={onRetry}
         className={cn(
-          // Kept on one literal on purpose: the Sunlight Mode guard checks the
-          // string it matched, so an override split onto its own cn() argument
-          // reads to the guard as a missing override.
-          "flex-shrink-0 inline-flex items-center gap-1 font-semibold text-error-100 [.theme-light_&]:text-error-800",
-          "hover:text-content-primary transition-colors",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-400/70 rounded",
+          "flex-shrink-0 inline-flex items-center gap-1 font-semibold text-error-ink",
+          "hover:opacity-80 transition-opacity duration-120 ease-out",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-ink/70 rounded",
         )}
       >
         <RefreshCw className="h-3 w-3" />
         Try again
       </button>
     )}
-  </m.div>
+  </div>
 );

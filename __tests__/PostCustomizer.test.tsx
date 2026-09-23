@@ -175,9 +175,11 @@ describe("PostCustomizer", () => {
     // association, so assistive tech announced the controls with no section
     // context at all.
     for (const name of [
+      "What kind of post",
+      "Who and what",
       "Vehicle",
-      "Design Style",
-      "Share to",
+      "Look",
+      "Where it goes",
       "Tone",
       "Caption",
     ] as const) {
@@ -205,7 +207,7 @@ describe("PostCustomizer", () => {
     expect(screen.queryByRole("group", { name: "Vehicle" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Scan VIN/i })).not.toBeInTheDocument();
     // Every other section is unaffected.
-    for (const name of ["Design Style", "Share to", "Tone", "Caption"] as const) {
+    for (const name of ["Look", "Where it goes", "Tone", "Caption"] as const) {
       expect(screen.getByRole("group", { name })).toBeInTheDocument();
     }
   });
@@ -296,7 +298,7 @@ describe("PostCustomizer", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Customer's name (optional)")).toHaveValue("Alex");
+    expect(screen.getByLabelText("Customer first name")).toHaveValue("Alex");
     expect(screen.getByText("Sporty").closest("button")).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -308,7 +310,7 @@ describe("PostCustomizer", () => {
     expect(
       screen.getByRole("button", { name: /Pre-Owned Spotlight/i }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Write My Own" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Write my own" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -465,9 +467,7 @@ describe("PostCustomizer", () => {
     expect(
       screen.queryByText("2025 Ford Bronco Big Bend 4dr SUV"),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /Scan VIN \(optional/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Scan VIN$/i })).toBeInTheDocument();
   });
 
   it("quarantines a restored caption that adds a different customer", async () => {
@@ -492,9 +492,9 @@ describe("PostCustomizer", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Customer's name (optional)")).toHaveValue("Lisa");
+    expect(screen.getByLabelText("Customer first name")).toHaveValue("Lisa");
     expect(screen.getByRole("alert")).toHaveTextContent("was quarantined");
-    expect(screen.getByRole("button", { name: "AI Caption" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Suggested caption" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -558,7 +558,7 @@ describe("PostCustomizer", () => {
     );
 
     expect(screen.getByRole("alert")).toHaveTextContent("was quarantined");
-    expect(screen.getByRole("button", { name: "AI Caption" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Suggested caption" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -592,7 +592,7 @@ describe("PostCustomizer", () => {
       (screen.getByLabelText("Your caption") as HTMLTextAreaElement).value,
     ).toContain("Alex");
 
-    fireEvent.change(screen.getByLabelText("Customer's name (optional)"), {
+    fireEvent.change(screen.getByLabelText("Customer first name"), {
       target: { value: "Beth" },
     });
     const reboundCaption = screen.getByLabelText("Your caption") as HTMLTextAreaElement;
@@ -814,7 +814,7 @@ describe("PostCustomizer creative system", () => {
     });
 
     // Every control group the creative system hides is still here.
-    for (const name of ["Design Style", "Share to", "Tone", "Caption"] as const) {
+    for (const name of ["Look", "Where it goes", "Tone", "Caption"] as const) {
       expect(screen.getByRole("group", { name })).toBeInTheDocument();
     }
     expect(
@@ -851,10 +851,14 @@ describe("PostCustomizer creative system", () => {
   it("drops the customize screen to category, who/what, and one optional toggle", () => {
     renderCustomizer(CREATIVE_DEALER);
 
-    for (const name of ["Design Style", "Tone", "Caption"] as const) {
+    for (const name of ["Look", "Tone", "Caption"] as const) {
       expect(screen.queryByRole("group", { name })).not.toBeInTheDocument();
     }
-    expect(screen.queryByRole("group", { name: "Share to" })).not.toBeInTheDocument();
+    // "Where it goes" survives as the category's prescribed summary, but the
+    // per-platform chips inside it are gone.
+    expect(
+      screen.queryByRole("button", { name: /^TikTok9:16 story-ready$/i }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /^PhotoExact images$/i }),
     ).not.toBeInTheDocument();
@@ -872,7 +876,7 @@ describe("PostCustomizer creative system", () => {
       screen.queryByRole("button", { name: /Advanced options/i }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Write My Own" }),
+      screen.queryByRole("button", { name: "Write my own" }),
     ).not.toBeInTheDocument();
 
     // What is left: the six categories, who/what, and the optional toggles.
@@ -886,7 +890,7 @@ describe("PostCustomizer creative system", () => {
     ] as const) {
       expect(screen.getByRole("button", { name: category })).toBeInTheDocument();
     }
-    expect(screen.getByLabelText(/Customer's name/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Customer first name/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Add a personal line/i)).toBeInTheDocument();
 
     // Compliance controls are untouched.
@@ -1030,7 +1034,7 @@ describe("PostCustomizer creative system", () => {
     const onGenerate = renderCustomizer(CREATIVE_DEALER);
 
     fireEvent.click(screen.getByRole("button", { name: "Inventory" }));
-    fireEvent.change(screen.getByLabelText(/Customer's name/i), {
+    fireEvent.change(screen.getByLabelText(/Customer first name/i), {
       target: { value: "Alex" },
     });
     fireEvent.change(screen.getByLabelText(/Add a personal line/i), {

@@ -1,7 +1,8 @@
-@import "@fontsource/inter/latin-400.css";
-@import "@fontsource/inter/latin-500.css";
-@import "@fontsource/inter/latin-600.css";
-@import "@fontsource/inter/latin-700.css";
+@import "@fontsource/barlow/latin-400.css";
+@import "@fontsource/barlow/latin-500.css";
+@import "@fontsource/barlow/latin-600.css";
+@import "@fontsource/barlow-semi-condensed/latin-500.css";
+@import "@fontsource/barlow-semi-condensed/latin-600.css";
 
 @tailwind base;
 @tailwind components;
@@ -9,205 +10,298 @@
 
 @layer base {
   /* =========================================================================
-     DEALER TRUST design tokens (2026-05-29 rewrite)
-     Aligned with the sister product LTV-Desking-PRO. Navy primary, calm
-     neutral charcoal surface, no decorative gradients, sentence case in copy.
-     Colors are stated in OKLCH (the May-2026 design-system default) with sRGB
-     fallbacks for older browsers via Tailwind utility classes.
+     LIGHT TABLE design tokens (2026-09-18)
+     Spec: docs/superpowers/specs/2026-09-18-light-table-ui-design.md §4.
+     A matte graphite surface whose only job is to make the photograph on it
+     look right. The product is achromatic; the dealership's brand colour is
+     the single accent. Values are R G B triplets consumed as
+     rgb(var(--x) / <alpha-value>) by tailwind.config.js unless noted.
      ========================================================================= */
   :root {
-    /* --- Semantic palette (R G B triplets, fed into bg-[rgb(var(--x))]) --- */
-    --color-primary: 30 64 175; /* navy-700 — Dealer Trust primary */
-    --color-primary-hover: 30 58 138; /* navy-800 */
-    --color-secondary: 71 85 105; /* slate-600 — calm neutral, no purple */
-    --color-success: 22 163 74; /* success-600 */
-    --color-warning: 217 119 6; /* amber-600 */
-    --color-error: 220 38 38; /* red-600 */
-    --color-info: 8 145 178; /* cyan-600 — used sparingly */
+    /* --- Surfaces (Graphite) --- */
+    --canvas: 18 20 22; /* #121416 page */
+    --panel: 25 28 31; /* #191c1f sections, header, sheets */
+    --panel-raised: 33 37 41; /* #212529 inputs, chips, rows */
+    --overlay: 42 47 52; /* #2a2f34 dialogs, popovers, toasts */
+    --hairline: 47 52 57; /* #2f3439 1px dividers */
+    --border-strong: 106 115 124; /* #6a737c control edges, ≥ 3:1 (WCAG 1.4.11) */
 
-    /* --- White-label brand color (per-dealer, runtime override) --- */
-    --brand-primary: #1e40af; /* navy-700 default */
-    --brand-primary-700: #1e3a8a;
-    --brand-primary-600: #1e40af;
-    --brand-primary-500: #2563eb;
-    --brand-primary-400: #60a5fa;
-    --brand-primary-300: #93c5fd;
-    /* Foreground color paired with the brand. White on navy reads AA at 16px+;
-       useDealerTheme.ts can override if a dealer picks a pastel brand. */
-    --brand-foreground: #ffffff;
+    /* --- Ink --- */
+    --ink: 240 242 244; /* #f0f2f4 */
+    --ink-2: 178 186 194; /* #b2bac2 labels, secondary */
+    --ink-3: 136 145 154; /* #88919a hints; canvas/panel/raised only (4.2:1 on overlay) */
+    --ink-hint: var(--ink-3); /* helper text; .on-overlay re-points it at --ink-2 */
 
-    /* RGB triplets of the same brand ramp, consumed by tailwind.config.js as
-       primary-300..700 (rgb(var(--brand-N-rgb) / <alpha-value>)). Overridden
-       at runtime by useDealerTheme so EVERY primary-* utility follows the
-       dealer's white-label color. Keep in lockstep with the hex vars above. */
-    --brand-300-rgb: 147 197 253; /* #93c5fd */
-    --brand-400-rgb: 96 165 250; /* #60a5fa */
-    --brand-500-rgb: 37 99 235; /* #2563eb */
-    --brand-600-rgb: 30 64 175; /* #1e40af */
-    --brand-700-rgb: 30 58 138; /* #1e3a8a */
-
-    /* Theme-aware translucent fills — replacements for dark-only bg-white/5
-       and bg-white/10. Rendered values match the old dark-mode look exactly;
-       Sunlight Mode flips them to ink-tinted fills. */
+    /* --- Translucent fills (ghost hover, row hover) --- */
     --fill-subtle: rgba(255, 255, 255, 0.05);
-    --fill-hover: rgba(255, 255, 255, 0.1);
+    --fill-hover: rgba(255, 255, 255, 0.09);
 
-    /* --- Surface (background) scale — calm neutral charcoal, NOT swirly --- */
-    --color-surface-base: 9 13 23; /* near-black, OKLCH(0.15 0.02 250) ish */
-    --color-surface-elevated: 17 22 36; /* one step lighter */
-    --color-surface-overlay: 27 33 50; /* card overlay */
-    --color-surface-raised: 38 44 63; /* modal / popover */
+    /* --- Semantic ink/fill, theme-aware. Photos are the only chroma, so
+       success and info are achromatic (a filled tag + check icon carries the
+       state); warning and error keep one desaturated printed-ink hue each. --- */
+    --success-ink: var(--ink);
+    --success-fill: var(--fill-hover);
+    --warning-ink: 224 170 96; /* amber-brown ink */
+    --warning-fill: rgba(224, 170, 96, 0.14);
+    --error-ink: 236 132 118; /* oxide red ink, 4.5:1 inside its own fill on --overlay */
+    --error-fill: rgba(236, 132, 118, 0.1);
+    --info-ink: var(--ink-2);
+    --info-fill: var(--fill-subtle);
 
-    /* Tailwind Surface Palette (Dark Mode Default) */
-    --surface-50: 248 250 252;
-    --surface-100: 241 245 249;
-    --surface-200: 226 232 240;
-    --surface-300: 203 213 225;
-    --surface-400: 148 163 184;
-    --surface-500: 100 116 139;
-    --surface-600: 71 85 105;
-    --surface-700: 51 65 85;
-    --surface-800: 30 41 59;
-    --surface-900: 15 23 42;
-    --surface-950: 2 6 23;
+    /* --- Brand accent. The product's own colour is a deep navy, used
+       wherever no dealership is signed in (login, system admin) and for a
+       store that has not set a brand colour. hooks/useDealerTheme.ts
+       overrides every --brand-* below from dealer.brand_color, per theme, and
+       clears them when there is none. The values are exactly what the hook
+       derives for #1e40af, so "no colour" and "navy" render identically. --- */
+    --brand-primary: #1e40af;
+    --brand-primary-700: #618fff;
+    --brand-primary-600: #527ff3;
+    --brand-primary-500: #456fe2;
+    --brand-primary-400: #3760d1;
+    --brand-primary-300: #2a50c0;
+    --brand-fill: 30 64 175; /* the solid accent (buttons, selected states) */
+    /* Dark-theme-derived twin of the brand set, consumed only inside
+       .publish-studio-theme (which stays dark in both themes). useDealerTheme
+       writes both sets; without a dealer both are the achromatic default. */
+    --brand-fill-studio: 30 64 175;
+    --brand-foreground-studio: #ffffff;
+    --brand-ink-studio: 85 130 247;
+    --brand-300-rgb-studio: 42 80 192;
+    --brand-400-rgb-studio: 55 96 209;
+    --brand-500-rgb-studio: 69 111 226;
+    --brand-600-rgb-studio: 82 127 243;
+    --brand-700-rgb-studio: 97 143 255;
+    --brand-foreground: #ffffff; /* text on --brand-fill */
+    --brand-ink: 85 130 247; /* brand as text/icon on --panel, ≥ 4.5:1 */
+    --brand-300-rgb: 42 80 192;
+    --brand-400-rgb: 55 96 209;
+    --brand-500-rgb: 69 111 226;
+    --brand-600-rgb: 82 127 243;
+    --brand-700-rgb: 97 143 255;
+    --color-primary: var(--brand-600-rgb);
+    --color-primary-hover: var(--brand-700-rgb);
 
-    /* --- Text scale — high contrast, no muddy mids --- */
-    --color-text-primary: 244 247 252; /* AA on every surface step */
-    --color-text-secondary: 192 200 216; /* AA at 4.7:1 on surface-base */
-    --color-text-tertiary: 140 148 168; /* AA-large only; use for hints */
+    /* --- Legacy aliases (kept so untouched screens re-colour instead of
+       breaking; PR2/PR3 move call sites onto the tokens above). --- */
+    --color-surface-base: var(--canvas);
+    --color-surface-elevated: var(--panel);
+    --color-surface-overlay: var(--panel-raised);
+    --color-surface-raised: var(--overlay);
+    --color-text-primary: var(--ink);
+    --color-text-secondary: var(--ink-2);
+    --color-text-tertiary: var(--ink-3);
+    --color-border: var(--hairline);
+    --color-border-strong: var(--border-strong);
+    --color-border-light: 38 42 46;
+    --color-secondary: var(--ink-2);
+    --color-success: var(--success-ink);
+    --color-warning: var(--warning-ink);
+    --color-error: var(--error-ink);
+    --color-info: var(--info-ink);
 
-    /* --- Borders + dividers — hairline, ~6% white --- */
-    --color-border: 60 70 92;
-    --color-border-strong: 84 96 122;
-    --color-border-light: 38 44 63;
+    /* Neutral graphite ramp behind bg-/text-surface-N (no blue tint) */
+    --surface-50: 240 242 244;
+    --surface-100: 240 242 244;
+    --surface-200: 240 242 244;
+    --surface-300: 178 186 194;
+    --surface-400: 136 145 154;
+    --surface-500: 112 120 128;
+    --surface-600: 106 115 124;
+    --surface-700: 42 47 52;
+    --surface-800: 33 37 41;
+    --surface-900: 25 28 31;
+    --surface-950: 18 20 22;
 
-    /* --- Focus ring — always brand color, never random --- */
-    --focus-ring: var(--brand-primary);
-    --focus-ring-offset: rgb(var(--color-surface-base));
+    /* --- Focus ring — brand, 2px, outline (never box-shadow) --- */
+    --focus-ring: rgb(var(--brand-ink));
+    --focus-ring-offset: rgb(var(--canvas));
 
-    /* --- Type scale — modular 1.125 (major second), display 1.2 --- */
-    --font-size-xs: 0.75rem; /* 12 */
-    --font-size-sm: 0.875rem; /* 14 */
-    --font-size-base: 1rem; /* 16 */
-    --font-size-lg: 1.125rem; /* 18 */
-    --font-size-xl: 1.25rem; /* 20 */
-    --font-size-2xl: 1.5rem; /* 24 */
-    --font-size-3xl: 1.875rem; /* 30 */
-    --font-size-4xl: 2.25rem; /* 36 */
-    --font-size-display: 3rem; /* 48 — login + admin H1 only */
+    /* --- Type --- */
+    --font-ui: "Barlow", "Helvetica Neue", Arial, sans-serif;
+    --font-display:
+      "Barlow Semi Condensed", "Barlow", "Helvetica Neue", Arial, sans-serif;
 
-    /* --- Spacing — 4px base, rhythm-locked --- */
+    /* --- Spacing — 4px base --- */
     --spacing-xs: 0.5rem;
     --spacing-sm: 0.75rem;
     --spacing-md: 1rem;
     --spacing-lg: 1.5rem;
     --spacing-xl: 2rem;
     --spacing-2xl: 3rem;
-    --spacing-touch-target: 2.75rem; /* 44px Apple HIG */
+    --spacing-touch-target: 2.75rem; /* 44px */
 
-    /* --- Radii — subtle, consistent --- */
-    --radius-sm: 6px;
-    --radius-md: 10px;
-    --radius-lg: 14px;
-    --radius-xl: 20px;
+    /* --- Radii --- */
+    --radius-sm: 8px; /* buttons, inputs, chips */
+    --radius-md: 12px; /* panels, rows */
+    --radius-lg: 16px; /* photo well, dialogs */
+    --radius-xl: 20px; /* mobile sheets */
 
-    /* --- Elevation — flat by default, lift only on raise --- */
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.28);
-    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.36);
-    --shadow-focus: 0 0 0 3px color-mix(in srgb, var(--brand-primary) 40%, transparent);
+    /* --- Elevation — panels cast nothing; only dialogs float. A print does
+       not get a shadow: it lies on a lit table (--table-lift, a soft radial
+       glow under the photo well) and its edge catches the light. --- */
+    --shadow-sm: none;
+    --shadow-md: 0 24px 48px rgba(0, 0, 0, 0.45);
+    --shadow-lg: var(--shadow-md);
+    --shadow-print: none;
+    --table-lift: radial-gradient(
+      ellipse 70% 60% at 50% 58%,
+      rgba(255, 255, 255, 0.06),
+      transparent 70%
+    );
+    --print-edge: 1px solid rgb(var(--border-strong) / 0.6);
+    --shadow-focus: 0 0 0 2px rgb(var(--brand-ink));
 
-    /* --- Motion — fast, eased, never showy --- */
+    /* --- Motion — one reveal per screen; everything else answers a tap --- */
     --duration-fast: 120ms;
     --duration-base: 180ms;
-    --duration-slow: 260ms;
+    --duration-slow: 320ms;
     --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
     --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
     /* Legacy ease names kept so existing components still compile. */
     --ease-ios: var(--ease-in-out);
     --ease-ios-in: cubic-bezier(0.4, 0, 1, 1);
     --ease-ios-out: var(--ease-out);
-    --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
-    --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-bounce: var(--ease-out);
+    --ease-smooth: var(--ease-out);
 
-    /* --- Decorative gradients neutralized.
-       Variables kept so any straggler reference still compiles, but they
-       resolve to transparent so the old aurora swirls disappear. --- */
+    /* Decorative gradient vars kept (transparent) for any straggler. */
     --gradient-start: transparent;
     --gradient-mid: transparent;
     --gradient-end: transparent;
   }
 
-  /* Sunlight Mode (High-Contrast Light Theme) */
+  /* Sunlight — designed for a phone held outdoors, not an inversion: warm
+     off-white canvas, white panels separated by borders instead of tone,
+     near-black ink, heavier borders on controls. */
   .theme-light {
-    --color-surface-base: 248 250 252;
-    --color-surface-elevated: 241 245 249;
-    --color-surface-overlay: 255 255 255;
-    --color-surface-raised: 255 255 255;
+    --canvas: 244 244 242; /* #f4f4f2 */
+    --panel: 255 255 255;
+    --panel-raised: 248 248 246; /* #f8f8f6 an input still reads as a well in glare */
+    --overlay: 255 255 255;
+    --hairline: 217 219 221; /* #d9dbdd */
+    --border-strong: 118 124 130; /* #767c82 ≥ 3:1 on white and canvas */
 
-    --color-text-primary: 15 23 42;
-    --color-text-secondary: 51 65 85;
-    --color-text-tertiary: 100 116 139;
+    --ink: 20 22 24; /* #141618 */
+    --ink-2: 72 78 84; /* #484e54 */
+    --ink-3: 104 111 118; /* #686f76 */
+    --ink-hint: var(--ink-3);
 
-    --color-border: 203 213 225;
-    --color-border-strong: 148 163 184;
-    --color-border-light: 226 232 240;
+    --fill-subtle: rgba(20, 22, 24, 0.05);
+    --fill-hover: rgba(20, 22, 24, 0.09);
 
-    --fill-subtle: rgba(15, 23, 42, 0.04);
-    --fill-hover: rgba(15, 23, 42, 0.08);
+    --warning-ink: 128 78 0;
+    --warning-fill: rgba(128, 78, 0, 0.12);
+    --error-ink: 150 46 38;
+    --error-fill: rgba(150, 46, 38, 0.1);
 
-    /* Invert surface palette so bg-surface-900 becomes light */
-    --surface-50: 2 6 23;
-    --surface-100: 15 23 42;
-    --surface-200: 30 41 59;
-    --surface-300: 51 65 85;
-    --surface-400: 71 85 105;
-    --surface-500: 100 116 139;
-    --surface-600: 148 163 184;
-    --surface-700: 203 213 225;
-    --surface-800: 226 232 240;
-    --surface-900: 241 245 249;
-    --surface-950: 248 250 252;
+    --brand-primary: #1e40af;
+    --brand-primary-700: #0a005e;
+    --brand-primary-600: #06006e;
+    --brand-primary-500: #05057e;
+    --brand-primary-400: #091e8e;
+    --brand-primary-300: #13309e;
+    --brand-fill: 30 64 175;
+    --brand-foreground: #ffffff;
+    --brand-ink: 30 64 175;
+    --brand-300-rgb: 19 48 158;
+    --brand-400-rgb: 9 30 142;
+    --brand-500-rgb: 5 5 126;
+    --brand-600-rgb: 6 0 110;
+    --brand-700-rgb: 10 0 94;
+
+    --color-border-light: 232 233 234;
+
+    /* Inverted alias ramp so bg-surface-900 reads as a light panel */
+    --surface-50: 20 22 24;
+    --surface-100: 20 22 24;
+    --surface-200: 20 22 24;
+    --surface-300: 72 78 84;
+    --surface-400: 104 111 118;
+    --surface-500: 104 111 118;
+    --surface-600: 118 124 130;
+    --surface-700: 217 219 221;
+    --surface-800: 236 237 238;
+    --surface-900: 255 255 255;
+    --surface-950: 244 244 242;
+
+    --shadow-md: 0 16px 40px rgba(20, 22, 24, 0.18);
+    --shadow-lg: var(--shadow-md);
+    /* No lift in Sunlight: a grey glow on white reads as a smudge. The well is
+       the raised tone plus its hairline. */
+    --table-lift: none;
+  }
+
+  /* Dialog bodies: tertiary ink is 4.2:1 on --overlay, so helper text there
+     uses secondary ink. Modal applies this class to its content. */
+  .on-overlay {
+    --ink-hint: var(--ink-2);
   }
 
   /*
-   * The publish result is a purpose-built media control room. Keeping this
-   * workspace dark preserves accurate photo/video contrast and matches the
-   * focused review surface on desktop and mobile even when the rest of the
-   * application is using the sunlight theme.
+   * The publish result is a media control room and stays dark in both themes
+   * so photo and video colour stays accurate. Same Graphite set as :root; the
+   * block exists so it wins over .theme-light on the result wrapper.
    */
   .publish-studio-theme {
-    --color-surface-base: 7 12 22;
-    --color-surface-elevated: 12 20 34;
-    --color-surface-overlay: 17 27 44;
-    --color-surface-raised: 26 38 58;
+    --canvas: 18 20 22;
+    --panel: 25 28 31;
+    --panel-raised: 33 37 41;
+    --overlay: 42 47 52;
+    --hairline: 47 52 57;
+    --border-strong: 106 115 124;
 
-    --color-text-primary: 248 250 252;
-    --color-text-secondary: 203 213 225;
-    --color-text-tertiary: 148 163 184;
-
-    --color-border: 42 56 78;
-    --color-border-strong: 67 84 110;
-    --color-border-light: 30 41 59;
+    --ink: 240 242 244;
+    --ink-2: 178 186 194;
+    --ink-3: 136 145 154;
+    --ink-hint: var(--ink-3);
 
     --fill-subtle: rgba(255, 255, 255, 0.05);
-    --fill-hover: rgba(255, 255, 255, 0.1);
+    --fill-hover: rgba(255, 255, 255, 0.09);
 
-    --surface-50: 248 250 252;
-    --surface-100: 241 245 249;
-    --surface-200: 226 232 240;
-    --surface-300: 203 213 225;
-    --surface-400: 148 163 184;
-    --surface-500: 100 116 139;
-    --surface-600: 71 85 105;
-    --surface-700: 51 65 85;
-    --surface-800: 30 41 59;
-    --surface-900: 15 23 42;
-    --surface-950: 2 6 23;
+    /* The studio ground is Graphite in both themes, so the accent must be the
+       dark-theme derivation whatever <html> currently carries. */
+    --brand-fill: var(--brand-fill-studio);
+    --brand-foreground: var(--brand-foreground-studio);
+    --brand-ink: var(--brand-ink-studio);
+    --brand-300-rgb: var(--brand-300-rgb-studio);
+    --brand-400-rgb: var(--brand-400-rgb-studio);
+    --brand-500-rgb: var(--brand-500-rgb-studio);
+    --brand-600-rgb: var(--brand-600-rgb-studio);
+    --brand-700-rgb: var(--brand-700-rgb-studio);
+    --color-primary: var(--brand-600-rgb);
+    --color-primary-hover: var(--brand-700-rgb);
 
-    background:
-      linear-gradient(180deg, rgba(37, 99, 235, 0.045), transparent 18rem),
-      rgb(var(--color-surface-base));
+    --success-ink: var(--ink);
+    --success-fill: var(--fill-hover);
+    --warning-ink: 224 170 96;
+    --warning-fill: rgba(224, 170, 96, 0.14);
+    --error-ink: 236 132 118;
+    --error-fill: rgba(236, 132, 118, 0.1);
+
+    --color-border-light: 38 42 46;
+
+    --surface-50: 240 242 244;
+    --surface-100: 240 242 244;
+    --surface-200: 240 242 244;
+    --surface-300: 178 186 194;
+    --surface-400: 136 145 154;
+    --surface-500: 112 120 128;
+    --surface-600: 106 115 124;
+    --surface-700: 42 47 52;
+    --surface-800: 33 37 41;
+    --surface-900: 25 28 31;
+    --surface-950: 18 20 22;
+
+    --shadow-md: 0 24px 48px rgba(0, 0, 0, 0.45);
+    --shadow-lg: var(--shadow-md);
+    --table-lift: radial-gradient(
+      ellipse 70% 60% at 50% 58%,
+      rgba(255, 255, 255, 0.06),
+      transparent 70%
+    );
+
+    background: rgb(var(--canvas));
   }
 
   /* Smooth scroll behavior with advanced typography */
@@ -222,10 +316,8 @@
     /* Enable advanced OpenType features */
     font-feature-settings:
       "liga" 1,
-      /* Standard ligatures */ "calt" 1,
-      /* Contextual alternates */ "kern" 1,
-      /* Kerning */ "tnum" 0,
-      /* Tabular numbers (off by default) */ "ss01" 1; /* Stylistic set 1 (if available) */
+      "calt" 1,
+      "kern" 1;
   }
 
   /* Respect reduced motion preference */
@@ -249,12 +341,6 @@
     background-color: rgb(var(--color-surface-base));
     color: rgb(var(--color-text-primary));
     @apply font-sans;
-    /* Subtle brand-tinted gradient floor — static, no animation. */
-    background-image: radial-gradient(
-      ellipse 120% 60% at 50% -10%,
-      color-mix(in srgb, var(--brand-primary) 8%, transparent),
-      transparent 70%
-    );
     /* fixed attachment janks scroll on many mobile browsers */
     background-attachment: scroll;
     overflow-x: hidden;
@@ -272,11 +358,7 @@
     /* Momentum scrolling on iOS for nested overflow regions */
     -webkit-overflow-scrolling: touch;
     /* Tap highlight tone matches brand instead of default blue flash */
-    -webkit-tap-highlight-color: color-mix(
-      in srgb,
-      var(--brand-primary) 22%,
-      transparent
-    );
+    -webkit-tap-highlight-color: rgb(var(--brand-ink) / 0.18);
   }
 
   /* Primary app scrollport — keeps layout chrome stable while content scrolls */
@@ -302,28 +384,8 @@
 
   body::selection,
   *::selection {
-    background-color: color-mix(in srgb, var(--brand-primary) 28%, transparent);
-    color: rgb(var(--color-text-primary));
-  }
-
-  /* Hairline brand accent at the top — anchors the brand without a hero swirl. */
-  body::before {
-    content: "";
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      var(--brand-primary) 35%,
-      var(--brand-primary) 65%,
-      transparent
-    );
-    opacity: 0.7;
-    z-index: 50;
-    pointer-events: none;
+    background-color: rgb(var(--brand-ink) / 0.24);
+    color: rgb(var(--ink));
   }
 
   /* Focus ring — always brand color, always 3px, always visible. */
@@ -341,7 +403,6 @@
   textarea,
   select {
     @apply font-sans;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
   /* ====== Mobile + cross-browser hardening ======
@@ -472,17 +533,19 @@
     /* Keep the access keypad at full-size touch targets on short phones.
        The brand is already present in the installed app chrome; use the wide
        canvas for a two-column sign-in layout instead of compressing rows. */
+    /* `!important` throughout this block: these rules sit in @layer
+       components and would otherwise lose to the element's own utilities. */
     .login-mobile-logo {
-      display: none;
+      display: none !important;
     }
 
     .login-access-pane {
-      grid-template-rows: minmax(0, 1fr) !important;
       padding: 0.5rem 1rem !important;
     }
 
+    /* .login-form always has exactly three children, in this order: the
+       heading block, the access switch, the mode panel. */
     .login-form {
-      grid-row: 1 / -1;
       height: 100%;
       grid-template-columns: minmax(13rem, 0.8fr) minmax(20rem, 1.2fr);
       grid-template-rows: auto minmax(0, 1fr) !important;
@@ -505,6 +568,32 @@
       grid-column: 2;
       grid-row: 1 / span 2;
       min-height: 0;
+    }
+
+    /* 390px of height has to hold four 64px key rows at full size, so the
+       code field gives up its label and its full well height, and the mode
+       panel closes up. The keys never shrink. */
+    .login-code-label {
+      display: none !important;
+    }
+
+    .login-code-slot {
+      height: 2.75rem !important;
+    }
+
+    .login-mode-panel {
+      gap: 0.5rem !important;
+    }
+
+    .login-keypad-group {
+      margin-top: 0 !important;
+      gap: 0.5rem !important;
+    }
+
+    /* 44 + 8 + 286 = 338 of the ~374 available: the keys and the field fit at
+       full size only if the closing hint stands down. */
+    .login-footer-note {
+      display: none !important;
     }
 
     .capture-intro {
@@ -530,13 +619,59 @@
     }
   }
 
+  /* Short PORTRAIT phones. The sign-in stack — lockup, heading, switch, a
+     labelled 56px field and four 64px key rows over a closing note — needs
+     roughly 686px, which an iPhone SE (667), a 360x640 Android or a 320x568
+     phone does not have. The pane scrolls at every breakpoint now, but the
+     keypad should not need scrolling to be used, so short portrait sheds the
+     same chrome short landscape does, in two steps. The keys never shrink.
+     `!important` throughout for the same reason as the landscape block: these
+     rules sit in @layer components, under the elements' own utilities. */
+  @media (orientation: portrait) and (max-height: 720px) {
+    .login-code-label {
+      display: none !important;
+    }
+
+    .login-code-slot {
+      height: 3rem !important;
+    }
+
+    .login-form {
+      row-gap: 1.25rem !important;
+    }
+
+    .login-mode-panel {
+      gap: 1rem !important;
+    }
+
+    /* 44 + 286 of keys is the screen's whole job; the closing hint stands down
+       first, exactly as it does in landscape. */
+    .login-footer-note {
+      display: none !important;
+    }
+  }
+
+  @media (orientation: portrait) and (max-height: 620px) {
+    .login-mobile-logo {
+      display: none !important;
+    }
+
+    .login-code-slot {
+      height: 2.75rem !important;
+    }
+
+    .login-form {
+      row-gap: 1rem !important;
+    }
+  }
+
   /* Firefox sometimes ignores backdrop-filter; provide a fallback solid bg */
   @supports not (backdrop-filter: blur(1px)) {
     .backdrop-blur-md,
     .backdrop-blur-lg,
     .backdrop-blur-xl,
     .backdrop-blur-2xl {
-      background-color: rgba(15, 23, 42, 0.95);
+      background-color: rgb(var(--overlay));
     }
   }
 
@@ -574,13 +709,14 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-surface-700/50 rounded-full;
+    background-color: rgb(var(--border-strong) / 0.5);
+    border-radius: 9999px;
     border: 3px solid transparent;
     background-clip: padding-box;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-surface-600/70;
+    background-color: rgb(var(--border-strong) / 0.7);
   }
 
   /* Corner styling */
@@ -588,60 +724,54 @@
     @apply bg-transparent;
   }
 
-  /* Headings with refined typography */
+  /* Headings — spec §4.2. Screen titles use the condensed display face;
+     section titles stay in the UI face. Components may override sizes. */
   h1,
   h2,
   h3,
   h4,
   h5,
   h6 {
-    @apply font-semibold tracking-tight;
-    font-feature-settings: "ss01", "ss02", "cv01";
+    @apply font-semibold;
     text-wrap: balance;
   }
 
   h1 {
-    @apply text-4xl md:text-5xl;
-    letter-spacing: -0.03em;
+    @apply font-display text-[1.75rem] leading-8 md:text-4xl md:leading-10;
+    letter-spacing: -0.01em;
   }
 
   h2 {
-    @apply text-3xl md:text-4xl;
-    letter-spacing: -0.025em;
+    @apply font-display text-2xl leading-7;
+    letter-spacing: -0.01em;
   }
 
   h3 {
-    @apply text-2xl md:text-3xl;
-    letter-spacing: -0.02em;
+    @apply text-lg leading-6;
   }
 
-  h4 {
-    @apply text-xl md:text-2xl;
-  }
-
-  h5 {
-    @apply text-lg md:text-xl;
-  }
-
+  h4,
+  h5,
   h6 {
-    @apply text-base md:text-lg;
+    @apply text-base leading-6;
   }
 
   /* Links with smooth transitions */
   a {
-    @apply text-primary-400 hover:text-primary-300 transition-colors duration-200;
+    @apply text-brand-ink underline-offset-2 transition-colors duration-150 hover:underline;
     text-decoration-skip-ink: auto;
   }
 
   /* Code blocks */
   code {
-    @apply font-mono text-sm bg-surface-800/80 px-1.5 py-0.5 rounded;
+    @apply font-mono text-sm px-1.5 py-0.5 rounded;
+    background-color: rgb(var(--panel-raised) / 0.8);
     font-feature-settings: "calt" 0;
   }
 
   pre {
-    @apply font-mono text-sm bg-surface-800/60 p-4 rounded-2xl overflow-x-auto;
-    backdrop-filter: blur(8px);
+    @apply font-mono text-sm p-4 rounded-lg overflow-x-auto;
+    background-color: rgb(var(--panel-raised) / 0.6);
   }
 
   pre code {
@@ -660,13 +790,14 @@
 
   /* Placeholder styling */
   ::placeholder {
-    @apply text-surface-400;
+    color: rgb(var(--ink-3));
     opacity: 1;
   }
 
   /* Selection styling */
   ::selection {
-    @apply bg-primary-500/30 text-primary-50;
+    background-color: rgb(var(--brand-ink) / 0.24);
+    color: rgb(var(--ink));
   }
 }
 
@@ -690,6 +821,95 @@
   /* Touch target (Apple HIG - minimum 44px) */
   .touch-target {
     @apply min-w-[44px] min-h-[44px] inline-flex items-center justify-center;
+  }
+
+  /* The light table: a photo well is a panel lit from beneath, and a print
+     lying on it gets an edge, never a drop shadow (spec §4.3). */
+  .table-lit {
+    background-color: rgb(var(--panel));
+    background-image: var(--table-lift);
+  }
+  .theme-light .table-lit {
+    background-color: rgb(var(--panel-raised));
+  }
+
+  /* Login has no photo, so the light table itself is the stage: one soft lift
+     under the centred access card. Desktop only — the phone screen is the card
+     and needs no ground under it — and, like .table-lit, none in Sunlight
+     Mode, where a grey glow on a warm white canvas reads as a smudge. */
+  @media (min-width: 1024px) {
+    .login-stage {
+      background-image: radial-gradient(
+        60% 55% at 50% 48%,
+        rgb(var(--panel-raised) / 0.55) 0%,
+        transparent 72%
+      );
+    }
+    .theme-light .login-stage {
+      background-image: none;
+    }
+
+    /* The access column is the card's own scrollport of last resort. `safe`
+       keeps the top of the column reachable when it does overflow — plain
+       `center` would push it past the scroll origin, where scrollTop clamps
+       to 0 and the heading can never be reached.
+       `!important` for the same reason as the short-landscape block below:
+       this rule is in @layer components and would otherwise lose to the
+       element's own `lg:justify-center` utility. The element keeps that
+       utility so a browser without `safe` alignment still centres. */
+    .login-access-pane {
+      justify-content: safe center !important;
+    }
+  }
+
+  /* A 13" laptop leaves roughly 680-780px of viewport once browser chrome is
+     counted, and the access column needs ~600 of it. Close the card's padding
+     and gaps there so the keypad and the brand copy both stay whole rather
+     than meeting the card's max-height. */
+  @media (min-width: 1024px) and (min-height: 501px) and (max-height: 820px) {
+    .login-access-pane {
+      padding-top: 1.5rem !important;
+      padding-bottom: 1.5rem !important;
+    }
+
+    .login-form,
+    .login-mode-panel,
+    .login-keypad-group {
+      gap: 1.25rem !important;
+    }
+
+    .login-card-brand {
+      padding: 2rem !important;
+    }
+  }
+
+  /* Sunlight Mode separates white surfaces with a border rather than with
+     tone (spec §4.1): --panel-raised is barely off --panel there, so the
+     borderless keys and the access switch would dissolve into the card. */
+  .theme-light .login-key {
+    border: 1px solid rgb(var(--hairline));
+  }
+
+  /* The switch is `h-[52px] p-1` under border-box, so a real border would come
+     out of the segments and drop them from 44px to 42px — below the touch
+     target the spec pins. An inset ring draws the same edge for free. */
+  .theme-light .login-switch {
+    box-shadow: inset 0 0 0 1px rgb(var(--hairline));
+  }
+
+  /* --overlay is pure white in Sunlight — the login card's own colour — so the
+     key variant's shared `hover:bg-overlay` erases the key face instead of
+     lifting it. On a white card the lift goes DOWN a tone, so Sunlight keeps
+     the raised fill and darkens it with the theme's own hover overlay.
+     `!important` because the utility sits in the later @layer utilities. */
+  .theme-light .login-key:hover {
+    background-color: rgb(var(--panel-raised)) !important;
+    background-image: linear-gradient(var(--fill-hover), var(--fill-hover));
+  }
+  .print {
+    border: var(--print-edge, 1px solid rgb(var(--border-strong) / 0.6));
+    border-radius: var(--radius-sm);
+    box-shadow: none;
   }
 
   /* Interactive-card affordance — border/background emphasis, no lift. */
@@ -732,18 +952,6 @@
     }
   }
 
-  /* Floating label for inputs */
-  .floating-label {
-    @apply absolute left-3 top-1/2 -translate-y-1/2;
-    @apply text-surface-400 text-sm pointer-events-none;
-    @apply transition-all duration-200 ease-apple;
-  }
-
-  .floating-label-active {
-    @apply -top-2 left-2 text-xs px-1;
-    @apply bg-surface-900 text-primary-400;
-  }
-
   /* Scrollbar hide */
   .scrollbar-hide {
     -ms-overflow-style: none;
@@ -781,7 +989,7 @@
   .card-interactive {
     @apply cursor-pointer;
     @apply transition-colors duration-200 ease-apple;
-    @apply hover:border-strong hover:bg-surface-raised;
+    @apply hover:border-strong hover:bg-overlay;
     @apply active:scale-[0.98];
   }
 
@@ -798,7 +1006,7 @@
 
   /* Tooltip arrow */
   .tooltip-arrow {
-    @apply absolute w-2 h-2 bg-surface-800 border border-surface-700;
+    @apply absolute w-2 h-2 bg-overlay border border-hairline;
     @apply rotate-45;
   }
 }

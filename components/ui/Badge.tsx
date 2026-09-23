@@ -1,71 +1,55 @@
 import React from "react";
-import { m, HTMLMotionProps } from "framer-motion";
+import { Check } from "lucide-react";
 import { cn } from "../../utils/classNames";
 
 type Variant = "primary" | "success" | "warning" | "error" | "info" | "neutral";
 type Size = "sm" | "md" | "lg";
 
-/**
- * The -300 ink is tuned for the dark theme, where it sits on a dark surface. In
- * Sunlight Mode the 15%-tinted fill resolves to near-white, so -300 ink drops to
- * roughly 1.6:1 and the badge renders as an empty capsule (observed on the
- * "Verified" pill in the customizer). Each variant therefore carries a
- * light-theme override at -800, which clears AA on the same fill.
- */
 const variantStyles: Record<Variant, string> = {
-  primary:
-    "bg-primary-500/15 text-primary-300 border border-primary-500/30 [.theme-light_&]:text-primary-800",
-  success:
-    "bg-success-500/15 text-success-300 border border-success-500/30 [.theme-light_&]:text-success-800",
-  warning:
-    "bg-warning-500/15 text-warning-300 border border-warning-500/30 [.theme-light_&]:text-warning-800",
-  error:
-    "bg-error-500/15 text-error-300 border border-error-500/30 [.theme-light_&]:text-error-800",
-  info: "bg-info-500/15 text-info-300 border border-info-500/30 [.theme-light_&]:text-info-800",
-  // No light-theme override here on purpose. Unlike the semantic ramps above,
-  // which are static hex, `surface` is CSS-variable driven and already inverts
-  // under .theme-light (globals.css): surface-300 becomes dark ink and
-  // surface-800 becomes a light fill. Adding an override made foreground and
-  // background the same token — 1.00:1, a blank capsule.
-  neutral: "bg-surface-800 text-surface-300 border border-surface-700",
+  primary: "bg-brand-fill text-brand-foreground border border-brand-fill",
+  success: "bg-success-fill text-success-ink border border-success-ink/30",
+  warning: "bg-warning-fill text-warning-ink border border-warning-ink/30",
+  error: "bg-error-fill text-error-ink border border-error-ink/30",
+  info: "bg-info-fill text-info-ink border border-info-ink/30",
+  neutral: "bg-panel-raised text-ink-2 border border-hairline",
 };
 
 const sizeStyles: Record<Size, string> = {
-  sm: "text-[10px] px-2 py-0.5 gap-1",
-  md: "text-xs px-2.5 py-1 gap-1.5",
-  lg: "text-sm px-3 py-1.5 gap-2",
+  sm: "text-2xs px-2 py-0.5 gap-1",
+  md: "text-2xs px-2.5 py-1 gap-1.5",
+  lg: "text-caption px-3 py-1.5 gap-2",
 };
 
 const dotStyles: Record<Variant, string> = {
-  primary: "bg-primary-400",
-  success: "bg-success-400",
-  warning: "bg-warning-400",
-  error: "bg-error-400",
-  info: "bg-info-400",
-  neutral: "bg-surface-400",
+  primary: "bg-brand-ink",
+  success: "bg-success-ink",
+  warning: "bg-warning-ink",
+  error: "bg-error-ink",
+  info: "bg-info-ink",
+  neutral: "bg-ink-2",
 };
 
-interface BadgeProps extends Omit<HTMLMotionProps<"span">, "ref"> {
+interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
   /** Badge color variant */
   variant?: Variant;
   /** Badge size */
   size?: Size;
-  /** Show animated dot indicator */
+  /** Show a dot indicator instead of the automatic success check icon */
   dot?: boolean;
-  /** Animate the dot (pulse effect) */
+  /** No-op (spec §4.4): kept for call-site compatibility. Only loading
+   *  placeholders (Skeleton, Shimmer) may pulse; a status dot never does. */
   pulse?: boolean;
-  /** Uppercase the label. Defaults to true for status chips; pass false for
-   *  descriptive labels so they don't read as shouty. */
+  /** Uppercase the label. Defaults to false — sentence case is the norm; when
+   *  true this applies nothing more than tracking-normal uppercase. */
   uppercase?: boolean;
 }
 
 /**
- * Badge component for status indicators and labels.
- * Features smooth animations and optional dot indicator.
+ * Badge component for status indicators and labels. Tokens only, no motion.
  *
  * @example
- * <Badge variant="success" dot pulse>Active</Badge>
- * <Badge variant="warning">Pending</Badge>
+ * <Badge variant="success">Active</Badge>
+ * <Badge variant="warning" dot pulse>Pending</Badge>
  */
 export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
   (
@@ -74,28 +58,24 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
       variant = "neutral",
       size = "md",
       dot = false,
-      pulse = false,
-      uppercase = true,
+      pulse: _pulse = false,
+      uppercase = false,
       children,
       ...props
     },
     ref,
   ) => (
-    <m.span
+    <span
       ref={ref}
       className={cn(
         "inline-flex items-center",
         "rounded-full",
-        "font-semibold tracking-wider",
-        uppercase && "uppercase",
-        "transition-all duration-200",
+        "font-medium",
+        uppercase && "uppercase tracking-normal",
         variantStyles[variant],
         sizeStyles[size],
         className,
       )}
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.2, ease: "easeOut" }}
       {...props}
     >
       {dot && (
@@ -106,13 +86,15 @@ export const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
             size === "md" && "w-2 h-2",
             size === "lg" && "w-2.5 h-2.5",
             dotStyles[variant],
-            pulse && "animate-pulse-soft",
           )}
           aria-hidden="true"
         />
       )}
+      {!dot && variant === "success" && (
+        <Check className="h-3 w-3 shrink-0" aria-hidden="true" />
+      )}
       {children as React.ReactNode}
-    </m.span>
+    </span>
   ),
 );
 

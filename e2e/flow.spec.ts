@@ -548,7 +548,7 @@ test.describe("Dealer Social Post AI Flow", () => {
 
     await page.goto("/#/capture");
     await expect(
-      page.getByRole("heading", { name: "Capture the handoff." }),
+      page.getByRole("heading", { name: "Start with a photo" }),
     ).toBeVisible();
 
     const mainContent = page.locator("#main-content");
@@ -599,7 +599,12 @@ test.describe("Dealer Social Post AI Flow", () => {
         overflowY: getComputedStyle(element).overflowY,
       }));
       expect(scrollContract.clientHeight).toBeGreaterThan(0);
-      expect(scrollContract.scrollHeight).toBeGreaterThan(scrollContract.clientHeight);
+      // The compact phone capture (buttons first, 4:3 well) can fit an 844px
+      // viewport without scrolling; the 600px pass below still proves the
+      // scrollport reaches the end when the content is taller than the screen.
+      expect(scrollContract.scrollHeight).toBeGreaterThanOrEqual(
+        scrollContract.clientHeight,
+      );
       expect(["auto", "scroll"]).toContain(scrollContract.overflowY);
 
       await mainContent.evaluate((element) => {
@@ -740,7 +745,7 @@ test.describe("Dealer Social Post AI Flow", () => {
 
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "Capture the handoff." }),
+      page.getByRole("heading", { name: "Start with a photo" }),
     ).toBeVisible();
     await page.evaluate(async (modelPolicyVersion) => {
       const image =
@@ -1091,7 +1096,7 @@ test.describe("Dealer Social Post AI Flow", () => {
 
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { name: "Capture the handoff." }),
+      page.getByRole("heading", { name: "Start with a photo" }),
     ).toBeVisible();
     await page.evaluate(async (modelPolicyVersion) => {
       const image = `data:image/svg+xml;base64,${btoa(
