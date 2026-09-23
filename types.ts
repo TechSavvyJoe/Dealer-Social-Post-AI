@@ -1,3 +1,4 @@
+import type { PlatformDestinationId } from "./services/platformOutputs";
 import type { WebsiteDraft, WebsitePublication } from "./services/websitePublishing";
 import type { DecodedVehicle } from "./services/vinDecoder";
 
@@ -132,6 +133,22 @@ export interface ImageSelection {
   originalFilename?: string;
 }
 
+/**
+ * How a completed share left the device: the OS share sheet resolved, the
+ * file was downloaded, or the caption was copied. Mirrors the `via` select on
+ * the `post_share_events` collection.
+ */
+export type PostShareVia = "share_sheet" | "download" | "copy";
+
+/** One recorded share. The server writes the timestamp. */
+export interface PostShareRecord {
+  /** Destination id from services/platformOutputs.ts, e.g. `facebook_feed`. */
+  channel: PlatformDestinationId;
+  via: PostShareVia;
+  /** Server-written time the share was recorded. */
+  at: string;
+}
+
 export interface GeneratedPost {
   image: string; // base64 data URL
   text: string;
@@ -204,6 +221,12 @@ export interface GeneratedPost {
   websiteDraft?: WebsiteDraft;
   /** Durable server-to-server delivery state for the private website draft. */
   websitePublication?: WebsitePublication;
+  /**
+   * Shares the server recorded for this post (POST /api/app/posts/:id/shared),
+   * oldest first. Present only after a completed share; never claims which
+   * app received it, only how it left the device.
+   */
+  sharedTo?: PostShareRecord[];
   /** User-visible provenance for the primary caption. */
   captionSource?: "ai" | "basic_fallback" | "custom";
   /** True when a safe local template was used instead of a provider result. */

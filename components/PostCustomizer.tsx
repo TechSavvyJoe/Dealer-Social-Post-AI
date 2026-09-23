@@ -43,7 +43,7 @@ import {
 } from "./templates";
 import { cn } from "../utils/classNames";
 import { VinScanner } from "./VinScanner";
-import { DecodedVehicle, vehicleToCreativeBrief } from "../services/vinDecoder";
+import { DecodedVehicle } from "../services/vinDecoder";
 import { PhotoReleaseModal } from "./PhotoReleaseModal";
 import { useAppStore } from "../stores/appStore";
 import { CapturedRelease } from "../services/photoReleases";
@@ -51,10 +51,8 @@ import { ScenarioPicker } from "./ScenarioPicker";
 import {
   PostScenario,
   POST_SCENARIOS,
-  scenarioToCreativeBrief,
   scenarioLegacyCreativeDefaults,
   getScenariosForDealer,
-  stripIdMarkerSpoof,
 } from "../services/postScenarios";
 import { resolveCreative } from "../services/creativeSystem";
 import { logEvent } from "../utils/telemetry";
@@ -65,21 +63,22 @@ import {
   getPrimaryImageProfile,
   getPlatformOptions,
   getSecondaryPlatformOptions,
-  platformsToCreativeBrief,
   resolvePrimaryImageProfile,
   type PrimaryImageProfile,
   type PlatformId,
 } from "../services/platformCopy";
-import { brandHashtagFromName, formatHashtag } from "../utils/hashtags";
-import {
-  releaseAuthorizesPublicLabel,
-  toPublicCustomerLabel,
-} from "../utils/customerIdentity";
+import { toPublicCustomerLabel } from "../utils/customerIdentity";
 import { captionUsesOnlyExpectedCustomer } from "../utils/captionQuality";
 import {
   listWebsiteDestinations,
   type WebsiteDestination,
 } from "../services/websitePublishing";
+import {
+  buildGenerationRequest,
+  composeGenerationCreativeBrief,
+  STYLE_AI_HINTS,
+  PERSONAL_LINE_MAX,
+} from "../services/generationRequest";
 
 interface PostCustomizerProps {
   imageSrc: string;
@@ -121,11 +120,11 @@ interface PostCustomizerProps {
   initialGenerationParams?: GenerationParams | null;
 }
 
-const normalizeReleaseVin = (value: string | undefined): string =>
-  (value || "").trim().toUpperCase();
-
 // Style descriptions. Icons are lucide components (not emoji) so they render
 // identically across OS/browser, sit on the baseline, and share one stroke weight.
+// aiHint values live in services/generationRequest.ts as STYLE_AI_HINTS (moved
+// there in PR2-0 unit U01, since buildGenerationRequest needs them and the
+// picker copy here must stay byte-identical to what it sends).
 const STYLE_INFO: Record<
   StyleOption,
   { icon: LucideIcon; desc: string; detail: string; aiHint: string }
@@ -134,36 +133,31 @@ const STYLE_INFO: Record<
     icon: Gem,
     desc: "Elegant & refined",
     detail: "Premium grade · real photo stays · clean type",
-    aiHint:
-      "Soft luxury grade and elegant type over the real delivery photo — no car swap.",
+    aiHint: STYLE_AI_HINTS[StyleOption.Luxury],
   },
   [StyleOption.Modern]: {
     icon: Zap,
     desc: "Bold & futuristic",
     detail: "High contrast · sharp sans · subtle overlays",
-    aiHint:
-      "Crisp modern type and contrast on the real photo — keep people and vehicle locked.",
+    aiHint: STYLE_AI_HINTS[StyleOption.Modern],
   },
   [StyleOption.Friendly]: {
     icon: PartyPopper,
     desc: "Warm & playful",
     detail: "Bright · welcoming · community energy",
-    aiHint:
-      "Warm, friendly polish on the real moment — lively without cartoon rebuilds.",
+    aiHint: STYLE_AI_HINTS[StyleOption.Friendly],
   },
   [StyleOption.Sporty]: {
     icon: Gauge,
     desc: "Dynamic & energetic",
     detail: "Bold type · athletic energy · same car",
-    aiHint:
-      "Sporty type energy while preserving the exact car and customers from the photo.",
+    aiHint: STYLE_AI_HINTS[StyleOption.Sporty],
   },
   [StyleOption.DepthPop]: {
     icon: Layers,
     desc: "3D depth pop",
     detail: "Headline behind the car · subject glow · thumbnail energy",
-    aiHint:
-      "Oversized headline tucked behind the real car with a glow outline — modern 3D depth.",
+    aiHint: STYLE_AI_HINTS[StyleOption.DepthPop],
   },
 };
 
@@ -232,13 +226,6 @@ const isPrimaryImageFormatId = (value: unknown): value is PrimaryImageFormatId =
   OUTPUT_FORMAT_CHOICES.some((format) => format.id === value);
 
 /**
- * Spec §4.5: the personal line is appended after the caption body — it is
- * never a replacement caption — and is capped so it cannot become a second
- * caption in disguise.
- */
-const PERSONAL_LINE_MAX = 140;
-
-/**
  * One optional yes/no capability (Add video, Playful). The creative system
  * replaces multi-choice option grids with these, so the salesperson screen
  * never grows a fourth mandatory decision.
@@ -282,72 +269,11 @@ const CapabilityToggle: React.FC<{
   </button>
 );
 
-interface CreativeBriefSections {
-  dealershipName: string;
-  scenarioBlock?: string;
-  vehicleBlock?: string;
-  oemBlock?: string;
-  designBlock: string;
-  /** Dealer brand voice — a brand contract, so it rides inside the caption window. */
-  voiceBlock?: string;
-  supportingBlocks: string[];
-  platformBlock?: string;
-}
-
-/** Keep immutable grounding facts ahead of verbose destination guidance. */
-export const composeGenerationCreativeBrief = ({
-  dealershipName,
-  scenarioBlock,
-  vehicleBlock,
-  oemBlock,
-  designBlock,
-  voiceBlock,
-  supportingBlocks,
-  platformBlock,
-}: CreativeBriefSections): string => {
-  const bounded = (value: string | undefined, limit: number) =>
-    (value || "").trim().slice(0, limit);
-  // scenarioToCreativeBrief embeds the ONE trusted "[id:...]" marker
-  // creativeSkills.ts's classifier keys off of, and its own docstring is
-  // explicit that this only works if no OTHER "[id:...]"-shaped text can
-  // reach the composed brief ahead of it — the classifier trusts whichever
-  // one it finds FIRST. Every field here except scenarioBlock is dealer-
-  // editable free text (dealer.brand_voice for voiceBlock, dealer name,
-  // hand-typed vehicle/OEM/design notes) that reaches this brief without
-  // ever passing through scenarioToCreativeBrief's own sanitization, so a
-  // dealer typing "[id:sold_by_salesperson]" into, say, their Brand Voice
-  // settings would otherwise forge that scenario's classification (and,
-  // downstream, deliveryLanguageAllowedForBrief) for every post regardless
-  // of which scenario was actually picked. Strip the same marker shape out
-  // of all of them; scenarioBlock is the one field intentionally exempt.
-  const boundedSafe = (value: string | undefined, limit: number) =>
-    bounded(stripIdMarkerSpoof(value || ""), limit);
-  // The caption model intentionally reads only the first 900 characters of
-  // this shared brief. Keep every immutable grounding block inside an 850-char
-  // worst-case envelope so a verbose custom scenario cannot push vehicle, OEM,
-  // or design facts out of the live caption prompt. The remaining budget is
-  // still available to the image model for dealer and destination guidance.
-  // Brand voice sits second: identity + voice never exceed 320 chars, so the
-  // dealership's voice can no longer be pushed out of the caption window by a
-  // verbose scenario or VIN block. Design DNA is last because the caption
-  // model also receives style guidance through its own styleHint.
-  const essential = [
-    `Dealership identity (use this exact name): "${boundedSafe(dealershipName, 100)}".`,
-    boundedSafe(voiceBlock, 220),
-    bounded(scenarioBlock, 240),
-    boundedSafe(vehicleBlock, 220),
-    boundedSafe(oemBlock, 120),
-    boundedSafe(designBlock, 120),
-  ].filter(Boolean);
-  const supporting = supportingBlocks
-    .map((part) => boundedSafe(part, 220))
-    .filter(Boolean);
-  const platform = boundedSafe(platformBlock, 500);
-  return [...essential, ...supporting, platform]
-    .filter(Boolean)
-    .join(" ")
-    .slice(0, 1400);
-};
+// composeGenerationCreativeBrief moved to services/generationRequest.ts in
+// PR2-0 unit U01. Re-exported here (import above) so existing imports of it
+// from this module — __tests__/PostCustomizer.test.tsx among them — keep
+// working unchanged.
+export { composeGenerationCreativeBrief };
 
 export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   imageSrc,
@@ -770,215 +696,81 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 
   const handleGenerate = useCallback(async () => {
     triggerHapticFeedback();
-    if (effectivePlatformIds.length === 0 && !websiteSelected) return;
-    if (scenarioNeedsCustomerRelease && !capturedRelease) {
-      setReleaseValidationError(true);
-      setReleaseModalOpen(true);
-      return;
-    }
-    if (
-      capturedRelease &&
-      (!releaseAuthorizesPublicLabel(capturedRelease.customerName, customerName) ||
-        normalizeReleaseVin(capturedRelease.vin) !==
-          normalizeReleaseVin(decodedVehicle?.vin))
-    ) {
-      // A signature is authority for one exact customer/vehicle pair. If
-      // restored or stale UI state ever diverges, discard it before any
-      // provider request and require a fresh acknowledgement.
-      setCapturedRelease(null);
-      setReleaseValidationError(true);
-      setReleaseModalOpen(true);
-      return;
-    }
-    setReleaseValidationError(false);
-    let preparedText: string | undefined;
 
-    // Style and tone are the resolver's answer. Disabled: identical to the
-    // picker state. Enabled: the dealership Look, and nothing else.
-    const effectiveStyle = resolved.style;
-    const effectiveTone = resolved.tone;
-    const styleInfo = STYLE_INFO[effectiveStyle];
-    const supportingBriefParts: string[] = [];
-
-    const vehiclePhrase =
-      decodedVehicle && !decodedVehicle.empty
-        ? [
-            decodedVehicle.year,
-            decodedVehicle.make,
-            decodedVehicle.model,
-            decodedVehicle.trim,
-          ]
-            .filter(Boolean)
-            .join(" ")
-        : undefined;
-
-    // Spec §4.5: the personal line rides in the brief as an appended sentence,
-    // never as a replacement caption, and passes the same identity lock the
-    // free-text caption path uses.
-    const trimmedPersonalLine = creativeEnabled
-      ? personalLine.trim().slice(0, PERSONAL_LINE_MAX)
-      : "";
-    if (trimmedPersonalLine) {
-      if (
-        !captionUsesOnlyExpectedCustomer(trimmedPersonalLine, customerName, {
-          allowedPhrases: [
-            dealershipName,
-            currentDealer?.oem_affiliation,
-            vehiclePhrase,
-          ],
-          rejectAnyCustomerIdentity: scenarioNeedsCustomerRelease && !customerName,
-        })
-      ) {
-        setCaptionIdentityError(
-          customerName
-            ? `Your personal line appears to name someone other than ${customerName}. Correct it before generating.`
-            : "Your personal line names a customer, but no approved customer name is attached to this post. Remove the name or add the approved customer first name.",
-        );
-        return;
-      }
-      setCaptionIdentityError("");
-      supportingBriefParts.push(
-        `Personal line (append verbatim after the caption body): "${trimmedPersonalLine}"`,
-      );
-    }
-
-    // Scenario context (Customer Delivery / Pre-Owned Spotlight / Service
-    // Promo / etc). This goes near the top of the brief so it dominates the
-    // default delivery-post framing where the scenarios diverge from it.
-    // Custom dealer scenarios resolve via the dealer's custom_scenarios JSON.
-    const scenarioBlock = scenarioToCreativeBrief(
+    // Guard + brief assembly moved to services/generationRequest.ts
+    // (PR2-0 unit U01) — buildGenerationRequest is the same body, byte-for-
+    // byte, as this used to be. This callback keeps ownership of every side
+    // effect (release/caption error state, the customizer.decisions
+    // telemetry call per amendments B6, and calling onGenerate).
+    const result = buildGenerationRequest({
+      dealershipName,
+      currentDealer,
       scenarioId,
-      currentDealer?.custom_scenarios,
-    );
-    const platformBrief = platformsToCreativeBrief(
+      decodedVehicle,
+      capturedRelease,
+      customerName,
+      personalLine,
+      creativeEnabled,
+      resolvedStyle: resolved.style,
+      resolvedTone: resolved.tone,
+      playfulOffered,
+      playfulRequested,
+      playfulStyleId: resolved.playfulStyleId,
+      captionSource,
+      customMessage,
       effectivePlatformIds,
-      dealershipName,
-    );
-
-    // Inject decoded vehicle context if a VIN was scanned. This grounds the
-    // model in concrete facts (year/make/model/trim/powertrain) so the caption
-    // stops hallucinating equipment that isn't on the car.
-    let vehicleBlock = "";
-    if (decodedVehicle && !decodedVehicle.empty) {
-      const vehicleBrief = vehicleToCreativeBrief(decodedVehicle);
-      if (vehicleBrief) {
-        vehicleBlock = `Vehicle facts (do not contradict): ${vehicleBrief}`;
-      }
-    }
-
-    const oemBlock = currentDealer?.oem_affiliation?.trim()
-      ? `OEM affiliation: ${currentDealer.oem_affiliation.trim()}. Respect that manufacturer's brand-guideline tone and avoid claims that conflict with their advertising standards.`
-      : "";
-
-    // Per-dealer brand voice / banned phrases / OEM affiliation. These come
-    // from the dealers PocketBase record so each dealership can tune voice
-    // without a code change.
-    const voiceBlock = currentDealer?.brand_voice?.trim()
-      ? `Brand voice (match this exactly): ${currentDealer.brand_voice.trim()}`
-      : "";
-    if (currentDealer?.banned_phrases?.trim()) {
-      const banned = currentDealer.banned_phrases
-        .split(/[\n,]+/)
-        .map((p) => p.trim())
-        .filter(Boolean);
-      if (banned.length > 0) {
-        supportingBriefParts.push(
-          `Forbidden phrases (do not use, even as a near-match): ${banned
-            .map((p) => `"${p}"`)
-            .join(", ")}.`,
-        );
-      }
-    }
-
-    // Identity context — tagline, website, address, hours give the model
-    // grounded facts to weave in naturally (and never invent).
-    const identityFacts: string[] = [];
-    if (currentDealer?.tagline?.trim())
-      identityFacts.push(`Tagline: "${currentDealer.tagline.trim()}"`);
-    if (currentDealer?.website?.trim())
-      identityFacts.push(`Website: ${currentDealer.website.trim()}`);
-    if (currentDealer?.address?.trim())
-      identityFacts.push(`Address: ${currentDealer.address.trim()}`);
-    if (currentDealer?.hours?.trim())
-      identityFacts.push(`Hours: ${currentDealer.hours.trim()}`);
-    if (currentDealer?.phone?.trim())
-      identityFacts.push(`Phone: ${currentDealer.phone.trim()}`);
-    if (identityFacts.length > 0) {
-      supportingBriefParts.push(
-        `Dealership facts (may be referenced, never contradicted): ${identityFacts.join(
-          "; ",
-        )}.`,
-      );
-    }
-
-    // Default hashtags + footer — sanitize to #PascalCase so IG/FB/TikTok
-    // recognize every tag (spaces inside #tags break platforms).
-    const dealerHashtags = (currentDealer?.default_hashtags || "")
-      .split(/[\n,]+/)
-      .map((h) => h.trim())
-      .filter(Boolean)
-      .map((h) => formatHashtag(h))
-      .filter(Boolean);
-    const brandTag = currentDealer?.name
-      ? brandHashtagFromName(currentDealer.name)
-      : "";
-    const requiredTags = Array.from(
-      new Set([brandTag, ...dealerHashtags].filter(Boolean)),
-    );
-    if (requiredTags.length > 0) {
-      supportingBriefParts.push(
-        `Required hashtags (each is one continuous #PascalCase token, space-separated on the last line): ${requiredTags.join(
-          " ",
-        )}.`,
-      );
-    }
-    const dealerFooter = (currentDealer?.default_footer || "").trim();
-    if (dealerFooter) {
-      supportingBriefParts.push(
-        `Required footer (append verbatim AFTER the caption, BEFORE the hashtags): "${dealerFooter}"`,
-      );
-    }
-
-    // Immutable scenario, dealer, vehicle, and OEM facts lead. Destination
-    // guidance is useful but expendable when the prompt budget is full.
-    const creativeBrief = composeGenerationCreativeBrief({
-      dealershipName,
-      scenarioBlock,
-      vehicleBlock,
-      oemBlock,
-      designBlock: `Design DNA: ${styleInfo.aiHint}`,
-      voiceBlock,
-      supportingBlocks: supportingBriefParts,
-      platformBlock: platformBrief,
+      websiteSelected,
+      effectiveImageProfile,
+      effectiveMediaMode,
     });
 
-    // The free-text "Write my own" path is a legacy-only caption source. Under
-    // the creative system the personal line above is the only typed copy, and
-    // it never replaces the caption body.
-    if (!creativeEnabled && captionSource === "custom" && customMessage.trim()) {
-      if (
-        !captionUsesOnlyExpectedCustomer(customMessage, customerName, {
-          allowedPhrases: [
-            dealershipName,
-            currentDealer?.oem_affiliation,
-            vehiclePhrase,
-          ],
-          rejectAnyCustomerIdentity: scenarioNeedsCustomerRelease && !customerName,
-        })
-      ) {
-        setCaptionIdentityError(
-          customerName
-            ? `This caption appears to name someone other than ${customerName}. Correct the caption before generating.`
-            : "This caption names a customer, but no approved customer name is attached to this post. Remove the name or add the approved customer first name.",
-        );
+    if (!result.ok) {
+      if (result.reason === "no_destination") return;
+      if (result.reason === "release_required") {
+        setReleaseValidationError(true);
+        setReleaseModalOpen(true);
         return;
       }
-      setCaptionIdentityError("");
-      preparedText = customMessage.trim();
+      if (result.reason === "release_mismatch") {
+        // A signature is authority for one exact customer/vehicle pair. If
+        // restored or stale UI state ever diverges, discard it before any
+        // provider request and require a fresh acknowledgement.
+        setCapturedRelease(null);
+        setReleaseValidationError(true);
+        setReleaseModalOpen(true);
+        return;
+      }
+      // identity: the release checks already passed to reach this branch.
+      setReleaseValidationError(false);
+      setCaptionIdentityError(result.message || "");
+      return;
     }
+
+    setReleaseValidationError(false);
 
     // Spec §10: instrument the mandatory decision count so the ≤ 5-decision
     // goal is measurable rather than asserted.
+    const trimmedPersonalLine = creativeEnabled
+      ? personalLine.trim().slice(0, PERSONAL_LINE_MAX)
+      : "";
+
+    // Review finding: only clear a previously-shown identity error when an
+    // identity check actually ran and passed on this Generate tap — the same
+    // two paths buildGenerationRequest itself identity-checks (a non-empty
+    // creative-mode personal line, or the legacy
+    // !creativeEnabled && captionSource==='custom' && customMessage.trim()
+    // path). The old handleGenerate left a stale error alone when neither ran
+    // (e.g. a restored session whose saved caption was quarantined, mounted
+    // with captionIdentityError set, captionSource 'ai' and an empty
+    // customMessage) — clearing it unconditionally here would make that alert
+    // vanish on a Generate tap that never re-validated identity.
+    if (
+      trimmedPersonalLine ||
+      (!creativeEnabled && captionSource === "custom" && customMessage.trim())
+    ) {
+      setCaptionIdentityError("");
+    }
+
     logEvent("customizer.decisions", {
       creativeSystem: creativeEnabled,
       look: resolved.look,
@@ -990,30 +782,15 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     setIsSubmitting(true);
     try {
       await onGenerate(
-        effectiveStyle,
-        effectiveTone,
-        customerName,
-        preparedText,
-        creativeBrief,
-        {
-          vin: decodedVehicle?.vin,
-          scenarioId,
-          customerIdentityRequired: scenarioNeedsCustomerRelease,
-          hasRelease: !!capturedRelease,
-          capturedRelease: capturedRelease || undefined,
-          websiteEnabled: websiteSelected,
-          websiteVehicleDescription: vehiclePhrase,
-          decodedVehicle: decodedVehicle || undefined,
-          // Carries the dealership's single Playful style to the result step,
-          // where it renders a second image beside the house-style master.
-          playfulStyleId:
-            playfulOffered && playfulRequested
-              ? resolved.playfulStyleId || undefined
-              : undefined,
-        },
-        effectivePlatformIds,
-        effectiveImageProfile,
-        effectiveMediaMode,
+        result.args.style,
+        result.args.tone,
+        result.args.customerName,
+        result.args.customText,
+        result.args.creativeBrief,
+        result.args.meta,
+        result.args.platformIds,
+        result.args.outputProfile,
+        result.args.mediaOutputMode,
       );
     } finally {
       setIsSubmitting(false);

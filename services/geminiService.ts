@@ -2333,6 +2333,9 @@ export const editSocialPostText = async (
   ...args: Parameters<typeof editSocialPostTextDetailed>
 ): Promise<string> => (await editSocialPostTextDetailed(...args)).text;
 
+/** One of the two halves generateSocialPost produces in parallel. */
+export type SocialPostPart = "caption" | "image";
+
 export const generateSocialPost = async (
   imageBase64Url: string,
   style: StyleOption,
@@ -2346,7 +2349,21 @@ export const generateSocialPost = async (
   imageAspectRatio?: ImageAspectRatio,
   customerIdentityRequired = true,
   signal?: AbortSignal,
+  /**
+   * Progress only: called once per part as its promise fulfils, so the
+   * Creating screen can say which half has actually landed. A part that
+   * rejects is never reported as ready.
+   */
+  onPartReady?: (part: SocialPostPart) => void,
 ): Promise<SocialPostGenerationResult> => {
+  // A progress listener must never be able to fail or alter the generation.
+  const notifyPartReady = (part: SocialPostPart) => {
+    try {
+      onPartReady?.(part);
+    } catch {
+      /* progress reporting is best-effort */
+    }
+  };
   const requestAuthEpoch = captureAuthEpoch();
   const normalisedImage = await normaliseDataUrl(imageBase64Url, signal);
   assertAuthEpoch(requestAuthEpoch);
@@ -2471,7 +2488,18 @@ export const generateSocialPost = async (
     }
   })();
 
-  const [textResult, imageResult] = await Promise.all([textPromise, imagePromise]);
+  // Each half is reported as its own promise fulfils (attached in the same
+  // tick both were created, so nothing can settle unobserved).
+  const [textResult, imageResult] = await Promise.all([
+    textPromise.then((result) => {
+      notifyPartReady("caption");
+      return result;
+    }),
+    imagePromise.then((result) => {
+      notifyPartReady("image");
+      return result;
+    }),
+  ]);
   assertAuthEpoch(requestAuthEpoch);
 
   if (!textResult.text) {

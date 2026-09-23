@@ -1,22 +1,19 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Download, Film, Image as ImageIcon, Loader2, Trash2 } from "lucide-react";
-import {
-  MEDIA_ARCHIVE_CHANGED_EVENT,
-  deleteArchivedMedia,
-  listDealerMedia,
-  type ArchivedMediaRecord,
-} from "../utils/creativeStorage";
-import {
-  savePreparedMediaToLibrary,
-  saveResultToastMessage,
-  type PreparedMediaSave,
-} from "../utils/mediaSave";
+import type { ArchivedMediaKind, ArchivedMediaRecord } from "../utils/creativeStorage";
+import { saveResultToastMessage, type PreparedMediaSave } from "../utils/mediaSave";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { useToast } from "./ui/Toast";
+import { useDeviceMedia } from "../hooks/useDeviceMedia";
 
 interface LocalMediaArchiveProps {
   dealerId: string;
 }
+
+// Module-level constant so useDeviceMedia's effect deps stay referentially
+// stable across renders, exactly as the hardcoded literal was before.
+const GENERATED_MEDIA_KINDS: ArchivedMediaKind[] = ["generated-image", "video"];
+const GENERATED_MEDIA_LIMIT = 12;
 
 const mediaFile = (record: ArchivedMediaRecord): PreparedMediaSave => {
   const kind = record.kind === "video" ? "video" : "image";
@@ -55,45 +52,12 @@ const when = (createdAt: number) =>
  */
 export const LocalMediaArchive: React.FC<LocalMediaArchiveProps> = ({ dealerId }) => {
   const toast = useToast();
-  const [records, setRecords] = useState<ArchivedMediaRecord[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setRecords(
-      await listDealerMedia(dealerId, {
-        kinds: ["generated-image", "video"],
-        limit: 12,
-      }),
-    );
-  }, [dealerId]);
-
-  useEffect(() => {
-    void load();
-    const handleChange = (event: Event) => {
-      const changedDealer = (event as CustomEvent<{ dealerId?: string }>).detail
-        ?.dealerId;
-      if (!changedDealer || changedDealer === dealerId) void load();
-    };
-    window.addEventListener(MEDIA_ARCHIVE_CHANGED_EVENT, handleChange);
-    return () => window.removeEventListener(MEDIA_ARCHIVE_CHANGED_EVENT, handleChange);
-  }, [dealerId, load]);
-
-  const [previews, setPreviews] = useState<
-    Array<{ record: ArchivedMediaRecord; url: string }>
-  >([]);
-
-  useEffect(() => {
-    // Creating URLs during render leaks the URL from React StrictMode's
-    // intentionally discarded render. Effect cleanup now owns each URL set.
-    const next = records.map((record) => ({
-      record,
-      url: URL.createObjectURL(record.previewBlob || record.blob),
-    }));
-    setPreviews(next);
-    return () => {
-      next.forEach(({ url }) => URL.revokeObjectURL(url));
-    };
-  }, [records]);
+  const { records, previews, remove, save } = useDeviceMedia({
+    dealerId,
+    kinds: GENERATED_MEDIA_KINDS,
+    limit: GENERATED_MEDIA_LIMIT,
+  });
 
   if (records.length === 0) return null;
 
@@ -171,9 +135,7 @@ export const LocalMediaArchive: React.FC<LocalMediaArchiveProps> = ({ dealerId }
                       try {
                         // The File is built synchronously before the first
                         // await, keeping navigator.share in this click.
-                        const result = await savePreparedMediaToLibrary(
-                          mediaFile(record),
-                        );
+                        const result = await save(mediaFile(record));
                         if (result.method === "error") {
                           toast.error(saveResultToastMessage(result));
                         } else if (result.method === "cancelled") {
@@ -201,7 +163,7 @@ export const LocalMediaArchive: React.FC<LocalMediaArchiveProps> = ({ dealerId }
                       triggerHapticFeedback();
                       setBusyId(record.id);
                       try {
-                        await deleteArchivedMedia(record.id);
+                        await remove(record.id);
                       } finally {
                         setBusyId(null);
                       }

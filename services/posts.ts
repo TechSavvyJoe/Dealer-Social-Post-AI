@@ -11,7 +11,13 @@
 
 import { dataUrlToBlob } from "../utils/imageUtils";
 import { assertAuthEpoch, captureAuthEpoch } from "../utils/authBoundary";
-import type { ImageAspectRatio, MediaOutputMode, PrimaryImageFormatId } from "../types";
+import type {
+  ImageAspectRatio,
+  MediaOutputMode,
+  PostShareVia,
+  PrimaryImageFormatId,
+} from "../types";
+import type { PlatformDestinationId } from "./platformOutputs";
 import { readApiError } from "./apiErrors";
 import {
   replaceFullCustomerName,
@@ -116,7 +122,66 @@ export interface PostRecord {
   identity_review_required?: boolean;
   /** Server-derived quarantine for creative pixels archived under an older policy. */
   image_review_required?: boolean;
+  /**
+   * Derived from the `post_share_events` collection by GET /api/app/posts:
+   * null when the post was never shared, absent from an older backend.
+   */
+  share_summary?: PostShareSummary | null;
 }
+
+/**
+ * What the History list knows about a post's recorded shares. Share events
+ * are their own collection (never a field on the post), so recording one does
+ * not bump the post's revision.
+ */
+export interface PostShareSummary {
+  /** Recorded shares; the server keeps the newest 20 per post. */
+  count: number;
+  /** Server-written time of the latest share. */
+  last_shared_at: string;
+  /** Destination of the latest share, e.g. `facebook_feed`. */
+  last_channel: string;
+  last_via: PostShareVia;
+  /** Distinct destinations, most recent first. */
+  channels: string[];
+}
+
+const POST_SHARE_VIAS: readonly PostShareVia[] = ["share_sheet", "download", "copy"];
+
+/**
+ * Client projection of the server's share summary. A missing field (older
+ * backend) stays absent; anything malformed or empty reads as never shared.
+ */
+export const projectShareSummary = (
+  raw: unknown,
+): PostShareSummary | null | undefined => {
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Record<string, unknown>;
+  const count =
+    typeof value.count === "number" && Number.isFinite(value.count)
+      ? Math.floor(value.count)
+      : 0;
+  const lastChannel = typeof value.last_channel === "string" ? value.last_channel : "";
+  const lastVia = POST_SHARE_VIAS.find((via) => via === value.last_via);
+  if (count <= 0 || !lastChannel || !lastVia) return null;
+  const channels = Array.isArray(value.channels)
+    ? value.channels.filter(
+        (channel, index, all): channel is string =>
+          typeof channel === "string" &&
+          Boolean(channel) &&
+          all.indexOf(channel) === index,
+      )
+    : [];
+  return {
+    count,
+    last_shared_at:
+      typeof value.last_shared_at === "string" ? value.last_shared_at : "",
+    last_channel: lastChannel,
+    last_via: lastVia,
+    channels: channels.length > 0 ? channels : [lastChannel],
+  };
+};
 
 export interface PostApprovalStatus {
   id: string;
@@ -436,6 +501,9 @@ export const projectPostRecordForUi = (
     platform_captions: platformCaptions,
     website_draft: websiteDraft,
     identity_review_required: identityReviewRequired || undefined,
+    ...(record.share_summary !== undefined
+      ? { share_summary: projectShareSummary(record.share_summary) }
+      : {}),
   };
 };
 
@@ -657,6 +725,40 @@ export const updatePostDraft = async (
   assertAuthEpoch(requestAuthEpoch);
   return updated;
 };
+
+export interface RecordPostSharedInput {
+  channel: PlatformDestinationId;
+  via: PostShareVia;
+}
+
+export interface RecordedPostShare {
+  id: string;
+  channel: PlatformDestinationId;
+  via: PostShareVia;
+  /** Server-written time; the client never supplies one. */
+  shared_at: string;
+  /** True when the same channel and method were already recorded within 60 s. */
+  deduplicated: boolean;
+}
+
+/**
+ * Record a completed share on the owner-scoped post. Call it only once the
+ * share happened (navigator.share resolved, the download started, the
+ * caption was copied). Sends the destination and method, nothing else: the
+ * server writes the time and refuses a post that is still locked.
+ */
+export const recordPostShared = async (
+  postId: string,
+  input: RecordPostSharedInput,
+): Promise<RecordedPostShare> =>
+  jsonRequest<RecordedPostShare>(
+    `/api/app/posts/${encodeURIComponent(postId)}/shared`,
+    {
+      method: "POST",
+      cache: "no-store",
+      body: JSON.stringify({ channel: input.channel, via: input.via }),
+    },
+  );
 
 /** Set a scheduled publication timestamp on the owner-scoped post record. */
 export const schedulePost = async (

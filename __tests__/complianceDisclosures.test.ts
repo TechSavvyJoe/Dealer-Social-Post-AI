@@ -284,6 +284,9 @@ describe("the meter measures what is actually delivered", () => {
   it("keeps the result screen wired to the delivered string, not the body", () => {
     // A source guard, because the defect was a prop pointing one variable to
     // the left. Both consumers claim to show or measure what gets posted.
+    // `deliveredCaption`'s computation moved into
+    // services/deliveryCaptions.ts's deliveredCaptionFor; the prop wiring
+    // below stays pinned in components/PostResult.tsx.
     const source = readFileSync(
       resolve(process.cwd(), "components/PostResult.tsx"),
       "utf8",
@@ -291,8 +294,24 @@ describe("the meter measures what is actually delivered", () => {
     expect(source).toContain("text={deliveredCaption}");
     expect(source).toContain("caption={deliveredCaption}");
     expect(source).toMatch(
-      /const deliveredCaption = prependEmployeeDisclosure\(\s*captionWithDisclosures,\s*currentDealer,?\s*\)/,
+      /const deliveredCaption = deliveredCaptionFor\(\s*editedText,\s*activeDisclosures,\s*currentDealer,?\s*\)/,
     );
+    const deliveryCaptionsSource = readFileSync(
+      resolve(process.cwd(), "services/deliveryCaptions.ts"),
+      "utf8",
+    );
+    expect(deliveryCaptionsSource).toMatch(
+      /export const deliveredCaptionFor = \([\s\S]*?prependEmployeeDisclosure\(appendDisclosureText\(editedText, disclosures\), dealer\)/,
+    );
+  });
+
+  it("the delivered-string guard actually fails on a body-only wiring (planted mutant)", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "components/PostResult.tsx"),
+      "utf8",
+    );
+    const mutated = source.replace("text={deliveredCaption}", "text={editedText}");
+    expect(mutated).not.toContain("text={deliveredCaption}");
   });
 });
 
@@ -300,8 +319,9 @@ describe("the meter measures what is actually delivered", () => {
  * A destination-specific caption that already carries the disclosure, combined
  * with `requiredPrefix` for the same disclosure, must never publish it twice.
  *
- * The share flow builds one caption per destination (PostResult.tsx's
- * sharePlatformCaptions) and separately threads `requiredPrefix` through
+ * The share flow builds one caption per destination
+ * (services/deliveryCaptions.ts's buildShareCaptions) and separately threads
+ * `requiredPrefix` through
  * every PublishContent so the fitter can protect it from truncation. Those
  * two channels briefly disagreed: the per-destination caption had the
  * disclosure baked in AND `requiredPrefix` carried it too, so
@@ -337,19 +357,37 @@ describe("a caption and requiredPrefix never publish the disclosure twice", () =
     expect(fitted).toContain(body);
   });
 
-  it("keeps components/PostResult.tsx's share-caption pack body-only", () => {
-    // A source guard for the actual regression site: sharePlatformCaptions
-    // must store the pre-prepend caption, not the disclosure-prepended one,
-    // because requiredPrefix is the single channel every downstream consumer
-    // (ShareDialog's contentForTarget, the fitter) already relies on.
+  it("keeps services/deliveryCaptions.ts's share-caption pack body-only", () => {
+    // A source guard for the actual regression site: buildShareCaptions
+    // (moved out of components/PostResult.tsx's former sharePlatformCaptions
+    // memo) must store the pre-prepend caption, not the disclosure-prepended
+    // one, because requiredPrefix is the single channel every downstream
+    // consumer (ShareDialog's contentForTarget, the fitter) already relies
+    // on.
     const source = readFileSync(
-      resolve(process.cwd(), "components/PostResult.tsx"),
+      resolve(process.cwd(), "services/deliveryCaptions.ts"),
       "utf8",
     );
-    const memoStart = source.indexOf("const sharePlatformCaptions = useMemo");
-    const memoEnd = source.indexOf("selectCaptionPlatform", memoStart);
-    const memo = source.slice(memoStart, memoEnd);
-    expect(memo).toContain("text: scanned.caption");
-    expect(memo).not.toContain("text: prepared.caption");
+    const fnStart = source.indexOf("export const buildShareCaptions");
+    const fnEnd = source.indexOf("export interface BuildCopyTextInput", fnStart);
+    const fn = source.slice(fnStart, fnEnd);
+    expect(fn).toContain("text: scanned.caption");
+    expect(fn).not.toContain("text: prepared.caption");
+  });
+
+  it("the body-only guard actually fails on the regressed shape (planted mutant)", () => {
+    // Proves the guard above is load-bearing rather than vacuous: swapping
+    // the real source's `text: scanned.caption` for the regressed
+    // `text: prepared.caption` must flip both assertions.
+    const source = readFileSync(
+      resolve(process.cwd(), "services/deliveryCaptions.ts"),
+      "utf8",
+    );
+    const fnStart = source.indexOf("export const buildShareCaptions");
+    const fnEnd = source.indexOf("export interface BuildCopyTextInput", fnStart);
+    const fn = source.slice(fnStart, fnEnd);
+    const mutated = fn.replace("text: scanned.caption", "text: prepared.caption");
+    expect(mutated).not.toContain("text: scanned.caption");
+    expect(mutated).toContain("text: prepared.caption");
   });
 });

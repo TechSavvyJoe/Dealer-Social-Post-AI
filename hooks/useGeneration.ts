@@ -223,6 +223,128 @@ export interface GenerationMeta {
   playfulStyleId?: string;
 }
 
+/**
+ * Honest Creating stages (spec §3.3). Each change is made at a real boundary
+ * inside generateMutation; nothing here advances on a timer.
+ *  - `signature`: a captured photo release is being durably stored. Skipped
+ *    when it was stored by an earlier attempt, because a retry reuses its id.
+ *  - `design`: consent is settled and the provider is producing the caption
+ *    and the image in parallel. `partsReady` says which half has landed.
+ *  - `checks`: the identity guard, the prohibited-claims sanitizer, the
+ *    destination caption pack and the private website draft.
+ *  - `saving`: logPost (approval submission included), then the release link.
+ */
+export type GenerationStage = "idle" | "signature" | "design" | "checks" | "saving";
+
+export interface GenerationPartsReady {
+  image: boolean;
+  caption: boolean;
+}
+
+const NO_PARTS_READY: GenerationPartsReady = { image: false, caption: false };
+
+/**
+ * What cancelGeneration did (amendments B5):
+ *  - `idle`: nothing was running, so nothing changed.
+ *  - `cancelled`: stopped before logPost. Nothing was created and the captured
+ *    release is untouched, so a retry reuses it without a new signature.
+ *  - `saving`: logPost had already started, so that save is left to finish in
+ *    My work (as a draft, or waiting for approval when `requiresApproval`).
+ *    Only the result is discarded. `saved` resolves true once the post exists.
+ */
+export type GenerationCancelResult =
+  | { status: "idle" }
+  | { status: "cancelled" }
+  | { status: "saving"; requiresApproval: boolean; saved: Promise<boolean> };
+
+/**
+ * One Create post tap. It rides in the mutation variables so every late
+ * callback of a cancelled run can see that it was cancelled, even after a
+ * newer run has started.
+ */
+interface GenerationRun {
+  controller: AbortController;
+  cancelled: boolean;
+  /**
+   * The signed-in workspace this run belongs to: the epoch at the tap, then
+   * the epoch the mutation itself checks against once it starts.
+   */
+  authEpoch: number;
+  stage: GenerationStage;
+  /** logPost has started. From here a cancel lets the save finish (B5). */
+  persistenceStarted: boolean;
+  requiresApproval: boolean;
+  /** Set together with persistenceStarted. */
+  saved?: Promise<boolean>;
+}
+
+const generationCancelledError = (): DOMException =>
+  new DOMException("Generation was cancelled.", "AbortError");
+
+const assertGenerationRunActive = (run: GenerationRun): void => {
+  if (run.cancelled) throw generationCancelledError();
+};
+
+/**
+ * Amendments A1: a signed release is single-use. The link-post route binds it
+ * to its first post permanently and answers 409 on a relink. A release is
+ * recorded here as soon as a post starts saving with it, so a Create post
+ * tapped while that save is still running cannot reuse it either. The record
+ * is dropped only when the save ended without the link ever being attempted,
+ * the one case where the release was never linked. Both the in-memory object
+ * and its server id are recorded, so a copy carrying the same id is caught.
+ */
+const linkedReleases = new WeakSet<CapturedRelease>();
+const linkedReleaseIds = new Set<string>();
+
+const markReleaseLinked = (release: CapturedRelease, releaseId?: string): void => {
+  linkedReleases.add(release);
+  if (releaseId) linkedReleaseIds.add(releaseId);
+};
+
+const unmarkReleaseLinked = (release: CapturedRelease, releaseId?: string): void => {
+  linkedReleases.delete(release);
+  if (releaseId) linkedReleaseIds.delete(releaseId);
+};
+
+/**
+ * B5: a Cancel during the `signature` stage hands the Create post guard back at
+ * once, but the signature upload it interrupted keeps going, and only that
+ * upload stamps its releaseId on the captured object. A retry with the same
+ * release therefore waits for it instead of storing the signature a second
+ * time: nothing is re-signed, no orphan release record is left on the server,
+ * and the id the retry links is the one on the captured object. Each entry
+ * settles (never rejects) when the upload phase ends, whether the id is now on
+ * the captured object or the upload failed and the retry must store it itself.
+ */
+const pendingSignatureUploads = new WeakMap<CapturedRelease, Promise<void>>();
+
+/** Record an upload about to start; the returned callback marks it over (idempotent). */
+const trackSignatureUpload = (captured: CapturedRelease | undefined): (() => void) => {
+  if (!captured || captured.releaseId) return () => undefined;
+  let settle!: () => void;
+  const upload = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  pendingSignatureUploads.set(captured, upload);
+  return () => {
+    if (pendingSignatureUploads.get(captured) === upload) {
+      pendingSignatureUploads.delete(captured);
+    }
+    settle();
+  };
+};
+
+/** Pass as buildGenerationRequest's `releaseAlreadyLinked` for the pending release. */
+export const isReleaseAlreadyLinked = (
+  release: CapturedRelease | null | undefined,
+): boolean =>
+  Boolean(
+    release &&
+    (linkedReleases.has(release) ||
+      (release.releaseId !== undefined && linkedReleaseIds.has(release.releaseId))),
+  );
+
 export const useGeneration = () => {
   const { error: toastError, warning: toastWarning } = useToast();
   const {
@@ -265,6 +387,51 @@ export const useGeneration = () => {
   // who navigates away mid-render stops eating Vertex quota.
   const videoAbortControllersRef = useRef<Set<AbortController>>(new Set());
 
+  // Honest stages and Cancel for the Creating screen. The legacy
+  // generationProgress/progressMessage above stay populated for the current
+  // overlay until that screen replaces it.
+  const [generationStage, setGenerationStage] = useState<GenerationStage>("idle");
+  const [partsReady, setPartsReady] = useState<GenerationPartsReady>(NO_PARTS_READY);
+  // B5: taken synchronously on the Create post tap, so a double tap or a
+  // repeated Cmd/Ctrl+Enter is a no-op before the step changes.
+  const inFlightRef = useRef(false);
+  const activeRunRef = useRef<GenerationRun | null>(null);
+
+  const advanceGenerationStage = useCallback(
+    (run: GenerationRun, stage: GenerationStage) => {
+      if (run.cancelled || activeRunRef.current !== run) return;
+      run.stage = stage;
+      setGenerationStage(stage);
+    },
+    [],
+  );
+
+  /**
+   * A Create post from a previous signed-in workspace no longer holds the
+   * guard or the stages. That run still goes on until its epoch checks discard
+   * it, exactly as before, but it must not turn a Create post in this
+   * workspace into a silent no-op until its discarded provider call returns.
+   * Compared against the live epoch, so a run started in it is never released.
+   */
+  const releaseRunFromPreviousWorkspace = useCallback(() => {
+    const staleRun = activeRunRef.current;
+    if (!staleRun || staleRun.authEpoch === useAppStore.getState().authEpoch) return;
+    activeRunRef.current = null;
+    inFlightRef.current = false;
+    setGenerationStage("idle");
+    setPartsReady(NO_PARTS_READY);
+  }, []);
+
+  const markPartReady = useCallback(
+    (run: GenerationRun, part: keyof GenerationPartsReady) => {
+      if (run.cancelled || activeRunRef.current !== run) return;
+      setPartsReady((current) =>
+        current[part] ? current : { ...current, [part]: true },
+      );
+    },
+    [],
+  );
+
   const cleanupTimers = useCallback(() => {
     if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
     timeoutsRef.current.forEach(clearTimeout);
@@ -287,7 +454,13 @@ export const useGeneration = () => {
   useEffect(() => {
     cleanupTimers();
     abortActiveVideoPolls();
-  }, [abortActiveVideoPolls, authEpoch, cleanupTimers]);
+    releaseRunFromPreviousWorkspace();
+  }, [
+    abortActiveVideoPolls,
+    authEpoch,
+    cleanupTimers,
+    releaseRunFromPreviousWorkspace,
+  ]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -310,8 +483,10 @@ export const useGeneration = () => {
       imageAspectRatio: PrimaryImageProfile["imageAspectRatio"];
       meta?: GenerationMeta;
       authEpoch: number;
+      run: GenerationRun;
     }) => {
       assertOperationAuthEpoch(params.authEpoch);
+      assertGenerationRunActive(params.run);
       if (!selectedImage || !currentDealer) throw new Error("Missing required data");
 
       // The consent gate implementation itself lives in the lazily loaded
@@ -321,14 +496,36 @@ export const useGeneration = () => {
       // services/photoReleases.test.ts enforces against this source text.
       const { runWithPersistedPhotoRelease } = await loadPublishPipeline();
       assertOperationAuthEpoch(params.authEpoch);
+      assertGenerationRunActive(params.run);
+      const captured = params.meta?.capturedRelease;
+      // A cancelled attempt may still be storing this same signature. Wait
+      // for it, so the gate below finds its releaseId and never stores the
+      // signature twice.
+      const earlierUpload = captured
+        ? pendingSignatureUploads.get(captured)
+        : undefined;
+      if (earlierUpload) {
+        await earlierUpload;
+        assertOperationAuthEpoch(params.authEpoch);
+        assertGenerationRunActive(params.run);
+      }
+      const endSignatureUpload = trackSignatureUpload(captured);
       const gated = await runWithPersistedPhotoRelease(
-        params.meta?.capturedRelease,
+        captured,
         currentDealer.name,
         async () => {
+          // The upload is over: its id is on the captured object.
+          endSignatureUpload();
           assertOperationAuthEpoch(params.authEpoch);
+          // A cancel during the signature upload stops here, after the
+          // release id is on the captured object, so a retry reuses it.
+          assertGenerationRunActive(params.run);
+          // Real boundary: consent is durably stored, or none was needed.
+          advanceGenerationStage(params.run, "design");
           const { generateSocialPost } = await loadGeminiService();
           assertOperationAuthEpoch(params.authEpoch);
-          return runGeminiTask("ai.generate", (signal) => {
+          assertGenerationRunActive(params.run);
+          const generate = (signal: AbortSignal) => {
             assertOperationAuthEpoch(params.authEpoch);
             return generateSocialPost(
               selectedImage,
@@ -343,17 +540,23 @@ export const useGeneration = () => {
               params.imageAspectRatio,
               params.meta?.customerIdentityRequired ?? true,
               signal,
+              (part) => markPartReady(params.run, part),
             );
-          });
+          };
+          // Cancel aborts the queued or running provider task.
+          const cancelSignal = params.run.controller.signal;
+          return runGeminiTask("ai.generate", generate, undefined, cancelSignal);
         },
         params.authEpoch,
-      );
+      ).finally(endSignatureUpload);
       assertOperationAuthEpoch(params.authEpoch);
+      assertGenerationRunActive(params.run);
       const exactImage = await renderExactPrimaryImage(
         gated.result.image,
         params.primaryFormatId,
       );
       assertOperationAuthEpoch(params.authEpoch);
+      assertGenerationRunActive(params.run);
       return {
         ...gated,
         result: {
@@ -363,11 +566,24 @@ export const useGeneration = () => {
       };
     },
     onMutate: (variables) => {
+      if (variables.run.cancelled) return;
+      // B5: the synchronous tap guard covers a double tap or a repeated
+      // Cmd/Ctrl+Enter only until the step changes. From here the run is
+      // tracked by activeRunRef (stages, Cancel); a later Create post from
+      // another workspace path detaches it and starts its own run, exactly as
+      // a second Generate did before the guard existed.
+      inFlightRef.current = false;
       cleanupTimers();
       setStep(AppStep.GENERATING);
       setError(null);
       setGenerationProgress(0);
       setProgressMessage("Analyzing your image...");
+      const captured = variables.meta?.capturedRelease;
+      setPartsReady(NO_PARTS_READY);
+      advanceGenerationStage(
+        variables.run,
+        captured && !captured.releaseId ? "signature" : "design",
+      );
       setGenerationParams({
         style: variables.style,
         tone: variables.tone,
@@ -427,9 +643,13 @@ export const useGeneration = () => {
     },
     onSuccess: async (gatedResult, variables) => {
       if (variables.authEpoch !== useAppStore.getState().authEpoch) return;
+      // A run cancelled before logPost is discarded whole: nothing is saved,
+      // no message is shown and the step stays where Cancel put it.
+      if (variables.run.cancelled) return;
       cleanupTimers();
       setGenerationProgress(100);
       setProgressMessage("Complete!");
+      advanceGenerationStage(variables.run, "checks");
 
       const result = gatedResult.result;
       const releaseId = gatedResult.releaseId;
@@ -437,6 +657,7 @@ export const useGeneration = () => {
       // The mutation already awaited this loader, so the memoized promise
       // resolves without another network fetch.
       const pipeline = await loadPublishPipeline();
+      if (variables.run.cancelled) return;
       const {
         analyzeCaptionSetForDelivery,
         buildFallbackWebsiteDraft,
@@ -551,16 +772,21 @@ export const useGeneration = () => {
           assertOperationAuthEpoch(variables.authEpoch);
           const { generatePlatformCaptionPack } = await loadGeminiService();
           assertOperationAuthEpoch(variables.authEpoch);
-          const rawPack = await runGeminiTask("ai.caption.pack", (signal) => {
-            assertOperationAuthEpoch(variables.authEpoch);
-            return generatePlatformCaptionPack(
-              selectedImage,
-              packBrief,
-              variables.customerName,
-              variables.meta?.customerIdentityRequired ?? true,
-              signal,
-            );
-          });
+          const rawPack = await runGeminiTask(
+            "ai.caption.pack",
+            (signal) => {
+              assertOperationAuthEpoch(variables.authEpoch);
+              return generatePlatformCaptionPack(
+                selectedImage,
+                packBrief,
+                variables.customerName,
+                variables.meta?.customerIdentityRequired ?? true,
+                signal,
+              );
+            },
+            undefined,
+            variables.run.controller.signal,
+          );
           assertOperationAuthEpoch(variables.authEpoch);
           const parsed = parsePlatformCaptionPack(rawPack, platformIds);
           const cleaned: Record<string, string> = {};
@@ -591,6 +817,8 @@ export const useGeneration = () => {
           }
           return Object.keys(cleaned).length > 0 ? cleaned : undefined;
         } catch (err) {
+          // A cancelled run aborted this call on purpose; it is not a failure.
+          if (variables.run.cancelled) return undefined;
           logError("caption.pack_failed", {
             message: err instanceof Error ? err.message : String(err),
             platforms: platformIds,
@@ -663,6 +891,8 @@ export const useGeneration = () => {
       }
       if (websiteDraft) finalPost.websiteDraft = websiteDraft;
       if (variables.authEpoch !== useAppStore.getState().authEpoch) return;
+      // Last point where a cancel means nothing was created (B5).
+      if (variables.run.cancelled) return;
 
       // Log post + (if a release was captured) link the already-persisted
       // release to it. The signature was durably saved before the provider
@@ -671,6 +901,7 @@ export const useGeneration = () => {
       // because the returned id is the secure status-polling handle and the
       // manager needs the exact image/caption they are approving.
       if (currentDealer) {
+        let releaseLinkAttempted = false;
         const persistPost = async () => {
           const captured = variables.meta?.capturedRelease;
           assertOperationAuthEpoch(variables.authEpoch);
@@ -733,6 +964,7 @@ export const useGeneration = () => {
           if (captured && releaseId && post) {
             const { linkReleaseToPostWithRetry } =
               await import("../services/photoReleases");
+            releaseLinkAttempted = true;
             try {
               await linkReleaseToPostWithRetry(releaseId, post.id, {
                 requestAuthEpoch: variables.authEpoch,
@@ -770,8 +1002,31 @@ export const useGeneration = () => {
         // Await the small first-party persistence request for every generated
         // post. Besides making metrics truthful, this gives subsequent video
         // and release updates an owner-scoped post id.
-        const persisted = await persistPost();
+        // B5: from here a cancel lets this save finish, and only the result
+        // is discarded. A1: the release is spent from the moment it starts.
+        const capturedForPost = variables.meta?.capturedRelease;
+        const releaseIdForPost = releaseId ?? capturedForPost?.releaseId;
+        if (capturedForPost) markReleaseLinked(capturedForPost, releaseIdForPost);
+        advanceGenerationStage(variables.run, "saving");
+        const persistence = persistPost();
+        variables.run.requiresApproval = !!currentDealer.requires_approval;
+        variables.run.saved = persistence.then(
+          (outcome) => Boolean(outcome.post),
+          () => false,
+        );
+        variables.run.persistenceStarted = true;
+        let persisted: Awaited<typeof persistence>;
+        try {
+          persisted = await persistence;
+        } finally {
+          if (capturedForPost && !releaseLinkAttempted) {
+            unmarkReleaseLinked(capturedForPost, releaseIdForPost);
+          }
+        }
         if (variables.authEpoch !== useAppStore.getState().authEpoch) return;
+        // Cancelled while saving: the post stays in My work, the result
+        // screen never opens for it.
+        if (variables.run.cancelled) return;
         const post = persisted.post;
         finalPost.releaseStatus = persisted.releaseStatus;
         if (persisted.releaseLinkStatus && persisted.unlinkedReleaseId) {
@@ -831,11 +1086,14 @@ export const useGeneration = () => {
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
       if (variables.authEpoch !== useAppStore.getState().authEpoch) return;
+      if (variables.run.cancelled) return;
       setGeneratedPost(finalPost);
       setStep(AppStep.RESULT);
     },
     onError: (err, variables) => {
       if (variables.authEpoch !== useAppStore.getState().authEpoch) return;
+      // Cancel already returned to Details with no error; its abort is not one.
+      if (variables.run.cancelled) return;
       cleanupTimers();
       const normalized = normalizeError(err);
       const fullMsg = `Failed to generate your post. ${normalized.message} ${recoveryHint(normalized)}`;
@@ -857,48 +1115,127 @@ export const useGeneration = () => {
       outputProfile?: PrimaryImageProfile,
       mediaOutputMode: MediaOutputMode = "photo",
     ) => {
-      // Warmed on CAPTURE by useAppController, so this usually resolves from
-      // the memoized promise instead of downloading at the Generate tap.
-      const { resolvePrimaryImageProfile } = await loadPublishPipeline();
-      // Single source of truth for this post's creative parameters. Disabled
-      // (every existing dealership): `style`/`tone` come back exactly as
-      // passed, `platformIds`/`formatIds` are empty, and both branches below
-      // fall through to today's values. Enabled: the Look owns style and tone
-      // and the category owns destinations and canvases, so a stale caller can
-      // never ship a post that contradicts the dealership's brand.
-      const resolved = resolveCreative({
-        dealer: currentDealer ?? null,
-        scenarioId: meta?.scenarioId,
-        fallbackStyle: style,
-        fallbackTone: tone,
-      });
-      const resolvedPlatformIds =
-        resolved.platformIds.length > 0 ? resolved.platformIds : platformIds;
-      // The prescribed canvas set is authoritative: a caller-supplied profile
-      // is kept only when it is one of the category's formats.
-      const profileHonorsPrescription =
-        resolved.formatIds.length === 0 ||
-        (outputProfile !== undefined &&
-          resolved.formatIds.includes(outputProfile.primaryFormatId));
-      const resolvedProfile = profileHonorsPrescription
-        ? (outputProfile ?? resolvePrimaryImageProfile(resolvedPlatformIds))
-        : resolvePrimaryImageProfile(resolvedPlatformIds);
-      await generateMutation.mutateAsync({
-        style: resolved.style,
-        tone: resolved.tone,
-        customerName,
-        customText,
-        creativeBrief,
-        platformIds: resolvedPlatformIds,
-        mediaOutputMode,
-        primaryFormatId: resolvedProfile.primaryFormatId,
-        imageAspectRatio: resolvedProfile.imageAspectRatio,
-        meta,
+      // B5: one generation at a time, decided synchronously on the tap. A run
+      // from before a sign-in boundary does not count, even if this tap lands
+      // before the auth-epoch effect above has run.
+      releaseRunFromPreviousWorkspace();
+      if (inFlightRef.current) return;
+      // A run that already passed onMutate (the salesperson reopened a post
+      // from My work and came back around to Generate while it was still
+      // going) is detached, not blocked: it settles on its own, its stage and
+      // part callbacks are ignored, and its finally never touches this run.
+      if (activeRunRef.current) {
+        activeRunRef.current = null;
+        setGenerationStage("idle");
+        setPartsReady(NO_PARTS_READY);
+      }
+      inFlightRef.current = true;
+      const run: GenerationRun = {
+        controller: new AbortController(),
+        cancelled: false,
         authEpoch: useAppStore.getState().authEpoch,
-      });
+        stage: "idle",
+        persistenceStarted: false,
+        requiresApproval: false,
+      };
+      activeRunRef.current = run;
+      try {
+        // Warmed on CAPTURE by useAppController, so this usually resolves from
+        // the memoized promise instead of downloading at the Generate tap.
+        const { resolvePrimaryImageProfile } = await loadPublishPipeline();
+        // Cancelled, or handed back by a sign-in boundary while the pipeline
+        // loaded: this tap belonged to the previous workspace.
+        if (run.cancelled || activeRunRef.current !== run) return;
+        // Single source of truth for this post's creative parameters. Disabled
+        // (every existing dealership): `style`/`tone` come back exactly as
+        // passed, `platformIds`/`formatIds` are empty, and both branches below
+        // fall through to today's values. Enabled: the Look owns style and tone
+        // and the category owns destinations and canvases, so a stale caller can
+        // never ship a post that contradicts the dealership's brand.
+        const resolved = resolveCreative({
+          dealer: currentDealer ?? null,
+          scenarioId: meta?.scenarioId,
+          fallbackStyle: style,
+          fallbackTone: tone,
+        });
+        const resolvedPlatformIds =
+          resolved.platformIds.length > 0 ? resolved.platformIds : platformIds;
+        // The prescribed canvas set is authoritative: a caller-supplied profile
+        // is kept only when it is one of the category's formats.
+        const profileHonorsPrescription =
+          resolved.formatIds.length === 0 ||
+          (outputProfile !== undefined &&
+            resolved.formatIds.includes(outputProfile.primaryFormatId));
+        const resolvedProfile = profileHonorsPrescription
+          ? (outputProfile ?? resolvePrimaryImageProfile(resolvedPlatformIds))
+          : resolvePrimaryImageProfile(resolvedPlatformIds);
+        const operationAuthEpoch = useAppStore.getState().authEpoch;
+        run.authEpoch = operationAuthEpoch;
+        await generateMutation.mutateAsync({
+          style: resolved.style,
+          tone: resolved.tone,
+          customerName,
+          customText,
+          creativeBrief,
+          platformIds: resolvedPlatformIds,
+          mediaOutputMode,
+          primaryFormatId: resolvedProfile.primaryFormatId,
+          imageAspectRatio: resolvedProfile.imageAspectRatio,
+          meta,
+          authEpoch: operationAuthEpoch,
+          run,
+        });
+      } catch (err) {
+        // The salesperson asked for this; a cancelled run settles quietly.
+        if (run.cancelled) return;
+        throw err;
+      } finally {
+        // A cancelled run already handed the guard back to the next tap.
+        if (activeRunRef.current === run) {
+          activeRunRef.current = null;
+          inFlightRef.current = false;
+          setGenerationStage("idle");
+          setPartsReady(NO_PARTS_READY);
+        }
+      }
     },
-    [currentDealer, generateMutation],
+    [currentDealer, generateMutation, releaseRunFromPreviousWorkspace],
   );
+
+  /**
+   * Cancel on the Creating screen (amendments B5). Before logPost starts the
+   * run is aborted: the queued or running provider task is cancelled, a late
+   * result is discarded, nothing is created and the captured release is left
+   * as it is (with its stored id, so a retry does not re-sign). After logPost
+   * has started, that save is left to finish in My work and only the result
+   * is discarded. Either way the salesperson is back on Details with no error,
+   * and generationParams are kept so nothing needs retyping.
+   */
+  const cancelGeneration = useCallback((): GenerationCancelResult => {
+    const run = activeRunRef.current;
+    if (!run || run.cancelled) return { status: "idle" };
+    run.cancelled = true;
+    activeRunRef.current = null;
+    inFlightRef.current = false;
+    if (!run.persistenceStarted) run.controller.abort(generationCancelledError());
+    cleanupTimers();
+    setGenerationStage("idle");
+    setPartsReady(NO_PARTS_READY);
+    setError(null);
+    setStep(AppStep.CUSTOMIZE);
+    logEvent("ai.generate.cancelled", {
+      stage: run.stage,
+      saving: run.persistenceStarted,
+    });
+    if (run.persistenceStarted) {
+      return {
+        status: "saving",
+        requiresApproval: run.requiresApproval,
+        saved: run.saved ?? Promise.resolve(false),
+      };
+    }
+    return { status: "cancelled" };
+  }, [cleanupTimers, setError, setStep]);
 
   const regenerateImageMutation = useMutation({
     mutationFn: async () => {
@@ -1754,6 +2091,9 @@ export const useGeneration = () => {
   return {
     generationProgress,
     progressMessage,
+    generationStage,
+    partsReady,
+    cancelGeneration,
     handleGenerate,
     handleRegenerateImage,
     handleFunMode,
