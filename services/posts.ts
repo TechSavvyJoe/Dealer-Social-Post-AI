@@ -34,6 +34,7 @@ import {
   describeUnauthorizedNames,
   unauthorizedCustomerNames,
 } from "../utils/captionQuality";
+import { stripCanonicalDisclosures } from "../utils/complianceDisclosures";
 
 export type ApprovalStatus = "n_a" | "pending" | "approved" | "rejected";
 
@@ -323,8 +324,10 @@ const assertCustomerCopyIsSafe = (input: {
     input.disclosures,
     ...Object.values(input.platformCaptions || {}),
   ].filter((value): value is string => Boolean(value?.trim()));
+  // Canonical disclosure material never reaches the guard (the same rule the
+  // server's save route applies): it is fixed legal copy, not a name.
   const offending = copy.flatMap((caption) =>
-    unauthorizedCustomerNames(caption, publicCustomer, {
+    unauthorizedCustomerNames(stripCanonicalDisclosures(caption), publicCustomer, {
       allowedPhrases: groundedPhrases(
         input.grounding,
         input.websiteDraft?.vehicleDescription,
@@ -361,14 +364,18 @@ const assertCustomerCopyIsSafe = (input: {
     if (
       websiteCopy.some(
         (caption) =>
-          !captionUsesOnlyExpectedCustomer(caption, publicCustomer, {
-            allowedPhrases: groundedPhrases(
-              input.grounding,
-              input.websiteDraft?.vehicleDescription,
-            ),
-            maskedPhrases: maskedPhrases(input.grounding),
-            rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
-          }),
+          !captionUsesOnlyExpectedCustomer(
+            stripCanonicalDisclosures(caption),
+            publicCustomer,
+            {
+              allowedPhrases: groundedPhrases(
+                input.grounding,
+                input.websiteDraft?.vehicleDescription,
+              ),
+              maskedPhrases: maskedPhrases(input.grounding),
+              rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
+            },
+          ),
       )
     ) {
       throw new Error(
@@ -406,26 +413,36 @@ export const projectPostRecordForUi = (
       : replaceFullCustomerName(value, protectedName, publicCustomer || undefined);
   const caption = sanitize(record.caption);
   const disclosures = sanitize(record.disclosures);
+  // Canonical disclosure material is stripped before every check below, as the
+  // server's History projection does: it is fixed legal copy, never a name.
   const captionIdentitySafe =
     !caption ||
-    captionUsesOnlyExpectedCustomer(caption, publicCustomer, {
-      allowedPhrases: groundedPhrases(
-        grounding,
-        record.website_draft?.vehicleDescription,
-      ),
-      maskedPhrases: maskedPhrases(grounding, record.salesperson_name),
-      rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
-    });
+    captionUsesOnlyExpectedCustomer(
+      stripCanonicalDisclosures(caption),
+      publicCustomer,
+      {
+        allowedPhrases: groundedPhrases(
+          grounding,
+          record.website_draft?.vehicleDescription,
+        ),
+        maskedPhrases: maskedPhrases(grounding, record.salesperson_name),
+        rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
+      },
+    );
   const disclosureIdentitySafe =
     !disclosures ||
-    captionUsesOnlyExpectedCustomer(disclosures, publicCustomer, {
-      allowedPhrases: groundedPhrases(
-        grounding,
-        record.website_draft?.vehicleDescription,
-      ),
-      maskedPhrases: maskedPhrases(grounding, record.salesperson_name),
-      rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
-    });
+    captionUsesOnlyExpectedCustomer(
+      stripCanonicalDisclosures(disclosures),
+      publicCustomer,
+      {
+        allowedPhrases: groundedPhrases(
+          grounding,
+          record.website_draft?.vehicleDescription,
+        ),
+        maskedPhrases: maskedPhrases(grounding, record.salesperson_name),
+        rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
+      },
+    );
   let identityReviewRequired = Boolean(record.identity_review_required);
   if (!captionIdentitySafe) identityReviewRequired = true;
   if (!disclosureIdentitySafe) identityReviewRequired = true;
@@ -435,7 +452,7 @@ export const projectPostRecordForUi = (
         Object.entries(record.platform_captions).flatMap(([platform, rawCaption]) => {
           const projectedCaption = sanitize(rawCaption) || "";
           const safe = captionUsesOnlyExpectedCustomer(
-            projectedCaption,
+            stripCanonicalDisclosures(projectedCaption),
             publicCustomer,
             {
               allowedPhrases: groundedPhrases(
@@ -478,14 +495,18 @@ export const projectPostRecordForUi = (
       websiteLabelSafe &&
       [projectedDraft.title, projectedDraft.body, projectedDraft.altText].every(
         (copy) =>
-          captionUsesOnlyExpectedCustomer(copy, publicCustomer, {
-            allowedPhrases: groundedPhrases(
-              grounding,
-              projectedDraft.vehicleDescription,
-            ),
-            maskedPhrases: maskedPhrases(grounding, record.salesperson_name),
-            rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
-          }),
+          captionUsesOnlyExpectedCustomer(
+            stripCanonicalDisclosures(copy),
+            publicCustomer,
+            {
+              allowedPhrases: groundedPhrases(
+                grounding,
+                projectedDraft.vehicleDescription,
+              ),
+              maskedPhrases: maskedPhrases(grounding, record.salesperson_name),
+              rejectAnyCustomerIdentity: customerIdentityRequired && !publicCustomer,
+            },
+          ),
       );
     if (websiteIdentitySafe) websiteDraft = projectedDraft;
     else identityReviewRequired = true;

@@ -16,7 +16,11 @@
  *    changed in this extraction.
  */
 import type { GeneratedPost } from "../types";
-import { prohibitedClaimsMessage, type DisclosureMatch } from "./complianceDisclosures";
+import {
+  prohibitedClaimsMessage,
+  stripCanonicalDisclosures,
+  type DisclosureMatch,
+} from "./complianceDisclosures";
 import { captionUsesOnlyExpectedCustomer } from "./captionQuality";
 import { toPublicCustomerLabel } from "./customerIdentity";
 
@@ -37,27 +41,32 @@ export interface CaptionIdentityContext {
 /**
  * The identity-guard wrapper (formerly PostResult.tsx's inline
  * `customerIdentityIsSafe`): allowedPhrases = dealer name/OEM/vehicle
- * description, maskedPhrases = salesperson name + first name.
+ * description, maskedPhrases = salesperson name + first name. Canonical
+ * disclosure material is stripped first, as the server's share route does.
  */
 export const checkCaptionIdentity = (
   caption: string,
   context: CaptionIdentityContext,
 ): boolean =>
-  captionUsesOnlyExpectedCustomer(caption, context.customerDisplayName, {
-    allowedPhrases: [
-      context.dealerName,
-      context.oemAffiliation,
-      context.vehicleDescription,
-    ],
-    maskedPhrases: [
-      context.currentPersonName,
-      toPublicCustomerLabel(context.currentPersonName),
-    ],
-    rejectAnyCustomerIdentity: Boolean(
-      (context.customerIdentityRequired || context.isCustomerStory) &&
-      !toPublicCustomerLabel(context.customerDisplayName),
-    ),
-  });
+  captionUsesOnlyExpectedCustomer(
+    stripCanonicalDisclosures(caption),
+    context.customerDisplayName,
+    {
+      allowedPhrases: [
+        context.dealerName,
+        context.oemAffiliation,
+        context.vehicleDescription,
+      ],
+      maskedPhrases: [
+        context.currentPersonName,
+        toPublicCustomerLabel(context.currentPersonName),
+      ],
+      rejectAnyCustomerIdentity: Boolean(
+        (context.customerIdentityRequired || context.isCustomerStory) &&
+        !toPublicCustomerLabel(context.customerDisplayName),
+      ),
+    },
+  );
 
 /** True when any caption in the set fails the identity guard. */
 export const deriveIdentityLocked = (
