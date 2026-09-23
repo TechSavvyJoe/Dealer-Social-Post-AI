@@ -130,14 +130,20 @@ describe("buildGenerationRequest", () => {
     });
   });
 
-  it("A1: releaseAlreadyLinked is ignored when the scenario needs no release", () => {
+  it("A1: a spent release is dropped, not carried, when the scenario needs no release", () => {
     const result = buildGenerationRequest({
       ...baseInput,
       scenarioId: "new_arrival",
-      capturedRelease: null,
+      customerName: "Alex",
+      decodedVehicle,
+      capturedRelease: release({ customerName: "Alex" }),
       releaseAlreadyLinked: true,
     });
     expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.args.meta?.hasRelease).toBe(false);
+      expect(result.args.meta?.capturedRelease).toBeUndefined();
+    }
   });
 
   it("requires a release for a scenario that needs a customer (customer_delivery)", () => {

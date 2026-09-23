@@ -207,7 +207,7 @@ export const buildGenerationRequest = (
     currentDealer,
     scenarioId,
     decodedVehicle,
-    capturedRelease,
+    capturedRelease: capturedReleaseInput,
     releaseAlreadyLinked = false,
     customerName,
     personalLine,
@@ -233,6 +233,14 @@ export const buildGenerationRequest = (
     ) || POST_SCENARIOS[0];
   const scenarioNeedsCustomerRelease =
     activeScenario.requiresCustomer || activeScenario.category === "delivery";
+  // A1: a release already linked to another post backs nothing. A scenario
+  // that requires one asks for a fresh signature below; one that never needed
+  // it drops the spent release here, so persistence never attempts a link
+  // that is guaranteed to fail and lock the post.
+  const capturedRelease =
+    capturedReleaseInput && releaseAlreadyLinked && !scenarioNeedsCustomerRelease
+      ? null
+      : capturedReleaseInput;
 
   if (effectivePlatformIds.length === 0 && !websiteSelected) {
     return { ok: false, reason: "no_destination" };

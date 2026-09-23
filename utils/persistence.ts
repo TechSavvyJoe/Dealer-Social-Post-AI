@@ -22,17 +22,48 @@ interface PersistedState {
   };
 }
 
+type PersistedGenerationParams = NonNullable<PersistedState["generationParams"]>;
+
+/**
+ * The Details draft a Cancel or a failed attempt carries back through the
+ * customizer's remount is in memory only: a captured release holds the
+ * customer's drawn signature, and the personal line is unposted free text.
+ * Neither belongs in localStorage (or its quota), and a restored session must
+ * never hand the customizer a release, so both are dropped on every save and
+ * on every load.
+ */
+const carriesInMemoryDraft = (params: PersistedState["generationParams"]): boolean =>
+  Boolean(params && ("capturedRelease" in params || "personalLine" in params));
+
+const withoutInMemoryDraft = (
+  params: PersistedGenerationParams,
+): PersistedGenerationParams => {
+  const {
+    capturedRelease: _release,
+    personalLine: _personalLine,
+    ...storable
+  } = params;
+  return storable;
+};
+
 const withoutImageBytes = (session: PersistedState): PersistedState => ({
   ...session,
   generatedPost: session.generatedPost
     ? { ...session.generatedPost, image: undefined }
     : undefined,
   selectedImage: undefined,
+  generationParams: session.generationParams
+    ? withoutInMemoryDraft(session.generationParams)
+    : undefined,
 });
 
 const scrubLegacyImageBytes = (session: PersistedState): PersistedState => {
   const scrubbed = withoutImageBytes(session);
-  if (session.selectedImage || session.generatedPost?.image) {
+  if (
+    session.selectedImage ||
+    session.generatedPost?.image ||
+    carriesInMemoryDraft(session.generationParams)
+  ) {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(scrubbed));
     } catch {

@@ -859,7 +859,9 @@ describe("useGeneration model-tier and provenance wiring", () => {
     /** Let the run advance inside act until `condition` holds, then flush. */
     const advanceUntil = async (condition: () => void) => {
       await act(async () => {
-        await vi.waitFor(condition);
+        // The first run in a cold worker pays the lazy publish-pipeline import,
+        // which can outlast waitFor's 1 s default and fail the test on order.
+        await vi.waitFor(condition, { timeout: 10_000 });
       });
     };
 
@@ -1014,6 +1016,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       expect(logEvent).toHaveBeenCalledWith("ai.generate.cancelled", {
         stage: "design",
         saving: false,
+        reason: "cancel",
       });
       expect(result.current.generationStage).toBe("idle");
       // Details keeps its values and the release keeps its stored id.
@@ -1130,6 +1133,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
         expect(logEvent).toHaveBeenCalledWith("ai.generate.cancelled", {
           stage: "saving",
           saving: true,
+          reason: "cancel",
         });
 
         cleanup();
@@ -1181,31 +1185,171 @@ describe("useGeneration model-tier and provenance wiring", () => {
       cleanup();
     });
 
-    it("a Create post after the step changed detaches the running generation instead of ignoring it (a second Generate always ran before the guard existed)", async () => {
-      let releaseFirst!: () => void;
-      mocks.generateSocialPost.mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            releaseFirst = () => resolve(generatedResult);
-          }),
-      );
+    it("a Create post after the step changed supersedes the running generation: the new run starts and the old one can never save or show its result", async () => {
+      const firstProvider = deferred<typeof generatedResult>();
+      mocks.generateSocialPost.mockImplementationOnce(() => firstProvider.promise);
+      const secondProvider = deferred<typeof generatedResult>();
+      mocks.generateSocialPost.mockImplementationOnce(() => secondProvider.promise);
       const { result, cleanup } = renderGeneration();
+      const stepCalls = (step: AppStep) =>
+        mocks.setStep.mock.calls.filter(([called]) => called === step).length;
 
-      let first!: Promise<void>;
-      await act(async () => {
-        first = result.current.handleGenerate(
-          StyleOption.Modern,
-          ToneOption.Professional,
-          "Alex",
-        );
-        await vi.waitFor(() =>
-          expect(mocks.setStep).toHaveBeenCalledWith(AppStep.GENERATING),
-        );
-      });
+      const first = startGeneration(result);
+      await advanceUntil(() =>
+        expect(mocks.generateSocialPost).toHaveBeenCalledTimes(1),
+      );
+      expect(mocks.setStep).toHaveBeenCalledWith(AppStep.GENERATING);
+      const firstSignal = mocks.runGeminiTask.mock.calls.find(
+        ([name]) => name === "ai.generate",
+      )?.[3];
 
       // The first run is past onMutate and still waiting on the provider; the
       // salesperson has reopened a post from My work and come back around to
       // Generate. That tap must start its own run, not silently do nothing.
+      mocks.logPost.mockResolvedValueOnce({ id: "post-newer" });
+      const second = startGeneration(result);
+      await advanceUntil(() =>
+        expect(mocks.generateSocialPost).toHaveBeenCalledTimes(2),
+      );
+      expect(stepCalls(AppStep.GENERATING)).toBe(2);
+      expect(result.current.generationStage).toBe("design");
+      // Superseded exactly as a Cancel would stop it, without navigating.
+      expect(firstSignal?.aborted).toBe(true);
+      expect(logEvent).toHaveBeenCalledWith("ai.generate.cancelled", {
+        stage: "design",
+        saving: false,
+        reason: "superseded",
+      });
+      expect(stepCalls(AppStep.CUSTOMIZE)).toBe(0);
+
+      // The first provider call answers late, while the newer run is still
+      // designing: nothing is saved and nothing on screen changes.
+      await act(async () => {
+        firstProvider.resolve(generatedResult);
+        await expect(first).resolves.toBeUndefined();
+      });
+      expect(mocks.logPost).not.toHaveBeenCalled();
+      expect(mocks.setGeneratedPost).not.toHaveBeenCalled();
+      expect(stepCalls(AppStep.RESULT)).toBe(0);
+      expect(mocks.toastError).not.toHaveBeenCalled();
+      expect(result.current.generationStage).toBe("design");
+
+      await act(async () => {
+        secondProvider.resolve(generatedResult);
+        await second;
+      });
+      // Only the newer run saved and opened its result.
+      expect(mocks.logPost).toHaveBeenCalledTimes(1);
+      expect(mocks.setGeneratedPost).toHaveBeenCalledTimes(1);
+      expect(mocks.setGeneratedPost.mock.calls[0][0]).toMatchObject({
+        postId: "post-newer",
+      });
+      expect(stepCalls(AppStep.RESULT)).toBe(1);
+      expect(stepCalls(AppStep.CUSTOMIZE)).toBe(0);
+      expect(mocks.setError).not.toHaveBeenCalledWith(expect.any(String));
+      expect(mocks.toastError).not.toHaveBeenCalled();
+      expect(result.current.generationStage).toBe("idle");
+
+      cleanup();
+    });
+
+    it("a superseded run that was already saving finishes its save in My work but never replaces the newer workspace", async () => {
+      const captured = signedRelease();
+      mocks.saveRelease.mockResolvedValueOnce({ id: "release-superseded-1" });
+      const firstSave = deferred<{ id: string } | null>();
+      mocks.logPost.mockImplementationOnce(() => firstSave.promise);
+      const { result, cleanup } = renderGeneration();
+      const stepCalls = (step: AppStep) =>
+        mocks.setStep.mock.calls.filter(([called]) => called === step).length;
+
+      const first = startGeneration(result, { capturedRelease: captured });
+      await advanceUntil(() => expect(mocks.logPost).toHaveBeenCalledTimes(1));
+      expect(result.current.generationStage).toBe("saving");
+
+      const secondProvider = deferred<typeof generatedResult>();
+      mocks.generateSocialPost.mockImplementationOnce(() => secondProvider.promise);
+      mocks.logPost.mockResolvedValueOnce({ id: "post-newer" });
+      const second = startGeneration(result);
+      await advanceUntil(() =>
+        expect(mocks.generateSocialPost).toHaveBeenCalledTimes(2),
+      );
+      expect(logEvent).toHaveBeenCalledWith("ai.generate.cancelled", {
+        stage: "saving",
+        saving: true,
+        reason: "superseded",
+      });
+      expect(result.current.generationStage).toBe("design");
+
+      // The first save answers while the newer run is still designing. Its
+      // post exists in My work with its release, but nothing on screen moves.
+      await act(async () => {
+        firstSave.resolve({ id: "post-superseded" });
+        await expect(first).resolves.toBeUndefined();
+      });
+      expect(mocks.linkReleaseToPostWithRetry).toHaveBeenCalledWith(
+        "release-superseded-1",
+        "post-superseded",
+        expect.anything(),
+      );
+      expect(mocks.setGeneratedPost).not.toHaveBeenCalled();
+      expect(stepCalls(AppStep.RESULT)).toBe(0);
+      expect(stepCalls(AppStep.CUSTOMIZE)).toBe(0);
+      expect(mocks.toastError).not.toHaveBeenCalled();
+      expect(mocks.toastWarning).not.toHaveBeenCalled();
+      expect(result.current.generationStage).toBe("design");
+
+      await act(async () => {
+        secondProvider.resolve(generatedResult);
+        await second;
+      });
+      expect(mocks.logPost).toHaveBeenCalledTimes(2);
+      expect(mocks.setGeneratedPost).toHaveBeenCalledTimes(1);
+      expect(mocks.setGeneratedPost.mock.calls[0][0]).toMatchObject({
+        postId: "post-newer",
+      });
+      expect(stepCalls(AppStep.RESULT)).toBe(1);
+      expect(stepCalls(AppStep.CUSTOMIZE)).toBe(0);
+
+      cleanup();
+    });
+
+    it("keeps the whole Details draft, release and personal line included, in memory for the remount a Cancel sends Details through", async () => {
+      const captured = signedRelease();
+      // Real release ids are unique server ids; the fixture's shared default
+      // would collide with a release an earlier test linked.
+      mocks.saveRelease.mockResolvedValueOnce({ id: "release-draft-carry-1" });
+      const provider = deferred<typeof generatedResult>();
+      mocks.generateSocialPost.mockImplementationOnce(() => provider.promise);
+      const { result, cleanup } = renderGeneration();
+
+      const run = startGeneration(result, {
+        capturedRelease: captured,
+        personalLine: "  Stop by and say hi on the lot. ",
+      });
+      await advanceUntil(() =>
+        expect(mocks.generateSocialPost).toHaveBeenCalledTimes(1),
+      );
+      // Set before the step changes, so the Details remount can read it back.
+      expect(mocks.setGenerationParams).toHaveBeenCalledTimes(1);
+      const draft = mocks.setGenerationParams.mock.calls[0][0];
+      expect(draft.capturedRelease).toBe(captured);
+      expect(draft.personalLine).toBe("  Stop by and say hi on the lot. ");
+
+      expect(cancel(result)).toEqual({ status: "cancelled" });
+      await act(async () => {
+        await run;
+        provider.resolve(generatedResult);
+      });
+      // Cancel keeps it: nothing clears or rewrites the draft.
+      expect(mocks.setGenerationParams).toHaveBeenCalledTimes(1);
+      expect(isReleaseAlreadyLinked(captured)).toBe(false);
+
+      cleanup();
+    });
+
+    it("leaves the in-memory draft fields off a run that had neither", async () => {
+      const { result, cleanup } = renderGeneration();
+
       await act(async () => {
         await result.current.handleGenerate(
           StyleOption.Modern,
@@ -1213,17 +1357,10 @@ describe("useGeneration model-tier and provenance wiring", () => {
           "Alex",
         );
       });
-      expect(mocks.generateSocialPost).toHaveBeenCalledTimes(2);
-      expect(
-        mocks.setStep.mock.calls.filter(([step]) => step === AppStep.GENERATING),
-      ).toHaveLength(2);
 
-      // The detached run settles on its own without disturbing the new one.
-      await act(async () => {
-        releaseFirst();
-        await first;
-      });
-      expect(result.current.generationStage).toBe("idle");
+      const draft = mocks.setGenerationParams.mock.calls[0][0];
+      expect(draft).not.toHaveProperty("capturedRelease");
+      expect(draft).not.toHaveProperty("personalLine");
 
       cleanup();
     });
@@ -1407,6 +1544,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       expect(logEvent).toHaveBeenCalledWith("ai.generate.cancelled", {
         stage: "signature",
         saving: false,
+        reason: "cancel",
       });
       mocks.setStep.mockClear();
 

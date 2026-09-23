@@ -3441,9 +3441,8 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
   }
 
   try {
-    // The same customer-identity review the History list projects as
-    // identity_review_required: caption, disclosures, every destination
-    // caption, and the website draft.
+    // Both copy locks below read the stored caption set: the caption and
+    // every selected destination's caption.
     const websitePublications = require(__hooks + "/websitePublications.js");
     const allowedPlatformIds = helpers.allowedPostPlatformIds();
     let platformIds = [];
@@ -3466,6 +3465,57 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
     const platformCaptions = parsedPlatformCaptions.ok
       ? parsedPlatformCaptions.value
       : {};
+
+    // The claim lock the result screen enforces (utils/postLocks.ts), under
+    // the current server policy: prohibited claims, this dealership's blocked
+    // wording as configured now, and the canonical disclosures, over the same
+    // stored caption set the draft save and the approval decision validate. A
+    // phrase the dealership blocks after the post was saved locks it here too.
+    const compliance = policies.validatePostComplianceSet(
+      [record.getString("caption")].concat(Object.values(platformCaptions)),
+      record.getString("disclosures"),
+      dealer.getString("banned_phrases"),
+    );
+    if (!compliance.ok) {
+      // The result screen's claim-lock wording (prohibitedClaimsMessage in
+      // utils/complianceDisclosures.ts). The policy names the dealership's
+      // blocked phrases but only flags a legal claim, so that one is described
+      // rather than quoted. A disclosure mismatch keeps the policy's error.
+      const blockedPhrases = compliance.dealer_blocked_phrases || [];
+      const legalClaim = !!compliance.legal_prohibited;
+      let claimMessage = compliance.error;
+      if (legalClaim || blockedPhrases.length > 0) {
+        const quoted = blockedPhrases
+          .map((phrase) => "\u201c" + phrase.trim() + "\u201d")
+          .join(", ");
+        const reason =
+          legalClaim && blockedPhrases.length > 0
+            ? "These claims are prohibited or blocked by this dealership and cannot be published."
+            : legalClaim
+              ? "Claims such as guaranteed approval or no credit check cannot be published."
+              : "This dealership has blocked this wording, so it cannot be published.";
+        claimMessage = legalClaim
+          ? "Remove prohibited advertising claims" +
+            (quoted ? ", including " + quoted : "") +
+            ". " +
+            reason
+          : "Remove prohibited advertising claim" +
+            (blockedPhrases.length === 1 ? "" : "s") +
+            ": " +
+            quoted +
+            ". " +
+            reason;
+      }
+      return c.json(409, {
+        error: "CLAIMS_BLOCKED",
+        code: "CLAIMS_BLOCKED",
+        message: claimMessage,
+      });
+    }
+
+    // The same customer-identity review the History list projects as
+    // identity_review_required: caption, disclosures, every destination
+    // caption, and the website draft.
     const storedWebsiteDraft = websitePublications.parseWebsiteDraft(
       record.getString("website_draft"),
     );

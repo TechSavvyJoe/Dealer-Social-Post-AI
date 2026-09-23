@@ -1,6 +1,7 @@
 import type { PlatformDestinationId } from "./services/platformOutputs";
 import type { WebsiteDraft, WebsitePublication } from "./services/websitePublishing";
 import type { DecodedVehicle } from "./services/vinDecoder";
+import type { CapturedRelease } from "./services/photoReleases";
 
 export enum AppStep {
   LOGIN,
@@ -415,4 +416,19 @@ export interface GenerationParams {
    * to prevent is highest.
    */
   decodedVehicle?: DecodedVehicle;
+  /**
+   * IN MEMORY ONLY — utils/persistence.ts drops it before anything reaches
+   * storage, because it holds the customer's drawn signature. The release
+   * signed for the attempt that sent Details back through its remount (a
+   * Cancel, or a generation that failed before the post was saved), so the
+   * retry needs no new signature. The customizer takes it back only while it
+   * has never been linked to a post (amendments A1: a release is single-use),
+   * and a restored session never carries one.
+   */
+  capturedRelease?: CapturedRelease;
+  /**
+   * IN MEMORY ONLY, like `capturedRelease`: the personal line exactly as it
+   * was typed on Details, restored verbatim on the same remount.
+   */
+  personalLine?: string;
 }

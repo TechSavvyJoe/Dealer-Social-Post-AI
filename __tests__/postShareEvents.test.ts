@@ -22,6 +22,10 @@ import {
 } from "../services/posts";
 import { PLATFORM_OUTPUT_PROFILES } from "../services/platformOutputs";
 import { postStatusFor } from "../utils/historyPost";
+import {
+  analyzeCaptionSetForDelivery,
+  prohibitedClaimsMessage,
+} from "../utils/complianceDisclosures";
 import { setActiveAuthEpoch } from "../utils/authBoundary";
 
 type AnyRecord = Record<string, unknown>;
@@ -45,6 +49,10 @@ type RealHelpers = {
 };
 type RealPolicies = {
   geminiModelPolicySnapshot: () => { version: string };
+  canonicalPostComplianceSet: (
+    captions: string[],
+    bannedPhrases?: string,
+  ) => { required_disclosures: string };
 };
 
 const realHelpers = loadCommonJs<RealHelpers>("pb_hooks/helpers.js");
@@ -279,6 +287,7 @@ interface ShareHarness {
   run: (options?: {
     body?: AnyRecord;
     postOverrides?: AnyRecord;
+    dealerOverrides?: AnyRecord;
     context?: AnyRecord | null;
     token?: string;
     postId?: string;
@@ -299,10 +308,13 @@ const shareHarness = (): ShareHarness => {
 
   const run: ShareHarness["run"] = (options = {}) => {
     const post = fakeRecord("post-1", postValues(options.postOverrides));
+    const runDealer = options.dealerOverrides
+      ? fakeRecord(dealer.id, { ...dealer.values, ...options.dealerOverrides })
+      : dealer;
     const context =
       options.context === undefined
         ? {
-            dealer,
+            dealer: runDealer,
             person: salesperson,
             session: { id: "session-1" },
             role: "salesperson",
@@ -634,6 +646,174 @@ describe("POST /api/app/posts/:id/shared", () => {
     expect(result.status).toBe(409);
     expect(result.payload.code).toBe("IDENTITY_REVIEW_REQUIRED");
     expect(harness.events).toHaveLength(0);
+  });
+
+  describe("claim lock", () => {
+    const share = { channel: "facebook_feed", via: "share_sheet" };
+    const storedDestinationCaption = "Congrats Michelle!";
+    /** What the result screen's claim lock says for the same caption set. */
+    const resultScreenClaimMessage = (captions: string[], bannedPhrases?: string) =>
+      prohibitedClaimsMessage(
+        analyzeCaptionSetForDelivery(captions, bannedPhrases).prohibited,
+      );
+
+    it("fails closed on wording the dealership blocked after the post was saved, in the result screen's words", () => {
+      const harness = shareHarness();
+      const caption =
+        "Congratulations Michelle on your new Bronco! Best price in town at Bob Maxey Ford.";
+      const bannedPhrases = "best price in town\ncheapest";
+      const result = harness.run({
+        postOverrides: { caption },
+        dealerOverrides: { banned_phrases: bannedPhrases },
+        body: share,
+      });
+
+      expect(result.status).toBe(409);
+      expect(result.payload).toEqual({
+        error: "CLAIMS_BLOCKED",
+        code: "CLAIMS_BLOCKED",
+        message: resultScreenClaimMessage(
+          [caption, storedDestinationCaption],
+          bannedPhrases,
+        ),
+      });
+      expect(result.payload.message).toBe(
+        "Remove prohibited advertising claim: \u201cbest price in town\u201d. This dealership has blocked this wording, so it cannot be published.",
+      );
+      expect(harness.events).toHaveLength(0);
+      expect(harness.savedRecords).toHaveLength(0);
+    });
+
+    it("checks every stored destination caption, not just the primary caption", () => {
+      const harness = shareHarness();
+      const destinationCaption = "Congrats Michelle! Cheapest Bronco in Michigan.";
+      const result = harness.run({
+        postOverrides: {
+          platform_captions: JSON.stringify({ facebook_feed: destinationCaption }),
+        },
+        dealerOverrides: { banned_phrases: "cheapest" },
+        body: share,
+      });
+      expect(result.status).toBe(409);
+      expect(result.payload.code).toBe("CLAIMS_BLOCKED");
+      expect(harness.events).toHaveLength(0);
+    });
+
+    it("names every blocked phrase across the caption set as the result screen does", () => {
+      const harness = shareHarness();
+      const caption =
+        "Congratulations Michelle on your new Bronco! Best price in town at Bob Maxey Ford.";
+      const destinationCaption = "Congrats Michelle! Cheapest Bronco in Michigan.";
+      const bannedPhrases = "cheapest, best price in town";
+      const result = harness.run({
+        postOverrides: {
+          caption,
+          platform_captions: JSON.stringify({ facebook_feed: destinationCaption }),
+        },
+        dealerOverrides: { banned_phrases: bannedPhrases },
+        body: share,
+      });
+      expect(result.status).toBe(409);
+      expect(result.payload.message).toBe(
+        resultScreenClaimMessage([caption, destinationCaption], bannedPhrases),
+      );
+      expect(result.payload.message).toMatch(/^Remove prohibited advertising claims: /);
+      expect(harness.events).toHaveLength(0);
+    });
+
+    it("fails closed on a prohibited credit claim in a legacy stored caption", () => {
+      const harness = shareHarness();
+      const result = harness.run({
+        postOverrides: {
+          caption: "Congratulations Michelle! Guaranteed approval on your next Bronco.",
+        },
+        body: share,
+      });
+      expect(result.status).toBe(409);
+      expect(result.payload.code).toBe("CLAIMS_BLOCKED");
+      expect(result.payload.message).toBe(
+        "Remove prohibited advertising claims. Claims such as guaranteed approval or no credit check cannot be published.",
+      );
+      expect(harness.events).toHaveLength(0);
+    });
+
+    it("fails closed when the stored disclosures no longer match the current policy, and records them when they do", () => {
+      // A post with no customer: the canonical disclosure text itself is not
+      // what this test is about (see the identity review for customer posts).
+      const noCustomer = {
+        release_required: false,
+        has_release: false,
+        release_status: "not_required",
+        customer_name: "",
+        platform_captions: "",
+      };
+      const caption =
+        "Fresh arrivals at Bob Maxey Ford of Howell! Lease for $299/mo with approved credit.";
+      const stale = shareHarness();
+      const blocked = stale.run({
+        postOverrides: { ...noCustomer, caption, disclosures: "" },
+        body: share,
+      });
+      expect(blocked.status).toBe(409);
+      expect(blocked.payload.code).toBe("CLAIMS_BLOCKED");
+      expect(blocked.payload.message).toMatch(/exact canonical compliance disclosures/);
+      expect(stale.events).toHaveLength(0);
+
+      const canonical = shareHarness();
+      const recorded = canonical.run({
+        postOverrides: {
+          ...noCustomer,
+          caption,
+          disclosures: realPolicies.canonicalPostComplianceSet([caption])
+            .required_disclosures,
+        },
+        body: share,
+      });
+      expect(recorded.status).toBe(200);
+      expect(canonical.events).toHaveLength(1);
+    });
+
+    it("records a clean post under a configured blocked-phrase list", () => {
+      const harness = shareHarness();
+      const result = harness.run({
+        dealerOverrides: { banned_phrases: "best price in town\ncheapest" },
+        body: share,
+      });
+      expect(result.status).toBe(200);
+      expect(result.payload.deduplicated).toBe(false);
+      expect(harness.events).toHaveLength(1);
+      expect(harness.savedRecords).toEqual([harness.events[0]]);
+    });
+
+    it("runs before the identity review and after the approval, release and image locks", () => {
+      const blockedCaption = {
+        caption: "Congratulations Sarah Williams! Best price in town.",
+      };
+      const blockedDealer = { banned_phrases: "best price in town" };
+      const cases: Array<[AnyRecord, string]> = [
+        [{}, "CLAIMS_BLOCKED"],
+        [{ approval_status: "pending" }, "APPROVAL_REQUIRED"],
+        [{ has_release: false }, "RELEASE_NOT_SAVED"],
+        [{ model_policy_version: "1999-01-01" }, "IMAGE_REVIEW_REQUIRED"],
+      ];
+      for (const [overrides, code] of cases) {
+        const harness = shareHarness();
+        const result = harness.run({
+          postOverrides: { ...blockedCaption, ...overrides },
+          dealerOverrides: blockedDealer,
+          body: share,
+        });
+        expect(result.status).toBe(409);
+        expect(result.payload.code).toBe(code);
+        expect(harness.events).toHaveLength(0);
+      }
+      // Without the blocked phrase the same caption is the identity lock's.
+      const identity = shareHarness().run({
+        postOverrides: blockedCaption,
+        body: share,
+      });
+      expect(identity.payload.code).toBe("IDENTITY_REVIEW_REQUIRED");
+    });
   });
 
   it("deduplicates the same channel and method within 60 seconds", () => {

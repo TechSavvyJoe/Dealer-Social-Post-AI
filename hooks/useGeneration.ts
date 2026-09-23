@@ -221,6 +221,13 @@ export interface GenerationMeta {
    * carried, never auto-applied here.
    */
   playfulStyleId?: string;
+  /**
+   * The personal line exactly as typed on Details. It already rides in the
+   * creative brief; this copy only survives the remount a Cancel or a failed
+   * attempt sends Details through (GenerationParams.personalLine). In memory
+   * only, never persisted.
+   */
+  personalLine?: string;
 }
 
 /**
@@ -256,6 +263,12 @@ export type GenerationCancelResult =
   | { status: "idle" }
   | { status: "cancelled" }
   | { status: "saving"; requiresApproval: boolean; saved: Promise<boolean> };
+
+/**
+ * Why a run stopped, as reported on `ai.generate.cancelled`: the salesperson
+ * tapped Cancel, or a newer Create post superseded a run still going.
+ */
+type GenerationDetachReason = "cancel" | "superseded";
 
 /**
  * One Create post tap. It rides in the mutation variables so every late
@@ -438,6 +451,35 @@ export const useGeneration = () => {
     timeoutsRef.current = [];
   }, []);
 
+  /**
+   * Stop a run for good (amendments B5). Shared by a Cancel on the Creating
+   * screen and by a newer Create post that supersedes a run still going. Before
+   * logPost starts the run is aborted: the queued or running provider task is
+   * cancelled, a late result is discarded, nothing is created and the captured
+   * release is left as it is. After logPost has started, that save is left to
+   * finish in My work (as a draft, or waiting for approval) and only the result
+   * is discarded. Every late callback checks `run.cancelled`, so from here the
+   * run can never set the post, the step or an error, or raise a toast. The
+   * caller owns navigation and the error banner.
+   */
+  const detachRun = useCallback(
+    (run: GenerationRun, reason: GenerationDetachReason) => {
+      run.cancelled = true;
+      if (activeRunRef.current === run) activeRunRef.current = null;
+      inFlightRef.current = false;
+      if (!run.persistenceStarted) run.controller.abort(generationCancelledError());
+      cleanupTimers();
+      setGenerationStage("idle");
+      setPartsReady(NO_PARTS_READY);
+      logEvent("ai.generate.cancelled", {
+        stage: run.stage,
+        saving: run.persistenceStarted,
+        reason,
+      });
+    },
+    [cleanupTimers],
+  );
+
   const abortActiveVideoPolls = useCallback(() => {
     for (const ctrl of videoAbortControllersRef.current) {
       try {
@@ -570,8 +612,9 @@ export const useGeneration = () => {
       // B5: the synchronous tap guard covers a double tap or a repeated
       // Cmd/Ctrl+Enter only until the step changes. From here the run is
       // tracked by activeRunRef (stages, Cancel); a later Create post from
-      // another workspace path detaches it and starts its own run, exactly as
-      // a second Generate did before the guard existed.
+      // another workspace path supersedes it (detachRun stops it, as Cancel
+      // would) and starts its own run, as a second Generate did before the
+      // guard existed.
       inFlightRef.current = false;
       cleanupTimers();
       setStep(AppStep.GENERATING);
@@ -599,6 +642,14 @@ export const useGeneration = () => {
         websiteEnabled: variables.meta?.websiteEnabled,
         websiteVehicleDescription: variables.meta?.websiteVehicleDescription,
         decodedVehicle: variables.meta?.decodedVehicle,
+        // The rest of the Details draft, so a Cancel or a failed attempt that
+        // sends Details back through its remount loses nothing. In memory only:
+        // utils/persistence.ts drops both before anything reaches storage, and
+        // the customizer takes the release back only while it is unlinked (A1).
+        ...(captured ? { capturedRelease: captured } : {}),
+        ...(variables.meta?.personalLine
+          ? { personalLine: variables.meta.personalLine }
+          : {}),
       });
 
       progressIntervalRef.current = setInterval(() => {
@@ -1122,13 +1173,12 @@ export const useGeneration = () => {
       if (inFlightRef.current) return;
       // A run that already passed onMutate (the salesperson reopened a post
       // from My work and came back around to Generate while it was still
-      // going) is detached, not blocked: it settles on its own, its stage and
-      // part callbacks are ignored, and its finally never touches this run.
-      if (activeRunRef.current) {
-        activeRunRef.current = null;
-        setGenerationStage("idle");
-        setPartsReady(NO_PARTS_READY);
-      }
+      // going) is superseded, not blocked, and stopped exactly as Cancel stops
+      // it: it can never save a post or replace this newer workspace with its
+      // stale result, and a save it had already started finishes in My work.
+      // It does not navigate: this run's onMutate owns the step.
+      const supersededRun = activeRunRef.current;
+      if (supersededRun) detachRun(supersededRun, "superseded");
       inFlightRef.current = true;
       const run: GenerationRun = {
         controller: new AbortController(),
@@ -1199,34 +1249,24 @@ export const useGeneration = () => {
         }
       }
     },
-    [currentDealer, generateMutation, releaseRunFromPreviousWorkspace],
+    [currentDealer, generateMutation, releaseRunFromPreviousWorkspace, detachRun],
   );
 
   /**
-   * Cancel on the Creating screen (amendments B5). Before logPost starts the
-   * run is aborted: the queued or running provider task is cancelled, a late
-   * result is discarded, nothing is created and the captured release is left
-   * as it is (with its stored id, so a retry does not re-sign). After logPost
+   * Cancel on the Creating screen (amendments B5). The run is stopped by
+   * detachRun: before logPost it is aborted and nothing is created (the captured
+   * release keeps its stored id, so a retry does not re-sign); after logPost
    * has started, that save is left to finish in My work and only the result
    * is discarded. Either way the salesperson is back on Details with no error,
-   * and generationParams are kept so nothing needs retyping.
+   * and generationParams (the release and personal line included, in memory)
+   * are kept so nothing needs retyping.
    */
   const cancelGeneration = useCallback((): GenerationCancelResult => {
     const run = activeRunRef.current;
     if (!run || run.cancelled) return { status: "idle" };
-    run.cancelled = true;
-    activeRunRef.current = null;
-    inFlightRef.current = false;
-    if (!run.persistenceStarted) run.controller.abort(generationCancelledError());
-    cleanupTimers();
-    setGenerationStage("idle");
-    setPartsReady(NO_PARTS_READY);
+    detachRun(run, "cancel");
     setError(null);
     setStep(AppStep.CUSTOMIZE);
-    logEvent("ai.generate.cancelled", {
-      stage: run.stage,
-      saving: run.persistenceStarted,
-    });
     if (run.persistenceStarted) {
       return {
         status: "saving",
@@ -1235,7 +1275,7 @@ export const useGeneration = () => {
       };
     }
     return { status: "cancelled" };
-  }, [cleanupTimers, setError, setStep]);
+  }, [setError, setStep, detachRun]);
 
   const regenerateImageMutation = useMutation({
     mutationFn: async () => {

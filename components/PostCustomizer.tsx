@@ -47,6 +47,7 @@ import { DecodedVehicle } from "../services/vinDecoder";
 import { PhotoReleaseModal } from "./PhotoReleaseModal";
 import { useAppStore } from "../stores/appStore";
 import { CapturedRelease } from "../services/photoReleases";
+import { isReleaseAlreadyLinked } from "../hooks/useGeneration";
 import { ScenarioPicker } from "./ScenarioPicker";
 import {
   PostScenario,
@@ -101,6 +102,8 @@ interface PostCustomizerProps {
       decodedVehicle?: DecodedVehicle;
       /** Dealership Playful style requested for a second image (spec §4.2). */
       playfulStyleId?: string;
+      /** The personal line as typed, carried back (in memory) by a Cancel or failed attempt. */
+      personalLine?: string;
     },
     platformIds?: PlatformId[],
     outputProfile?: PrimaryImageProfile,
@@ -288,6 +291,14 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
 }) => {
   const currentDealer = useAppStore((s) => s.currentDealer);
   const currentPerson = useAppStore((s) => s.currentPerson);
+  // The in-memory half of the Details draft. When Create post starts,
+  // useGeneration puts the signed release and the personal line as typed on the
+  // store's generationParams; the seed the parent passes carries only the
+  // storable choices. A Cancel or a failed attempt remounts this screen, and the
+  // initializers below take both back from here, once. utils/persistence.ts
+  // stores neither, so a restored session never carries them.
+  const carriedRelease = useAppStore((s) => s.generationParams?.capturedRelease);
+  const carriedPersonalLine = useAppStore((s) => s.generationParams?.personalLine);
   // Each customizer section is a labelled group of controls, not a form field.
   // A bare <label> with no `for` announces nothing, so the section headings are
   // plain text nodes wired to a role="group" wrapper by id.
@@ -456,8 +467,16 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
   );
   // Captured signature stays local until Generate. useGeneration durably saves
   // it before the customer photo is sent to an AI provider, then links that
-  // same protected record to the created post.
-  const [capturedRelease, setCapturedRelease] = useState<CapturedRelease | null>(null);
+  // same protected record to the created post. A Cancel or a failed attempt
+  // hands it back (in memory only; a restored session never carries one) so
+  // the retry needs no new signature, but only while it has never been linked
+  // to a post: a signed release is single-use (amendments A1). Only alongside
+  // a seed: a new post (no seed) never inherits a signature.
+  const [capturedRelease, setCapturedRelease] = useState<CapturedRelease | null>(() => {
+    if (!initialGenerationParams) return null;
+    const carried = initialGenerationParams.capturedRelease ?? carriedRelease;
+    return carried && !isReleaseAlreadyLinked(carried) ? carried : null;
+  });
   // Creative-system-only controls. They render nothing while the dealership has
   // not opted in, so a legacy dealer sees exactly today's screen.
   const [addVideo, setAddVideo] = useState(() => {
@@ -465,7 +484,12 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     return restoredMode === "video" || restoredMode === "both";
   });
   const [playfulRequested, setPlayfulRequested] = useState(false);
-  const [personalLine, setPersonalLine] = useState("");
+  // Handed back verbatim, in memory only, on the same remount as the release.
+  const [personalLine, setPersonalLine] = useState(() => {
+    if (!initialGenerationParams) return "";
+    const carried = initialGenerationParams.personalLine ?? carriedPersonalLine;
+    return typeof carried === "string" ? carried : "";
+  });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -708,6 +732,7 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
       scenarioId,
       decodedVehicle,
       capturedRelease,
+      releaseAlreadyLinked: isReleaseAlreadyLinked(capturedRelease),
       customerName,
       personalLine,
       creativeEnabled,
@@ -727,6 +752,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
     if (!result.ok) {
       if (result.reason === "no_destination") return;
       if (result.reason === "release_required") {
+        // A1: a release already linked to another post backs nothing; drop it
+        // so the screen never claims a spent signature is captured.
+        if (result.detail === "release_already_used") setCapturedRelease(null);
         setReleaseValidationError(true);
         setReleaseModalOpen(true);
         return;
@@ -787,7 +815,9 @@ export const PostCustomizer: React.FC<PostCustomizerProps> = ({
         result.args.customerName,
         result.args.customText,
         result.args.creativeBrief,
-        result.args.meta,
+        // The typed line already rides in the brief. This copy only lets a
+        // Cancel or a failed attempt hand it back to Details (in memory).
+        trimmedPersonalLine ? { ...result.args.meta, personalLine } : result.args.meta,
         result.args.platformIds,
         result.args.outputProfile,
         result.args.mediaOutputMode,
