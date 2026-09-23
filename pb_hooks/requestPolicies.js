@@ -41,6 +41,10 @@ function initialApprovalStatus(dealer) {
   return recordBool(dealer, "requires_approval") ? "pending" : "n_a";
 }
 
+// The exact header that opens every canonical disclosure block. Mirrored in
+// utils/complianceDisclosures.ts.
+const CANONICAL_DISCLOSURE_HEADER = "— Disclosures —";
+
 // Canonical disclosure templates for approval-bound social copy. These are an
 // authorization contract, not a UI hint: a client-provided marker or edited
 // approximation never satisfies the required text.
@@ -177,7 +181,7 @@ function canonicalPostCompliance(caption, bannedPhrases) {
   return {
     categories: categories,
     required_disclosures: disclosureTexts.length
-      ? "— Disclosures —\n" + disclosureTexts.join(" ")
+      ? CANONICAL_DISCLOSURE_HEADER + "\n" + disclosureTexts.join(" ")
       : "",
     legal_prohibited: legalProhibited,
     dealer_blocked_phrases: blockedPhrases,
@@ -217,7 +221,7 @@ function canonicalPostComplianceSet(captions, bannedPhrases) {
   return {
     categories: orderedCategories,
     required_disclosures: disclosureTexts.length
-      ? "— Disclosures —\n" + disclosureTexts.join(" ")
+      ? CANONICAL_DISCLOSURE_HEADER + "\n" + disclosureTexts.join(" ")
       : "",
     legal_prohibited: legalProhibited,
     dealer_blocked_phrases: blockedPhrases,
@@ -230,7 +234,7 @@ function validatePostComplianceSet(captions, disclosures, bannedPhrases) {
   const result = canonicalPostComplianceSet(values, bannedPhrases);
 
   for (let i = 0; i < values.length; i++) {
-    if ((values[i] || "").toString().indexOf("— Disclosures —") !== -1) {
+    if ((values[i] || "").toString().indexOf(CANONICAL_DISCLOSURE_HEADER) !== -1) {
       return {
         ...result,
         ok: false,
@@ -258,6 +262,206 @@ function validatePostComplianceSet(captions, disclosures, bannedPhrases) {
   }
 
   return { ...result, ok: true, error: "" };
+}
+
+// Canonical disclosure material: the exact header plus every rule's exact
+// disclosure text. This is fixed legal copy the server writes, so it can never
+// carry a customer name — and the customer-name guard reads its capitalised
+// legal words ("Taxes", "Lessee", "Disclosures") as names. Mirrored exactly by
+// canonicalDisclosureMaterial() in utils/complianceDisclosures.ts.
+function canonicalDisclosureMaterial() {
+  const material = [CANONICAL_DISCLOSURE_HEADER];
+  for (let i = 0; i < POST_COMPLIANCE_RULES.length; i++) {
+    material.push(POST_COMPLIANCE_RULES[i].disclosure);
+  }
+  return material;
+}
+
+// What may bound canonical material on each side, besides the start or end of
+// the text. Explicit lists rather than \s, so the PocketBase JSVM and the
+// browser agree character for character. A rule's legal text ends in "." and
+// the server joins it with spaces, so any whitespace bounds it. The header does
+// not end a sentence and the server always writes it on its own line, so only a
+// line break bounds it: "Welcome to the — Disclosures — Ford Family Michelle!"
+// keeps its header and is reviewed as one line, the way a reader sees it.
+// Mirrored in utils/complianceDisclosures.ts.
+const CANONICAL_DISCLOSURE_BOUNDARY = " \t\n\r\f\v";
+const CANONICAL_DISCLOSURE_HEADER_BOUNDARY = "\n\r";
+
+// What each stripped piece of canonical material becomes: a line break. The
+// legal copy ends in "." and a reader sees it as a sentence of its own, so the
+// guard must see a hard boundary there too. Replacing it with nothing fused
+// the text on either side into one word ("Big day" + <APR text> + "Jessica…"
+// reached the guard as "Big dayJessica…") and erased the sentence break before
+// a name, so the guard missed names a reader sees. Mirrored in
+// utils/complianceDisclosures.ts.
+const CANONICAL_DISCLOSURE_REPLACEMENT = "\n";
+
+function isCanonicalDisclosureBoundary(source, index, boundary) {
+  if (index < 0 || index >= source.length) return true;
+  return boundary.indexOf(source.charAt(index)) !== -1;
+}
+
+// The first occurrence of `item` at or after `from` that is bounded on both
+// sides (see CANONICAL_DISCLOSURE_BOUNDARY). Material glued to other text is
+// not canonical there and stays in for review.
+function nextBoundedCanonicalMaterial(source, item, from) {
+  const boundary =
+    item === CANONICAL_DISCLOSURE_HEADER
+      ? CANONICAL_DISCLOSURE_HEADER_BOUNDARY
+      : CANONICAL_DISCLOSURE_BOUNDARY;
+  let at = source.indexOf(item, from);
+  while (at !== -1) {
+    if (
+      isCanonicalDisclosureBoundary(source, at - 1, boundary) &&
+      isCanonicalDisclosureBoundary(source, at + item.length, boundary)
+    ) {
+      return at;
+    }
+    at = source.indexOf(item, at + 1);
+  }
+  return -1;
+}
+
+// Split text around every exact, bounded occurrence of canonical disclosure
+// material, scanning left to right once. Even indexes are free
+// text, odd indexes are canonical material, and joining every part reproduces
+// the input exactly.
+function splitCanonicalDisclosures(text) {
+  const source = (text || "").toString();
+  const material = canonicalDisclosureMaterial();
+  const parts = [];
+  let cursor = 0;
+  for (;;) {
+    let foundAt = -1;
+    let foundLength = 0;
+    for (let i = 0; i < material.length; i++) {
+      const at = nextBoundedCanonicalMaterial(source, material[i], cursor);
+      if (at === -1) continue;
+      if (
+        foundAt === -1 ||
+        at < foundAt ||
+        (at === foundAt && material[i].length > foundLength)
+      ) {
+        foundAt = at;
+        foundLength = material[i].length;
+      }
+    }
+    if (foundAt === -1) break;
+    parts.push(
+      source.slice(cursor, foundAt),
+      source.slice(foundAt, foundAt + foundLength),
+    );
+    cursor = foundAt + foundLength;
+  }
+  parts.push(source.slice(cursor));
+  return parts;
+}
+
+// The one rule, identical to stripCanonicalDisclosures() in
+// utils/complianceDisclosures.ts: replace each exact, bounded piece of
+// canonical disclosure material with a line break and keep everything else.
+// Anything that is not exactly canonical — a name planted beside real
+// disclosures, an edited sentence, legal copy glued to other text — stays in
+// the text and is still reviewed.
+function stripCanonicalDisclosures(text) {
+  const parts = splitCanonicalDisclosures(text);
+  const freeText = [];
+  for (let i = 0; i < parts.length; i += 2) freeText.push(parts[i]);
+  return freeText.join(CANONICAL_DISCLOSURE_REPLACEMENT);
+}
+
+// websitePublications.reviewPostCustomerIdentity (passed in as `review`) over
+// the values with canonical disclosure material stripped
+// (stripCanonicalDisclosures: each piece becomes a line break): the guard
+// decides only on what remains. The projection keeps canonical material
+// verbatim, so the customer-name redaction can never rewrite legal copy either.
+// The same review as a four-argument function, for helpers that take the
+// guard as a parameter (websitePublications.publicWebsiteDraftForPost).
+function identityReviewExcludingDisclosures(review) {
+  return function (protectedName, values, allowedPhrases, rejectUnnamed) {
+    return reviewCustomerIdentityExcludingDisclosures(
+      review,
+      protectedName,
+      values,
+      allowedPhrases,
+      rejectUnnamed,
+    );
+  };
+}
+
+function reviewCustomerIdentityExcludingDisclosures(
+  review,
+  protectedName,
+  values,
+  allowedPhrases,
+  rejectUnnamed,
+) {
+  const sources = (Array.isArray(values) ? values : []).map(function (value) {
+    return (value || "").toString();
+  });
+  // A protected name can straddle a seam: customer "Anna Lease" and a caption
+  // "Congrats Anna " + the lease rule ("Lease offer with approved credit…").
+  // Stripping the rule would remove the surname before the redaction runs,
+  // so the full name would publish unredacted. When a seam's own redaction
+  // changes anything, that value keeps no exemption and is reviewed exactly
+  // as written (the behaviour before canonical material was exempted).
+  const seamSplitsProtectedName = function (valueParts) {
+    for (let k = 1; k < valueParts.length; k += 2) {
+      const piece = valueParts[k];
+      const before = (valueParts[k - 1] || "").slice(-200);
+      const after = (valueParts[k + 1] || "").slice(0, 200);
+      const firstWord = (piece.match(/^[^\s,-]*/) || [""])[0];
+      const lastWord = (piece.match(/[^\s,-]*$/) || [""])[0];
+      // Compare each seam's redaction with the redaction of its free-text side
+      // alone, so a full name already sitting in the free text (redacted either
+      // way) does not count — only a name the seam itself forms does.
+      const projected = review(
+        protectedName,
+        [before, after, before + firstWord, lastWord + after],
+        allowedPhrases,
+        false,
+      ).projectedValues;
+      if (projected[2] !== projected[0] + firstWord) return true;
+      if (projected[3] !== lastWord + projected[1]) return true;
+    }
+    return false;
+  };
+  const parts = sources.map(function (source) {
+    const valueParts = splitCanonicalDisclosures(source);
+    return valueParts.length > 1 && seamSplitsProtectedName(valueParts)
+      ? [source]
+      : valueParts;
+  });
+  const remainders = parts.map(function (valueParts) {
+    const freeText = [];
+    for (let i = 0; i < valueParts.length; i += 2) freeText.push(valueParts[i]);
+    return freeText.join(CANONICAL_DISCLOSURE_REPLACEMENT);
+  });
+  const result = review(protectedName, remainders, allowedPhrases, rejectUnnamed);
+  const projectedValues = sources.map(function (source, index) {
+    const projected = result.projectedValues[index] || "";
+    // No canonical material: the guard saw the whole value.
+    if (parts[index].length === 1) return projected;
+    // Nothing redacted: keep the value exactly as written.
+    if (projected === remainders[index]) return source;
+    // Redact each free-text part on its own and put the legal copy back.
+    const freeText = parts[index].filter(function (_part, partIndex) {
+      return partIndex % 2 === 0;
+    });
+    const redacted = review(
+      protectedName,
+      freeText,
+      allowedPhrases,
+      false,
+    ).projectedValues;
+    return parts[index]
+      .map(function (part, partIndex) {
+        return partIndex % 2 === 0 ? redacted[partIndex / 2] || "" : part;
+      })
+      .join("");
+  });
+  return Object.assign({}, result, { projectedValues: projectedValues });
 }
 
 // These filters are always injected by the server. Client payloads are not
@@ -1707,6 +1911,10 @@ module.exports = {
   canonicalPostComplianceSet,
   validatePostCompliance,
   validatePostComplianceSet,
+  canonicalDisclosureMaterial,
+  stripCanonicalDisclosures,
+  reviewCustomerIdentityExcludingDisclosures,
+  identityReviewExcludingDisclosures,
   isAllowedProxyPath,
   isAllowedProxyRequest,
   providerOperationStartProvider,

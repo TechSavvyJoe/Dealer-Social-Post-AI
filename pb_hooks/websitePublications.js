@@ -7035,7 +7035,12 @@ function groundedVehicleIdentityPhrase(value) {
   return "";
 }
 
-function publicWebsiteDraftForPost(post, dealerName, oemAffiliation) {
+// `reviewIdentity` defaults to the guard itself. The interactive routes pass
+// requestPolicies.identityReviewExcludingDisclosures(reviewPostCustomerIdentity)
+// so website copy gets the same canonical-disclosure exemption as the caption
+// set: a website draft the save route accepted is never refused at share,
+// send or History for carrying the fixed legal text.
+function publicWebsiteDraftForPost(post, dealerName, oemAffiliation, reviewIdentity) {
   const parsed = parseWebsiteDraft(recordString(post, "website_draft"));
   if (!parsed.ok || !parsed.value || !parsed.value.enabled) {
     return { websiteDraft: null, identityReviewRequired: false };
@@ -7047,7 +7052,7 @@ function publicWebsiteDraftForPost(post, dealerName, oemAffiliation) {
   const vehicleDescription = groundedVehicleIdentityPhrase(
     draft.vehicleDescription || "",
   );
-  const review = reviewPostCustomerIdentity(
+  const review = (reviewIdentity || reviewPostCustomerIdentity)(
     protectedName,
     [draft.title || "", draft.body || "", draft.altText || ""],
     [

@@ -120,6 +120,117 @@ const RULES: Rule[] = [
   },
 ];
 
+/** The exact header that opens every canonical disclosure block. */
+export const CANONICAL_DISCLOSURE_HEADER = "— Disclosures —";
+
+/**
+ * Canonical disclosure material: the exact header plus every rule's exact
+ * disclosure text, in canonical order. Fixed legal copy that can never carry a
+ * customer name. Must stay identical to canonicalDisclosureMaterial() in
+ * pb_hooks/requestPolicies.js (asserted by __tests__/complianceDisclosures.test.ts).
+ */
+export const canonicalDisclosureMaterial = (): string[] => [
+  CANONICAL_DISCLOSURE_HEADER,
+  ...RULES.filter((rule) => !rule.prohibited && rule.disclosure).map(
+    (rule) => rule.disclosure,
+  ),
+];
+
+/**
+ * What may bound canonical material on each side, besides the start or end of
+ * the text. Explicit lists rather than \s, so the browser and the PocketBase
+ * JSVM agree character for character. A rule's legal text ends in "." and is
+ * joined with spaces, so any whitespace bounds it; the header does not end a
+ * sentence and is always written on its own line, so only a line break bounds
+ * it. Must stay identical to CANONICAL_DISCLOSURE_BOUNDARY and
+ * CANONICAL_DISCLOSURE_HEADER_BOUNDARY in pb_hooks/requestPolicies.js.
+ */
+const CANONICAL_DISCLOSURE_BOUNDARY = " \t\n\r\f\v";
+const CANONICAL_DISCLOSURE_HEADER_BOUNDARY = "\n\r";
+
+/**
+ * What each stripped piece of canonical material becomes: a line break, never
+ * nothing. The legal copy ends in "." and a reader sees it as a sentence of its
+ * own; removing it outright fused the text on either side into one word and
+ * erased the sentence break before a name, so the guard missed names a reader
+ * sees. Must stay identical to CANONICAL_DISCLOSURE_REPLACEMENT in
+ * pb_hooks/requestPolicies.js.
+ */
+const CANONICAL_DISCLOSURE_REPLACEMENT = "\n";
+
+const isCanonicalDisclosureBoundary = (
+  source: string,
+  index: number,
+  boundary: string,
+): boolean =>
+  index < 0 || index >= source.length || boundary.indexOf(source.charAt(index)) !== -1;
+
+/**
+ * The first occurrence of `item` at or after `from` that is bounded on both
+ * sides (see CANONICAL_DISCLOSURE_BOUNDARY). Material glued to other text is
+ * not canonical there and stays in for review.
+ */
+const nextBoundedCanonicalMaterial = (
+  source: string,
+  item: string,
+  from: number,
+): number => {
+  const boundary =
+    item === CANONICAL_DISCLOSURE_HEADER
+      ? CANONICAL_DISCLOSURE_HEADER_BOUNDARY
+      : CANONICAL_DISCLOSURE_BOUNDARY;
+  let at = source.indexOf(item, from);
+  while (at !== -1) {
+    if (
+      isCanonicalDisclosureBoundary(source, at - 1, boundary) &&
+      isCanonicalDisclosureBoundary(source, at + item.length, boundary)
+    ) {
+      return at;
+    }
+    at = source.indexOf(item, at + 1);
+  }
+  return -1;
+};
+
+/**
+ * Replace canonical disclosure material before text reaches the customer-name
+ * guard, which otherwise reads capitalised legal words ("Taxes", "Lessee",
+ * "Disclosures") as names. The same rule as stripCanonicalDisclosures() in
+ * pb_hooks/requestPolicies.js: one left-to-right pass; only exact material
+ * bounded on both sides (whitespace for rule text, a line break for the
+ * header, or the ends of the text) is taken out, and each piece becomes a line
+ * break. Anything that is not exactly canonical — a name
+ * planted beside real disclosures, an edited sentence, legal copy glued to
+ * other text — stays in the text and is still reviewed.
+ */
+export const stripCanonicalDisclosures = (text: string | null | undefined): string => {
+  const source = text ?? "";
+  const material = canonicalDisclosureMaterial();
+  const freeText: string[] = [];
+  let cursor = 0;
+  for (;;) {
+    let foundAt = -1;
+    let foundLength = 0;
+    for (const item of material) {
+      const at = nextBoundedCanonicalMaterial(source, item, cursor);
+      if (at === -1) continue;
+      if (
+        foundAt === -1 ||
+        at < foundAt ||
+        (at === foundAt && item.length > foundLength)
+      ) {
+        foundAt = at;
+        foundLength = item.length;
+      }
+    }
+    if (foundAt === -1) break;
+    freeText.push(source.slice(cursor, foundAt));
+    cursor = foundAt + foundLength;
+  }
+  freeText.push(source.slice(cursor));
+  return freeText.join(CANONICAL_DISCLOSURE_REPLACEMENT);
+};
+
 export type DealerBannedPhrases = string | string[] | null | undefined;
 
 const parseDealerBannedPhrases = (value: DealerBannedPhrases): string[] => {

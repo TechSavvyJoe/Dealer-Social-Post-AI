@@ -2586,7 +2586,10 @@ routerAdd("POST", "/api/app/posts", (c) => {
         websiteDraft.altText || "",
       );
     }
-    const identityReview = websitePublications.reviewPostCustomerIdentity(
+    // Canonical disclosure material is stripped before the customer-name guard
+    // reads anything (policies.reviewCustomerIdentityExcludingDisclosures).
+    const identityReview = policies.reviewCustomerIdentityExcludingDisclosures(
+      websitePublications.reviewPostCustomerIdentity,
       protectedCustomerName,
       identityValues,
       [
@@ -3054,7 +3057,8 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
           )
         : "";
     const platformCaptionIds = Object.keys(parsedPlatformCaptions.value);
-    const identityReview = websitePublications.reviewPostCustomerIdentity(
+    const identityReview = policies.reviewCustomerIdentityExcludingDisclosures(
+      websitePublications.reviewPostCustomerIdentity,
       record.getString("customer_name"),
       [caption, disclosures].concat(
         platformCaptionIds.map(function (platformId) {
@@ -3526,7 +3530,8 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
         ? storedWebsiteDraft.value
         : null;
     const protectedCustomerName = record.getString("customer_name");
-    const copyReview = websitePublications.reviewPostCustomerIdentity(
+    const copyReview = policies.reviewCustomerIdentityExcludingDisclosures(
+      websitePublications.reviewPostCustomerIdentity,
       protectedCustomerName,
       [record.getString("caption"), record.getString("disclosures")].concat(
         Object.keys(platformCaptions).map((id) => platformCaptions[id]),
@@ -3551,6 +3556,9 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
       record,
       dealer.getString("name"),
       dealer.getString("oem_affiliation"),
+      policies.identityReviewExcludingDisclosures(
+        websitePublications.reviewPostCustomerIdentity,
+      ),
     );
     if (copyReview.reviewRequired || websiteReview.identityReviewRequired) {
       return c.json(409, {
@@ -3639,6 +3647,9 @@ routerAdd("GET", "/api/app/posts/:id/website-publication", (c) => {
       post,
       context.dealer.getString("name"),
       context.dealer.getString("oem_affiliation"),
+      policies.identityReviewExcludingDisclosures(
+        websitePublications.reviewPostCustomerIdentity,
+      ),
     );
     if (publicDraft.websiteDraft) {
       summary.websiteDraft = publicDraft.websiteDraft;
@@ -3740,6 +3751,9 @@ routerAdd("POST", "/api/app/posts/:id/website-publication", (c) => {
       claim.post,
       context.dealer.getString("name"),
       context.dealer.getString("oem_affiliation"),
+      policies.identityReviewExcludingDisclosures(
+        websitePublications.reviewPostCustomerIdentity,
+      ),
     );
     if (publicDraft.websiteDraft) {
       summary.websiteDraft = publicDraft.websiteDraft;
@@ -3836,6 +3850,9 @@ routerAdd("POST", "/api/app/posts/:id/website-publication/retry", (c) => {
       post,
       context.dealer.getString("name"),
       context.dealer.getString("oem_affiliation"),
+      policies.identityReviewExcludingDisclosures(
+        websitePublications.reviewPostCustomerIdentity,
+      ),
     );
     if (publicDraft.websiteDraft) {
       summary.websiteDraft = publicDraft.websiteDraft;
@@ -4200,7 +4217,8 @@ routerAdd("GET", "/api/app/posts", (c) => {
         ),
       ];
       const reviewValue = function (value) {
-        return websitePublications.reviewPostCustomerIdentity(
+        return policies.reviewCustomerIdentityExcludingDisclosures(
+          websitePublications.reviewPostCustomerIdentity,
           protectedCustomerName,
           [(value || "").toString()],
           allowedIdentityPhrases,
@@ -4495,7 +4513,8 @@ routerAdd("PATCH", "/api/app/posts/:id", (c) => {
           websiteDraft.altText || "",
         );
       }
-      const identityReview = websitePublications.reviewPostCustomerIdentity(
+      const identityReview = policies.reviewCustomerIdentityExcludingDisclosures(
+        websitePublications.reviewPostCustomerIdentity,
         record.getString("customer_name"),
         identityValues,
         [

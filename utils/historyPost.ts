@@ -13,6 +13,7 @@ import { resolveHistoryPlatformIds } from "../services/platformCopy";
 import { GeneratedPost, UserRole } from "../types";
 import { toPublicCustomerLabel } from "./customerIdentity";
 import { captionUsesOnlyExpectedCustomer } from "./captionQuality";
+import { stripCanonicalDisclosures } from "./complianceDisclosures";
 
 /**
  * A saved post's caption/copy is safe to reopen or surface in search only
@@ -50,12 +51,18 @@ export const savedPostIdentityIsSafe = (
     post.salesperson_name,
     toPublicCustomerLabel(post.salesperson_name),
   ];
+  // Canonical disclosure material is stripped first, as the server's History
+  // projection does: it is fixed legal copy, never a name.
   return copy.every((caption) =>
-    captionUsesOnlyExpectedCustomer(caption, publicCustomer, {
-      allowedPhrases,
-      maskedPhrases,
-      rejectAnyCustomerIdentity: Boolean(post.release_required && !publicCustomer),
-    }),
+    captionUsesOnlyExpectedCustomer(
+      stripCanonicalDisclosures(caption),
+      publicCustomer,
+      {
+        allowedPhrases,
+        maskedPhrases,
+        rejectAnyCustomerIdentity: Boolean(post.release_required && !publicCustomer),
+      },
+    ),
   );
 };
 

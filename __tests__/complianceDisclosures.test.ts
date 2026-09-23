@@ -4,12 +4,15 @@ import { describe, expect, it } from "vitest";
 import { PLATFORM_LIMITS, evaluate } from "../utils/platformLimits";
 import { fitPublishCaptionToBudget } from "../services/publishTargets";
 import {
+  CANONICAL_DISCLOSURE_HEADER,
   DEFAULT_EMPLOYEE_DISCLOSURE_TEMPLATE,
   analyzeCaptionForDelivery,
   analyzeCaptionSetForDelivery,
   buildEmployeeDisclosure,
+  canonicalDisclosureMaterial,
   prepareCaptionForDelivery,
   prependEmployeeDisclosure,
+  stripCanonicalDisclosures,
 } from "../utils/complianceDisclosures";
 
 describe("delivery compliance", () => {
@@ -389,5 +392,196 @@ describe("a caption and requiredPrefix never publish the disclosure twice", () =
     const mutated = fn.replace("text: scanned.caption", "text: prepared.caption");
     expect(mutated).not.toContain("text: scanned.caption");
     expect(mutated).toContain("text: prepared.caption");
+  });
+});
+
+describe("canonical disclosure material is one table on both sides", () => {
+  type ServerPolicies = {
+    canonicalDisclosureMaterial(): string[];
+    stripCanonicalDisclosures(text: string): string;
+    canonicalPostComplianceSet(
+      captions: string[],
+      bannedPhrases?: string,
+    ): { categories: string[]; required_disclosures: string };
+  };
+  const loadServerPolicies = (): ServerPolicies => {
+    const source = readFileSync(
+      resolve(process.cwd(), "pb_hooks/requestPolicies.js"),
+      "utf8",
+    );
+    const module = { exports: {} as ServerPolicies };
+    new Function("module", "exports", source)(module, module.exports);
+    return module.exports;
+  };
+  const server = loadServerPolicies();
+
+  // One trigger per rule, in canonical order.
+  const triggers = [
+    ["financing_apr", "Finance it at 1.9% APR."],
+    ["zero_down", "Drive home with $0 down."],
+    ["lease", "Lease yours for $299/mo."],
+    ["rebate_pricing", "Take $3,000 off MSRP."],
+    ["trade_value", "Ask about your trade-in value."],
+  ] as const;
+
+  it("has the same header and the same disclosure strings, in the same order", () => {
+    const material = canonicalDisclosureMaterial();
+    expect(server.canonicalDisclosureMaterial()).toEqual(material);
+    expect(material).toHaveLength(1 + triggers.length);
+    expect(material[0]).toBe("— Disclosures —");
+    expect(CANONICAL_DISCLOSURE_HEADER).toBe(material[0]);
+    // Every entry is exactly what each side writes for its rule.
+    triggers.forEach(([category, caption], index) => {
+      const serverBlock = server.canonicalPostComplianceSet([caption]);
+      expect(serverBlock.categories).toEqual([category]);
+      expect(serverBlock.required_disclosures).toBe(
+        `${material[0]}\n${material[index + 1]}`,
+      );
+      expect(prepareCaptionForDelivery(caption).disclosures).toBe(
+        serverBlock.required_disclosures,
+      );
+    });
+  });
+
+  it("hands out a copy, so a caller cannot edit the table", () => {
+    const first = canonicalDisclosureMaterial();
+    first.push("Congrats Jessica!");
+    first[1] = "edited";
+    expect(canonicalDisclosureMaterial()).toEqual(server.canonicalDisclosureMaterial());
+    const serverFirst = server.canonicalDisclosureMaterial();
+    serverFirst.push("Congrats Jessica!");
+    expect(server.canonicalDisclosureMaterial()).toEqual(canonicalDisclosureMaterial());
+  });
+
+  const all = triggers.map(([, caption]) => caption);
+  const everyBlock = analyzeCaptionSetForDelivery(all).disclosures;
+  const material = canonicalDisclosureMaterial();
+  const [header, apr, zeroDown, lease, rebate, trade] = material;
+  // Every kind of character that may or may not bound material, so a change to
+  // either side's boundary lists shows up as a remainder mismatch.
+  const separators = [" ", "\n", "\r\n", "\t", "\f", "\v", " ", "", "-", ".", "!"];
+  const corpus: string[] = [
+    "",
+    everyBlock,
+    `Congrats Michelle! Lease yours for $299/mo.\n\n${everyBlock}`,
+    `\n\n${everyBlock}`,
+    everyBlock.replace(lease, `${lease} Congrats Jessica!`),
+    everyBlock.replace(apr, `Thanks to Jessica Smith. ${apr}`),
+    // Edited or partial legal copy is not canonical and is kept.
+    everyBlock.replace("qualified buyers", "qualified buyers like Jessica"),
+    "Taxes, title, license, registration, and dealer documentary fees additional.",
+    zeroDown.toUpperCase(),
+    apr.replace(/ /g, "  "),
+    // Adjacent, repeated and header-only material.
+    `${header}${header}${trade}${trade}`,
+    `${header}\n${header}\n${trade} ${trade}`,
+    `Jessica${rebate}Smith`,
+    `${header}\n`,
+    // Smart-punctuation lookalike header is not the header.
+    "- Disclosures -\nCongrats Jessica!",
+    // Material used as a separator: glued, spaced, one side glued.
+    `Big day${apr}Jessica is loving her new Ford!`,
+    `Nothing beats a delivery like this ${apr} Jessica is officially a Bronco owner!`,
+    `What a day${trade}Johnson family, enjoy the new Bronco!`,
+    `What a day ${trade} Johnson family, enjoy the new Bronco!`,
+    `Big day${apr} Jessica is loving her new Ford!`,
+    `Big day ${apr}Jessica is loving her new Ford!`,
+    // The header mid-line, glued, and on its own line.
+    `Congratulations${header}Jessica Smith`,
+    `Congratulations ${header} Jessica Smith`,
+    `Congratulations\n${header}\nJessica Smith`,
+    // A glued occurrence first, then a bounded one of the same text.
+    `x${lease}y ${lease} z`,
+    `${lease}${lease} ${lease}`,
+    ...separators.flatMap((left) =>
+      separators.map((right) => `Congrats${left}${apr}${right}Jessica!`),
+    ),
+    ...separators.flatMap((left) =>
+      separators.map((right) => `Congrats${left}${header}${right}Jessica!`),
+    ),
+  ];
+
+  it.each(corpus.map((text, index) => [index, text]))(
+    "strips exactly the same text on the server and the client (row %i)",
+    (_index, text) => {
+      expect(server.stripCanonicalDisclosures(text)).toBe(
+        stripCanonicalDisclosures(text),
+      );
+    },
+  );
+
+  it("removes only exact canonical material and keeps every other character", () => {
+    expect(stripCanonicalDisclosures(everyBlock).trim()).toBe("");
+    expect(
+      stripCanonicalDisclosures(
+        everyBlock.replace(lease, `${lease} Congrats Jessica!`),
+      ).trim(),
+    ).toBe("Congrats Jessica!");
+    const edited = everyBlock.replace(
+      "qualified buyers",
+      "qualified buyers like Jessica",
+    );
+    expect(stripCanonicalDisclosures(edited)).toContain(
+      "qualified buyers like Jessica",
+    );
+    const fragment =
+      "Taxes, title, license, registration, and dealer documentary fees additional.";
+    expect(stripCanonicalDisclosures(fragment)).toBe(fragment);
+    expect(stripCanonicalDisclosures(zeroDown.toUpperCase())).toBe(
+      zeroDown.toUpperCase(),
+    );
+    expect(stripCanonicalDisclosures(undefined)).toBe("");
+    expect(stripCanonicalDisclosures(null)).toBe("");
+  });
+
+  it("puts a line break where the legal copy was, so the text on either side never fuses", () => {
+    // Replacing material with nothing turned "this <APR text> Jessica" into
+    // "this  Jessica" (no sentence break) and "day<APR text>Jessica" into
+    // "dayJessica" (one word), and the guard missed the name a reader sees.
+    expect(
+      stripCanonicalDisclosures(
+        `Nothing beats a delivery like this ${apr} Jessica is officially a Bronco owner!`,
+      ),
+    ).toBe(
+      "Nothing beats a delivery like this \n Jessica is officially a Bronco owner!",
+    );
+    expect(stripCanonicalDisclosures(everyBlock)).toBe("\n\n\n \n \n \n \n");
+    expect(stripCanonicalDisclosures(`${lease}`)).toBe("\n");
+    expect(stripCanonicalDisclosures(`A\n${header}\nB`)).toBe("A\n\n\nB");
+  });
+
+  it("keeps material glued to other text, so it is reviewed as written", () => {
+    for (const text of [
+      `Big day${apr}Jessica is loving her new Ford!`,
+      `What a day${trade}Johnson family, enjoy the new Bronco!`,
+      `Big day${apr} Jessica is loving her new Ford!`,
+      `Big day ${apr}Jessica is loving her new Ford!`,
+      `Jessica${rebate}Smith`,
+      `${header}${header}${trade}${trade}`,
+      `Congrats ${apr} Jessica!`,
+    ]) {
+      expect(stripCanonicalDisclosures(text)).toBe(text);
+      expect(server.stripCanonicalDisclosures(text)).toBe(text);
+    }
+    // Only the bounded occurrence of repeated text is taken out.
+    expect(stripCanonicalDisclosures(`x${lease}y ${lease} z`)).toBe(`x${lease}y \n z`);
+  });
+
+  it("takes the header out only on a line of its own", () => {
+    // The header does not end a sentence. Mid-line, a reader reads straight
+    // through it, so the guard must too.
+    for (const text of [
+      `Congratulations ${header} Jessica Smith`,
+      `Congratulations${header}Jessica Smith`,
+      `Congratulations\t${header}\tJessica Smith`,
+      `Congratulations\n${header} Jessica Smith`,
+    ]) {
+      expect(stripCanonicalDisclosures(text)).toBe(text);
+      expect(server.stripCanonicalDisclosures(text)).toBe(text);
+    }
+    expect(stripCanonicalDisclosures(`Congratulations\r\n${header}\r\nJessica`)).toBe(
+      "Congratulations\r\n\n\r\nJessica",
+    );
+    expect(stripCanonicalDisclosures(`${header}\n${apr}`)).toBe("\n\n\n");
   });
 });
