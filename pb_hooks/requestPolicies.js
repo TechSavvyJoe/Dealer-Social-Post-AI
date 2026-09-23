@@ -376,6 +376,20 @@ function stripCanonicalDisclosures(text) {
 // (stripCanonicalDisclosures: each piece becomes a line break): the guard
 // decides only on what remains. The projection keeps canonical material
 // verbatim, so the customer-name redaction can never rewrite legal copy either.
+// The same review as a four-argument function, for helpers that take the
+// guard as a parameter (websitePublications.publicWebsiteDraftForPost).
+function identityReviewExcludingDisclosures(review) {
+  return function (protectedName, values, allowedPhrases, rejectUnnamed) {
+    return reviewCustomerIdentityExcludingDisclosures(
+      review,
+      protectedName,
+      values,
+      allowedPhrases,
+      rejectUnnamed,
+    );
+  };
+}
+
 function reviewCustomerIdentityExcludingDisclosures(
   review,
   protectedName,
@@ -1900,6 +1914,7 @@ module.exports = {
   canonicalDisclosureMaterial,
   stripCanonicalDisclosures,
   reviewCustomerIdentityExcludingDisclosures,
+  identityReviewExcludingDisclosures,
   isAllowedProxyPath,
   isAllowedProxyRequest,
   providerOperationStartProvider,

@@ -968,6 +968,46 @@ describe("POST /api/app/posts/:id/shared", () => {
     },
   );
 
+  it("records a share when a website draft carries the canonical block, and still holds a name planted in it", () => {
+    // Codex on #38: the share route reviewed the caption set with the
+    // exemption but the website draft through publicWebsiteDraftForPost with
+    // the raw guard, so a draft the save route accepted still returned 409.
+    // A canonical block only fits a site_update body (900 chars; a
+    // customer_story body is capped at 280), so that is the real shape.
+    const caption = "Congrats Michelle! Lease yours for $299/mo.";
+    const block = serverDisclosures([caption]);
+    const websiteDraft = (body: string) =>
+      JSON.stringify({
+        schemaVersion: 1,
+        enabled: true,
+        kind: "site_update",
+        category: "promotions",
+        title: "Lease specials this month",
+        body,
+        altText: "A new Escape in the showroom.",
+      });
+    const base = {
+      caption,
+      platform_captions: JSON.stringify({ facebook_feed: caption }),
+      disclosures: block,
+    };
+    const lead = "Lease a new Escape this month.";
+
+    const clean = runShare({
+      ...base,
+      website_draft: websiteDraft(`${lead}\n\n${block}`),
+    });
+    expect(clean.result.status, JSON.stringify(clean.result.payload)).toBe(200);
+    expect(clean.events).toHaveLength(1);
+
+    const planted = runShare({
+      ...base,
+      website_draft: websiteDraft(`${lead}\n\n${block} Congrats Jessica!`),
+    });
+    expect(planted.result.status).toBe(409);
+    expect(planted.events).toHaveLength(0);
+  });
+
   it.each(SURNAME_PROBES)(
     "holds the protected surname beside %s legal copy",
     (_shape, caption) => {

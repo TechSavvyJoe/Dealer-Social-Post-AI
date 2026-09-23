@@ -3556,6 +3556,9 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
       record,
       dealer.getString("name"),
       dealer.getString("oem_affiliation"),
+      policies.identityReviewExcludingDisclosures(
+        websitePublications.reviewPostCustomerIdentity,
+      ),
     );
     if (copyReview.reviewRequired || websiteReview.identityReviewRequired) {
       return c.json(409, {
@@ -3644,6 +3647,9 @@ routerAdd("GET", "/api/app/posts/:id/website-publication", (c) => {
       post,
       context.dealer.getString("name"),
       context.dealer.getString("oem_affiliation"),
+      policies.identityReviewExcludingDisclosures(
+        websitePublications.reviewPostCustomerIdentity,
+      ),
     );
     if (publicDraft.websiteDraft) {
       summary.websiteDraft = publicDraft.websiteDraft;
@@ -3745,6 +3751,9 @@ routerAdd("POST", "/api/app/posts/:id/website-publication", (c) => {
       claim.post,
       context.dealer.getString("name"),
       context.dealer.getString("oem_affiliation"),
+      policies.identityReviewExcludingDisclosures(
+        websitePublications.reviewPostCustomerIdentity,
+      ),
     );
     if (publicDraft.websiteDraft) {
       summary.websiteDraft = publicDraft.websiteDraft;
@@ -3841,6 +3850,9 @@ routerAdd("POST", "/api/app/posts/:id/website-publication/retry", (c) => {
       post,
       context.dealer.getString("name"),
       context.dealer.getString("oem_affiliation"),
+      policies.identityReviewExcludingDisclosures(
+        websitePublications.reviewPostCustomerIdentity,
+      ),
     );
     if (publicDraft.websiteDraft) {
       summary.websiteDraft = publicDraft.websiteDraft;
