@@ -1,13 +1,12 @@
-import React, { useState, useRef, useEffect, useCallback, memo } from "react";
+import React, { useState, useRef, memo } from "react";
 import { Camera, Upload } from "lucide-react";
-import { fileToNormalizedDataUrl } from "../utils/imageUtils";
 import { WebcamCapture } from "./WebcamCapture";
 import { triggerHapticFeedback } from "../utils/haptics";
-import { toUiMessage } from "../utils/errorMessages";
 import { Button } from "./ui/Button";
 import { ErrorBanner } from "./ui/ErrorBanner";
 import { useAppStore } from "../stores/appStore";
 import { RecentCaptureShelf } from "./RecentCaptureShelf";
+import { usePhotoIntake } from "../hooks/usePhotoIntake";
 import type { ImageSelection } from "../types";
 
 interface ImageInputProps {
@@ -22,69 +21,22 @@ const isMobileDevice = () => {
 
 export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) => {
   const dealerId = useAppStore((state) => state.currentDealer?.id || "");
-  const [error, setError] = useState<string | null>(null);
+  const { error, setError, isProcessing, isDraggingOver, processFile } = usePhotoIntake(
+    {
+      onImageSelected,
+    },
+  );
   const [showWebcam, setShowWebcam] = useState(false);
-  const [isDraggingOver, setIsDraggingOver] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      processFile(file);
+      void processFile(file);
     }
     event.target.value = "";
   };
-
-  const processFile = useCallback(
-    async (file: File) => {
-      const hasImageExtension = /\.(?:avif|heic|heif|jpe?g|png|webp)$/i.test(file.name);
-      if (!file.type.startsWith("image/") && !hasImageExtension) {
-        setError("Invalid file type. Please use an image file.");
-        return;
-      }
-
-      // Keep uploads within a mobile-safe envelope before decoding.
-      const maxSizeInBytes = 12 * 1024 * 1024;
-      if (file.size > maxSizeInBytes) {
-        setError("That photo is too large. Choose an image smaller than 12 MB.");
-        return;
-      }
-
-      try {
-        setError(null);
-        setIsProcessing(true);
-
-        // Process and normalize orientation - this handles EXIF rotation
-        const dataUrl = await fileToNormalizedDataUrl(file);
-
-        // The global crop/review dialog is the single review surface for every
-        // source. Calling it directly avoids two sequential confirmation steps.
-        onImageSelected({
-          workingImage: dataUrl,
-          originalSource: file,
-          originalFilename: file.name,
-        });
-      } catch (err) {
-        console.error("Error reading file:", err);
-        const message = err instanceof Error ? err.message : "";
-        // HEIC/HEIF gets its own curated copy rather than the raw decoder
-        // message, which named the unsupported MIME type, not a next step.
-        setError(
-          /HEI[CF]/i.test(message)
-            ? "This photo is in Apple's HEIC/HEIF format, which this browser cannot read. Take the photo again with 'Most Compatible' format enabled, or use a JPEG/PNG."
-            : toUiMessage(
-                err,
-                "Could not read the selected image file. Please try again.",
-              ),
-        );
-      } finally {
-        setIsProcessing(false);
-      }
-    },
-    [onImageSelected],
-  );
 
   const handleOpenCamera = () => {
     triggerHapticFeedback();
@@ -102,55 +54,6 @@ export const ImageInput: React.FC<ImageInputProps> = memo(({ onImageSelected }) 
     triggerHapticFeedback();
     fileInputRef.current?.click();
   };
-
-  useEffect(() => {
-    const handleWindowDragOver = (e: DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setIsDraggingOver(true);
-    };
-
-    const handleWindowDragEnter = (e: DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (e.dataTransfer?.items && e.dataTransfer.items.length > 0) {
-        setIsDraggingOver(true);
-      }
-    };
-
-    const handleWindowDragLeave = (e: DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      // Only disable if we are leaving the window (clientX/Y are 0 or outside bounds)
-      // or if relatedTarget is null (meaning we left the document)
-      if (e.clientX === 0 || e.clientY === 0) {
-        setIsDraggingOver(false);
-      }
-    };
-
-    const handleWindowDrop = (e: DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setIsDraggingOver(false);
-
-      const file = e.dataTransfer?.files?.[0];
-      if (file) {
-        processFile(file);
-      }
-    };
-
-    window.addEventListener("dragover", handleWindowDragOver);
-    window.addEventListener("dragenter", handleWindowDragEnter);
-    window.addEventListener("dragleave", handleWindowDragLeave);
-    window.addEventListener("drop", handleWindowDrop);
-
-    return () => {
-      window.removeEventListener("dragover", handleWindowDragOver);
-      window.removeEventListener("dragenter", handleWindowDragEnter);
-      window.removeEventListener("dragleave", handleWindowDragLeave);
-      window.removeEventListener("drop", handleWindowDrop);
-    };
-  }, [processFile]);
 
   if (showWebcam) {
     return (

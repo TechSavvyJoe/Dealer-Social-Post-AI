@@ -906,9 +906,10 @@ const captionRequestFacts = (
       ? "No public customer label is authorized. Do not include or invent any person's name; refer generically only when the selected post type actually concerns a customer."
       : "This post type does not require a customer identity. Do not include or invent any customer or personal name.";
 
-  // PostCustomizer keeps every immutable fact inside this first 900-character
-  // window. The remaining shared brief is visual/destination support and is not
-  // needed by the primary caption model.
+  // services/generationRequest.ts's composeGenerationCreativeBrief keeps every
+  // immutable fact inside this first 900-character window. The remaining
+  // shared brief is visual/destination support and is not needed by the
+  // primary caption model.
   const brief = (creativeBrief || "").trim().slice(0, 900);
   const hashtags = [`#${storeTag}`, ...profile.hashtags].join(" ");
 

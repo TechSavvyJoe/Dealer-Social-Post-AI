@@ -1,21 +1,21 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Loader2, RotateCcw, Trash2 } from "lucide-react";
-import {
-  MEDIA_ARCHIVE_CHANGED_EVENT,
-  archivedMediaToDataUrl,
-  deleteArchivedMedia,
-  listDealerMedia,
-  type ArchivedMediaRecord,
-} from "../utils/creativeStorage";
+import type { ArchivedMediaKind } from "../utils/creativeStorage";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
 import type { ImageSelection } from "../types";
+import { useDeviceMedia } from "../hooks/useDeviceMedia";
 
 interface RecentCaptureShelfProps {
   dealerId: string;
   onSelect: (selection: ImageSelection) => void;
 }
+
+// Module-level constant so useDeviceMedia's effect deps stay referentially
+// stable across renders, exactly as the hardcoded literal was before.
+const CAPTURE_MEDIA_KINDS: ArchivedMediaKind[] = ["capture"];
+const CAPTURE_MEDIA_LIMIT = 8;
 
 const formatCaptureTime = (createdAt: number) =>
   new Date(createdAt).toLocaleString([], {
@@ -34,46 +34,17 @@ export const RecentCaptureShelf: React.FC<RecentCaptureShelfProps> = ({
   dealerId,
   onSelect,
 }) => {
-  const [records, setRecords] = useState<ArchivedMediaRecord[]>([]);
   const [openingId, setOpeningId] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setRecords(
-      await listDealerMedia(dealerId, {
-        kinds: ["capture"],
-        limit: 8,
-      }),
-    );
-  }, [dealerId]);
-
-  useEffect(() => {
-    void load();
-    const handleChange = (event: Event) => {
-      const changedDealer = (event as CustomEvent<{ dealerId?: string }>).detail
-        ?.dealerId;
-      if (!changedDealer || changedDealer === dealerId) void load();
-    };
-    window.addEventListener(MEDIA_ARCHIVE_CHANGED_EVENT, handleChange);
-    return () => window.removeEventListener(MEDIA_ARCHIVE_CHANGED_EVENT, handleChange);
-  }, [dealerId, load]);
-
-  const [previewUrls, setPreviewUrls] = useState<
-    Array<{ record: ArchivedMediaRecord; url: string }>
-  >([]);
-
-  useEffect(() => {
-    // Object URL creation belongs in an effect, not render. React StrictMode
-    // can discard a render before registering its cleanup, which would leak
-    // every URL created by useMemo during that discarded render.
-    const next = records.map((record) => ({
-      record,
-      url: URL.createObjectURL(record.previewBlob || record.blob),
-    }));
-    setPreviewUrls(next);
-    return () => {
-      next.forEach(({ url }) => URL.revokeObjectURL(url));
-    };
-  }, [records]);
+  const {
+    records,
+    previews: previewUrls,
+    remove,
+    toDataUrl,
+  } = useDeviceMedia({
+    dealerId,
+    kinds: CAPTURE_MEDIA_KINDS,
+    limit: CAPTURE_MEDIA_LIMIT,
+  });
 
   if (records.length === 0) return null;
 
@@ -113,7 +84,7 @@ export const RecentCaptureShelf: React.FC<RecentCaptureShelfProps> = ({
                   setOpeningId(record.id);
                   try {
                     onSelect({
-                      workingImage: await archivedMediaToDataUrl(record),
+                      workingImage: await toDataUrl(record),
                       originalSource: record.blob,
                       originalFilename: record.originalFilename,
                     });
@@ -146,7 +117,7 @@ export const RecentCaptureShelf: React.FC<RecentCaptureShelfProps> = ({
                 type="button"
                 onClick={async () => {
                   triggerHapticFeedback();
-                  await deleteArchivedMedia(record.id);
+                  await remove(record.id);
                 }}
                 variant="ghost"
                 size="icon"

@@ -261,19 +261,22 @@ describe("post output-profile persistence", () => {
   });
 
   it("restores the saved output profile when History reopens a creative", () => {
-    const history = readFileSync(
-      resolve(process.cwd(), "components/PostHistory.tsx"),
+    // The reopen mapping moved to utils/historyPost.ts's
+    // toGeneratedPostFromRecord (PR2-0 extraction); PostHistory.tsx now calls
+    // it instead of building the object inline.
+    const historyPost = readFileSync(
+      resolve(process.cwd(), "utils/historyPost.ts"),
       "utf8",
     );
 
-    expect(history).toContain("platformIds:");
-    expect(history).toContain("post.platform_ids");
-    expect(history).toContain("post.platform_captions");
-    expect(history).toContain("captionSource: post.caption_source");
-    expect(history).toContain("mediaOutputMode:");
-    expect(history).toContain('post.caption_source === "basic_fallback"');
-    expect(history).toContain("primaryFormatId: post.primary_format_id");
-    expect(history).toContain("imageAspectRatio: post.image_aspect_ratio");
+    expect(historyPost).toContain("platformIds:");
+    expect(historyPost).toContain("post.platform_ids");
+    expect(historyPost).toContain("post.platform_captions");
+    expect(historyPost).toContain("captionSource: post.caption_source");
+    expect(historyPost).toContain("mediaOutputMode:");
+    expect(historyPost).toContain('post.caption_source === "basic_fallback"');
+    expect(historyPost).toContain("primaryFormatId: post.primary_format_id");
+    expect(historyPost).toContain("imageAspectRatio: post.image_aspect_ratio");
   });
 
   it("adds the forward media-mode field and expands exact portrait enums", () => {

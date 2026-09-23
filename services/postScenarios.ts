@@ -414,11 +414,11 @@ export const SCENARIO_CATEGORY_ICON: Record<ScenarioCategory, LucideIcon> = {
  *
  * This must also run on every OTHER dealer-editable free-text field that can
  * end up ahead of this module's own marker in the final creative brief
- * (components/PostCustomizer.tsx's composeGenerationCreativeBrief — e.g.
+ * (services/generationRequest.ts's composeGenerationCreativeBrief — e.g.
  * dealer.brand_voice) — the classifier trusts whichever "[id:...]" it finds
  * FIRST, so an unsanitized field earlier in that assembly is just as capable
  * of forging a scenario as an unsanitized scenario field is. Exported so
- * PostCustomizer can apply it there too.
+ * generationRequest can apply it there too.
  */
 export const stripIdMarkerSpoof = (value: string): string =>
   value
@@ -459,14 +459,15 @@ export const scenarioToCreativeBrief = (
   // Finance Team") can otherwise collide with a built-in alias and silently
   // inherit that built-in's tone/CTA/hashtags. It goes FIRST, ahead of the
   // label, not inline after it: this block is truncated further downstream
-  // (composeGenerationCreativeBrief's `bounded(scenarioBlock, 240)`), by
-  // character count, with no awareness of where the marker sits. A long but
-  // entirely ordinary custom label — nothing spoofed, `label` already went
-  // through stripIdMarkerSpoof above — could otherwise push the marker past
-  // that cut, silently falling back to the same label-alias matching this
-  // marker system exists to replace (and which a label like "Sold by..."
-  // can legitimately collide with). Leading with a short, fixed-shape marker
-  // keeps it well inside any downstream budget regardless of label length.
+  // (services/generationRequest.ts's composeGenerationCreativeBrief's
+  // `bounded(scenarioBlock, 240)`), by character count, with no awareness of
+  // where the marker sits. A long but entirely ordinary custom label —
+  // nothing spoofed, `label` already went through stripIdMarkerSpoof above —
+  // could otherwise push the marker past that cut, silently falling back to
+  // the same label-alias matching this marker system exists to replace (and
+  // which a label like "Sold by..." can legitimately collide with). Leading
+  // with a short, fixed-shape marker keeps it well inside any downstream
+  // budget regardless of label length.
   return [
     `[id:${scenario.id}] Post scenario: ${safeLabel}.`,
     safePromptAdditions,

@@ -281,6 +281,95 @@ describe("Persistence Utils", () => {
     });
   });
 
+  describe("the in-memory Details draft (release signature, personal line)", () => {
+    const SIGNATURE = "data:image/png;base64,ZHJhd24tc2lnbmF0dXJlLXN0cm9rZXM=";
+    const draftParams = () => ({
+      style: "Modern & Bold",
+      tone: "Excited",
+      customerName: "Alex",
+      scenarioId: "customer_delivery",
+      capturedRelease: {
+        customerName: "Alex Johnson",
+        signaturePngDataUrl: SIGNATURE,
+        releaseId: "release-123",
+      },
+      personalLine: "Stop by and say hi on the lot.",
+    });
+
+    it("never writes the captured release or the personal line to localStorage", () => {
+      saveSession({ dealerId: "dealer123", step: 2, generationParams: draftParams() });
+
+      const raw = localStorageMock.store[STORAGE_KEY];
+      expect(raw).not.toContain(SIGNATURE);
+      expect(raw).not.toContain("release-123");
+      expect(raw).not.toContain("Stop by and say hi on the lot.");
+      const savedData = JSON.parse(raw);
+      expect(savedData.generationParams).not.toHaveProperty("capturedRelease");
+      expect(savedData.generationParams).not.toHaveProperty("personalLine");
+      // The storable choices are kept as before.
+      expect(savedData.generationParams).toMatchObject({
+        customerName: "Alex",
+        scenarioId: "customer_delivery",
+      });
+    });
+
+    it("keeps the signature out on the quota-retry path too", () => {
+      localStorageMock.setItem.mockImplementationOnce(() => {
+        throw new DOMException("Quota exceeded", "QuotaExceededError");
+      });
+
+      saveSession({ dealerId: "dealer123", step: 2, generationParams: draftParams() });
+
+      for (const [, written] of localStorageMock.setItem.mock.calls) {
+        expect(written).not.toContain(SIGNATURE);
+        expect(written).not.toContain("capturedRelease");
+        expect(written).not.toContain("personalLine");
+      }
+      expect(localStorageMock.store[STORAGE_KEY]).not.toContain(SIGNATURE);
+    });
+
+    it("does not carry a stored copy forward when another field is saved", () => {
+      localStorageMock.store[STORAGE_KEY] = JSON.stringify({
+        dealerId: "dealer123",
+        step: 2,
+        generationParams: draftParams(),
+      });
+
+      saveSession({ step: 3 });
+
+      const raw = localStorageMock.store[STORAGE_KEY];
+      expect(raw).not.toContain(SIGNATURE);
+      const savedData = JSON.parse(raw);
+      expect(savedData.step).toBe(3);
+      expect(savedData.generationParams).not.toHaveProperty("capturedRelease");
+      expect(savedData.generationParams).not.toHaveProperty("personalLine");
+      expect(savedData.generationParams.customerName).toBe("Alex");
+    });
+
+    it("loads a stored copy without either field and rewrites storage scrubbed", () => {
+      localStorageMock.store[STORAGE_KEY] = JSON.stringify({
+        dealerId: "dealer123",
+        step: 2,
+        loginTimestamp: Date.now(),
+        generationParams: draftParams(),
+      });
+
+      const loaded = loadSession();
+
+      expect(loaded?.generationParams).not.toHaveProperty("capturedRelease");
+      expect(loaded?.generationParams).not.toHaveProperty("personalLine");
+      expect(loaded?.generationParams).toMatchObject({
+        customerName: "Alex",
+        scenarioId: "customer_delivery",
+      });
+      expect(localStorageMock.setItem).toHaveBeenCalledTimes(1);
+      const raw = localStorageMock.store[STORAGE_KEY];
+      expect(raw).not.toContain(SIGNATURE);
+      expect(JSON.parse(raw).generationParams).not.toHaveProperty("capturedRelease");
+      expect(JSON.parse(raw).generationParams).not.toHaveProperty("personalLine");
+    });
+  });
+
   describe("clearSession", () => {
     it("removes session from localStorage", () => {
       localStorageMock.setItem(STORAGE_KEY, JSON.stringify({ dealerId: "test" }));

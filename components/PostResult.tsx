@@ -37,7 +37,6 @@ import { toUiMessage } from "../utils/errorMessages";
 import { Badge } from "./ui/Badge";
 import { cn } from "../utils/classNames";
 import { ProgressBar } from "./ui/ProgressBar";
-import { normalizeError, recoveryHint } from "../utils/errorHandler";
 import { MultiFormatExportModal } from "./MultiFormatExportModal";
 import { ScheduleDialog } from "./ScheduleDialog";
 import { LayoutGrid } from "lucide-react";
@@ -57,63 +56,46 @@ import { ProgressiveImage } from "./ui/ProgressiveImage";
 import { useToast } from "./ui/Toast";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
-import {
-  getPostApprovalStatus,
-  markPostVideoGenerated,
-  schedulePost,
-  updatePostDraft,
-} from "../services/posts";
+import { schedulePost, type DealerIdentityGrounding } from "../services/posts";
 import {
   analyzeCaptionForDelivery,
   analyzeCaptionSetForDelivery,
-  prohibitedClaimsMessage,
   buildEmployeeDisclosure,
-  prependEmployeeDisclosure,
 } from "../utils/complianceDisclosures";
-import { captionUsesOnlyExpectedCustomer } from "../utils/captionQuality";
-import { toPublicCustomerLabel } from "../utils/customerIdentity";
+import { derivePostLocks, type CaptionIdentityContext } from "../utils/postLocks";
+import {
+  buildCopyText,
+  buildShareCaptions,
+  deliveredCaptionFor,
+  effectivePackFor,
+  withPackEdit,
+} from "../services/deliveryCaptions";
 import {
   preferredExportFormatIds,
-  resolvePrimaryImageProfile,
   resolvePlatformOption,
 } from "../services/platformCopy";
 import {
   isMobilePhotoDevice,
-  prepareMediaForSave,
   savePreparedMediaToLibrary,
   saveResultToastMessage,
-  validateVideoMetadata,
-  type PreparedMediaSave,
 } from "../utils/mediaSave";
 import { useAppStore } from "../stores/appStore";
-import { ApiError } from "../services/apiErrors";
-import { linkReleaseToPostWithRetry } from "../services/photoReleases";
-import { connectionManager } from "../utils/connectionManager";
-import { archiveDealerMedia } from "../utils/creativeStorage";
-import { EXPORT_FORMATS, renderFormatIfNeeded } from "../utils/multiFormatExport";
-import { logError } from "../utils/telemetry";
-import {
-  derivePlatformDeliveryPlan,
-  type PlannedPlatformDelivery,
-} from "../services/platformOutputs";
 import type { PublishContent } from "../services/publishTargets";
 import {
   appendDealershipMention,
   dealershipMentionFor,
 } from "../utils/socialAttribution";
-import { retainNewestVideoJobs } from "../utils/videoJobRetention";
 import {
-  buildFinalWebsiteDraftFallback,
-  enqueueWebsitePublication,
-  getWebsitePublication,
-  listWebsiteDestinations,
-  retryWebsitePublication,
-  safeWebsiteReviewUrl,
-  websitePublicationNeedsStatusRefresh,
-  websitePublicationPollDelay,
   type WebsiteDraft,
   type WebsitePublication,
 } from "../services/websitePublishing";
+import { useApprovalStatus } from "../hooks/useApprovalStatus";
+import { useReleaseRepair } from "../hooks/useReleaseRepair";
+import { useDraftAutosave } from "../hooks/useDraftAutosave";
+import { useWebsiteHandoff } from "../hooks/useWebsiteHandoff";
+import { usePostLeaveGuard } from "../hooks/usePostLeaveGuard";
+import { useVideoJobs } from "../hooks/useVideoJobs";
+import { usePreparedDelivery } from "../hooks/usePreparedDelivery";
 
 // Lazy load modals for performance
 const LazyImagePreviewModal = React.lazy(() =>
@@ -541,40 +523,10 @@ export const PostResult: React.FC<PostResultProps> = ({
    */
   const [photoRetryUsed, setPhotoRetryUsed] = useState(false);
   const [captionRetryUsed, setCaptionRetryUsed] = useState(false);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  /** Legacy free-form video selection stays separate from an exact delivery row. */
-  const [manualVideoSelected, setManualVideoSelected] = useState(false);
-  const [isVideoLoading, setIsVideoLoading] = useState(false);
-  /** Synchronous guard: React state alone cannot stop two taps in one frame. */
-  const videoGenerationActiveRef = useRef(false);
-  const videoJobSequenceRef = useRef(0);
-  const [videoLoadingMessage, setVideoLoadingMessage] = useState("");
-  /** Browser is buffering / decoding the blob after generation finishes. */
-  const [isVideoBuffering, setIsVideoBuffering] = useState(false);
-  const [videoPlayError, setVideoPlayError] = useState<string | null>(null);
-  /** Start muted for autoplay policy; user can enable sound with one tap. */
-  const [videoMuted, setVideoMuted] = useState(true);
+  // videoUrl, manualVideoSelected, the render guard, loading/preview state,
+  // blob-URL ownership and videoJobs now live in hooks/useVideoJobs.ts (see
+  // the hook call below, after resultIdentity).
   const videoElRef = useRef<HTMLVideoElement | null>(null);
-  /** Own blob URLs so we only revoke the previous one when replacing/unmounting. */
-  const activeVideoBlobRef = useRef<string | null>(null);
-  const ownedVideoBlobUrlsRef = useRef<Set<string>>(new Set());
-  const [videoJobs, setVideoJobs] = useState<
-    Array<{
-      id: string;
-      style: VideoStyle;
-      status: "queued" | "processing" | "completed" | "failed";
-      duration: number;
-      soundtrack: VideoRequestOptions["soundtrack"];
-      aspectPreference: VideoRequestOptions["aspectPreference"];
-      resolution: VideoRequestOptions["resolution"];
-      pacing: VideoRequestOptions["pacing"];
-      createdAt: string;
-      /** Exact source creative revision used to generate this clip. */
-      sourceCreativeKey: string;
-      url?: string;
-      error?: string;
-    }>
-  >([]);
 
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isMultiFormatOpen, setIsMultiFormatOpen] = useState(false);
@@ -598,125 +550,57 @@ export const PostResult: React.FC<PostResultProps> = ({
   const [leaveConfirm, setLeaveConfirm] = useState<"startOver" | "remix" | null>(null);
   const [hasSavedMedia, setHasSavedMedia] = useState(false);
   const [hasCopiedCaption, setHasCopiedCaption] = useState(false);
-  // What the manager asked to be changed. The rejection message used to say
-  // "create another post with the requested changes" while nothing carried the
-  // requested changes; this is them.
-  const [rejectionReason, setRejectionReason] = useState<string>(
-    post.rejectionReason || "",
-  );
-  const [approvalStatus, setApprovalStatus] = useState<
-    NonNullable<GeneratedPost["approvalStatus"]>
-  >(
-    post.approvalStatus ??
-      (requiresApproval ? (post.postId ? "pending" : "submission_failed") : "n_a"),
-  );
-  const [approvalCheckError, setApprovalCheckError] = useState<string | null>(null);
-  const [imageReviewRequired, setImageReviewRequired] = useState(
-    Boolean(post.imageReviewRequired),
-  );
-  /**
-   * Release state is local because it is repairable from this screen: a
-   * successful "Retry saving release" turns a locked post into a deliverable
-   * one without regenerating anything.
-   */
-  const [releaseStatus, setReleaseStatus] = useState<GeneratedPost["releaseStatus"]>(
-    post.releaseStatus,
-  );
-  const [releaseLinkStatus, setReleaseLinkStatus] = useState<
-    GeneratedPost["releaseLinkStatus"]
-  >(post.releaseLinkStatus);
-  const [releaseRetrying, setReleaseRetrying] = useState(false);
-  const [releaseRetryNotice, setReleaseRetryNotice] = useState<string | null>(null);
-  /** One automatic reconnect retry per mount; the button stays available after. */
-  const releaseReconnectUsedRef = useRef(false);
-  const releaseRetryingRef = useRef(false);
-  const [websitePublication, setWebsitePublication] = useState<
-    WebsitePublication | undefined
-  >(
-    post.websitePublication ??
-      (post.websiteDraft?.enabled ? { status: "not_requested" } : undefined),
-  );
-  const [websiteDraft, setWebsiteDraft] = useState<WebsiteDraft | undefined>(
-    post.websiteDraft,
-  );
-  const [websiteCheckError, setWebsiteCheckError] = useState<string | null>(null);
-  const [websiteRetrying, setWebsiteRetrying] = useState(false);
-  const [websiteSending, setWebsiteSending] = useState(false);
-  /** Stops duplicate final sends before React can commit the disabled state. */
-  const websiteSendingRef = useRef(false);
-  /** One authoritative status read per restored/saved post, including not_requested. */
-  const websiteStatusHydratedPostRef = useRef<string | null>(null);
-  const [websiteDestinationRevision, setWebsiteDestinationRevision] = useState(0);
+  // approval status, release repair and website-handoff state now live in
+  // hooks/useApprovalStatus.ts, hooks/useReleaseRepair.ts and
+  // hooks/useWebsiteHandoff.ts (see the hook calls below, after `locks`).
   /** Local edits to per-platform pack captions (share + tab switch must honor these). */
   const [packOverrides, setPackOverrides] = useState<Record<string, string>>({});
   /** Prior image versions after regen/fun/edit (local compare stack, max 5). */
   const [imageVersions, setImageVersions] = useState<string[]>([]);
-  const [preparedSave, setPreparedSave] = useState<PreparedMediaSave | null>(null);
-  /** Prevent a prepared file from ever being used under a different delivery row. */
-  const [preparedSaveForKey, setPreparedSaveForKey] = useState<string | null>(null);
-  const [mediaPreparationError, setMediaPreparationError] = useState<string | null>(
-    null,
-  );
-  const [mediaPreparationNonce, setMediaPreparationNonce] = useState(0);
-  const [formattedPreviewUrl, setFormattedPreviewUrl] = useState<string | null>(null);
-  const [selectedDeliveryId, setSelectedDeliveryId] = useState<string | null>(null);
-  const [isPreparingSave, setIsPreparingSave] = useState(false);
-  const [draftSyncStatus, setDraftSyncStatus] = useState<
-    "idle" | "saving" | "saved" | "error"
-  >("idle");
-  const draftSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingDraftSyncRef = useRef<{
-    caption: string;
-    disclosures: string;
-    imageDataUrl?: string;
-    platformCaptions?: Record<string, string>;
-  } | null>(null);
-  const draftSyncChainRef = useRef<Promise<void>>(Promise.resolve());
-  const draftSyncMountedRef = useRef(true);
-  const lastSyncedDraftRef = useRef({
-    caption: post.text,
-    disclosures: post.disclosures || "",
-    image: post.image,
-    platformCaptions: JSON.stringify(post.platformCaptions || {}),
-  });
-  /** Server revision returned by the latest exact draft save. */
-  const lastPostRevisionRef = useRef<string | null>(null);
-  /** Live creative identity used to reject a send if anything changes during AI prep. */
-  const latestWebsiteCreativeRef = useRef({
-    postId: post.postId,
-    image: post.image,
-    caption: post.text,
-  });
-  const currentPostPropRef = useRef(post);
-  currentPostPropRef.current = post;
-  latestWebsiteCreativeRef.current = {
-    postId: post.postId,
-    image: post.image,
-    caption: activeCaptionPlatform ? primaryCaption : editedText,
-  };
+  // preparedSave/preparedSaveForKey, the preparation error and retry nonce,
+  // formattedPreviewUrl, selectedDeliveryId and isPreparingSave now live in
+  // hooks/usePreparedDelivery.ts (see the hook call below, after websiteDraft).
+  // draftSyncStatus/pendingDraftSyncRef/lastSyncedDraftRef/lastPostRevisionRef
+  // and latestWebsiteCreativeRef now live in hooks/useDraftAutosave.ts and
+  // hooks/useWebsiteHandoff.ts respectively.
   const prevImageRef = useRef(post.image);
   const resultIdentity =
     post.postId ||
     post.aiMeta?.image.attemptId ||
     post.aiMeta?.lastSuccessfulGenerationAt ||
     "local-result";
-  const videoCreativeRevisionRef = useRef({
-    image: post.image,
+  // The creative-revision binding, the job list, blob-URL ownership, the
+  // synchronous two-tap guard and houseMotionOptions moved verbatim into
+  // hooks/useVideoJobs.ts; the names below are unchanged aliases.
+  const videoJobState = useVideoJobs({
+    post,
     resultIdentity,
-    revision: 0,
+    dealerId,
+    motion: resolved.motion,
+    onGenerateVideo,
   });
-  if (
-    videoCreativeRevisionRef.current.image !== post.image ||
-    videoCreativeRevisionRef.current.resultIdentity !== resultIdentity
-  ) {
-    const previous = videoCreativeRevisionRef.current;
-    videoCreativeRevisionRef.current = {
-      image: post.image,
-      resultIdentity,
-      revision: previous.resultIdentity === resultIdentity ? previous.revision + 1 : 0,
-    };
-  }
-  const currentVideoCreativeKey = `${resultIdentity}:${videoCreativeRevisionRef.current.revision}`;
+  const {
+    videoJobs,
+    videoUrl,
+    adoptVideoUrl,
+    manualVideoSelected,
+    setManualVideoSelected,
+    isVideoLoading,
+    videoLoadingMessage,
+    isVideoBuffering,
+    setIsVideoBuffering,
+    videoPlayError,
+    setVideoPlayError,
+    videoMuted,
+    setVideoMuted,
+    videoGenerationActiveRef,
+    currentVideoCreativeKey,
+    videoJobForDelivery,
+    startVideoJob,
+    retryVideoJob: handleRetryVideo,
+    removeVideoJob: handleRemoveVideoJob,
+    houseMotionOptions,
+  } = videoJobState;
   const previousResultIdentityRef = useRef(resultIdentity);
   const previousPostTextRef = useRef(post.text);
   // Caption state follows a new result/caption pack, but image-only
@@ -764,12 +648,10 @@ export const PostResult: React.FC<PostResultProps> = ({
     );
   }, [post.image]);
 
-  const effectivePack = useMemo(() => {
-    if (!post.platformCaptions && Object.keys(packOverrides).length === 0) {
-      return undefined;
-    }
-    return { ...(post.platformCaptions || {}), ...packOverrides };
-  }, [post.platformCaptions, packOverrides]);
+  const effectivePack = useMemo(
+    () => effectivePackFor(post.platformCaptions, packOverrides),
+    [post.platformCaptions, packOverrides],
+  );
 
   const platformCaptionTabs = useMemo(() => {
     const pack = effectivePack;
@@ -786,57 +668,303 @@ export const PostResult: React.FC<PostResultProps> = ({
     }));
   }, [effectivePack, post.platformIds]);
 
+  const captionAnalysis = useMemo(
+    () =>
+      analyzeCaptionForDelivery(
+        editedText,
+        bannedPhrases,
+        undefined,
+        deliveryLanguageAllowed,
+      ),
+    [bannedPhrases, editedText, deliveryLanguageAllowed],
+  );
+  const captionSetAnalysis = useMemo(() => {
+    const currentPrimaryCaption = activeCaptionPlatform ? primaryCaption : editedText;
+    const variants = { ...(effectivePack || {}) };
+    if (activeCaptionPlatform) variants[activeCaptionPlatform] = editedText;
+    return analyzeCaptionSetForDelivery(
+      [currentPrimaryCaption, ...Object.values(variants)],
+      bannedPhrases,
+    );
+  }, [activeCaptionPlatform, bannedPhrases, editedText, effectivePack, primaryCaption]);
+  const imageBusy = isImageLoading || isVideoLoading;
+  const textBusy = isTextLoading;
+
+  // Approval polling, release repair and the website handoff each moved into
+  // their own hook (hooks/useApprovalStatus.ts, hooks/useReleaseRepair.ts,
+  // hooks/useWebsiteHandoff.ts). useWebsiteHandoff must run before
+  // identityContext/locks below (and before deliveryPlan further down),
+  // since those read its `websiteDraft`.
+  const {
+    reviewRequired,
+    approvalStatus,
+    rejectionReason,
+    imageReviewRequired,
+    approvalCheckError,
+  } = useApprovalStatus({ post, requiresApproval });
+  const {
+    releaseStatus,
+    releaseLinkStatus,
+    retrying: releaseRetrying,
+    notice: releaseRetryNotice,
+    retry: retryReleaseLink,
+  } = useReleaseRepair({ post });
+  const websiteHandoffCaptions = useMemo(
+    () => ({
+      activeCaptionPlatform,
+      primaryCaption,
+      editedText,
+      bannedPhrases,
+      deliveryLanguageAllowed,
+      effectivePack,
+      disclosures: captionSetAnalysis.disclosures,
+    }),
+    [
+      activeCaptionPlatform,
+      primaryCaption,
+      editedText,
+      bannedPhrases,
+      deliveryLanguageAllowed,
+      effectivePack,
+      captionSetAnalysis.disclosures,
+    ],
+  );
+  const websiteHandoff = useWebsiteHandoff({
+    post,
+    dealerId,
+    dealer: currentDealer,
+    imageBusy,
+    textBusy,
+    onPrepareFinalWebsiteDraft,
+    captions: websiteHandoffCaptions,
+  });
+  const {
+    websiteDraft,
+    publication: websitePublication,
+    checkError: websiteCheckError,
+    sending: websiteSending,
+    retrying: websiteRetrying,
+    reviewUrl: websiteReviewUrl,
+    handoffStarted: websiteHandoffStarted,
+  } = websiteHandoff;
+
+  const identityContext = useMemo<CaptionIdentityContext>(
+    () => ({
+      customerDisplayName: post.customerDisplayName,
+      dealerName: currentDealer?.name,
+      oemAffiliation: currentDealer?.oem_affiliation,
+      vehicleDescription: websiteDraft?.vehicleDescription,
+      currentPersonName,
+      customerIdentityRequired: post.customerIdentityRequired,
+      isCustomerStory: websiteDraft?.kind === "customer_story",
+    }),
+    [
+      currentDealer?.name,
+      currentDealer?.oem_affiliation,
+      currentPersonName,
+      post.customerDisplayName,
+      post.customerIdentityRequired,
+      websiteDraft?.kind,
+      websiteDraft?.vehicleDescription,
+    ],
+  );
+  const locks = useMemo(() => {
+    const currentPrimaryCaption = activeCaptionPlatform ? primaryCaption : editedText;
+    const variants = { ...(effectivePack || {}) };
+    if (activeCaptionPlatform) variants[activeCaptionPlatform] = editedText;
+    return derivePostLocks({
+      captions: [currentPrimaryCaption, ...Object.values(variants)],
+      identity: identityContext,
+      prohibited: captionSetAnalysis.prohibited,
+      imageReviewRequired,
+      reviewRequired,
+      approvalStatus,
+      rejectionReason,
+      releaseStatus,
+      releaseLinkStatus,
+      releaseId: post.releaseId,
+      postId: post.postId,
+      customerDisplayName: post.customerDisplayName,
+    });
+  }, [
+    activeCaptionPlatform,
+    primaryCaption,
+    editedText,
+    effectivePack,
+    identityContext,
+    captionSetAnalysis.prohibited,
+    imageReviewRequired,
+    reviewRequired,
+    approvalStatus,
+    rejectionReason,
+    releaseStatus,
+    releaseLinkStatus,
+    post.releaseId,
+    post.postId,
+    post.customerDisplayName,
+  ]);
+  const {
+    identityLocked,
+    approvalLocked,
+    releaseLocked,
+    releaseLinkRepairable,
+    claimLocked,
+    deliveryLocked,
+  } = locks;
+  // Once a creative has entered the review workflow it must remain byte-for-
+  // byte equivalent to what the manager saw. Delivery unlocks on approval,
+  // while edits require starting a new review submission.
+  const creativeLockedForReview = reviewRequired;
+  const contentEditingLocked =
+    creativeLockedForReview || websiteHandoffStarted || websiteSending;
+  const videoReviewLockMessage =
+    "This reviewed creative must stay unchanged. Start a new post to create a video.";
+  const historyReadOnly = Boolean(post.historyReadOnly);
+  const editableDraft = !contentEditingLocked && !historyReadOnly;
+  const originalRequiredMessage =
+    "This tool needs the original captured photo. Reopened History keeps the finished creative, so use Edit image or start a new photo instead.";
+  /** Brand mode only: shown once a one-shot retry has been spent. */
+  const oneShotSpentMessage =
+    "Already used once on this post. A manager can regenerate it for you.";
+
+  // The resolved "current caption to save" — activeCaptionPlatform switches
+  // the autosave target from the primary caption to a fresh analysis of the
+  // platform tab's own text, exactly as the inline effect used to before it
+  // moved into hooks/useDraftAutosave.ts.
+  const draftPrimaryCaption = activeCaptionPlatform ? primaryCaption : editedText;
+  const draftCaptionAnalysis = useMemo(
+    () =>
+      activeCaptionPlatform
+        ? analyzeCaptionForDelivery(
+            primaryCaption,
+            bannedPhrases,
+            undefined,
+            deliveryLanguageAllowed,
+          )
+        : captionAnalysis,
+    [
+      activeCaptionPlatform,
+      primaryCaption,
+      bannedPhrases,
+      deliveryLanguageAllowed,
+      captionAnalysis,
+    ],
+  );
+  const draftGrounding = useMemo<DealerIdentityGrounding>(
+    () => ({
+      dealerName: currentDealer?.name,
+      oemAffiliation: currentDealer?.oem_affiliation,
+      vehicleDescription:
+        websiteDraft?.vehicleDescription || generationVehicleDescription,
+      salespersonName: currentPersonName,
+    }),
+    [
+      currentDealer?.name,
+      currentDealer?.oem_affiliation,
+      websiteDraft?.vehicleDescription,
+      generationVehicleDescription,
+      currentPersonName,
+    ],
+  );
+  const autosave = useDraftAutosave({
+    post,
+    editable: editableDraft,
+    primaryCaption: draftPrimaryCaption,
+    captionAnalysis: draftCaptionAnalysis,
+    captionSetAnalysis,
+    effectivePack,
+    identityLocked,
+    grounding: draftGrounding,
+  });
+  const draftSyncStatus = autosave.status;
+  const flushPendingDraft = autosave.flush;
+
+  // The verbatim per-kind copy and the precedence-selected primary reason
+  // (image review, then identity, then claims, then release, then approval)
+  // now live in utils/postLocks.ts's derivePostLocks; these are aliases so
+  // every downstream reference below (toasts, aria-labels, banners) is
+  // unchanged.
+  const approvalGateMessage = locks.approvalMessage;
+  const releaseGateTitle = locks.releaseTitle;
+  const releaseGateMessage = locks.releaseMessage;
+  const claimGateMessage = locks.claimMessage;
+  const identityGateMessage = locks.identityMessage;
+  const imageReviewGateMessage = locks.imageReviewMessage;
+  const deliveryGateMessage = locks.primary.message;
+  const deliveryLockLabel = locks.primary.label;
+  /**
+   * The action bar states the lock; it does not offer it as something to press.
+   * It used to render inside the Copy button, so the same sentence appeared as
+   * a banner, a toast, and a disabled control that looked tappable. The reason
+   * still reaches assistive tech through each disabled button's aria-label, so
+   * this stays out of the live regions rather than announcing a third time.
+   */
+  const deliveryLockStatus = deliveryLocked ? (
+    <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-warning-200">
+      <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span>Delivery locked · {deliveryLockLabel}</span>
+    </p>
+  ) : null;
+  const websiteStatusCopy = websitePublicationCopy(
+    websitePublication,
+    Boolean(post.postId),
+  );
+
+  const handleRetryWebsite = websiteHandoff.retry;
+
+  const handleSendWebsiteDraft = useCallback(
+    () =>
+      websiteHandoff.send({
+        autosave: {
+          flush: autosave.flush,
+          stage: autosave.stage,
+          lastRevisionRef: autosave.lastRevisionRef,
+        },
+        deliveryLocked,
+        deliveryGateMessage,
+      }),
+    [
+      websiteHandoff,
+      autosave.flush,
+      autosave.stage,
+      autosave.lastRevisionRef,
+      deliveryLocked,
+      deliveryGateMessage,
+    ],
+  );
+
   const exportPriorityFormatIds = useMemo(
     () => preferredExportFormatIds(post.platformIds ?? []),
     [post.platformIds],
   );
-  const primarySaveFormat = useMemo(() => {
-    const formatId =
-      post.primaryFormatId ??
-      resolvePrimaryImageProfile(post.platformIds).primaryFormatId;
-    return EXPORT_FORMATS.find((format) => format.id === formatId);
-  }, [post.platformIds, post.primaryFormatId]);
-  const deliveryPlan = useMemo(() => {
-    const requestedMode =
-      videoJobs.length > 0 && post.mediaOutputMode !== "video"
-        ? "both"
-        : (post.mediaOutputMode ?? "photo");
-    const fallbackPlatform =
-      primarySaveFormat?.id === "feed_portrait"
-        ? "instagram_feed"
-        : primarySaveFormat?.id === "gbp"
-          ? "gbp"
-          : primarySaveFormat?.id === "marketplace"
-            ? "marketplace"
-            : "instagram_story";
-    const requestedPlatforms = Array.isArray(post.platformIds)
-      ? post.platformIds
-      : websiteDraft?.enabled
-        ? []
-        : [fallbackPlatform];
-    return derivePlatformDeliveryPlan(
-      requestedPlatforms,
-      requestedMode,
-      post.postId ? `dealer-social-${post.postId}` : "dealer-social-post",
-    );
-  }, [
-    post.mediaOutputMode,
-    post.platformIds,
-    post.postId,
-    primarySaveFormat?.id,
-    videoJobs.length,
-    websiteDraft?.enabled,
-  ]);
-  const deliveriesById = useMemo(
-    () =>
-      new Map<string, PlannedPlatformDelivery>(
-        deliveryPlan.deliveries.map((delivery) => [delivery.id, delivery]),
-      ),
-    [deliveryPlan.deliveries],
-  );
-  const websiteOnly = Boolean(
-    websiteDraft?.enabled && deliveryPlan.deliveries.length === 0,
-  );
+  // The delivery plan, the selected row, its preparation key, the single
+  // prepared File, the preview object URL and selection moved verbatim into
+  // hooks/usePreparedDelivery.ts; the names below are unchanged aliases. The
+  // batch and share-queue state stays inline (it is retired in U21).
+  const {
+    deliveryPlan,
+    deliveriesById,
+    websiteOnly,
+    selectedDeliveryId,
+    setSelectedDeliveryId,
+    selectedDelivery,
+    selectedVideoJob,
+    preparationKeyForDelivery,
+    preparedSaveForKey,
+    activePreparedSave,
+    activeImageFormat,
+    isPreparingSave,
+    mediaPreparationError,
+    setMediaPreparationError,
+    retryPreparation,
+    formattedPreviewUrl,
+    selectDeliveryById: handleSelectDelivery,
+  } = usePreparedDelivery({
+    post,
+    resultIdentity,
+    websiteEnabled: websiteDraft?.enabled,
+    video: videoJobState,
+  });
   const deliveryPlanSignature = deliveryPlan.deliveries
     .map((delivery) => delivery.id)
     .join("|");
@@ -852,46 +980,6 @@ export const PostResult: React.FC<PostResultProps> = ({
     setShareQueueIndex(0);
     shareQueueOpenedRef.current = null;
   }, [deliveryPlanSignature, resultIdentity]);
-  const selectedDelivery = selectedDeliveryId
-    ? deliveriesById.get(selectedDeliveryId)
-    : undefined;
-  const latestVideoJobBySpec = useMemo(() => {
-    const bySpec = new Map<string, (typeof videoJobs)[number]>();
-    for (const job of videoJobs) {
-      if (job.sourceCreativeKey !== currentVideoCreativeKey) continue;
-      if (job.aspectPreference === "9:16" || job.aspectPreference === "16:9") {
-        bySpec.set(`${job.aspectPreference}:${job.resolution}:${job.duration}`, job);
-      }
-    }
-    return bySpec;
-  }, [currentVideoCreativeKey, videoJobs]);
-  const videoJobForDelivery = useCallback(
-    (delivery: PlannedPlatformDelivery) => {
-      if (
-        delivery.mediaKind !== "video" ||
-        delivery.profile.preparation.kind !== "veo"
-      ) {
-        return undefined;
-      }
-      const preparation = delivery.profile.preparation;
-      return latestVideoJobBySpec.get(
-        `${preparation.nativeAspectRatio}:${preparation.resolution}:${preparation.durationSeconds}`,
-      );
-    },
-    [latestVideoJobBySpec],
-  );
-  const selectedVideoJob =
-    selectedDelivery?.mediaKind === "video"
-      ? videoJobForDelivery(selectedDelivery)
-      : undefined;
-  const preparationKeyForDelivery = useCallback(
-    (delivery: PlannedPlatformDelivery) => {
-      const job =
-        delivery.mediaKind === "video" ? videoJobForDelivery(delivery) : undefined;
-      return `delivery:${delivery.id}:${job?.id || "asset"}`;
-    },
-    [videoJobForDelivery],
-  );
   const batchEligibleDeliveryIds = useMemo(
     () =>
       new Set<string>(
@@ -919,799 +1007,10 @@ export const PostResult: React.FC<PostResultProps> = ({
       return next;
     });
   }, [batchEligibleDeliveryIds]);
-  const selectedPreparationKey = manualVideoSelected
-    ? `manual-video:${videoUrl || "pending"}`
-    : selectedDelivery
-      ? preparationKeyForDelivery(selectedDelivery)
-      : `primary:${resultIdentity}`;
-  const activePreparedSave =
-    preparedSaveForKey === selectedPreparationKey ? preparedSave : null;
-  const activeImageFormat = useMemo(() => {
-    if (selectedDelivery?.mediaKind === "photo") {
-      return EXPORT_FORMATS.find(
-        (format) => format.id === selectedDelivery.profile.legacyExportFormatId,
-      );
-    }
-    return primarySaveFormat;
-  }, [primarySaveFormat, selectedDelivery]);
-
-  useEffect(() => {
-    if (
-      selectedDeliveryId &&
-      deliveryPlan.deliveries.some((delivery) => delivery.id === selectedDeliveryId)
-    ) {
-      return;
-    }
-    setSelectedDeliveryId(deliveryPlan.deliveries[0]?.id || null);
-  }, [deliveryPlan.deliveries, selectedDeliveryId]);
 
   useEffect(() => {
     setIsToolsOpen(false);
   }, [isDesktopLayout]);
-  const captionAnalysis = useMemo(
-    () =>
-      analyzeCaptionForDelivery(
-        editedText,
-        bannedPhrases,
-        undefined,
-        deliveryLanguageAllowed,
-      ),
-    [bannedPhrases, editedText, deliveryLanguageAllowed],
-  );
-  const captionSetAnalysis = useMemo(() => {
-    const currentPrimaryCaption = activeCaptionPlatform ? primaryCaption : editedText;
-    const variants = { ...(effectivePack || {}) };
-    if (activeCaptionPlatform) variants[activeCaptionPlatform] = editedText;
-    return analyzeCaptionSetForDelivery(
-      [currentPrimaryCaption, ...Object.values(variants)],
-      bannedPhrases,
-    );
-  }, [activeCaptionPlatform, bannedPhrases, editedText, effectivePack, primaryCaption]);
-  const customerIdentityIsSafe = useCallback(
-    (caption: string): boolean =>
-      captionUsesOnlyExpectedCustomer(caption, post.customerDisplayName, {
-        allowedPhrases: [
-          currentDealer?.name,
-          currentDealer?.oem_affiliation,
-          websiteDraft?.vehicleDescription,
-        ],
-        maskedPhrases: [currentPersonName, toPublicCustomerLabel(currentPersonName)],
-        rejectAnyCustomerIdentity: Boolean(
-          (post.customerIdentityRequired || websiteDraft?.kind === "customer_story") &&
-          !toPublicCustomerLabel(post.customerDisplayName),
-        ),
-      }),
-    [
-      currentDealer?.name,
-      currentDealer?.oem_affiliation,
-      currentPersonName,
-      post.customerDisplayName,
-      post.customerIdentityRequired,
-      websiteDraft?.kind,
-      websiteDraft?.vehicleDescription,
-    ],
-  );
-  const identityLocked = useMemo(() => {
-    const currentPrimaryCaption = activeCaptionPlatform ? primaryCaption : editedText;
-    const variants = { ...(effectivePack || {}) };
-    if (activeCaptionPlatform) variants[activeCaptionPlatform] = editedText;
-    return [currentPrimaryCaption, ...Object.values(variants)].some(
-      (caption) => !customerIdentityIsSafe(caption),
-    );
-  }, [
-    activeCaptionPlatform,
-    customerIdentityIsSafe,
-    editedText,
-    effectivePack,
-    post.customerDisplayName,
-    primaryCaption,
-  ]);
-  const imageBusy = isImageLoading || isVideoLoading;
-  const textBusy = isTextLoading;
-  const reviewRequired =
-    post.approvalStatus !== undefined
-      ? post.approvalStatus !== "n_a"
-      : requiresApproval;
-  const approvalLocked = reviewRequired && approvalStatus !== "approved";
-  // The gate itself is unchanged: delivery stays locked for BOTH release
-  // failures. Only the explanation and the remedy differ below.
-  const releaseLocked = releaseStatus === "save_failed";
-  /**
-   * The recoverable variant: the customer's signature is durably stored on the
-   * server and only its association with this post is missing, so both ids
-   * needed to repair it are already in hand.
-   */
-  const releaseLinkRepairable =
-    releaseLocked &&
-    releaseLinkStatus === "link_failed" &&
-    Boolean(post.releaseId) &&
-    Boolean(post.postId);
-  const claimLocked = captionSetAnalysis.prohibited.length > 0;
-  const deliveryLocked =
-    imageReviewRequired ||
-    approvalLocked ||
-    releaseLocked ||
-    claimLocked ||
-    identityLocked;
-  const persistWebsiteState = useCallback(
-    (
-      nextDraft: WebsiteDraft | undefined,
-      nextPublication: WebsitePublication,
-      creativePatch: Partial<GeneratedPost> = {},
-    ) => {
-      setWebsiteDraft(nextDraft);
-      setWebsitePublication(nextPublication);
-      const sourcePost = currentPostPropRef.current;
-      if (!sourcePost.postId) return;
-      const store = useAppStore.getState();
-      const current = store.generatedPost;
-      if (current && current.postId !== sourcePost.postId) return;
-      const base = current || sourcePost;
-      store.setGeneratedPost({
-        ...base,
-        ...creativePatch,
-        websiteDraft: nextDraft ?? base.websiteDraft,
-        websitePublication: nextPublication,
-      });
-    },
-    [],
-  );
-  /**
-   * Repair the missing post↔release association. Nothing is re-signed and no
-   * paid generation runs: this is the same small first-party POST that failed
-   * after the post was created, replayed with the ids already on the post.
-   */
-  const retryReleaseLink = useCallback(
-    async (trigger: "manual" | "reconnect") => {
-      const sourcePost = currentPostPropRef.current;
-      const releaseId = sourcePost.releaseId;
-      const postId = sourcePost.postId;
-      if (!releaseId || !postId || releaseRetryingRef.current) return;
-      releaseRetryingRef.current = true;
-      setReleaseRetrying(true);
-      setReleaseRetryNotice(null);
-      try {
-        await linkReleaseToPostWithRetry(releaseId, postId);
-        setReleaseStatus("saved");
-        setReleaseLinkStatus(undefined);
-        const store = useAppStore.getState();
-        const current = store.generatedPost;
-        if (!current || current.postId === postId) {
-          const base = current || sourcePost;
-          store.setGeneratedPost({
-            ...base,
-            releaseStatus: "saved",
-            releaseLinkStatus: undefined,
-          });
-        }
-        toast.success(
-          "Photo release saved to this post. Copy, share, save, and export are unlocked.",
-        );
-      } catch (error) {
-        logError("photo_release.link_retry_failed", {
-          message: error instanceof Error ? error.message : String(error),
-          trigger,
-        });
-        setReleaseRetryNotice(
-          connectionManager.isOnline
-            ? "That did not go through. Nothing was lost — the signed release is still stored. Try again in a moment; it also retries on its own when the connection comes back."
-            : "You are offline. Nothing was lost — the signed release is still stored, and this retries automatically as soon as you are back online.",
-        );
-      } finally {
-        releaseRetryingRef.current = false;
-        setReleaseRetrying(false);
-      }
-    },
-    [toast],
-  );
-  // Queue one automatic repair for the common field case: the link failed
-  // because the lot Wi-Fi dropped, and the salesperson is still on this screen
-  // when the connection comes back.
-  useEffect(() => {
-    if (!releaseLinkRepairable) return;
-    return connectionManager.subscribe((online) => {
-      if (!online || releaseReconnectUsedRef.current) return;
-      releaseReconnectUsedRef.current = true;
-      void retryReleaseLink("reconnect");
-    });
-  }, [releaseLinkRepairable, retryReleaseLink]);
-  // Once a creative has entered the review workflow it must remain byte-for-
-  // byte equivalent to what the manager saw. Delivery unlocks on approval,
-  // while edits require starting a new review submission.
-  const creativeLockedForReview = reviewRequired;
-  const websiteHandoffStarted = Boolean(
-    websitePublication && websitePublication.status !== "not_requested",
-  );
-  const contentEditingLocked =
-    creativeLockedForReview || websiteHandoffStarted || websiteSending;
-  const videoReviewLockMessage =
-    "This reviewed creative must stay unchanged. Start a new post to create a video.";
-  const historyReadOnly = Boolean(post.historyReadOnly);
-  const editableDraft = !contentEditingLocked && !historyReadOnly;
-  const originalRequiredMessage =
-    "This tool needs the original captured photo. Reopened History keeps the finished creative, so use Edit image or start a new photo instead.";
-  /** Brand mode only: shown once a one-shot retry has been spent. */
-  const oneShotSpentMessage =
-    "Already used once on this post. A manager can regenerate it for you.";
-
-  const flushPendingDraft = useCallback((): Promise<boolean> => {
-    const draft = pendingDraftSyncRef.current;
-    if (draftSyncTimeoutRef.current) {
-      clearTimeout(draftSyncTimeoutRef.current);
-      draftSyncTimeoutRef.current = null;
-    }
-    if (!draft || !post.postId || !editableDraft) return Promise.resolve(true);
-
-    const operation = draftSyncChainRef.current.then(async () => {
-      try {
-        const updated = await updatePostDraft(post.postId as string, {
-          ...draft,
-          grounding: {
-            dealerName: currentDealer?.name,
-            oemAffiliation: currentDealer?.oem_affiliation,
-            vehicleDescription:
-              websiteDraft?.vehicleDescription || generationVehicleDescription,
-            salespersonName: currentPersonName,
-          },
-        });
-        lastPostRevisionRef.current = updated.post_revision;
-        lastSyncedDraftRef.current = {
-          caption: draft.caption,
-          disclosures: draft.disclosures,
-          image: draft.imageDataUrl || lastSyncedDraftRef.current.image,
-          platformCaptions: JSON.stringify(draft.platformCaptions || {}),
-        };
-        if (pendingDraftSyncRef.current === draft) {
-          pendingDraftSyncRef.current = null;
-        }
-        if (draftSyncMountedRef.current) {
-          setDraftSyncStatus(pendingDraftSyncRef.current ? "saving" : "saved");
-        }
-        return true;
-      } catch (err) {
-        logError("post.draft_sync_failed", {
-          postId: post.postId,
-          message: err instanceof Error ? err.message : String(err),
-        });
-        if (draftSyncMountedRef.current) setDraftSyncStatus("error");
-        return false;
-      }
-    });
-    draftSyncChainRef.current = operation.then(() => undefined);
-    return operation;
-  }, [
-    currentDealer?.name,
-    currentDealer?.oem_affiliation,
-    currentPersonName,
-    editableDraft,
-    generationVehicleDescription,
-    post.postId,
-    websiteDraft?.vehicleDescription,
-  ]);
-
-  useEffect(() => {
-    if (!post.postId || !editableDraft) return;
-    const historyCaption = activeCaptionPlatform ? primaryCaption : editedText;
-    const historyAnalysis = activeCaptionPlatform
-      ? analyzeCaptionForDelivery(
-          primaryCaption,
-          bannedPhrases,
-          undefined,
-          deliveryLanguageAllowed,
-        )
-      : captionAnalysis;
-    if (
-      !historyCaption.trim() ||
-      historyAnalysis.compliance.prohibited.length > 0 ||
-      captionSetAnalysis.prohibited.length > 0 ||
-      identityLocked
-    ) {
-      return;
-    }
-    const last = lastSyncedDraftRef.current;
-    const caption = historyAnalysis.caption;
-    const disclosures = captionSetAnalysis.disclosures;
-    const imageChanged = post.image !== last.image;
-    const platformCaptionsJson = JSON.stringify(effectivePack || {});
-    const platformCaptionsChanged = platformCaptionsJson !== last.platformCaptions;
-    if (
-      caption === last.caption &&
-      disclosures === last.disclosures &&
-      !imageChanged &&
-      !platformCaptionsChanged
-    ) {
-      return;
-    }
-    pendingDraftSyncRef.current = {
-      caption,
-      disclosures,
-      ...(imageChanged ? { imageDataUrl: post.image } : {}),
-      platformCaptions: effectivePack,
-    };
-    setDraftSyncStatus("saving");
-    if (draftSyncTimeoutRef.current) clearTimeout(draftSyncTimeoutRef.current);
-    draftSyncTimeoutRef.current = setTimeout(() => {
-      void flushPendingDraft();
-    }, 600);
-  }, [
-    activeCaptionPlatform,
-    bannedPhrases,
-    captionAnalysis,
-    captionSetAnalysis,
-    deliveryLanguageAllowed,
-    editedText,
-    effectivePack,
-    flushPendingDraft,
-    post.image,
-    post.postId,
-    primaryCaption,
-    editableDraft,
-    identityLocked,
-  ]);
-
-  useEffect(() => {
-    draftSyncMountedRef.current = true;
-    return () => {
-      draftSyncMountedRef.current = false;
-      if (draftSyncTimeoutRef.current) {
-        clearTimeout(draftSyncTimeoutRef.current);
-        draftSyncTimeoutRef.current = null;
-      }
-      // Queue the last edit behind any in-flight save so an older response can
-      // never overwrite a newer draft during navigation.
-      void flushPendingDraft();
-    };
-  }, [flushPendingDraft]);
-
-  const approvalGateMessage =
-    approvalStatus === "approved"
-      ? "Manager approved this exact creative. Save, share, and export are unlocked; start a new post to make changes."
-      : approvalStatus === "rejected"
-        ? rejectionReason
-          ? `A manager asked for a change: ${rejectionReason} Delivery stays locked until you create another post.`
-          : "A manager rejected this creative. Delivery remains locked; create another post with the requested changes."
-        : approvalStatus === "submission_failed"
-          ? "This creative could not be submitted for approval. Delivery remains locked; check your connection and create another post to retry."
-          : "This exact image and caption are awaiting manager approval. Save, share, and export unlock automatically after approval.";
-  // Two different failures, two different truths. The harsher wording is
-  // reserved for the case where consent may genuinely be missing; claiming a
-  // stored signature "was not stored" sent salespeople back to customers who
-  // had already driven away.
-  const releaseGateTitle = releaseLinkRepairable
-    ? "Photo release not attached yet"
-    : "Photo release not saved";
-  const releaseGateMessage = releaseLinkRepairable
-    ? "The customer's signed release was captured and saved — nothing needs to be signed again. Only its link to this post did not finish, so copy, share, save, and export stay locked until it does. Retry saving the release below."
-    : "The signed photo release was not stored, so consent cannot be verified. Copy, share, save, and export remain locked; check your connection and create another post to retry.";
-  const claimGateMessage = claimLocked
-    ? prohibitedClaimsMessage(captionSetAnalysis.prohibited)
-    : "";
-  const identityGateMessage = identityLocked
-    ? post.customerDisplayName
-      ? `This copy appears to name someone other than ${post.customerDisplayName}. Correct every caption before saving, copying, scheduling, sharing, or sending it to the website.`
-      : "This customer-required copy includes a name without an approved public customer label. Remove the name or add the approved customer first name before delivery."
-    : "";
-  const imageReviewGateMessage = imageReviewRequired
-    ? "This saved image predates the current on-pixel customer-name, logo, and source-fidelity review. It cannot be copied, saved, shared, scheduled, approved, or sent to the website. Create a new post from the original photo."
-    : "";
-  const deliveryGateMessage = imageReviewRequired
-    ? imageReviewGateMessage
-    : identityLocked
-      ? identityGateMessage
-      : claimLocked
-        ? claimGateMessage
-        : releaseLocked
-          ? releaseGateMessage
-          : approvalGateMessage;
-  const deliveryLockLabel = imageReviewRequired
-    ? "Image review required"
-    : identityLocked
-      ? "Customer blocked"
-      : claimLocked
-        ? "Claim blocked"
-        : releaseLocked
-          ? releaseLinkRepairable
-            ? "Release not attached"
-            : "Release not saved"
-          : "Approval pending";
-  /**
-   * The action bar states the lock; it does not offer it as something to press.
-   * It used to render inside the Copy button, so the same sentence appeared as
-   * a banner, a toast, and a disabled control that looked tappable. The reason
-   * still reaches assistive tech through each disabled button's aria-label, so
-   * this stays out of the live regions rather than announcing a third time.
-   */
-  const deliveryLockStatus = deliveryLocked ? (
-    <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-warning-200">
-      <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span>Delivery locked · {deliveryLockLabel}</span>
-    </p>
-  ) : null;
-  const websiteStatusCopy = websitePublicationCopy(
-    websitePublication,
-    Boolean(post.postId),
-  );
-  const websiteReviewUrl = useMemo(
-    () => safeWebsiteReviewUrl(websitePublication?.reviewUrl),
-    [websiteDestinationRevision, websitePublication?.reviewUrl],
-  );
-
-  useEffect(() => {
-    setApprovalStatus(
-      post.approvalStatus ??
-        (requiresApproval ? (post.postId ? "pending" : "submission_failed") : "n_a"),
-    );
-    setApprovalCheckError(null);
-    setImageReviewRequired(Boolean(post.imageReviewRequired));
-  }, [post.postId, post.approvalStatus, post.imageReviewRequired, requiresApproval]);
-
-  // A different post (or a store update after a repair) owns the release gate.
-  useEffect(() => {
-    setReleaseStatus(post.releaseStatus);
-    setReleaseLinkStatus(post.releaseLinkStatus);
-    setReleaseRetryNotice(null);
-    releaseReconnectUsedRef.current = false;
-  }, [post.postId, post.releaseStatus, post.releaseLinkStatus]);
-
-  useEffect(() => {
-    if (!reviewRequired || approvalStatus !== "pending" || !post.postId) {
-      return;
-    }
-
-    const controller = new AbortController();
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    let active = true;
-
-    const schedule = () => {
-      if (active) timeoutId = setTimeout(checkStatus, 10000);
-    };
-    const checkStatus = async () => {
-      if (!active) return;
-      if (typeof document !== "undefined" && document.hidden) {
-        schedule();
-        return;
-      }
-      try {
-        const result = await getPostApprovalStatus(
-          post.postId as string,
-          controller.signal,
-        );
-        if (!active) return;
-        setApprovalCheckError(null);
-        setImageReviewRequired(Boolean(result.image_review_required));
-        setApprovalStatus(result.approval_status);
-        setRejectionReason(result.rejection_reason || "");
-        if (result.approval_status === "approved") {
-          toast.success("Manager approved this post. Delivery is unlocked.");
-          return;
-        }
-        if (result.approval_status === "rejected") {
-          toast.warning(
-            result.rejection_reason
-              ? `Manager asked for a change: ${result.rejection_reason}`
-              : "Manager requested changes. Delivery remains locked.",
-          );
-          return;
-        }
-        schedule();
-      } catch (err) {
-        if (!active || (err instanceof DOMException && err.name === "AbortError")) {
-          return;
-        }
-        setApprovalCheckError(
-          "Approval status could not be refreshed. We’ll keep checking.",
-        );
-        schedule();
-      }
-    };
-
-    void checkStatus();
-    return () => {
-      active = false;
-      controller.abort();
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, [approvalStatus, post.postId, reviewRequired, toast]);
-
-  useEffect(() => {
-    setWebsitePublication(
-      post.websitePublication ??
-        (post.websiteDraft?.enabled ? { status: "not_requested" } : undefined),
-    );
-    setWebsiteDraft(post.websiteDraft);
-    setWebsiteCheckError(null);
-  }, [post.postId, post.websiteDraft, post.websitePublication]);
-
-  // safeWebsiteReviewUrl remains exact-origin bound. A direct session restore
-  // can land on RESULT before PostCustomizer has loaded destination config, so
-  // prime the allowlist here as well.
-  useEffect(() => {
-    if (!websiteDraft?.enabled) return;
-    void listWebsiteDestinations()
-      .then(() => setWebsiteDestinationRevision((revision) => revision + 1))
-      .catch(() => undefined);
-  }, [websiteDraft?.enabled]);
-
-  // Local/session state is only a fast restore hint. Read the durable state
-  // once even when it says not_requested so a reload or lost POST response can
-  // never make an already-sent draft look editable again.
-  useEffect(() => {
-    if (!websiteDraft?.enabled || !post.postId) return;
-    const hydrationKey = `${dealerId}:${post.postId}`;
-    if (websiteStatusHydratedPostRef.current === hydrationKey) return;
-    websiteStatusHydratedPostRef.current = hydrationKey;
-    const controller = new AbortController();
-    let active = true;
-
-    void getWebsitePublication(post.postId, controller.signal)
-      .then((next) => {
-        if (!active) return;
-        persistWebsiteState(next.websiteDraft ?? websiteDraft, next);
-        setWebsiteCheckError(null);
-      })
-      .catch((err) => {
-        if (!active || (err instanceof DOMException && err.name === "AbortError")) {
-          return;
-        }
-        setWebsiteCheckError(
-          "Website status could not be verified yet. No new handoff has been started.",
-        );
-      });
-
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [dealerId, persistWebsiteState, post.postId, websiteDraft]);
-
-  useEffect(() => {
-    if (!websiteDraft?.enabled || !post.postId) return;
-    if (!websitePublication || websitePublication.status === "not_requested") return;
-    if (
-      websitePublication &&
-      !websitePublicationNeedsStatusRefresh(websitePublication.status)
-    ) {
-      return;
-    }
-    const controller = new AbortController();
-    let active = true;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-    const refresh = async () => {
-      if (typeof document !== "undefined" && document.hidden) {
-        timeoutId = setTimeout(refresh, 60_000);
-        return;
-      }
-      try {
-        const next = await getWebsitePublication(
-          post.postId as string,
-          controller.signal,
-        );
-        if (!active) return;
-        persistWebsiteState(next.websiteDraft ?? websiteDraft, next);
-        setWebsiteCheckError(null);
-        if (websitePublicationNeedsStatusRefresh(next.status)) {
-          timeoutId = setTimeout(refresh, websitePublicationPollDelay(next.status));
-        }
-      } catch (err) {
-        if (!active || (err instanceof DOMException && err.name === "AbortError")) {
-          return;
-        }
-        setWebsiteCheckError(
-          "Website status could not be refreshed. The delivery worker will keep retrying safely.",
-        );
-        timeoutId = setTimeout(refresh, 15_000);
-      }
-    };
-
-    void refresh();
-    return () => {
-      active = false;
-      controller.abort();
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, [persistWebsiteState, post.postId, websiteDraft, websitePublication?.status]);
-
-  const handleRetryWebsite = useCallback(async () => {
-    if (!post.postId || websiteRetrying) return;
-    const retryingStatusCheck = websitePublication?.status === "draft_ready";
-    setWebsiteRetrying(true);
-    try {
-      const next = await retryWebsitePublication(post.postId);
-      persistWebsiteState(next.websiteDraft ?? websiteDraft, next);
-      setWebsiteCheckError(null);
-      toast.success(
-        retryingStatusCheck
-          ? "Website status check queued."
-          : "Private website draft queued again.",
-      );
-    } catch (err) {
-      toast.error(toUiMessage(err, "Website draft could not be retried."));
-    } finally {
-      setWebsiteRetrying(false);
-    }
-  }, [
-    persistWebsiteState,
-    post.postId,
-    toast,
-    websiteDraft,
-    websitePublication?.status,
-    websiteRetrying,
-  ]);
-
-  const handleSendWebsiteDraft = useCallback(async () => {
-    if (!post.postId || !websiteDraft?.enabled || websiteSendingRef.current) return;
-    if (deliveryLocked) {
-      toast.warning(deliveryGateMessage);
-      return;
-    }
-    if (imageBusy || textBusy) {
-      toast.warning("Wait for the current image or caption update to finish first.");
-      return;
-    }
-    const finalCaption = activeCaptionPlatform ? primaryCaption : editedText;
-    const finalCaptionAnalysis = analyzeCaptionForDelivery(
-      finalCaption,
-      bannedPhrases,
-      undefined,
-      deliveryLanguageAllowed,
-    );
-    if (finalCaptionAnalysis.compliance.prohibited.length > 0) {
-      toast.warning(
-        prohibitedClaimsMessage(finalCaptionAnalysis.compliance.prohibited),
-      );
-      return;
-    }
-
-    const capturedCreative = {
-      postId: post.postId,
-      image: post.image,
-      caption: finalCaptionAnalysis.caption,
-    };
-    const savedPrimaryCaption = activeCaptionPlatform
-      ? analyzeCaptionForDelivery(
-          primaryCaption,
-          bannedPhrases,
-          undefined,
-          deliveryLanguageAllowed,
-        ).caption
-      : capturedCreative.caption;
-    const savedPlatformCaptions = activeCaptionPlatform
-      ? {
-          ...(effectivePack || {}),
-          [activeCaptionPlatform]: capturedCreative.caption,
-        }
-      : effectivePack;
-    const creativePatch: Partial<GeneratedPost> = {
-      image: capturedCreative.image,
-      text: savedPrimaryCaption,
-      disclosures: captionSetAnalysis.disclosures,
-      ...(savedPlatformCaptions ? { platformCaptions: savedPlatformCaptions } : {}),
-    };
-
-    websiteSendingRef.current = true;
-    setWebsiteSending(true);
-    try {
-      // Always write the exact visible creative once at the send boundary,
-      // even when autosave was already idle. The returned server revision is
-      // the compare-and-set token used by the enqueue route.
-      pendingDraftSyncRef.current = {
-        caption: savedPrimaryCaption,
-        disclosures: captionSetAnalysis.disclosures,
-        imageDataUrl: capturedCreative.image,
-        platformCaptions: savedPlatformCaptions,
-      };
-      setDraftSyncStatus("saving");
-      lastPostRevisionRef.current = null;
-      const draftSaved = await flushPendingDraft();
-      const expectedPostRevision = lastPostRevisionRef.current;
-      if (!draftSaved || !expectedPostRevision) {
-        throw new Error(
-          "The latest edit did not save. Retry the My Work save before sending.",
-        );
-      }
-      const finalDraft = onPrepareFinalWebsiteDraft
-        ? await onPrepareFinalWebsiteDraft({
-            caption: finalCaptionAnalysis.caption,
-            image: capturedCreative.image,
-            currentDraft: websiteDraft,
-          })
-        : buildFinalWebsiteDraftFallback({
-            currentDraft: websiteDraft,
-            dealerName: currentDealer?.name || "the dealership",
-            oemAffiliation: currentDealer?.oem_affiliation,
-            caption: finalCaptionAnalysis.caption,
-          });
-      const liveCreative = latestWebsiteCreativeRef.current;
-      const liveCaption = analyzeCaptionForDelivery(
-        liveCreative.caption,
-        bannedPhrases,
-        undefined,
-        deliveryLanguageAllowed,
-      ).caption;
-      const storedCreative = useAppStore.getState().generatedPost;
-      const changedCreativePart =
-        liveCreative.postId !== capturedCreative.postId
-          ? "post"
-          : liveCreative.image !== capturedCreative.image
-            ? "live image"
-            : liveCaption !== capturedCreative.caption
-              ? "live caption"
-              : storedCreative?.postId === capturedCreative.postId &&
-                  storedCreative.image !== capturedCreative.image
-                ? "saved image"
-                : null;
-      if (changedCreativePart) {
-        throw new Error(
-          "The creative changed while the website draft was being prepared. Review it and send again.",
-        );
-      }
-      const next = await enqueueWebsitePublication(
-        post.postId,
-        finalDraft,
-        expectedPostRevision,
-      );
-      persistWebsiteState(next.websiteDraft ?? finalDraft, next, creativePatch);
-      setWebsiteCheckError(null);
-      toast.success(
-        next.status === "waiting_approval"
-          ? "Final private website draft sent for manager approval."
-          : "Final private draft sent to Customer Hub.",
-      );
-    } catch (err) {
-      // If the POST response was lost—or another tab completed the exact
-      // handoff—restore the durable status before offering another Send.
-      let restored = false;
-      try {
-        const authoritative = await getWebsitePublication(post.postId);
-        if (authoritative.status !== "not_requested") {
-          // The status response carries the winning frozen draft. Never bind
-          // this tab's submitted copy to a handoff another tab won.
-          persistWebsiteState(
-            authoritative.websiteDraft ?? websiteDraft,
-            authoritative,
-          );
-          setWebsiteCheckError(null);
-          toast.warning(
-            err instanceof ApiError && err.code === "WEBSITE_DRAFT_ALREADY_SENT"
-              ? "Another window already sent the final website draft. The sent copy and status were restored."
-              : "The website handoff was already recorded. Its final copy and status were restored.",
-          );
-          restored = true;
-        }
-      } catch {
-        // Preserve the original, more useful send error below.
-      }
-      if (!restored) {
-        toast.error(toUiMessage(err, "The final website draft could not be sent."));
-      }
-    } finally {
-      websiteSendingRef.current = false;
-      setWebsiteSending(false);
-    }
-  }, [
-    activeCaptionPlatform,
-    bannedPhrases,
-    currentDealer?.name,
-    currentDealer?.oem_affiliation,
-    captionSetAnalysis.disclosures,
-    deliveryGateMessage,
-    deliveryLanguageAllowed,
-    deliveryLocked,
-    editedText,
-    effectivePack,
-    flushPendingDraft,
-    imageBusy,
-    onPrepareFinalWebsiteDraft,
-    post.image,
-    post.postId,
-    persistWebsiteState,
-    primaryCaption,
-    textBusy,
-    toast,
-    websiteDraft,
-  ]);
-
   useEffect(() => {
     if (previousPostTextRef.current === post.text) return;
     previousPostTextRef.current = post.text;
@@ -1788,189 +1087,9 @@ export const PostResult: React.FC<PostResultProps> = ({
     }
   }, [activeCaptionPlatform, historyIndex, textHistory]);
 
-  const adoptVideoUrl = useCallback((url: string | null) => {
-    // Preview selection must not revoke a completed queue asset. The user can
-    // switch video → photo → video without turning the retained URL into a
-    // dead pointer. URLs are revoked only on explicit removal or unmount.
-    if (url?.startsWith("blob:")) ownedVideoBlobUrlsRef.current.add(url);
-    activeVideoBlobRef.current = url;
-    setVideoUrl(url);
-    setVideoPlayError(null);
-    setIsVideoBuffering(Boolean(url));
-    // New clips start muted so autoplay works; prompt user to unmute.
-    setVideoMuted(true);
-  }, []);
-
-  useEffect(() => {
-    if (!videoUrl) return;
-    const activeJob = [...videoJobs].reverse().find((job) => job.url === videoUrl);
-    if (
-      !activeJob ||
-      activeJob.sourceCreativeKey !== currentVideoCreativeKey ||
-      (activeJob.aspectPreference !== "9:16" && activeJob.aspectPreference !== "16:9")
-    ) {
-      setManualVideoSelected(false);
-      adoptVideoUrl(null);
-      return;
-    }
-    if (manualVideoSelected) return;
-    const matchingDelivery = deliveryPlan.deliveries.find(
-      (delivery) =>
-        delivery.mediaKind === "video" &&
-        delivery.profile.preparation.kind === "veo" &&
-        delivery.profile.preparation.nativeAspectRatio === activeJob.aspectPreference &&
-        delivery.profile.preparation.resolution === activeJob.resolution &&
-        delivery.profile.preparation.durationSeconds === activeJob.duration,
-    );
-    if (matchingDelivery && matchingDelivery.id !== selectedDeliveryId) {
-      setSelectedDeliveryId(matchingDelivery.id);
-    }
-  }, [
-    adoptVideoUrl,
-    currentVideoCreativeKey,
-    deliveryPlan.deliveries,
-    manualVideoSelected,
-    selectedDeliveryId,
-    videoJobs,
-    videoUrl,
-  ]);
-
-  // Unmount-only bulk cleanup. Selecting a different asset never destroys it.
-  useEffect(() => {
-    return () => {
-      ownedVideoBlobUrlsRef.current.forEach((owned) => {
-        try {
-          URL.revokeObjectURL(owned);
-        } catch {
-          /* ignore */
-        }
-      });
-      ownedVideoBlobUrlsRef.current.clear();
-      activeVideoBlobRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    const retained = new Set(
-      videoJobs.map((job) => job.url).filter((url): url is string => Boolean(url)),
-    );
-    ownedVideoBlobUrlsRef.current.forEach((owned) => {
-      if (retained.has(owned) || activeVideoBlobRef.current === owned) return;
-      URL.revokeObjectURL(owned);
-      ownedVideoBlobUrlsRef.current.delete(owned);
-    });
-  }, [videoJobs, videoUrl]);
-
   useEffect(() => {
     setHasSavedMedia(false);
   }, [videoUrl]);
-
-  useEffect(() => {
-    let active = true;
-    setPreparedSave(null);
-    setPreparedSaveForKey(null);
-    setMediaPreparationError(null);
-    const preparationKey = selectedPreparationKey;
-
-    const selectedVideoUrl =
-      !manualVideoSelected &&
-      selectedDelivery?.mediaKind === "video" &&
-      selectedVideoJob?.status === "completed"
-        ? selectedVideoJob.url
-        : undefined;
-    if (
-      !manualVideoSelected &&
-      selectedDelivery?.mediaKind === "video" &&
-      !selectedVideoUrl
-    ) {
-      setIsPreparingSave(false);
-      return () => {
-        active = false;
-      };
-    }
-
-    setIsPreparingSave(true);
-    void (async () => {
-      const isVideo = manualVideoSelected
-        ? Boolean(videoUrl)
-        : selectedDelivery
-          ? selectedDelivery.mediaKind === "video"
-          : Boolean(videoUrl);
-      const sourceUrl =
-        !isVideo && activeImageFormat
-          ? await renderFormatIfNeeded(post.image, activeImageFormat)
-          : selectedVideoUrl || videoUrl || post.image;
-      if (
-        isVideo &&
-        !manualVideoSelected &&
-        selectedDelivery?.mediaKind === "video" &&
-        selectedDelivery.profile.preparation.kind === "veo" &&
-        selectedVideoUrl
-      ) {
-        await validateVideoMetadata(selectedVideoUrl, {
-          width: selectedDelivery.profile.output.width,
-          height: selectedDelivery.profile.output.height,
-          durationSeconds: selectedDelivery.profile.preparation.durationSeconds,
-        });
-      }
-      const basename = isVideo
-        ? (!manualVideoSelected && selectedDelivery?.mediaKind === "video"
-            ? selectedDelivery.filename.replace(/\.[^.]+$/, "")
-            : undefined) || "dealer-social-video"
-        : selectedDelivery?.filename.replace(/\.[^.]+$/, "") ||
-          activeImageFormat?.filename.replace(/\.[^.]+$/, "") ||
-          "dealer-social-post";
-      return prepareMediaForSave({
-        sourceUrl,
-        kind: isVideo ? "video" : "image",
-        basename,
-      });
-    })()
-      .then((prepared) => {
-        if (active) {
-          setPreparedSave(prepared);
-          setPreparedSaveForKey(preparationKey);
-        }
-      })
-      .catch((err) => {
-        if (!active) return;
-        setPreparedSave(null);
-        setPreparedSaveForKey(null);
-        setMediaPreparationError(
-          toUiMessage(err, "The exact platform file could not be prepared."),
-        );
-      })
-      .finally(() => {
-        if (active) setIsPreparingSave(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [
-    activeImageFormat,
-    manualVideoSelected,
-    post.image,
-    mediaPreparationNonce,
-    selectedDelivery,
-    selectedPreparationKey,
-    selectedVideoJob,
-    videoUrl,
-  ]);
-
-  useEffect(() => {
-    if (
-      !activePreparedSave ||
-      activePreparedSave.kind !== "image" ||
-      videoUrl ||
-      typeof URL.createObjectURL !== "function"
-    ) {
-      setFormattedPreviewUrl(null);
-      return;
-    }
-    const url = URL.createObjectURL(activePreparedSave.file);
-    setFormattedPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [activePreparedSave, videoUrl]);
 
   const displayImageUrl = formattedPreviewUrl || post.image;
 
@@ -2091,120 +1210,66 @@ export const PostResult: React.FC<PostResultProps> = ({
 
   const activeDisclosures = captionAnalysis.disclosures.trim();
   const activeDisclosureCategories = captionAnalysis.disclosureCategories;
-  const appendDisclosureText = (caption: string, disclosures: string): string => {
-    const cap = caption.trim();
-    const disclosureText = disclosures.trim();
-    if (!disclosureText) return cap;
-    return `${cap}\n\n${
-      disclosureText.startsWith("— Disclosures —")
-        ? disclosureText
-        : `— Disclosures —\n${disclosureText}`
-    }`;
-  };
-  const captionWithDisclosures = appendDisclosureText(editedText, activeDisclosures);
 
   /**
    * What actually reaches the destination, including the FTC team-member
    * disclosure that every delivery path prepends as a protected prefix.
    *
-   * `captionWithDisclosures` is body + compliance footer and stops there, so
-   * anything measuring or previewing it was short by the length of the
-   * disclosure plus its blank line — around 45 characters for a typical
-   * dealership name, which is 16% of X's 280-character budget. The meter told
-   * a salesperson they had room the destination was never going to give them,
-   * and the phone preview showed a caption missing the one line that is there
-   * for legal reasons. Idempotent, so a salesperson who typed the disclosure
-   * themselves does not see it twice.
+   * `appendDisclosureText(editedText, activeDisclosures)` is body + compliance
+   * footer and stops there, so anything measuring or previewing it without
+   * this wrapper was short by the length of the disclosure plus its blank
+   * line — around 45 characters for a typical dealership name, which is 16%
+   * of X's 280-character budget. The meter told a salesperson they had room
+   * the destination was never going to give them, and the phone preview
+   * showed a caption missing the one line that is there for legal reasons.
+   * Idempotent, so a salesperson who typed the disclosure themselves does not
+   * see it twice.
    */
-  const deliveredCaption = prependEmployeeDisclosure(
-    captionWithDisclosures,
+  const deliveredCaption = deliveredCaptionFor(
+    editedText,
+    activeDisclosures,
     currentDealer,
   );
 
   // Persist textarea edits into the active pack slot so Share uses salesperson edits.
   useEffect(() => {
     if (!activeCaptionPlatform) return;
-    const trimmed = editedText.trim();
-    if (!trimmed) return;
-    setPackOverrides((prev) => {
-      if (prev[activeCaptionPlatform] === trimmed) return prev;
-      return { ...prev, [activeCaptionPlatform]: trimmed };
-    });
+    setPackOverrides((prev) => withPackEdit(prev, activeCaptionPlatform, editedText));
   }, [editedText, activeCaptionPlatform]);
 
   /** Re-scan every outgoing variant; one platform can trigger a different disclosure. */
-  const sharePlatformCaptions = useMemo(() => {
-    if (!effectivePack) return undefined;
-    const out: Record<string, PlatformShareCaption> = {};
-    for (const [id, cap] of Object.entries(effectivePack)) {
-      // Active platform: use live editor text (includes in-progress edits)
-      const base = id === activeCaptionPlatform ? editedText.trim() : cap?.trim();
-      if (!base) continue;
-      // The disclosure is applied AFTER the compliance/normalisation pass, never
-      // before. analyzeCaptionForDelivery runs cleanSocialCaption, whose
-      // assistant-preamble heuristic drops an entire first line starting with
-      // "I have", "I've", "Here's" or "Sure" — exactly how a compliance officer
-      // words a material-connection line. Prepending first silently deleted the
-      // disclosure for four of five realistic wordings.
-      const attributed = appendDealershipMention(base, id, currentDealer);
-      const scanned = analyzeCaptionForDelivery(
-        attributed,
+  const sharePlatformCaptions = useMemo(
+    () =>
+      buildShareCaptions({
+        effectivePack,
+        activeCaptionPlatform,
+        editedText,
+        dealer: currentDealer,
         bannedPhrases,
-        undefined,
         deliveryLanguageAllowed,
-      );
-      // Scan the disclosure-prepended text (unchanged from before), so the
-      // identity-safety and prohibited-claims checks see exactly what the
-      // caption will look like once a delivery path adds requiredPrefix.
-      const prepared = {
-        ...scanned,
-        caption: prependEmployeeDisclosure(scanned.caption, currentDealer),
-      };
-      const identitySafe = customerIdentityIsSafe(prepared.caption);
-      out[id] = {
-        // Body only — `scanned.caption`, NOT `prepared.caption`. Every
-        // consumer of this pack (handleShareDelivery's comment two screens
-        // down, contentForTarget in ShareDialog, the fitter in
-        // services/publishTargets.ts) already treats requiredPrefix as the
-        // one channel for the disclosure. Storing the prepended string here
-        // duplicated it: ShareDialog spreads `...content` (which still
-        // carries requiredPrefix) and only overrides `text`, so the fitter
-        // added the disclosure a second time on top of a caption that
-        // already opened with it, corrupting both the published post and the
-        // budget it was fit against.
-        text: scanned.caption,
-        disclosures: prepared.disclosures || undefined,
-        blockedReason: !identitySafe
-          ? identityGateMessage
-          : prepared.compliance.prohibited.length > 0
-            ? prohibitedClaimsMessage(prepared.compliance.prohibited)
-            : undefined,
-      };
-    }
-    if (out.instagram_feed && !out.instagram_reel) {
-      out.instagram_reel = out.instagram_feed;
-    }
-    return Object.keys(out).length > 0 ? out : undefined;
-  }, [
-    activeCaptionPlatform,
-    bannedPhrases,
-    currentDealer,
-    customerIdentityIsSafe,
-    deliveryLanguageAllowed,
-    editedText,
-    effectivePack,
-    identityGateMessage,
-  ]);
+        identity: identityContext,
+        identityBlockedMessage: identityGateMessage,
+      }),
+    [
+      activeCaptionPlatform,
+      bannedPhrases,
+      currentDealer,
+      identityContext,
+      deliveryLanguageAllowed,
+      editedText,
+      effectivePack,
+      identityGateMessage,
+    ],
+  );
 
   const selectCaptionPlatform = useCallback(
     (platformId: string | null, withHaptic = true) => {
       // Flush current editor into pack before switching
-      if (activeCaptionPlatform && editedText.trim()) {
-        setPackOverrides((prev) => ({
-          ...prev,
-          [activeCaptionPlatform]: editedText.trim(),
-        }));
-      } else if (activeCaptionPlatform === null) {
+      if (activeCaptionPlatform) {
+        setPackOverrides((prev) =>
+          withPackEdit(prev, activeCaptionPlatform, editedText),
+        );
+      } else {
         setPrimaryCaption(editedText);
       }
       const pack = { ...(post.platformCaptions || {}), ...packOverrides };
@@ -2271,26 +1336,22 @@ export const PostResult: React.FC<PostResultProps> = ({
     let success = false;
     const copyDestinationId =
       activeCaptionPlatform || selectedDelivery?.destinationId || post.platformIds?.[0];
-    const attributedCaption = copyDestinationId
-      ? appendDealershipMention(editedText, copyDestinationId, currentDealer)
-      : editedText;
-    const preparedCopy = analyzeCaptionForDelivery(
-      attributedCaption,
+    // Attribute, scan, then prepend the disclosure and append the footer (see
+    // the note in buildShareCaptions). This path pastes straight into
+    // Facebook and has no budget fitter behind it, so a disclosure lost here
+    // is simply absent from the published post.
+    const copyResult = buildCopyText({
+      editedText,
+      copyDestinationId,
+      dealer: currentDealer,
       bannedPhrases,
-      undefined,
       deliveryLanguageAllowed,
-    );
-    if (preparedCopy.compliance.prohibited.length > 0) {
-      toast.warning(prohibitedClaimsMessage(preparedCopy.compliance.prohibited));
+    });
+    if (copyResult.blockedReason) {
+      toast.warning(copyResult.blockedReason);
       return;
     }
-    // Prepend after the scan (see the note in sharePlatformCaptions). This path
-    // pastes straight into Facebook and has no budget fitter behind it, so a
-    // disclosure lost here is simply absent from the published post.
-    const textToCopy = appendDisclosureText(
-      prependEmployeeDisclosure(preparedCopy.caption, currentDealer),
-      preparedCopy.disclosures,
-    );
+    const textToCopy = copyResult.text;
     if (navigator.clipboard) {
       try {
         await navigator.clipboard.writeText(textToCopy);
@@ -2421,159 +1482,6 @@ export const PostResult: React.FC<PostResultProps> = ({
     setIsTextEditing(false);
   };
 
-  const startVideoJob = async (
-    style: VideoStyle,
-    options: VideoRequestOptions,
-    existingJobId?: string,
-  ) => {
-    if (videoGenerationActiveRef.current) {
-      toast.warning("A video is already rendering. Wait for it to finish first.");
-      return;
-    }
-    videoGenerationActiveRef.current = true;
-    setIsVideoLoading(true);
-
-    const messages = [
-      "Setting up the virtual studio…",
-      "Directing the AI animator…",
-      "Rendering motion on your delivery photo…",
-      "Still working — AI video often takes 1–3 minutes…",
-      "Almost there — keep this screen open…",
-    ];
-    let messageIndex = 0;
-    let allowRotation = true;
-    const startedAt = Date.now();
-    const formatElapsed = () => {
-      const s = Math.floor((Date.now() - startedAt) / 1000);
-      const m = Math.floor(s / 60);
-      const r = s % 60;
-      return m > 0 ? `${m}m ${r}s` : `${r}s`;
-    };
-    setVideoLoadingMessage(`${messages[messageIndex]} (${formatElapsed()})`);
-    const intervalId = setInterval(() => {
-      if (!allowRotation) return;
-      // Advance copy every ~5s; always show elapsed so the wait feels tracked.
-      if ((Date.now() - startedAt) % 5000 < 1100) {
-        messageIndex = (messageIndex + 1) % messages.length;
-      }
-      setVideoLoadingMessage(`${messages[messageIndex]} (${formatElapsed()})`);
-    }, 1000);
-
-    videoJobSequenceRef.current += 1;
-    const randomJobId =
-      typeof globalThis.crypto?.randomUUID === "function"
-        ? globalThis.crypto.randomUUID()
-        : `${Date.now()}-${videoJobSequenceRef.current}`;
-    const jobId = existingJobId || `video-${randomJobId}`;
-    if (!existingJobId) {
-      setVideoJobs((prev) =>
-        retainNewestVideoJobs([
-          ...prev,
-          {
-            id: jobId,
-            style,
-            status: "queued" as const,
-            duration: options.durationSeconds,
-            soundtrack: options.soundtrack,
-            aspectPreference: options.aspectPreference,
-            resolution: options.resolution,
-            pacing: options.pacing,
-            createdAt: new Date().toISOString(),
-            sourceCreativeKey: currentVideoCreativeKey,
-          },
-        ]),
-      );
-    }
-
-    // Mark job as processing
-    setVideoJobs((prev) =>
-      prev.map((job) =>
-        job.id === jobId ? { ...job, status: "processing", error: undefined } : job,
-      ),
-    );
-
-    // The provider service owns bounded model/poll retries. Retrying the whole
-    // request here could create multiple paid Veo jobs after a lost response.
-    const maxAttempts = 1;
-    const runAttempt = async (attempt: number): Promise<void> => {
-      try {
-        const url = await onGenerateVideo(style, options);
-        // Always show the latest successful render (previous logic kept a
-        // stale/null URL if something odd was already set).
-        adoptVideoUrl(url);
-        if (dealerId) {
-          void archiveDealerMedia(dealerId, {
-            kind: "video",
-            source: url,
-            label: `${style} video`,
-          });
-        }
-        setVideoJobs((prev) =>
-          prev.map((job) =>
-            job.id === jobId ? { ...job, status: "completed", url } : job,
-          ),
-        );
-        toast.success("Video ready — tap play if it does not start.");
-        if (post.postId) {
-          try {
-            await markPostVideoGenerated(post.postId);
-          } catch (_err) {
-            // The paid render succeeded, so keep it usable. Be explicit that
-            // only the history metric failed rather than misreporting the
-            // whole generation as failed and tempting a costly retry.
-            toast.warning(
-              "Video created, but its history metric could not be updated.",
-            );
-          }
-        }
-      } catch (error) {
-        const normalized = normalizeError(error);
-        const retryDelay =
-          attempt < maxAttempts && normalized.retryable ? attempt * 8000 : 0;
-        const attemptMessage = `Attempt ${attempt} failed: ${normalized.message}`;
-
-        if (retryDelay > 0) {
-          allowRotation = false;
-          setVideoLoadingMessage(
-            `${attemptMessage}. Retrying in ${retryDelay / 1000}s...`,
-          );
-          setVideoJobs((prev) =>
-            prev.map((job) =>
-              job.id === jobId
-                ? { ...job, status: "queued", error: attemptMessage }
-                : job,
-            ),
-          );
-          await new Promise((resolve) => setTimeout(resolve, retryDelay));
-          allowRotation = true;
-          setVideoLoadingMessage(messages[0]);
-          messageIndex = 0;
-          return runAttempt(attempt + 1);
-        }
-
-        const finalMessage = `${attemptMessage}. ${recoveryHint(normalized)}`;
-        allowRotation = false;
-        setVideoLoadingMessage(finalMessage);
-        setVideoJobs((prev) =>
-          prev.map((job) =>
-            job.id === jobId ? { ...job, status: "failed", error: finalMessage } : job,
-          ),
-        );
-        throw normalized;
-      }
-    };
-
-    try {
-      await runAttempt(1);
-    } catch (err) {
-      // Failure is already recorded in job state; no additional action needed here.
-    } finally {
-      videoGenerationActiveRef.current = false;
-      setIsVideoLoading(false);
-      clearInterval(intervalId);
-    }
-  };
-
   const handleGenerateVideo = async (
     style: VideoStyle,
     options: VideoRequestOptions,
@@ -2583,29 +1491,6 @@ export const PostResult: React.FC<PostResultProps> = ({
     setVideoDirectorDeliveryId(null);
     await startVideoJob(style, options);
   };
-
-  /**
-   * Brand mode "Add video": the dealership motion signature, not an option
-   * matrix. Spec §4.3 — 9:16 · 6s · 720p · music on, style bound to the Look.
-   */
-  const houseMotionOptions = useMemo((): VideoRequestOptions | null => {
-    const motion = resolved.motion;
-    if (!motion) return null;
-    const aspect: VideoRequestOptions["aspectPreference"] =
-      motion.aspects[0] === "16:9" ? "16:9" : "9:16";
-    const soundtrack = (
-      ["none", "celebration", "cinematic", "anthemic", "funk"] as const
-    ).includes(motion.audio as VideoRequestOptions["soundtrack"])
-      ? (motion.audio as VideoRequestOptions["soundtrack"])
-      : "cinematic";
-    return {
-      durationSeconds: 6,
-      soundtrack,
-      aspectPreference: aspect,
-      resolution: "720p",
-      pacing: "cinematic",
-    };
-  }, [resolved.motion]);
 
   const handleAddHouseVideo = async () => {
     if (!resolved.motion || !houseMotionOptions) return;
@@ -2664,54 +1549,6 @@ export const PostResult: React.FC<PostResultProps> = ({
       setCaptionRetryUsed(true);
     }
     await handleTextAction(onRegenerateText).catch(() => undefined);
-  };
-
-  const handleRetryVideo = async (jobId: string) => {
-    const job = videoJobs.find((j) => j.id === jobId);
-    if (!job) return;
-    const options: VideoRequestOptions = {
-      durationSeconds: job.duration,
-      soundtrack: job.soundtrack,
-      aspectPreference: job.aspectPreference,
-      resolution: job.resolution,
-      pacing: job.pacing,
-    };
-    await startVideoJob(
-      job.style,
-      options,
-      job.sourceCreativeKey === currentVideoCreativeKey ? jobId : undefined,
-    );
-  };
-
-  const handleRemoveVideoJob = (jobId: string) => {
-    const removed = videoJobs.find((job) => job.id === jobId);
-    if (removed?.url && activeVideoBlobRef.current === removed.url) {
-      adoptVideoUrl(null);
-      setManualVideoSelected(false);
-    }
-    if (removed?.url?.startsWith("blob:")) {
-      ownedVideoBlobUrlsRef.current.delete(removed.url);
-      URL.revokeObjectURL(removed.url);
-    }
-    setVideoJobs((prev) => prev.filter((job) => job.id !== jobId));
-  };
-
-  const handleSelectDelivery = (deliveryId: string) => {
-    const delivery = deliveriesById.get(deliveryId);
-    if (!delivery) return;
-    triggerHapticFeedback();
-    setPreparedSave(null);
-    setPreparedSaveForKey(null);
-    setIsPreparingSave(delivery.mediaKind === "photo");
-    setSelectedDeliveryId(deliveryId);
-    setMediaPreparationError(null);
-    setManualVideoSelected(false);
-    if (delivery.mediaKind === "photo") {
-      adoptVideoUrl(null);
-      return;
-    }
-    const job = videoJobForDelivery(delivery);
-    adoptVideoUrl(job?.status === "completed" && job.url ? job.url : null);
   };
 
   const handleSelectMobileDelivery = (deliveryId: string) => {
@@ -2890,7 +1727,7 @@ export const PostResult: React.FC<PostResultProps> = ({
       handleSelectDelivery(queue[0]);
     } else if (!activePreparedSave) {
       setMediaPreparationError(null);
-      setMediaPreparationNonce((value) => value + 1);
+      retryPreparation();
     }
   };
 
@@ -2929,7 +1766,7 @@ export const PostResult: React.FC<PostResultProps> = ({
     if (!delivery) return;
     if (delivery.mediaKind === "photo") {
       handleSelectDelivery(deliveryId);
-      setMediaPreparationNonce((value) => value + 1);
+      retryPreparation();
       return;
     }
     if (creativeLockedForReview) {
@@ -3068,26 +1905,24 @@ export const PostResult: React.FC<PostResultProps> = ({
     ],
   );
 
-  const hasWorkAtRisk =
-    !hasSavedMedia ||
-    !hasCopiedCaption ||
-    captionWasEdited ||
-    imageEditPrompt.trim().length > 0 ||
-    videoJobs.length > 0;
+  // hasWorkAtRisk / requestLeaveResult's decision procedure now live in
+  // hooks/usePostLeaveGuard.ts; PostResult keeps the same names as thin
+  // aliases so every downstream reference is unchanged.
+  const { atRisk: hasWorkAtRisk, requestLeave } = usePostLeaveGuard({
+    hasSavedMedia,
+    hasCopiedCaption,
+    captionWasEdited,
+    imageEditPromptDirty: imageEditPrompt.trim().length > 0,
+    videoJobCount: videoJobs.length,
+    imageBusy,
+    textBusy,
+    websiteSending,
+  });
 
   const requestLeaveResult = (mode: "startOver" | "remix") => {
-    triggerHapticFeedback();
-    if (imageBusy || textBusy || websiteSending) {
-      toast.warning(
-        websiteSending
-          ? "Wait for the final website handoff to finish before leaving this post."
-          : mode === "remix"
-            ? "Wait for the current update to finish before remixing this photo."
-            : "Wait for the current update to finish before starting another post.",
-      );
-      return;
-    }
-    if (hasWorkAtRisk) {
+    const outcome = requestLeave(mode);
+    if (outcome === "blocked") return;
+    if (outcome === "confirm") {
       setLeaveConfirm(mode);
       return;
     }
@@ -4479,7 +3314,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                               void handleRetryDelivery(queuedDelivery.id);
                             } else {
                               handleSelectDelivery(queuedDelivery.id);
-                              setMediaPreparationNonce((value) => value + 1);
+                              retryPreparation();
                             }
                           }}
                         >
@@ -4562,7 +3397,7 @@ export const PostResult: React.FC<PostResultProps> = ({
                         <div className="flex items-center gap-1.5">
                           <Badge
                             variant={
-                              draftSyncStatus === "error"
+                              draftSyncStatus === "failed"
                                 ? "error"
                                 : draftSyncStatus === "saved"
                                   ? "success"
@@ -4570,17 +3405,17 @@ export const PostResult: React.FC<PostResultProps> = ({
                             }
                             uppercase={false}
                           >
-                            {draftSyncStatus === "error"
+                            {draftSyncStatus === "failed"
                               ? "History save failed"
                               : draftSyncStatus === "saved"
                                 ? "Saved to My work"
                                 : "Saving to My work…"}
                           </Badge>
-                          {draftSyncStatus === "error" ? (
+                          {draftSyncStatus === "failed" ? (
                             <button
                               type="button"
                               className="min-h-8 rounded-lg border border-error-400/30 bg-error-500/10 px-2 text-[10px] font-semibold text-error-100 [.theme-light_&]:text-error-800"
-                              onClick={() => void flushPendingDraft()}
+                              onClick={() => void autosave.retry()}
                             >
                               Retry
                             </button>

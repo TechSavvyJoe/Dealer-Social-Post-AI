@@ -92,10 +92,30 @@ describe("a rejection has to say what to change", () => {
 
 describe("the reason reaches the salesperson", () => {
   it("leads the locked-delivery message on the result screen", () => {
-    const result = read("components/PostResult.tsx");
-    expect(result).toContain("A manager asked for a change: ${rejectionReason}");
-    // And the toast, for someone who is not looking at the banner.
-    expect(result).toContain("Manager asked for a change: ${result.rejection_reason}");
+    // The banner copy moved into utils/postLocks.ts's derivePostLocks
+    // (approvalMessage) as part of the pure lock-derivation extraction;
+    // PostResult.tsx now renders it via that module.
+    const locks = read("utils/postLocks.ts");
+    expect(locks).toContain("A manager asked for a change: ${input.rejectionReason}");
+    // And the toast, for someone who is not looking at the banner. This one
+    // stays with the approval-status polling effect, not the derived lock
+    // message — moved into hooks/useApprovalStatus.ts as part of the PR2-0
+    // extraction (PostResult.tsx now just calls the hook).
+    const approvalHook = read("hooks/useApprovalStatus.ts");
+    expect(approvalHook).toContain(
+      "Manager asked for a change: ${result.rejection_reason}",
+    );
+  });
+
+  it("the retargeted banner-copy guard actually fails on a wrong wording (planted mutant)", () => {
+    const locks = read("utils/postLocks.ts");
+    const mutated = locks.replace(
+      "A manager asked for a change: ${input.rejectionReason}",
+      "A manager requested a change: ${input.rejectionReason}",
+    );
+    expect(mutated).not.toContain(
+      "A manager asked for a change: ${input.rejectionReason}",
+    );
   });
 
   it("appears on the row in My work", () => {
@@ -109,14 +129,13 @@ describe("the reason reaches the salesperson", () => {
     // set rejectionReason, so reopening a rejected post showed the generic
     // "a manager rejected this" copy with the actual reason dropped on the
     // floor — while the same record rendered it in the list two hundred lines
-    // down.
-    const history = read("components/PostHistory.tsx");
-    const mapping = history.slice(
-      history.indexOf("const generated: GeneratedPost = {"),
-      history.indexOf(
-        "releaseStatus:",
-        history.indexOf("const generated: GeneratedPost = {"),
-      ),
+    // down. The mapping moved to utils/historyPost.ts's
+    // toGeneratedPostFromRecord (PR2-0 extraction); PostHistory.tsx now calls
+    // it instead of building the object inline.
+    const historyPost = read("utils/historyPost.ts");
+    const mapping = historyPost.slice(
+      historyPost.indexOf("const approval ="),
+      historyPost.indexOf("releaseStatus:", historyPost.indexOf("const approval =")),
     );
     expect(mapping).toContain("approvalStatus: approval");
     expect(mapping).toContain("rejectionReason: post.rejection_reason || undefined");

@@ -3334,6 +3334,285 @@ routerAdd("GET", "/api/app/posts/:id/status", (c) => {
   }
 });
 
+// Record that the post's author completed a share: the OS share sheet
+// resolved, the file was downloaded, or the caption was copied. The client
+// calls this only after the share happened, and the row says only that — the
+// honest label is "sent to the share sheet", never which app received it.
+//
+// Events live in `post_share_events`, never on the post: saving the post
+// would bump `posts.updated`, which is the website hand-off's post_revision.
+// The route fails closed on every delivery lock, deduplicates a repeat of the
+// same channel and method within 60 seconds, and keeps the newest 20 events
+// per post. Additive: an older frontend never calls it.
+routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const policies = require(__hooks + "/requestPolicies.js");
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  const dealer = context.dealer;
+  const shareWriter = context.person ? context.person.id : context.session.id;
+  const shareHourly = helpers.checkProxyRateLimit(
+    "app-write:post-share:hour:" + dealer.id + ":" + shareWriter,
+    120,
+    60 * 60 * 1000,
+  );
+  if (!shareHourly.ok) {
+    const retryAfter = Math.max(1, Math.ceil((shareHourly.retryAfterMs || 0) / 1000));
+    c.response().header().set("Retry-After", String(retryAfter));
+    return c.json(429, {
+      error: "WRITE_RATE_LIMITED",
+      code: "WRITE_RATE_LIMITED",
+      message: "Too many shares recorded. Try again later.",
+    });
+  }
+
+  let record = null;
+  try {
+    record = $app.dao().findRecordById("posts", c.pathParam("id"));
+  } catch (_e) {
+    return c.json(404, { error: "Post not found" });
+  }
+
+  if (record.getString("dealer") !== dealer.id) {
+    return c.json(403, { error: "Cross-dealer share record blocked" });
+  }
+
+  // Only the post's author records a share. A manager reading a teammate's
+  // post in History is not its author.
+  const token = helpers.readSessionToken(c);
+  const currentOwnerHash = token ? helpers.hashSessionToken(token) : "";
+  const isOwner =
+    !!currentOwnerHash && currentOwnerHash === record.getString("owner_session_hash");
+  const isSamePerson = helpers.isAuthoritativePostPerson(context, record);
+  if (!isOwner && !isSamePerson) {
+    return c.json(403, { error: "Post belongs to another session" });
+  }
+
+  const body = $apis.requestInfo(c).data || {};
+  const channel = (body.channel || "").toString().trim();
+  const via = (body.via || "").toString().trim();
+  if (helpers.allowedPostPlatformIds().indexOf(channel) === -1) {
+    return c.json(400, {
+      error: "INVALID_SHARE_CHANNEL",
+      code: "INVALID_SHARE_CHANNEL",
+      message: "Unknown share destination.",
+    });
+  }
+  if (["share_sheet", "download", "copy"].indexOf(via) === -1) {
+    return c.json(400, {
+      error: "INVALID_SHARE_METHOD",
+      code: "INVALID_SHARE_METHOD",
+      message: "Unknown share method.",
+    });
+  }
+
+  // Delivery locks. Unknown or legacy-blank approval states fail closed, the
+  // same reading the website hand-off applies.
+  const approval = record.getString("approval_status");
+  if (approval !== "n_a" && approval !== "approved") {
+    return c.json(409, {
+      error: "APPROVAL_REQUIRED",
+      code: "APPROVAL_REQUIRED",
+      message: "This post needs a manager's approval before it is shared.",
+    });
+  }
+  const releaseRequired = record.getBool
+    ? record.getBool("release_required")
+    : !!record.get("release_required");
+  const hasRelease = record.getBool
+    ? record.getBool("has_release")
+    : !!record.get("has_release");
+  if (
+    releaseRequired &&
+    (!hasRelease || record.getString("release_status") !== "saved")
+  ) {
+    return c.json(409, {
+      error: "RELEASE_NOT_SAVED",
+      code: "RELEASE_NOT_SAVED",
+      message: "The customer's photo release is not saved on this post.",
+    });
+  }
+  if (policies.postImageReviewRequired(record, policies.geminiModelPolicySnapshot())) {
+    return c.json(409, {
+      error: "IMAGE_REVIEW_REQUIRED",
+      code: "IMAGE_REVIEW_REQUIRED",
+      message: "This saved image predates the current on-pixel safety review.",
+    });
+  }
+
+  try {
+    // Both copy locks below read the stored caption set: the caption and
+    // every selected destination's caption.
+    const websitePublications = require(__hooks + "/websitePublications.js");
+    const allowedPlatformIds = helpers.allowedPostPlatformIds();
+    let platformIds = [];
+    try {
+      const parsed = JSON.parse(record.getString("platform_ids") || "[]");
+      if (Array.isArray(parsed)) {
+        platformIds = parsed.filter(
+          (id, index) =>
+            typeof id === "string" &&
+            allowedPlatformIds.indexOf(id) !== -1 &&
+            parsed.indexOf(id) === index,
+        );
+      }
+    } catch (_e) {}
+    const parsedPlatformCaptions = helpers.parsePostPlatformCaptions(
+      record.getString("platform_captions"),
+      allowedPlatformIds,
+      platformIds,
+    );
+    const platformCaptions = parsedPlatformCaptions.ok
+      ? parsedPlatformCaptions.value
+      : {};
+
+    // The claim lock the result screen enforces (utils/postLocks.ts), under
+    // the current server policy: prohibited claims, this dealership's blocked
+    // wording as configured now, and the canonical disclosures, over the same
+    // stored caption set the draft save and the approval decision validate. A
+    // phrase the dealership blocks after the post was saved locks it here too.
+    const compliance = policies.validatePostComplianceSet(
+      [record.getString("caption")].concat(Object.values(platformCaptions)),
+      record.getString("disclosures"),
+      dealer.getString("banned_phrases"),
+    );
+    if (!compliance.ok) {
+      // The result screen's claim-lock wording (prohibitedClaimsMessage in
+      // utils/complianceDisclosures.ts). The policy names the dealership's
+      // blocked phrases but only flags a legal claim, so that one is described
+      // rather than quoted. A disclosure mismatch keeps the policy's error.
+      const blockedPhrases = compliance.dealer_blocked_phrases || [];
+      const legalClaim = !!compliance.legal_prohibited;
+      let claimMessage = compliance.error;
+      if (legalClaim || blockedPhrases.length > 0) {
+        const quoted = blockedPhrases
+          .map((phrase) => "\u201c" + phrase.trim() + "\u201d")
+          .join(", ");
+        const reason =
+          legalClaim && blockedPhrases.length > 0
+            ? "These claims are prohibited or blocked by this dealership and cannot be published."
+            : legalClaim
+              ? "Claims such as guaranteed approval or no credit check cannot be published."
+              : "This dealership has blocked this wording, so it cannot be published.";
+        claimMessage = legalClaim
+          ? "Remove prohibited advertising claims" +
+            (quoted ? ", including " + quoted : "") +
+            ". " +
+            reason
+          : "Remove prohibited advertising claim" +
+            (blockedPhrases.length === 1 ? "" : "s") +
+            ": " +
+            quoted +
+            ". " +
+            reason;
+      }
+      return c.json(409, {
+        error: "CLAIMS_BLOCKED",
+        code: "CLAIMS_BLOCKED",
+        message: claimMessage,
+      });
+    }
+
+    // The same customer-identity review the History list projects as
+    // identity_review_required: caption, disclosures, every destination
+    // caption, and the website draft.
+    const storedWebsiteDraft = websitePublications.parseWebsiteDraft(
+      record.getString("website_draft"),
+    );
+    const rawWebsiteDraft =
+      storedWebsiteDraft.ok &&
+      storedWebsiteDraft.value &&
+      storedWebsiteDraft.value.enabled
+        ? storedWebsiteDraft.value
+        : null;
+    const protectedCustomerName = record.getString("customer_name");
+    const copyReview = websitePublications.reviewPostCustomerIdentity(
+      protectedCustomerName,
+      [record.getString("caption"), record.getString("disclosures")].concat(
+        Object.keys(platformCaptions).map((id) => platformCaptions[id]),
+      ),
+      [
+        websitePublications.groundedIdentityPhrase(dealer.getString("name")),
+        websitePublications.groundedIdentityPhrase(dealer.getString("oem_affiliation")),
+        record.getString("salesperson_name"),
+        websitePublications.publicCustomerLabel(record.getString("salesperson_name")),
+        websitePublications.groundedIdentityPhrase(
+          rawWebsiteDraft
+            ? websitePublications.groundedVehicleIdentityPhrase(
+                rawWebsiteDraft.vehicleDescription || "",
+              )
+            : "",
+        ),
+      ],
+      releaseRequired &&
+        !websitePublications.publicCustomerLabel(protectedCustomerName),
+    );
+    const websiteReview = websitePublications.publicWebsiteDraftForPost(
+      record,
+      dealer.getString("name"),
+      dealer.getString("oem_affiliation"),
+    );
+    if (copyReview.reviewRequired || websiteReview.identityReviewRequired) {
+      return c.json(409, {
+        error: "IDENTITY_REVIEW_REQUIRED",
+        code: "IDENTITY_REVIEW_REQUIRED",
+        message: "This post's copy is held for customer-name review.",
+      });
+    }
+
+    const maxShareEvents = 20;
+    const dedupeSince = helpers.databaseTimestamp(
+      new Date(Date.now() - 60 * 1000).toISOString(),
+    );
+    let shared = null;
+    let deduplicated = false;
+    $app.dao().runInTransaction(function (txDao) {
+      const existing = txDao.findRecordsByFilter(
+        "post_share_events",
+        "post = {:post}",
+        "-created,-id",
+        100,
+        0,
+        { post: record.id },
+      );
+      for (let i = 0; i < existing.length; i++) {
+        if (
+          existing[i].getString("channel") === channel &&
+          existing[i].getString("via") === via &&
+          existing[i].getString("created") >= dedupeSince
+        ) {
+          shared = existing[i];
+          deduplicated = true;
+          return;
+        }
+      }
+      const event = new Record(txDao.findCollectionByNameOrId("post_share_events"));
+      event.set("post", record.id);
+      event.set("dealer", dealer.id);
+      event.set("channel", channel);
+      event.set("via", via);
+      txDao.saveRecord(event);
+      shared = event;
+      // Keep the newest events: the one just written plus maxShareEvents - 1.
+      for (let i = maxShareEvents - 1; i < existing.length; i++) {
+        txDao.deleteRecord(existing[i]);
+      }
+    });
+
+    c.response().header().set("Cache-Control", "private, no-store");
+    return c.json(200, {
+      id: record.id,
+      channel: shared.getString("channel"),
+      via: shared.getString("via"),
+      shared_at: shared.getString("created"),
+      deduplicated: deduplicated,
+    });
+  } catch (err) {
+    console.error("[/api/app/posts/:id/shared] error", err);
+    return c.json(500, { error: "Failed to record share" });
+  }
+});
+
 routerAdd("GET", "/api/app/posts/:id/website-publication", (c) => {
   const helpers = require(__hooks + "/helpers.js");
   const policies = require(__hooks + "/requestPolicies.js");
@@ -3811,6 +4090,60 @@ routerAdd("GET", "/api/app/posts", (c) => {
     const websitePublicationByPost = websitePublications.publicationSummariesForDealer(
       dealer.id,
     );
+    // Derived "Shared · Facebook" summary per post from post_share_events.
+    // The route that writes them keeps at most 20 per post, so this read is
+    // bounded by the page size. Ids are bound one placeholder each (dbx
+    // rejects a JS array inside IN()), in chunks well under SQLite's limit.
+    // A failed read leaves every summary null rather than failing the list.
+    const shareSummaryByPost = {};
+    try {
+      const pagePostIds = page.map((r) => r.id);
+      for (let start = 0; start < pagePostIds.length; start += 200) {
+        const chunk = pagePostIds.slice(start, start + 200);
+        const shareParams = { dealer: dealer.id };
+        const placeholders = chunk.map((id, index) => {
+          shareParams["post" + index] = id;
+          return "{:post" + index + "}";
+        });
+        const shareRows = arrayOf(
+          new DynamicModel({ post: "", channel: "", via: "", created: "" }),
+        );
+        $app
+          .dao()
+          .db()
+          .newQuery(
+            "SELECT post, channel, via, created FROM post_share_events " +
+              "WHERE dealer = {:dealer} AND post IN (" +
+              placeholders.join(", ") +
+              ") ORDER BY created DESC, id DESC",
+          )
+          .bind(shareParams)
+          .all(shareRows);
+        for (let i = 0; i < shareRows.length; i++) {
+          const postId = (shareRows[i].post || "").toString();
+          const shareChannel = (shareRows[i].channel || "").toString();
+          if (!postId || !shareChannel) continue;
+          let summary = shareSummaryByPost[postId];
+          if (!summary) {
+            // Rows arrive newest first, so the first row seen is the latest.
+            summary = {
+              count: 0,
+              last_shared_at: (shareRows[i].created || "").toString(),
+              last_channel: shareChannel,
+              last_via: (shareRows[i].via || "").toString(),
+              channels: [],
+            };
+            shareSummaryByPost[postId] = summary;
+          }
+          summary.count += 1;
+          if (summary.channels.indexOf(shareChannel) === -1) {
+            summary.channels.push(shareChannel);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[/api/app/posts] share summary error", err);
+    }
     const items = page.map((r) => {
       let platformIds = [];
       const storedPlatformIdsRaw = r.getString("platform_ids");
@@ -4009,6 +4342,7 @@ routerAdd("GET", "/api/app/posts", (c) => {
         identity_review_required: identityReviewRequired || undefined,
         image_review_required: imageReviewRequired || undefined,
         website_publication: websitePublication,
+        share_summary: shareSummaryByPost[r.id] || null,
       };
     });
 
