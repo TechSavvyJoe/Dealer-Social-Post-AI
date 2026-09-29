@@ -1,0 +1,63 @@
+/**
+ * HARD GATE for the narrow Codex-findings guard fix (orchestrator-owned; do not edit).
+ * base = production's guard (origin/main == 30327d9), new = this worktree.
+ * Rule: no caption that base REJECTS may be ACCEPTED by new (client or server),
+ * except rows explicitly listed in ALLOWED_RELAXATIONS (the one false-refusal
+ * finding, "Celebrating Local Heroes"-style collective participial openers).
+ * Also: new client === new server on every row (parity).
+ * Writes a full table to oracle-report.txt.
+ */
+import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+import { captionUsesOnlyExpectedCustomer as clientNewFn } from "../../../utils/captionQuality";
+import { captionUsesOnlyExpectedCustomer as clientBaseFn } from "./base/captionQuality";
+
+type WP = { containsUnexpectedCustomerIdentity(t: string, c: string | undefined, a: unknown[]): boolean; groundedIdentityPhrase(p: string): unknown };
+const loadPb = (rel: string): WP => { const src = readFileSync(resolve(process.cwd(), rel), "utf8"); const module = { exports: {} as WP }; new Function("module", "exports", src)(module, module.exports); return module.exports; };
+const srvNew = loadPb("pb_hooks/websitePublications.js");
+const srvBase = loadPb("__tests__/__scratch__/oracle/base/websitePublications.js");
+const DEALER = "Bob Maxey Ford of Howell", OEM = "Ford", SALESPERSON = "Joe Gallant";
+const server = (w: WP) => (caption: string, customer?: string, vehicle?: string) => !w.containsUnexpectedCustomerIdentity(caption, customer, [w.groundedIdentityPhrase(DEALER), w.groundedIdentityPhrase(OEM), SALESPERSON, "Joe", w.groundedIdentityPhrase(vehicle || "")]);
+const client = (fn: typeof clientNewFn) => (caption: string, customer?: string, vehicle?: string) => fn(caption, customer, { allowedPhrases: [DEALER, OEM, vehicle], maskedPhrases: [SALESPERSON, "Joe"], rejectAnyCustomerIdentity: !customer });
+
+type Row = { caption: string; customer?: string; vehicle?: string; safe: boolean };
+const corpus: Row[] = JSON.parse(readFileSync(resolve(process.cwd(), "__tests__/__scratch__/oracle/corpus-5850.json"), "utf8"));
+const baselineParity = new Set(readFileSync(resolve(process.cwd(), "__tests__/__scratch__/oracle/baseline-parity.txt"), "utf8").split("\n").filter(Boolean).map((l) => l.replace(/ newClient=.*$/, "")));
+const extraPath = resolve(process.cwd(), "__tests__/__scratch__/oracle/extra-rows.json");
+let extra: Row[] = []; try { extra = JSON.parse(readFileSync(extraPath, "utf8")); } catch { /* optional */ }
+
+// Only the false-refusal finding may relax base: collective noun phrases after a participial opener,
+// and only on rows whose expected verdict is ACCEPT (a relaxation that carries a real name is a violation).
+const ALLOWED_RELAXATIONS = [/\b(Celebrating|Honoring|Honouring|Welcoming|Thanking|Supporting|Recognizing|Recognising|Saluting)\s+(Local|Our|The|All|Every)\b/];
+
+describe("narrow guard fix — hard gate vs production", () => {
+  it("never accepts what production refuses (except the listed relaxation) and keeps client/server parity", () => {
+    const rows = [...corpus, ...extra];
+    const out: string[] = [];
+    const violations: string[] = [], parity: string[] = [], moved: string[] = [];
+    let improvedLeaks = 0, relaxed = 0;
+    for (const r of rows) {
+      const bC = client(clientBaseFn)(r.caption, r.customer, r.vehicle), bS = server(srvBase)(r.caption, r.customer, r.vehicle);
+      const nC = client(clientNewFn)(r.caption, r.customer, r.vehicle), nS = server(srvNew)(r.caption, r.customer, r.vehicle);
+      const base = bC && bS, next = nC && nS; // accept only when both sides accept
+      const tag = JSON.stringify({ caption: r.caption, customer: r.customer, vehicle: r.vehicle });
+      if (nC !== nS && !baselineParity.has(tag)) parity.push(tag + ` newClient=${nC} newServer=${nS}`);
+      if (base !== next) {
+        const line = `${base ? "ACCEPT" : "REJECT"}→${next ? "ACCEPT" : "REJECT"} expect=${r.safe ? "ACCEPT" : "REJECT"} ${tag}`;
+        moved.push(line);
+        if (!base && next) { if (r.safe && ALLOWED_RELAXATIONS.some((re) => re.test(r.caption))) relaxed++; else violations.push(line); }
+        if (base && !next && !r.safe) improvedLeaks++;
+      }
+    }
+    out.push(`rows=${rows.length} (corpus ${corpus.length} + extra ${extra.length})`);
+    out.push(`moved=${moved.length} closedLeaks(base ACCEPT→REJECT on expect-REJECT)=${improvedLeaks} allowedRelaxations=${relaxed}`);
+    out.push(`VIOLATIONS (base REJECT → new ACCEPT, not allowed)=${violations.length}`);
+    out.push(`NEW PARITY MISMATCHES (new client ≠ new server, beyond the 27 production already has)=${parity.length}`);
+    out.push("", "== violations ==", ...violations, "", "== parity ==", ...parity, "", "== all moved rows ==", ...moved);
+    writeFileSync(resolve(process.cwd(), "__tests__/__scratch__/oracle/oracle-report.txt"), out.join("\n"));
+    console.log(out.slice(0, 4).join("\n"));
+    expect(violations).toEqual([]);
+    expect(parity).toEqual([]);
+  }, 600_000);
+});

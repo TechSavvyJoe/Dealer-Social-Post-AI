@@ -1,0 +1,27 @@
+{"caption":"Congrats to 𐐔𐐯𐑅𐐨𐑉𐐯𐐻 on the new Bronco!"} newClient=false newServer=true
+{"caption":"Congrats to 陳𠮷 and Sarah!","customer":"陳𠮷"} newClient=false newServer=true
+{"caption":"Congrats to 李𠀋 Wong on the new Bronco!","customer":"李𠀋 Wong"} newClient=false newServer=true
+{"caption":"Congrats to 𐓏𐓘𐓻𐓘𐓻𐓟 on the new Bronco!"} newClient=false newServer=true
+{"caption":"Congrats to 𞤀𞤣𞤤𞤢𞤥 on the new Bronco!"} newClient=false newServer=true
+{"caption":"Congrats to 𐐔𐐯𐑅𐐨𐑉𐐯𐐻 𐐖𐐱𐐸𐑌𐑅𐐱𐑌!"} newClient=false newServer=true
+{"caption":"Congrats to 陳大𠮶 and Dave Miller on the new Bronco!","customer":"陳大𠮶"} newClient=false newServer=true
+{"caption":"Congrats to 陳𠮷 Miller on the new Bronco!","customer":"陳𠮷"} newClient=false newServer=true
+{"caption":"Congrats to 𞤀𞤣𞤢𞤥𞤢 Diallo on the new Bronco!","customer":"𞤀𞤣𞤢𞤥𞤢 Diallo"} newClient=false newServer=true
+{"caption":"Congrats to Diallo on the new Bronco!","customer":"𞤀𞤣𞤢𞤥𞤢 Diallo"} newClient=false newServer=true
+{"caption":"Congrats to 𐓏𐓘𐓻𐓘𐓻𐓟 Smith on the new Bronco!","customer":"𐓏𐓘𐓻𐓘𐓻𐓟 Smith"} newClient=false newServer=true
+{"caption":"Congrats to 𞤀𞤣𞤢𞤥𞤢 on the new Bronco!","customer":"Michelle"} newClient=false newServer=true
+{"caption":"Congrats to 𞤀𞤣𞤢𞤥𞤢 on the new Bronco!"} newClient=false newServer=true
+{"caption":"Congrats to Constructor on the new Bronco!"} newClient=false newServer=true
+{"caption":"Congrats to Constructor on the new Bronco!","customer":"Michelle"} newClient=false newServer=true
+{"caption":"Congrats to प्रिया and Dave!","customer":"प्रिया"} newClient=false newServer=true
+{"caption":"Congrats to प्रिया Miller!","customer":"प्रिया"} newClient=false newServer=true
+{"caption":"Congrats to ਪ੍ਰੀਤ and Dave!","customer":"ਪ੍ਰੀਤ"} newClient=false newServer=true
+{"caption":"Congrats to ਪ੍ਰੀਤ Miller!","customer":"ਪ੍ਰੀਤ"} newClient=false newServer=true
+{"caption":"Congrats to சுரேஷ் and Dave!","customer":"சுரேஷ்"} newClient=false newServer=true
+{"caption":"Congrats to சுரேஷ் Miller!","customer":"சுரேஷ்"} newClient=false newServer=true
+{"caption":"Congrats to محمّد and Dave!","customer":"محمّد"} newClient=false newServer=true
+{"caption":"Congrats to محمّد Miller!","customer":"محمّد"} newClient=false newServer=true
+{"caption":"Congrats to שָׂרָה and Dave!","customer":"שָׂרָה"} newClient=false newServer=true
+{"caption":"Congrats to שָׂרָה Miller!","customer":"שָׂרָה"} newClient=false newServer=true
+{"caption":"Congrats to ধ্রুব and Dave!","customer":"ধ্রুব"} newClient=false newServer=true
+{"caption":"Congrats to ধ্রুব Miller!","customer":"ধ্রুব"} newClient=false newServer=true
