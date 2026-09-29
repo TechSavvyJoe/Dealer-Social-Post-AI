@@ -672,3 +672,172 @@ describe("ensureUsableCaption", () => {
     });
   });
 });
+
+describe("Codex findings on PR #35 (F1-F6)", () => {
+  const store = {
+    allowedPhrases: ["Bob Maxey Ford of Howell", "Ford"],
+    maskedPhrases: ["Joe Gallant", "Joe"],
+  };
+  const noCustomer = { ...store, rejectAnyCustomerIdentity: true };
+  const names = (caption: string, customer?: string) =>
+    unauthorizedCustomerNames(caption, customer, customer ? store : noCustomer);
+
+  it("F1: treats America as a name in person-addressing slots, not in place slots", () => {
+    expect(names("Congrats to America!")).toEqual(["America"]);
+    expect(names("Welcome home, America!")).toEqual(["America"]);
+    expect(names("Meet America!")).toEqual(["America"]);
+    expect(names("Our customer: America!")).toEqual(["America"]);
+    expect(names("Congrats to America Ferrera!")).toEqual(["America"]);
+    expect(names("Happy Birthday, America!")).toEqual([]);
+    expect(names("Ford: Built for America.")).toEqual([]);
+    expect(names("Congrats to Team America!")).toEqual([]);
+  });
+
+  it("F2: an ambiguous given name in a person-action phrase is the person", () => {
+    expect(names("Helping Hunter find his dream car!", "Michelle")).toEqual(["Hunter"]);
+    expect(names("Welcoming Hunter to the family!", "Michelle")).toEqual(["Hunter"]);
+    expect(names("Big smiles from Hunter!", "Michelle")).toEqual(["Hunter"]);
+    expect(names("Congrats to Hunter and Michelle!", "Michelle")).toEqual(["Hunter"]);
+    expect(names("Highlights from April!")).toEqual([]);
+    expect(names("Welcome Spring!")).toEqual([]);
+    expect(names("Celebrating Summer!")).toEqual([]);
+  });
+
+  it("F3: a vocabulary surname glued to the authorized name is still a surname", () => {
+    expect(names("Michelle Price is all smiles!", "Michelle")).toEqual(["Price"]);
+    expect(names("Michelle Miles!", "Michelle")).toEqual(["Miles"]);
+    expect(names("MICHELLE POWER IS ALL SMILES!", "Michelle")).toEqual(["POWER"]);
+    expect(names("Michelle Is All Smiles!", "Michelle")).toEqual([]);
+    expect(names("Michelle Style.", "Michelle")).toEqual([]);
+  });
+
+  it("F4: a crowd after a participial opener is not a name, but a person after it still is", () => {
+    expect(names("Congrats, Michelle! Celebrating Local Heroes!", "Michelle")).toEqual(
+      [],
+    );
+    expect(names("Recognizing Every Nurse this week!")).toEqual([]);
+    expect(names("Celebrating Local Heroes like Sarah!", "Michelle")).not.toEqual([]);
+    expect(names("Honoring Local Heroes like Hunter!")).not.toEqual([]);
+    expect(names("Celebrating Local Heroes – like Sarah Johnson!")).not.toEqual([]);
+  });
+
+  it("F5: a person label before the lone make names a person; listing copy does not", () => {
+    expect(names("Congrats to our customer Ford!", "Michelle")).toEqual(["Ford"]);
+    expect(names("Congrats to new owner Ford!", "Michelle")).toEqual(["Ford"]);
+    expect(names("Thanks to customer Ford!", "Michelle")).toEqual(["Ford"]);
+    expect(names("Congrats to Ford on 120 years!")).toEqual([]);
+    expect(names("One owner Ford, no accidents.")).toEqual([]);
+    expect(names("CONGRATS TO OUR OWNER FORD PASS MEMBERS!")).toEqual([]);
+    expect(names("Congrats to the winner Ford chose!")).toEqual([]);
+  });
+
+  it("F6: title abbreviations join their name in any case", () => {
+    expect(names("Congrats to MR. MILLER!")).toEqual(["MILLER"]);
+    expect(names("Welcome home, DR. NGUYEN!")).toEqual(["NGUYEN"]);
+    expect(names("Thanks to MRS. SMITH!")).toEqual(["SMITH"]);
+    // A trailing state code keeps its sentence break.
+    expect(names("SHIPS TO MI, OH AND MS. CALL FOR DETAILS!")).toEqual([]);
+  });
+});
+
+describe("Codex findings on PR #35 (F1-F6): closure review", () => {
+  const store = {
+    allowedPhrases: ["Bob Maxey Ford of Howell", "Ford"],
+    maskedPhrases: ["Joe Gallant", "Joe"],
+  };
+  const noCustomer = { ...store, rejectAnyCustomerIdentity: true };
+  const names = (caption: string, customer?: string) =>
+    unauthorizedCustomerNames(caption, customer, customer ? store : noCustomer);
+
+  it("F1: America is a name wherever only a person fits", () => {
+    expect(names("America is all smiles!")).toEqual(["America"]);
+    expect(names("Big smiles from America!", "Michelle")).toEqual(["America"]);
+    expect(names("Happy delivery day, America!")).toEqual(["America"]);
+    expect(names("Shoutout to America!")).toEqual(["America"]);
+    expect(names("America, enjoy your new Bronco!")).toEqual(["America"]);
+    expect(names("Thanks for choosing us, America!")).toEqual(["America"]);
+    expect(names("Presenting America with the keys!")).toEqual(["America"]);
+    // The country after a toast, a place or its own occasion.
+    expect(names("Thanks, America!")).toEqual([]);
+    expect(names("America, the beautiful!")).toEqual([]);
+    expect(names("Wishing America a happy 4th!")).toEqual([]);
+    expect(names("Made in America, sold in Howell.")).toEqual([]);
+  });
+
+  it("F2: a vocabulary name keeps its person-only continuations", () => {
+    expect(names("Helping Hunter with a new F-150!", "Michelle")).toEqual(["Hunter"]);
+    expect(names("Helping Rose with his new F-150!", "Michelle")).toEqual(["Rose"]);
+    expect(names("Big smiles from King!", "Michelle")).toEqual(["King"]);
+    expect(names("Big smiles from Hunter and the whole crew!", "Michelle")).toEqual([
+      "Hunter",
+    ]);
+    expect(names("Celebrating Summer with a sale!")).toEqual([]);
+    expect(names("Big smiles from the service team!")).toEqual([]);
+  });
+
+  it("F3: ALL CAPS and closing vocabulary surnames stay surnames", () => {
+    expect(names("MICHELLE YOUNG IS ALL SMILES!", "Michelle")).toEqual(["YOUNG"]);
+    expect(names("MICHELLE WOODS IS ALL SMILES!", "Michelle")).toEqual(["WOODS"]);
+    expect(names("Congrats, Michelle Driver!", "Michelle")).toEqual(["Driver"]);
+    expect(names("Congrats, Michelle Friend!", "Michelle")).toEqual(["Friend"]);
+    expect(names("MICHELLE, ENJOY YOUR NEW BRONCO!", "Michelle")).toEqual([]);
+    expect(names("Michelle Weekend vibes!", "Michelle")).toEqual([]);
+  });
+
+  it("F4: the relaxation stays Title Case, closed-world and name-free", () => {
+    expect(names("Congrats Michelle — Celebrating Local Heroes!", "Michelle")).toEqual(
+      [],
+    );
+    expect(
+      names(
+        "Congrats, Michelle! Celebrating Local Heroes in Livingston County!",
+        "Michelle",
+      ),
+    ).toEqual([]);
+    // ALL CAPS keeps production's refusal: only the Title Case form may relax.
+    expect(
+      names("Congrats, Michelle! CELEBRATING LOCAL HEROES!", "Michelle"),
+    ).not.toEqual([]);
+    expect(names("Celebrating Each Hero Thomas Jones!")).not.toEqual([]);
+    expect(names("Celebrating Local Heroes Charles Rogers!")).not.toEqual([]);
+    expect(names("Celebrating Local Heroes. Charles Rogers, you rock!")).not.toEqual(
+      [],
+    );
+    expect(names("Celebrating Local Heroes like Bob Howell!")).not.toEqual([]);
+    expect(names("Celebrating Local Heroes. Price, you rock!")).not.toEqual([]);
+    expect(names("Celebrating Local Heroes and Driver!")).not.toEqual([]);
+    expect(names("Celebrating Local Heroes #Sarah")).not.toEqual([]);
+    expect(names("Celebrating Local Heroes like sarah!")).not.toEqual([]);
+  });
+
+  it("F5: a sentence-opening, greeting or heading label names the lone make", () => {
+    expect(names("New owner Ford drove home today!")).toEqual(["Ford"]);
+    expect(names("Proud new owner Ford!")).toEqual(["Ford"]);
+    expect(names("Client Ford is thrilled!")).toEqual(["Ford"]);
+    expect(names("The new owner Ford drove home happy!")).toEqual(["Ford"]);
+    expect(names("Customer spotlight: Ford!")).toEqual(["Ford"]);
+    expect(names("Hey, customer Ford!")).toEqual(["Ford"]);
+    expect(names("The owner Ford trusts.")).toEqual([]);
+    expect(names("Meet the driver Ford sponsors this season!")).toEqual([]);
+    expect(names("Customer Ford Pass rewards are here!")).toEqual([]);
+  });
+
+  it("F6: any-case titles only ever add a refusal", () => {
+    expect(names("Congrats to prof. Smith!")).not.toEqual([]);
+    expect(names("Congrats to sgt. Jones!")).not.toEqual([]);
+    // A street "ST." / "DR." keeps the boundary production kept.
+    expect(
+      names("Stop by 123 Main ST. Sarah Johnson just drove home happy!"),
+    ).not.toEqual([]);
+    expect(names("Top prof. Rated service!")).toEqual([]);
+    expect(names("New Bronco on MAIN ST. Come see it today!")).toEqual([]);
+  });
+
+  it("reads non-ASCII digits and astral letters with production's rules only", () => {
+    // Emoji are plain text; an astral letter or a non-ASCII digit turns the
+    // relaxation off, so production's refusal stands.
+    expect(names("Celebrating Local Heroes 🎉")).toEqual([]);
+    expect(names("Celebrating Local Heroes Sarah٣!")).not.toEqual([]);
+    expect(names("Celebrating Local Heroes 𐐀𐐨𐐻 Rogers!")).not.toEqual([]);
+  });
+});

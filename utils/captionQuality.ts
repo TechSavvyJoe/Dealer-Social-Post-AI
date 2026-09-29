@@ -634,6 +634,34 @@ const PERSON_SLOT_OPENER = new RegExp(
   `^(?:(?:${ciAlt(["big", "huge", "special", "massive", "major"])})\\s+)?(?:${ciAlt(["congratulations", "congrats", "kudos", "meet", "welcoming", "welcome", "happy", "say", "hats", "props", "way", "well", "enjoy", "good", "nice", "great", "sold", "delivered", "new", "spotlight"])}|(?:${ci("so")}\\s+)?${ci("proud")})\\b`,
   "u",
 );
+/**
+ * The person-only actions: nobody helps, thanks or assists a season
+ * ("Helping Hunter find his dream car", "Thanking Grace!", "Assisting Summer
+ * with a new F-150").
+ */
+const PERSON_ACTION_OPENER = new RegExp(
+  `^(?:${ciAlt(["helping", "helped", "thanking", "thanked", "congratulating", "congratulated", "congratulate", "assisting", "assisted"])})\\b`,
+  "u",
+);
+const WELCOMED_OPENER = new RegExp(`^${ci("welcomed")}\\b`, "u");
+/**
+ * Astral-plane letters (anything past U+FFFF but the emoji blocks),
+ * non-ASCII digits and the few BMP letters whose case the server's Unicode
+ * 15.1 tables read differently from \p{Lu}/\p{Ll} (titlecase digraphs such
+ * as "ǅ", letters added since): production's client (\p{L}, \p{N}) and
+ * server (enumerated BMP letters, [0-9]) already read these differently, so
+ * the rules added for the Codex findings on PR #35 stay off for such a
+ * caption and both sides keep production's verdict. Mirrored literally as
+ * IDENTITY_EXOTIC_TEXT.
+ */
+const EXOTIC_IDENTITY_TEXT = new RegExp(
+  "[\\uD800-\\uD83B\\uD83F-\\uDBFF][\\uDC00-\\uDFFF]|[\\u01C5\\u01C8\\u01CB\\u01F2\\u0295\\u088F\\u0C5C\\u0CDC\\u1C89-\\u1C8A\\u1F88-\\u1F8F\\u1F98-\\u1F9F\\u1FA8-\\u1FAF\\u1FBC\\u1FCC\\u1FFC\\uA7CB-\\uA7CF\\uA7D2\\uA7D4\\uA7DA-\\uA7DC\\uA7F1\\u00B2-\\u00B3\\u00B9\\u00BC-\\u00BE\\u0660-\\u0669\\u06F0-\\u06F9\\u07C0-\\u07C9\\u0966-\\u096F\\u09E6-\\u09EF\\u09F4-\\u09F9\\u0A66-\\u0A6F\\u0AE6-\\u0AEF\\u0B66-\\u0B6F\\u0B72-\\u0B77\\u0BE6-\\u0BF2\\u0C66-\\u0C6F\\u0C78-\\u0C7E\\u0CE6-\\u0CEF\\u0D58-\\u0D5E\\u0D66-\\u0D78\\u0DE6-\\u0DEF\\u0E50-\\u0E59\\u0ED0-\\u0ED9\\u0F20-\\u0F33\\u1040-\\u1049\\u1090-\\u1099\\u1369-\\u137C\\u16EE-\\u16F0\\u17E0-\\u17E9\\u17F0-\\u17F9\\u1810-\\u1819\\u1946-\\u194F\\u19D0-\\u19DA\\u1A80-\\u1A89\\u1A90-\\u1A99\\u1B50-\\u1B59\\u1BB0-\\u1BB9\\u1C40-\\u1C49\\u1C50-\\u1C59\\u2070\\u2074-\\u2079\\u2080-\\u2089\\u2150-\\u2182\\u2185-\\u2189\\u2460-\\u249B\\u24EA-\\u24FF\\u2776-\\u2793\\u2CFD\\u3007\\u3021-\\u3029\\u3038-\\u303A\\u3192-\\u3195\\u3220-\\u3229\\u3248-\\u324F\\u3251-\\u325F\\u3280-\\u3289\\u32B1-\\u32BF\\uA620-\\uA629\\uA6E6-\\uA6EF\\uA830-\\uA835\\uA8D0-\\uA8D9\\uA900-\\uA909\\uA9D0-\\uA9D9\\uA9F0-\\uA9F9\\uAA50-\\uAA59\\uABF0-\\uABF9\\uFF10-\\uFF19]",
+);
+/** A person-addressing opener, with the person-only actions for plain text. */
+const isPersonSlotOpener = (matchText: string, grounding: IdentityGrounding): boolean =>
+  PERSON_SLOT_OPENER.test(matchText) ||
+  (!grounding.exotic &&
+    (PERSON_ACTION_OPENER.test(matchText) || WELCOMED_OPENER.test(matchText)));
 const DELIBERATE_PATTERN_INDEXES = customerContextPatterns
   .map((_, index) => index)
   .filter(
@@ -1877,6 +1905,13 @@ interface IdentityGrounding {
   words: ReadonlySet<string>;
   pairs: ReadonlySet<string>;
   modelWords: ReadonlySet<string>;
+  /** The caption matches EXOTIC_IDENTITY_TEXT: production's rules only. */
+  exotic: boolean;
+  /**
+   * Plain caption text without a hashtag or mention: the only text the
+   * collective-crowd relaxation reads ("#Sarah" is split before the scan).
+   */
+  crowdPlain: boolean;
 }
 
 const buildGrounding = (
@@ -1904,7 +1939,7 @@ const buildGrounding = (
       else if (afterBrand) modelWords.add(lowerToken(raw));
     }
   }
-  return { words, pairs, modelWords };
+  return { words, pairs, modelWords, exotic: false, crowdPlain: false };
 };
 
 /**
@@ -2440,13 +2475,18 @@ const AMBIGUOUS_NAME_WORDS = new Set([
   "west",
 ]);
 /** "Appreciation Day", "Game Day": the ambiguous word completes a noun phrase. */
-const ambiguousWordCompletesPhrase = (caption: string, tokenStart: number): boolean => {
+const ambiguousWordCompletesPhrase = (
+  caption: string,
+  tokenStart: number,
+  grounding: IdentityGrounding,
+): boolean => {
   const before = caption.slice(0, tokenStart).match(PREVIOUS_WORD_PATTERN);
   if (!before) return false;
   const lower = lowerToken(before[1]);
   return (
     (NON_CUSTOMER_CONTEXT_WORDS.has(lower) || LEAD_IN_NOUN_SET.has(lower)) &&
     !PERSON_HEAD_NOUNS.has(lower) &&
+    !(PERSON_LABEL_WORDS.has(lower) && !grounding.exotic) &&
     !NOUN_DETERMINERS.has(lower) &&
     lower !== "the" &&
     !HOP_STOP_WORDS.has(lower) &&
@@ -2528,6 +2568,115 @@ const precededByUnknownCapital = (
   }
   return word;
 };
+/** Explicit labels a caption puts on a person ("our customer", "new owner"). */
+const PERSON_LABEL_NOUNS = [
+  "customer",
+  "owner",
+  "buyer",
+  "driver",
+  "client",
+  "guest",
+  "member",
+  "shopper",
+  "purchaser",
+  "winner",
+  "patron",
+  "lessee",
+];
+/**
+ * "our client Young", "our winner Day": a label never completes a phrase
+ * with the name after it — except "guest", which heads its own nouns ("our
+ * Guest Star").
+ */
+const PERSON_LABEL_WORDS = new Set(
+  PERSON_LABEL_NOUNS.filter((noun) => noun !== "guest").flatMap((noun) => [
+    noun,
+    `${noun}s`,
+  ]),
+);
+const PERSON_LABEL_BEFORE = new RegExp(
+  `(?:^|[^\\p{L}0-9'’-])(?:${PERSON_LABEL_NOUNS.join("|")})(?:\\s*[,:–—-]{1,2}\\s*|\\s+["“'‘(\\[]?)$`,
+  "iu",
+);
+/** "Customer spotlight: Ford!", "Owner of the Month — Ford": a label heading. */
+const PERSON_LABEL_HEADING_BEFORE =
+  /\b(?:customer|owner|buyer|client|guest|member)s?\s+(?:spotlight|of\s+the\s+(?:day|week|month|year))\s*[:–—-]\s*$/iu;
+/**
+ * "New owner Ford drove home today!", "Happy customer Ford!", "Proud new
+ * owner Ford!", "The new owner Ford drove home happy!": a label that opens
+ * its sentence, at most behind a determiner and words describing the person.
+ */
+const SENTENCE_LABEL_CLAUSE =
+  /^\s*(?:(?:the|our|my|this|a|another)\s+)?(?:(?:new|newest|brand-new|proud|happy|lucky|loyal|repeat|valued|satisfied|first-time|longtime|long-time|returning)(?:\s+|$)){0,3}$/iu;
+const LABEL_ADDRESSING_WORDS =
+  /\b(?:congratulations|congrats|kudos|props|thanks|thank|shout|meet|welcome|welcoming|welcomed|helping|helped|delivered|sold|from|our|my|another|say|hi|hello|hey|cheers|salute|hats|introducing|presenting|spotlighting)\b/iu;
+/**
+ * "the winner Ford chose!", "the driver Ford sponsors this season": after
+ * "the … <label>", the make opens a relative clause when its verb closes the
+ * clause or a time word follows ("The new owner Ford drove home happy" is
+ * the person).
+ */
+const LABEL_RELATIVE_CLAUSE_AFTER =
+  /^\s+[\p{Ll}][\p{L}'’-]*(?:\s*(?:[!.?,;:]|$|\n)|\s+(?:most|best|always|ever|often|still|first|too|again|daily|this|last|next|every|each|today|tonight|yesterday)\b)/u;
+/**
+ * "Congrats to our customer Ford!", "Thanks to new owner Ford!", "Our
+ * customer Ford is all smiles", "One happy customer, Ford!": an explicit
+ * person label names the lone make as a person when the clause addresses
+ * someone or owns the label, or sets the make off as its apposition. Listing
+ * copy ("One owner Ford, no accidents", "Every owner Ford has ever had"), a
+ * relative clause ("the winner Ford chose") and the make's own programs and
+ * models ("our owner Ford Pass members", "Winner: Ford F-150") are not.
+ */
+const labelNamesLoneMake = (
+  caption: string,
+  tokenStart: number,
+  tokenEnd: number,
+): boolean => {
+  const before = caption.slice(0, tokenStart);
+  const rest = caption.slice(tokenEnd);
+  // "Ford Pass members", "Ford F-150": the make names a program or a model.
+  const following = rest.match(/^\s+([\p{L}0-9][\p{L}0-9'’-]*)/u);
+  if (
+    following &&
+    (/[0-9]/u.test(following[1]) ||
+      (isCapitalized(following[1]) && LEAD_IN_NOUN_SET.has(lowerToken(following[1]))))
+  ) {
+    return false;
+  }
+  // The make closes the phrase or acts: "…Ford!", "…Ford drove home".
+  const verb = rest.match(/^\s+(?:just\s+)?([\p{L}'’-]+)/u);
+  const closesOrActs =
+    /^\s*(?:[!.?]|$|\n)/u.test(rest) ||
+    (!!verb && CUSTOMER_ACTION_WORDS.has(verb[1].toLocaleLowerCase("en-US")));
+  // "Customer spotlight: Ford!": the heading labels the person it names
+  // ("Customer Spotlight: Howell Little League" is an organisation).
+  if (PERSON_LABEL_HEADING_BEFORE.test(before)) return closesOrActs;
+  const label = before.match(PERSON_LABEL_BEFORE);
+  if (!label) return false;
+  // "One happy customer, Ford!": set off by punctuation, the make is the
+  // label's apposition.
+  if (/[^\s\p{L}]/u.test(label[0].replace(/^[^\p{L}]+/u, ""))) return true;
+  const clause =
+    before
+      .slice(0, before.length - label[0].length)
+      .split(/[.!?\n]/u)
+      .pop() || "";
+  // "Congrats to the winner Ford chose": the make opens a relative clause.
+  if (
+    /\b[Tt][Hh][Ee](?:\s+[\p{L}'’-]+){0,3}\s*$/u.test(clause) &&
+    LABEL_RELATIVE_CLAUSE_AFTER.test(rest)
+  ) {
+    return false;
+  }
+  // "New owner Ford drove home today!", "Customer Ford loves the Bronco!",
+  // "Happy customer Ford!": the label opens its sentence and the make is its
+  // subject or the whole phrase ("One owner Ford, no accidents" is listing
+  // copy).
+  if (SENTENCE_LABEL_CLAUSE.test(clause) && closesOrActs) return true;
+  return (
+    LABEL_ADDRESSING_WORDS.test(clause) && !/\b(?:every|each|any)\b/iu.test(clause)
+  );
+};
 /** "Mr. Ford", "Coach Miller", "her son Ford": a title or relative right before. */
 const precededByPersonNoun = (caption: string, tokenStart: number): boolean => {
   const before = caption.slice(0, tokenStart).match(PREVIOUS_WORD_PATTERN);
@@ -2552,12 +2701,68 @@ const trailingVocativeIsList = (caption: string, tokenStart: number): boolean =>
   }
   return false;
 };
+/**
+ * "Welcome Will to the family", "… to the Maxey Ford family", "Welcoming
+ * Hunter aboard": joining a group is what a person does.
+ */
+const JOINS_GROUP_CONTINUATION = new RegExp(
+  `^\\s+(?:${TO}\\s+(?:${THE}|${ci("our")})\\s+(?:[\\p{L}0-9'’-]+\\s+){0,3}?(?:${ciAlt(["family", "families", "team", "crew", "nation", "club"])})|${ci("aboard")})\\b`,
+  "u",
+);
+/** "Congrats to Summer on the new Escape": the purchase is a person's. */
+const NEW_PURCHASE_CONTINUATION = new RegExp(
+  `^\\s+${ci("on")}\\s+(?:${ciAlt(["the", "your", "their"])})\\s+(?:${ciAlt(["new", "first", "latest"])})\\b`,
+  "u",
+);
+/** "Helping Hunter find the perfect truck": a bare verb after the name. */
+const PERSON_BARE_VERB_CONTINUATION =
+  /^\s+(?:find|pick|choose|get|drive|take|buy|lease|trade|upgrade|land|score|start|make|finance|save|shop|celebrate|check|sign|head|roll)\b/u;
+/**
+ * "Helping Hunter with a new F-150", "Big smiles from Summer and the whole
+ * crew": what a person does next in a person-only slot.
+ */
+const PERSON_WITH_CONTINUATION =
+  /^\s+(?:with\s+(?:a|an|the|his|her|their)|and\s+the\s+(?:whole\s+)?(?:crew|team|family|gang|squad|bunch))\b/iu;
+/**
+ * "Big smiles from Hunter!", "All smiles from Grace today", "Smiles from
+ * Summer 🎉", "Big smiles from Hunter — enjoy the ride!": the phrase closes
+ * on the person, at an optional time word.
+ */
+const PERSON_PHRASE_CLOSE =
+  /^(?:\s+(?:today|tonight|yesterday|this\s+(?:morning|afternoon|evening|weekend|week)))?\s*(?:[!.?,;–—]|$|\n|[\u{1F000}-\u{1FBFF}\u2600-\u27BF])/u;
+/**
+ * "Big smiles from King!", "Congrats from April!", "Love from Summer": a
+ * reaction sent "from" someone — only a person sends one, so every
+ * vocabulary name counts there ("Highlights from April" and "Straight from
+ * Summer" are not reactions).
+ */
+const REACTION_FROM_BEFORE =
+  /\b(?:smiles?|congrats|congratulations|thanks|thank-you|thank\s+you|love|hugs|kudos|props|high[\s-]fives?)\s+from\s+$/iu;
+const reactionFromSlot = (caption: string, tokenStart: number): boolean =>
+  REACTION_FROM_BEFORE.test(caption.slice(0, tokenStart));
+/**
+ * "Big smiles from Hunter!", "All smiles from Grace!": the sender "from"
+ * names directly is a person — unless the word is a date or season outside
+ * a reaction ("Highlights from April", "Straight from Summer").
+ */
+const fromPersonSlot = (
+  caption: string,
+  tokenStart: number,
+  lower: string,
+  patternIndex: number,
+  grounding: IdentityGrounding,
+): boolean =>
+  !grounding.exotic &&
+  (patternIndex === 3 || patternIndex === 5) &&
+  /\b[Ff]rom\s+$/u.test(caption.slice(0, tokenStart)) &&
+  (!NON_CUSTOMER_CONTEXT_WORDS.has(lower) || reactionFromSlot(caption, tokenStart));
 const personContinuation = (
   caption: string,
   tokenEnd: number,
   token: string,
   grounding: IdentityGrounding,
   strongOnly: boolean,
+  personOnlySlot = false,
 ): boolean => {
   const rest = caption.slice(tokenEnd);
   if (
@@ -2603,7 +2808,38 @@ const personContinuation = (
     return true;
   }
   if (strongOnly) return false;
-  return /^\s*(?:[!.?,;]|$|\n)/u.test(rest);
+  if (grounding.exotic) return /^\s*(?:[!.?,;]|$|\n)/u.test(rest);
+  // In a person-addressing slot the phrase may go on about the person:
+  // "Helping Hunter find his dream car", "Helping Will pick out a truck",
+  // "Welcoming Grace to the Maxey Ford family", "Congrats to Hunter and
+  // Michelle" (a second listed person, not a Title Case pair like "Spring and
+  // Summer"), "Helping Hunter with a new F-150" (a season only where nobody
+  // but a person fits: "Welcoming Spring with a sale" is the season).
+  if (
+    clauseOwnsPerson(caption, tokenEnd) ||
+    JOINS_GROUP_CONTINUATION.test(rest) ||
+    NEW_PURCHASE_CONTINUATION.test(rest) ||
+    PERSON_BARE_VERB_CONTINUATION.test(rest) ||
+    (PERSON_WITH_CONTINUATION.test(rest) &&
+      (personOnlySlot || !NON_CUSTOMER_CONTEXT_WORDS.has(lowerToken(token))))
+  ) {
+    return true;
+  }
+  const listed = rest.match(/^\s*(?:[Aa][Nn][Dd]|&)\s+([\p{Lu}][\p{L}'’-]*)/u);
+  if (listed) {
+    const other = lowerToken(listed[1]);
+    if (
+      other === "customer" ||
+      !(
+        AMBIGUOUS_NAME_WORDS.has(other) ||
+        NON_CUSTOMER_CONTEXT_WORDS.has(other) ||
+        HOP_LEAD_IN_WORDS.has(other)
+      )
+    ) {
+      return true;
+    }
+  }
+  return PERSON_PHRASE_CLOSE.test(rest);
 };
 
 /**
@@ -3290,9 +3526,10 @@ const hopToPerson = (
         cursor,
         next[1],
         grounding,
-        !PERSON_SLOT_OPENER.test(context.matchText),
+        !isPersonSlotOpener(context.matchText, grounding),
+        PERSON_ACTION_OPENER.test(context.matchText),
       ) &&
-      !ambiguousWordCompletesPhrase(caption, nextStart)
+      !ambiguousWordCompletesPhrase(caption, nextStart, grounding)
     ) {
       found.push(followedByUnknownCapital(caption, cursor, grounding) || next[1]);
       return;
@@ -3337,6 +3574,548 @@ interface CandidateContext {
   listTail: boolean;
 }
 
+/**
+ * "Celebrating Local Heroes!", "Recognizing Every Nurse this week",
+ * "Congrats Michelle — Honoring Local First Responders in Livingston
+ * County": a participial opener honouring a crowd. "Local" / "Every", written
+ * exactly so, is no name there — nor is the participle a dash hands the
+ * sentence to — when
+ * - a crowd from a closed list follows ("Heroes", "First Responders",
+ *   "Businesses & Families");
+ * - the rest of that sentence is lowercase, a time phrase ("Every Day", "All
+ *   Year") or a place after in/at/across ("in Livingston County");
+ * - no other capitalized word anywhere in the caption could be a person
+ *   ("Celebrating Local Heroes. Charles Rogers, you rock!").
+ * Plain text only (ASCII, typographic punctuation, emoji): anything else
+ * keeps production's verdict. Mirrored as identityCollectiveCrowd().
+ */
+const COLLECTIVE_OPENERS = new Set([
+  "Celebrating",
+  "Honoring",
+  "Welcoming",
+  "Thanking",
+  "Recognizing",
+  "Saluting",
+]);
+const COLLECTIVE_MODIFIERS = new Set(["Local", "Every"]);
+const CROWD_ADJECTIVES = new Set([
+  "first",
+  "new",
+  "small",
+  "young",
+  "brave",
+  "unsung",
+  "everyday",
+  "amazing",
+  "hardworking",
+  "hard-working",
+  "hometown",
+  "incredible",
+  "service",
+  "healthcare",
+  "fellow",
+  "favorite",
+  "favourite",
+  "dedicated",
+  "retired",
+  "area",
+]);
+const CROWD_NOUNS = new Set([
+  "hero",
+  "heroes",
+  "veteran",
+  "veterans",
+  "nurse",
+  "nurses",
+  "teacher",
+  "teachers",
+  "educators",
+  "responders",
+  "business",
+  "businesses",
+  "family",
+  "families",
+  "student",
+  "students",
+  "athletes",
+  "graduate",
+  "graduates",
+  "grads",
+  "volunteer",
+  "volunteers",
+  "firefighter",
+  "firefighters",
+  "officers",
+  "troops",
+  "member",
+  "members",
+  "customer",
+  "customers",
+  "driver",
+  "drivers",
+  "owner",
+  "owners",
+  "neighbor",
+  "neighbors",
+  "neighbour",
+  "neighbours",
+  "legend",
+  "legends",
+  "champion",
+  "champions",
+  "school",
+  "schools",
+  "charity",
+  "charities",
+  "nonprofits",
+  "workers",
+  "moms",
+  "dads",
+  "parents",
+  "kids",
+  "coaches",
+  "artists",
+  "makers",
+  "leaders",
+  "partners",
+  "sponsors",
+  "employees",
+  "farmers",
+  "seniors",
+  "community",
+  "communities",
+  "military",
+]);
+const CROWD_TIME_LEADS = new Set(["every", "all", "this", "each"]);
+const CROWD_TIME_WORDS = new Set([
+  ...TIME_FOLLOWERS,
+  "year",
+  "years",
+  "long",
+  "round",
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
+]);
+const CROWD_PLACE_PREPOSITIONS = new Set([
+  "in",
+  "at",
+  "across",
+  "around",
+  "throughout",
+]);
+const PLAIN_CAPTION_TEXT =
+  /^[\t-\r -~\u00A0\u00A9\u00AE\u00B0\u00B7\u200D\u2010-\u2027\u2030-\u205E\u20A0-\u20CF\u2190-\u21FF\u2300-\u23FF\u25A0-\u27BF\u2B00-\u2BFF\uFE0F]*$/;
+const EMOJI_PAIR = /[\uD83C-\uD83E][\uDC00-\uDFFF]/g;
+const PLAIN_CAPTION_TOKEN = /[A-Za-z0-9][A-Za-z0-9'-]*|[^\sA-Za-z0-9]/g;
+/** A capitalized caption word that can be nobody: vocabulary, not a name. */
+/** Vocabulary that names people too ("Price, you rock!", "Congrats Ace!"). */
+const CROWD_NAME_WORDS = new Set(["ace", "sunshine", "princess", "buddy", "champ"]);
+const plainCaptionWord = (word: string, grounding: IdentityGrounding): boolean => {
+  const lower = lowerToken(word);
+  return (
+    !AMBIGUOUS_NAME_WORDS.has(lower) &&
+    !VOCABULARY_SURNAMES.has(lower) &&
+    !CLOSING_VOCABULARY_SURNAMES.has(lower) &&
+    !CROWD_NAME_WORDS.has(lower) &&
+    !TITLE_HEAD_NOUNS.has(lower) &&
+    !RELATIVE_NOUN_SET.has(lower) &&
+    !grounding.words.has(lower) &&
+    !isAutomotiveBrandToken(word) &&
+    (NON_CUSTOMER_CONTEXT_WORDS.has(lower) ||
+      HOP_STOP_WORDS.has(lower) ||
+      LEAD_IN_BOUNDARY_WORDS.has(lower) ||
+      HOP_LEAD_IN_WORDS.has(lower) ||
+      DETERMINER_ADJECTIVES.has(lower) ||
+      NOUN_DETERMINERS.has(lower) ||
+      CUSTOMER_CONTEXT_TRIGGER_WORDS.has(lower) ||
+      CUSTOMER_ACTION_WORDS.has(lower) ||
+      TIME_FOLLOWERS.has(lower))
+  );
+};
+/**
+ * A lowercase caption word the crowd relaxation knows names nobody: its time,
+ * place and crowd words and the vocabulary above ("all month long — stop
+ * by!", never "like sarah").
+ */
+const CROWD_FUNCTION_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "or",
+  "but",
+  "not",
+  "so",
+  "too",
+  "very",
+  "just",
+  "more",
+  "most",
+  "always",
+  "again",
+  "it",
+  "its",
+  "they",
+  "them",
+  "their",
+  "these",
+  "those",
+  "that",
+  "which",
+  "what",
+  "how",
+  "when",
+  "where",
+  "if",
+  "than",
+  "then",
+  "there",
+  "here",
+  "into",
+  "about",
+  "after",
+  "before",
+  "during",
+  "near",
+  "like",
+  "every",
+  "each",
+  "local",
+  "stop",
+  "come",
+  "see",
+  "visit",
+  "join",
+  "keep",
+  "help",
+  "make",
+  "serve",
+  "honor",
+  "honour",
+  "salute",
+  "thank",
+  "love",
+  "celebrate",
+  "recognize",
+  "recognise",
+  "keeping",
+  "making",
+  "serving",
+  "running",
+  "working",
+  "doing",
+  "giving",
+  "being",
+  "can",
+  "could",
+  "should",
+  "would",
+  "must",
+  "do",
+  "does",
+  "did",
+  "go",
+  "get",
+  "be",
+  "been",
+  "am",
+]);
+const crowdLowercaseWord = (word: string, grounding: IdentityGrounding): boolean => {
+  if (/^[0-9]/.test(word)) return /^[0-9]+(?:st|nd|rd|th|s)?$/.test(word);
+  const lower = lowerToken(word);
+  return (
+    CROWD_FUNCTION_WORDS.has(lower) ||
+    CROWD_TIME_WORDS.has(lower) ||
+    CROWD_TIME_LEADS.has(lower) ||
+    CROWD_PLACE_PREPOSITIONS.has(lower) ||
+    CROWD_NOUNS.has(lower) ||
+    CROWD_ADJECTIVES.has(lower) ||
+    plainCaptionWord(word, grounding)
+  );
+};
+/**
+ * "in Livingston County", "at Bob Maxey Ford", "across Michigan": known
+ * place words, and at most one other word naming an organisation ("Sarah
+ * Johnson High School" still carries a name).
+ */
+const crowdPlaceWords = (words: string[], grounding: IdentityGrounding): boolean => {
+  const lowers = words.map(lowerToken);
+  if (
+    lowers.some(
+      (lower) => AMBIGUOUS_NAME_WORDS.has(lower) || TITLE_HEAD_NOUNS.has(lower),
+    )
+  ) {
+    return false;
+  }
+  const unknown = lowers.filter(
+    (lower) =>
+      !grounding.words.has(lower) &&
+      !ORGANISATION_FOLLOWERS.has(lower) &&
+      !NON_CUSTOMER_CONTEXT_WORDS.has(lower),
+  ).length;
+  return (
+    unknown === 0 ||
+    (unknown === 1 && ORGANISATION_FOLLOWERS.has(lowers[lowers.length - 1]))
+  );
+};
+const collectiveCrowd = (
+  caption: string,
+  tokenStart: number,
+  token: string,
+  grounding: IdentityGrounding,
+): boolean => {
+  if (
+    grounding.exotic ||
+    !grounding.crowdPlain ||
+    !PLAIN_CAPTION_TEXT.test(caption.replace(EMOJI_PAIR, ""))
+  ) {
+    return false;
+  }
+  const tokens = Array.from(caption.matchAll(PLAIN_CAPTION_TOKEN), (m) => ({
+    text: m[0],
+    start: m.index ?? 0,
+    end: (m.index ?? 0) + m[0].length,
+  }));
+  const at = tokens.findIndex((t) => t.start === tokenStart);
+  if (at < 0) return false;
+  const opener = COLLECTIVE_OPENERS.has(token) ? at : at - 1;
+  const modifier = opener + 1;
+  if (
+    opener < 0 ||
+    modifier >= tokens.length ||
+    !COLLECTIVE_OPENERS.has(tokens[opener].text) ||
+    !COLLECTIVE_MODIFIERS.has(tokens[modifier].text) ||
+    caption.slice(tokens[opener].end, tokens[modifier].start) !== " "
+  ) {
+    return false;
+  }
+  const isWord = (i: number) =>
+    i < tokens.length && /^[A-Za-z0-9]/.test(tokens[i].text);
+  // A capitalized word that names people too ("… and Driver", "… and
+  // Young") is never joined onto the crowd.
+  const crowdWord = (i: number, set: ReadonlySet<string>, joined: boolean) => {
+    if (!isWord(i) || !/^[A-Za-z]?[a-z'-]+$/.test(tokens[i].text)) return false;
+    const lower = tokens[i].text.toLowerCase();
+    return (
+      set.has(lower) &&
+      !(
+        joined &&
+        /^[A-Z]/.test(tokens[i].text) &&
+        (AMBIGUOUS_NAME_WORDS.has(lower) ||
+          VOCABULARY_SURNAMES.has(lower) ||
+          CLOSING_VOCABULARY_SURNAMES.has(lower) ||
+          CROWD_NAME_WORDS.has(lower))
+      )
+    );
+  };
+  // The crowd: adjectives and a noun, joined by "&", "and" or a comma; an
+  // adjective with no noun after it is not part of it.
+  const crowdPhraseEnd = (start: number, joined: boolean): number => {
+    let j = start;
+    while (crowdWord(j, CROWD_ADJECTIVES, joined)) j++;
+    return crowdWord(j, CROWD_NOUNS, joined) ? j + 1 : -1;
+  };
+  let index = crowdPhraseEnd(modifier + 1, false);
+  if (index < 0) return false;
+  for (;;) {
+    const joiner = index < tokens.length ? tokens[index].text : "";
+    if (joiner !== "&" && joiner !== "," && joiner !== "and") break;
+    const next = crowdPhraseEnd(index + 1, true);
+    if (next < 0) break;
+    index = next;
+  }
+  // Every other capitalized word: lowercase-only right after the crowd in
+  // its sentence; elsewhere only vocabulary opening its sentence ("Congrats,
+  // Michelle!" — never "Congrats Price!", "Thank you Love!"); time phrases
+  // and places anywhere.
+  let sameSentence = true;
+  const sentenceInitial = (i: number): boolean => {
+    for (let j = i - 1; j >= 0; j--) {
+      if (caption.slice(tokens[j].end, tokens[j + 1].start).includes("\n")) return true;
+      if (isWord(j)) return false;
+      if (/[.!?]/.test(tokens[j].text)) return true;
+    }
+    return true;
+  };
+  const clear = (i: number, strict: boolean): number => {
+    const t = tokens[i];
+    if (!isWord(i)) {
+      if (/[.!?]/.test(t.text)) sameSentence = false;
+      return i + 1;
+    }
+    if (!/^[A-Z]/.test(t.text))
+      return crowdLowercaseWord(t.text, grounding) ? i + 1 : -1;
+    const lower = t.text.toLowerCase();
+    if (lower === "customer") return i + 1;
+    if (
+      CROWD_TIME_LEADS.has(lower) &&
+      isWord(i + 1) &&
+      CROWD_TIME_WORDS.has(lowerToken(tokens[i + 1].text))
+    ) {
+      let j = i + 1;
+      while (isWord(j) && CROWD_TIME_WORDS.has(lowerToken(tokens[j].text))) j++;
+      return j;
+    }
+    if (lower === "today" || lower === "tonight") return i + 1;
+    if (
+      i > 0 &&
+      isWord(i - 1) &&
+      CROWD_PLACE_PREPOSITIONS.has(tokens[i - 1].text.toLowerCase())
+    ) {
+      let j = i;
+      while (isWord(j) && /^[A-Z]/.test(tokens[j].text)) j++;
+      return crowdPlaceWords(
+        tokens.slice(i, j).map((w) => w.text),
+        grounding,
+      )
+        ? j
+        : -1;
+    }
+    if (!strict && sentenceInitial(i) && plainCaptionWord(t.text, grounding))
+      return i + 1;
+    return -1;
+  };
+  for (let i = 0; i < opener;) {
+    i = clear(i, false);
+    if (i < 0) return false;
+  }
+  sameSentence = true;
+  for (let i = index; i < tokens.length;) {
+    if (i > index && caption.slice(tokens[i - 1].end, tokens[i].start).includes("\n")) {
+      sameSentence = false;
+    }
+    i = clear(i, sameSentence);
+    if (i < 0) return false;
+  }
+  return true;
+};
+
+/** "Made in America is…", "Built for America": a place preposition before. */
+const COUNTRY_PLACE_BEFORE =
+  /\b(?:in|across|of|for|throughout|around|from|all\s+over|out\s+of)\s+(?:the\s+)?$/iu;
+/**
+ * "Happy 4th of July", "Happy Birthday", "Happy 250th": the country's own
+ * day ("Happy anniversary, America!" is an owner's).
+ */
+const COUNTRY_OCCASION =
+  /\b(?:birthday|4th|fourth|july|independence|memorial|veterans?|labou?r|presidents?|flag|thanksgiving|new\s+year|holidays?|constitution|juneteenth|[0-9]+(?:st|nd|rd|th))\b/iu;
+/**
+ * "Thank you, America!", "God bless you, America": the whole clause is what a
+ * country is told ("Thanks for choosing us, America!" thanks a customer).
+ */
+const COUNTRY_VOCATIVE_CLAUSE =
+  /^(?:thank\s+you|thanks|(?:three\s+)?cheers|god\s+bless(?:\s+you)?|we\s+(?:love|salute)\s+you)$/iu;
+/**
+ * "America, the beautiful", "America — we salute you": a leading vocative the
+ * country is addressed with ("America, enjoy your new Bronco!" is a person).
+ */
+const COUNTRY_LEADING_CONTINUATION =
+  /^\s*(?:,|[:–—-]+)\s*(?:the|land|home\s+of|we\s+(?:love|salute|thank)|thank\s+you\s+for\s+your\s+service|god\s+bless|happy\s+(?:birthday|4th|fourth|independence|july|[0-9]+(?:st|nd|rd|th)))\b/iu;
+/**
+ * "Shoutout to America!", "Presenting America with the keys", "Handed the
+ * keys to America": openers only a person is addressed with, beyond the
+ * person slots.
+ */
+const COUNTRY_PERSON_OPENER =
+  /^(?:(?:big|huge|special|massive|major)\s+)?(?:shout(?:[\s-]?outs?)?|high\s+fives?|warm\s+welcome|safe\s+travels|introducing|presenting|spotlighting|surprising|surprised|greeting|greeted|treating|treated|gifting|gifted|handed)\b/iu;
+/** "Congrats to America on 250 years!": the country's own milestone. */
+const COUNTRY_MILESTONE_AFTER =
+  /^\s+on\s+(?:its\s+|the\s+)?[0-9]+(?:st|nd|rd|th)?\s+(?:years?|birthday|anniversary)\b/iu;
+/**
+ * "Congrats to America!", "Meet America!", "America is all smiles!", "Big
+ * smiles from America!", "Happy delivery day, America!", "Our customer:
+ * America", "Cheers to America Ferrera!": America is a given name too. The
+ * country is forgiven only where a place or the country itself fits —
+ * "Made in America", "Built for America", "Serving America", "Thank you,
+ * America!", "Happy 4th of July, America!", "Congrats to Team America!",
+ * "America's best-selling truck".
+ */
+const countryAddressedAsPerson = (
+  caption: string,
+  token: string,
+  tokenStart: number,
+  tokenEnd: number,
+  grounding: IdentityGrounding,
+  context: CandidateContext,
+): boolean => {
+  if (
+    grounding.exotic ||
+    lowerToken(token) !== "america" ||
+    /['’][Ss]?$/u.test(token)
+  ) {
+    return false;
+  }
+  const before = caption.slice(0, tokenStart);
+  // "Congrats to Team America!", "Captain America would drive a Bronco".
+  const previous = before.match(PREVIOUS_WORD_PATTERN);
+  if (
+    previous &&
+    (COLLECTIVE_FOLLOWERS.has(lowerToken(previous[1])) ||
+      lowerToken(previous[1]) === "captain")
+  ) {
+    return false;
+  }
+  // "America Ferrera!", "America Rivera on your new F-150" — a surname closes
+  // the name ("Serving America Since 1955" is Title Case).
+  const surname = followedByUnknownCapital(caption, tokenEnd, grounding);
+  if (
+    surname &&
+    /^\s+\S+(?:\s*(?:[!.?,;:]|$|\n)|\s+[\p{Ll}])/u.test(caption.slice(tokenEnd))
+  ) {
+    return true;
+  }
+  if (context.patternIndex >= 11 && context.patternIndex !== 16) return true;
+  if (context.patternIndex === BARE_ACTION_PATTERN_INDEX) {
+    return !COUNTRY_PLACE_BEFORE.test(before);
+  }
+  if (context.patternIndex === 3 || context.patternIndex === 5) {
+    return reactionFromSlot(caption, tokenStart);
+  }
+  // "Thank you, America!", "Thanks, America!" (a caption of nothing but
+  // "names") — but "Michelle and America!".
+  if (
+    context.patternIndex === TRAILING_VOCATIVE_PATTERN_INDEX ||
+    context.patternIndex === 16
+  ) {
+    const clause = (before.split(/[.!?\n]/u).pop() || "")
+      .replace(/[\s,;:–—-]+$/u, "")
+      .replace(/^[^\p{L}]+/u, "");
+    return !(
+      COUNTRY_VOCATIVE_CLAUSE.test(clause) ||
+      (/^happy\b/iu.test(clause) && COUNTRY_OCCASION.test(clause))
+    );
+  }
+  // "America, delivered!", "America! Welcome home!": a headline for a person
+  // ("Made in America, sold in Howell" is the place).
+  if (context.patternIndex === 7) return !COUNTRY_PLACE_BEFORE.test(before);
+  // "America, enjoy your new Bronco!" — but "America, the beautiful".
+  if (context.patternIndex === LEADING_VOCATIVE_PATTERN_INDEX) {
+    return !COUNTRY_LEADING_CONTINUATION.test(caption.slice(tokenEnd));
+  }
+  if (!isPersonSlotOpener(context.matchText, grounding)) {
+    if (COUNTRY_PERSON_OPENER.test(context.matchText)) return true;
+    // "Wishing America a great first drive!" — but "Wishing America a happy
+    // 4th!".
+    return (
+      /^wishing\b/iu.test(context.matchText) &&
+      !COUNTRY_OCCASION.test(caption.slice(tokenEnd).split(/[.!?\n]/u)[0])
+    );
+  }
+  if (/^[Hh][Aa][Pp][Pp][Yy]\b/u.test(context.matchText)) {
+    return !COUNTRY_OCCASION.test(context.matchText);
+  }
+  return !COUNTRY_MILESTONE_AFTER.test(caption.slice(tokenEnd));
+};
+
 const evaluateCandidate = (
   caption: string,
   token: string,
@@ -3351,6 +4130,14 @@ const evaluateCandidate = (
   const isPhotoCaption = context.patternIndex === PHOTO_CAPTION_PATTERN_INDEX;
   // "New Arrivals: Bronco, Explorer, Expedition": the last item of a list.
   if (context.listTail) return;
+  // "Celebrating Local Heroes!", "Congrats Michelle — Recognizing Every
+  // Nurse": a crowd.
+  if (
+    (COLLECTIVE_MODIFIERS.has(token) || COLLECTIVE_OPENERS.has(token)) &&
+    collectiveCrowd(caption, tokenStart, token, grounding)
+  ) {
+    return;
+  }
   // "America's Truck", "Sarah's": a possessive in a photo caption belongs to
   // the possessive pattern.
   if (isPhotoCaption && /['’][Ss]$/u.test(token)) return;
@@ -3386,7 +4173,7 @@ const evaluateCandidate = (
         }
         if (
           AMBIGUOUS_NAME_WORDS.has(lower) &&
-          !ambiguousWordCompletesPhrase(caption, tokenStart)
+          !ambiguousWordCompletesPhrase(caption, tokenStart, grounding)
         ) {
           found.push(token);
           return;
@@ -3424,13 +4211,19 @@ const evaluateCandidate = (
         token,
         grounding,
         !(
-          PERSON_SLOT_OPENER.test(context.matchText) ||
+          isPersonSlotOpener(context.matchText, grounding) ||
           context.patternIndex === 8 ||
           context.patternIndex === LEADING_VOCATIVE_PATTERN_INDEX ||
-          context.patternIndex >= 11
+          context.patternIndex >= 11 ||
+          fromPersonSlot(caption, tokenStart, lower, context.patternIndex, grounding)
         ),
+        PERSON_ACTION_OPENER.test(context.matchText) ||
+          reactionFromSlot(caption, tokenStart),
       ) &&
-      !ambiguousWordCompletesPhrase(caption, tokenStart)
+      // "Welcome Spring!" completes a phrase; "Welcome Will to the family"
+      // does not.
+      (!ambiguousWordCompletesPhrase(caption, tokenStart, grounding) ||
+        (!grounding.exotic && JOINS_GROUP_CONTINUATION.test(caption.slice(tokenEnd))))
     ) {
       found.push(followedByUnknownCapital(caption, tokenEnd, grounding) || token);
       return;
@@ -3453,14 +4246,20 @@ const evaluateCandidate = (
     if (run.ok && !before.unrelated) {
       const totalTokens = run.tokenCount + before.tokenCount;
       const anyBrand = run.containsBrand || before.containsBrand;
-      // "Mr. Ford", "Coach Ford", "her son Ford": a title or relative before
-      // the store's word names a person who shares it — never a VIN-grounded
-      // model ("Meet Mr. Bronco").
+      // "Mr. Ford", "Coach Ford", "her son Ford", "our customer Ford", "new
+      // owner Ford": a title, relative or person label before the store's
+      // word names a person who shares it — never a VIN-grounded model
+      // ("Meet Mr. Bronco").
+      // "Client Ford is thrilled!", "Winner Ford took home a Bronco": the
+      // label names the subject of a bare action too.
       if (
-        !isBareAction &&
         !isPhotoCaption &&
         !grounding.modelWords.has(lower) &&
-        precededByPersonNoun(caption, tokenStart)
+        ((!isBareAction && precededByPersonNoun(caption, tokenStart)) ||
+          (!grounding.exotic &&
+            run.tokenCount === 1 &&
+            before.tokenCount === 0 &&
+            labelNamesLoneMake(caption, tokenStart, tokenEnd)))
       ) {
         found.push(token);
         return;
@@ -3574,7 +4373,8 @@ const evaluateCandidate = (
 
   if (
     (lower === "america" || lower === "americas" || lower === "usa") &&
-    !clauseOwnsPerson(caption, tokenEnd)
+    !clauseOwnsPerson(caption, tokenEnd) &&
+    !countryAddressedAsPerson(caption, token, tokenStart, tokenEnd, grounding, context)
   ) {
     // "Built for America", "Happy Birthday to America": the country.
     return;
@@ -3761,6 +4561,30 @@ const HASHTAG_OPENER_WORDS = new Set([
   "employee",
 ]);
 const TITLE_ABBREVIATIONS = /\b(Mr|Mrs|Ms|Mx|Dr|Jr|Sr|St)\.(?=\s)/gu;
+/**
+ * "MR. MILLER", "mr. Miller", "Mr.Miller", "prof. Smith", "sgt. Jones": a
+ * personal title in any case, or glued to its name, is not a sentence end
+ * either. Joining it can also erase
+ * a boundary the caption meant ("123 Oak DR. Sarah Johnson just drove home",
+ * "MI, OH AND MS."), so this join only ever runs as a SECOND scan whose
+ * names are added to the first (see unauthorizedCustomerNames): it can add
+ * a refusal, never lift one. "MS." closing a list of state codes is
+ * Mississippi and keeps its period. Mirrored as
+ * IDENTITY_ANY_CASE_TITLE_ABBREVIATIONS.
+ */
+const ANY_CASE_TITLE_ABBREVIATIONS =
+  /\b([Mm][Rr][Ss]?|[Mm][SsXx]|[Dd][Rr]|[Pp][Rr][Oo][Ff]|[Rr][Ee][Vv]|[Ss][Gg][Tt]|[Cc][Aa][Pp][Tt]|[Ff][Rr])\.(\s|(?=[A-Z]))/g;
+const STATE_CODE_LIST_BEFORE = /\b[A-Z]{2}(?:\s*,\s*|,?\s+(?:and|AND|or|OR|&)\s+)$/u;
+const joinAnyCaseTitle = (
+  match: string,
+  title: string,
+  space: string,
+  offset: number,
+  text: string,
+): string =>
+  title === "MS" && STATE_CODE_LIST_BEFORE.test(text.slice(0, offset))
+    ? match
+    : title.charAt(0).toUpperCase() + title.slice(1).toLowerCase() + (space || " ");
 
 /** "@SarahJohnson" → "Sarah Johnson", "@BobMaxeyFord" → "Bob Maxey Ford". */
 const splitMention = (tag: string): string =>
@@ -3838,6 +4662,45 @@ const splitHashtag = (tag: string, grounding: IdentityGrounding): string => {
  */
 const NAME_PARTICLES =
   "(?:(?:de|la|del|della|di|da|du|van|von|der|den|le|el|al|bin|ibn|mac|mc)\\s+)*";
+/**
+ * Marketing, place and title vocabulary that is also a common surname
+ * ("Michelle Price is all smiles", "Michelle Miles!", "Michelle Power 🎉").
+ * Glued to the approved label, one of these is the surname whatever follows
+ * — the Title Case / ALL CAPS forgiveness below is for words that are not
+ * names.
+ */
+const VOCABULARY_SURNAMES = new Set([
+  "price",
+  "miles",
+  "power",
+  "speed",
+  "prince",
+  "queen",
+  "flint",
+  "fenton",
+  "lansing",
+  "hawks",
+]);
+/**
+ * Vocabulary that is also a surname only where it closes the phrase or the
+ * sentence goes on in lowercase: "Congrats, Michelle Driver!", "Michelle
+ * Court is all smiles", "MICHELLE LOVE IS ALL SMILES" ("Michelle Style.",
+ * "Michelle Vibes!", "Michelle Team is thrilled" name nobody).
+ */
+const CLOSING_VOCABULARY_SURNAMES = new Set([
+  "driver",
+  "love",
+  "court",
+  "player",
+  "sale",
+  "sales",
+  "bank",
+  "winner",
+  "brighton",
+  "friend",
+  "low",
+  "pastor",
+]);
 const surnameAfterPlaceholder = (
   tagged: string,
   grounding: IdentityGrounding,
@@ -3853,11 +4716,27 @@ const surnameAfterPlaceholder = (
     if (grounding.words.has(lower) || isAutomotiveBrandToken(word)) return word;
     // "Michelle Day is all smiles", "Michelle Porter!": a vocabulary word
     // that is also a surname, followed by the sentence going on in lowercase
-    // (or ending) rather than by Title Case.
+    // (or ending) rather than by Title Case. In an ALL CAPS sentence
+    // ("MICHELLE YOUNG IS ALL SMILES!") every word is capitalized, so the
+    // words after it count as lowercase.
+    const closesLikeSurname =
+      /^(?:\s*(?:[!.?,;]|$|\n)|\s+[\p{Ll}])/u.test(rest) ||
+      (!grounding.exotic &&
+        word === word.toUpperCase() &&
+        /^\s+[A-Z]/u.test(rest) &&
+        !/\p{Ll}/u.test((rest.match(/^[^.!?\n]*/u) || [""])[0]));
     if (
       AMBIGUOUS_NAME_WORDS.has(lower) &&
       !PERSON_ADJECTIVES.has(lower) &&
-      /^(?:\s*(?:[!.?,;]|$|\n)|\s+[\p{Ll}])/u.test(rest)
+      closesLikeSurname
+    ) {
+      return word;
+    }
+    if (!grounding.exotic && VOCABULARY_SURNAMES.has(lower)) return word;
+    if (
+      !grounding.exotic &&
+      CLOSING_VOCABULARY_SURNAMES.has(lower) &&
+      closesLikeSurname
     ) {
       return word;
     }
@@ -3883,8 +4762,42 @@ export const unauthorizedCustomerNames = (
   expectedCustomerName?: string,
   options: CaptionCustomerIdentityOptions = {},
 ): string[] => {
+  const names = namesInCaption(caption, expectedCustomerName, options, false);
+  // "Congrats to MR. MILLER!", "Thanks to mrs. Smith!", "Congrats to
+  // Mr.Miller!": scanned again with any-case titles joined; that scan can
+  // only add names.
+  const source = (caption || "").normalize("NFKC");
+  ANY_CASE_TITLE_ABBREVIATIONS.lastIndex = 0;
+  if (
+    EXOTIC_IDENTITY_TEXT.test(source) ||
+    !ANY_CASE_TITLE_ABBREVIATIONS.test(source.replace(TITLE_ABBREVIATIONS, "$1"))
+  ) {
+    return names;
+  }
+  return Array.from(
+    new Set([
+      ...names,
+      ...namesInCaption(caption, expectedCustomerName, options, true),
+    ]),
+  );
+};
+
+const namesInCaption = (
+  caption: string,
+  expectedCustomerName: string | undefined,
+  options: CaptionCustomerIdentityOptions,
+  anyCaseTitles: boolean,
+): string[] => {
   const expected = toPublicCustomerLabel(expectedCustomerName);
-  const grounding = buildGrounding(options.allowedPhrases);
+  const grounding = {
+    ...buildGrounding(options.allowedPhrases),
+    exotic: EXOTIC_IDENTITY_TEXT.test((caption || "").normalize("NFKC")),
+    crowdPlain: false,
+  };
+  grounding.crowdPlain =
+    !grounding.exotic &&
+    !/[#@]/.test((caption || "").normalize("NFKC")) &&
+    PLAIN_CAPTION_TEXT.test((caption || "").normalize("NFKC").replace(EMOJI_PAIR, ""));
   // Every whitespace run collapses to one character, but a line break stays
   // a line break so a new sentence on the next line is a hard boundary.
   const preSplit = (caption || "")
@@ -3896,6 +4809,11 @@ export const unauthorizedCustomerNames = (
     .replace(/[‒―−]/gu, "—")
     // "Mr. Miller", "Dr. Nguyen": the title's period is not a sentence end.
     .replace(TITLE_ABBREVIATIONS, "$1")
+    .replace(ANY_CASE_TITLE_ABBREVIATIONS, (...args) =>
+      anyCaseTitles
+        ? joinAnyCaseTitle(args[0], args[1], args[2], args[3], args[4])
+        : args[0],
+    )
     .replace(/\s+/g, (ws) => (ws.includes("\n") ? "\n" : " "))
     .trim();
   // "#CongratsMichelle" / "#WelcomeHomeMichelle" address a person just as

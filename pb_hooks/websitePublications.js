@@ -4797,6 +4797,33 @@ const IDENTITY_FROM_OPENER = new RegExp(
   "\\b[Ff]rom(?:\\s+[" + IDENTITY_LOWER + "][" + IDENTITY_LOWER + "'’-]*)*\\s+$",
 );
 const IDENTITY_TITLE_ABBREVIATIONS = /\b(Mr|Mrs|Ms|Mx|Dr|Jr|Sr|St)\.(?=\s)/g;
+// Mirror of ANY_CASE_TITLE_ABBREVIATIONS: "MR. MILLER", "mr. Miller",
+// "Mr.Miller" — joined only in a SECOND scan whose verdict is added to the
+// first, so erasing a boundary the caption meant ("123 Oak DR. Sarah…",
+// "MI, OH AND MS.") can add a refusal, never lift one.
+const IDENTITY_ANY_CASE_TITLE_ABBREVIATIONS =
+  /\b([Mm][Rr][Ss]?|[Mm][SsXx]|[Dd][Rr]|[Pp][Rr][Oo][Ff]|[Rr][Ee][Vv]|[Ss][Gg][Tt]|[Cc][Aa][Pp][Tt]|[Ff][Rr])\.(\s|(?=[A-Z]))/g;
+// "MI, OH AND MS." closing a list of state codes is Mississippi.
+const IDENTITY_STATE_CODE_LIST_BEFORE =
+  /\b[A-Z]{2}(?:\s*,\s*|,?\s+(?:and|AND|or|OR|&)\s+)$/;
+function identityJoinAnyCaseTitle(match, title, space, offset, text) {
+  return title === "MS" && IDENTITY_STATE_CODE_LIST_BEFORE.test(text.slice(0, offset))
+    ? match
+    : title.charAt(0).toUpperCase() + title.slice(1).toLowerCase() + (space || " ");
+}
+// Mirror of EXOTIC_IDENTITY_TEXT: astral-plane letters (anything past U+FFFF
+// but the emoji blocks), non-ASCII digits and the few BMP letters whose case
+// these Unicode 15.1 tables read differently from the client's \p{Lu}/\p{Ll}
+// ("ǅ", letters added since), which production's client and server already
+// read differently — the rules added for the Codex findings on PR #35 stay
+// off for such a caption.
+const IDENTITY_EXOTIC_TEXT = new RegExp(
+  "[\\uD800-\\uD83B\\uD83F-\\uDBFF][\\uDC00-\\uDFFF]|[\\u01C5\\u01C8\\u01CB\\u01F2\\u0295\\u088F\\u0C5C\\u0CDC\\u1C89-\\u1C8A\\u1F88-\\u1F8F\\u1F98-\\u1F9F\\u1FA8-\\u1FAF\\u1FBC\\u1FCC\\u1FFC\\uA7CB-\\uA7CF\\uA7D2\\uA7D4\\uA7DA-\\uA7DC\\uA7F1\\u00B2-\\u00B3\\u00B9\\u00BC-\\u00BE\\u0660-\\u0669\\u06F0-\\u06F9\\u07C0-\\u07C9\\u0966-\\u096F\\u09E6-\\u09EF\\u09F4-\\u09F9\\u0A66-\\u0A6F\\u0AE6-\\u0AEF\\u0B66-\\u0B6F\\u0B72-\\u0B77\\u0BE6-\\u0BF2\\u0C66-\\u0C6F\\u0C78-\\u0C7E\\u0CE6-\\u0CEF\\u0D58-\\u0D5E\\u0D66-\\u0D78\\u0DE6-\\u0DEF\\u0E50-\\u0E59\\u0ED0-\\u0ED9\\u0F20-\\u0F33\\u1040-\\u1049\\u1090-\\u1099\\u1369-\\u137C\\u16EE-\\u16F0\\u17E0-\\u17E9\\u17F0-\\u17F9\\u1810-\\u1819\\u1946-\\u194F\\u19D0-\\u19DA\\u1A80-\\u1A89\\u1A90-\\u1A99\\u1B50-\\u1B59\\u1BB0-\\u1BB9\\u1C40-\\u1C49\\u1C50-\\u1C59\\u2070\\u2074-\\u2079\\u2080-\\u2089\\u2150-\\u2182\\u2185-\\u2189\\u2460-\\u249B\\u24EA-\\u24FF\\u2776-\\u2793\\u2CFD\\u3007\\u3021-\\u3029\\u3038-\\u303A\\u3192-\\u3195\\u3220-\\u3229\\u3248-\\u324F\\u3251-\\u325F\\u3280-\\u3289\\u32B1-\\u32BF\\uA620-\\uA629\\uA6E6-\\uA6EF\\uA830-\\uA835\\uA8D0-\\uA8D9\\uA900-\\uA909\\uA9D0-\\uA9D9\\uA9F0-\\uA9F9\\uAA50-\\uAA59\\uABF0-\\uABF9\\uFF10-\\uFF19]",
+);
+// Own-property lookup for the rules below ("Constructor" is not vocabulary).
+function identityHas(set, key) {
+  return Object.prototype.hasOwnProperty.call(set, key) && !!set[key];
+}
 // The opener reached the candidate through a lowercase lead-in word ("to",
 // "the", "our newest", "the all-new") rather than naming it outright.
 const IDENTITY_LEAD_IN_OPENER = new RegExp(
@@ -4984,6 +5011,32 @@ const IDENTITY_PERSON_SLOT_OPENER = new RegExp(
     identityCi("proud") +
     ")\\b",
 );
+// Mirror of PERSON_ACTION_OPENER / WELCOMED_OPENER / isPersonSlotOpener():
+// nobody helps, thanks or assists a season.
+const IDENTITY_PERSON_ACTION_OPENER = new RegExp(
+  "^(?:" +
+    identityCiAlt([
+      "helping",
+      "helped",
+      "thanking",
+      "thanked",
+      "congratulating",
+      "congratulated",
+      "congratulate",
+      "assisting",
+      "assisted",
+    ]) +
+    ")\\b",
+);
+const IDENTITY_WELCOMED_OPENER = new RegExp("^" + identityCi("welcomed") + "\\b");
+function identityIsPersonSlotOpener(matchText, grounding) {
+  return (
+    IDENTITY_PERSON_SLOT_OPENER.test(matchText) ||
+    (!grounding.exotic &&
+      (IDENTITY_PERSON_ACTION_OPENER.test(matchText) ||
+        IDENTITY_WELCOMED_OPENER.test(matchText)))
+  );
+}
 // Mirror of clauseOwnsPerson(): the clause goes on about a single person.
 function identityClauseOwnsPerson(scan, tokenEnd) {
   return /^(?:\s+[^\s.!?;:\n—–]+){0,7}?\s+(?:[Hh][Ee][Rr]|[Hh][Ii][Ss])\b/.test(
@@ -5058,6 +5111,153 @@ function identityPrecededByUnknownCapital(scan, tokenStart, grounding, actionWor
   }
   return word;
 }
+// Mirror of VOCABULARY_SURNAMES: vocabulary that is also a common surname
+// ("Michelle Price is all smiles") — glued to the approved label it is the
+// surname whatever follows.
+const IDENTITY_VOCABULARY_SURNAMES = {
+  price: true,
+  miles: true,
+  power: true,
+  speed: true,
+  prince: true,
+  queen: true,
+  flint: true,
+  fenton: true,
+  lansing: true,
+  hawks: true,
+};
+// Mirror of CLOSING_VOCABULARY_SURNAMES: a surname where it closes the
+// phrase or the sentence goes on in lowercase ("Congrats, Michelle Driver!").
+const IDENTITY_CLOSING_VOCABULARY_SURNAMES = {
+  driver: true,
+  love: true,
+  court: true,
+  player: true,
+  sale: true,
+  sales: true,
+  bank: true,
+  winner: true,
+  brighton: true,
+  friend: true,
+  low: true,
+  pastor: true,
+};
+const IDENTITY_SURNAME_CLOSE = new RegExp(
+  "^(?:\\s*(?:[!.?,;]|$|\\n)|\\s+[" + IDENTITY_LOWER + "])",
+);
+const IDENTITY_HAS_LOWER = new RegExp("[" + IDENTITY_LOWER + "]");
+// Mirror of labelNamesLoneMake(): "Congrats to our customer Ford!", "Our
+// customer Ford is all smiles", "One happy customer, Ford!" — an explicit
+// person label names the lone make as a person when the clause addresses
+// someone or owns the label; listing copy ("One owner Ford, no accidents",
+// "Every owner Ford has ever had") and "Ford Pass" / "Ford F-150" do not.
+const IDENTITY_PERSON_LABEL_NOUNS = [
+  "customer",
+  "owner",
+  "buyer",
+  "driver",
+  "client",
+  "guest",
+  "member",
+  "shopper",
+  "purchaser",
+  "winner",
+  "patron",
+  "lessee",
+];
+// Mirror of PERSON_LABEL_WORDS: "our client Young" — a label never completes
+// a phrase with the name after it, except "guest" ("our Guest Star").
+const IDENTITY_PERSON_LABEL_WORDS = {};
+IDENTITY_PERSON_LABEL_NOUNS.forEach(function (noun) {
+  if (noun === "guest") return;
+  IDENTITY_PERSON_LABEL_WORDS[noun] = true;
+  IDENTITY_PERSON_LABEL_WORDS[noun + "s"] = true;
+});
+const IDENTITY_PERSON_LABEL_BEFORE = new RegExp(
+  "(?:^|[^" +
+    IDENTITY_LETTER +
+    "0-9'’-])(?:" +
+    IDENTITY_PERSON_LABEL_NOUNS.join("|") +
+    ")(?:\\s*[,:–—-]{1,2}\\s*|\\s+[\"“'‘(\\[]?)$",
+  "i",
+);
+const IDENTITY_LABEL_ADDRESSING_WORDS =
+  /\b(?:congratulations|congrats|kudos|props|thanks|thank|shout|meet|welcome|welcoming|welcomed|helping|helped|delivered|sold|from|our|my|another|say|hi|hello|hey|cheers|salute|hats|introducing|presenting|spotlighting)\b/i;
+const IDENTITY_LABEL_FOLLOWING_WORD = new RegExp(
+  "^\\s+([" + IDENTITY_LETTER + "0-9][" + IDENTITY_LETTER + "0-9'’-]*)",
+);
+const IDENTITY_LEADING_NON_LETTERS = new RegExp("^[^" + IDENTITY_LETTER + "]+");
+const IDENTITY_NON_SPACE_NON_LETTER = new RegExp("[^\\s" + IDENTITY_LETTER + "]");
+const IDENTITY_THE_LEAD_IN_END = new RegExp(
+  "\\b[Tt][Hh][Ee](?:\\s+[" + IDENTITY_LETTER + "'’-]+){0,3}\\s*$",
+);
+// Mirror of LABEL_RELATIVE_CLAUSE_AFTER: "the winner Ford chose!", "the
+// driver Ford sponsors this season" — but "The new owner Ford drove home".
+const IDENTITY_LABEL_RELATIVE_CLAUSE_AFTER = new RegExp(
+  "^\\s+[" +
+    IDENTITY_LOWER +
+    "][" +
+    IDENTITY_LETTER +
+    "'’-]*(?:\\s*(?:[!.?,;:]|$|\\n)|\\s+(?:most|best|always|ever|often|still|first|too|again|daily|this|last|next|every|each|today|tonight|yesterday)\\b)",
+);
+// Mirror of PERSON_LABEL_HEADING_BEFORE / SENTENCE_LABEL_CLAUSE.
+const IDENTITY_PERSON_LABEL_HEADING_BEFORE =
+  /\b(?:customer|owner|buyer|client|guest|member)s?\s+(?:spotlight|of\s+the\s+(?:day|week|month|year))\s*[:–—-]\s*$/i;
+const IDENTITY_SENTENCE_LABEL_CLAUSE =
+  /^\s*(?:(?:the|our|my|this|a|another)\s+)?(?:(?:new|newest|brand-new|proud|happy|lucky|loyal|repeat|valued|satisfied|first-time|longtime|long-time|returning)(?:\s+|$)){0,3}$/i;
+const IDENTITY_LABEL_VERB = new RegExp(
+  "^\\s+(?:just\\s+)?([" + IDENTITY_LETTER + "'’-]+)",
+);
+function identityLabelNamesLoneMake(scan, tokenStart, tokenEnd, actionWords) {
+  const before = scan.slice(0, tokenStart);
+  const rest = scan.slice(tokenEnd);
+  const following = IDENTITY_LABEL_FOLLOWING_WORD.exec(rest);
+  if (
+    following &&
+    (identityHasDigit(following[1]) ||
+      (IDENTITY_CAPITAL.test(following[1]) &&
+        identityHas(IDENTITY_LEAD_IN_NOUN_SET, identityLower(following[1]))))
+  ) {
+    return false;
+  }
+  // The make closes the phrase or acts: "…Ford!", "…Ford drove home".
+  const verb = IDENTITY_LABEL_VERB.exec(rest);
+  const closesOrActs =
+    /^\s*(?:[!.?]|$|\n)/.test(rest) ||
+    (!!verb && identityHas(actionWords, verb[1].toLowerCase()));
+  // "Customer spotlight: Ford!": the heading labels the person it names
+  // ("Customer Spotlight: Howell Little League" is an organisation).
+  if (IDENTITY_PERSON_LABEL_HEADING_BEFORE.test(before)) return closesOrActs;
+  const label = IDENTITY_PERSON_LABEL_BEFORE.exec(before);
+  if (!label) return false;
+  if (
+    IDENTITY_NON_SPACE_NON_LETTER.test(
+      label[0].replace(IDENTITY_LEADING_NON_LETTERS, ""),
+    )
+  ) {
+    return true;
+  }
+  const clause =
+    before
+      .slice(0, before.length - label[0].length)
+      .split(/[.!?\n]/)
+      .pop() || "";
+  // "Congrats to the winner Ford chose": the make opens a relative clause.
+  if (
+    IDENTITY_THE_LEAD_IN_END.test(clause) &&
+    IDENTITY_LABEL_RELATIVE_CLAUSE_AFTER.test(rest)
+  ) {
+    return false;
+  }
+  // "New owner Ford drove home today!", "Happy customer Ford!", "The new
+  // owner Ford drove home happy!": the label opens its sentence and the make
+  // is its subject or the whole phrase.
+  if (IDENTITY_SENTENCE_LABEL_CLAUSE.test(clause) && closesOrActs) return true;
+  return (
+    IDENTITY_LABEL_ADDRESSING_WORDS.test(clause) &&
+    !/\b(?:every|each|any)\b/i.test(clause)
+  );
+}
 // Mirror of precededByPersonNoun(): "Mr. Ford", "her son Ford".
 function identityPrecededByPersonNoun(scan, tokenStart) {
   const before = IDENTITY_PREVIOUS_WORD.exec(scan.slice(0, tokenStart));
@@ -5081,6 +5281,65 @@ function identityTrailingVocativeIsList(scan, tokenStart) {
   }
   return false;
 }
+// Mirror of JOINS_GROUP_CONTINUATION: "Welcome Will to the family",
+// "Welcoming Hunter aboard".
+const IDENTITY_JOINS_GROUP_CONTINUATION = new RegExp(
+  "^\\s+(?:" +
+    IDENTITY_TO +
+    "\\s+(?:" +
+    IDENTITY_THE +
+    "|" +
+    identityCi("our") +
+    ")\\s+(?:[" +
+    IDENTITY_LETTER +
+    "0-9'’-]+\\s+){0,3}?(?:" +
+    identityCiAlt(["family", "families", "team", "crew", "nation", "club"]) +
+    ")|" +
+    identityCi("aboard") +
+    ")\\b",
+);
+// Mirror of NEW_PURCHASE_CONTINUATION: "Congrats to Summer on the new Escape".
+const IDENTITY_NEW_PURCHASE_CONTINUATION = new RegExp(
+  "^\\s+" +
+    identityCi("on") +
+    "\\s+(?:" +
+    identityCiAlt(["the", "your", "their"]) +
+    ")\\s+(?:" +
+    identityCiAlt(["new", "first", "latest"]) +
+    ")\\b",
+);
+// Mirror of PERSON_BARE_VERB_CONTINUATION: "Helping Hunter find the perfect truck".
+const IDENTITY_PERSON_BARE_VERB_CONTINUATION =
+  /^\s+(?:find|pick|choose|get|drive|take|buy|lease|trade|upgrade|land|score|start|make|finance|save|shop|celebrate|check|sign|head|roll)\b/;
+const IDENTITY_LISTED_WITH = new RegExp(
+  "^\\s*(?:[Aa][Nn][Dd]|&)\\s+([" + IDENTITY_UPPER + "][" + IDENTITY_LETTER + "'’-]*)",
+);
+// Mirror of PERSON_WITH_CONTINUATION / PERSON_PHRASE_CLOSE: "Helping Hunter
+// with a new F-150", "Big smiles from Summer and the whole crew", "Big
+// smiles from Hunter this weekend!", "Smiles from Summer 🎉".
+const IDENTITY_PERSON_WITH_CONTINUATION =
+  /^\s+(?:with\s+(?:a|an|the|his|her|their)|and\s+the\s+(?:whole\s+)?(?:crew|team|family|gang|squad|bunch))\b/i;
+const IDENTITY_PERSON_PHRASE_CLOSE =
+  /^(?:\s+(?:today|tonight|yesterday|this\s+(?:morning|afternoon|evening|weekend|week)))?\s*(?:[!.?,;–—]|$|\n|[\uD83C-\uD83E][\uDC00-\uDFFF]|[\u2600-\u27BF])/;
+// Mirror of REACTION_FROM_BEFORE / reactionFromSlot(): "Big smiles from
+// King!" — only a person sends a reaction.
+const IDENTITY_REACTION_FROM_BEFORE =
+  /\b(?:smiles?|congrats|congratulations|thanks|thank-you|thank\s+you|love|hugs|kudos|props|high[\s-]fives?)\s+from\s+$/i;
+function identityReactionFromSlot(scan, tokenStart) {
+  return IDENTITY_REACTION_FROM_BEFORE.test(scan.slice(0, tokenStart));
+}
+// Mirror of fromPersonSlot(): "Big smiles from Hunter!" — the sender "from"
+// names directly is a person, unless the word is a date or season outside a
+// reaction.
+function identityFromPersonSlot(scan, tokenStart, lower, patternIndex, grounding) {
+  return (
+    !grounding.exotic &&
+    (patternIndex === 3 || patternIndex === 5) &&
+    /\b[Ff]rom\s+$/.test(scan.slice(0, tokenStart)) &&
+    (!identityHas(IDENTITY_NON_CUSTOMER_WORDS, lower) ||
+      identityReactionFromSlot(scan, tokenStart))
+  );
+}
 // Mirror of personContinuation() / ambiguousWordCompletesPhrase().
 function identityPersonContinuation(
   scan,
@@ -5089,6 +5348,7 @@ function identityPersonContinuation(
   grounding,
   strongOnly,
   actionWords,
+  personOnlySlot,
 ) {
   const rest = scan.slice(tokenEnd);
   if (
@@ -5136,20 +5396,588 @@ function identityPersonContinuation(
     return true;
   }
   if (strongOnly) return false;
-  return /^\s*(?:[!.?,;]|$|\n)/.test(rest);
+  if (grounding.exotic) return /^\s*(?:[!.?,;]|$|\n)/.test(rest);
+  // In a person-addressing slot the phrase may go on about the person
+  // ("Helping Hunter find his dream car", "Welcoming Grace to the Maxey Ford
+  // family", "Congrats to Hunter and Michelle", "Helping Hunter with a new
+  // F-150" — a season only where nobody but a person fits).
+  if (
+    identityClauseOwnsPerson(scan, tokenEnd) ||
+    IDENTITY_JOINS_GROUP_CONTINUATION.test(rest) ||
+    IDENTITY_NEW_PURCHASE_CONTINUATION.test(rest) ||
+    IDENTITY_PERSON_BARE_VERB_CONTINUATION.test(rest) ||
+    (IDENTITY_PERSON_WITH_CONTINUATION.test(rest) &&
+      (!!personOnlySlot ||
+        !identityHas(IDENTITY_NON_CUSTOMER_WORDS, identityLower(token))))
+  ) {
+    return true;
+  }
+  const listed = IDENTITY_LISTED_WITH.exec(rest);
+  if (listed) {
+    const other = identityLower(listed[1]);
+    if (
+      other === "customer" ||
+      !(
+        identityHas(IDENTITY_AMBIGUOUS_NAME_WORDS, other) ||
+        identityHas(IDENTITY_NON_CUSTOMER_WORDS, other) ||
+        identityHas(IDENTITY_HOP_LEAD_IN_WORDS, other)
+      )
+    ) {
+      return true;
+    }
+  }
+  return IDENTITY_PERSON_PHRASE_CLOSE.test(rest);
 }
-function identityAmbiguousWordCompletesPhrase(scan, tokenStart) {
+function identityAmbiguousWordCompletesPhrase(scan, tokenStart, grounding) {
   const before = IDENTITY_PREVIOUS_WORD.exec(scan.slice(0, tokenStart));
   if (!before) return false;
   const lower = identityLower(before[1]);
   return (
     (!!IDENTITY_NON_CUSTOMER_WORDS[lower] || !!IDENTITY_LEAD_IN_NOUN_SET[lower]) &&
     !IDENTITY_PERSON_HEAD_NOUNS[lower] &&
+    !(
+      Object.prototype.hasOwnProperty.call(IDENTITY_PERSON_LABEL_WORDS, lower) &&
+      !grounding.exotic
+    ) &&
     !IDENTITY_NOUN_DETERMINERS[lower] &&
     lower !== "the" &&
     !IDENTITY_HOP_STOP_WORDS[lower] &&
     !IDENTITY_LEAD_IN_BOUNDARY_WORDS[lower]
   );
+}
+// Mirror of collectiveCrowd(): "Celebrating Local Heroes!", "Congrats
+// Michelle — Recognizing Every Nurse this week" — a participial opener
+// honouring a crowd from a closed list, the rest of its sentence lowercase,
+// a time phrase or a place, and no other capitalized word in the caption
+// that could be a person. Plain text only.
+const IDENTITY_COLLECTIVE_OPENERS = {
+  Celebrating: true,
+  Honoring: true,
+  Welcoming: true,
+  Thanking: true,
+  Recognizing: true,
+  Saluting: true,
+};
+const IDENTITY_COLLECTIVE_MODIFIERS = { Local: true, Every: true };
+const IDENTITY_CROWD_ADJECTIVES = {};
+[
+  "first",
+  "new",
+  "small",
+  "young",
+  "brave",
+  "unsung",
+  "everyday",
+  "amazing",
+  "hardworking",
+  "hard-working",
+  "hometown",
+  "incredible",
+  "service",
+  "healthcare",
+  "fellow",
+  "favorite",
+  "favourite",
+  "dedicated",
+  "retired",
+  "area",
+].forEach(function (word) {
+  IDENTITY_CROWD_ADJECTIVES[word] = true;
+});
+const IDENTITY_CROWD_NOUNS = {};
+[
+  "hero",
+  "heroes",
+  "veteran",
+  "veterans",
+  "nurse",
+  "nurses",
+  "teacher",
+  "teachers",
+  "educators",
+  "responders",
+  "business",
+  "businesses",
+  "family",
+  "families",
+  "student",
+  "students",
+  "athletes",
+  "graduate",
+  "graduates",
+  "grads",
+  "volunteer",
+  "volunteers",
+  "firefighter",
+  "firefighters",
+  "officers",
+  "troops",
+  "member",
+  "members",
+  "customer",
+  "customers",
+  "driver",
+  "drivers",
+  "owner",
+  "owners",
+  "neighbor",
+  "neighbors",
+  "neighbour",
+  "neighbours",
+  "legend",
+  "legends",
+  "champion",
+  "champions",
+  "school",
+  "schools",
+  "charity",
+  "charities",
+  "nonprofits",
+  "workers",
+  "moms",
+  "dads",
+  "parents",
+  "kids",
+  "coaches",
+  "artists",
+  "makers",
+  "leaders",
+  "partners",
+  "sponsors",
+  "employees",
+  "farmers",
+  "seniors",
+  "community",
+  "communities",
+  "military",
+].forEach(function (word) {
+  IDENTITY_CROWD_NOUNS[word] = true;
+});
+const IDENTITY_CROWD_TIME_LEADS = { every: true, all: true, this: true, each: true };
+const IDENTITY_CROWD_TIME_WORDS = {};
+Object.keys(IDENTITY_TIME_FOLLOWERS)
+  .concat([
+    "year",
+    "years",
+    "long",
+    "round",
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+  ])
+  .forEach(function (word) {
+    IDENTITY_CROWD_TIME_WORDS[word] = true;
+  });
+const IDENTITY_CROWD_PLACE_PREPOSITIONS = {
+  in: true,
+  at: true,
+  across: true,
+  around: true,
+  throughout: true,
+};
+const IDENTITY_PLAIN_CAPTION_TEXT =
+  /^[\t-\r -~\u00A0\u00A9\u00AE\u00B0\u00B7\u200D\u2010-\u2027\u2030-\u205E\u20A0-\u20CF\u2190-\u21FF\u2300-\u23FF\u25A0-\u27BF\u2B00-\u2BFF\uFE0F]*$/;
+const IDENTITY_EMOJI_PAIR = /[\uD83C-\uD83E][\uDC00-\uDFFF]/g;
+// Mirror of CROWD_NAME_WORDS: vocabulary that names people too.
+const IDENTITY_CROWD_NAME_WORDS = {
+  ace: true,
+  sunshine: true,
+  princess: true,
+  buddy: true,
+  champ: true,
+};
+function identityPlainCaptionWord(word, grounding, actionWords) {
+  const lower = identityLower(word);
+  return (
+    !identityHas(IDENTITY_AMBIGUOUS_NAME_WORDS, lower) &&
+    !identityHas(IDENTITY_VOCABULARY_SURNAMES, lower) &&
+    !identityHas(IDENTITY_CLOSING_VOCABULARY_SURNAMES, lower) &&
+    !identityHas(IDENTITY_CROWD_NAME_WORDS, lower) &&
+    !identityHas(IDENTITY_TITLE_HEAD_NOUNS, lower) &&
+    !identityHas(IDENTITY_RELATIVE_NOUN_SET, lower) &&
+    !identityHas(grounding.words, lower) &&
+    !isAutomotiveBrandToken(word) &&
+    (identityHas(IDENTITY_NON_CUSTOMER_WORDS, lower) ||
+      identityHas(IDENTITY_HOP_STOP_WORDS, lower) ||
+      identityHas(IDENTITY_LEAD_IN_BOUNDARY_WORDS, lower) ||
+      identityHas(IDENTITY_HOP_LEAD_IN_WORDS, lower) ||
+      identityHas(IDENTITY_DETERMINER_ADJECTIVES, lower) ||
+      identityHas(IDENTITY_NOUN_DETERMINERS, lower) ||
+      identityHas(IDENTITY_TRIGGER_WORDS, lower) ||
+      identityHas(actionWords, lower) ||
+      identityHas(IDENTITY_TIME_FOLLOWERS, lower))
+  );
+}
+// Mirror of crowdLowercaseWord(): a lowercase word the crowd relaxation knows
+// names nobody ("all month long — stop by!", never "like sarah").
+const IDENTITY_CROWD_FUNCTION_WORDS = {};
+[
+  "a",
+  "an",
+  "and",
+  "or",
+  "but",
+  "not",
+  "so",
+  "too",
+  "very",
+  "just",
+  "more",
+  "most",
+  "always",
+  "again",
+  "it",
+  "its",
+  "they",
+  "them",
+  "their",
+  "these",
+  "those",
+  "that",
+  "which",
+  "what",
+  "how",
+  "when",
+  "where",
+  "if",
+  "than",
+  "then",
+  "there",
+  "here",
+  "into",
+  "about",
+  "after",
+  "before",
+  "during",
+  "near",
+  "like",
+  "every",
+  "each",
+  "local",
+  "stop",
+  "come",
+  "see",
+  "visit",
+  "join",
+  "keep",
+  "help",
+  "make",
+  "serve",
+  "honor",
+  "honour",
+  "salute",
+  "thank",
+  "love",
+  "celebrate",
+  "recognize",
+  "recognise",
+  "keeping",
+  "making",
+  "serving",
+  "running",
+  "working",
+  "doing",
+  "giving",
+  "being",
+  "can",
+  "could",
+  "should",
+  "would",
+  "must",
+  "do",
+  "does",
+  "did",
+  "go",
+  "get",
+  "be",
+  "been",
+  "am",
+].forEach(function (word) {
+  IDENTITY_CROWD_FUNCTION_WORDS[word] = true;
+});
+function identityCrowdLowercaseWord(word, grounding, actionWords) {
+  if (/^[0-9]/.test(word)) return /^[0-9]+(?:st|nd|rd|th|s)?$/.test(word);
+  const lower = identityLower(word);
+  return (
+    identityHas(IDENTITY_CROWD_FUNCTION_WORDS, lower) ||
+    identityHas(IDENTITY_CROWD_TIME_WORDS, lower) ||
+    identityHas(IDENTITY_CROWD_TIME_LEADS, lower) ||
+    identityHas(IDENTITY_CROWD_PLACE_PREPOSITIONS, lower) ||
+    identityHas(IDENTITY_CROWD_NOUNS, lower) ||
+    identityHas(IDENTITY_CROWD_ADJECTIVES, lower) ||
+    identityPlainCaptionWord(word, grounding, actionWords)
+  );
+}
+function identityCrowdPlaceWords(words, grounding) {
+  const lowers = words.map(identityLower);
+  for (let i = 0; i < lowers.length; i++) {
+    if (
+      identityHas(IDENTITY_AMBIGUOUS_NAME_WORDS, lowers[i]) ||
+      identityHas(IDENTITY_TITLE_HEAD_NOUNS, lowers[i])
+    ) {
+      return false;
+    }
+  }
+  let unknown = 0;
+  for (let i = 0; i < lowers.length; i++) {
+    if (
+      !identityHas(grounding.words, lowers[i]) &&
+      !identityHas(IDENTITY_ORGANISATION_FOLLOWERS, lowers[i]) &&
+      !identityHas(IDENTITY_NON_CUSTOMER_WORDS, lowers[i])
+    ) {
+      unknown++;
+    }
+  }
+  return (
+    unknown === 0 ||
+    (unknown === 1 &&
+      identityHas(IDENTITY_ORGANISATION_FOLLOWERS, lowers[lowers.length - 1]))
+  );
+}
+function identityCollectiveCrowd(scan, tokenStart, token, grounding, actionWords) {
+  if (
+    grounding.exotic ||
+    !grounding.crowdPlain ||
+    !IDENTITY_PLAIN_CAPTION_TEXT.test(scan.replace(IDENTITY_EMOJI_PAIR, ""))
+  ) {
+    return false;
+  }
+  const tokens = [];
+  const tokenPattern = /[A-Za-z0-9][A-Za-z0-9'-]*|[^\sA-Za-z0-9]/g;
+  let m = null;
+  while ((m = tokenPattern.exec(scan)) !== null) {
+    tokens.push({ text: m[0], start: m.index, end: m.index + m[0].length });
+  }
+  let at = -1;
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i].start === tokenStart) {
+      at = i;
+      break;
+    }
+  }
+  if (at < 0) return false;
+  const opener = identityHas(IDENTITY_COLLECTIVE_OPENERS, token) ? at : at - 1;
+  const modifier = opener + 1;
+  if (
+    opener < 0 ||
+    modifier >= tokens.length ||
+    !identityHas(IDENTITY_COLLECTIVE_OPENERS, tokens[opener].text) ||
+    !identityHas(IDENTITY_COLLECTIVE_MODIFIERS, tokens[modifier].text) ||
+    scan.slice(tokens[opener].end, tokens[modifier].start) !== " "
+  ) {
+    return false;
+  }
+  const isWord = function (i) {
+    return i < tokens.length && /^[A-Za-z0-9]/.test(tokens[i].text);
+  };
+  // A capitalized word that names people too ("… and Driver") is never
+  // joined onto the crowd.
+  const crowdWord = function (i, set, joined) {
+    if (!isWord(i) || !/^[A-Za-z]?[a-z'-]+$/.test(tokens[i].text)) return false;
+    const lower = tokens[i].text.toLowerCase();
+    return (
+      identityHas(set, lower) &&
+      !(
+        joined &&
+        /^[A-Z]/.test(tokens[i].text) &&
+        (identityHas(IDENTITY_AMBIGUOUS_NAME_WORDS, lower) ||
+          identityHas(IDENTITY_VOCABULARY_SURNAMES, lower) ||
+          identityHas(IDENTITY_CLOSING_VOCABULARY_SURNAMES, lower) ||
+          identityHas(IDENTITY_CROWD_NAME_WORDS, lower))
+      )
+    );
+  };
+  // Adjectives and a noun; an adjective with no noun after it is not part of
+  // the crowd.
+  const crowdPhraseEnd = function (start, joined) {
+    let j = start;
+    while (crowdWord(j, IDENTITY_CROWD_ADJECTIVES, joined)) j++;
+    return crowdWord(j, IDENTITY_CROWD_NOUNS, joined) ? j + 1 : -1;
+  };
+  let index = crowdPhraseEnd(modifier + 1, false);
+  if (index < 0) return false;
+  for (;;) {
+    const joiner = index < tokens.length ? tokens[index].text : "";
+    if (joiner !== "&" && joiner !== "," && joiner !== "and") break;
+    const next = crowdPhraseEnd(index + 1, true);
+    if (next < 0) break;
+    index = next;
+  }
+  // Outside the crowd's own sentence only vocabulary opening its sentence
+  // ("Congrats, Michelle!" — never "Congrats Price!").
+  let sameSentence = true;
+  const sentenceInitial = function (i) {
+    for (let j = i - 1; j >= 0; j--) {
+      if (scan.slice(tokens[j].end, tokens[j + 1].start).indexOf("\n") >= 0)
+        return true;
+      if (isWord(j)) return false;
+      if (/[.!?]/.test(tokens[j].text)) return true;
+    }
+    return true;
+  };
+  const clear = function (i, strict) {
+    const t = tokens[i];
+    if (!isWord(i)) {
+      if (/[.!?]/.test(t.text)) sameSentence = false;
+      return i + 1;
+    }
+    if (!/^[A-Z]/.test(t.text)) {
+      return identityCrowdLowercaseWord(t.text, grounding, actionWords) ? i + 1 : -1;
+    }
+    const lower = t.text.toLowerCase();
+    if (lower === "customer") return i + 1;
+    if (
+      identityHas(IDENTITY_CROWD_TIME_LEADS, lower) &&
+      isWord(i + 1) &&
+      identityHas(IDENTITY_CROWD_TIME_WORDS, identityLower(tokens[i + 1].text))
+    ) {
+      let j = i + 1;
+      while (
+        isWord(j) &&
+        identityHas(IDENTITY_CROWD_TIME_WORDS, identityLower(tokens[j].text))
+      )
+        j++;
+      return j;
+    }
+    if (lower === "today" || lower === "tonight") return i + 1;
+    if (
+      i > 0 &&
+      isWord(i - 1) &&
+      identityHas(IDENTITY_CROWD_PLACE_PREPOSITIONS, tokens[i - 1].text.toLowerCase())
+    ) {
+      let j = i;
+      while (isWord(j) && /^[A-Z]/.test(tokens[j].text)) j++;
+      const words = [];
+      for (let k = i; k < j; k++) words.push(tokens[k].text);
+      return identityCrowdPlaceWords(words, grounding) ? j : -1;
+    }
+    if (
+      !strict &&
+      sentenceInitial(i) &&
+      identityPlainCaptionWord(t.text, grounding, actionWords)
+    ) {
+      return i + 1;
+    }
+    return -1;
+  };
+  for (let i = 0; i < opener;) {
+    i = clear(i, false);
+    if (i < 0) return false;
+  }
+  sameSentence = true;
+  for (let i = index; i < tokens.length;) {
+    if (
+      i > index &&
+      scan.slice(tokens[i - 1].end, tokens[i].start).indexOf("\n") >= 0
+    ) {
+      sameSentence = false;
+    }
+    i = clear(i, sameSentence);
+    if (i < 0) return false;
+  }
+  return true;
+}
+// Mirror of countryAddressedAsPerson(): "Congrats to America!", "America is
+// all smiles!", "Big smiles from America!", "Happy delivery day, America!" —
+// the country only where a place or the country itself fits ("Made in
+// America", "Thank you, America!", "Happy 4th of July, America!").
+const IDENTITY_COUNTRY_PLACE_BEFORE =
+  /\b(?:in|across|of|for|throughout|around|from|all\s+over|out\s+of)\s+(?:the\s+)?$/i;
+const IDENTITY_COUNTRY_OCCASION =
+  /\b(?:birthday|4th|fourth|july|independence|memorial|veterans?|labou?r|presidents?|flag|thanksgiving|new\s+year|holidays?|constitution|juneteenth|[0-9]+(?:st|nd|rd|th))\b/i;
+// Mirror of COUNTRY_VOCATIVE_CLAUSE / COUNTRY_LEADING_CONTINUATION /
+// COUNTRY_PERSON_OPENER: "Thank you, America!" (the whole clause), "America,
+// the beautiful" — but "Thanks for choosing us, America!", "America, enjoy
+// your new Bronco!", "Shoutout to America!" address a person.
+const IDENTITY_COUNTRY_VOCATIVE_CLAUSE =
+  /^(?:thank\s+you|thanks|(?:three\s+)?cheers|god\s+bless(?:\s+you)?|we\s+(?:love|salute)\s+you)$/i;
+const IDENTITY_COUNTRY_LEADING_CONTINUATION =
+  /^\s*(?:,|[:–—-]+)\s*(?:the|land|home\s+of|we\s+(?:love|salute|thank)|thank\s+you\s+for\s+your\s+service|god\s+bless|happy\s+(?:birthday|4th|fourth|independence|july|[0-9]+(?:st|nd|rd|th)))\b/i;
+const IDENTITY_COUNTRY_PERSON_OPENER =
+  /^(?:(?:big|huge|special|massive|major)\s+)?(?:shout(?:[\s-]?outs?)?|high\s+fives?|warm\s+welcome|safe\s+travels|introducing|presenting|spotlighting|surprising|surprised|greeting|greeted|treating|treated|gifting|gifted|handed)\b/i;
+const IDENTITY_COUNTRY_SURNAME_CLOSE = new RegExp(
+  "^\\s+\\S+(?:\\s*(?:[!.?,;:]|$|\\n)|\\s+[" + IDENTITY_LOWER + "])",
+);
+const IDENTITY_COUNTRY_MILESTONE_AFTER =
+  /^\s+on\s+(?:its\s+|the\s+)?[0-9]+(?:st|nd|rd|th)?\s+(?:years?|birthday|anniversary)\b/i;
+function identityCountryAddressedAsPerson(
+  scan,
+  token,
+  tokenStart,
+  tokenEnd,
+  grounding,
+  context,
+  actionWords,
+) {
+  if (
+    grounding.exotic ||
+    identityLower(token) !== "america" ||
+    /['’][Ss]?$/.test(token)
+  ) {
+    return false;
+  }
+  const before = scan.slice(0, tokenStart);
+  const previous = IDENTITY_PREVIOUS_WORD.exec(before);
+  if (
+    previous &&
+    (identityHas(IDENTITY_COLLECTIVE_FOLLOWERS, identityLower(previous[1])) ||
+      identityLower(previous[1]) === "captain")
+  ) {
+    return false;
+  }
+  if (
+    identityFollowedByUnknownCapital(scan, tokenEnd, grounding, actionWords) &&
+    IDENTITY_COUNTRY_SURNAME_CLOSE.test(scan.slice(tokenEnd))
+  ) {
+    return true;
+  }
+  if (context.patternIndex >= 11 && context.patternIndex !== 16) return true;
+  if (context.patternIndex === IDENTITY_BARE_ACTION_INDEX) {
+    return !IDENTITY_COUNTRY_PLACE_BEFORE.test(before);
+  }
+  if (context.patternIndex === 3 || context.patternIndex === 5) {
+    return identityReactionFromSlot(scan, tokenStart);
+  }
+  // "Thank you, America!", "Thanks, America!" — but "Michelle and America!".
+  if (
+    context.patternIndex === IDENTITY_TRAILING_VOCATIVE_INDEX ||
+    context.patternIndex === 16
+  ) {
+    const clause = (before.split(/[.!?\n]/).pop() || "")
+      .replace(/[\s,;:–—-]+$/, "")
+      .replace(IDENTITY_LEADING_NON_LETTERS, "");
+    return !(
+      IDENTITY_COUNTRY_VOCATIVE_CLAUSE.test(clause) ||
+      (/^happy\b/i.test(clause) && IDENTITY_COUNTRY_OCCASION.test(clause))
+    );
+  }
+  // "America, delivered!", "America! Welcome home!": a headline for a person
+  // ("Made in America, sold in Howell" is the place).
+  if (context.patternIndex === 7) return !IDENTITY_COUNTRY_PLACE_BEFORE.test(before);
+  if (context.patternIndex === IDENTITY_LEADING_VOCATIVE_INDEX) {
+    return !IDENTITY_COUNTRY_LEADING_CONTINUATION.test(scan.slice(tokenEnd));
+  }
+  if (!identityIsPersonSlotOpener(context.matchText, grounding)) {
+    if (IDENTITY_COUNTRY_PERSON_OPENER.test(context.matchText)) return true;
+    // "Wishing America a great first drive!" — but "Wishing America a happy 4th!".
+    return (
+      /^wishing\b/i.test(context.matchText) &&
+      !IDENTITY_COUNTRY_OCCASION.test(scan.slice(tokenEnd).split(/[.!?\n]/)[0])
+    );
+  }
+  if (/^[Hh][Aa][Pp][Pp][Yy]\b/.test(context.matchText)) {
+    return !IDENTITY_COUNTRY_OCCASION.test(context.matchText);
+  }
+  return !IDENTITY_COUNTRY_MILESTONE_AFTER.test(scan.slice(tokenEnd));
 }
 function identityFollowedByTimeNoun(scan, tokenEnd) {
   const following = IDENTITY_FOLLOWING_WORD.exec(scan.slice(tokenEnd));
@@ -5222,7 +6050,13 @@ function buildIdentityGrounding(allowed) {
       else if (afterBrand) modelWords[identityLower(raws[j])] = true;
     }
   }
-  return { words: words, pairs: pairs, modelWords: modelWords };
+  return {
+    words: words,
+    pairs: pairs,
+    modelWords: modelWords,
+    exotic: false,
+    crowdPlain: false,
+  };
 }
 
 // Mirror of looksPlural() on the client: "Johnsons"/"Adventures", not
@@ -5743,11 +6577,44 @@ function identityVehicleSlotPattern(patternIndex, matchText) {
  * text names someone who is not the authorized customer.
  */
 function containsUnexpectedCustomerIdentity(text, expectedCustomer, allowedPhrases) {
+  if (identityScanForCustomer(text, expectedCustomer, allowedPhrases, false))
+    return true;
+  // "Congrats to MR. MILLER!", "Thanks to mrs. Smith!", "Congrats to
+  // Mr.Miller!": scanned again with any-case titles joined; that scan can
+  // only add a refusal (mirror of unauthorizedCustomerNames()).
+  const source = (text || "").toString().normalize("NFKC");
+  IDENTITY_ANY_CASE_TITLE_ABBREVIATIONS.lastIndex = 0;
+  if (
+    IDENTITY_EXOTIC_TEXT.test(source) ||
+    !IDENTITY_ANY_CASE_TITLE_ABBREVIATIONS.test(
+      source.replace(IDENTITY_TITLE_ABBREVIATIONS, "$1"),
+    )
+  ) {
+    return false;
+  }
+  return identityScanForCustomer(text, expectedCustomer, allowedPhrases, true);
+}
+
+function identityScanForCustomer(
+  text,
+  expectedCustomer,
+  allowedPhrases,
+  anyCaseTitles,
+) {
   const expected = publicCustomerLabel(expectedCustomer);
   // Every whitespace run collapses to one character, but a line break stays
   // a line break so a new sentence on the next line is a hard boundary.
   const allowed = normalizeAllowedIdentityPhrases(allowedPhrases);
   const grounding = buildIdentityGrounding(allowed);
+  grounding.exotic = IDENTITY_EXOTIC_TEXT.test(
+    (text || "").toString().normalize("NFKC"),
+  );
+  grounding.crowdPlain =
+    !grounding.exotic &&
+    !/[#@]/.test((text || "").toString().normalize("NFKC")) &&
+    IDENTITY_PLAIN_CAPTION_TEXT.test(
+      (text || "").toString().normalize("NFKC").replace(IDENTITY_EMOJI_PAIR, ""),
+    );
   const preSplit = (text || "")
     .toString()
     .normalize("NFKC")
@@ -5758,6 +6625,14 @@ function containsUnexpectedCustomerIdentity(text, expectedCustomer, allowedPhras
     .replace(/[‒―−]/g, "—")
     // "Mr. Miller", "Dr. Nguyen": the title's period is not a sentence end.
     .replace(IDENTITY_TITLE_ABBREVIATIONS, "$1")
+    .replace(
+      IDENTITY_ANY_CASE_TITLE_ABBREVIATIONS,
+      function (match, title, space, offset, all) {
+        return anyCaseTitles
+          ? identityJoinAnyCaseTitle(match, title, space, offset, all)
+          : match;
+      },
+    )
     .trim()
     .replace(/\s+/g, function (ws) {
       return ws.indexOf("\n") >= 0 ? "\n" : " ";
@@ -6395,10 +7270,11 @@ function containsUnexpectedCustomerIdentity(text, expectedCustomer, allowedPhras
           cursor,
           next[1],
           grounding,
-          !IDENTITY_PERSON_SLOT_OPENER.test(context.matchText),
+          !identityIsPersonSlotOpener(context.matchText, grounding),
           actionWords,
+          IDENTITY_PERSON_ACTION_OPENER.test(context.matchText),
         ) &&
-        !identityAmbiguousWordCompletesPhrase(scan, nextStart)
+        !identityAmbiguousWordCompletesPhrase(scan, nextStart, grounding)
       ) {
         return true;
       }
@@ -6431,6 +7307,15 @@ function containsUnexpectedCustomerIdentity(text, expectedCustomer, allowedPhras
     const isPhotoCaption = context.patternIndex === IDENTITY_PHOTO_CAPTION_INDEX;
     // "New Arrivals: Bronco, Explorer, Expedition": the last item of a list.
     if (context.listTail) return false;
+    // "Celebrating Local Heroes!", "Congrats Michelle — Recognizing Every
+    // Nurse": a crowd.
+    if (
+      (identityHas(IDENTITY_COLLECTIVE_MODIFIERS, token) ||
+        identityHas(IDENTITY_COLLECTIVE_OPENERS, token)) &&
+      identityCollectiveCrowd(scan, tokenStart, token, grounding, actionWords)
+    ) {
+      return false;
+    }
     // "America's Truck": a possessive in a photo caption belongs to the
     // possessive pattern.
     if (isPhotoCaption && /['’][Ss]$/.test(token)) return false;
@@ -6459,7 +7344,7 @@ function containsUnexpectedCustomerIdentity(text, expectedCustomer, allowedPhras
           }
           if (
             IDENTITY_AMBIGUOUS_NAME_WORDS[lower] &&
-            !identityAmbiguousWordCompletesPhrase(scan, tokenStart)
+            !identityAmbiguousWordCompletesPhrase(scan, tokenStart, grounding)
           ) {
             return true;
           }
@@ -6495,14 +7380,27 @@ function containsUnexpectedCustomerIdentity(text, expectedCustomer, allowedPhras
           token,
           grounding,
           !(
-            IDENTITY_PERSON_SLOT_OPENER.test(context.matchText) ||
+            identityIsPersonSlotOpener(context.matchText, grounding) ||
             context.patternIndex === 8 ||
             context.patternIndex === IDENTITY_LEADING_VOCATIVE_INDEX ||
-            context.patternIndex >= 11
+            context.patternIndex >= 11 ||
+            identityFromPersonSlot(
+              scan,
+              tokenStart,
+              lower,
+              context.patternIndex,
+              grounding,
+            )
           ),
           actionWords,
+          IDENTITY_PERSON_ACTION_OPENER.test(context.matchText) ||
+            identityReactionFromSlot(scan, tokenStart),
         ) &&
-        !identityAmbiguousWordCompletesPhrase(scan, tokenStart)
+        // "Welcome Spring!" completes a phrase; "Welcome Will to the family"
+        // does not.
+        (!identityAmbiguousWordCompletesPhrase(scan, tokenStart, grounding) ||
+          (!grounding.exotic &&
+            IDENTITY_JOINS_GROUP_CONTINUATION.test(scan.slice(tokenEnd))))
       ) {
         return true;
       }
@@ -6532,14 +7430,18 @@ function containsUnexpectedCustomerIdentity(text, expectedCustomer, allowedPhras
       if (run.ok && !before.unrelated) {
         const totalTokens = run.tokenCount + before.tokenCount;
         const anyBrand = run.containsBrand || before.containsBrand;
-        // "Mr. Ford", "Coach Ford", "her son Ford": a title or relative before
-        // the store's word names a person who shares it — never a
-        // VIN-grounded model ("Meet Mr. Bronco").
+        // "Mr. Ford", "Coach Ford", "her son Ford", "our customer Ford": a
+        // title, relative or person label before the store's word names a
+        // person who shares it — never a VIN-grounded model ("Meet Mr. Bronco").
+        // "Client Ford is thrilled!": the label names a bare action's subject too.
         if (
-          !isBareAction &&
           !isPhotoCaption &&
           !grounding.modelWords[lower] &&
-          identityPrecededByPersonNoun(scan, tokenStart)
+          ((!isBareAction && identityPrecededByPersonNoun(scan, tokenStart)) ||
+            (!grounding.exotic &&
+              run.tokenCount === 1 &&
+              before.tokenCount === 0 &&
+              identityLabelNamesLoneMake(scan, tokenStart, tokenEnd, actionWords)))
         ) {
           return true;
         }
@@ -6631,10 +7533,21 @@ function containsUnexpectedCustomerIdentity(text, expectedCustomer, allowedPhras
       return true;
     }
 
-    // "Built for America", "Happy Birthday to America": the country.
+    // "Built for America", "Happy Birthday to America": the country — but
+    // not where only a person fits ("Congrats to America!", "America is all
+    // smiles!", "Our customer: America", "America Ferrera").
     if (
       (lower === "america" || lower === "americas" || lower === "usa") &&
-      !identityClauseOwnsPerson(scan, tokenEnd)
+      !identityClauseOwnsPerson(scan, tokenEnd) &&
+      !identityCountryAddressedAsPerson(
+        scan,
+        token,
+        tokenStart,
+        tokenEnd,
+        grounding,
+        context,
+        actionWords,
+      )
     ) {
       return false;
     }
@@ -6789,11 +7702,34 @@ function containsUnexpectedCustomerIdentity(text, expectedCustomer, allowedPhras
     if (grounding.words[lower] || isAutomotiveBrandToken(word)) return true;
     // "Michelle Day is all smiles", "Michelle Porter!": a vocabulary word
     // that is also a surname, followed by the sentence going on in lowercase
-    // (or ending) rather than by Title Case.
+    // (or ending) rather than by Title Case — in an ALL CAPS sentence
+    // ("MICHELLE YOUNG IS ALL SMILES!") the words after it count as lowercase.
+    const closesLikeSurname =
+      IDENTITY_SURNAME_CLOSE.test(rest) ||
+      (!grounding.exotic &&
+        word === word.toUpperCase() &&
+        /^\s+[A-Z]/.test(rest) &&
+        !IDENTITY_HAS_LOWER.test((/^[^.!?\n]*/.exec(rest) || [""])[0]));
     if (
       IDENTITY_AMBIGUOUS_NAME_WORDS[lower] &&
       !IDENTITY_PERSON_ADJECTIVES[lower] &&
-      new RegExp("^(?:\\s*(?:[!.?,;]|$|\\n)|\\s+[" + IDENTITY_LOWER + "])").test(rest)
+      closesLikeSurname
+    ) {
+      return true;
+    }
+    if (
+      !grounding.exotic &&
+      Object.prototype.hasOwnProperty.call(IDENTITY_VOCABULARY_SURNAMES, lower)
+    ) {
+      return true;
+    }
+    if (
+      !grounding.exotic &&
+      Object.prototype.hasOwnProperty.call(
+        IDENTITY_CLOSING_VOCABULARY_SURNAMES,
+        lower,
+      ) &&
+      closesLikeSurname
     ) {
       return true;
     }
