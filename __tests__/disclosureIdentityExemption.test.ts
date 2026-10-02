@@ -799,7 +799,7 @@ const runDraft = (
 };
 
 describe("PATCH /api/app/posts/:id/draft", () => {
-  it("accepts an absent legacy revision but rejects a stale supplied revision", () => {
+  it("rejects absent and stale revisions after the client rollout", () => {
     const valid = storedPost();
     const legacy = runDraft(
       {
@@ -809,8 +809,11 @@ describe("PATCH /api/app/posts/:id/draft", () => {
       {},
       { omitExpectedRevision: true },
     );
-    expect(legacy.result.status).toBe(200);
-    expect(legacy.saved).toHaveLength(1);
+    expect(legacy.result).toMatchObject({
+      status: 409,
+      payload: { code: "POST_DRAFT_REVISION_REQUIRED" },
+    });
+    expect(legacy.saved).toHaveLength(0);
 
     const stale = runDraft({
       expected_post_revision: "2026-09-21 09:00:00.000Z",

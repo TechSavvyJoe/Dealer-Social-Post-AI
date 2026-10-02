@@ -474,7 +474,7 @@ describe("POST /api/app/posts/:id/shared", () => {
     expect(harness.headers.get("Cache-Control")).toBe("private, no-store");
   });
 
-  it("accepts an absent legacy revision but rejects a stale supplied revision", () => {
+  it("rejects absent and stale revisions after the client rollout", () => {
     const legacy = shareHarness();
     expect(
       legacy.run({
@@ -482,13 +482,10 @@ describe("POST /api/app/posts/:id/shared", () => {
         body: { channel: "facebook_feed", via: "copy" },
       }),
     ).toMatchObject({
-      status: 200,
-      payload: {
-        post_revision: "2026-09-20 10:00:00.000Z",
-        deduplicated: false,
-      },
+      status: 409,
+      payload: { code: "POST_SHARE_REVISION_REQUIRED" },
     });
-    expect(legacy.events).toHaveLength(1);
+    expect(legacy.events).toHaveLength(0);
 
     const stale = shareHarness();
     expect(
