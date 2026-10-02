@@ -1171,7 +1171,7 @@ const jsonResponse = (body: unknown, status = 200) =>
   });
 
 describe("recordPostShared", () => {
-  it("POSTs only the channel and method to the owner-scoped route", async () => {
+  it("POSTs the channel, method, and exact saved revision to the owner-scoped route", async () => {
     setActiveAuthEpoch(701);
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({
@@ -1180,6 +1180,7 @@ describe("recordPostShared", () => {
         via: "share_sheet",
         shared_at: "2026-09-23 12:00:00.000Z",
         deduplicated: false,
+        post_revision: "revision-1",
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -1187,6 +1188,7 @@ describe("recordPostShared", () => {
     const recorded = await recordPostShared("post/1", {
       channel: "facebook_feed",
       via: "share_sheet",
+      expectedPostRevision: "revision-1",
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -1197,6 +1199,7 @@ describe("recordPostShared", () => {
     expect(JSON.parse(init.body as string)).toEqual({
       channel: "facebook_feed",
       via: "share_sheet",
+      expected_post_revision: "revision-1",
     });
     expect(recorded).toMatchObject({ channel: "facebook_feed", deduplicated: false });
   });
@@ -1217,7 +1220,11 @@ describe("recordPostShared", () => {
       ),
     );
     await expect(
-      recordPostShared("post-1", { channel: "facebook_feed", via: "download" }),
+      recordPostShared("post-1", {
+        channel: "facebook_feed",
+        via: "download",
+        expectedPostRevision: "revision-1",
+      }),
     ).rejects.toBeTruthy();
   });
 });
