@@ -965,6 +965,5 @@ files at commit `7192eb1` on 2026-09-10.
   (`fly-deploy.yml:209`) and appears in no log line, no summary and no readable Fly
   secret. Treat a past release's `POCKETBASE_BACKUP_LAST_VERIFIED_AT` as unrecoverable
   unless someone recorded it (step 5.2, option 1).
-- `docs/production-backups-and-release.md:5` states PocketBase is pinned to `0.22.37`.
-  The authoritative pin is `Dockerfile`'s `ARG PB_VERSION=0.22.55` (matched by
-  `start-pocketbase.sh:44`). That doc line is stale; this runbook uses `0.22.55`.
+- PocketBase is pinned consistently to `0.22.55` in the release runbook,
+  `Dockerfile`, and `start-pocketbase.sh` because the hooks still use the 0.22 JSVM API.

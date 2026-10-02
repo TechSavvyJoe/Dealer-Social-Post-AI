@@ -365,7 +365,6 @@ export const useWebsiteHandoff = ({
           imageDataUrl: capturedCreative.image,
           platformCaptions: savedPlatformCaptions,
         });
-        autosave.lastRevisionRef.current = null;
         const draftSaved = await autosave.flush();
         const expectedPostRevision = autosave.lastRevisionRef.current;
         if (!draftSaved || !expectedPostRevision) {

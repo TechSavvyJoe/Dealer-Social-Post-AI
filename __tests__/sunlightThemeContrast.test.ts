@@ -231,30 +231,15 @@ describe("Sunlight Mode keeps selected controls readable", () => {
     ).toEqual([]);
   });
 
-  it("pins the studio-theme invariants the PostResult exemption rests on", () => {
-    // STUDIO_THEMED_FILES exempts the result screen because it is dark in both
-    // themes. That is only true while all of these hold. If any stops
-    // holding, the exemption starts hiding real defects, so fail here instead.
+  it("keeps the new Post screen in the selected Sunlight theme", () => {
     const app = read("App.tsx");
-    expect(app).toContain("publish-studio-theme");
-    expect(app).toContain("AppStep.RESULT");
-
-    // globals.css must re-darken the surface ramp inside the studio (both the
-    // Light Table canvas token and the legacy surface-950 alias PR2/PR3 files
-    // still read), otherwise the ramp stays inverted under .theme-light and
-    // the screen goes light.
-    const css = read("styles/globals.css");
-    const studio = css.slice(css.indexOf(".publish-studio-theme"));
-    expect(studio).toMatch(/--surface-950:\s*18 20 22/);
-    expect(studio).toMatch(/--canvas:\s*18 20 22/);
-
-    // The sticky delivery bar renders through createPortal into document.body,
-    // so it lands outside the wrapper App.tsx themes and has to carry the class
-    // itself. Without it the "Delivery locked" notice measured 1.19:1 in a real
-    // browser against the built CSS; with it, 14.94:1.
-    const result = read("components/PostResult.tsx");
-    const portal = result.slice(result.indexOf("createPortal("));
-    expect(portal).toContain("publish-studio-theme");
+    const main = read("components/MainContent.tsx");
+    expect(app).not.toContain("publish-studio-theme");
+    expect(main).not.toContain('import("./PostResult")');
+    expect(main).toContain('import("./PostScreen")');
+    const post = read("components/PostScreen.tsx");
+    expect(post).not.toContain("publish-studio-theme");
+    expect(post).toContain("text-ink");
   });
 
   it("never puts a light-theme override on a ramp that already inverts", () => {

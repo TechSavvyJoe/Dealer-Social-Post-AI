@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { History, Settings, LogOut } from "lucide-react";
+import { History, Settings, LogOut, ChevronLeft } from "lucide-react";
 import { Dealer } from "../types";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { Button } from "./ui/Button";
 import { Badge } from "./ui/Badge";
 import { Modal } from "./ui/Modal";
 import { cn } from "../utils/classNames";
-import { Logo } from "./Logo";
 import type { PersonSummary } from "../services/salespeople";
 
 interface HeaderProps {
@@ -19,6 +18,9 @@ interface HeaderProps {
   confirmBeforeLogout?: boolean;
   /** Dense product/context chrome for the result publishing workspace. */
   studioMode?: boolean;
+  onBack?: () => void;
+  flowTitle?: string;
+  navigationDisabled?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -29,7 +31,11 @@ export const Header: React.FC<HeaderProps> = ({
   onShowHistory,
   confirmBeforeLogout = false,
   studioMode = false,
+  onBack,
+  flowTitle,
+  navigationDisabled = false,
 }) => {
+  const [accountOpen, setAccountOpen] = useState(false);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
 
   const handleLogout = () => {
@@ -69,78 +75,81 @@ export const Header: React.FC<HeaderProps> = ({
     <>
       <header
         className={cn(
-          "w-full z-40 sticky top-0 h-14",
-          studioMode && "max-sm:hidden",
+          "w-full z-40 relative h-16 shrink-0",
+
           "bg-panel border-b border-hairline",
         )}
       >
         <div className="mx-auto flex h-full w-full max-w-screen-2xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-10">
           {/* Product/dealer identity */}
           <div className="flex min-w-0 items-center gap-3">
-            {studioMode ? (
-              <>
-                <Logo markOnly size={36} className="sm:hidden" />
-                <Logo className="hidden sm:flex" />
-                <span
-                  className="hidden h-7 w-px shrink-0 bg-hairline md:block"
-                  aria-hidden="true"
-                />
-                <div className="hidden min-w-0 md:block">
-                  <h1 className="truncate text-sm font-semibold tracking-tight text-ink">
-                    Publish studio
-                  </h1>
-                  <p className="truncate text-2xs text-ink-2">{dealer.name}</p>
-                </div>
-              </>
-            ) : (
-              <>
-                {dealer.logo ? (
-                  <img
-                    src={dealer.logo}
-                    alt={`${dealer.name} logo`}
-                    className="h-10 w-10 shrink-0 rounded-md object-contain bg-panel-raised p-1.5 border border-hairline"
-                  />
-                ) : (
-                  <div
-                    className={cn(
-                      "flex h-10 w-10 shrink-0 items-center justify-center rounded-md",
-                      "bg-brand-fill text-brand-foreground font-semibold text-xl",
-                    )}
-                    aria-hidden="true"
-                  >
-                    {dealer.name.charAt(0)}
-                  </div>
-                )}
+            {onBack && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onBack}
+                aria-label="Go back"
+                disabled={navigationDisabled}
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </Button>
+            )}
 
-                <div className="flex min-w-0 flex-col">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-base font-semibold tracking-tight leading-tight text-ink">
-                      {dealer.name}
-                    </span>
-                    {dealer.requires_approval && (
-                      <Badge
-                        variant="warning"
-                        size="sm"
-                        uppercase={false}
-                        className="shrink-0"
-                      >
-                        <span className="max-sm:hidden">Approval required</span>
-                        <span className="sm:hidden">Review</span>
-                      </Badge>
-                    )}
-                  </div>
-                  {person && (
-                    <span className="mt-0.5 hidden truncate text-caption text-ink-2 md:inline">
-                      Posting as {person.name}
-                    </span>
+            <>
+              {dealer.logo ? (
+                <img
+                  src={dealer.logo}
+                  alt={`${dealer.name} logo`}
+                  className="h-10 w-10 shrink-0 rounded-md object-contain bg-panel-raised p-1.5 border border-hairline"
+                />
+              ) : (
+                <div
+                  className={cn(
+                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-md",
+                    "bg-brand-fill text-brand-foreground font-semibold text-xl",
+                  )}
+                  aria-hidden="true"
+                >
+                  {dealer.name.charAt(0)}
+                </div>
+              )}
+
+              <div className="flex min-w-0 flex-col">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-base font-semibold tracking-tight leading-tight text-ink">
+                    {dealer.name}
+                  </span>
+                  {dealer.requires_approval && (
+                    <Badge
+                      variant="warning"
+                      size="sm"
+                      uppercase={false}
+                      className="shrink-0"
+                    >
+                      <span className="max-sm:hidden">Approval required</span>
+                      <span className="sm:hidden">Review</span>
+                    </Badge>
                   )}
                 </div>
-              </>
-            )}
+                {person && (
+                  <span className="mt-0.5 hidden truncate text-caption text-ink-2 md:inline">
+                    Posting as {person.name}
+                  </span>
+                )}
+                {flowTitle && (
+                  <span className="mt-0.5 text-caption text-ink-2 md:hidden">
+                    {flowTitle}
+                  </span>
+                )}
+              </div>
+            </>
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          <nav
+            aria-label="Account"
+            className="hidden items-center gap-2 sm:flex sm:gap-3"
+          >
             {studioMode && person ? (
               <div
                 className="hidden min-h-10 items-center gap-2.5 rounded-sm border border-hairline bg-panel-raised px-2.5 sm:flex"
@@ -171,6 +180,7 @@ export const Header: React.FC<HeaderProps> = ({
                   variant="ghost"
                   size="sm"
                   leftIcon={<History className="h-4 w-4" />}
+                  disabled={navigationDisabled}
                   onClick={handleOpenHistory}
                   aria-label="Open my work"
                 >
@@ -185,6 +195,7 @@ export const Header: React.FC<HeaderProps> = ({
                 variant="ghost"
                 size="sm"
                 leftIcon={<Settings className="w-4 h-4" />}
+                disabled={navigationDisabled}
                 onClick={handleOpenSettings}
                 aria-label="Open settings"
                 aria-keyshortcuts="Meta+K Control+K"
@@ -199,6 +210,7 @@ export const Header: React.FC<HeaderProps> = ({
                 variant="ghost"
                 size="sm"
                 leftIcon={<LogOut className="w-4 h-4" />}
+                disabled={navigationDisabled}
                 onClick={handleLogout}
                 className="hover:text-error-ink hover:bg-error-fill"
                 aria-label="Log out"
@@ -206,7 +218,81 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="hidden sm:inline">Log out</span>
               </Button>
             </div>
-          </div>
+          </nav>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="sm:hidden rounded-full bg-brand-fill text-brand-foreground"
+            aria-label="Open account menu"
+            aria-expanded={accountOpen}
+            aria-controls="account-menu"
+            onClick={() => setAccountOpen(!accountOpen)}
+            disabled={navigationDisabled}
+          >
+            <span className="text-sm font-semibold">
+              {(person?.name || dealer.name)
+                .split(/\s+/)
+                .filter(Boolean)
+                .slice(0, 2)
+                .map((s) => s[0])
+                .join("")}
+            </span>
+          </Button>
+          {accountOpen && (
+            <>
+              <button
+                className="fixed inset-0 z-40 cursor-default"
+                aria-label="Close account menu"
+                onClick={() => setAccountOpen(false)}
+              />
+              <nav
+                id="account-menu"
+                aria-label="Account menu"
+                className="absolute right-4 top-16 z-50 w-60 rounded-md border border-strong bg-overlay p-2 shadow-dialog on-overlay"
+              >
+                {person && (
+                  <p className="border-b border-hairline px-3 py-3 text-sm text-ink-2">
+                    Posting as {person.name}
+                  </p>
+                )}
+                {onShowHistory && (
+                  <Button
+                    variant="ghost"
+                    fullWidth
+                    className="justify-start"
+                    onClick={() => {
+                      setAccountOpen(false);
+                      handleOpenHistory();
+                    }}
+                  >
+                    My work
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  fullWidth
+                  className="justify-start"
+                  onClick={() => {
+                    setAccountOpen(false);
+                    handleOpenSettings();
+                  }}
+                >
+                  Settings
+                </Button>
+                <Button
+                  variant="ghost"
+                  fullWidth
+                  className="justify-start"
+                  onClick={() => {
+                    setAccountOpen(false);
+                    handleLogout();
+                  }}
+                >
+                  Log out
+                </Button>
+              </nav>
+            </>
+          )}
         </div>
       </header>
       <Modal

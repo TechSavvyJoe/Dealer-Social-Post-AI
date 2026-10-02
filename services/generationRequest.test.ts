@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildGenerationRequest,
+  buildSavedPostLookRequest,
   composeGenerationCreativeBrief,
   STYLE_AI_HINTS,
   type BuildGenerationRequestInput,
@@ -322,5 +323,43 @@ describe("buildGenerationRequest", () => {
     if (result.ok) {
       expect(result.args.creativeBrief).toMatchSnapshot();
     }
+  });
+});
+
+describe("saved-post Look changes", () => {
+  const savedPost = {
+    postId: "saved-delivery",
+    scenarioId: "customer_delivery",
+    image: "saved-image",
+    text: "Congratulations Alex!",
+    releaseStatus: "saved" as const,
+  };
+  const delivery = {
+    ...baseInput,
+    scenarioId: "customer_delivery",
+    customerName: "Alex",
+  };
+  it("rebuilds appearance after reload without a signature or new release payload", () => {
+    const result = buildSavedPostLookRequest(delivery, savedPost);
+    expect(result.ok).toBe(true);
+    expect(result).not.toHaveProperty("args");
+    expect(result).not.toHaveProperty("meta");
+    expect(JSON.stringify(result)).not.toContain("capturedRelease");
+    expect(buildGenerationRequest(delivery)).toMatchObject({
+      ok: false,
+      reason: "release_required",
+    });
+  });
+  it.each([
+    { postId: undefined },
+    { releaseStatus: "save_failed" as const },
+    { historyReadOnly: true },
+    { imageReviewRequired: true },
+    { scenarioId: "new_arrival" },
+    { releaseLinkStatus: "link_failed" as const },
+  ])("rejects missing, mismatched, or locked saved-post authority: %j", (patch) => {
+    expect(buildSavedPostLookRequest(delivery, { ...savedPost, ...patch }).ok).toBe(
+      false,
+    );
   });
 });

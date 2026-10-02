@@ -225,11 +225,11 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
 
     return (
       <fieldset className={className}>
-        <legend className="mb-2 text-xs font-medium uppercase tracking-wide text-surface-300">
+        <legend className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-2">
           Customer signature
         </legend>
         <div
-          className="mb-3 grid grid-cols-2 gap-1 rounded-xl border border-hairline bg-surface-950/50 p-1"
+          className="mb-3 grid grid-cols-2 gap-1 rounded-md border border-hairline bg-panel p-1"
           role="group"
           aria-label="Signature method"
         >
@@ -239,10 +239,10 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
               type="button"
               aria-pressed={signatureMethod === method}
               onClick={() => setSignatureMethod(method)}
-              className={`min-h-11 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+              className={`min-h-11 rounded-sm px-3 py-2 text-sm font-semibold transition-colors ${
                 signatureMethod === method
-                  ? "bg-primary-500/25 text-primary-100 [.theme-light_&]:text-primary-950"
-                  : "text-surface-400 hover:bg-fill-subtle hover:text-surface-200"
+                  ? "bg-brand-fill text-brand-foreground"
+                  : "text-ink-2 hover:bg-fill-subtle hover:text-ink"
               }`}
             >
               {method === "draw" ? "Draw signature" : "Type name"}
@@ -275,19 +275,19 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
                   animate={{ opacity: 1 }}
                   className="pointer-events-none absolute inset-0 flex items-center justify-center"
                 >
-                  <div className="flex items-center gap-2 text-xs text-surface-400">
+                  <div className="flex items-center gap-2 text-xs text-ink-2">
                     <PenLine className="h-3.5 w-3.5" />
                     Sign with finger or stylus
                   </div>
                 </m.div>
               )}
             </div>
-            <div className="mt-2 flex items-center justify-between text-[10px] text-surface-400">
+            <div className="mt-2 flex items-center justify-between text-[10px] text-ink-2">
               <span
                 id={statusId}
                 role="status"
                 aria-live="polite"
-                className={hasStrokes ? "text-success-400" : "text-surface-500"}
+                className={hasStrokes ? "text-success-ink" : "text-ink-hint"}
               >
                 {hasStrokes ? "Signature captured" : "Awaiting signature…"}
               </span>
@@ -295,7 +295,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
                 type="button"
                 onClick={clear}
                 disabled={!hasStrokes}
-                className="flex min-h-11 items-center gap-1 rounded px-3 py-2 text-surface-300 transition-colors hover:bg-fill-subtle disabled:cursor-not-allowed disabled:opacity-30"
+                className="flex min-h-11 items-center gap-1 rounded px-3 py-2 text-ink-2 transition-colors hover:bg-fill-subtle disabled:cursor-not-allowed disabled:opacity-30"
               >
                 <Eraser className="h-3 w-3" />
                 Clear
@@ -307,7 +307,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, SignaturePadProps>(
             <div>
               <label
                 htmlFor={typedNameId}
-                className="mb-1.5 block text-xs font-medium text-surface-300"
+                className="mb-1.5 block text-xs font-medium text-ink-2"
               >
                 Type the customer’s full legal name
               </label>

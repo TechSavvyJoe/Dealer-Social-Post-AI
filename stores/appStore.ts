@@ -8,6 +8,9 @@ import {
   GenerationParams,
   UserRole,
   ImageQualityTier,
+  PostDraft,
+  PendingRelease,
+  ImageSelection,
 } from "../types";
 import { loadSession, saveSession, clearSession } from "../utils/persistence";
 import { setProxyCapabilities } from "../services/proxyCapabilities";
@@ -83,6 +86,11 @@ interface AppState {
   selectedImage: string | null;
   generatedPost: GeneratedPost | null;
   generationParams: GenerationParams | null;
+  postDraft: PostDraft | null;
+  pendingRelease: PendingRelease | null;
+  pendingPhoto: ImageSelection | null;
+  postWorkAtRisk: boolean;
+  postReturnStep: AppStep | null;
   error: string | null;
   isRestoringSession: boolean;
   /** Monotonic identity boundary used to discard stale async provider results. */
@@ -98,9 +106,17 @@ interface AppState {
   setStep: (step: AppStep) => void;
   setCurrentDealer: (dealer: Dealer | null) => void;
   setSelectedImage: (image: string | null) => void;
-  setGeneratedPost: (post: GeneratedPost | null) => void;
+  setGeneratedPost: (
+    post: GeneratedPost | null,
+    options?: { archive?: boolean },
+  ) => void;
   setGenerationParams: (params: GenerationParams | null) => void;
   setError: (error: string | null) => void;
+  setPostDraft: (draft: PostDraft | null) => void;
+  setPendingRelease: (release: PendingRelease | null) => void;
+  setPendingPhoto: (photo: ImageSelection | null) => void;
+  setPostWorkAtRisk: (atRisk: boolean) => void;
+  setPostReturnStep: (step: AppStep | null) => void;
   setPreferences: (
     prefs: Partial<{
       theme: "dark" | "light" | "system";
@@ -214,6 +230,7 @@ export const resolveRestoredStep = (
         ? AppStep.RESULT
         : AppStep.CAPTURE;
 
+  if (requestedStep === AppStep.WORK) return AppStep.WORK;
   if (requestedStep === AppStep.RESULT && hasGeneratedPost) {
     return AppStep.RESULT;
   }
@@ -237,6 +254,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedImage: null,
   generatedPost: null,
   generationParams: null,
+  postDraft: null,
+  pendingRelease: null,
+  pendingPhoto: null,
+  postWorkAtRisk: false,
+  postReturnStep: null,
   error: null,
   isRestoringSession: true,
   authEpoch: 0,
@@ -270,6 +292,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedImage: null,
       generatedPost: null,
       generationParams: null,
+      postDraft: null,
+      pendingRelease: null,
+      pendingPhoto: null,
+      postWorkAtRisk: false,
+      postReturnStep: null,
       error: null,
       authEpoch: get().authEpoch + 1,
     });
@@ -282,6 +309,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         selectedImage: undefined,
         generatedPost: undefined,
         generationParams: undefined,
+        postDraft: undefined,
         imageQualityTier: preferences.imageQualityTier,
         theme: preferences.theme,
         preferredStyle: preferences.preferredStyle,
@@ -324,6 +352,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         ? {
             step,
             generationParams: null,
+            postDraft: null,
+            pendingRelease: null,
+            pendingPhoto: null,
+            postWorkAtRisk: false,
+            postReturnStep: null,
           }
         : { step },
     );
@@ -334,6 +367,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         dealerId: currentDealer.id,
         generatedPost: generatedPost || undefined,
         selectedImage: selectedImage || undefined,
+        postDraft: startsNewCapture ? undefined : get().postDraft || undefined,
         generationParams: startsNewCapture
           ? undefined
           : get().generationParams || undefined,
@@ -358,13 +392,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  setGeneratedPost: (post) => {
+  setGeneratedPost: (post, options) => {
     const previousImage = get().generatedPost?.image;
     set({ generatedPost: post });
     const { currentDealer, step, selectedImage } = get();
     if (currentDealer) {
       void saveDealerCreative(currentDealer.id, "generated", post?.image || null);
-      if (post?.image && post.image !== previousImage) {
+      if (post?.image && post.image !== previousImage && options?.archive !== false) {
         void archiveDealerMedia(currentDealer.id, {
           kind: "generated-image",
           source: post.image,
@@ -395,6 +429,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  setPostDraft: (postDraft) => {
+    set({ postDraft });
+    saveSession({ postDraft: postDraft || undefined });
+  },
+  setPendingRelease: (pendingRelease) => set({ pendingRelease }),
+  setPendingPhoto: (pendingPhoto) => set({ pendingPhoto }),
+  setPostWorkAtRisk: (postWorkAtRisk) => set({ postWorkAtRisk }),
+  setPostReturnStep: (postReturnStep) => set({ postReturnStep }),
   setError: (error) => set({ error }),
 
   setPreferences: (prefs) => {
@@ -542,6 +584,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       isImpersonating: false,
       selectedImage: null,
       generatedPost: null,
+      generationParams: null,
+      postDraft: null,
+      pendingRelease: null,
+      pendingPhoto: null,
+      postWorkAtRisk: false,
+      postReturnStep: null,
       error: null,
       step: AppStep.LOGIN,
       role: "salesperson",
@@ -573,6 +621,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       generatedPost: null,
       selectedImage: null,
       generationParams: null,
+      postDraft: null,
+      pendingRelease: null,
+      pendingPhoto: null,
+      postWorkAtRisk: false,
+      postReturnStep: null,
       error: null,
       step: nextStep,
     });
@@ -585,6 +638,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         selectedImage: undefined,
         generatedPost: undefined,
         generationParams: undefined,
+        postDraft: undefined,
       });
     }
     if (dealerId) void clearDealerCreatives(dealerId);
@@ -688,6 +742,21 @@ export const useAppStore = create<AppState>((set, get) => ({
             selectedImage: restoredSelectedImage,
             generatedPost: restoredGeneratedPost,
             generationParams: restoredGenerationParams,
+            postDraft: matchesPersistedDealer
+              ? session?.postDraft ||
+                (restoredSelectedImage
+                  ? {
+                      categoryId: "deliveries",
+                      scenarioId:
+                        restoredGenerationParams?.scenarioId || "customer_delivery",
+                      decodedVehicle: restoredGenerationParams?.decodedVehicle,
+                    }
+                  : null)
+              : null,
+            pendingRelease: null,
+            pendingPhoto: null,
+            postWorkAtRisk: false,
+            postReturnStep: null,
             step: restoredStep,
             imageQualityTier: session?.imageQualityTier ?? "standard",
             ...(session?.theme
@@ -770,6 +839,11 @@ if (typeof window !== "undefined") {
       selectedImage: null,
       generatedPost: null,
       generationParams: null,
+      postDraft: null,
+      pendingRelease: null,
+      pendingPhoto: null,
+      postWorkAtRisk: false,
+      postReturnStep: null,
       error: null,
       role: "salesperson",
       step: AppStep.LOGIN,

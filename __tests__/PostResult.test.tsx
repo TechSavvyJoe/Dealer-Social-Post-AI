@@ -162,22 +162,28 @@ const callbacks = {
 
 const renderResult = (
   overrides: Partial<React.ComponentProps<typeof PostResult>> = {},
-) =>
-  render(
+) => {
+  const basePost = {
+    image: "data:image/png;base64,aGVsbG8=",
+    text: "A polished delivery-day caption.",
+    disclosures: "Offer subject to approved credit.",
+    disclosureCategories: ["finance"],
+  };
+  const post = overrides.post
+    ? {
+        ...(overrides.post.postId && overrides.post.postRevision === undefined
+          ? { postRevision: "2026-08-05 09:40:00.000Z" }
+          : {}),
+        ...overrides.post,
+      }
+    : basePost;
+
+  return render(
     <ToastProvider>
-      <PostResult
-        post={{
-          image: "data:image/png;base64,aGVsbG8=",
-          text: "A polished delivery-day caption.",
-          disclosures: "Offer subject to approved credit.",
-          disclosureCategories: ["finance"],
-        }}
-        {...callbacks}
-        isDesktopLayout={false}
-        {...overrides}
-      />
+      <PostResult {...callbacks} isDesktopLayout={false} {...overrides} post={post} />
     </ToastProvider>,
   );
+};
 
 describe("PostResult job-first flow", () => {
   beforeEach(() => {
@@ -206,6 +212,7 @@ describe("PostResult job-first flow", () => {
       id: "release-9",
       post_id: "delivery-post-1",
       has_release: true,
+      post_revision: "revision-after-link",
     });
     mockSavePreparedMediaToLibrary.mockResolvedValue({
       method: "download",

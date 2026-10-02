@@ -92,7 +92,7 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
           type="button"
           disabled={disabled || !value.mon.open}
           onClick={copyWeekdays}
-          className="text-xs font-semibold text-primary-300 hover:text-primary-200 disabled:opacity-40"
+          className="text-xs font-semibold text-ink-2 underline decoration-brand-ink/60 underline-offset-4 hover:text-ink disabled:opacity-40"
         >
           Copy Mon → weekdays
         </button>
@@ -155,7 +155,7 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
                       </option>
                     ))}
                   </select>
-                  <span className="text-xs text-surface-500">to</span>
+                  <span className="text-xs text-ink-2">to</span>
                   <label
                     className="sr-only"
                     htmlFor={`${controlIdPrefix}-close-${day}`}
@@ -180,7 +180,7 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
                   </select>
                 </div>
               ) : (
-                <p className="text-xs text-surface-400">
+                <p className="text-xs text-ink-2">
                   Tap the day to mark it open and set hours
                 </p>
               )}
@@ -191,7 +191,7 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
 
       {preview ? (
         <p className="text-xs text-surface-400">
-          Preview: <span className="font-mono text-primary-200/90">{preview}</span>
+          Preview: <span className="font-mono text-ink-2">{preview}</span>
         </p>
       ) : null}
     </div>

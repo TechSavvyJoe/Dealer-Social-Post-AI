@@ -201,6 +201,7 @@ describe("photo release consent gate", () => {
             id: "release-1",
             post_id: "post-1",
             has_release: true,
+            post_revision: "revision-after-link",
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -211,6 +212,7 @@ describe("photo release consent gate", () => {
       id: "release-1",
       post_id: "post-1",
       has_release: true,
+      post_revision: "revision-after-link",
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/app/photo_releases/release-1/link-post",
@@ -228,7 +230,12 @@ describe("photo release consent gate", () => {
 describe("post↔release link recovery", () => {
   const linkResponse = () =>
     new Response(
-      JSON.stringify({ id: "release-1", post_id: "post-1", has_release: true }),
+      JSON.stringify({
+        id: "release-1",
+        post_id: "post-1",
+        has_release: true,
+        post_revision: "revision-after-link",
+      }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
   const unavailable = () =>
@@ -247,7 +254,12 @@ describe("post↔release link recovery", () => {
 
     await expect(
       linkReleaseToPostWithRetry("release-1", "post-1", { maxAttempts: 2 }),
-    ).resolves.toEqual({ id: "release-1", post_id: "post-1", has_release: true });
+    ).resolves.toEqual({
+      id: "release-1",
+      post_id: "post-1",
+      has_release: true,
+      post_revision: "revision-after-link",
+    });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 

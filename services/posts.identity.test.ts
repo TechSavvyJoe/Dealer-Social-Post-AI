@@ -56,6 +56,7 @@ describe("post UI identity projection", () => {
     await expect(
       updatePostDraft("post-mixed", {
         caption: "Lisa and Jordan just celebrated a delivery day.",
+        expectedPostRevision: "2026-09-20 10:00:00.000Z",
       }),
     ).rejects.toThrow("not authorized");
   });

@@ -2,7 +2,7 @@
 
 This runbook keeps the single-writer PocketBase database recoverable and prevents a Vercel frontend from reaching the production domain before its matching Fly backend is ready.
 
-Local version files, GitHub Actions, npm, and Docker pin Node `22.23.1` (npm `10.9.8`). Vercel exposes Node only at the major-version level, so `package.json` constrains builds to Node 22 and Vercel applies its current Node 22 patch automatically. PocketBase remains pinned to `0.22.37`.
+Local version files, GitHub Actions, npm, and Docker pin Node `22.23.1` (npm `10.9.8`). Vercel exposes Node only at the major-version level, so `package.json` constrains builds to Node 22 and Vercel applies its current Node 22 patch automatically. PocketBase remains pinned to `0.22.55`.
 
 ## One-time private R2 setup
 
@@ -100,6 +100,18 @@ that calls it becomes reachable. The job pulls the production environment,
 refuses a Cloudflare test sitekey, builds with `VITE_RELEASE_SHA`, and refuses a
 bundle that is not stamped with its own SHA. It deploys with `--skip-domain`,
 verifies the immutable deployment, and only then moves traffic.
+
+The backend-first workflow cannot safely introduce a newly required client
+request field in one release. Split a revision contract into three compatible
+stages: (1) release an additive backend that returns every new revision token
+but does not require it, (2) release and verify the frontend that preserves and
+sends those tokens, and (3) release the strict backend enforcement. The
+`expected_post_revision` contract also needs the additive photo-release link
+receipt before the frontend stage, because attaching consent advances the post
+revision. A pull request that combines the strict backend and first frontend
+sender must remain blocked from `main` until it is split into those stages. Do
+not leave the field optional in the final backend; doing so silently removes
+the compare-and-set guarantee.
 
 Two things must be true before it reports success, and both are asserted:
 

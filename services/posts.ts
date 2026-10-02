@@ -85,6 +85,8 @@ export interface LogPostInput {
 
 export interface PostRecord {
   id: string;
+  /** Opaque PocketBase update revision used for compare-and-set writes. */
+  updated?: string;
   dealer: string;
   salesperson_name?: string;
   /** Optional FK to the salespeople collection — preferred over the free-text name when present. */
@@ -530,6 +532,8 @@ export const projectPostRecordForUi = (
 
 export interface UpdatePostDraftInput {
   caption: string;
+  /** Last server revision observed by this editor. */
+  expectedPostRevision: string;
   disclosures?: string;
   imageDataUrl?: string;
   platformCaptions?: Record<string, string>;
@@ -716,6 +720,7 @@ export const updatePostDraft = async (
   });
   const requestAuthEpoch = captureAuthEpoch();
   const form = new FormData();
+  form.append("expected_post_revision", input.expectedPostRevision);
   form.append("caption", input.caption.trim());
   form.append("disclosures", input.disclosures?.trim() || "");
   form.append("platform_captions", JSON.stringify(input.platformCaptions || {}));
@@ -750,6 +755,8 @@ export const updatePostDraft = async (
 export interface RecordPostSharedInput {
   channel: PlatformDestinationId;
   via: PostShareVia;
+  /** Revision of the exact saved copy that was exported. */
+  expectedPostRevision: string;
 }
 
 export interface RecordedPostShare {
@@ -760,13 +767,15 @@ export interface RecordedPostShare {
   shared_at: string;
   /** True when the same channel and method were already recorded within 60 s. */
   deduplicated: boolean;
+  /** Revision of the saved copy whose delivery locks were checked. */
+  post_revision: string;
 }
 
 /**
  * Record a completed share on the owner-scoped post. Call it only once the
  * share happened (navigator.share resolved, the download started, the
- * caption was copied). Sends the destination and method, nothing else: the
- * server writes the time and refuses a post that is still locked.
+ * caption was copied). The revision binds the receipt to the exact saved copy;
+ * the server writes the time and refuses stale or locked posts.
  */
 export const recordPostShared = async (
   postId: string,
@@ -777,7 +786,11 @@ export const recordPostShared = async (
     {
       method: "POST",
       cache: "no-store",
-      body: JSON.stringify({ channel: input.channel, via: input.via }),
+      body: JSON.stringify({
+        channel: input.channel,
+        via: input.via,
+        expected_post_revision: input.expectedPostRevision,
+      }),
     },
   );
 

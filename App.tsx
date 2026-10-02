@@ -1,21 +1,18 @@
-import React, { Suspense, useEffect, useState } from "react";
-import { AnimatePresence } from "framer-motion";
+import React, { Suspense, useEffect, useRef, useState } from "react";
 import { Header } from "./components/Header";
 import { ImpersonationBanner } from "./components/ImpersonationBanner";
 import { MainContent } from "./components/MainContent";
 import { OfflineBanner } from "./components/OfflineBanner";
 import { useAppController } from "./hooks/useAppController";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
-import { useUrlStepSync } from "./hooks/useUrlStepSync";
+import { postHasWorkAtRisk, useUrlStepSync } from "./hooks/useUrlStepSync";
 import { AppStep } from "./types";
 import { useToast } from "./components/ui/Toast";
 import { useAppStore } from "./stores/appStore";
 import { Modal } from "./components/ui/Modal";
 import { Button } from "./components/ui/Button";
-import { History, LayoutDashboard, Settings } from "lucide-react";
 import { PwaUpdatePrompt } from "./components/PwaUpdatePrompt";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-
 interface PanelBoundaryProps {
   children: React.ReactNode;
   /** Surface name used in the compact fallback copy. */
@@ -103,458 +100,288 @@ const LazySettingsModal = React.lazy(() =>
     default: mod.SettingsModal,
   })),
 );
-const LazyImageCropModal = React.lazy(() =>
-  import("./components/ImageCropModal").then((mod) => ({
-    default: mod.ImageCropModal,
-  })),
-);
-const LazyPostHistory = React.lazy(() =>
-  import("./components/PostHistory").then((mod) => ({
-    default: mod.PostHistory,
-  })),
-);
 const AppContent: React.FC = () => {
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [isMobileLogoutConfirmOpen, setIsMobileLogoutConfirmOpen] = useState(false);
-  const {
-    step,
-    currentDealer,
-    selectedImage,
-    generatedPost,
-    error,
-    preferredStyle,
-    preferredTone,
-    imageQualityTier,
-    isRestoringSession,
-    setStep,
-    setError,
-    setPreferences,
-    logout,
-    reset,
-    startRemix,
-    isSettingsOpen,
-    setIsSettingsOpen,
-    isVideoDirectorOpen,
-    setIsVideoDirectorOpen,
-    cropModalOpen,
-    tempImageForCrop,
-    tempOriginalForBackup,
-    tempOriginalFilename,
-    originalBackupStatus,
-    isDesktopLayout,
-    generationProgress,
-    progressMessage,
-    handleLogin,
-    handleStyleToneChange,
-    handleImageSelected,
-    handleCropConfirm,
-    handleCropClose,
-    handleGenerate,
-    handleRegenerateImage,
-    handleFunMode,
-    handleEditImage,
-    handleRegenerateText,
-    handleEditText,
-    handlePrepareFinalWebsiteDraft,
-    handleGenerateVideo,
-    generateCaptionVariant,
-  } = useAppController();
+  const app = useAppController();
+  const { step, currentDealer, selectedImage, generatedPost, isRestoringSession } = app;
+  const currentPerson = useAppStore((s) => s.currentPerson);
+  const isImpersonating = useAppStore((s) => s.isImpersonating);
+  const theme = useAppStore((s) => s.theme);
+  const postWorkAtRisk = useAppStore((s) => s.postWorkAtRisk);
+  const settingsEverOpened = useMountedOnce(app.isSettingsOpen);
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const leaveAction = useRef<(() => void) | null>(null);
+  const [workReturnStep, setWorkReturnStep] = useState<AppStep | null>(null);
+  const [managementDirty, setManagementDirty] = useState(false);
+  const toast = useToast();
+  const mainRef = useRef<HTMLElement>(null);
 
-  // Defer the heavyweight panel chunks until each panel is first opened.
-  const settingsEverOpened = useMountedOnce(isSettingsOpen);
-  const cropEverOpened = useMountedOnce(cropModalOpen);
-  const historyEverOpened = useMountedOnce(isHistoryOpen);
-
-  // Warm the photo-review chunk once signed in and idle. Settings and History
-  // are optional panels, so first-open loading is the right trade for them.
-  // The crop step is not optional: every image selection opens it and
-  // handleCropConfirm is the only route into CUSTOMIZE. Before the panels
-  // were deferred this chunk was fetched at boot as a side effect of
-  // rendering the modal closed, and the service worker cached it then. Gating
-  // alone removed that warm-up and left a first-time, cold-cache salesperson
-  // with a tap that showed nothing until the network answered. Prefetching
-  // after login keeps the login-screen win and restores the warm-up on the
-  // path that actually needs it. Same import specifier as LazyImageCropModal,
-  // so Vite resolves it to the same chunk.
+  // Prefetch the actual next screen, without downloading signed-in panels at login.
   const isSignedIn = Boolean(currentDealer);
   useEffect(() => {
     if (!isSignedIn) return;
-    const warm = () => {
-      void import("./components/ImageCropModal");
-    };
-    const idle = (
-      window as Window & { requestIdleCallback?: typeof requestIdleCallback }
-    ).requestIdleCallback;
-    if (idle) {
-      const handle = idle(warm, { timeout: 3000 });
-      return () => {
-        (
-          window as Window & { cancelIdleCallback?: typeof cancelIdleCallback }
-        ).cancelIdleCallback?.(handle);
-      };
-    }
-    const timer = window.setTimeout(warm, 1500);
+    const timer = window.setTimeout(() => {
+      void import("./components/PostDetails").catch(() => {});
+    }, 1500);
     return () => window.clearTimeout(timer);
   }, [isSignedIn]);
-  // Must run before any conditional return — React requires a stable hook order.
-  const isImpersonating = useAppStore((s) => s.isImpersonating);
-  const currentPerson = useAppStore((s) => s.currentPerson);
-  const currentPersonId = currentPerson?.id || "";
-  const theme = useAppStore((s) => s.theme);
   useEffect(() => {
-    setIsHistoryOpen(false);
-  }, [currentDealer?.id, currentPersonId, isImpersonating]);
-
+    setLeaveOpen(false);
+    leaveAction.current = null;
+    setWorkReturnStep(null);
+  }, [currentDealer?.id, currentPerson?.id, isImpersonating]);
   useEffect(() => {
-    const updateTheme = () => {
-      const isDark =
-        step === AppStep.RESULT ||
-        theme === "dark" ||
-        (theme === "system" &&
-          window.matchMedia("(prefers-color-scheme: dark)").matches);
-      if (!isDark) {
-        document.documentElement.classList.add("theme-light");
-      } else {
-        document.documentElement.classList.remove("theme-light");
-      }
-      // Keep the browser chrome tint in sync with the runtime theme. The
-      // index.html pre-paint script only sets this once at boot; without this
-      // write the Safari 15+ tab bar / Android status bar goes stale on
-      // Settings theme changes, system-scheme flips, and the always-dark
-      // RESULT publish studio. Colors mirror index.html's pre-paint script.
+    mainRef.current?.scrollTo?.({ top: 0 });
+  }, [step]);
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const update = () => {
+      const dark = theme === "dark" || (theme === "system" && media.matches);
+      document.documentElement.classList.toggle("theme-light", !dark);
       document
         .querySelector('meta[name="theme-color"]')
-        ?.setAttribute("content", isDark ? "#121416" : "#f4f4f2");
+        ?.setAttribute("content", dark ? "#121416" : "#f4f4f2");
     };
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [theme]);
 
-    updateTheme();
-
-    if (theme === "system" && typeof window !== "undefined") {
-      const media = window.matchMedia("(prefers-color-scheme: dark)");
-      const handler = () => updateTheme();
-      media.addEventListener("change", handler);
-      return () => media.removeEventListener("change", handler);
+  const requestLeave = (action: () => void) => {
+    if (step === AppStep.CREATING) return;
+    if (
+      (step === AppStep.POST && postHasWorkAtRisk()) ||
+      (step === AppStep.DEALER_ADMIN && managementDirty)
+    ) {
+      leaveAction.current = action;
+      setLeaveOpen(true);
+      return;
     }
-  }, [step, theme]);
-
-  const toast = useToast();
-
-  // Mirror the step machine into #/step history entries so the platform Back
-  // gesture steps through the flow instead of exiting the installed app.
+    action();
+  };
+  const goBack = () =>
+    requestLeave(() => {
+      const state = useAppStore.getState();
+      if (step === AppStep.POST) {
+        if (state.postReturnStep !== null) app.setStep(state.postReturnStep);
+        else if (selectedImage) app.startRemix();
+        else app.setStep(AppStep.WORK);
+      } else if (step === AppStep.WORK && workReturnStep !== null) {
+        app.setStep(workReturnStep);
+        setWorkReturnStep(null);
+      } else app.reset();
+    });
+  const openWork = () =>
+    requestLeave(() => {
+      setWorkReturnStep(
+        step === AppStep.DETAILS || step === AppStep.POST ? step : null,
+      );
+      app.setStep(AppStep.WORK);
+    });
+  const requestLogout = () =>
+    requestLeave(() => {
+      void app.logout();
+    });
   useUrlStepSync({
-    onBlockedResultBack: () =>
-      toast.info(
-        "Unsaved creative in progress. Use 'New photo' or 'Remix' to leave this screen.",
-      ),
+    managementDirty,
+    onBlockedManagementBack: (target) => {
+      leaveAction.current = () => app.setStep(target);
+      setLeaveOpen(true);
+    },
+    onBlockedResultBack: () => {
+      leaveAction.current = () => {
+        const state = useAppStore.getState();
+        if (state.postReturnStep !== null) app.setStep(state.postReturnStep);
+        else if (state.selectedImage) app.startRemix();
+        else app.reset();
+      };
+      setLeaveOpen(true);
+    },
   });
-
-  // Power-user shortcuts. Step-aware so each key does the smart thing where you are.
   useKeyboardShortcuts({
     onCancel: () => {
-      if (isHistoryOpen) {
-        setIsHistoryOpen(false);
+      if (document.querySelector('[role="dialog"]')) return;
+      if (app.isSettingsOpen) {
+        app.setIsSettingsOpen(false);
         return;
       }
-      if (isSettingsOpen) {
-        setIsSettingsOpen(false);
-        return;
-      }
-      if (isVideoDirectorOpen) {
-        setIsVideoDirectorOpen(false);
-        return;
-      }
-      if (cropModalOpen) {
-        handleCropClose();
-        return;
-      }
-      // Step-specific back actions
-      if (step === AppStep.CUSTOMIZE) {
-        setStep(AppStep.CAPTURE);
-        return;
-      }
-      if (step === AppStep.RESULT) {
-        // Result replacement is intentionally guarded by PostResult's
-        // confirmation dialog. A global Escape must never bypass that guard
-        // and discard an expensive unsaved creative.
-        toast.info(
-          "Unsaved creative in progress. Use 'New photo' or 'Remix' to leave this screen.",
-        );
-        return;
-      }
+      if ([AppStep.DETAILS, AppStep.POST, AppStep.WORK].includes(step)) goBack();
     },
-    onPalette: () => setIsSettingsOpen(!isSettingsOpen),
-    onFocusSearch: () => {
-      const first = document.querySelector<HTMLElement>(
-        "input:not([disabled]), textarea:not([disabled])",
-      );
-      first?.focus();
-    },
+    onPalette: () => app.setIsSettingsOpen(!app.isSettingsOpen),
+    onFocusSearch: () =>
+      document
+        .querySelector<HTMLElement>("input:not([disabled]), textarea:not([disabled])")
+        ?.focus(),
   });
-
-  if (isRestoringSession) {
+  const cancelGeneration = () => {
+    const result = app.cancelGeneration();
+    if (result.status === "saving") {
+      toast.info("Finishing the save in My work…");
+      void result.saved.then((saved) => {
+        if (saved)
+          toast.info(
+            result.requiresApproval
+              ? "Saved to My work · waiting for approval"
+              : "Saved to My work as a draft",
+          );
+        else
+          toast.warning("The post could not be saved. Your photo is still in Details.");
+      });
+    }
+  };
+  if (isRestoringSession)
     return (
       <main
-        className="flex min-h-0 flex-1 items-center justify-center bg-canvas p-6 text-ink"
+        className="flex flex-1 items-center justify-center bg-canvas p-6 text-ink"
         aria-busy="true"
       >
-        <div className="flex items-center gap-4" role="status" aria-live="polite">
-          <span
-            className="h-10 w-10 rounded-xl border border-strong bg-brand-tint grid place-items-center"
-            aria-hidden="true"
-          >
-            <span className="h-2.5 w-2.5 rounded-full bg-brand-fill animate-pulse-soft" />
-          </span>
-          <div>
-            <p className="font-semibold tracking-tight">Dealer Social</p>
-            <p className="text-sm text-ink-2">Preparing your studio…</p>
-          </div>
-        </div>
+        <p role="status">Opening your workspace…</p>
       </main>
     );
-  }
-
   return (
-    <div
-      className={`flex min-h-0 flex-1 flex-col font-sans ${
-        step === AppStep.RESULT ? "publish-studio-theme" : ""
-      }`}
-      style={{
-        backgroundColor: "rgb(var(--color-surface-base))",
-        color: "rgb(var(--color-text-primary))",
-      }}
-    >
+    <div className="flex min-h-0 flex-1 flex-col bg-canvas font-sans text-ink">
       <OfflineBanner />
       {isImpersonating && <ImpersonationBanner />}
       <PwaUpdatePrompt />
-      {currentDealer && (step !== AppStep.RESULT || isDesktopLayout) && (
+      {currentDealer && (
         <Header
           dealer={currentDealer}
           person={currentPerson}
-          onLogout={() => logout()}
-          onShowSettings={() => setIsSettingsOpen(true)}
-          onShowHistory={() => setIsHistoryOpen(true)}
-          confirmBeforeLogout={step === AppStep.RESULT && Boolean(generatedPost)}
-          studioMode={step === AppStep.RESULT}
+          onLogout={requestLogout}
+          onShowSettings={() => app.setIsSettingsOpen(true)}
+          onShowHistory={openWork}
+          confirmBeforeLogout={false}
+          onBack={
+            step === AppStep.DETAILS || step === AppStep.POST || step === AppStep.WORK
+              ? goBack
+              : undefined
+          }
+          flowTitle={
+            step === AppStep.DETAILS
+              ? "Post details"
+              : step === AppStep.POST
+                ? "Your post"
+                : step === AppStep.WORK
+                  ? "My work"
+                  : undefined
+          }
+          navigationDisabled={step === AppStep.CREATING}
         />
       )}
-
-      <div className="flex min-h-0 flex-1">
-        {step === AppStep.RESULT && isDesktopLayout ? (
-          <aside
-            className="flex w-[5.25rem] shrink-0 flex-col items-center border-r border-hairline bg-panel px-2 py-4"
-            aria-label="Publishing workspace navigation"
-          >
-            <nav className="flex w-full flex-1 flex-col gap-2">
-              <span
-                className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl bg-brand-fill px-1 text-2xs font-semibold text-brand-foreground"
-                aria-current="page"
-              >
-                <LayoutDashboard className="h-5 w-5" aria-hidden="true" />
-                Workspace
-              </span>
-              <button
-                type="button"
-                onClick={() => setIsHistoryOpen(true)}
-                className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-strong px-1 text-2xs font-medium text-ink transition-colors hover:bg-panel-raised"
-              >
-                <History className="h-5 w-5" aria-hidden="true" />
-                My work
-              </button>
-            </nav>
-            <button
-              type="button"
-              onClick={() => setIsSettingsOpen(true)}
-              className="flex min-h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-xl border border-strong px-1 text-2xs font-medium text-ink transition-colors hover:bg-panel-raised"
-            >
-              <Settings className="h-5 w-5" aria-hidden="true" />
-              Settings
-            </button>
-          </aside>
-        ) : null}
-
-        <main
-          id="main-content"
-          className={
-            step === AppStep.LOGIN
-              ? // Zero vertical chrome on mobile login — #root already owns
-                // safe-area. On desktop this is the lit stage the access card
-                // is centred on (.login-stage, styles/globals.css).
-                "login-stage mx-auto flex h-full min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-0 py-0 sm:px-6 sm:py-4 lg:px-8 lg:py-6"
-              : step === AppStep.RESULT
-                ? // Publishing is a wide, dense studio. It remains one scrollport on
-                  // short displays, but uses the available desktop canvas.
-                  "mx-auto flex min-h-0 w-full max-w-[1680px] flex-1 flex-col overflow-y-auto overscroll-y-contain px-2 pb-2 pt-2 sm:px-3 sm:pb-3 sm:pt-3 lg:px-4 lg:pb-4 lg:pt-4"
-                : // Non-login: one scrollport; bottom pad only for content (safe-area on #root)
-                  "mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-y-auto overscroll-y-contain px-4 pb-4 pt-3 sm:px-6 sm:pb-6 sm:pt-5 lg:px-8 lg:pb-8 lg:pt-6"
-          }
-        >
-          <AnimatePresence mode="wait">
-            <MainContent
-              key="main-content"
-              displayedStep={step}
-              step={step}
-              currentDealer={currentDealer}
-              selectedImage={selectedImage}
-              generatedPost={generatedPost}
-              error={error}
-              preferredStyle={preferredStyle}
-              preferredTone={preferredTone}
-              isDesktopLayout={isDesktopLayout}
-              generationProgress={generationProgress}
-              progressMessage={progressMessage}
-              onLogin={handleLogin}
-              onImageSelected={handleImageSelected}
-              onReset={reset}
-              onRemix={startRemix}
-              onDismissError={() => setError(null)}
-              onGenerate={handleGenerate}
-              onBackToCapture={() => setStep(AppStep.CAPTURE)}
-              onStyleToneChange={handleStyleToneChange}
-              onRegenerateImage={handleRegenerateImage}
-              onEditImage={handleEditImage}
-              onRegenerateText={handleRegenerateText}
-              onEditText={handleEditText}
-              onPrepareFinalWebsiteDraft={handlePrepareFinalWebsiteDraft}
-              onFunMode={handleFunMode}
-              onGenerateVideo={handleGenerateVideo}
-              onGenerateCaptionVariant={generateCaptionVariant}
-              onShowSettings={() => setIsSettingsOpen(true)}
-              onShowHistory={() => setIsHistoryOpen(true)}
-              onRequestLogout={() => setIsMobileLogoutConfirmOpen(true)}
-            />
-          </AnimatePresence>
-        </main>
-      </div>
-
+      <main
+        id="main-content"
+        ref={mainRef}
+        className={
+          step === AppStep.LOGIN
+            ? "login-stage mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden sm:px-6 sm:py-4 lg:px-8 lg:py-6"
+            : "mx-auto flex min-h-0 w-full max-w-[1440px] flex-1 flex-col overflow-y-auto overscroll-y-contain"
+        }
+      >
+        <MainContent
+          displayedStep={step}
+          step={step}
+          currentDealer={currentDealer}
+          selectedImage={selectedImage}
+          generatedPost={generatedPost}
+          error={app.error}
+          preferredStyle={app.preferredStyle}
+          preferredTone={app.preferredTone}
+          isDesktopLayout={app.isDesktopLayout}
+          generationProgress={app.generationProgress}
+          progressMessage={app.progressMessage}
+          generationStage={app.generationStage}
+          partsReady={app.partsReady}
+          onCancelGeneration={cancelGeneration}
+          onLogin={app.handleLogin}
+          onImageSelected={app.handleImageSelected}
+          onPhotoPicked={app.handlePhotoPicked}
+          onOpenPost={app.handleOpenPost}
+          onReusePhoto={(selection) => {
+            app.supersedeGeneration();
+            app.reset();
+            useAppStore.getState().setPendingPhoto(selection);
+            app.setStep(AppStep.HOME);
+            useAppStore.getState().setPendingPhoto(selection);
+          }}
+          onReset={() => requestLeave(app.reset)}
+          onBackFromWork={goBack}
+          onManagementDirtyChange={setManagementDirty}
+          onRemix={() => requestLeave(app.startRemix)}
+          onDismissError={() => app.setError(null)}
+          onGenerate={app.handleGenerate}
+          onBackToCapture={goBack}
+          onStyleToneChange={app.handleStyleToneChange}
+          onRegenerateImage={app.handleRegenerateImage}
+          onEditImage={app.handleEditImage}
+          onRegenerateText={app.handleRegenerateText}
+          onEditText={app.handleEditText}
+          onPrepareFinalWebsiteDraft={app.handlePrepareFinalWebsiteDraft}
+          onFunMode={app.handleFunMode}
+          onGenerateVideo={app.handleGenerateVideo}
+          onGenerateCaptionVariant={app.generateCaptionVariant}
+          onChangeLook={app.handleChangeLook}
+          onShowSettings={() => app.setIsSettingsOpen(true)}
+          onShowHistory={openWork}
+          onRequestLogout={requestLogout}
+        />
+      </main>
       <PanelErrorBoundary
         panelName="Settings"
-        onDismiss={() => setIsSettingsOpen(false)}
+        onDismiss={() => app.setIsSettingsOpen(false)}
       >
         <Suspense fallback={null}>
           {settingsEverOpened && (
             <LazySettingsModal
-              isOpen={isSettingsOpen}
-              onClose={() => setIsSettingsOpen(false)}
-              imageQualityTier={imageQualityTier}
+              isOpen={app.isSettingsOpen}
+              onClose={() => app.setIsSettingsOpen(false)}
+              onOpenDealerSetup={() => {
+                app.setIsSettingsOpen(false);
+                requestLeave(() => app.setStep(AppStep.DEALER_ADMIN));
+              }}
+              imageQualityTier={app.imageQualityTier}
               theme={theme}
               onImageQualityTierChange={(value) =>
-                setPreferences({ imageQualityTier: value })
+                app.setPreferences({ imageQualityTier: value })
               }
-              onThemeChange={(value) => setPreferences({ theme: value })}
+              onThemeChange={(value) => app.setPreferences({ theme: value })}
             />
           )}
         </Suspense>
       </PanelErrorBoundary>
-
-      <PanelErrorBoundary panelName="Photo review" onDismiss={handleCropClose}>
-        {/* Not `null`: if the chunk is still downloading when the salesperson
-            picks a photo, a blank screen reads as a dead tap. The overlay is
-            deliberately minimal and theme-aware; it is gone the moment the
-            module resolves, which on a warmed cache is before it paints. */}
-        <Suspense
-          fallback={
-            cropModalOpen ? (
-              <div
-                role="status"
-                aria-live="polite"
-                className="fixed inset-0 z-50 flex items-center justify-center"
-                style={{ backgroundColor: "rgb(var(--color-surface-base) / 0.85)" }}
-              >
-                <p
-                  className="text-sm font-medium"
-                  style={{ color: "rgb(var(--color-text-secondary))" }}
-                >
-                  Opening photo review…
-                </p>
-              </div>
-            ) : null
-          }
-        >
-          {cropEverOpened && (
-            <LazyImageCropModal
-              isOpen={cropModalOpen}
-              onClose={handleCropClose}
-              imageSrc={tempImageForCrop}
-              originalSource={tempOriginalForBackup}
-              originalFilename={tempOriginalFilename}
-              onConfirm={handleCropConfirm}
-              originalBackupStatus={originalBackupStatus}
-            />
-          )}
-        </Suspense>
-      </PanelErrorBoundary>
-
       <Modal
-        isOpen={isHistoryOpen}
-        onClose={() => setIsHistoryOpen(false)}
-        size="full"
-        title="My work"
-        description="Reopen a post to share it again or copy its caption."
-        className="mx-2 w-[calc(100%-1rem)] sm:mx-4 sm:w-[min(72rem,calc(100%-2rem))]"
-      >
-        <PanelErrorBoundary
-          panelName="My work"
-          onDismiss={() => setIsHistoryOpen(false)}
-        >
-          <Suspense
-            fallback={
-              <div
-                className="flex min-h-48 items-center justify-center text-sm text-ink-2"
-                role="status"
-              >
-                Loading your work…
-              </div>
-            }
-          >
-            {historyEverOpened && (
-              <LazyPostHistory onOpenCreative={() => setIsHistoryOpen(false)} />
-            )}
-          </Suspense>
-        </PanelErrorBoundary>
-      </Modal>
-
-      <Modal
-        isOpen={isMobileLogoutConfirmOpen}
-        onClose={() => setIsMobileLogoutConfirmOpen(false)}
+        isOpen={leaveOpen}
+        onClose={() => setLeaveOpen(false)}
+        title={managementDirty ? "Leave unsaved store settings?" : "Leave this post?"}
+        description={
+          managementDirty
+            ? "Save your dealership settings before leaving, or discard these changes."
+            : postWorkAtRisk
+              ? "Changes are still saving or work is in progress."
+              : "This post has not been saved yet."
+        }
         size="sm"
-        title="Log out and discard this post?"
-        description="This post hasn't been saved yet."
         footer={
           <>
-            <Button
-              variant="outline"
-              onClick={() => setIsMobileLogoutConfirmOpen(false)}
-              fullWidth
-            >
+            <Button variant="secondary" onClick={() => setLeaveOpen(false)}>
               Keep working
             </Button>
             <Button
               variant="danger"
               onClick={() => {
-                setIsMobileLogoutConfirmOpen(false);
-                logout();
+                setLeaveOpen(false);
+                leaveAction.current?.();
+                leaveAction.current = null;
               }}
-              fullWidth
             >
-              Log out anyway
+              Leave anyway
             </Button>
           </>
         }
       >
-        <p className="text-sm leading-relaxed text-ink-2">
-          Save the image and copy the caption first if you want to keep them.
-        </p>
+        <p className="text-sm text-ink-2">Leaving now may lose your latest changes.</p>
       </Modal>
-
-      {/* Video director lives on PostResult — global no-op modal removed */}
     </div>
   );
 };
-
-const App: React.FC = () => {
-  // ToastProvider is mounted once at the root (index.tsx); no need to nest a
-  // second provider here.
+export default function App() {
   return <AppContent />;
-};
-
-export default App;
+}

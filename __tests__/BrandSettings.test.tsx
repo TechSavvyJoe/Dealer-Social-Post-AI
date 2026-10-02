@@ -72,6 +72,39 @@ afterEach(() => {
 });
 
 describe("dealer Brand section", () => {
+  it("uses a clickable setup checklist to reveal one focused section at a time", () => {
+    renderSettings();
+    const creative = screen.getByRole("button", { name: /Creative/ });
+    expect(creative).not.toHaveAttribute("aria-current");
+    fireEvent.click(creative);
+    expect(creative).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("region", { name: "Brand" })).not.toHaveClass("hidden");
+    expect(
+      screen.getByRole("progressbar", { name: "Store setup progress" }),
+    ).toHaveAttribute("aria-valuemax", "5");
+  });
+
+  it("persists advanced approval and team permission fields through validated server fields", async () => {
+    const { onSaved } = renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: /Workflow/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced workflow controls" }));
+    fireEvent.change(screen.getByLabelText("Policy"), { target: { value: "always" } });
+    fireEvent.click(screen.getByRole("switch", { name: /Playful/ }));
+
+    const payload = await save(onSaved);
+    expect(JSON.parse(String(payload.approval_policy))).toEqual({ mode: "always" });
+    expect(JSON.parse(String(payload.feature_permissions))).toEqual({
+      playful: { team: false, people: {} },
+    });
+    expect(payload).not.toHaveProperty("category_destinations");
+  });
+
+  it("reports the active streamlined resolver when the dealer flag is on", () => {
+    renderSettings({ ...baseDealer, creative_system_v2: true });
+    fireEvent.click(screen.getByRole("button", { name: /Creative/ }));
+    expect(screen.getByText(/^Active for your store\./)).toBeInTheDocument();
+  });
+
   it("renders every phase-1 brand control with its label", () => {
     renderSettings();
 
@@ -109,11 +142,9 @@ describe("dealer Brand section", () => {
     ).toBeInTheDocument();
   });
 
-  // Phase 1 ships dark, so the Brand copy must not claim to govern behavior
-  // while the legacy overlay-style picker below is the section that actually
-  // does. The two sections used to state opposite things on the same card.
-  it("scopes the Brand promise to the creative system being switched on", () => {
+  it("accurately explains the classic resolver until the creative system is enabled", () => {
     renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: /Creative/ }));
 
     const brand = screen.getByRole("region", { name: "Brand" });
     expect(
@@ -121,24 +152,18 @@ describe("dealer Brand section", () => {
         /One house style for every post: salespeople never pick image style, tone, or video look themselves\./,
       ),
     ).toBeInTheDocument();
-    const note = within(brand).getByText(/^Not turned on yet\./);
+    const note = within(brand).getByText(/^Your store is using the classic/);
     expect(note).toHaveTextContent(
-      /they take over once the new creative system is switched on for your store/,
-    );
-    expect(note).toHaveTextContent(
-      /the image overlay styles further down are what your team actually sees/,
+      /ask your system administrator to enable the streamlined creative system/,
     );
   });
 
   it("says the legacy overlay styles are the ones in charge today", () => {
     renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: /Creative/ }));
 
     const overlay = screen.getByText(/^Pick which design styles your team can use/);
-    expect(overlay).toHaveTextContent(
-      /These stay in charge until the Brand section above is switched on\./,
-    );
-    // The legacy section itself is untouched: Phase 1 must not silently drop
-    // the control that governs today.
+    expect(overlay).toHaveTextContent(/Star one to preselect it/);
     expect(screen.getByText("Image overlay styles")).toBeInTheDocument();
     expect(screen.getAllByText("available to salespeople").length).toBeGreaterThan(0);
   });

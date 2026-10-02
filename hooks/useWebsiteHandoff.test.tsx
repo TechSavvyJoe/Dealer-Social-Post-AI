@@ -75,10 +75,10 @@ const baseCaptions = {
   disclosures: "",
 };
 
-// Mirrors the real useDraftAutosave: `send` nulls the ref then awaits flush,
-// which is expected to set the revision as a side effect before resolving.
+// Mirrors the real useDraftAutosave: flush compare-and-sets from the last
+// observed revision, then replaces it with the saved revision.
 const stubAutosave = (): WebsiteHandoffAutosave => {
-  const lastRevisionRef: { current: string | null } = { current: null };
+  const lastRevisionRef: { current: string | null } = { current: "rev-0" };
   return {
     stage: vi.fn(),
     flush: vi.fn(async () => {

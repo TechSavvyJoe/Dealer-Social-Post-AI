@@ -10,7 +10,13 @@
  * clears a stale capturedRelease on release_mismatch itself — see amendments
  * B6 and A1.
  */
-import { StyleOption, ToneOption, type Dealer, type MediaOutputMode } from "../types";
+import {
+  StyleOption,
+  ToneOption,
+  type Dealer,
+  type MediaOutputMode,
+  type GeneratedPost,
+} from "../types";
 import { DecodedVehicle, vehicleToCreativeBrief } from "./vinDecoder";
 import { CapturedRelease } from "./photoReleases";
 import {
@@ -199,8 +205,9 @@ export interface BuildGenerationRequestInput {
  * capturedRelease on release_mismatch, and the customizer.decisions telemetry
  * call (amendments B6).
  */
-export const buildGenerationRequest = (
+const buildRequest = (
   input: BuildGenerationRequestInput,
+  savedPostRelease = false,
 ): BuildGenerationRequestResult => {
   const {
     dealershipName,
@@ -245,7 +252,7 @@ export const buildGenerationRequest = (
   if (effectivePlatformIds.length === 0 && !websiteSelected) {
     return { ok: false, reason: "no_destination" };
   }
-  if (scenarioNeedsCustomerRelease && !capturedRelease) {
+  if (scenarioNeedsCustomerRelease && !capturedRelease && !savedPostRelease) {
     return { ok: false, reason: "release_required" };
   }
   if (scenarioNeedsCustomerRelease && capturedRelease && releaseAlreadyLinked) {
@@ -458,5 +465,54 @@ export const buildGenerationRequest = (
       outputProfile: effectiveImageProfile,
       mediaOutputMode: effectiveMediaMode,
     },
+  };
+};
+
+/** Creation always requires a fresh, single-use signature. */
+export const buildGenerationRequest = (input: BuildGenerationRequestInput) =>
+  buildRequest(input);
+
+/** Image-only edits of the same durable post reuse its linked consent, never its signature.
+ * Returns only appearance inputs so this path cannot create or link a new post.
+ */
+export const buildSavedPostLookRequest = (
+  input: BuildGenerationRequestInput,
+  post: GeneratedPost,
+):
+  | { ok: true; style: StyleOption; tone: ToneOption; creativeBrief: string }
+  | { ok: false; message: string } => {
+  const scenario = getScenariosForDealer(input.currentDealer?.custom_scenarios).find(
+    (item) => item.id === input.scenarioId,
+  );
+  if (
+    !post.postId ||
+    !scenario ||
+    post.scenarioId !== input.scenarioId ||
+    post.historyReadOnly ||
+    post.imageReviewRequired ||
+    post.releaseLinkStatus ||
+    ((scenario.requiresCustomer || scenario.category === "delivery") &&
+      post.releaseStatus !== "saved")
+  ) {
+    return {
+      ok: false,
+      message:
+        "This post needs its saved consent and original details before its Look can change.",
+    };
+  }
+  const built = buildRequest(
+    { ...input, capturedRelease: null, releaseAlreadyLinked: false },
+    true,
+  );
+  if (!built.ok)
+    return {
+      ok: false,
+      message: built.message || "Confirm the post details before changing its Look.",
+    };
+  return {
+    ok: true,
+    style: built.args.style,
+    tone: built.args.tone,
+    creativeBrief: built.args.creativeBrief,
   };
 };

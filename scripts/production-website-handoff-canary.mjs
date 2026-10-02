@@ -268,6 +268,9 @@ export function validateRevisionContractSource(source) {
     );
   }
   if (
+    !patch.includes("expected_post_revision") ||
+    !patch.includes("POST_DRAFT_REVISION_REQUIRED") ||
+    !patch.includes("POST_DRAFT_REVISION_CONFLICT") ||
     !patch.includes("post_revision") ||
     !send.includes("expected_post_revision") ||
     !send.includes("WEBSITE_POST_REVISION_REQUIRED") ||
@@ -450,6 +453,16 @@ function createPostForm(image, websiteDraft) {
   form.append("media_output_mode", "photo");
   form.append("website_draft", JSON.stringify(websiteDraft));
   form.append("creative_image", new Blob([image], { type: "image/jpeg" }), "qa.jpg");
+  return form;
+}
+
+export function createDraftForm(caption, expectedPostRevision) {
+  const revision = assertSafeRevision(expectedPostRevision, "Draft update input");
+  const form = new FormData();
+  form.append("expected_post_revision", String(revision));
+  form.append("caption", caption);
+  form.append("disclosures", "");
+  form.append("platform_captions", "{}");
   return form;
 }
 
@@ -698,6 +711,7 @@ async function runLockedCanary() {
       );
     }
     assertNotRequested(created.website_publication, "Initial post save");
+    const createdRevision = assertSafeRevision(created.updated, "Initial post save");
     evidence.resources.postId = created.id;
     evidence.checks.initialPrivateDraft = {
       passed: true,
@@ -720,13 +734,10 @@ async function runLockedCanary() {
     const savedSetup = await jsonOrFail(
       await client.request(`/api/app/posts/${encodeURIComponent(created.id)}/draft`, {
         method: "PATCH",
-        body: (() => {
-          const form = new FormData();
-          form.append("caption", "Synthetic saved setup caption. Never publish.");
-          form.append("disclosures", "");
-          form.append("platform_captions", "{}");
-          return form;
-        })(),
+        body: createDraftForm(
+          "Synthetic saved setup caption. Never publish.",
+          createdRevision,
+        ),
         signal: AbortSignal.timeout(60_000),
       }),
       "POST_UPDATE_FAILED",
@@ -739,13 +750,10 @@ async function runLockedCanary() {
     const updated = await jsonOrFail(
       await client.request(`/api/app/posts/${encodeURIComponent(created.id)}/draft`, {
         method: "PATCH",
-        body: (() => {
-          const form = new FormData();
-          form.append("caption", "Synthetic final caption. Never publish.");
-          form.append("disclosures", "");
-          form.append("platform_captions", "{}");
-          return form;
-        })(),
+        body: createDraftForm(
+          "Synthetic final caption. Never publish.",
+          initialRevision,
+        ),
         signal: AbortSignal.timeout(60_000),
       }),
       "POST_UPDATE_FAILED",

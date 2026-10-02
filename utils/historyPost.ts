@@ -93,6 +93,7 @@ export const toGeneratedPostFromRecord = (
     isBasicFallback: post.caption_source === "basic_fallback",
     disclosures: post.disclosures || undefined,
     postId: post.id,
+    postRevision: post.updated || undefined,
     approvalStatus: approval,
     // The reason travels with the rejection, or the reopened result
     // screen falls back to the generic "a manager rejected this" copy

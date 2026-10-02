@@ -225,6 +225,7 @@ describe("useGeneration model-tier and provenance wiring", () => {
       id: "release-stored-1",
       post_id: "post-77",
       has_release: true,
+      post_revision: "revision-linked-1",
     });
     mocks.loadGeminiService.mockResolvedValue({
       generateSocialPost: mocks.generateSocialPost,

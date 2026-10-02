@@ -130,6 +130,32 @@ const ensureMarketingBodyFloor = (
 
   const name = storeName?.trim();
 
+  // A normalized caption can come back through this function after autosave
+  // or reload. Once one of our floor CTAs is present, keep the first-pass
+  // result intact instead of appending another copy on every pass. Match the
+  // generated phrases only; arbitrary short copy still follows the original
+  // branch behavior below.
+  const floorCtas = !deliveryLanguageAllowed
+    ? name
+      ? [
+          `Thank you for being part of the ${name} family.`,
+          `We're grateful for the trust our customers place in ${name} every day.`,
+        ]
+      : [
+          "Thank you for being part of our story.",
+          "We're grateful for the trust our customers place in us every day.",
+        ]
+    : name
+      ? [
+          `Visit ${name} this week and let's get you behind the wheel.`,
+          "Stop by this week — we'd love to help you find the one.",
+        ]
+      : ["Ready for your next delivery day? Stop by and let's find the one."];
+  const normalizedBody = trimmed.replace(/\s+/g, " ").toLowerCase();
+  if (floorCtas.some((cta) => normalizedBody.includes(cta.toLowerCase()))) {
+    return trimmed;
+  }
+
   if (!deliveryLanguageAllowed) {
     if (!name) {
       return trimmed

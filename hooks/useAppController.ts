@@ -6,7 +6,14 @@ import { loadGeminiService, useGemini } from "./useGemini";
 import { loadPublishPipeline } from "../services/publishPipeline";
 import { useGeneration } from "./useGeneration";
 import { useDealerTheme } from "./useDealerTheme";
-import { AppStep, StyleOption, ToneOption, type ImageSelection } from "../types";
+import {
+  AppStep,
+  StyleOption,
+  ToneOption,
+  type ImageSelection,
+  type BrandCategoryId,
+  type GeneratedPost,
+} from "../types";
 import { isCreativeSystemEnabled } from "../services/creativeSystem";
 import { logEvent } from "../utils/telemetry";
 import { archiveDealerMedia } from "../utils/creativeStorage";
@@ -222,6 +229,54 @@ export const useAppController = () => {
     setOriginalBackupStatus("idle");
   }, []);
 
+  const handlePhotoPicked = useCallback(
+    (selection: ImageSelection, categoryId: BrandCategoryId, scenarioId: string) => {
+      generationProps.supersedeGeneration();
+      const store = useAppStore.getState();
+      store.setGeneratedPost(null);
+      store.setError(null);
+      store.setGenerationParams(null);
+      store.setPendingRelease(null);
+      store.setPendingPhoto(null);
+      store.setPostReturnStep(null);
+      store.setSelectedImage(selection.workingImage);
+      store.setPostDraft({ categoryId, scenarioId });
+      store.setStep(AppStep.DETAILS);
+      if (store.currentDealer) {
+        void archiveDealerMedia(store.currentDealer.id, {
+          kind: "capture",
+          source: selection.originalSource,
+          previewSource: selection.workingImage,
+          originalFilename: selection.originalFilename,
+          label: "Original photo",
+        }).then((record) =>
+          logEvent("media.capture.backup", {
+            outcome: record ? "saved" : "unavailable",
+          }),
+        );
+      }
+    },
+    [generationProps.supersedeGeneration],
+  );
+
+  const handleOpenPost = useCallback(
+    (post: GeneratedPost) => {
+      generationProps.supersedeGeneration();
+      const store = useAppStore.getState();
+      store.setPostReturnStep(
+        store.role === "salesperson" ? AppStep.WORK : AppStep.DEALER_ADMIN,
+      );
+      store.setGeneratedPost(post);
+      store.setSelectedImage(null);
+      store.setGenerationParams(null);
+      store.setPostDraft(null);
+      store.setPendingRelease(null);
+      store.setError(null);
+      store.setStep(AppStep.POST);
+    },
+    [generationProps.supersedeGeneration],
+  );
+
   return {
     step,
     currentDealer,
@@ -255,5 +310,7 @@ export const useAppController = () => {
     handleImageSelected,
     handleCropConfirm,
     handleCropClose,
+    handlePhotoPicked,
+    handleOpenPost,
   };
 };

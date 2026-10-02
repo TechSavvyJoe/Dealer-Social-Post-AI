@@ -13,7 +13,7 @@ import {
   websitePublicationPollDelay,
 } from "../services/websitePublishing";
 import { useAppStore } from "../stores/appStore";
-import { AppStep } from "../types";
+import { AppStep, type GeneratedPost } from "../types";
 import { toUiMessage } from "../utils/errorMessages";
 import { toPublicCustomerLabel } from "../utils/customerIdentity";
 import {
@@ -26,6 +26,7 @@ const HISTORY_PAGE_SIZE = 50;
 
 export interface UsePostHistoryListOptions {
   onOpenCreative?: () => void;
+  onPostReady?: (post: GeneratedPost) => void;
 }
 
 /**
@@ -36,6 +37,7 @@ export interface UsePostHistoryListOptions {
  */
 export const usePostHistoryList = ({
   onOpenCreative,
+  onPostReady,
 }: UsePostHistoryListOptions = {}) => {
   const dealer = useAppStore((s) => s.currentDealer);
   const role = useAppStore((s) => s.role);
@@ -57,6 +59,15 @@ export const usePostHistoryList = ({
   const [, setWebsiteOriginsReady] = useState(false);
 
   const reqIdRef = useRef(0);
+  const mountedRef = useRef(true);
+  const openRequestRef = useRef(0);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      openRequestRef.current += 1;
+    };
+  }, []);
   const websitePollTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const identityGrounding = useMemo(
     () => ({ dealerName: dealer?.name, oemAffiliation: dealer?.oem_affiliation }),
@@ -200,8 +211,16 @@ export const usePostHistoryList = ({
         return;
       }
       setOpeningId(post.id);
+      const requestId = ++openRequestRef.current;
+      const authEpoch = useAppStore.getState().authEpoch;
       try {
         const image = await fetchPostCreativeDataUrl(post.creative_image_url);
+        if (
+          !mountedRef.current ||
+          requestId !== openRequestRef.current ||
+          authEpoch !== useAppStore.getState().authEpoch
+        )
+          return;
         const generated = toGeneratedPostFromRecord(post, {
           role,
           currentPersonId,
@@ -210,20 +229,30 @@ export const usePostHistoryList = ({
         // A stored creative may come from another device/session, so it does
         // not have the original capture needed for a true same-photo remix.
         // Clear any stale capture and expose only safe share/export actions.
-        setSelectedImage(null);
-        setGenerationParams(null);
-        setGeneratedPost(generated);
-        setStep(AppStep.RESULT);
+        if (onPostReady) onPostReady(generated);
+        else {
+          setSelectedImage(null);
+          setGenerationParams(null);
+          setGeneratedPost(generated);
+          setStep(AppStep.RESULT);
+        }
         onOpenCreative?.();
         toastSuccess("Creative reopened — share or export without regenerating.");
       } catch (err) {
-        toastError(toUiMessage(err, "Could not open this creative."));
+        if (
+          mountedRef.current &&
+          requestId === openRequestRef.current &&
+          authEpoch === useAppStore.getState().authEpoch
+        )
+          toastError(toUiMessage(err, "Could not open this creative."));
       } finally {
-        setOpeningId(null);
+        if (mountedRef.current && requestId === openRequestRef.current)
+          setOpeningId(null);
       }
     },
     [
       onOpenCreative,
+      onPostReady,
       currentPersonId,
       identityGrounding,
       role,

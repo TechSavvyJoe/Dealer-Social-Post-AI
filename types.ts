@@ -4,15 +4,33 @@ import type { DecodedVehicle } from "./services/vinDecoder";
 import type { CapturedRelease } from "./services/photoReleases";
 
 export enum AppStep {
-  LOGIN,
-  CAPTURE,
-  CUSTOMIZE,
-  GENERATING,
-  RESULT,
+  LOGIN = 0,
+  HOME = 1,
+  DETAILS = 2,
+  CREATING = 3,
+  POST = 4,
   /** Super-admin (Joe): manages dealerships across all tenants. */
-  ADMIN,
+  ADMIN = 5,
   /** Per-dealership admin (GSM/GM): manages their own dealership only. */
-  DEALER_ADMIN,
+  DEALER_ADMIN = 6,
+  WORK = 7,
+  /** Compatibility names for older integrations and stored numeric steps. */
+  CAPTURE = HOME,
+  CUSTOMIZE = DETAILS,
+  GENERATING = CREATING,
+  RESULT = POST,
+}
+
+export interface PostDraft {
+  categoryId: BrandCategoryId;
+  scenarioId: string;
+  decodedVehicle?: DecodedVehicle;
+  personalLine?: string;
+}
+
+/** A signature is session-memory only and can be linked to just one post. */
+export interface PendingRelease extends CapturedRelease {
+  linked?: boolean;
 }
 
 export type UserRole = "salesperson" | "dealer_admin" | "super_admin";
@@ -151,6 +169,13 @@ export interface PostShareRecord {
 }
 
 export interface GeneratedPost {
+  /** Per-post creative retry budget survives session restore. */
+  tryAnotherUsed?: boolean;
+  /**
+   * Server `posts.updated` value for optimistic writes and share receipts.
+   * It is an opaque compare-and-set token, never a client-generated timestamp.
+   */
+  postRevision?: string;
   image: string; // base64 data URL
   text: string;
   /** Public-safe first name/family label; never the protected full release name. */

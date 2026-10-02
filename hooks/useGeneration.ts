@@ -12,6 +12,8 @@ import {
   GeneratedPost,
   ImageQualityTier,
   MediaOutputMode,
+  GenerationParams,
+  SignatureLook,
 } from "../types";
 import { useToast } from "../components/ui/Toast";
 import { normalizeError, recoveryHint } from "../utils/errorHandler";
@@ -34,7 +36,11 @@ import type { CaptionGenerationResult } from "../services/modelConfig";
 // Pure resolver (no React, no network). While a dealership has not opted into
 // `creative_system_v2` every call is a pass-through of the values the caller
 // already supplied, so nothing below changes for an existing dealership.
-import { resolveCreative } from "../services/creativeSystem";
+import {
+  resolveCreative,
+  isSignatureLook,
+  LOOK_DEFINITIONS,
+} from "../services/creativeSystem";
 // Kept static deliberately: stores/appStore.ts already imports this constant
 // eagerly, so modelConfig rides the entry chunk either way and
 // mergeCaptionProvenance can stay synchronous.
@@ -132,7 +138,7 @@ const latestSuccessfulAt = (
 };
 
 const workspaceKeyForPost = (post: GeneratedPost | null | undefined): string | null =>
-  post?.postId || post?.aiMeta?.image.attemptId || post?.image || null;
+  post?.postId || post?.aiMeta?.image?.attemptId || post?.image || null;
 
 const workspaceIsCurrent = (workspaceKey: string | null): boolean =>
   workspaceKeyForPost(useAppStore.getState().generatedPost) === workspaceKey;
@@ -1017,7 +1023,7 @@ export const useGeneration = () => {
               await import("../services/photoReleases");
             releaseLinkAttempted = true;
             try {
-              await linkReleaseToPostWithRetry(releaseId, post.id, {
+              const linked = await linkReleaseToPostWithRetry(releaseId, post.id, {
                 requestAuthEpoch: variables.authEpoch,
                 onRetry: (attempt) =>
                   logEvent("photo_release.link_retry", {
@@ -1026,6 +1032,7 @@ export const useGeneration = () => {
                   }),
               });
               assertOperationAuthEpoch(variables.authEpoch);
+              post.updated = linked.post_revision;
               releaseStatus = "saved";
             } catch (err) {
               // Consent exists on the server. Keep every delivery gate closed,
@@ -1086,6 +1093,7 @@ export const useGeneration = () => {
         }
         if (post) {
           finalPost.postId = post.id;
+          finalPost.postRevision = post.updated;
           finalPost.imageReviewRequired = Boolean(post.image_review_required);
           if (post.website_draft) finalPost.websiteDraft = post.website_draft;
           finalPost.websitePublication =
@@ -1277,12 +1285,18 @@ export const useGeneration = () => {
     return { status: "cancelled" };
   }, [setError, setStep, detachRun]);
 
+  const supersedeGeneration = useCallback(() => {
+    const run = activeRunRef.current;
+    if (run && !run.cancelled) detachRun(run, "superseded");
+  }, [detachRun]);
+
   const regenerateImageMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (override?: GenerationParams) => {
+      const request = override || useAppStore.getState().generationParams;
       const sourcePost = useAppStore.getState().generatedPost;
       const workspaceKey = workspaceKeyForPost(sourcePost);
       const operationAuthEpoch = useAppStore.getState().authEpoch;
-      if (!selectedImage || !generationParams || !currentDealer || !sourcePost)
+      if (!selectedImage || !request || !currentDealer || !sourcePost)
         throw new Error("Missing required data");
       assertOperationAuthEpoch(operationAuthEpoch);
       const [{ resolvePrimaryImageProfile }, { generateSocialPost }] =
@@ -1292,19 +1306,19 @@ export const useGeneration = () => {
         assertOperationAuthEpoch(operationAuthEpoch);
         return generateSocialPost(
           selectedImage,
-          generationParams.style,
-          generationParams.tone,
+          request.style,
+          request.tone,
           currentDealer.name,
-          generationParams.customerName,
+          request.customerName,
           currentDealer.logo,
-          generationParams.customText || generatedPost?.text,
-          generationParams.creativeBrief,
+          request.customText || generatedPost?.text,
+          request.creativeBrief,
           imageQualityTier,
-          generationParams.imageAspectRatio ??
-            resolvePrimaryImageProfile(generationParams.platformIds).imageAspectRatio,
+          request.imageAspectRatio ??
+            resolvePrimaryImageProfile(request.platformIds).imageAspectRatio,
           resolveCustomerIdentityRequired(
             sourcePost.customerIdentityRequired,
-            generationParams.customerIdentityRequired,
+            request.customerIdentityRequired,
           ),
           signal,
         );
@@ -1312,30 +1326,33 @@ export const useGeneration = () => {
       assertOperationAuthEpoch(operationAuthEpoch);
       const formatId =
         sourcePost.primaryFormatId ??
-        generationParams.primaryFormatId ??
-        resolvePrimaryImageProfile(
-          sourcePost.platformIds ?? generationParams.platformIds,
-        ).primaryFormatId;
+        request.primaryFormatId ??
+        resolvePrimaryImageProfile(sourcePost.platformIds ?? request.platformIds)
+          .primaryFormatId;
       const image = await renderExactPrimaryImage(result.image, formatId);
       assertOperationAuthEpoch(operationAuthEpoch);
       return {
         workspaceKey,
         operationAuthEpoch,
         image,
+        params: override,
       };
     },
     onMutate: () => setError(null),
     // This control promises an image-only refresh. Preserve the caption,
     // disclosure, release, approval, and owner-scoped post metadata rather
     // than replacing the entire reviewed result with the provider response.
-    onSuccess: ({ workspaceKey, operationAuthEpoch, image }) => {
+    onSuccess: ({ workspaceKey, operationAuthEpoch, image, params }) => {
       if (
         operationAuthEpoch !== useAppStore.getState().authEpoch ||
         !workspaceIsCurrent(workspaceKey)
       )
         return;
       const currentPost = useAppStore.getState().generatedPost;
-      if (currentPost) setGeneratedPost({ ...currentPost, image });
+      if (currentPost) {
+        if (params) useAppStore.getState().setGenerationParams(params);
+        setGeneratedPost({ ...currentPost, image });
+      }
     },
     onError: (err) => {
       const normalized = normalizeError(err);
@@ -1346,8 +1363,90 @@ export const useGeneration = () => {
   });
 
   const handleRegenerateImage = useCallback(async () => {
-    await regenerateImageMutation.mutateAsync();
+    await regenerateImageMutation.mutateAsync(undefined);
   }, [regenerateImageMutation]);
+
+  const handleChangeLook = useCallback(
+    async (look: SignatureLook | StyleOption) => {
+      const state = useAppStore.getState();
+      const post = state.generatedPost;
+      const previous = state.generationParams;
+      const workspaceKey = workspaceKeyForPost(post);
+      if (!post || !previous || !state.selectedImage || !state.currentDealer)
+        throw new Error("The original photo is needed to change the Look.");
+      if (
+        post.historyReadOnly ||
+        post.imageReviewRequired ||
+        post.releaseStatus === "save_failed" ||
+        (state.currentDealer.requires_approval && post.approvalStatus !== "n_a") ||
+        post.websitePublication?.status === "published"
+      ) {
+        throw new Error(
+          "This post is locked for review. Start a new post to change its Look.",
+        );
+      }
+      const [{ buildSavedPostLookRequest }, { resolveStoreDefaults }] =
+        await Promise.all([
+          import("../services/generationRequest"),
+          import("../services/storeDefaults"),
+        ]);
+      assertOperationAuthEpoch(state.authEpoch);
+      if (!workspaceIsCurrent(workspaceKey)) return;
+      const defaults = resolveStoreDefaults({
+        dealer: state.currentDealer,
+        person: state.currentPerson,
+        categoryId: state.postDraft?.categoryId || "deliveries",
+        scenarioId: post.scenarioId || previous.scenarioId || "customer_delivery",
+        websiteReady: Boolean(post.websiteDraft?.enabled),
+      });
+      const choice = defaults.looks.find((item) => item.id === look);
+      if (!choice) throw new Error("This Look is not enabled by your store.");
+      const definition = isSignatureLook(look)
+        ? LOOK_DEFINITIONS[look]
+        : { style: look, tone: previous.tone };
+      const built = buildSavedPostLookRequest(
+        {
+          dealershipName: state.currentDealer.name,
+          currentDealer: state.currentDealer,
+          scenarioId: post.scenarioId || previous.scenarioId || "customer_delivery",
+          decodedVehicle:
+            state.postDraft?.decodedVehicle || previous.decodedVehicle || null,
+          capturedRelease: null,
+          releaseAlreadyLinked: false,
+          customerName: previous.customerName,
+          personalLine: state.postDraft?.personalLine || previous.personalLine || "",
+          creativeEnabled: true,
+          resolvedStyle: definition.style,
+          resolvedTone: definition.tone,
+          playfulOffered: false,
+          playfulRequested: false,
+          captionSource: "ai",
+          customMessage: "",
+          effectivePlatformIds: previous.platformIds || [],
+          websiteSelected: Boolean(post.websiteDraft?.enabled),
+          effectiveImageProfile: {
+            label: "Post image",
+            primaryFormatId: post.primaryFormatId || "feed_portrait",
+            imageAspectRatio: post.imageAspectRatio || "4:5",
+          },
+          effectiveMediaMode: previous.mediaOutputMode || "photo",
+        },
+        post,
+      );
+      if (!built.ok)
+        throw new Error(
+          built.message ||
+            "Confirm the customer and vehicle details before changing the Look.",
+        );
+      await regenerateImageMutation.mutateAsync({
+        ...previous,
+        style: built.style,
+        tone: built.tone,
+        creativeBrief: built.creativeBrief,
+      });
+    },
+    [regenerateImageMutation],
+  );
 
   const funModeMutation = useMutation({
     mutationFn: async (styleName?: string) => {
@@ -2134,8 +2233,10 @@ export const useGeneration = () => {
     generationStage,
     partsReady,
     cancelGeneration,
+    supersedeGeneration,
     handleGenerate,
     handleRegenerateImage,
+    handleChangeLook,
     handleFunMode,
     handleEditImage,
     handleRegenerateText,

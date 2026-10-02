@@ -13,7 +13,7 @@
 import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MainContent } from "../components/MainContent";
+import { PostDetails } from "../components/PostDetails";
 import { PostCustomizer } from "../components/PostCustomizer";
 import { useAppStore } from "../stores/appStore";
 import type { CapturedRelease } from "../services/photoReleases";
@@ -57,6 +57,26 @@ vi.mock("../components/PhotoReleaseModal", () => ({
         Sign release
       </button>
     ) : null,
+}));
+
+vi.mock("../components/details/ReleaseSheet", () => ({
+  ReleaseSheet: ({
+    onCaptured,
+    onCancel,
+  }: {
+    onCaptured: (release: CapturedRelease) => void;
+    onCancel: () => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() => {
+        if (mocks.nextRelease) onCaptured(mocks.nextRelease);
+        onCancel();
+      }}
+    >
+      Sign release
+    </button>
+  ),
 }));
 
 const localStorageMock = (() => {
@@ -103,38 +123,7 @@ const signedRelease = (): CapturedRelease => ({
   signaturePngDataUrl: SIGNATURE,
 });
 
-type OnGenerate = React.ComponentProps<typeof MainContent>["onGenerate"];
-
-const makeMainContentProps = (
-  onGenerate: OnGenerate,
-  step: AppStep = AppStep.CUSTOMIZE,
-): React.ComponentProps<typeof MainContent> => ({
-  displayedStep: step,
-  step,
-  currentDealer: CREATIVE_DEALER,
-  selectedImage: "data:image/png;base64,cGhvdG8=",
-  generatedPost: null as GeneratedPost | null,
-  error: null,
-  preferredStyle: StyleOption.Modern,
-  preferredTone: ToneOption.Excited,
-  isDesktopLayout: true,
-  generationProgress: 0,
-  progressMessage: "",
-  onLogin: vi.fn(),
-  onImageSelected: vi.fn(),
-  onReset: vi.fn(),
-  onRemix: vi.fn(),
-  onDismissError: vi.fn(),
-  onGenerate,
-  onBackToCapture: vi.fn(),
-  onStyleToneChange: vi.fn(),
-  onRegenerateImage: vi.fn().mockResolvedValue(undefined),
-  onEditImage: vi.fn().mockResolvedValue(undefined),
-  onRegenerateText: vi.fn().mockResolvedValue(undefined),
-  onEditText: vi.fn().mockResolvedValue(""),
-  onFunMode: vi.fn().mockResolvedValue(undefined),
-  onGenerateVideo: vi.fn().mockResolvedValue(""),
-});
+type OnGenerate = React.ComponentProps<typeof PostDetails>["onGenerate"];
 
 /**
  * What useGeneration's onMutate records before the step leaves Details: the
@@ -206,21 +195,34 @@ afterEach(() => {
 describe("Details draft carried through a Cancel or failed-attempt remount", () => {
   it("hands the signed release and the personal line back after Generate then Cancel, without re-signing", async () => {
     const onGenerate = vi.fn(recordLikeOnMutate);
-    const { rerender } = render(<MainContent {...makeMainContentProps(onGenerate)} />);
+    useAppStore.setState({
+      postDraft: { categoryId: "deliveries", scenarioId: "customer_delivery" },
+      pendingRelease: null,
+    });
+    const renderDetails = () => (
+      <PostDetails
+        imageSrc="data:image/png;base64,cGhvdG8="
+        onGenerate={onGenerate}
+        onBack={vi.fn()}
+        onChangePhoto={vi.fn()}
+      />
+    );
+    const { unmount } = render(renderDetails());
 
     // A new post: nothing is carried in.
-    const line = await screen.findByLabelText(/Add a personal line/i);
+    fireEvent.click(screen.getByRole("button", { name: /Anything to mention/i }));
+    const line = await screen.findByLabelText(/Anything to mention/i);
     expect(line).toHaveValue("");
-    expect(releaseIsCaptured()).toBeNull();
+    expect(screen.queryByText(/^Signed ·/)).toBeNull();
 
     // Sign, type the line, Create post.
     const captured = signedRelease();
     mocks.nextRelease = captured;
-    fireEvent.click(screen.getByRole("button", { name: /Capture customer release/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Get customer's signature/i }));
     fireEvent.click(screen.getByRole("button", { name: "Sign release" }));
-    expect(releaseIsCaptured()).toHaveTextContent("Release captured for Alex");
+    expect(screen.getByText("Signed · Alex Johnson")).toBeInTheDocument();
     fireEvent.change(line, { target: { value: PERSONAL_LINE } });
-    fireEvent.click(screen.getByRole("button", { name: /Generate Post/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Create post/i }));
     await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(1));
     expect(useAppStore.getState().generationParams).toMatchObject({
       capturedRelease: captured,
@@ -228,22 +230,20 @@ describe("Details draft carried through a Cancel or failed-attempt remount", () 
     });
 
     // Creating: Details unmounts.
-    rerender(<MainContent {...makeMainContentProps(onGenerate, AppStep.GENERATING)} />);
-    expect(screen.queryByLabelText(/Add a personal line/i)).not.toBeInTheDocument();
+    unmount();
+    expect(screen.queryByLabelText(/Anything to mention/i)).not.toBeInTheDocument();
 
-    // Cancel returns to Details (the store keeps generationParams on CUSTOMIZE)
-    // and the keyed transition remounts the customizer.
-    act(() => useAppStore.getState().setStep(AppStep.CUSTOMIZE));
-    rerender(<MainContent {...makeMainContentProps(onGenerate)} />);
-    expect(await screen.findByLabelText(/Add a personal line/i)).toHaveValue(
+    // Cancel returns to Details and remounts from postDraft + pendingRelease.
+    act(() => useAppStore.getState().setStep(AppStep.DETAILS));
+    render(renderDetails());
+    expect(await screen.findByLabelText(/Anything to mention/i)).toHaveValue(
       PERSONAL_LINE,
     );
-    expect(releaseIsCaptured()).toHaveTextContent("Release captured for Alex");
-    expect(screen.getByLabelText(/Customer first name/i)).toHaveValue("Alex");
+    expect(screen.getByText("Signed · Alex Johnson")).toBeInTheDocument();
 
     // The retry runs on the same signature: no second pad, no new release.
     mocks.nextRelease = null;
-    fireEvent.click(screen.getByRole("button", { name: /Generate Post/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Create post/i }));
     await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(2));
     expect(
       screen.queryByRole("button", { name: "Sign release" }),

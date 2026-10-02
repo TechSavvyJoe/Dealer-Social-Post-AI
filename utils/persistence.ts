@@ -1,10 +1,11 @@
-import type { GeneratedPost, GenerationParams } from "../types";
+import type { GeneratedPost, GenerationParams, PostDraft } from "../types";
 import { clearAllCreatives } from "./creativeStorage";
 
 const STORAGE_KEY = "dealer-social-post-ai.session";
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 interface PersistedState {
+  postDraft?: Omit<PostDraft, "personalLine">;
   generatedPost?: Omit<GeneratedPost, "image"> & { image?: string };
   selectedImage?: string;
   dealerId?: string;
@@ -48,6 +49,13 @@ const withoutInMemoryDraft = (
 
 const withoutImageBytes = (session: PersistedState): PersistedState => ({
   ...session,
+  postDraft: session.postDraft
+    ? {
+        categoryId: session.postDraft.categoryId,
+        scenarioId: session.postDraft.scenarioId,
+        decodedVehicle: session.postDraft.decodedVehicle,
+      }
+    : undefined,
   generatedPost: session.generatedPost
     ? { ...session.generatedPost, image: undefined }
     : undefined,

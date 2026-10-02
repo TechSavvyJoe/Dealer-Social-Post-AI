@@ -242,6 +242,25 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
     }
   }, [step.id, onDismiss]);
 
+  const stepComplete = (id: StepId): boolean => {
+    if (id === "contact")
+      return Boolean(website.trim() && phone.trim() && address.trim());
+    if (id === "social")
+      return Boolean(facebookUrl.trim() || instagramHandle.trim() || gbpUrl.trim());
+    if (id === "voice") return Boolean(voice.trim());
+    if (id === "banned") return Boolean(banned.trim());
+    if (id === "color") return HEX_RE.test(color.trim());
+    if (id === "hashtags")
+      return Boolean(defaultHashtags.trim() || defaultFooter.trim());
+    if (id === "overlays")
+      return Boolean(dealer.enabled_styles?.trim() || defaultStyle);
+    if (id === "approval") return dealer.requires_approval !== undefined;
+    return step.id === "done";
+  };
+  const completedSteps = STEPS.slice(0, -1).filter((item) =>
+    stepComplete(item.id),
+  ).length;
+
   return (
     <m.div
       initial={{ opacity: 0, y: 10 }}
@@ -279,35 +298,50 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
         )}
       </div>
 
-      {/* Step indicator */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-hairline bg-panel px-3 py-2">
+        <div>
+          <div className="text-xs font-semibold text-ink">Setup checklist</div>
+          <div className="text-2xs text-ink-2">
+            {completedSteps} of {STEPS.length - 1} complete · choose any step
+          </div>
+        </div>
+        <div className="h-2 w-24 overflow-hidden rounded-full bg-fill-subtle">
+          <div
+            className="h-full bg-brand-fill"
+            style={{ width: `${(completedSteps / (STEPS.length - 1)) * 100}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Compact, clickable step indicator. */}
+      <div
+        className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5"
+        aria-label="Setup steps"
+      >
         {STEPS.map((s, i) => {
           const Icon = s.icon;
           const active = i === stepIdx;
-          const done = i < stepIdx;
+          const done = stepComplete(s.id);
           return (
-            <div key={s.id} className="flex items-center flex-1">
-              <div
-                className={cn(
-                  "flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] flex-shrink-0",
-                  active &&
-                    "bg-primary-500/20 text-primary-100 [.theme-light_&]:text-primary-950",
-                  done && "text-success-200",
-                  !active && !done && "text-surface-500",
-                )}
-              >
-                <Icon className="h-3 w-3" />
-                <span className="hidden sm:inline">{s.title}</span>
-              </div>
-              {i < STEPS.length - 1 && (
-                <div
-                  className={cn(
-                    "h-px flex-1 mx-1",
-                    done ? "bg-success-400/50" : "bg-fill-hover",
-                  )}
-                />
+            <button
+              key={s.id}
+              type="button"
+              aria-current={active ? "step" : undefined}
+              onClick={() => setStepIdx(i)}
+              className={cn(
+                "flex min-h-11 items-center gap-2 rounded-sm border px-3 text-left text-xs",
+                active
+                  ? "border-brand-ink bg-brand-tint text-ink"
+                  : "border-hairline bg-panel-raised text-ink-2 hover:border-strong",
               )}
-            </div>
+            >
+              {done ? (
+                <Check className="h-4 w-4 text-success-ink" aria-hidden="true" />
+              ) : (
+                <Icon className="h-4 w-4" aria-hidden="true" />
+              )}
+              {s.title}
+            </button>
           );
         })}
       </div>

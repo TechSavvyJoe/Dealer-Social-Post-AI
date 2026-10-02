@@ -135,7 +135,7 @@ async function expectMaskableSafeZone(page: Page, sources: string[]) {
   }
 }
 
-async function stubAuthenticatedCapture(page: Page) {
+async function stubAuthenticatedHome(page: Page) {
   await page.route("**/api/app/session", async (route) => {
     await route.fulfill({
       status: 200,
@@ -292,7 +292,7 @@ test.describe("Home Screen PWA contracts", () => {
     }
   });
 
-  test("keeps authenticated Capture usable in iPhone standalone display mode", async ({
+  test("keeps authenticated Home usable in iPhone standalone display mode", async ({
     page,
     context,
     browserName,
@@ -323,7 +323,7 @@ test.describe("Home Screen PWA contracts", () => {
         get: () => true,
       });
     });
-    await stubAuthenticatedCapture(page);
+    await stubAuthenticatedHome(page);
 
     const cdp = await context.newCDPSession(page);
     await cdp.send("Emulation.setSafeAreaInsetsOverride", {
@@ -340,9 +340,9 @@ test.describe("Home Screen PWA contracts", () => {
     });
 
     try {
-      await page.goto("/#/capture");
+      await page.goto("/");
       await expect(
-        page.getByRole("heading", { name: "Start with a photo" }),
+        page.getByRole("heading", { name: "What are you posting?" }),
       ).toBeVisible();
       expect(
         await page.evaluate(
@@ -434,12 +434,14 @@ test.describe("Home Screen PWA contracts", () => {
       expect(shell.documentOverflow).toBe(0);
 
       const mainContent = page.locator("#main-content");
-      const takePhoto = page.getByRole("button", { name: "Take photo" });
-      const chooseFromDevice = page.getByRole("button", {
-        name: "Choose from device",
+      const deliveryAction = page.getByRole("button", { name: /^Delivery/ });
+      const teamCard = page.locator("article").filter({ hasText: /^Team/ }).first();
+      const chooseFromLibrary = teamCard.getByRole("button", {
+        name: "Choose from library",
       });
-      await expect(takePhoto).toBeVisible();
-      await expect(chooseFromDevice).toBeVisible();
+      await expect(deliveryAction).toBeVisible();
+      await expect(page.getByLabel("Take a photo for Delivery")).toBeAttached();
+      await expect(page.getByLabel("Choose a photo for Delivery")).toBeAttached();
 
       await mainContent.evaluate((element) => {
         element.style.scrollBehavior = "auto";
@@ -456,38 +458,35 @@ test.describe("Home Screen PWA contracts", () => {
 
       const bottomReach = await page.evaluate(() => {
         const main = document.querySelector<HTMLElement>("#main-content");
-        const grid = document.querySelector<HTMLElement>(".capture-studio-grid");
-        const sidebar = document.querySelector<HTMLElement>(".capture-studio-sidebar");
-        const choose = Array.from(document.querySelectorAll("button")).find(
-          (button) => button.textContent?.trim() === "Choose from device",
+        const cards = Array.from(document.querySelectorAll<HTMLElement>("article"));
+        const finalCard = cards.find((card) =>
+          card.textContent?.trim().startsWith("Team"),
         );
-        if (!main || !grid || !sidebar || !choose) return null;
+        const choose = Array.from(finalCard?.querySelectorAll("button") || []).find(
+          (button) => button.textContent?.trim() === "Choose from library",
+        );
+        if (!main || !finalCard || !choose) return null;
         const mainBounds = main.getBoundingClientRect();
-        const gridBounds = grid.getBoundingClientRect();
-        const sidebarBounds = sidebar.getBoundingClientRect();
+        const finalCardBounds = finalCard.getBoundingClientRect();
         const chooseBounds = choose.getBoundingClientRect();
         return {
           mainBottom: mainBounds.bottom,
-          gridBottom: gridBounds.bottom,
-          sidebarBottom: sidebarBounds.bottom,
+          finalCardBottom: finalCardBounds.bottom,
           chooseBottom: chooseBounds.bottom,
           viewportHeight: window.innerHeight,
-          mainBottomPadding: Number.parseFloat(getComputedStyle(main).paddingBottom),
         };
       });
       expect(bottomReach).not.toBeNull();
       expect(bottomReach!.mainBottom).toBeLessThanOrEqual(
         bottomReach!.viewportHeight - shell.rootPaddingBottom + 1,
       );
-      expect(bottomReach!.gridBottom).toBeLessThanOrEqual(
-        bottomReach!.mainBottom - bottomReach!.mainBottomPadding + 1,
-      );
-      expect(bottomReach!.sidebarBottom).toBeLessThanOrEqual(
+      expect(bottomReach!.finalCardBottom).toBeLessThanOrEqual(
         bottomReach!.mainBottom + 1,
       );
       expect(bottomReach!.chooseBottom).toBeLessThanOrEqual(
         bottomReach!.mainBottom + 1,
       );
+      await expect(chooseFromLibrary).toBeVisible();
     } finally {
       await cdp.send("Emulation.setSafeAreaInsetsOverride", {
         insets: {

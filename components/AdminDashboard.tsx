@@ -9,6 +9,7 @@ import { Button } from "./ui/Button";
 import { Skeleton } from "./ui/Skeleton";
 import {
   Building2,
+  Plug,
   ChevronLeft,
   ChevronRight,
   Eye,
@@ -25,7 +26,7 @@ import {
   Users,
 } from "lucide-react";
 import { PersonEditModal } from "./PersonEditModal";
-import { SystemHealthPanel } from "./SystemHealthPanel";
+import { ConnectionsPanel } from "./admin/ConnectionsPanel";
 import { ConfirmationModal } from "./ConfirmationModal";
 import { useAppStore } from "../stores/appStore";
 import { useToast } from "./ui/Toast";
@@ -49,7 +50,7 @@ import {
 } from "../utils/hoursFormat";
 import { cn } from "../utils/classNames";
 
-type HubTab = "dealers" | "admins" | "users";
+type HubTab = "dealers" | "admins" | "users" | "connections";
 const PEOPLE_PAGE_SIZE = 50;
 
 const fieldClassName =
@@ -375,6 +376,7 @@ export const AdminDashboard: React.FC = () => {
     { key: "dealers", label: "Dealers", icon: Building2 },
     { key: "admins", label: "Admins", icon: Shield },
     { key: "users", label: "Users", icon: Users },
+    { key: "connections", label: "Connections", icon: Plug },
   ];
 
   const handleTabKeyDown = (
@@ -402,19 +404,15 @@ export const AdminDashboard: React.FC = () => {
   };
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-5 p-0 sm:space-y-6 sm:p-2 lg:p-4">
+    <div className="mx-auto w-full max-w-6xl space-y-5 p-4 sm:space-y-6 sm:p-6 lg:p-8">
       {/* Page identity first; diagnostics are a quiet strip below it. */}
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-content-tertiary">
-            Platform
-          </p>
           <h2 className="mt-1 text-2xl font-bold tracking-tight text-content-primary">
             System admin
           </h2>
           <p className="mt-1 max-w-xl text-sm text-content-secondary">
-            Work across every dealership, or narrow the hub to one store. Every person
-            remains clearly labeled and tenant-scoped.
+            Manage your dealerships, people and platform connections in one place.
           </p>
         </div>
         <Button
@@ -423,15 +421,13 @@ export const AdminDashboard: React.FC = () => {
           leftIcon={<RefreshCw className="h-4 w-4" />}
           onClick={() => {
             void refetch();
-            if (tab !== "dealers") void refetchPeople();
+            if (tab === "admins" || tab === "users") void refetchPeople();
           }}
           disabled={isPending}
         >
           {isPending ? "Refreshing…" : "Refresh"}
         </Button>
       </header>
-
-      <SystemHealthPanel />
 
       {/* Section toolbar: underline tabs + the tenant scope control. */}
       <div className="flex flex-col gap-3 border-b border-hairline lg:flex-row lg:items-end lg:justify-between">
@@ -464,7 +460,12 @@ export const AdminDashboard: React.FC = () => {
           ))}
         </div>
 
-        <div className="flex min-w-0 items-center gap-2 pb-2 lg:max-w-sm">
+        <div
+          className={cn(
+            "flex min-w-0 items-center gap-2 pb-2 lg:max-w-sm",
+            tab === "connections" && "hidden",
+          )}
+        >
           <label
             htmlFor="selected-dealer"
             className="shrink-0 text-xs font-medium uppercase tracking-wide text-content-tertiary"
@@ -486,7 +487,7 @@ export const AdminDashboard: React.FC = () => {
           </select>
         </div>
       </div>
-      {selectedDealer ? (
+      {selectedDealer && tab !== "connections" ? (
         <p className="-mt-3 text-xs text-content-tertiary sm:-mt-4">
           Showing people for{" "}
           <strong className="font-semibold text-content-secondary">
@@ -495,6 +496,15 @@ export const AdminDashboard: React.FC = () => {
         </p>
       ) : null}
 
+      {tab === "connections" && (
+        <div
+          id="admin-panel-connections"
+          role="tabpanel"
+          aria-labelledby="admin-tab-connections"
+        >
+          <ConnectionsPanel />
+        </div>
+      )}
       {tab === "dealers" && (
         <div
           id="admin-panel-dealers"

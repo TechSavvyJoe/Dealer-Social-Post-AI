@@ -6,6 +6,7 @@ import type {
 } from "../utils/complianceDisclosures";
 import { logError } from "../utils/telemetry";
 import type { GeneratedPost } from "../types";
+import { useAppStore } from "../stores/appStore";
 
 export interface PendingDraftSync {
   caption: string;
@@ -71,7 +72,13 @@ export const useDraftAutosave = ({
     platformCaptions: JSON.stringify(post.platformCaptions || {}),
   });
   /** Server revision returned by the latest exact draft save. */
-  const lastRevisionRef = useRef<string | null>(null);
+  const lastRevisionRef = useRef<string | null>(post.postRevision || null);
+  useEffect(() => {
+    // Release linking and other same-post server transitions can advance the
+    // revision outside autosave. Adopt the revision carried by the live post;
+    // the response path below still refuses to replace a newer observed token.
+    if (post.postRevision) lastRevisionRef.current = post.postRevision;
+  }, [post.postId, post.postRevision]);
 
   const flush = useCallback((): Promise<boolean> => {
     const draft = pendingDraftSyncRef.current;
@@ -83,17 +90,52 @@ export const useDraftAutosave = ({
 
     const operation = draftSyncChainRef.current.then(async () => {
       try {
+        const expectedPostRevision = lastRevisionRef.current;
+        if (!expectedPostRevision) {
+          throw new Error(
+            "This saved post is missing its revision. Reopen it from My work before editing.",
+          );
+        }
         const updated = await updatePostDraft(post.postId as string, {
           ...draft,
+          expectedPostRevision,
           grounding,
         });
-        lastRevisionRef.current = updated.post_revision;
         lastSyncedDraftRef.current = {
           caption: draft.caption,
           disclosures: draft.disclosures,
           image: draft.imageDataUrl || lastSyncedDraftRef.current.image,
           platformCaptions: JSON.stringify(draft.platformCaptions || {}),
         };
+        const store = useAppStore.getState();
+        const current = store.generatedPost;
+        let authoritativeRevision = updated.post_revision;
+        if (
+          current &&
+          current.postId === post.postId &&
+          current.postRevision &&
+          current.postRevision !== expectedPostRevision
+        ) {
+          authoritativeRevision = current.postRevision;
+        }
+        lastRevisionRef.current = authoritativeRevision;
+        if (current && current.postId === post.postId) {
+          const currentPost = current;
+          const savedDraftIsStillLatest = pendingDraftSyncRef.current === draft;
+          store.setGeneratedPost(
+            savedDraftIsStillLatest
+              ? {
+                  ...currentPost,
+                  text: draft.caption,
+                  disclosures: draft.disclosures || undefined,
+                  platformCaptions: draft.platformCaptions,
+                  image: draft.imageDataUrl || currentPost.image,
+                  postRevision: authoritativeRevision,
+                }
+              : { ...currentPost, postRevision: authoritativeRevision },
+            { archive: false },
+          );
+        }
         if (pendingDraftSyncRef.current === draft) {
           pendingDraftSyncRef.current = null;
         }

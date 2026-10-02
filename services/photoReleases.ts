@@ -48,6 +48,8 @@ export interface LinkedPhotoReleaseRecord {
   id: string;
   post_id: string;
   has_release: true;
+  /** Revision after the post's consent flags were durably updated. */
+  post_revision: string;
 }
 
 export const saveRelease = async (
