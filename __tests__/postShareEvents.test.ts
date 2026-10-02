@@ -291,6 +291,7 @@ interface ShareHarness {
     context?: AnyRecord | null;
     token?: string;
     postId?: string;
+    omitExpectedRevision?: boolean;
   }) => RouteResult;
   events: ReturnType<typeof fakeRecord>[];
   savedRecords: unknown[];
@@ -332,6 +333,17 @@ const shareHarness = (): ShareHarness => {
       databaseTimestamp: realHelpers.databaseTimestamp,
     };
     const txDao = {
+      db: () => ({
+        newQuery: () => ({
+          bind: () => ({
+            execute: () => ({ rowsAffected: () => 1 }),
+          }),
+        }),
+      }),
+      findRecordById: (collection: string, id: string) => {
+        if (collection === "posts" && id === post.id) return post;
+        throw new Error("not found");
+      },
       findRecordsByFilter: (
         collection: string,
         filter: string,
@@ -381,7 +393,16 @@ const shareHarness = (): ShareHarness => {
           runInTransaction: (fn: (dao: typeof txDao) => void) => fn(txDao),
         }),
       },
-      $apis: { requestInfo: () => ({ data: options.body ?? {} }) },
+      $apis: {
+        requestInfo: () => ({
+          data: {
+            ...(options.omitExpectedRevision
+              ? {}
+              : { expected_post_revision: post.getString("updated") }),
+            ...(options.body ?? {}),
+          },
+        }),
+      },
       Record: function Record(collection: { name: string }) {
         const values: AnyRecord = { collection: collection.name };
         const record = fakeRecord("", values);
@@ -436,6 +457,7 @@ describe("POST /api/app/posts/:id/shared", () => {
       channel: "facebook_feed",
       via: "share_sheet",
       deduplicated: false,
+      post_revision: "2026-09-20 10:00:00.000Z",
     });
     expect(result.payload.shared_at).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
     expect(harness.events).toHaveLength(1);
@@ -451,6 +473,61 @@ describe("POST /api/app/posts/:id/shared", () => {
     expect(harness.savedRecords).toEqual([harness.events[0]]);
     expect(harness.headers.get("Cache-Control")).toBe("private, no-store");
   });
+
+  it("accepts an absent legacy revision but rejects a stale supplied revision", () => {
+    const legacy = shareHarness();
+    expect(
+      legacy.run({
+        omitExpectedRevision: true,
+        body: { channel: "facebook_feed", via: "copy" },
+      }),
+    ).toMatchObject({
+      status: 200,
+      payload: {
+        post_revision: "2026-09-20 10:00:00.000Z",
+        deduplicated: false,
+      },
+    });
+    expect(legacy.events).toHaveLength(1);
+
+    const stale = shareHarness();
+    expect(
+      stale.run({
+        body: {
+          channel: "facebook_feed",
+          via: "copy",
+          expected_post_revision: "2026-09-19 09:00:00.000Z",
+        },
+      }),
+    ).toMatchObject({
+      status: 409,
+      payload: { code: "POST_SHARE_REVISION_CONFLICT" },
+    });
+    expect(stale.events).toHaveLength(0);
+  });
+
+  it.each([
+    ["blank", ""],
+    ["non-string", { revision: "2026-09-20 10:00:00.000Z" }],
+    ["oversized", "x".repeat(81)],
+  ])(
+    "rejects a %s supplied revision instead of treating it as legacy",
+    (_label, revision) => {
+      const harness = shareHarness();
+      const result = harness.run({
+        body: {
+          channel: "facebook_feed",
+          via: "copy",
+          expected_post_revision: revision,
+        },
+      });
+      expect(result).toMatchObject({
+        status: 409,
+        payload: { code: "POST_SHARE_REVISION_REQUIRED" },
+      });
+      expect(harness.events).toHaveLength(0);
+    },
+  );
 
   it("takes only channel and via from the client; the server owns post, dealer and time", () => {
     const harness = shareHarness();

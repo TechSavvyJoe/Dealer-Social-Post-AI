@@ -2481,8 +2481,8 @@ describe("vision-QC review is its own generation task (Gemini P0-2)", () => {
       /const PROXY_CAPABILITIES = Object\.freeze\(\{[^}]*veoNegativePrompt: true,[^}]*\}\);/,
     );
     expect(helpers).toContain("\n  PROXY_CAPABILITIES,\n");
-    // Dealer login, cookie restore, impersonate, exit-impersonate, and health.
-    expect(hook.match(/capabilities: helpers\.PROXY_CAPABILITIES,/g)).toHaveLength(5);
+    // Dealer login, cookie restore, impersonate, exit-impersonate, health, and connections.
+    expect(hook.match(/capabilities: helpers\.PROXY_CAPABILITIES,/g)).toHaveLength(6);
     expect(hook).toContain(
       "apiContractVersion: helpers.API_CONTRACT_VERSION,\n    capabilities: helpers.PROXY_CAPABILITIES,",
     );

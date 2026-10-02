@@ -949,6 +949,97 @@ routerAdd("GET", "/api/app/proxy-readiness", (c) => {
   return c.json(trusted ? 200 : 503, { ok: trusted });
 });
 
+// System-administrator configuration inventory for Settings. This endpoint reports
+// only whether a connection is configured/enabled; it never echoes a secret
+// and never claims a provider was tested. Live provider canaries remain an
+// explicit release operation owned by the system administrator.
+routerAdd("GET", "/api/app/connections", (c) => {
+  const helpers = require(__hooks + "/helpers.js");
+  const policies = require(__hooks + "/requestPolicies.js");
+  const context = helpers.sessionContext(c);
+  if (!context) return c.json(401, { error: "No active session" });
+  if (context.role !== "super_admin") {
+    return c.json(403, { error: "System administrator role required" });
+  }
+
+  const configured = function (name) {
+    const value = ($os.getenv(name) || "").toString().trim();
+    return !!value && value !== "your-api-key-here";
+  };
+  const enabled = function (name) {
+    return ($os.getenv(name) || "").toString().trim().toLowerCase() === "true";
+  };
+  const validSecret = function (name) {
+    const value = ($os.getenv(name) || "").toString();
+    return value.length >= 32 && value === value.trim();
+  };
+  const validHttpsUrl = function (name) {
+    return /^https:\/\/[A-Za-z0-9.-]+(?::\d{2,5})?(?:\/[^?#]*)?$/.test(
+      ($os.getenv(name) || "").toString().trim().replace(/\/+$/, ""),
+    );
+  };
+  const geminiConfigured = configured("GEMINI_API_KEY");
+  const anthropicConfigured = configured("ANTHROPIC_API_KEY");
+  const openaiConfigured = configured("OPENAI_API_KEY");
+  const modelPolicy = policies.geminiModelPolicySnapshot();
+  const configuredWebsiteDealer = ($os.getenv("CUSTOMER_HUB_DEALER_ID") || "")
+    .toString()
+    .trim();
+  const websiteConfigured = require(
+    __hooks + "/websitePublications.js",
+  ).destinationConfiguration(configuredWebsiteDealer).enabled;
+  const walkaroundEnabled = enabled("WALKAROUND_STUDIO_ENABLED");
+  const walkaroundBucket = ($os.getenv("WALKAROUND_GCS_BUCKET") || "")
+    .toString()
+    .trim();
+  const walkaroundConfigured =
+    /^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/.test(walkaroundBucket) &&
+    validHttpsUrl("WALKAROUND_UPLOAD_BROKER_URL") &&
+    validSecret("WALKAROUND_UPLOAD_BROKER_TOKEN") &&
+    validHttpsUrl("WALKAROUND_YOUTUBE_BROKER_URL") &&
+    validSecret("WALKAROUND_YOUTUBE_BROKER_TOKEN") &&
+    validSecret("WALKAROUND_WORKER_TOKEN") &&
+    validSecret("WALKAROUND_WORKER_SIGNING_SECRET");
+
+  c.response().header().set("Cache-Control", "private, no-store");
+  c.response().header().set("Vary", "Cookie");
+  return c.json(200, {
+    scope: "configuration_only",
+    providers: {
+      gemini: {
+        configured: geminiConfigured,
+        enabled: geminiConfigured,
+        verification: "not_tested",
+      },
+      anthropic: {
+        configured: anthropicConfigured,
+        enabled: anthropicConfigured && enabled("ENABLE_CLAUDE_FALLBACK"),
+        verification: "not_tested",
+      },
+      openai: {
+        configured: openaiConfigured,
+        enabled: openaiConfigured && enabled("ENABLE_OPENAI_FALLBACK"),
+        verification: "not_tested",
+      },
+    },
+    automation: {
+      customer_hub: {
+        configured: websiteConfigured,
+        enabled: websiteConfigured,
+        verification: "not_tested",
+      },
+      walkaround: {
+        configured: walkaroundConfigured,
+        enabled: walkaroundEnabled && walkaroundConfigured,
+        verification: "not_tested",
+      },
+    },
+    apiContractVersion: helpers.API_CONTRACT_VERSION,
+    capabilities: helpers.PROXY_CAPABILITIES,
+    modelPolicyVersion: String(modelPolicy.version),
+  });
+});
+
 // ----------------------------------------------------------------------------
 // Health + diagnostics endpoint. Public (no session required) so uptime
 // monitors can hit it. Public callers get only aggregate readiness; detailed
@@ -2299,10 +2390,14 @@ routerAdd("POST", "/api/app/photo_releases/:id/link-post", (c) => {
       require(__hooks + "/websitePublications.js").reconcilePublicationForPost(post.id);
     } catch (_e) {}
 
+    // Saving the consent flags advances posts.updated. Return that exact
+    // revision so the editor's next draft/share compare-and-set is not stale.
+    const linkedPost = $app.dao().findRecordById("posts", post.id);
     return c.json(200, {
       id: release.id,
       post_id: post.id,
       has_release: true,
+      post_revision: linkedPost.getString("updated"),
     });
   } catch (err) {
     console.error("[/api/app/photo_releases/:id/link-post] error", err);
@@ -2927,6 +3022,7 @@ routerAdd("POST", "/api/app/posts", (c) => {
       id: record.id,
       dealer: dealer.id,
       generated_at: record.getString("generated_at"),
+      updated: record.getString("updated"),
       customer_name: publicCustomerName,
       approval_status: record.getString("approval_status"),
       release_required: record.getBool
@@ -3005,6 +3101,29 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
     }
 
     const body = $apis.requestInfo(c).data || {};
+    // Phase A rollout compatibility: an older installed frontend omits this
+    // field entirely. Bind that request to the revision loaded above, then
+    // apply the same transaction recheck. Once the sender rollout is proven,
+    // Phase C removes this absence-only fallback.
+    const revisionWasSupplied = Object.prototype.hasOwnProperty.call(
+      body,
+      "expected_post_revision",
+    );
+    const expectedPostRevision = revisionWasSupplied
+      ? typeof body.expected_post_revision === "string"
+        ? body.expected_post_revision.trim()
+        : ""
+      : record.getString("updated");
+    if (
+      (revisionWasSupplied && typeof body.expected_post_revision !== "string") ||
+      !expectedPostRevision ||
+      expectedPostRevision.length > 80
+    ) {
+      return c.json(409, {
+        error: "Reload this saved post before editing it.",
+        code: "POST_DRAFT_REVISION_REQUIRED",
+      });
+    }
     let caption = helpers.assertString((body.caption || "").toString().trim(), 12000);
     let disclosures = helpers.assertString(
       (body.disclosures || "").toString().trim(),
@@ -3116,7 +3235,6 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
     if (parsedPlatformCaptions) {
       draftData.platform_captions = parsedPlatformCaptions.serialized;
     }
-    const loadedRevision = record.getString("updated");
     let savedRecord = null;
     $app.dao().runInTransaction(function (txDao) {
       // This write fence is deliberately first. It serializes a draft save
@@ -3142,7 +3260,7 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
       if (current.getString("approval_status") !== "n_a") {
         throw new Error("post_draft_immutable");
       }
-      if (current.getString("updated") !== loadedRevision) {
+      if (current.getString("updated") !== expectedPostRevision) {
         throw new Error("post_draft_revision_conflict");
       }
       if (
@@ -3392,9 +3510,31 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
     return c.json(403, { error: "Post belongs to another session" });
   }
 
-  const body = $apis.requestInfo(c).data || {};
-  const channel = (body.channel || "").toString().trim();
-  const via = (body.via || "").toString().trim();
+  let body = null;
+  try {
+    body = $apis.requestInfo(c).data || {};
+  } catch (_e) {
+    return c.json(400, {
+      error: "INVALID_SHARE_REQUEST",
+      code: "INVALID_SHARE_REQUEST",
+      message: "The share record request is invalid.",
+    });
+  }
+  const channel = typeof body.channel === "string" ? body.channel.trim() : "";
+  const via = typeof body.via === "string" ? body.via.trim() : "";
+  // Phase A rollout compatibility mirrors draft saves: only true absence gets
+  // the record revision loaded for this request. A malformed supplied value
+  // never downgrades to legacy behavior, and the transaction rechecks either
+  // token after taking the post write fence.
+  const revisionWasSupplied = Object.prototype.hasOwnProperty.call(
+    body,
+    "expected_post_revision",
+  );
+  const expectedPostRevision = revisionWasSupplied
+    ? typeof body.expected_post_revision === "string"
+      ? body.expected_post_revision.trim()
+      : ""
+    : record.getString("updated");
   if (helpers.allowedPostPlatformIds().indexOf(channel) === -1) {
     return c.json(400, {
       error: "INVALID_SHARE_CHANNEL",
@@ -3407,6 +3547,24 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
       error: "INVALID_SHARE_METHOD",
       code: "INVALID_SHARE_METHOD",
       message: "Unknown share method.",
+    });
+  }
+  if (
+    (revisionWasSupplied && typeof body.expected_post_revision !== "string") ||
+    !expectedPostRevision ||
+    expectedPostRevision.length > 80
+  ) {
+    return c.json(409, {
+      error: "Save or reload this post before recording its share.",
+      code: "POST_SHARE_REVISION_REQUIRED",
+      message: "The share receipt needs the revision of the saved copy.",
+    });
+  }
+  if (record.getString("updated") !== expectedPostRevision) {
+    return c.json(409, {
+      error: "POST_SHARE_REVISION_CONFLICT",
+      code: "POST_SHARE_REVISION_CONFLICT",
+      message: "This post changed before the share receipt was recorded.",
     });
   }
 
@@ -3575,6 +3733,21 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
     let shared = null;
     let deduplicated = false;
     $app.dao().runInTransaction(function (txDao) {
+      // Serialize with draft updates and the website handoff, then recheck the
+      // client revision. The policy checks above therefore describe the exact
+      // saved copy associated with this receipt.
+      const fence = txDao
+        .db()
+        .newQuery("UPDATE posts SET updated = updated WHERE id = {:post}")
+        .bind({ post: record.id })
+        .execute();
+      if (!fence || fence.rowsAffected() !== 1) {
+        throw new Error("source_post_missing");
+      }
+      const current = txDao.findRecordById("posts", record.id);
+      if (current.getString("updated") !== expectedPostRevision) {
+        throw new Error("post_share_revision_conflict");
+      }
       const existing = txDao.findRecordsByFilter(
         "post_share_events",
         "post = {:post}",
@@ -3614,8 +3787,16 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
       via: shared.getString("via"),
       shared_at: shared.getString("created"),
       deduplicated: deduplicated,
+      post_revision: expectedPostRevision,
     });
   } catch (err) {
+    if ((err && err.message ? err.message : "") === "post_share_revision_conflict") {
+      return c.json(409, {
+        error: "POST_SHARE_REVISION_CONFLICT",
+        code: "POST_SHARE_REVISION_CONFLICT",
+        message: "This post changed before the share receipt was recorded.",
+      });
+    }
     console.error("[/api/app/posts/:id/shared] error", err);
     return c.json(500, { error: "Failed to record share" });
   }

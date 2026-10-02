@@ -3,7 +3,7 @@
 # Development Startup Script
 # This script starts both PocketBase backend and Vite frontend
 
-set -e
+set -euo pipefail
 
 echo "========================================="
 echo "Starting Dealer Social Post AI (Development Mode)"
@@ -48,7 +48,7 @@ if [ -f .env.local ]; then
 fi
 
 # Check if GEMINI_API_KEY is set
-if [ -z "$GEMINI_API_KEY" ] || [ "$GEMINI_API_KEY" = "your-api-key-here" ]; then
+if [ -z "${GEMINI_API_KEY:-}" ] || [ "$GEMINI_API_KEY" = "your-api-key-here" ]; then
     echo "⚠️  WARNING: GEMINI_API_KEY is not configured!"
     echo ""
     echo "Please follow these steps:"
@@ -57,16 +57,17 @@ if [ -z "$GEMINI_API_KEY" ] || [ "$GEMINI_API_KEY" = "your-api-key-here" ]; then
     echo "3. Replace 'your-api-key-here' with your actual API key"
     echo "4. Save the file and run this script again"
     echo ""
-    read -p "Press Enter to continue anyway (the app will not work until you set the API key)..."
+    echo "The app will open, but AI generation and deep readiness will be unavailable."
 else
     echo "✓ GEMINI_API_KEY is configured"
 fi
 
-if [ -z "$ADMIN_LOGIN_USERNAME" ] || [ -z "$ADMIN_LOGIN_PASSWORD" ]; then
+if [ -z "${ADMIN_LOGIN_USERNAME:-}" ] || [ -z "${ADMIN_LOGIN_PASSWORD:-}" ]; then
     echo "⚠️  ADMIN_LOGIN_USERNAME / ADMIN_LOGIN_PASSWORD are unset — the system-admin account will not be provisioned, so super-admin login will fail."
 fi
 
-if [ "${#SALESPERSON_PIN_PEPPER}" -lt 32 ]; then
+PIN_PEPPER_VALUE="${SALESPERSON_PIN_PEPPER:-}"
+if [ "${#PIN_PEPPER_VALUE}" -lt 32 ]; then
     echo "⚠️  SALESPERSON_PIN_PEPPER is unset or too short (needs 32+ chars) — creating people and personal-code sign-in will fail."
 fi
 
@@ -89,26 +90,69 @@ echo ""
 
 # Function to cleanup background processes on exit
 cleanup() {
+    status=$?
+    trap - EXIT INT TERM
     echo ""
     echo "Shutting down services..."
-    kill $(jobs -p) 2>/dev/null || true
+    job_pids=$(jobs -p)
+    if [ -n "$job_pids" ]; then
+        # shellcheck disable=SC2086
+        kill $job_pids 2>/dev/null || true
+    fi
     wait 2>/dev/null || true
     echo "✓ All services stopped"
-    exit 0
+    exit "$status"
 }
 
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Start PocketBase in the background
 ./start-pocketbase.sh &
 POCKETBASE_PID=$!
 
-# Wait a bit for PocketBase to start
-sleep 3
+# Wait for the PocketBase router instead of assuming it starts within three
+# seconds. A 503 from deep readiness still proves the hooks are serving; it
+# also gives the browser an actionable configuration response after startup.
+BACKEND_READY=0
+for attempt in $(seq 1 60); do
+    if ! kill -0 "$POCKETBASE_PID" 2>/dev/null; then
+        backend_status=0
+        wait "$POCKETBASE_PID" || backend_status=$?
+        echo "ERROR: PocketBase exited before it became ready (status $backend_status)."
+        if [ "$backend_status" -eq 0 ]; then
+            exit 1
+        fi
+        exit "$backend_status"
+    fi
+    health_status=$(curl -sS --connect-timeout 1 --max-time 2 \
+        -o /dev/null -w '%{http_code}' \
+        http://127.0.0.1:8090/api/app/health 2>/dev/null || true)
+    if [ "$health_status" = "200" ] || [ "$health_status" = "503" ]; then
+        BACKEND_READY=1
+        break
+    fi
+    sleep 0.5
+done
+if [ "$BACKEND_READY" -ne 1 ]; then
+    echo "ERROR: PocketBase did not expose /api/app/health within 30 seconds."
+    exit 1
+fi
 
 # Start Vite dev server
 npm run dev &
 VITE_PID=$!
 
-# Wait for both processes
-wait $POCKETBASE_PID $VITE_PID
+# Bash 3.2 (the macOS system shell) has no `wait -n`, so poll both children
+# and return the first process failure instead of hanging behind the survivor.
+while kill -0 "$POCKETBASE_PID" 2>/dev/null && kill -0 "$VITE_PID" 2>/dev/null; do
+    sleep 1
+done
+
+if ! kill -0 "$POCKETBASE_PID" 2>/dev/null; then
+    wait "$POCKETBASE_PID"
+    exit $?
+fi
+
+wait "$VITE_PID"
