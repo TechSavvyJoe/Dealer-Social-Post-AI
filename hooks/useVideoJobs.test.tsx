@@ -27,6 +27,7 @@ vi.mock("../utils/creativeStorage", () => ({
 }));
 
 import { useVideoJobs, type UseVideoJobsOptions } from "./useVideoJobs";
+import { useAppStore } from "../stores/appStore";
 
 const REEL: VideoRequestOptions = {
   durationSeconds: 8,
@@ -280,6 +281,33 @@ describe("useVideoJobs", () => {
       status: "completed",
       url: "blob:clip-1",
     });
+    unmount();
+  });
+
+  it("leaves the post's revision alone when a finished video is marked", async () => {
+    // Even a server that still answered with a revision must not move the
+    // editor's compare-and-set token: marking a video never advances it.
+    mocks.markPostVideoGenerated.mockResolvedValueOnce({
+      id: "post-1",
+      has_video: true,
+      post_revision: "rev-from-video",
+    } as never);
+    useAppStore.setState({
+      generatedPost: {
+        image: "data:image/png;base64,aW1hZ2U=",
+        text: "Caption",
+        postId: "post-1",
+        postRevision: "rev-1",
+      },
+    });
+    const { result, unmount } = renderHook(() => useVideoJobs(options()));
+    await act(async () => {
+      await result.current.startVideoJob(VideoStyle.GoldenRadiance, REEL);
+    });
+
+    expect(mocks.markPostVideoGenerated).toHaveBeenCalledWith("post-1");
+    expect(result.current.videoJobs[0].status).toBe("completed");
+    expect(useAppStore.getState().generatedPost?.postRevision).toBe("rev-1");
     unmount();
   });
 

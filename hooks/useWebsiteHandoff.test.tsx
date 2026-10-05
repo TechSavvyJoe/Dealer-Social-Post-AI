@@ -239,6 +239,54 @@ describe("useWebsiteHandoff", () => {
     expect(result.current.handoffStarted).toBe(true);
   });
 
+  it("adopts the revision the hand-off claim returns, so the next share receipt is current", async () => {
+    // A real store: every write lands where the next read sees it.
+    mocks.setGeneratedPost.mockImplementation((next: GeneratedPost) => {
+      mocks.store.generatedPost = next;
+    });
+    mocks.store.generatedPost = { ...basePost, postRevision: "rev-1" };
+    mocks.getWebsitePublication.mockResolvedValue({ status: "not_requested" });
+    mocks.enqueueWebsitePublication.mockResolvedValue({
+      status: "queued",
+      websiteDraft,
+      post_revision: "rev-2",
+    });
+    const { result } = renderHook(() =>
+      useWebsiteHandoff({
+        post: { ...basePost, postRevision: "rev-1" },
+        dealerId: "dealer-1",
+        dealer: null,
+        imageBusy: false,
+        textBusy: false,
+        captions: baseCaptions,
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    mocks.getWebsitePublication.mockResolvedValue({ status: "queued" });
+
+    await act(async () => {
+      await result.current.send({
+        autosave: stubAutosave(),
+        deliveryLocked: false,
+        deliveryGateMessage: "",
+      });
+    });
+
+    expect(mocks.enqueueWebsitePublication).toHaveBeenCalledWith(
+      "post-1",
+      expect.objectContaining({ enabled: true }),
+      "rev-1",
+    );
+    expect((mocks.store.generatedPost as GeneratedPost).postRevision).toBe("rev-2");
+    expect(mocks.setGeneratedPost).toHaveBeenCalledWith(
+      expect.objectContaining({ postId: "post-1", postRevision: "rev-2" }),
+      { archive: false },
+    );
+  });
+
   it("send refuses when delivery is locked", async () => {
     const { result } = renderHook(() =>
       useWebsiteHandoff({

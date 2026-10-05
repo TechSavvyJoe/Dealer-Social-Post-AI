@@ -126,6 +126,53 @@ describe("publishTargets handoff strategy", () => {
     expect(writeText).toHaveBeenCalledWith("Delivery day");
   });
 
+  it.each([
+    ["reached", () => Promise.resolve(), true],
+    ["did not reach", () => Promise.reject(new Error("NotAllowedError")), false],
+  ])(
+    "reports whether the caption %s the clipboard alongside the share",
+    async (_label, writeTextResult, captionCopied) => {
+      Object.defineProperty(navigator, "share", {
+        configurable: true,
+        value: vi.fn(() => Promise.resolve()),
+      });
+      Object.defineProperty(navigator, "canShare", {
+        configurable: true,
+        value: () => true,
+      });
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: vi.fn(writeTextResult) },
+      });
+      // The legacy textarea path is the clipboard's last resort; fail it too.
+      Object.defineProperty(document, "execCommand", {
+        configurable: true,
+        value: vi.fn(() => false),
+      });
+      const target = PUBLISH_TARGETS.find(
+        (candidate) => candidate.id === "facebook_feed",
+      );
+
+      try {
+        const result = await sharePrepared({
+          target: target!,
+          content: { text: "Delivery day" },
+          caption: "Delivery day",
+          file: new File(["image"], "delivery.jpg", { type: "image/jpeg" }),
+          webUrl: null,
+        });
+
+        expect(result).toMatchObject({
+          kind: "shared",
+          via: "web-share",
+          captionCopied,
+        });
+      } finally {
+        Reflect.deleteProperty(document, "execCommand");
+      }
+    },
+  );
+
   it("keeps a prepared video available for Save when mobile canShare throws", async () => {
     const share = vi.fn();
     Object.defineProperty(navigator, "share", {
@@ -272,7 +319,7 @@ describe("publishTargets handoff strategy", () => {
       }),
     ).resolves.toMatchObject({
       kind: "error",
-      message: expect.stringMatching(/will not substitute a still image/i),
+      message: expect.stringMatching(/still image won.t be sent in its place/i),
     });
   });
 
