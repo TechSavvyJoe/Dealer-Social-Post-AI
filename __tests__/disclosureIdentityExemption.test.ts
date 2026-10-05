@@ -748,6 +748,7 @@ const runDraft = (
   );
   const post = fakeRecord("post-1", storedPost(postOverrides));
   const saved: AnyRecord[] = [];
+  const log = vi.fn();
   const txDao = {
     db: () => ({
       newQuery: () => ({
@@ -759,6 +760,7 @@ const runDraft = (
   const handler = routeContext(
     source,
     {
+      console: { error: vi.fn(), log, warn: vi.fn() },
       helpers: sessionHelpers(salespersonContext()),
       $app: {
         dao: () => ({
@@ -795,7 +797,7 @@ const runDraft = (
       findPublicationForPostWithDaoStrict: () => null,
     },
   );
-  return { result: handler(routeRequest()), saved };
+  return { result: handler(routeRequest()), saved, log };
 };
 
 describe("PATCH /api/app/posts/:id/draft", () => {
@@ -811,6 +813,10 @@ describe("PATCH /api/app/posts/:id/draft", () => {
     );
     expect(legacy.result.status).toBe(200);
     expect(legacy.saved).toHaveLength(1);
+    // Stage C's release gate counts these lines in the production log.
+    expect(legacy.log).toHaveBeenCalledWith(
+      "[revision-legacy-client] route=draft post=post-1",
+    );
 
     const stale = runDraft({
       expected_post_revision: "2026-09-21 09:00:00.000Z",
@@ -822,6 +828,9 @@ describe("PATCH /api/app/posts/:id/draft", () => {
       payload: { code: "POST_DRAFT_REVISION_CONFLICT" },
     });
     expect(stale.saved).toHaveLength(0);
+    expect(stale.log).not.toHaveBeenCalledWith(
+      expect.stringContaining("[revision-legacy-client]"),
+    );
   });
 
   it.each([

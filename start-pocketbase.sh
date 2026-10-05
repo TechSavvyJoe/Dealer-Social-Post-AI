@@ -138,7 +138,10 @@ echo ""
 
 POCKETBASE_HTTP_ADDR="${POCKETBASE_HTTP_ADDR:-0.0.0.0:8090}"
 POCKETBASE_DATA_DIR="${POCKETBASE_DATA_DIR:-./pb_data}"
+# PocketBase resolves the default migrations directory relative to --dir, so a
+# POCKETBASE_DATA_DIR override would silently load no migrations. Pin it.
 exec ./pocketbase serve \
     --http="$POCKETBASE_HTTP_ADDR" \
     --dir="$POCKETBASE_DATA_DIR" \
-    --hooksDir=./pb_hooks
+    --hooksDir=./pb_hooks \
+    --migrationsDir=./pb_migrations
