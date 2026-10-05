@@ -143,6 +143,18 @@ const workspaceKeyForPost = (post: GeneratedPost | null | undefined): string | n
 const workspaceIsCurrent = (workspaceKey: string | null): boolean =>
   workspaceKeyForPost(useAppStore.getState().generatedPost) === workspaceKey;
 
+/**
+ * A post whose image the Post screen will not let leave the phone: waiting
+ * for, refused or never sent for approval, held for image review, or with a
+ * photo release that did not save. Its image is set without a device recovery
+ * copy, or My work could save the exact image the Post screen locks. Any
+ * approval status counts: a replaced image is never the one a manager saw.
+ */
+const imageStaysOffDevice = (post: GeneratedPost): boolean =>
+  (post.approvalStatus ?? "n_a") !== "n_a" ||
+  Boolean(post.imageReviewRequired) ||
+  post.releaseStatus === "save_failed";
+
 const assertOperationAuthEpoch = (operationAuthEpoch: number): void => {
   if (operationAuthEpoch !== useAppStore.getState().authEpoch) {
     throw new DOMException(
@@ -395,6 +407,12 @@ export const useGeneration = () => {
   );
 
   const { runGeminiTask, loadGeminiService } = useGemini();
+
+  /** Every new post image goes through here, so a locked one stays off the device. */
+  const setPostImage = (post: GeneratedPost) => {
+    if (imageStaysOffDevice(post)) setGeneratedPost(post, { archive: false });
+    else setGeneratedPost(post);
+  };
 
   // Removed local lastGenerationParams state in favor of store persistence
 
@@ -1146,7 +1164,7 @@ export const useGeneration = () => {
       await new Promise((resolve) => setTimeout(resolve, 500));
       if (variables.authEpoch !== useAppStore.getState().authEpoch) return;
       if (variables.run.cancelled) return;
-      setGeneratedPost(finalPost);
+      setPostImage(finalPost);
       setStep(AppStep.RESULT);
     },
     onError: (err, variables) => {
@@ -1351,7 +1369,7 @@ export const useGeneration = () => {
       const currentPost = useAppStore.getState().generatedPost;
       if (currentPost) {
         if (params) useAppStore.getState().setGenerationParams(params);
-        setGeneratedPost({ ...currentPost, image });
+        setPostImage({ ...currentPost, image });
       }
     },
     onError: (err) => {
@@ -1499,7 +1517,7 @@ export const useGeneration = () => {
       )
         return;
       const currentPost = useAppStore.getState().generatedPost;
-      if (currentPost) setGeneratedPost({ ...currentPost, image });
+      if (currentPost) setPostImage({ ...currentPost, image });
     },
     onError: (err) => {
       const normalized = normalizeError(err);
@@ -1566,7 +1584,7 @@ export const useGeneration = () => {
       )
         return;
       const currentPost = useAppStore.getState().generatedPost;
-      if (currentPost) setGeneratedPost({ ...currentPost, image });
+      if (currentPost) setPostImage({ ...currentPost, image });
     },
     onError: (err) => {
       const normalized = normalizeError(err);

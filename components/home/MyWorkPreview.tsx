@@ -1,41 +1,20 @@
-import React from "react";
-import { ChevronRight, Images } from "lucide-react";
+import React, { useMemo } from "react";
+import { ChevronRight, Image as ImageIcon, Loader2, RefreshCw } from "lucide-react";
 import type { PostRecord } from "../../services/posts";
-import { postStatusFor } from "../../utils/historyPost";
+import { homeTilesForDealer } from "../../services/storeDefaults";
+import { useAppStore } from "../../stores/appStore";
+import { savedPostIdentityIsSafe } from "../../utils/historyPost";
+import {
+  STATUS_TONE_CLASS,
+  postCategoryLabel,
+  postStatusCopy,
+} from "../../utils/postLabels";
+import { Button } from "../ui/Button";
+import { Skeleton } from "../ui/Skeleton";
 
-const scenarioLabel = (scenarioId?: string) => {
-  if (scenarioId === "customer_delivery") return "Delivery";
-  if (scenarioId === "new_arrival") return "New arrival";
-  if (scenarioId === "service_promotion") return "Service";
-  if (scenarioId === "team_anniversary") return "Team";
-  return "Post";
-};
+const PREVIEW_COUNT = 3;
 
-const statusText = (post: PostRecord) => {
-  const status = postStatusFor(post);
-  if (status === "waiting") return "Waiting for approval";
-  if (status === "changes") return "Changes requested";
-  if (status === "review_blocked") return "Review needed";
-  if (status === "shared") {
-    const channel = post.share_summary?.last_channel.includes("instagram")
-      ? "Instagram"
-      : post.share_summary?.last_channel === "linkedin"
-        ? "LinkedIn"
-        : "Facebook";
-    const time = post.share_summary?.last_shared_at
-      ? new Date(post.share_summary.last_shared_at).toLocaleString([], {
-          month: "short",
-          day: "numeric",
-          hour: "numeric",
-          minute: "2-digit",
-        })
-      : "Shared";
-    return `Shared to ${channel} · ${time}`;
-  }
-  return "Draft";
-};
-
-export const MyWorkPreview: React.FC<{
+interface MyWorkPreviewProps {
   posts: PostRecord[];
   loading: boolean;
   error: string | null;
@@ -43,87 +22,161 @@ export const MyWorkPreview: React.FC<{
   onSeeAll: () => void;
   onRetry: () => void;
   onOpen: (post: PostRecord) => void;
-}> = ({ posts, loading, error, openingId, onSeeAll, onRetry, onOpen }) => (
-  <section
-    aria-labelledby="my-work-heading"
-    className="overflow-hidden rounded-lg border border-hairline bg-panel"
-  >
-    <div className="flex min-h-16 items-center justify-between border-b border-hairline px-4">
-      <div>
-        <p className="text-2xs font-semibold uppercase tracking-[0.14em] text-brand-ink">
-          Recent studio work
-        </p>
+}
+
+/**
+ * Home's "My work": the last three posts as plain hairline rows under a
+ * title-2 header. A bordered panel only beside the tiles on desktop; on a
+ * phone it is part of the page, as the Home artboard shows.
+ */
+export const MyWorkPreview: React.FC<MyWorkPreviewProps> = ({
+  posts,
+  loading,
+  error,
+  openingId,
+  onSeeAll,
+  onRetry,
+  onOpen,
+}) => {
+  const dealer = useAppStore((s) => s.currentDealer);
+  const tiles = useMemo(() => homeTilesForDealer(dealer), [dealer]);
+  // The same grounding usePostHistoryList checks before it opens a post, so
+  // Home holds exactly the posts My work holds.
+  const grounding = useMemo(
+    () => ({ dealerName: dealer?.name, oemAffiliation: dealer?.oem_affiliation }),
+    [dealer?.name, dealer?.oem_affiliation],
+  );
+  const now = new Date();
+
+  return (
+    <section
+      aria-labelledby="my-work-preview-heading"
+      className="lg:overflow-hidden lg:rounded-md lg:border lg:border-hairline lg:bg-panel"
+    >
+      <div className="flex min-h-12 items-center justify-between border-b border-hairline lg:px-4">
         <h2
-          id="my-work-heading"
-          className="font-display text-xl font-semibold text-ink"
+          id="my-work-preview-heading"
+          className="font-display text-lg font-semibold text-ink"
         >
           My work
         </h2>
+        <button
+          type="button"
+          onClick={onSeeAll}
+          className="-mr-1 min-h-11 px-1 text-sm font-medium text-brand-ink"
+        >
+          See all
+        </button>
       </div>
-      <button type="button" onClick={onSeeAll} className="min-h-11 px-1 text-brand-ink">
-        See all
-      </button>
-    </div>
-    <div className="px-4">
-      {loading ? (
-        <p role="status" className="py-6 text-sm text-ink-2">
-          Loading your work…
-        </p>
-      ) : error ? (
-        <div className="py-5">
-          <p role="alert" className="text-sm text-error-ink">
-            {error}
-          </p>
-          <button
-            type="button"
-            onClick={onRetry}
-            className="mt-2 min-h-11 text-brand-ink"
-          >
-            Try again
-          </button>
-        </div>
-      ) : posts.length === 0 ? (
-        <div className="py-7 text-center">
-          <span className="mx-auto grid h-11 w-11 place-items-center rounded-md border border-hairline bg-panel-raised text-ink-2">
-            <Images className="h-5 w-5" aria-hidden="true" />
-          </span>
-          <p className="mt-3 font-medium text-ink">Your recent posts will show here.</p>
-          <p className="mx-auto mt-1 max-w-56 text-sm text-ink-2">
-            Choose a category to make your first post.
-          </p>
-        </div>
-      ) : (
-        posts.slice(0, 3).map((post) => (
-          <button
-            key={post.id}
-            type="button"
-            onClick={() => onOpen(post)}
-            disabled={openingId === post.id}
-            className="flex min-h-[92px] w-full items-center gap-3 border-b border-hairline py-3 text-left transition-colors last:border-b-0 hover:bg-fill-subtle"
-          >
-            <div className="h-16 w-16 shrink-0 overflow-hidden rounded-md border border-hairline bg-panel-raised">
-              {post.creative_image_url ? (
-                <img
-                  src={post.creative_image_url}
-                  alt=""
-                  className="h-full w-full object-cover"
-                />
-              ) : null}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-base font-medium text-ink">
-                {scenarioLabel(post.scenario_id)}
-                {post.customer_name ? ` · ${post.customer_name}` : ""}
+      <div className="lg:px-4">
+        {loading && posts.length === 0 ? (
+          <div role="status" aria-label="Loading your posts">
+            {Array.from({ length: PREVIEW_COUNT }, (_, index) => (
+              <div
+                key={index}
+                className="flex min-h-16 items-center gap-3 border-b border-hairline py-2 last:border-b-0"
+              >
+                <Skeleton variant="rectangular" className="h-12 w-12 rounded-sm" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="w-2/3" />
+                  <Skeleton className="h-3 w-1/3" />
+                </div>
               </div>
-              <div className="truncate text-sm text-ink-2">{statusText(post)}</div>
-            </div>
-            <ChevronRight
-              className="h-5 w-5 shrink-0 text-ink-hint"
-              aria-hidden="true"
-            />
-          </button>
-        ))
-      )}
-    </div>
-  </section>
-);
+            ))}
+          </div>
+        ) : error ? (
+          <div className="py-5">
+            <p role="alert" className="text-sm text-error-ink">
+              {error}
+            </p>
+            <Button
+              variant="secondary"
+              className="mt-3"
+              onClick={onRetry}
+              leftIcon={<RefreshCw />}
+            >
+              Try again
+            </Button>
+          </div>
+        ) : posts.length === 0 ? (
+          <div className="py-6">
+            <p className="text-base font-medium text-ink">No posts yet</p>
+            <p className="mt-1 text-sm text-ink-2">
+              Choose a category to make your first post.
+            </p>
+          </div>
+        ) : (
+          <ul>
+            {posts.slice(0, PREVIEW_COUNT).map((post) => {
+              const label = postCategoryLabel(post.scenario_id, dealer, tiles);
+              const customer = post.customer_name?.trim();
+              // The client's own identity check can hold a post the server has
+              // not flagged; it reads exactly like a server hold, as in My work.
+              const held = Boolean(
+                post.image_review_required || !savedPostIdentityIsSafe(post, grounding),
+              );
+              const status = postStatusCopy(
+                held ? { ...post, identity_review_required: true } : post,
+                { surface: "home", now },
+              );
+              const busy = openingId === post.id;
+              const statusId = `my-work-preview-status-${post.id}`;
+              return (
+                <li key={post.id} className="border-b border-hairline last:border-b-0">
+                  <button
+                    type="button"
+                    onClick={() => onOpen(post)}
+                    disabled={busy}
+                    aria-busy={busy || undefined}
+                    aria-label={`Open ${label}${customer ? `, ${customer}` : ""}`}
+                    aria-describedby={statusId}
+                    className="flex min-h-16 w-full items-center gap-3 py-2 text-left transition-colors duration-120 ease-out hover:bg-fill-subtle disabled:cursor-wait"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-sm bg-fill-subtle text-ink-hint"
+                    >
+                      {post.creative_image_url && !held ? (
+                        <img
+                          src={post.creative_image_url}
+                          alt=""
+                          loading="lazy"
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <ImageIcon className="h-5 w-5" />
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-base font-medium text-ink">
+                        {label}
+                        {customer ? ` · ${customer}` : ""}
+                      </span>
+                      <span
+                        id={statusId}
+                        className={`block truncate text-caption ${STATUS_TONE_CLASS[status.tone]}`}
+                      >
+                        {status.label}
+                      </span>
+                    </span>
+                    {busy ? (
+                      <Loader2
+                        className="h-5 w-5 shrink-0 animate-spin text-ink-hint motion-reduce:animate-none"
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <ChevronRight
+                        className="h-5 w-5 shrink-0 text-ink-hint"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+};

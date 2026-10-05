@@ -1325,6 +1325,102 @@ describe("share_summary client projection", () => {
     ).toBeNull();
   });
 
+  it("keeps the share-sheet fields apart and fails closed on a malformed count", () => {
+    expect(
+      projectShareSummary({
+        count: 2,
+        last_shared_at: "2026-09-22 10:00:00.000Z",
+        last_channel: "instagram_feed",
+        last_via: "copy",
+        channels: ["instagram_feed", "facebook_feed"],
+        sheet_count: 1,
+        last_sheet_channel: "facebook_feed",
+        last_sheet_at: "2026-09-22 09:00:00.000Z",
+      }),
+    ).toEqual({
+      count: 2,
+      last_shared_at: "2026-09-22 10:00:00.000Z",
+      last_channel: "instagram_feed",
+      last_via: "copy",
+      channels: ["instagram_feed", "facebook_feed"],
+      sheet_count: 1,
+      last_sheet_channel: "facebook_feed",
+      last_sheet_at: "2026-09-22 09:00:00.000Z",
+    });
+    // A count the client cannot read never becomes a "Shared" claim.
+    expect(
+      projectShareSummary({
+        count: 1,
+        last_channel: "facebook_feed",
+        last_via: "download",
+        sheet_count: "2",
+        last_sheet_channel: "facebook_feed",
+        last_sheet_at: "2026-09-22 09:00:00.000Z",
+      }),
+    ).toMatchObject({ sheet_count: 0, last_sheet_channel: "", last_sheet_at: "" });
+    // An older backend that never sent the fields keeps them absent.
+    const older = projectShareSummary({
+      count: 1,
+      last_channel: "facebook_feed",
+      last_via: "share_sheet",
+    });
+    expect(older && "sheet_count" in older).toBe(false);
+    expect(older && "last_sheet_channel" in older).toBe(false);
+  });
+
+  it("reads downloads and copies apart from a share once projected from the list", async () => {
+    setActiveAuthEpoch(704);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          items: [
+            record({
+              share_summary: {
+                count: 2,
+                last_shared_at: "2026-09-22 10:00:00.000Z",
+                last_channel: "facebook_feed",
+                last_via: "copy",
+                channels: ["facebook_feed"],
+                sheet_count: 1,
+                last_sheet_channel: "facebook_feed",
+                last_sheet_at: "2026-09-22 09:00:00.000Z",
+              },
+            }),
+            record({
+              id: "post-2",
+              share_summary: {
+                count: 1,
+                last_shared_at: "2026-09-22 10:00:00.000Z",
+                last_channel: "facebook_feed",
+                last_via: "download",
+                channels: ["facebook_feed"],
+                sheet_count: 0,
+                last_sheet_channel: "",
+                last_sheet_at: "",
+              },
+            }),
+            record({
+              id: "post-3",
+              share_summary: {
+                count: 1,
+                last_shared_at: "2026-09-22 10:00:00.000Z",
+                last_channel: "linkedin",
+                last_via: "copy",
+                channels: ["linkedin"],
+                sheet_count: 0,
+                last_sheet_channel: "",
+                last_sheet_at: "",
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+    const page = await listPostsPage({ limit: 3 });
+    expect(page.items.map(postStatusFor)).toEqual(["shared", "downloaded", "copied"]);
+  });
+
   it("reads as shared in My work once projected from the list", async () => {
     setActiveAuthEpoch(703);
     vi.stubGlobal(

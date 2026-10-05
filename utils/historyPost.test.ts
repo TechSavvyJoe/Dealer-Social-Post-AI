@@ -3,6 +3,7 @@ import type { PostRecord } from "../services/posts";
 import {
   postStatusFor,
   savedPostIdentityIsSafe,
+  shareStatusDetail,
   toGeneratedPostFromRecord,
 } from "./historyPost";
 
@@ -142,14 +143,111 @@ describe("postStatusFor", () => {
     expect(postStatusFor({ approval_status: "pending" })).toBe("waiting");
   });
 
-  it("reads a share record as shared once approval is out of the way", () => {
+  it("reads a share-sheet record as shared once approval is out of the way", () => {
     expect(
-      postStatusFor({ approval_status: "approved", share_summary: { count: 1 } }),
+      postStatusFor({
+        approval_status: "approved",
+        share_summary: {
+          count: 1,
+          last_via: "share_sheet",
+          sheet_count: 1,
+          last_sheet_channel: "facebook_feed",
+        },
+      }),
     ).toBe("shared");
+  });
+
+  it("never calls a download or a copied caption a share", () => {
+    expect(
+      postStatusFor({
+        approval_status: "n_a",
+        share_summary: { count: 1, last_via: "download", sheet_count: 0 },
+      }),
+    ).toBe("downloaded");
+    expect(
+      postStatusFor({
+        approval_status: "n_a",
+        share_summary: { count: 2, last_via: "copy", sheet_count: 0 },
+      }),
+    ).toBe("copied");
+  });
+
+  it("keeps an earlier share sheet visible after a later copy", () => {
+    expect(
+      postStatusFor({
+        approval_status: "n_a",
+        share_summary: {
+          count: 2,
+          last_via: "copy",
+          last_channel: "instagram_feed",
+          sheet_count: 1,
+          last_sheet_channel: "facebook_feed",
+        },
+      }),
+    ).toBe("shared");
+  });
+
+  it("judges an older backend without sheet_count by its latest event", () => {
+    expect(
+      postStatusFor({ share_summary: { count: 1, last_via: "share_sheet" } }),
+    ).toBe("shared");
+    expect(postStatusFor({ share_summary: { count: 1, last_via: "download" } })).toBe(
+      "downloaded",
+    );
+    expect(postStatusFor({ share_summary: { count: 1, last_via: "copy" } })).toBe(
+      "copied",
+    );
+  });
+
+  it("trusts the share-sheet count over a contradictory latest event", () => {
+    expect(
+      postStatusFor({
+        share_summary: { count: 1, last_via: "share_sheet", sheet_count: 0 },
+      }),
+    ).toBe("draft");
   });
 
   it("falls back to draft with nothing else to report", () => {
     expect(postStatusFor({ approval_status: "n_a" })).toBe("draft");
     expect(postStatusFor({})).toBe("draft");
+    expect(postStatusFor({ share_summary: null })).toBe("draft");
+  });
+});
+
+describe("shareStatusDetail", () => {
+  it("names the latest share-sheet destination and time for a share", () => {
+    expect(
+      shareStatusDetail({
+        count: 2,
+        last_via: "copy",
+        last_channel: "instagram_feed",
+        last_shared_at: "2026-10-05 16:00:00.000Z",
+        sheet_count: 1,
+        last_sheet_channel: "linkedin",
+        last_sheet_at: "2026-10-05 15:00:00.000Z",
+      }),
+    ).toEqual({ channel: "linkedin", at: "2026-10-05 15:00:00.000Z" });
+  });
+
+  it("names the latest event for a download, a copy or an older backend", () => {
+    expect(
+      shareStatusDetail({
+        count: 1,
+        last_via: "download",
+        last_channel: "gbp",
+        last_shared_at: "2026-10-05 15:00:00.000Z",
+        sheet_count: 0,
+        last_sheet_channel: "",
+        last_sheet_at: "",
+      }),
+    ).toEqual({ channel: "gbp", at: "2026-10-05 15:00:00.000Z" });
+    expect(
+      shareStatusDetail({
+        count: 1,
+        last_via: "share_sheet",
+        last_channel: "marketplace",
+        last_shared_at: "2026-10-05 15:00:00.000Z",
+      }),
+    ).toEqual({ channel: "marketplace", at: "2026-10-05 15:00:00.000Z" });
   });
 });

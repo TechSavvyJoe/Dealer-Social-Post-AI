@@ -1649,4 +1649,137 @@ describe("useGeneration model-tier and provenance wiring", () => {
       cleanup();
     });
   });
+
+  describe("device recovery copy of a new post", () => {
+    const generate = async () => {
+      const { result, cleanup } = renderGeneration();
+      await act(async () => {
+        await result.current.handleGenerate(
+          StyleOption.Modern,
+          ToneOption.Professional,
+          "Alex",
+        );
+      });
+      cleanup();
+      expect(mocks.setStep).toHaveBeenLastCalledWith(AppStep.RESULT);
+      return mocks.setGeneratedPost.mock.calls.at(-1) as
+        [GeneratedPost, { archive?: boolean }?] | undefined;
+    };
+
+    it("keeps the recovery copy of a post that opens unlocked", async () => {
+      mocks.logPost.mockResolvedValueOnce({ id: "post-open", approval_status: "n_a" });
+
+      const call = await generate();
+
+      expect(call?.[0]).toMatchObject({ postId: "post-open", approvalStatus: "n_a" });
+      expect(call?.[1]?.archive).not.toBe(false);
+    });
+
+    it.each([
+      [
+        "waiting for manager approval",
+        { requires_approval: true },
+        { id: "post-pending", approval_status: "pending" },
+        { approvalStatus: "pending" },
+      ],
+      [
+        "whose approval submission failed",
+        { requires_approval: true },
+        null,
+        { approvalStatus: "submission_failed" },
+      ],
+      [
+        "held for image review",
+        {},
+        { id: "post-image", image_review_required: true },
+        { imageReviewRequired: true },
+      ],
+      [
+        "whose photo release did not save",
+        {},
+        { id: "post-release", release_required: true, release_status: "pending" },
+        { releaseStatus: "save_failed" },
+      ],
+    ])(
+      "leaves no recovery copy of a post %s",
+      async (_label, dealer, persisted, expected) => {
+        mocks.store.currentDealer = {
+          id: "dealer-1",
+          name: "Example Motors",
+          ...dealer,
+        };
+        mocks.logPost.mockResolvedValueOnce(persisted);
+
+        const call = await generate();
+
+        expect(call?.[0]).toMatchObject(expected);
+        expect(call?.[1]).toEqual({ archive: false });
+      },
+    );
+
+    type Generation = ReturnType<typeof useGeneration>;
+    const imagePaths: [string, (generation: Generation) => Promise<void>][] = [
+      ["Try another", (generation) => generation.handleRegenerateImage()],
+      ["Playful", (generation) => generation.handleFunMode("Golden Delivery")],
+      ["an image edit", (generation) => generation.handleEditImage("Add a spotlight")],
+    ];
+    const replaceImage = async (
+      current: GeneratedPost,
+      run: (generation: Generation) => Promise<void>,
+    ) => {
+      mocks.store.generatedPost = current;
+      const { result, cleanup } = renderGeneration();
+      await act(async () => {
+        await run(result.current);
+      });
+      cleanup();
+      return mocks.setGeneratedPost.mock.calls.at(-1) as
+        [GeneratedPost, { archive?: boolean }?] | undefined;
+    };
+
+    it.each(imagePaths)(
+      "keeps the recovery copy of a new image from %s on an unlocked post",
+      async (_label, run) => {
+        const call = await replaceImage(
+          { ...existingPost, approvalStatus: "n_a", releaseStatus: "saved" },
+          run,
+        );
+
+        expect(call?.[0].image).not.toBe(existingPost.image);
+        expect(call?.[1]?.archive).not.toBe(false);
+      },
+    );
+
+    it.each(
+      imagePaths.flatMap(([label, run]) =>
+        (
+          [
+            ["whose photo release did not save", { releaseStatus: "save_failed" }],
+            ["held for image review", { imageReviewRequired: true }],
+            ["waiting for approval", { approvalStatus: "pending" }],
+          ] as [string, Partial<GeneratedPost>][]
+        ).map(
+          ([lock, state]) =>
+            [label, lock, state, run] as [
+              string,
+              string,
+              Partial<GeneratedPost>,
+              (generation: Generation) => Promise<void>,
+            ],
+        ),
+      ),
+    )(
+      "leaves no recovery copy of a new image from %s on a post %s",
+      async (_label, _lock, state, run) => {
+        const call = await replaceImage(
+          { ...existingPost, approvalStatus: "n_a", releaseStatus: "saved", ...state },
+          run,
+        );
+
+        expect(call?.[0]).toMatchObject(state);
+        expect(call?.[0].image).not.toBe(existingPost.image);
+        expect(call?.[1]).toEqual({ archive: false });
+      },
+    );
+  });
 });
