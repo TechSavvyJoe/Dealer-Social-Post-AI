@@ -7,7 +7,11 @@ type Policies = {
   serializeProxyBody: (requestInfo: unknown) => string;
   initialApprovalStatus: (
     dealer: unknown,
-    context?: { category?: string; countPriorPosts?: () => number },
+    context?: {
+      category?: string;
+      involvesCustomer?: boolean;
+      countApprovedPosts?: () => number;
+    },
   ) => "pending" | "n_a";
 
   isAllowedProxyPath: (path: string) => boolean;
@@ -428,7 +432,7 @@ describe("PocketBase request policies", () => {
           : "",
     });
     const never = () => {
-      throw new Error("the post count must not be read for this policy");
+      throw new Error("the approved-post count must not be read for this policy");
     };
 
     it("never turns review on for a store that has it off", () => {
@@ -440,7 +444,8 @@ describe("PocketBase request policies", () => {
         expect(
           policies.initialApprovalStatus(store(false, policy), {
             category: "deliveries",
-            countPriorPosts: () => 0,
+            involvesCustomer: true,
+            countApprovedPosts: () => 0,
           }),
         ).toBe("n_a");
       }
@@ -460,7 +465,8 @@ describe("PocketBase request policies", () => {
         expect(
           policies.initialApprovalStatus(store(true, policy), {
             category: "service",
-            countPriorPosts: never,
+            involvesCustomer: false,
+            countApprovedPosts: never,
           }),
         ).toBe("pending");
       }
@@ -469,12 +475,16 @@ describe("PocketBase request policies", () => {
     it("reviews only the selected categories, and anything it cannot classify", () => {
       const dealer = store(true, {
         mode: "per_category",
-        categories: ["deliveries", "promotions"],
+        categories: ["promotions", "community"],
       });
       const status = (category?: string) =>
-        policies.initialApprovalStatus(dealer, { category, countPriorPosts: never });
-      expect(status("deliveries")).toBe("pending");
+        policies.initialApprovalStatus(dealer, {
+          category,
+          involvesCustomer: false,
+          countApprovedPosts: never,
+        });
       expect(status("promotions")).toBe("pending");
+      expect(status("community")).toBe("pending");
       expect(status("service")).toBe("n_a");
       expect(status("team")).toBe("n_a");
       expect(status("")).toBe("pending");
@@ -485,18 +495,40 @@ describe("PocketBase request policies", () => {
         expect(
           policies.initialApprovalStatus(
             store(true, { mode: "per_category", categories }),
-            { category: "service" },
+            { category: "service", involvesCustomer: false },
           ),
         ).toBe("pending");
       }
     });
 
-    it("reviews each person's first posts, and anyone it cannot count", () => {
+    it("reviews a customer post with deliveries, whatever type the author picked", () => {
+      const dealer = store(true, { mode: "per_category", categories: ["deliveries"] });
+      const status = (category: string, involvesCustomer?: boolean) =>
+        policies.initialApprovalStatus(dealer, { category, involvesCustomer });
+      // A sold-by post maps to "team" and a recall to "service", but both carry
+      // a customer; so does any post filed under another type with a name.
+      expect(status("team", true)).toBe("pending");
+      expect(status("service", true)).toBe("pending");
+      expect(status("inventory", true)).toBe("pending");
+      // Unknown is treated as involving a customer.
+      expect(status("inventory", undefined)).toBe("pending");
+      expect(status("inventory", false)).toBe("n_a");
+      // Deliveries not selected: the customer signal adds nothing.
+      expect(
+        policies.initialApprovalStatus(
+          store(true, { mode: "per_category", categories: ["promotions"] }),
+          { category: "team", involvesCustomer: true },
+        ),
+      ).toBe("n_a");
+    });
+
+    it("reviews a person until enough of their posts were approved", () => {
       const dealer = store(true, { mode: "first_n", firstN: 3 });
-      const status = (countPriorPosts?: () => number) =>
+      const status = (countApprovedPosts?: () => number) =>
         policies.initialApprovalStatus(dealer, {
           category: "service",
-          countPriorPosts,
+          involvesCustomer: false,
+          countApprovedPosts,
         });
       expect(status(() => 0)).toBe("pending");
       expect(status(() => 2)).toBe("pending");
@@ -514,7 +546,7 @@ describe("PocketBase request policies", () => {
       for (const firstN of [0, -2, 1.5, "abc", undefined]) {
         expect(
           policies.initialApprovalStatus(store(true, { mode: "first_n", firstN }), {
-            countPriorPosts: () => 99,
+            countApprovedPosts: () => 99,
           }),
         ).toBe("pending");
       }
@@ -1332,8 +1364,10 @@ You are a strict visual quality-control inspector for an automotive dealership i
     );
     expect(hook).toContain("policies.buildOpenAIImageRequest(requestInfo.data)");
     expect(hook).toContain("policies.buildAnthropicMessageRequest(");
-    // The narrowing inputs are server-resolved: the scenario's own category
-    // and a count of the session's own person, never a field from the body.
+    // The narrowing inputs are server-resolved: the scenario's own category,
+    // the release/customer-story signal, and a count of posts a MANAGER
+    // approved for the session's own person — never a field from the body,
+    // and never a count the author can raise by posting.
     const approvalCall = hook.slice(
       hook.indexOf("policies.initialApprovalStatus(dealer, {"),
       hook.indexOf("let caption = helpers.assertString("),
@@ -1341,7 +1375,10 @@ You are a strict visual quality-control inspector for an automotive dealership i
     expect(approvalCall).toContain(
       'category: approvalMapping ? approvalMapping.category : ""',
     );
-    expect(approvalCall).toContain("{:dealer} AND salesperson_id = {:person}");
+    expect(approvalCall).toContain("releaseRequired ||");
+    expect(approvalCall).toContain('approvalMapping.kind === "customer_story"');
+    expect(approvalCall).toContain("{:dealer} AND salesperson_id = {:person} ");
+    expect(approvalCall).toContain("AND approval_status = 'approved'");
     expect(approvalCall).toContain(
       "bind({ dealer: dealer.id, person: salespersonId })",
     );

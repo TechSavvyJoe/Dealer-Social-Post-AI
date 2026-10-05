@@ -2642,15 +2642,20 @@ routerAdd("POST", "/api/app/posts", (c) => {
       : "System Admin";
 
     // A store's approval policy is applied only from server-resolved facts:
-    // the scenario's brand category and the author's own post count. Anything
-    // unknown is reviewed (see policies.initialApprovalStatus).
+    // the scenario's brand category, whether the post involves a customer, and
+    // how many of the author's posts a manager has approved. Anything unknown
+    // is reviewed (see policies.initialApprovalStatus).
     const approvalMapping = websitePublications.resolveWebsiteMapping(
       scenarioId,
       dealer.getString("custom_scenarios"),
     );
     const approvalStatus = policies.initialApprovalStatus(dealer, {
       category: approvalMapping ? approvalMapping.category : "",
-      countPriorPosts: function () {
+      involvesCustomer:
+        releaseRequired ||
+        !approvalMapping ||
+        approvalMapping.kind === "customer_story",
+      countApprovedPosts: function () {
         if (!salespersonId) return NaN;
         const row = new DynamicModel({ total: 0 });
         $app
@@ -2658,7 +2663,8 @@ routerAdd("POST", "/api/app/posts", (c) => {
           .db()
           .newQuery(
             "SELECT COUNT(*) AS total FROM posts " +
-              "WHERE dealer = {:dealer} AND salesperson_id = {:person}",
+              "WHERE dealer = {:dealer} AND salesperson_id = {:person} " +
+              "AND approval_status = 'approved'",
           )
           .bind({ dealer: dealer.id, person: salespersonId })
           .one(row);
