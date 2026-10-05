@@ -101,7 +101,7 @@ describe("derivePostLocks: precedence (image review > identity > claim > release
       approvalStatus: "rejected",
     });
     expect(locks.primary.kind).toBe("image_review");
-    expect(locks.primary.title).toBe("Image safety review required");
+    expect(locks.primary.title).toBe("This image needs to be remade");
     expect(locks.primary.label).toBe("Image review required");
     expect(locks.primary.message).toBe(locks.imageReviewMessage);
     expect(locks.deliveryLocked).toBe(true);
@@ -125,7 +125,7 @@ describe("derivePostLocks: precedence (image review > identity > claim > release
       approvalStatus: "rejected",
     });
     expect(locks.primary.kind).toBe("identity");
-    expect(locks.primary.title).toBe("Customer name blocked");
+    expect(locks.primary.title).toBe("Check the customer's name");
     expect(locks.primary.label).toBe("Customer blocked");
   });
 
@@ -145,7 +145,7 @@ describe("derivePostLocks: precedence (image review > identity > claim > release
       approvalStatus: "rejected",
     });
     expect(locks.primary.kind).toBe("claim");
-    expect(locks.primary.title).toBe("Caption claim blocked");
+    expect(locks.primary.title).toBe("Caption needs a fix");
     expect(locks.primary.label).toBe("Claim blocked");
     expect(locks.primary.message).toContain("prohibited advertising claim");
   });
@@ -199,9 +199,9 @@ describe("derivePostLocks: precedence (image review > identity > claim > release
     });
     expect(rejectedWithReason.deliveryLocked).toBe(true);
     expect(rejectedWithReason.primary.kind).toBe("approval");
-    expect(rejectedWithReason.primary.label).toBe("Approval pending");
+    expect(rejectedWithReason.primary.label).toBe("Changes requested");
     expect(rejectedWithReason.approvalMessage).toBe(
-      "A manager asked for a change: Please remove the pricing claim. Delivery stays locked until you create another post.",
+      "Your manager asked for a change: Please remove the pricing claim. Start a new post to make it.",
     );
 
     const rejectedNoReason = derivePostLocks({
@@ -211,7 +211,7 @@ describe("derivePostLocks: precedence (image review > identity > claim > release
       rejectionReason: "",
     });
     expect(rejectedNoReason.approvalMessage).toBe(
-      "A manager rejected this creative. Delivery remains locked; create another post with the requested changes.",
+      "Your manager sent this back. Start a new post with the changes.",
     );
 
     const pending = derivePostLocks({
@@ -221,7 +221,7 @@ describe("derivePostLocks: precedence (image review > identity > claim > release
     });
     expect(pending.approvalLocked).toBe(true);
     expect(pending.approvalMessage).toBe(
-      "This exact image and caption are awaiting manager approval. Save, share, and export unlock automatically after approval.",
+      "Your manager needs to approve this image and caption. It's saved in My work, and sharing unlocks here as soon as it's approved.",
     );
 
     const submissionFailed = derivePostLocks({
@@ -230,7 +230,7 @@ describe("derivePostLocks: precedence (image review > identity > claim > release
       approvalStatus: "submission_failed",
     });
     expect(submissionFailed.approvalMessage).toBe(
-      "This creative could not be submitted for approval. Delivery remains locked; check your connection and create another post to retry.",
+      "This post couldn't be sent for approval. Check your connection, then start a new post.",
     );
 
     const approved = derivePostLocks({
@@ -241,7 +241,7 @@ describe("derivePostLocks: precedence (image review > identity > claim > release
     expect(approved.approvalLocked).toBe(false);
     expect(approved.deliveryLocked).toBe(false);
     expect(approved.approvalMessage).toBe(
-      "Manager approved this exact creative. Save, share, and export are unlocked; start a new post to make changes.",
+      "Your manager approved this post. You can share it now. To change anything, start a new post.",
     );
   });
 
@@ -253,7 +253,7 @@ describe("derivePostLocks: precedence (image review > identity > claim > release
       customerDisplayName: "Sarah",
     });
     expect(named.identityMessage).toBe(
-      "This copy appears to name someone other than Sarah. Correct every caption before saving, copying, scheduling, sharing, or sending it to the website.",
+      "The caption seems to name someone other than Sarah. Edit the caption to remove that name, then share.",
     );
 
     const unnamed = derivePostLocks({
@@ -263,7 +263,7 @@ describe("derivePostLocks: precedence (image review > identity > claim > release
       customerDisplayName: undefined,
     });
     expect(unnamed.identityMessage).toBe(
-      "This customer-required copy includes a name without an approved public customer label. Remove the name or add the approved customer first name before delivery.",
+      "The caption names a person who hasn't signed a release. Remove the name or use the customer's first name.",
     );
   });
 });

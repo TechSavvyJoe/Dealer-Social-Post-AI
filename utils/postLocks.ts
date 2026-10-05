@@ -11,9 +11,11 @@
  *    phrase rules cannot drift between call sites.
  *
  * 2. `derivePostLocks` — the delivery-lock precedence ladder: image review,
- *    then identity, then claims, then release, then approval. Every message
- *    below is copied verbatim from the original inline computation; no wording
- *    changed in this extraction.
+ *    then identity, then claims, then release, then approval. The precedence
+ *    and every gate are unchanged from the original inline computation. The
+ *    image-review, identity, claim-title and approval copy was rewritten in
+ *    the salesperson's words for the Post screen; the release title and
+ *    message are deliberately untouched (see the note on their two truths).
  */
 import type { GeneratedPost } from "../types";
 import {
@@ -111,7 +113,7 @@ export interface PostLocks {
   releaseLinkRepairable: boolean;
   claimLocked: boolean;
   deliveryLocked: boolean;
-  /** Verbatim per-kind banner copy, preserved for the four independent banners. */
+  /** Per-kind banner copy, kept separate for the four independent banners. */
   imageReviewMessage: string;
   identityMessage: string;
   claimMessage: string;
@@ -159,22 +161,33 @@ export const derivePostLocks = (input: DerivePostLocksInput): PostLocks => {
   const claimMessage = claimLocked ? prohibitedClaimsMessage(input.prohibited) : "";
   const identityMessage = identityLocked
     ? input.customerDisplayName
-      ? `This copy appears to name someone other than ${input.customerDisplayName}. Correct every caption before saving, copying, scheduling, sharing, or sending it to the website.`
-      : "This customer-required copy includes a name without an approved public customer label. Remove the name or add the approved customer first name before delivery."
+      ? `The caption seems to name someone other than ${input.customerDisplayName}. Edit the caption to remove that name, then share.`
+      : "The caption names a person who hasn't signed a release. Remove the name or use the customer's first name."
     : "";
   const imageReviewMessage = input.imageReviewRequired
-    ? "This saved image predates the current on-pixel customer-name, logo, and source-fidelity review. It cannot be copied, saved, shared, scheduled, approved, or sent to the website. Create a new post from the original photo."
+    ? "This image was made before our latest safety check, so it can't be shared or sent for approval. Start a new post from the original photo."
     : "";
+  // "Unlocks here" is literal: useApprovalStatus polls the post's status and
+  // the lock clears on this screen as soon as a manager approves.
   const approvalMessage =
     input.approvalStatus === "approved"
-      ? "Manager approved this exact creative. Save, share, and export are unlocked; start a new post to make changes."
+      ? "Your manager approved this post. You can share it now. To change anything, start a new post."
       : input.approvalStatus === "rejected"
         ? input.rejectionReason
-          ? `A manager asked for a change: ${input.rejectionReason} Delivery stays locked until you create another post.`
-          : "A manager rejected this creative. Delivery remains locked; create another post with the requested changes."
+          ? `Your manager asked for a change: ${input.rejectionReason} Start a new post to make it.`
+          : "Your manager sent this back. Start a new post with the changes."
         : input.approvalStatus === "submission_failed"
-          ? "This creative could not be submitted for approval. Delivery remains locked; check your connection and create another post to retry."
-          : "This exact image and caption are awaiting manager approval. Save, share, and export unlock automatically after approval.";
+          ? "This post couldn't be sent for approval. Check your connection, then start a new post."
+          : "Your manager needs to approve this image and caption. It's saved in My work, and sharing unlocks here as soon as it's approved.";
+
+  // Only a pending post is waiting on anyone; a sent-back or unsent post
+  // must not be titled as if it were.
+  const approvalLabel =
+    input.approvalStatus === "rejected"
+      ? "Changes requested"
+      : input.approvalStatus === "submission_failed"
+        ? "Not sent for approval"
+        : "Waiting for approval";
 
   const message = input.imageReviewRequired
     ? imageReviewMessage
@@ -195,7 +208,7 @@ export const derivePostLocks = (input: DerivePostLocksInput): PostLocks => {
           ? releaseLinkRepairable
             ? "Release not attached"
             : "Release not saved"
-          : "Approval pending";
+          : approvalLabel;
   const kind: PostLockKind = input.imageReviewRequired
     ? "image_review"
     : identityLocked
@@ -206,11 +219,11 @@ export const derivePostLocks = (input: DerivePostLocksInput): PostLocks => {
           ? "release"
           : "approval";
   const title = input.imageReviewRequired
-    ? "Image safety review required"
+    ? "This image needs to be remade"
     : identityLocked
-      ? "Customer name blocked"
+      ? "Check the customer's name"
       : claimLocked
-        ? "Caption claim blocked"
+        ? "Caption needs a fix"
         : releaseLocked
           ? releaseTitle
           : label;

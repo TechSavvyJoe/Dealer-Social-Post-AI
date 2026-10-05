@@ -814,17 +814,17 @@ describe("PostResult job-first flow", () => {
 
     expect(
       within(delivery).getByRole("button", {
-        name: "Copy caption (approval pending)",
+        name: "Copy caption (not sent for approval)",
       }),
     ).toBeDisabled();
     expect(
       within(delivery).getByRole("button", {
-        name: "Share post (approval pending)",
+        name: "Share post (not sent for approval)",
       }),
     ).toBeDisabled();
     expect(
       within(delivery).getByRole("button", {
-        name: "Save image (approval pending)",
+        name: "Save image (not sent for approval)",
       }),
     ).toBeDisabled();
   });

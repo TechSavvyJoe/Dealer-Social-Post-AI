@@ -96,7 +96,9 @@ describe("the reason reaches the salesperson", () => {
     // (approvalMessage) as part of the pure lock-derivation extraction;
     // PostResult.tsx now renders it via that module.
     const locks = read("utils/postLocks.ts");
-    expect(locks).toContain("A manager asked for a change: ${input.rejectionReason}");
+    expect(locks).toContain(
+      "Your manager asked for a change: ${input.rejectionReason}",
+    );
     // And the toast, for someone who is not looking at the banner. This one
     // stays with the approval-status polling effect, not the derived lock
     // message — moved into hooks/useApprovalStatus.ts as part of the PR2-0
@@ -110,11 +112,11 @@ describe("the reason reaches the salesperson", () => {
   it("the retargeted banner-copy guard actually fails on a wrong wording (planted mutant)", () => {
     const locks = read("utils/postLocks.ts");
     const mutated = locks.replace(
-      "A manager asked for a change: ${input.rejectionReason}",
-      "A manager requested a change: ${input.rejectionReason}",
+      "Your manager asked for a change: ${input.rejectionReason}",
+      "Your manager requested a change: ${input.rejectionReason}",
     );
     expect(mutated).not.toContain(
-      "A manager asked for a change: ${input.rejectionReason}",
+      "Your manager asked for a change: ${input.rejectionReason}",
     );
   });
 
@@ -146,6 +148,6 @@ describe("the reason reaches the salesperson", () => {
     expect(queue).toContain("QUICK_REASONS");
     expect(queue).toContain("Pricing claim needs a disclosure");
     // The send button stays disabled until there is something to send.
-    expect(queue).toContain("disabled={busy[post.id] || !reason.trim()}");
+    expect(queue).toContain("disabled={Boolean(busy[post.id]) || !reason.trim()}");
   });
 });
