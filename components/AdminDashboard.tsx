@@ -1,15 +1,18 @@
 import React, { useMemo, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useIsFetching,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { Dealer } from "../types";
 import * as db from "../services/database";
 import { toUiMessage } from "../utils/errorMessages";
 import { logError } from "../utils/telemetry";
-import { m } from "framer-motion";
+import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
 import { Skeleton } from "./ui/Skeleton";
 import {
-  Building2,
-  Plug,
   ChevronLeft,
   ChevronRight,
   Eye,
@@ -19,14 +22,15 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Shield,
-  Trash2,
   UserCog,
   UserRound,
-  Users,
 } from "lucide-react";
 import { PersonEditModal } from "./PersonEditModal";
-import { ConnectionsPanel } from "./admin/ConnectionsPanel";
+import {
+  ConnectionsPanel,
+  SYSTEM_CONNECTIONS_QUERY_KEY,
+} from "./admin/ConnectionsPanel";
+import { DealerSetupStatus } from "./admin/DealerSetupStatus";
 import { ConfirmationModal } from "./ConfirmationModal";
 import { useAppStore } from "../stores/appStore";
 import { useToast } from "./ui/Toast";
@@ -54,8 +58,8 @@ type HubTab = "dealers" | "admins" | "users" | "connections";
 const PEOPLE_PAGE_SIZE = 50;
 
 const fieldClassName =
-  "mt-1 block w-full rounded-xl border border-surface-700 bg-surface-900/70 px-4 py-3 text-surface-50 placeholder:text-surface-400 transition-colors focus:border-primary-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
-const labelClassName = "block text-sm font-medium text-surface-300";
+  "mt-1.5 block min-h-11 w-full rounded-sm border border-strong bg-panel-raised px-3 text-base text-ink placeholder:text-ink-hint transition-colors duration-120 ease-out focus:border-brand-ink disabled:cursor-not-allowed disabled:opacity-50";
+const labelClassName = "block text-sm font-medium text-ink-2";
 
 const isSystemDealer = (dealer: Dealer, sessionDealerId?: string) =>
   dealer.id === sessionDealerId || dealer.name?.toUpperCase() === "SYSTEM ADMIN";
@@ -94,7 +98,7 @@ export const AdminDashboard: React.FC = () => {
   const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
 
-  const { data, error, isPending, refetch } = useQuery({
+  const { data, error, isPending, isFetching, refetch } = useQuery({
     queryKey: ["dealers"],
     queryFn: () => db.getDealers(),
   });
@@ -125,6 +129,7 @@ export const AdminDashboard: React.FC = () => {
   const {
     data: peoplePage,
     isPending: peopleLoading,
+    isFetching: peopleFetching,
     error: peopleError,
     refetch: refetchPeople,
   } = useQuery({
@@ -157,6 +162,15 @@ export const AdminDashboard: React.FC = () => {
     ? Math.min(peopleRangeStart + people.length - 1, peopleTotal)
     : 0;
 
+  const connectionsFetching =
+    useIsFetching({ queryKey: [SYSTEM_CONNECTIONS_QUERY_KEY] }) > 0;
+  const refreshing =
+    tab === "connections"
+      ? connectionsFetching
+      : tab === "dealers"
+        ? isFetching
+        : isFetching || peopleFetching;
+
   React.useEffect(() => {
     setPeopleCursor(undefined);
     setCursorHistory([]);
@@ -178,6 +192,15 @@ export const AdminDashboard: React.FC = () => {
   const openPeopleTab = (dealerId: string, nextTab: "admins" | "users") => {
     selectDealer(dealerId);
     setTab(nextTab);
+  };
+
+  /** One Refresh for the whole hub: it reloads whatever the open tab shows. */
+  const handleRefresh = () => {
+    void refetch();
+    if (tab === "admins" || tab === "users") void refetchPeople();
+    if (tab === "connections") {
+      void queryClient.invalidateQueries({ queryKey: [SYSTEM_CONNECTIONS_QUERY_KEY] });
+    }
   };
 
   const resetDealerForm = () => {
@@ -225,6 +248,13 @@ export const AdminDashboard: React.FC = () => {
       toast.error(toUiMessage(err, "Failed to delete dealer."));
     },
   });
+
+  const openNewDealerForm = () => {
+    setEditingDealer(null);
+    setFormState({ name: "", logoUrl: "", logoFile: null });
+    setHoursWeek(defaultWeekHours());
+    setShowDealerForm(true);
+  };
 
   const handleEditDealer = (dealer: Dealer) => {
     setEditingDealer(dealer);
@@ -372,11 +402,11 @@ export const AdminDashboard: React.FC = () => {
     });
   }, []);
 
-  const tabs: Array<{ key: HubTab; label: string; icon: typeof Building2 }> = [
-    { key: "dealers", label: "Dealers", icon: Building2 },
-    { key: "admins", label: "Admins", icon: Shield },
-    { key: "users", label: "Users", icon: Users },
-    { key: "connections", label: "Connections", icon: Plug },
+  const tabs: Array<{ key: HubTab; label: string }> = [
+    { key: "dealers", label: "Dealers" },
+    { key: "admins", label: "Admins" },
+    { key: "users", label: "Users" },
+    { key: "connections", label: "Connections" },
   ];
 
   const handleTabKeyDown = (
@@ -403,40 +433,160 @@ export const AdminDashboard: React.FC = () => {
     });
   };
 
+  const savingDealer = addMutation.isPending || updateMutation.isPending;
+
+  // The scope control is shared by the Dealers, Admins and Users tabs.
+  const storeSelect = (
+    <div className="flex min-w-0 items-center gap-3 sm:w-full sm:max-w-sm">
+      <label htmlFor="selected-dealer" className="shrink-0 text-sm text-ink-2">
+        Store
+      </label>
+      <select
+        id="selected-dealer"
+        value={selectedDealerId}
+        onChange={(e) => selectDealer(e.target.value)}
+        className="min-h-11 w-full min-w-0 rounded-sm border border-strong bg-panel-raised px-3 text-base text-ink transition-colors duration-120 ease-out focus:border-brand-ink"
+      >
+        <option value="">All dealerships</option>
+        {storeDealers.map((d) => (
+          <option key={d.id} value={d.id}>
+            {d.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
+  const dealerForm = (
+    <form onSubmit={handleDealerSubmit} className="space-y-4">
+      <div>
+        <h3 className="font-display text-lg font-semibold text-ink">
+          {editingDealer ? `Edit ${editingDealer.name}` : "New dealership"}
+        </h3>
+        <p className="mt-1 text-sm text-ink-2">
+          Access codes are assigned under Admins and Users — not on the store record.
+        </p>
+      </div>
+      <div>
+        <label htmlFor="name" className={labelClassName}>
+          Dealer name *
+        </label>
+        <input
+          id="name"
+          name="name"
+          type="text"
+          required
+          value={formState.name}
+          onChange={(e) => setFormState((s) => ({ ...s, name: e.target.value }))}
+          className={fieldClassName}
+          placeholder="e.g. Sunrise Auto Group"
+        />
+      </div>
+      <HoursPicker
+        value={hoursWeek}
+        onChange={setHoursWeek}
+        preview={serializeHours(hoursWeek)}
+      />
+      <div>
+        <label htmlFor="logoUrl" className={labelClassName}>
+          Logo URL
+        </label>
+        <input
+          id="logoUrl"
+          name="logoUrl"
+          type="url"
+          value={formState.logoUrl}
+          disabled={!!formState.logoFile}
+          onChange={(e) => setFormState((s) => ({ ...s, logoUrl: e.target.value }))}
+          className={fieldClassName}
+          placeholder="https://example.com/logo.png"
+        />
+      </div>
+      <div>
+        <label htmlFor="logoFile" className={labelClassName}>
+          {editingDealer ? "Upload logo (replaces current)" : "Upload logo"}
+        </label>
+        <input
+          id="logoFile"
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          onChange={(e) =>
+            setFormState((s) => ({
+              ...s,
+              logoFile: e.target.files?.[0] || null,
+              logoUrl: e.target.files?.[0] ? "" : s.logoUrl,
+            }))
+          }
+          className="mt-1.5 block w-full rounded-sm border border-dashed border-strong bg-panel-raised px-3 py-2 text-sm text-ink-2 file:mr-4 file:min-h-9 file:rounded-sm file:border-0 file:bg-fill-hover file:px-4 file:text-sm file:font-semibold file:text-ink"
+        />
+      </div>
+      <div className="flex flex-col-reverse gap-3 border-t border-hairline pt-4 sm:flex-row sm:items-center sm:justify-between">
+        {editingDealer ? (
+          <Button
+            type="button"
+            variant="danger"
+            disabled={deleteMutation.isPending || savingDealer}
+            onClick={() => setDealerPendingDelete(editingDealer)}
+          >
+            Delete dealer
+          </Button>
+        ) : (
+          <span className="hidden sm:block" />
+        )}
+        <div className="flex flex-col-reverse gap-3 sm:flex-row">
+          <Button type="button" variant="secondary" onClick={resetDealerForm}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" disabled={savingDealer}>
+            {savingDealer
+              ? "Saving…"
+              : editingDealer
+                ? "Update dealer"
+                : "Create dealer"}
+          </Button>
+        </div>
+      </div>
+    </form>
+  );
+
   return (
     <div className="mx-auto w-full max-w-6xl space-y-5 p-4 sm:space-y-6 sm:p-6 lg:p-8">
-      {/* Page identity first; diagnostics are a quiet strip below it. */}
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="mt-1 text-2xl font-bold tracking-tight text-content-primary">
+      <header className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="font-display text-3xl font-semibold text-ink sm:text-4xl">
             System admin
           </h2>
-          <p className="mt-1 max-w-xl text-sm text-content-secondary">
+          <p className="mt-1 max-w-xl text-sm text-ink-2">
             Manage your dealerships, people and platform connections in one place.
           </p>
         </div>
         <Button
-          variant="outline"
-          size="sm"
-          leftIcon={<RefreshCw className="h-4 w-4" />}
-          onClick={() => {
-            void refetch();
-            if (tab === "admins" || tab === "users") void refetchPeople();
-          }}
-          disabled={isPending}
+          variant="ghost"
+          size="icon"
+          aria-label="Refresh"
+          title="Refresh"
+          aria-busy={refreshing || undefined}
+          onClick={handleRefresh}
         >
-          {isPending ? "Refreshing…" : "Refresh"}
+          {refreshing ? (
+            <Loader2
+              className="h-5 w-5 animate-spin motion-reduce:animate-none"
+              aria-hidden="true"
+            />
+          ) : (
+            <RefreshCw className="h-5 w-5" aria-hidden="true" />
+          )}
         </Button>
       </header>
 
-      {/* Section toolbar: underline tabs + the tenant scope control. */}
-      <div className="flex flex-col gap-3 border-b border-hairline lg:flex-row lg:items-end lg:justify-between">
+      {/* One tab pattern across the product: text tabs, brand underline. */}
+      <div className="border-b border-hairline">
         <div
-          className="-mb-px flex w-full gap-1 overflow-x-auto sm:w-auto"
+          className="-mb-px flex overflow-x-auto"
           role="tablist"
           aria-label="System admin sections"
         >
-          {tabs.map(({ key, label, icon: TabIcon }) => (
+          {tabs.map(({ key, label }) => (
             <button
               key={key}
               type="button"
@@ -448,53 +598,17 @@ export const AdminDashboard: React.FC = () => {
               onClick={() => setTab(key)}
               onKeyDown={(event) => handleTabKeyDown(event, key)}
               className={cn(
-                "flex min-w-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-semibold transition-colors",
+                "min-h-11 shrink-0 whitespace-nowrap border-b-2 px-3 text-sm font-semibold transition-colors duration-120 ease-out",
                 tab === key
-                  ? "border-primary-500 text-content-primary"
-                  : "border-transparent text-content-tertiary hover:text-content-secondary",
+                  ? "border-brand-fill text-ink"
+                  : "border-transparent text-ink-2 hover:text-ink",
               )}
             >
-              <TabIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
               {label}
             </button>
           ))}
         </div>
-
-        <div
-          className={cn(
-            "flex min-w-0 items-center gap-2 pb-2 lg:max-w-sm",
-            tab === "connections" && "hidden",
-          )}
-        >
-          <label
-            htmlFor="selected-dealer"
-            className="shrink-0 text-xs font-medium uppercase tracking-wide text-content-tertiary"
-          >
-            Store
-          </label>
-          <select
-            id="selected-dealer"
-            value={selectedDealerId}
-            onChange={(e) => selectDealer(e.target.value)}
-            className="w-full min-w-0 rounded-md border border-hairline bg-surface-overlay px-3 py-2 text-sm text-content-primary"
-          >
-            <option value="">All dealerships</option>
-            {storeDealers.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-        </div>
       </div>
-      {selectedDealer && tab !== "connections" ? (
-        <p className="-mt-3 text-xs text-content-tertiary sm:-mt-4">
-          Showing people for{" "}
-          <strong className="font-semibold text-content-secondary">
-            {selectedDealer.name}
-          </strong>
-        </p>
-      ) : null}
 
       {tab === "connections" && (
         <div
@@ -502,7 +616,8 @@ export const AdminDashboard: React.FC = () => {
           role="tabpanel"
           aria-labelledby="admin-tab-connections"
         >
-          <ConnectionsPanel />
+          {/* Undefined until the list loads, so no mapped store reads as missing. */}
+          <ConnectionsPanel dealers={data ? storeDealers : undefined} />
         </div>
       )}
       {tab === "dealers" && (
@@ -513,221 +628,129 @@ export const AdminDashboard: React.FC = () => {
           aria-busy={isPending}
           className="space-y-4"
         >
-          <div className="flex justify-end">
-            <Button
-              variant="primary"
-              size="sm"
-              leftIcon={<Plus className="h-4 w-4" />}
-              onClick={() => {
-                if (showDealerForm) resetDealerForm();
-                else {
-                  setEditingDealer(null);
-                  setFormState({ name: "", logoUrl: "", logoFile: null });
-                  setHoursWeek(defaultWeekHours());
-                  setShowDealerForm(true);
-                }
-              }}
-            >
-              {showDealerForm ? "Cancel" : "Add Dealer"}
-            </Button>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            {storeSelect}
+            {!showDealerForm ? (
+              <Button
+                variant="primary"
+                className="w-full sm:w-auto"
+                leftIcon={<Plus />}
+                onClick={openNewDealerForm}
+              >
+                Add dealer
+              </Button>
+            ) : null}
           </div>
 
-          {showDealerForm && (
-            <m.div
-              initial={{ opacity: 0, y: -12 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="rounded-2xl border border-hairline bg-surface-900/70 p-5 shadow-elevation-3 backdrop-blur-xl sm:p-6"
-            >
-              <form onSubmit={handleDealerSubmit} className="space-y-4">
-                <div>
-                  <h3 className="text-xl font-semibold text-surface-50">
-                    {editingDealer ? `Edit: ${editingDealer.name}` : "New dealership"}
-                  </h3>
-                  <p className="mt-1 text-sm text-surface-400">
-                    Access codes are assigned under Admins and Users — not on the store
-                    record.
-                  </p>
-                </div>
-                <div>
-                  <label htmlFor="name" className={labelClassName}>
-                    Dealer name *
-                  </label>
-                  <input
-                    id="name"
-                    name="name"
-                    type="text"
-                    required
-                    value={formState.name}
-                    onChange={(e) =>
-                      setFormState((s) => ({ ...s, name: e.target.value }))
-                    }
-                    className={fieldClassName}
-                    placeholder="e.g. Sunrise Auto Group"
-                  />
-                </div>
-                <HoursPicker
-                  value={hoursWeek}
-                  onChange={setHoursWeek}
-                  preview={serializeHours(hoursWeek)}
-                />
-                <div>
-                  <label htmlFor="logoUrl" className={labelClassName}>
-                    Logo URL
-                  </label>
-                  <input
-                    id="logoUrl"
-                    name="logoUrl"
-                    type="url"
-                    value={formState.logoUrl}
-                    disabled={!!formState.logoFile}
-                    onChange={(e) =>
-                      setFormState((s) => ({ ...s, logoUrl: e.target.value }))
-                    }
-                    className={fieldClassName}
-                    placeholder="https://example.com/logo.png"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="logoFile" className={labelClassName}>
-                    Upload logo {editingDealer ? "(replaces current)" : ""}
-                  </label>
-                  <input
-                    id="logoFile"
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    onChange={(e) =>
-                      setFormState((s) => ({
-                        ...s,
-                        logoFile: e.target.files?.[0] || null,
-                        logoUrl: e.target.files?.[0] ? "" : s.logoUrl,
-                      }))
-                    }
-                    className="mt-1 block w-full rounded-xl border border-dashed border-surface-700 bg-surface-950/40 px-4 py-3 text-sm text-surface-400 file:mr-4 file:rounded-full file:border-0 file:bg-primary-600 file:px-4 file:py-2 file:font-semibold file:text-white"
-                  />
-                </div>
-                <div className="flex justify-end gap-3">
-                  <Button type="button" variant="outline" onClick={resetDealerForm}>
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    disabled={addMutation.isPending || updateMutation.isPending}
-                  >
-                    {addMutation.isPending || updateMutation.isPending
-                      ? "Saving…"
-                      : editingDealer
-                        ? "Update dealer"
-                        : "Create dealer"}
-                  </Button>
-                </div>
-              </form>
-            </m.div>
-          )}
+          {showDealerForm && !editingDealer ? (
+            <div className="rounded-md border border-hairline bg-panel p-4 sm:p-6">
+              {dealerForm}
+            </div>
+          ) : null}
 
           {isPending && (
             <div className="space-y-3">
-              <Skeleton className="h-24 w-full rounded-2xl" />
-              <Skeleton className="h-24 w-full rounded-2xl" />
+              <Skeleton className="h-28 w-full rounded-md" />
+              <Skeleton className="h-28 w-full rounded-md" />
             </div>
           )}
           {error && (
-            <p className="text-sm text-rose-300" role="alert">
+            <p className="text-sm text-error-ink" role="alert">
               Failed to load dealerships. Try refresh.
             </p>
           )}
 
-          <div className="space-y-3">
+          <ul className="space-y-3">
             {storeDealers.map((dealer) => {
               const isSelected = dealer.id === selectedDealerId;
+              if (showDealerForm && editingDealer?.id === dealer.id) {
+                return (
+                  <li
+                    key={dealer.id}
+                    className="rounded-md border border-strong bg-panel p-4 sm:p-6"
+                  >
+                    {dealerForm}
+                  </li>
+                );
+              }
               return (
-                <m.div
+                <li
                   key={dealer.id}
                   className={cn(
-                    "rounded-2xl border p-4 shadow-elevation-1 backdrop-blur-xl sm:p-5",
+                    "space-y-3 rounded-md border p-4 sm:p-5",
                     isSelected
-                      ? "border-primary-500/50 bg-primary-500/10 ring-1 ring-primary-400/30"
-                      : "border-hairline bg-surface-900/55",
+                      ? "border-strong bg-panel-raised"
+                      : "border-hairline bg-panel",
                   )}
                 >
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <button
-                      type="button"
-                      onClick={() => selectDealer(dealer.id)}
-                      aria-pressed={isSelected}
-                      aria-label={`${isSelected ? "Selected dealership" : "Select dealership"}: ${dealer.name}`}
-                      className="flex min-w-0 items-center gap-4 text-left"
-                    >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-center gap-3">
                       {dealer.logo ? (
                         <img
                           src={dealer.logo}
                           alt=""
-                          className="h-14 w-14 rounded-xl border border-hairline bg-surface-950/50 object-contain p-2"
+                          className="h-12 w-12 shrink-0 rounded-sm border border-hairline bg-panel-raised object-contain p-1.5"
                         />
                       ) : (
-                        <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-primary-500/20 bg-primary-500/10">
-                          <Building2 className="h-7 w-7 text-primary-300" />
-                        </div>
+                        <span
+                          aria-hidden="true"
+                          className="grid h-12 w-12 shrink-0 place-items-center rounded-sm border border-hairline bg-fill-subtle font-display text-lg font-semibold text-ink-2"
+                        >
+                          {dealer.name.trim().charAt(0).toUpperCase() || "?"}
+                        </span>
                       )}
                       <div className="min-w-0">
-                        <h3 className="truncate text-lg font-bold text-surface-50">
-                          {dealer.name}
-                          {isSelected && (
-                            <span className="ml-2 text-xs font-semibold uppercase tracking-wide text-primary-300">
-                              selected
-                            </span>
-                          )}
+                        <h3 className="font-display text-lg font-semibold text-ink">
+                          <button
+                            type="button"
+                            onClick={() => selectDealer(dealer.id)}
+                            aria-pressed={isSelected}
+                            aria-label={`${isSelected ? "Selected dealership" : "Select dealership"}: ${dealer.name}`}
+                            className="block max-w-full truncate rounded-sm text-left underline-offset-4 hover:underline"
+                          >
+                            {dealer.name}
+                          </button>
                         </h3>
-                        <p className="mt-0.5 text-xs text-surface-400">
-                          {dealer.hours?.trim() || "Hours not set"}
-                        </p>
+                        {isSelected ? (
+                          <Badge variant="neutral" className="mt-1">
+                            Selected
+                          </Badge>
+                        ) : null}
                       </div>
-                    </button>
-                    <div className="flex flex-wrap justify-end gap-2">
+                    </div>
+                    <div className="flex flex-wrap gap-2 sm:justify-end">
                       <Button
-                        variant="outline"
-                        size="sm"
+                        variant="secondary"
                         onClick={() => openPeopleTab(dealer.id, "admins")}
                       >
                         Admins
                       </Button>
                       <Button
-                        variant="outline"
-                        size="sm"
+                        variant="secondary"
                         onClick={() => openPeopleTab(dealer.id, "users")}
                       >
                         Users
                       </Button>
                       <Button
-                        variant="outline"
-                        size="icon"
+                        variant="secondary"
+                        leftIcon={<Pencil />}
                         onClick={() => handleEditDealer(dealer)}
-                        title="Edit dealer"
                         aria-label={`Edit ${dealer.name}`}
                       >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="danger"
-                        size="icon"
-                        onClick={() => setDealerPendingDelete(dealer)}
-                        disabled={deleteMutation.isPending}
-                        title="Delete dealer"
-                        aria-label={`Delete ${dealer.name}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
+                        Edit
                       </Button>
                     </div>
                   </div>
-                </m.div>
+                  <DealerSetupStatus dealer={dealer} />
+                </li>
               );
             })}
-            {!isPending && storeDealers.length === 0 && (
-              <p className="rounded-2xl border border-dashed border-surface-700 p-8 text-center text-sm text-surface-400">
-                No dealerships yet. Add your first store to get started.
-              </p>
-            )}
-          </div>
+          </ul>
+          {!isPending && storeDealers.length === 0 && (
+            <p className="rounded-md border border-dashed border-strong p-8 text-center text-sm text-ink-2">
+              No dealerships yet. Add your first store to get started.
+            </p>
+          )}
         </div>
       )}
 
@@ -739,41 +762,26 @@ export const AdminDashboard: React.FC = () => {
           aria-busy={peopleLoading}
           className="space-y-4"
         >
-          <div className="grid gap-2 sm:grid-cols-3">
-            <div className="rounded-xl border border-hairline bg-surface-900/55 p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-400">
-                Scope
-              </p>
-              <p className="mt-1 truncate text-sm font-semibold text-surface-100">
-                {selectedDealer?.name || "All dealerships"}
-              </p>
-            </div>
-            <div className="rounded-xl border border-hairline bg-surface-900/55 p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-400">
-                Showing
-              </p>
-              <p className="mt-1 text-sm font-semibold text-surface-100">
-                {tab === "admins" ? "Managers" : "Salespeople"}
-              </p>
-            </div>
-            <div className="rounded-xl border border-hairline bg-surface-900/55 p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-surface-400">
-                People
-              </p>
-              <p className="mt-1 text-sm font-semibold tabular-nums text-surface-100">
-                {people.length
-                  ? `${peopleRangeStart}–${peopleRangeEnd} of ${peopleTotal}`
-                  : `0 of ${peopleTotal}`}
-              </p>
-            </div>
+          {storeSelect}
+
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <h3 className="font-display text-lg font-semibold text-ink">
+              {tab === "admins" ? "Managers" : "Salespeople"} at{" "}
+              {selectedDealer?.name || "every dealership"}
+            </h3>
+            <p className="text-sm tabular-nums text-ink-2">
+              {people.length
+                ? `${peopleRangeStart}–${peopleRangeEnd} of ${peopleTotal}`
+                : `0 of ${peopleTotal}`}
+            </p>
           </div>
 
-          <div className="sticky top-0 z-10 rounded-2xl border border-hairline bg-surface-950/95 p-3 shadow-elevation-2 backdrop-blur-xl">
+          <div className="sticky top-0 z-10 bg-canvas py-2">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <label className="relative min-w-0 flex-1">
                 <span className="sr-only">Search people</span>
                 <Search
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-surface-500"
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-hint"
                   aria-hidden="true"
                 />
                 <input
@@ -782,40 +790,34 @@ export const AdminDashboard: React.FC = () => {
                   onChange={(event) =>
                     setPeopleSearch(event.target.value.slice(0, 120))
                   }
-                  className="w-full rounded-xl border border-surface-700 bg-surface-900/80 py-2.5 pl-10 pr-3 text-sm text-surface-100 placeholder:text-surface-400 focus:border-primary-500 focus:outline-none"
+                  className="min-h-11 w-full rounded-sm border border-strong bg-panel-raised pl-10 pr-3 text-base text-ink placeholder:text-ink-hint transition-colors duration-120 ease-out focus:border-brand-ink"
                   placeholder={`Search ${tab === "admins" ? "managers" : "salespeople"}…`}
                 />
               </label>
-              <button
-                type="button"
+              <Button
+                variant={codesToShare ? "secondary" : "ghost"}
                 aria-pressed={codesToShare}
+                leftIcon={<KeyRound />}
                 onClick={() => setCodesToShare((value) => !value)}
-                className={cn(
-                  "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition-colors",
-                  codesToShare
-                    ? "border-warning-400/30 bg-warning-500/15 text-warning-100 [.theme-light_&]:text-warning-900"
-                    : "border-surface-700 bg-surface-900/80 text-surface-300 hover:border-surface-600",
-                )}
               >
-                <KeyRound className="h-4 w-4" aria-hidden="true" />
                 Codes to share
-              </button>
+              </Button>
             </div>
           </div>
 
           {selectedDealer ? (
-            <div className="rounded-2xl border border-hairline bg-surface-900/60 p-4 sm:p-5">
-              <h3 className="text-lg font-bold text-surface-50">
+            <div className="rounded-md border border-hairline bg-panel p-4 sm:p-5">
+              <h3 className="font-display text-lg font-semibold text-ink">
                 {tab === "admins"
-                  ? `Add manager · ${selectedDealer.name}`
-                  : `Add salesperson · ${selectedDealer.name}`}
+                  ? `Add a manager to ${selectedDealer.name}`
+                  : `Add a salesperson to ${selectedDealer.name}`}
               </h3>
-              <p className="mt-1 text-xs text-surface-400">
+              <p className="mt-1 text-caption text-ink-2">
                 {tab === "admins"
                   ? "A 4-digit fallback code is created first; then you’ll set the manager’s username and password."
                   : "The server creates a unique 4-digit code and shows it once."}
               </p>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
                 <div className="flex-1">
                   <label className={labelClassName} htmlFor="new-person-name">
                     Name
@@ -835,12 +837,11 @@ export const AdminDashboard: React.FC = () => {
                 <Button
                   variant="primary"
                   disabled={savingPerson || !personForm.name.trim()}
-                  className="min-h-12"
                   leftIcon={
                     savingPerson ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <Loader2 className="animate-spin motion-reduce:animate-none" />
                     ) : (
-                      <UserRound className="h-4 w-4" />
+                      <UserRound />
                     )
                   }
                   onClick={() => void handleAddPerson()}
@@ -850,26 +851,26 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div className="rounded-xl border border-primary-500/20 bg-primary-500/[0.07] px-4 py-3 text-sm text-primary-100">
+            <p className="rounded-md border border-hairline bg-panel px-4 py-3 text-sm text-ink-2">
               You’re viewing every dealership. Select one store above when you need to
               add a person.
-            </div>
+            </p>
           )}
 
           {oneTimeCredential ? (
-            <div className="rounded-2xl border border-warning-400/25 bg-warning-500/[0.08] p-4">
-              <p className="text-sm font-semibold text-warning-100">
+            <div className="rounded-md border border-warning-ink/30 bg-warning-fill p-4">
+              <p className="text-sm font-semibold text-ink">
                 Share {oneTimeCredential.person.name}&apos;s code privately
               </p>
-              <p className="mt-1 text-xs text-warning-100/70">
+              <p className="mt-1 text-caption text-ink-2">
                 This one-time response is not stored in the roster.
               </p>
               <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-                <code className="flex-1 rounded-xl border border-hairline bg-surface-950/80 px-4 py-3 text-center text-xl tracking-[0.4em] text-surface-50">
+                <code className="flex-1 rounded-sm border border-hairline bg-panel-raised px-4 py-3 text-center font-display text-2xl tabular-nums tracking-[0.4em] text-ink">
                   {oneTimeCredential.pin}
                 </code>
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   onClick={() => {
                     void navigator.clipboard
                       .writeText(oneTimeCredential.pin)
@@ -897,7 +898,7 @@ export const AdminDashboard: React.FC = () => {
                 </Button>
                 {oneTimeCredential.person.role === "manager" ? (
                   <Button
-                    variant="outline"
+                    variant="secondary"
                     onClick={() => setEditingPerson(oneTimeCredential.person)}
                   >
                     Set up manager login
@@ -907,123 +908,113 @@ export const AdminDashboard: React.FC = () => {
             </div>
           ) : null}
 
-          {peopleLoading && <Skeleton className="h-32 w-full rounded-2xl" />}
+          {peopleLoading && <Skeleton className="h-32 w-full rounded-md" />}
           {peopleError ? (
             <div
-              className="rounded-2xl border border-error-500/25 bg-error-500/10 p-4 text-sm text-error-100 [.theme-light_&]:text-error-800"
+              className="rounded-md bg-error-fill p-4 text-sm text-error-ink"
               role="alert"
             >
               <p className="font-semibold">Roster unavailable</p>
-              <p className="mt-1 text-error-200 [.theme-light_&]:text-error-800">
+              <p className="mt-1">
                 {toUiMessage(peopleError, "Try refreshing this view.")}
               </p>
             </div>
           ) : null}
 
-          <div className="space-y-2">
-            {people.map((person) => (
-              <div
-                key={person.id}
-                className={cn(
-                  "flex flex-col gap-3 rounded-2xl border border-hairline bg-surface-900/55 p-4 sm:flex-row sm:items-center sm:justify-between",
-                  !person.active && "opacity-60",
-                )}
-              >
-                <div className="min-w-0">
-                  <div className="font-semibold text-surface-50">
-                    {person.name}
-                    {!person.active && (
-                      <span className="ml-2 text-xs font-medium text-surface-400">
-                        inactive
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-surface-400">
-                    <span>{dealerNameFor(person)}</span>
-                    <span
-                      className={cn(
-                        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                        person.pinNeedsDistribution
-                          ? "bg-warning-500/10 text-warning-200 ring-1 ring-warning-500/20 [.theme-light_&]:text-warning-800"
-                          : person.hasPin
-                            ? "bg-success-500/10 text-success-300 ring-1 ring-success-500/20 [.theme-light_&]:text-success-900"
-                            : "bg-surface-800 text-surface-400 ring-1 ring-hairline",
+          {people.length > 0 ? (
+            <ul className="divide-y divide-hairline rounded-md border border-hairline bg-panel">
+              {people.map((person) => (
+                <li
+                  key={person.id}
+                  className={cn(
+                    "flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between",
+                    !person.active && "opacity-60",
+                  )}
+                >
+                  <div className="min-w-0">
+                    <div className="font-semibold text-ink">
+                      {person.name}
+                      {!person.active && (
+                        <span className="ml-2 text-caption font-medium text-ink-2">
+                          Inactive
+                        </span>
                       )}
-                    >
-                      {person.pinNeedsDistribution
-                        ? "Code to share"
-                        : person.hasPin
-                          ? "Code set"
-                          : "No code"}
-                    </span>
-                    {person.role === "manager" ? (
-                      <span
-                        className={cn(
-                          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                          person.hasManagerLogin
-                            ? "bg-primary-500/10 text-primary-200 ring-1 ring-primary-400/25 [.theme-light_&]:text-primary-900"
-                            : "bg-surface-800 text-surface-400 ring-1 ring-hairline",
-                        )}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-ink-2">
+                      <span>{dealerNameFor(person)}</span>
+                      <Badge
+                        variant={
+                          person.pinNeedsDistribution
+                            ? "warning"
+                            : person.hasPin
+                              ? "success"
+                              : "neutral"
+                        }
                       >
-                        {person.hasManagerLogin
-                          ? `@${person.managerUsername}`
-                          : "Manager login not set"}
-                      </span>
-                    ) : null}
+                        {person.pinNeedsDistribution
+                          ? "Code to share"
+                          : person.hasPin
+                            ? "Code set"
+                            : "No code"}
+                      </Badge>
+                      {person.role === "manager" ? (
+                        <Badge variant="neutral">
+                          {person.hasManagerLogin
+                            ? `@${person.managerUsername}`
+                            : "Manager login not set"}
+                        </Badge>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    leftIcon={<UserCog className="h-3.5 w-3.5" />}
-                    onClick={() => setEditingPerson(person)}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    disabled={!person.active || impersonatingId === person.id}
-                    leftIcon={
-                      impersonatingId === person.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Eye className="h-3.5 w-3.5" />
-                      )
-                    }
-                    onClick={() => void handleOpenAs(person)}
-                  >
-                    Open as
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleTogglePerson(person)}
-                  >
-                    {person.active ? "Deactivate" : "Reactivate"}
-                  </Button>
-                </div>
-              </div>
-            ))}
-            {!peopleLoading && people.length === 0 && (
-              <p className="rounded-2xl border border-dashed border-surface-700 p-8 text-center text-sm text-surface-400">
-                {peopleSearch || codesToShare
-                  ? "No people match these filters."
-                  : tab === "admins"
-                    ? `No managers yet for ${selectedDealer?.name || "these dealerships"}.`
-                    : `No salespeople yet for ${selectedDealer?.name || "these dealerships"}.`}
-              </p>
-            )}
-          </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="secondary"
+                      leftIcon={<UserCog />}
+                      onClick={() => setEditingPerson(person)}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={!person.active || impersonatingId === person.id}
+                      leftIcon={
+                        impersonatingId === person.id ? (
+                          <Loader2 className="animate-spin motion-reduce:animate-none" />
+                        ) : (
+                          <Eye />
+                        )
+                      }
+                      onClick={() => void handleOpenAs(person)}
+                    >
+                      Open as
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => void handleTogglePerson(person)}
+                    >
+                      {person.active ? "Deactivate" : "Reactivate"}
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {!peopleLoading && people.length === 0 && (
+            <p className="rounded-md border border-dashed border-strong p-8 text-center text-sm text-ink-2">
+              {peopleSearch || codesToShare
+                ? "No people match these filters."
+                : tab === "admins"
+                  ? `No managers yet for ${selectedDealer?.name || "these dealerships"}.`
+                  : `No salespeople yet for ${selectedDealer?.name || "these dealerships"}.`}
+            </p>
+          )}
 
           {(cursorHistory.length > 0 || peoplePage?.nextCursor) && (
             <div className="flex items-center justify-between border-t border-hairline pt-3">
               <Button
-                variant="outline"
-                size="sm"
+                variant="secondary"
                 disabled={cursorHistory.length === 0 || peopleLoading}
-                leftIcon={<ChevronLeft className="h-4 w-4" />}
+                leftIcon={<ChevronLeft />}
                 onClick={() => {
                   const previous = cursorHistory[cursorHistory.length - 1];
                   setCursorHistory((history) => history.slice(0, -1));
@@ -1032,14 +1023,13 @@ export const AdminDashboard: React.FC = () => {
               >
                 Previous
               </Button>
-              <span className="text-xs text-surface-400">
+              <span className="text-caption text-ink-2">
                 {PEOPLE_PAGE_SIZE} per page
               </span>
               <Button
-                variant="outline"
-                size="sm"
+                variant="secondary"
                 disabled={!peoplePage?.nextCursor || peopleLoading}
-                rightIcon={<ChevronRight className="h-4 w-4" />}
+                rightIcon={<ChevronRight />}
                 onClick={() => {
                   setCursorHistory((history) => [...history, peopleCursor || ""]);
                   setPeopleCursor(peoplePage?.nextCursor);
@@ -1058,6 +1048,7 @@ export const AdminDashboard: React.FC = () => {
         onConfirm={() => {
           if (dealerPendingDelete) {
             deleteMutation.mutate(dealerPendingDelete.id);
+            if (editingDealer?.id === dealerPendingDelete.id) resetDealerForm();
             setDealerPendingDelete(null);
           }
         }}
