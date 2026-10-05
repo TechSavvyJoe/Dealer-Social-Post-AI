@@ -3109,6 +3109,11 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
       body,
       "expected_post_revision",
     );
+    if (!revisionWasSupplied) {
+      // Stage C's release gate: strict enforcement ships only after these
+      // lines stop appearing in the production log for the rollout window.
+      console.log("[revision-legacy-client] route=draft post=" + record.id);
+    }
     const expectedPostRevision = revisionWasSupplied
       ? typeof body.expected_post_revision === "string"
         ? body.expected_post_revision.trim()
@@ -3345,7 +3350,13 @@ routerAdd("POST", "/api/app/posts/:id/video-generated", (c) => {
       record.set("has_video", true);
       $app.dao().saveRecord(record);
     }
-    return c.json(200, { id: record.id, has_video: true });
+    // Saving has_video advances posts.updated. Return that revision so the
+    // editor's next draft save or share receipt is not rejected as stale.
+    return c.json(200, {
+      id: record.id,
+      has_video: true,
+      post_revision: record.getString("updated"),
+    });
   } catch (err) {
     console.error("[/api/app/posts/:id/video-generated] error", err);
     return c.json(500, { error: "Failed to record generated video" });
@@ -3437,6 +3448,10 @@ routerAdd("GET", "/api/app/posts/:id/status", (c) => {
     );
     return c.json(200, {
       id: record.id,
+      // A manager decision advances posts.updated. Once a post has left the
+      // n_a state its content is immutable, so the author's editor can adopt
+      // this revision for share receipts without risking a lost edit.
+      post_revision: record.getString("updated"),
       approval_status: record.getString("approval_status"),
       approved_by: record.getString("approved_by"),
       approved_at: record.getString("approved_at"),
@@ -4501,6 +4516,9 @@ routerAdd("GET", "/api/app/posts", (c) => {
           ? r.getBool("attribution_authoritative")
           : !!r.get("attribution_authoritative"),
         generated_at: r.getString("generated_at"),
+        // The compare-and-set token a reopened post must send with its next
+        // draft save or share receipt; without it the editor is read-only.
+        updated: r.getString("updated"),
         style: r.getString("style"),
         tone: r.getString("tone"),
         customer_name: publicCustomerName,

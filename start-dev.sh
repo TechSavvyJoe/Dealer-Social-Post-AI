@@ -95,10 +95,14 @@ cleanup() {
     echo ""
     echo "Shutting down services..."
     job_pids=$(jobs -p)
-    if [ -n "$job_pids" ]; then
-        # shellcheck disable=SC2086
-        kill $job_pids 2>/dev/null || true
-    fi
+    for pid in $job_pids; do
+        # A job may still be a shell running a foreground child (the first-run
+        # PocketBase download, or npm's vite). Bash defers a signal until that
+        # child exits, so signal the children too or `wait` blocks until the
+        # download finishes.
+        pkill -TERM -P "$pid" 2>/dev/null || true
+        kill "$pid" 2>/dev/null || true
+    done
     wait 2>/dev/null || true
     echo "✓ All services stopped"
     exit "$status"
@@ -115,8 +119,10 @@ POCKETBASE_PID=$!
 # Wait for the PocketBase router instead of assuming it starts within three
 # seconds. A 503 from deep readiness still proves the hooks are serving; it
 # also gives the browser an actionable configuration response after startup.
+# The budget covers a first run, when start-pocketbase.sh downloads and
+# checksums the pinned binary (curl allows up to 180 s) before serving.
 BACKEND_READY=0
-for attempt in $(seq 1 60); do
+for attempt in $(seq 1 480); do
     if ! kill -0 "$POCKETBASE_PID" 2>/dev/null; then
         backend_status=0
         wait "$POCKETBASE_PID" || backend_status=$?
@@ -136,7 +142,7 @@ for attempt in $(seq 1 60); do
     sleep 0.5
 done
 if [ "$BACKEND_READY" -ne 1 ]; then
-    echo "ERROR: PocketBase did not expose /api/app/health within 30 seconds."
+    echo "ERROR: PocketBase did not expose /api/app/health within 4 minutes."
     exit 1
 fi
 

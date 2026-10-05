@@ -1130,6 +1130,12 @@ describe("GET /api/app/posts share_summary", () => {
     expect(result.status).toBe(200);
     const items = result.payload.items as AnyRecord[];
     expect(items.map((item) => item.id)).toEqual(["post-1", "post-2"]);
+    // A post reopened from My work must carry its compare-and-set revision,
+    // or its next draft save and share receipt cannot be sent at all.
+    expect(items.map((item) => item.updated)).toEqual([
+      "2026-09-20 10:00:00.000Z",
+      "2026-09-20 10:00:00.000Z",
+    ]);
     expect(items[0].share_summary).toEqual({
       count: 3,
       last_shared_at: "2026-09-22 09:00:00.000Z",
