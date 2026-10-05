@@ -1142,6 +1142,9 @@ describe("GET /api/app/posts share_summary", () => {
       last_channel: "facebook_feed",
       last_via: "share_sheet",
       channels: ["facebook_feed", "instagram_feed"],
+      sheet_count: 1,
+      last_sheet_channel: "facebook_feed",
+      last_sheet_at: "2026-09-22 09:00:00.000Z",
     });
     expect(items[1].share_summary).toBeNull();
 
@@ -1157,6 +1160,50 @@ describe("GET /api/app/posts share_summary", () => {
       post1: "post-2",
     });
     expect(Object.values(queries[0].params).some(Array.isArray)).toBe(false);
+  });
+
+  it("keeps the share-sheet facts apart from the latest event", () => {
+    const { result } = runList([
+      {
+        dealer: "dealer-1",
+        post: "post-1",
+        channel: "instagram_feed",
+        via: "share_sheet",
+        created: "2026-09-21 09:00:00.000Z",
+      },
+      {
+        dealer: "dealer-1",
+        post: "post-1",
+        channel: "facebook_feed",
+        via: "copy",
+        created: "2026-09-22 09:00:00.000Z",
+      },
+      {
+        dealer: "dealer-1",
+        post: "post-2",
+        channel: "facebook_feed",
+        via: "download",
+        created: "2026-09-22 10:00:00.000Z",
+      },
+    ]);
+    const items = result.payload.items as AnyRecord[];
+    // A later copy must not hide the earlier completed share sheet...
+    expect(items[0].share_summary).toMatchObject({
+      count: 2,
+      last_via: "copy",
+      last_channel: "facebook_feed",
+      sheet_count: 1,
+      last_sheet_channel: "instagram_feed",
+      last_sheet_at: "2026-09-21 09:00:00.000Z",
+    });
+    // ...and a download alone is never a share.
+    expect(items[1].share_summary).toMatchObject({
+      count: 1,
+      last_via: "download",
+      sheet_count: 0,
+      last_sheet_channel: "",
+      last_sheet_at: "",
+    });
   });
 
   it("keeps listing when the share read fails, with every summary null", () => {
