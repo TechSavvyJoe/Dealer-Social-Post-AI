@@ -37,8 +37,62 @@ function recordString(record, fieldName) {
   return "";
 }
 
-function initialApprovalStatus(dealer) {
-  return recordBool(dealer, "requires_approval") ? "pending" : "n_a";
+function readApprovalPolicy(dealer) {
+  const raw = recordString(dealer, "approval_policy").trim();
+  if (!raw || raw === "null") return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+/**
+ * Whether a new post waits for manager review.
+ *
+ * dealers.requires_approval turns review on for the store. approval_policy can
+ * only narrow which posts are reviewed while review is on: it never turns
+ * review on by itself, and everything it cannot decide is reviewed — no
+ * policy, an unreadable policy, an unknown mode, an empty category list, a
+ * post whose category or whose author's post count is unknown.
+ *
+ * `context.category` is the server-resolved brand category of the post's
+ * scenario. `context.countPriorPosts` returns how many posts the author
+ * already has at this store; it is called only for a first_n policy.
+ */
+function initialApprovalStatus(dealer, context) {
+  if (!recordBool(dealer, "requires_approval")) return "n_a";
+  const policy = readApprovalPolicy(dealer);
+  if (!policy) return "pending";
+
+  if (policy.mode === "per_category") {
+    const categories = Array.isArray(policy.categories) ? policy.categories : [];
+    const category =
+      context && typeof context.category === "string" ? context.category : "";
+    if (!category || categories.length === 0) return "pending";
+    return categories.indexOf(category) === -1 ? "n_a" : "pending";
+  }
+
+  if (policy.mode === "first_n") {
+    const firstN = Number(policy.firstN);
+    if (!(firstN >= 1) || Math.floor(firstN) !== firstN) return "pending";
+    let prior = NaN;
+    try {
+      prior =
+        context && typeof context.countPriorPosts === "function"
+          ? Number(context.countPriorPosts())
+          : NaN;
+    } catch (_e) {
+      prior = NaN;
+    }
+    if (!(prior >= 0) || Math.floor(prior) !== prior) return "pending";
+    return prior < firstN ? "pending" : "n_a";
+  }
+
+  return "pending";
 }
 
 // The exact header that opens every canonical disclosure block. Mirrored in

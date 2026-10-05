@@ -2641,7 +2641,30 @@ routerAdd("POST", "/api/app/posts", (c) => {
       ? context.person.getString("name")
       : "System Admin";
 
-    const approvalStatus = policies.initialApprovalStatus(dealer);
+    // A store's approval policy is applied only from server-resolved facts:
+    // the scenario's brand category and the author's own post count. Anything
+    // unknown is reviewed (see policies.initialApprovalStatus).
+    const approvalMapping = websitePublications.resolveWebsiteMapping(
+      scenarioId,
+      dealer.getString("custom_scenarios"),
+    );
+    const approvalStatus = policies.initialApprovalStatus(dealer, {
+      category: approvalMapping ? approvalMapping.category : "",
+      countPriorPosts: function () {
+        if (!salespersonId) return NaN;
+        const row = new DynamicModel({ total: 0 });
+        $app
+          .dao()
+          .db()
+          .newQuery(
+            "SELECT COUNT(*) AS total FROM posts " +
+              "WHERE dealer = {:dealer} AND salesperson_id = {:person}",
+          )
+          .bind({ dealer: dealer.id, person: salespersonId })
+          .one(row);
+        return Number(row.total);
+      },
+    });
     let caption = helpers.assertString((body.caption || "").toString().trim(), 12000);
     let disclosures = helpers.assertString(
       (body.disclosures || "").toString().trim(),
