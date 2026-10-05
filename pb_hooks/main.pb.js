@@ -3376,16 +3376,23 @@ routerAdd("POST", "/api/app/posts/:id/video-generated", (c) => {
       ? record.getBool("has_video")
       : !!record.get("has_video");
     if (!alreadyGenerated) {
-      record.set("has_video", true);
-      $app.dao().saveRecord(record);
+      // Column-scoped on purpose. Saving the record loaded above would write
+      // every column back (undoing a caption saved since it was read) and
+      // advance posts.updated, the editor's compare-and-set revision, so an
+      // autosave already in flight would be rejected as stale. The flag is
+      // not post content: it changes neither the row's other columns nor the
+      // revision, and this route returns no revision for an editor to adopt.
+      $app
+        .dao()
+        .db()
+        .newQuery(
+          "UPDATE posts SET has_video = 1 " +
+            "WHERE id = {:post} AND dealer = {:dealer} AND COALESCE(has_video, 0) = 0",
+        )
+        .bind({ post: record.id, dealer: dealer.id })
+        .execute();
     }
-    // Saving has_video advances posts.updated. Return that revision so the
-    // editor's next draft save or share receipt is not rejected as stale.
-    return c.json(200, {
-      id: record.id,
-      has_video: true,
-      post_revision: record.getString("updated"),
-    });
+    return c.json(200, { id: record.id, has_video: true });
   } catch (err) {
     console.error("[/api/app/posts/:id/video-generated] error", err);
     return c.json(500, { error: "Failed to record generated video" });
@@ -4374,12 +4381,25 @@ routerAdd("GET", "/api/app/posts", (c) => {
               last_channel: shareChannel,
               last_via: (shareRows[i].via || "").toString(),
               channels: [],
+              // Only a completed share sheet may be labelled "Shared"; a
+              // download or a copied caption is not one. Kept apart from the
+              // latest event so a later copy cannot hide an earlier share.
+              sheet_count: 0,
+              last_sheet_channel: "",
+              last_sheet_at: "",
             };
             shareSummaryByPost[postId] = summary;
           }
           summary.count += 1;
           if (summary.channels.indexOf(shareChannel) === -1) {
             summary.channels.push(shareChannel);
+          }
+          if ((shareRows[i].via || "").toString() === "share_sheet") {
+            if (summary.sheet_count === 0) {
+              summary.last_sheet_channel = shareChannel;
+              summary.last_sheet_at = (shareRows[i].created || "").toString();
+            }
+            summary.sheet_count += 1;
           }
         }
       }

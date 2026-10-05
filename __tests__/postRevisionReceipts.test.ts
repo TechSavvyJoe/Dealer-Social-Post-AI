@@ -1,6 +1,6 @@
 /**
- * Every server write that advances `posts.updated` must hand the editor the new
- * revision, or the editor's next draft save / share receipt is rejected as
+ * A server write must either leave `posts.updated` alone or hand the editor the
+ * new revision, or the editor's next draft save / share receipt is rejected as
  * stale. These run the real route source against fakes of the PocketBase
  * runtime (the same pattern as postShareEvents.test.ts).
  */
@@ -44,6 +44,7 @@ const runRoute = (
 ) => {
   let handler: ((c: unknown) => RouteResult) | undefined;
   const saved: unknown[] = [];
+  const queries: Array<{ sql: string; params: AnyRecord }> = [];
   runInNewContext(routeSource(start), {
     __hooks: "/hooks",
     routerAdd: (_method: string, _path: string, callback: typeof handler) => {
@@ -83,6 +84,16 @@ const runRoute = (
           options.onSave?.();
           saved.push(record);
         },
+        db: () => ({
+          newQuery: (sql: string) => ({
+            bind: (params: AnyRecord) => ({
+              execute: () => {
+                queries.push({ sql, params });
+                return { rowsAffected: () => 1 };
+              },
+            }),
+          }),
+        }),
       }),
     },
     console: { error: vi.fn(), log: vi.fn() },
@@ -93,52 +104,50 @@ const runRoute = (
     response: () => ({ header: () => ({ set: vi.fn() }) }),
     json: (status: number, payload: AnyRecord) => ({ status, payload }),
   });
-  return { result, saved };
+  return { result, saved, queries };
 };
 
-describe("revision receipts on non-draft writes", () => {
-  it("video-generated returns the revision its own save produced", () => {
+describe("revisions on non-draft writes", () => {
+  it("video-generated marks the flag without rewriting the post or moving its revision", () => {
     const values: AnyRecord = {
       dealer: "dealer-1",
       owner_session_hash: "owner-hash",
       has_video: false,
+      caption: "Saved by another tab after this record was read.",
       updated: "2026-10-05 10:00:00.000Z",
     };
-    const post = fakePost(values);
-    const { result, saved } = runRoute(
+    const { result, saved, queries } = runRoute(
       'routerAdd("POST", "/api/app/posts/:id/video-generated"',
-      post,
-      {
-        // PocketBase refreshes `updated` on the record it saves.
-        onSave: () => {
-          values.updated = "2026-10-05 10:05:00.000Z";
-        },
-      },
+      fakePost(values),
     );
-    expect(saved).toHaveLength(1);
-    expect(result).toEqual({
-      status: 200,
-      payload: {
-        id: "post-1",
-        has_video: true,
-        post_revision: "2026-10-05 10:05:00.000Z",
-      },
-    });
+    // No whole-record save: that would write every column back and advance
+    // posts.updated, rejecting an autosave already in flight.
+    expect(saved).toHaveLength(0);
+    expect(queries).toHaveLength(1);
+    expect(queries[0].sql).toMatch(
+      /^UPDATE posts SET has_video = 1 WHERE id = \{:post\}/,
+    );
+    expect(queries[0].sql).not.toMatch(/updated|caption/);
+    expect(queries[0].params).toEqual({ post: "post-1", dealer: "dealer-1" });
+    expect(values.updated).toBe("2026-10-05 10:00:00.000Z");
+    // No revision is returned: this route never checked the caller's token,
+    // so an editor must not adopt one from it.
+    expect(result).toEqual({ status: 200, payload: { id: "post-1", has_video: true } });
   });
 
-  it("video-generated returns the current revision when nothing was saved", () => {
-    const post = fakePost({
-      dealer: "dealer-1",
-      owner_session_hash: "owner-hash",
-      has_video: true,
-      updated: "2026-10-05 10:00:00.000Z",
-    });
-    const { result, saved } = runRoute(
+  it("video-generated is a no-op once the flag is set", () => {
+    const { result, saved, queries } = runRoute(
       'routerAdd("POST", "/api/app/posts/:id/video-generated"',
-      post,
+      fakePost({
+        dealer: "dealer-1",
+        owner_session_hash: "owner-hash",
+        has_video: true,
+        updated: "2026-10-05 10:00:00.000Z",
+      }),
     );
     expect(saved).toHaveLength(0);
-    expect(result.payload.post_revision).toBe("2026-10-05 10:00:00.000Z");
+    expect(queries).toHaveLength(0);
+    expect(result).toEqual({ status: 200, payload: { id: "post-1", has_video: true } });
   });
 
   it("the approval status poll carries the revision a manager decision produced", () => {
