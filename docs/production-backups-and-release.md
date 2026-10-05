@@ -113,6 +113,37 @@ sender must remain blocked from `main` until it is split into those stages. Do
 not leave the field optional in the final backend; doing so silently removes
 the compare-and-set guarantee.
 
+### The post-revision contract, stage by stage
+
+| Stage | What ships                                                                                                                                            | Works with                   |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| A     | Backend returns a revision from every write and checks one when it is sent. A draft save without one still works and logs `[revision-legacy-client]`. | any frontend                 |
+| B     | Frontend sends the revision it last saw with every draft save and share receipt.                                                                      | backend at stage A or later  |
+| C     | Backend rejects a draft save or share receipt that carries no revision (`409`).                                                                       | frontend at stage B or later |
+
+Stages A and B may ship in the same `main` commit: the backend deploys first and
+still accepts the older client. Stage C must ship alone, later, and only through
+this gate. All three conditions must hold:
+
+1. Stage B's `release-frontend` job is green and the canonical alias serves that
+   build.
+2. The production log shows no `[revision-legacy-client]` line for seven
+   consecutive days. Each line names a post whose author is still on a build
+   from before stage B (an installed app or a tab that was never reopened).
+   `flyctl logs --app dealer-social-post-ai-production --no-tail | grep -c
+"revision-legacy-client"` (or the **Fetch Fly Logs** workflow) reads only
+   Fly's recent buffer, so check once a day through the window; a single check
+   at the end proves nothing about the earlier days.
+3. The stage C change is the only change in its `main` commit and merges after
+   stage B's whole pipeline has finished.
+
+Until the gate is met, stage A's compatibility stays. It costs nothing for
+current clients, which always send a revision; it only keeps an older installed
+app able to save.
+
+Rolling back across these stages has its own order. See
+[the post-revision contract in the rollback runbook](runbooks/rollback.md#2a-the-post-revision-contract-stages-a-b-c).
+
 Two things must be true before it reports success, and both are asserted:
 
 - `dealer-social-post-ai.vercel.app` resolves to the deployment just created.
