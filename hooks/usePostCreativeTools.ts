@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { GeneratedPost } from "../types";
+import type { GeneratedPost, GenerationParams } from "../types";
 import type { StoreDefaults, StoreLook } from "../services/storeDefaults";
 import type { UseVideoJobsResult } from "./useVideoJobs";
 import { useAppStore } from "../stores/appStore";
@@ -11,6 +11,8 @@ type CreativeOperationFence = {
   workspace: string;
   postId?: string;
 };
+/** One rendered Look: the image and the brief that produced it. */
+type LookRender = { image: string; params: GenerationParams | null };
 
 export interface UsePostCreativeToolsOptions {
   post: GeneratedPost;
@@ -45,6 +47,50 @@ const workspaceKey = (post: GeneratedPost): string =>
   post.postId || post.aiMeta?.image.attemptId || post.image;
 
 /**
+ * The Look this post was rendered with: the one whose style matches the brief
+ * in the store, else the store's default Look.
+ */
+const seedLooks = (
+  defaults: StoreDefaults,
+  post: GeneratedPost,
+): { lookId: StoreLook["id"]; cache: Map<string, LookRender> } => {
+  const params = useAppStore.getState().generationParams;
+  const lookId =
+    defaults.looks.find((look) => look.style === params?.style)?.id ??
+    defaults.defaultLookId;
+  return {
+    lookId,
+    cache: new Map([[String(lookId), { image: post.image, params }]]),
+  };
+};
+
+/**
+ * The generation pipeline announces its own provider failures (it sets the
+ * store error and shows a toast). Watch for that while a call runs so one
+ * failure gets one message. Returns a stop function that reports whether the
+ * pipeline spoke.
+ */
+const watchPipelineReport = (): (() => boolean) => {
+  let reported = false;
+  const unsubscribe = useAppStore.subscribe((state, previous) => {
+    if (state.error && state.error !== previous.error) reported = true;
+  });
+  return () => {
+    unsubscribe();
+    return reported;
+  };
+};
+
+/**
+ * A refusal written for people (locked post, Look not enabled, no original
+ * photo) is shown as is; anything technical gets the plain fallback.
+ */
+const plainReason = (error: unknown, fallback: string): string =>
+  error instanceof Error && error.name === "Error" && error.message.trim()
+    ? error.message.trim()
+    : fallback;
+
+/**
  * Bounded Post-screen creative actions. Look renders and the playful pair are
  * deliberately memory-only; only the one-shot Try another budget travels with
  * the post so a remount cannot grant another paid regeneration.
@@ -63,8 +109,9 @@ export const usePostCreativeTools = ({
 }: UsePostCreativeToolsOptions): UsePostCreativeToolsResult => {
   const toast = useToast();
   const [busyLabel, setBusyLabel] = useState("");
+  const [initialLooks] = useState(() => seedLooks(defaults, post));
   const [selectedLookId, setSelectedLookId] = useState<StoreLook["id"]>(
-    defaults.defaultLookId,
+    initialLooks.lookId,
   );
   const [playfulPair, setPlayfulPair] = useState<{
     master: string;
@@ -73,18 +120,24 @@ export const usePostCreativeTools = ({
   const busyRef = useRef(false);
   const mountedRef = useRef(true);
   const workspaceRef = useRef(workspaceKey(post));
-  const lookCacheRef = useRef<Map<string, string>>(
-    new Map([[String(defaults.defaultLookId), post.image]]),
-  );
+  // Async work reads the selection from here so it never acts on a stale one.
+  const selectedLookRef = useRef<StoreLook["id"]>(initialLooks.lookId);
+  const lookCacheRef = useRef<Map<string, LookRender>>(initialLooks.cache);
+
+  const selectLook = useCallback((lookId: StoreLook["id"]) => {
+    selectedLookRef.current = lookId;
+    if (mountedRef.current) setSelectedLookId(lookId);
+  }, []);
 
   useEffect(() => {
     const nextWorkspace = workspaceKey(post);
     if (workspaceRef.current === nextWorkspace) return;
     workspaceRef.current = nextWorkspace;
-    lookCacheRef.current = new Map([[String(defaults.defaultLookId), post.image]]);
-    setSelectedLookId(defaults.defaultLookId);
+    const next = seedLooks(defaults, post);
+    lookCacheRef.current = next.cache;
+    selectLook(next.lookId);
     setPlayfulPair(null);
-  }, [defaults.defaultLookId, post]);
+  }, [defaults, post, selectLook]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -112,7 +165,7 @@ export const usePostCreativeTools = ({
 
   const refuseLocked = useCallback((): boolean => {
     if (!locked) return false;
-    toast.warning(lockReason || "This creative cannot be changed right now.");
+    toast.warning(lockReason || "This post can't be changed right now.");
     return true;
   }, [lockReason, locked, toast]);
 
@@ -127,6 +180,45 @@ export const usePostCreativeTools = ({
       if (mountedRef.current) setBusyLabel("");
     }
   }, []);
+
+  /** Remember what is on screen now, and its brief, as this Look's render. */
+  const rememberLook = useCallback((lookId: StoreLook["id"]) => {
+    const state = useAppStore.getState();
+    const image = state.generatedPost?.image;
+    if (image) {
+      lookCacheRef.current.set(String(lookId), {
+        image,
+        params: state.generationParams,
+      });
+    }
+  }, []);
+
+  /**
+   * Run provider work. A failure the pipeline did not already announce gets
+   * one plain warning; a failure after the post changed underneath is silent.
+   */
+  const attempt = useCallback(
+    async (
+      fence: CreativeOperationFence,
+      work: () => Promise<void>,
+      onFailure: (error: unknown) => string,
+    ): Promise<boolean> => {
+      const stopWatching = watchPipelineReport();
+      try {
+        await work();
+        return true;
+      } catch (error) {
+        const pipelineReported = stopWatching();
+        if (fenceIsCurrent(fence) && !pipelineReported) {
+          toast.warning(onFailure(error));
+        }
+        return false;
+      } finally {
+        stopWatching();
+      }
+    },
+    [fenceIsCurrent, toast],
+  );
 
   const markTryAnotherUsed = useCallback(() => {
     const store = useAppStore.getState();
@@ -151,29 +243,35 @@ export const usePostCreativeTools = ({
     // a partial provider failure cannot buy an extra attempt.
     markTryAnotherUsed();
     const fence = captureFence();
+    // The store's brief is the selected Look's (a cached switch restores it),
+    // so the new version belongs to that Look.
+    const renderedLookId = selectedLookRef.current;
     await run("Creating another version…", async () => {
-      // These mutations both patch generatedPost. Keep them serialized so a
-      // stale completion cannot overwrite the other mutation's newer fields.
-      await onRegenerateImage();
-      if (!fenceIsCurrent(fence)) return;
-      await onRegenerateText();
-      if (!fenceIsCurrent(fence)) return;
-      const current = useAppStore.getState().generatedPost;
-      if (current?.image) {
-        lookCacheRef.current.set(String(selectedLookId), current.image);
-      }
+      await attempt(
+        fence,
+        async () => {
+          // These mutations both patch generatedPost. Keep them serialized so
+          // a stale completion cannot overwrite the other's newer fields.
+          await onRegenerateImage();
+          if (!fenceIsCurrent(fence)) return;
+          rememberLook(renderedLookId);
+          await onRegenerateText();
+        },
+        () => "Couldn't create another version.",
+      );
     });
   }, [
-    hasOriginalCapture,
+    attempt,
     captureFence,
     fenceIsCurrent,
+    hasOriginalCapture,
     markTryAnotherUsed,
     onRegenerateImage,
     onRegenerateText,
     post,
     refuseLocked,
+    rememberLook,
     run,
-    selectedLookId,
     toast,
   ]);
 
@@ -192,18 +290,18 @@ export const usePostCreativeTools = ({
 
   const changeLook = useCallback(
     async (look: StoreLook) => {
-      if (
-        refuseLocked() ||
-        !hasOriginalCapture ||
-        busyRef.current ||
-        look.id === selectedLookId
-      ) {
-        return;
-      }
+      if (refuseLocked() || !hasOriginalCapture || busyRef.current) return;
+      const previousLookId = selectedLookRef.current;
+      if (look.id === previousLookId) return;
       const cached = lookCacheRef.current.get(String(look.id));
-      setSelectedLookId(look.id);
       if (cached) {
-        selectCreative(cached);
+        const store = useAppStore.getState();
+        const current = store.generatedPost;
+        if (current && post.postId && current.postId !== post.postId) return;
+        selectLook(look.id);
+        // Bring back this Look's brief too, so Try another renders this Look.
+        if (cached.params) store.setGenerationParams(cached.params);
+        selectCreative(cached.image);
         return;
       }
       if (!onChangeLook) {
@@ -212,21 +310,34 @@ export const usePostCreativeTools = ({
       }
       const fence = captureFence();
       await run(`Applying ${look.label}…`, async () => {
-        await onChangeLook(look.id);
+        selectLook(look.id);
+        const applied = await attempt(
+          fence,
+          () => onChangeLook(look.id),
+          (error) => plainReason(error, `Couldn't apply ${look.label}. Try again.`),
+        );
         if (!fenceIsCurrent(fence)) return;
-        const current = useAppStore.getState().generatedPost;
-        if (current?.image) lookCacheRef.current.set(String(look.id), current.image);
+        if (!applied) {
+          // Put the selector back on the Look that is still on screen, so the
+          // same Look can be chosen again to retry.
+          selectLook(previousLookId);
+          return;
+        }
+        rememberLook(look.id);
       });
     },
     [
-      hasOriginalCapture,
+      attempt,
       captureFence,
       fenceIsCurrent,
+      hasOriginalCapture,
       onChangeLook,
+      post.postId,
       refuseLocked,
+      rememberLook,
       run,
       selectCreative,
-      selectedLookId,
+      selectLook,
       toast,
     ],
   );
@@ -266,14 +377,19 @@ export const usePostCreativeTools = ({
     const master = post.image;
     const fence = captureFence();
     await run("Creating a playful version…", async () => {
-      await onFunMode(defaults.playfulStyleId || undefined);
-      if (!fenceIsCurrent(fence)) return;
+      const created = await attempt(
+        fence,
+        () => onFunMode(defaults.playfulStyleId || undefined),
+        () => "Couldn't create a playful version. Try again.",
+      );
+      if (!created || !fenceIsCurrent(fence)) return;
       const playful = useAppStore.getState().generatedPost?.image;
       if (playful && playful !== master) setPlayfulPair({ master, playful });
     });
   }, [
-    defaults.playfulStyleId,
+    attempt,
     captureFence,
+    defaults.playfulStyleId,
     fenceIsCurrent,
     hasOriginalCapture,
     onFunMode,
