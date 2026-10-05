@@ -11,7 +11,14 @@
  * made controllable (its real bookkeeping is proven in the hook's tests).
  */
 import React from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PostDetails } from "../components/PostDetails";
 import { PostCustomizer } from "../components/PostCustomizer";
@@ -192,6 +199,15 @@ afterEach(() => {
   });
 });
 
+/** The Details signature row: a "Signed" badge and the customer's name. */
+const signatureRow = () =>
+  screen.getByRole("button", { name: /^Customer's signature/ });
+const expectSignedBy = (name: string) => {
+  const row = within(signatureRow());
+  expect(row.getByText("Signed")).toBeInTheDocument();
+  expect(row.getByText(name)).toBeInTheDocument();
+};
+
 describe("Details draft carried through a Cancel or failed-attempt remount", () => {
   it("hands the signed release and the personal line back after Generate then Cancel, without re-signing", async () => {
     const onGenerate = vi.fn(recordLikeOnMutate);
@@ -213,14 +229,14 @@ describe("Details draft carried through a Cancel or failed-attempt remount", () 
     fireEvent.click(screen.getByRole("button", { name: /Anything to mention/i }));
     const line = await screen.findByLabelText(/Anything to mention/i);
     expect(line).toHaveValue("");
-    expect(screen.queryByText(/^Signed ·/)).toBeNull();
+    expect(within(signatureRow()).queryByText("Signed")).toBeNull();
 
     // Sign, type the line, Create post.
     const captured = signedRelease();
     mocks.nextRelease = captured;
     fireEvent.click(screen.getByRole("button", { name: /Get customer's signature/i }));
     fireEvent.click(screen.getByRole("button", { name: "Sign release" }));
-    expect(screen.getByText("Signed · Alex Johnson")).toBeInTheDocument();
+    expectSignedBy("Alex Johnson");
     fireEvent.change(line, { target: { value: PERSONAL_LINE } });
     fireEvent.click(screen.getByRole("button", { name: /Create post/i }));
     await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(1));
@@ -239,7 +255,7 @@ describe("Details draft carried through a Cancel or failed-attempt remount", () 
     expect(await screen.findByLabelText(/Anything to mention/i)).toHaveValue(
       PERSONAL_LINE,
     );
-    expect(screen.getByText("Signed · Alex Johnson")).toBeInTheDocument();
+    expectSignedBy("Alex Johnson");
 
     // The retry runs on the same signature: no second pad, no new release.
     mocks.nextRelease = null;

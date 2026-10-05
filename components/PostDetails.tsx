@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Check, ChevronRight, ScanLine, Sparkles } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, MessageSquareText, PenLine, ScanLine } from "lucide-react";
 import type {
   ImageSelection,
   MediaOutputMode,
@@ -22,6 +22,7 @@ import { isReleaseAlreadyLinked } from "../hooks/useGeneration";
 import { listWebsiteDestinations } from "../services/websitePublishing";
 import { Modal } from "./ui/Modal";
 import { Button } from "./ui/Button";
+import { Badge } from "./ui/Badge";
 import { ErrorBanner } from "./ui/ErrorBanner";
 import { VinScanner } from "./VinScanner";
 import { ReleaseSheet } from "./details/ReleaseSheet";
@@ -46,6 +47,37 @@ export interface PostDetailsProps {
   onDismissError?: () => void;
 }
 
+const REASON_ID = "create-post-reason";
+const LINE_COUNT_ID = "personal-line-count";
+
+/** One tappable row: icon, label with its status tag, value, chevron. */
+const DetailRow: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  badge: React.ReactNode;
+  value?: string;
+  valueClassName?: string;
+  onClick: () => void;
+}> = ({ icon, label, badge, value, valueClassName = "max-w-[40%]", onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="flex min-h-16 w-full items-center gap-3 rounded-md border border-hairline bg-panel-raised px-4 py-3 text-left text-ink transition-colors duration-120 ease-out hover:border-strong"
+  >
+    <span className="shrink-0 text-ink-2 [&>svg]:h-5 [&>svg]:w-5" aria-hidden="true">
+      {icon}
+    </span>
+    <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+      <span className="text-base">{label}</span>
+      {badge}
+    </span>
+    {value ? (
+      <span className={`${valueClassName} truncate text-sm text-ink-2`}>{value}</span>
+    ) : null}
+    <ChevronRight className="h-5 w-5 shrink-0 text-ink-hint" aria-hidden="true" />
+  </button>
+);
+
 const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
   imageSrc,
   onGenerate,
@@ -57,6 +89,7 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
 }) => {
   const dealer = useAppStore((state) => state.currentDealer);
   const person = useAppStore((state) => state.currentPerson);
+  const role = useAppStore((state) => state.role);
   const setPostDraft = useAppStore((state) => state.setPostDraft);
   const pendingRelease = useAppStore((state) => state.pendingRelease);
   const setPendingRelease = useAppStore((state) => state.setPendingRelease);
@@ -66,6 +99,23 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [websiteReady, setWebsiteReady] = useState(false);
+  const lineRef = useRef<HTMLTextAreaElement>(null);
+  const focusLineOnOpen = useRef(false);
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barHeight, setBarHeight] = useState<number | null>(null);
+
+  // Phones: the action bar is fixed over the page, and a long gate reason can
+  // wrap to several lines, so the page reserves the bar's measured height
+  // (plus a gap) instead of a guess that would hide the bottom of the form.
+  useEffect(() => {
+    const bar = barRef.current;
+    if (!bar || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      setBarHeight(Math.ceil(bar.getBoundingClientRect().height));
+    });
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, []);
 
   const intake = usePhotoIntake({
     enableDrop: false,
@@ -83,6 +133,15 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
       .catch(() => setWebsiteReady(false));
     return () => controller.abort();
   }, [dealer?.id]);
+
+  // Opening "Anything to mention?" swaps the row for the field, so focus
+  // follows it instead of falling back to the page.
+  useEffect(() => {
+    if (lineOpen && focusLineOnOpen.current) {
+      focusLineOnOpen.current = false;
+      lineRef.current?.focus();
+    }
+  }, [lineOpen]);
 
   const tile = useMemo(
     () =>
@@ -103,14 +162,18 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
     [dealer, draft, person, websiteReady],
   );
 
+  // A1: a signature is single-use. Once it backs a post (Back from Post returns
+  // here with the same pendingRelease) it can never back another one.
+  const releaseSpent =
+    isReleaseAlreadyLinked(pendingRelease) || pendingRelease?.linked === true;
+
   const request = buildGenerationRequest({
     dealershipName: dealer?.name || "Dealership",
     currentDealer: dealer,
     scenarioId: draft.scenarioId,
     decodedVehicle: draft.decodedVehicle || null,
     capturedRelease: pendingRelease,
-    releaseAlreadyLinked:
-      isReleaseAlreadyLinked(pendingRelease) || pendingRelease?.linked === true,
+    releaseAlreadyLinked: releaseSpent,
     customerName: toPublicCustomerLabel(pendingRelease?.customerName),
     personalLine: draft.personalLine || "",
     // Details always supports the optional personal line. Store defaults still
@@ -130,22 +193,37 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
     effectiveMediaMode: "photo",
   });
 
+  // With no usable signature (none yet, already used, or no longer matching
+  // this customer or vehicle) the primary action IS getting one; every other
+  // gate disables Create post and says why. A fresh capture binds the current
+  // VIN, so it always clears a mismatch.
+  const signatureMismatch = !request.ok && request.reason === "release_mismatch";
+  const needsSignature =
+    !request.ok &&
+    (request.reason === "release_required" ||
+      (signatureMismatch && defaults.releaseRequired));
+  const signed = Boolean(pendingRelease) && !releaseSpent && !signatureMismatch;
+  // Managers sign in as dealer admins and can add a channel themselves.
+  const canSetUpStore = role === "dealer_admin" || role === "super_admin";
+
   const gateReason = request.ok
     ? null
     : request.reason === "release_required"
-      ? "Needs the customer's signature first"
+      ? request.detail === "release_already_used"
+        ? "This signature was used for your last post — get a new signature"
+        : null
       : request.reason === "identity"
         ? request.message || "Check the optional line before creating."
         : request.reason === "no_destination"
-          ? "No sharing destination is configured."
-          : "The signature no longer matches this customer or vehicle.";
-  const reasonId = "create-post-reason";
+          ? canSetUpStore
+            ? "No place to share is set up for your store yet. Add one in dealership setup."
+            : "No place to share is set up for your store yet. Ask your manager."
+          : "The signature no longer matches this customer or vehicle — get a new signature.";
+
+  const openRelease = () => setReleaseOpen(true);
 
   const createPost = async () => {
-    if (!request.ok || submitting) {
-      if (!request.ok && request.reason.startsWith("release")) setReleaseOpen(true);
-      return;
-    }
+    if (!request.ok || submitting) return;
     setSubmitting(true);
     setLocalError(null);
     try {
@@ -165,143 +243,141 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
       );
     } catch {
       setLocalError(
-        "Generation was interrupted. Your photo and details are still here.",
+        "Creating the post stopped. Your photo and details are still here.",
       );
     } finally {
       setSubmitting(false);
     }
   };
 
-  useKeyboardShortcuts({ onPrimary: () => void createPost(), onCancel: onBack });
+  const primaryAction = () => {
+    if (needsSignature) openRelease();
+    else void createPost();
+  };
+
+  useKeyboardShortcuts({ onPrimary: primaryAction, onCancel: onBack });
+
+  const bannerMessage = error || localError || intake.error;
+  const categoryLabel = tile?.label || "Post";
 
   return (
-    <div className="mx-auto grid w-full max-w-[1240px] gap-7 px-0 pb-[calc(6.5rem+var(--sab))] pt-3 sm:px-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(350px,.65fr)] lg:gap-10 lg:px-8 lg:pb-10 lg:pt-10">
+    <div
+      style={
+        barHeight
+          ? ({ "--details-bar-space": `${barHeight + 24}px` } as React.CSSProperties)
+          : undefined
+      }
+      className="mx-auto grid w-full max-w-[1240px] gap-4 pb-[var(--details-bar-space,calc(8.5rem+var(--sab)))] sm:gap-6 sm:px-6 sm:pt-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(350px,.65fr)] lg:grid-rows-[auto_1fr] lg:gap-x-12 lg:gap-y-6 lg:px-8 lg:pb-10 lg:pt-10"
+    >
+      {/* The header carries the category title on phones; this heading names
+          the page for screen readers there and is the display title on desktop. */}
+      <div className="max-lg:sr-only lg:col-start-2 lg:row-start-1">
+        <h1 className="font-display text-3xl font-semibold text-ink md:text-4xl">
+          {categoryLabel}
+        </h1>
+        {tile?.blurb ? <p className="mt-1 text-base text-ink-2">{tile.blurb}</p> : null}
+      </div>
+
       <PhotoPanel
+        className="lg:col-start-1 lg:row-span-2 lg:row-start-1"
         imageSrc={imageSrc}
-        categoryLabel={tile?.label || "Post"}
-        categoryBlurb={tile?.blurb}
-        dealerName={dealer?.name}
+        categoryLabel={categoryLabel}
         isProcessing={intake.isProcessing}
         onFile={(file) => void intake.processFile(file)}
       />
 
-      <section className="flex min-h-[430px] flex-col px-4 sm:rounded-xl sm:border sm:border-hairline sm:bg-panel sm:p-5 lg:p-6">
-        <div className="hidden lg:block">
-          <div className="mb-4 flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-md border border-strong bg-brand-tint text-brand-ink">
-              <Sparkles className="h-5 w-5" aria-hidden="true" />
-            </span>
-            <p className="text-2xs font-semibold uppercase tracking-[0.15em] text-brand-ink">
-              Post setup
-            </p>
-          </div>
-          <h1 className="font-display text-3xl font-semibold text-ink">
-            {tile?.label || "Post details"}
-          </h1>
-          <p className="mt-1 text-ink-2">{tile?.blurb}</p>
-        </div>
-        {error || localError || intake.error ? (
+      <section className="flex min-w-0 flex-col px-4 sm:px-0 lg:col-start-2 lg:row-start-2">
+        {bannerMessage ? (
           <ErrorBanner
-            message={error || localError || intake.error || ""}
+            message={bannerMessage}
+            actionLabel="Dismiss"
             onRetry={() => {
               setLocalError(null);
               intake.setError(null);
               onDismissError?.();
             }}
-            className="mb-4 mt-4"
+            className="mb-3"
           />
         ) : null}
 
-        <div className="mt-3 space-y-3 lg:mt-6">
-          {defaults.releaseRequired ? (
-            pendingRelease ? (
-              <button
-                type="button"
-                onClick={() => setReleaseOpen(true)}
-                className="flex min-h-16 w-full items-center gap-3 rounded-md border border-hairline bg-panel-raised px-4 text-left hover:border-strong hover:bg-fill-subtle"
-              >
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-sm bg-brand-tint text-brand-ink">
-                  <Check className="h-5 w-5" aria-hidden="true" />
-                </span>
-                <span className="flex-1">Customer&apos;s signature</span>
-                <span className="text-sm font-medium text-brand-ink">
-                  Signed · {pendingRelease.customerName}
-                </span>
-                <ChevronRight className="h-5 w-5 text-ink-hint" aria-hidden="true" />
-              </button>
-            ) : (
-              <div className="rounded-md border border-hairline bg-panel-raised p-4">
-                <div className="mb-3 flex justify-between">
-                  <span>Customer&apos;s signature</span>
-                  <span className="text-warning-ink">Needed</span>
-                </div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  fullWidth
-                  onClick={() => setReleaseOpen(true)}
-                >
-                  Get customer&apos;s signature
-                </Button>
-              </div>
-            )
+        <div className="space-y-3 lg:pb-8">
+          {defaults.vehicleRelevant ? (
+            <DetailRow
+              icon={<ScanLine />}
+              label="Vehicle"
+              badge={<Badge variant="neutral">Optional</Badge>}
+              value={draft.decodedVehicle?.summary || "Scan VIN"}
+              valueClassName="max-w-[55%]"
+              onClick={() => setVinOpen(true)}
+            />
           ) : null}
 
-          {defaults.vehicleRelevant ? (
-            <button
-              type="button"
-              onClick={() => setVinOpen(true)}
-              className="flex min-h-16 w-full items-center gap-3 rounded-md border border-hairline bg-panel-raised px-4 text-left hover:border-strong hover:bg-fill-subtle"
-            >
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-sm bg-brand-tint text-brand-ink">
-                <ScanLine className="h-5 w-5" aria-hidden="true" />
-              </span>
-              <span className="flex-1">Vehicle</span>
-              <span className="max-w-[55%] truncate text-sm text-ink-hint">
-                {draft.decodedVehicle?.summary || "Scan VIN · optional"}
-              </span>
-              <ChevronRight className="h-5 w-5 text-ink-hint" aria-hidden="true" />
-            </button>
+          {defaults.releaseRequired ? (
+            <DetailRow
+              icon={<PenLine />}
+              label="Customer's signature"
+              badge={
+                signed ? (
+                  <Badge variant="success">Signed</Badge>
+                ) : (
+                  <Badge variant="warning">Needed</Badge>
+                )
+              }
+              value={signed ? pendingRelease?.customerName : undefined}
+              onClick={openRelease}
+            />
           ) : null}
 
           {lineOpen ? (
             <div className="rounded-md border border-hairline bg-panel-raised p-4">
               <label
                 htmlFor="personal-line"
-                className="mb-1.5 block text-sm text-ink-2"
+                className="mb-2 flex flex-wrap items-center gap-2 text-base text-ink"
               >
-                Anything to mention? <span className="text-ink-hint">optional</span>
+                Anything to mention? <Badge variant="neutral">Optional</Badge>
               </label>
               <textarea
+                ref={lineRef}
                 id="personal-line"
                 value={draft.personalLine || ""}
                 maxLength={PERSONAL_LINE_MAX}
+                aria-describedby={LINE_COUNT_ID}
                 onChange={(event) =>
                   setPostDraft({ ...draft, personalLine: event.target.value })
                 }
-                className="min-h-24 w-full rounded-md border border-strong bg-panel p-3 text-base text-ink"
+                className="min-h-24 w-full resize-none rounded-sm border border-strong bg-panel px-3 py-2.5 text-base text-ink transition-colors duration-120 ease-out focus:border-brand-ink"
               />
-              <div className="mt-1 text-right text-caption text-ink-hint">
+              <div
+                id={LINE_COUNT_ID}
+                className="mt-1 text-right text-caption text-ink-hint"
+              >
                 {PERSONAL_LINE_MAX - (draft.personalLine?.length || 0)} left
               </div>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={() => setLineOpen(true)}
-              className="flex min-h-14 w-full items-center rounded-md border border-dashed border-strong px-4 text-left text-ink-2 hover:bg-fill-subtle"
-            >
-              <span className="flex-1">
-                Anything to mention? <span className="text-ink-hint">optional</span>
-              </span>
-              <ChevronRight className="h-5 w-5 text-ink-hint" aria-hidden="true" />
-            </button>
+            <DetailRow
+              icon={<MessageSquareText />}
+              label="Anything to mention?"
+              badge={<Badge variant="neutral">Optional</Badge>}
+              onClick={() => {
+                focusLineOnOpen.current = true;
+                setLineOpen(true);
+              }}
+            />
           )}
         </div>
 
-        <div className="mt-auto border-t border-hairline pt-6 lg:mt-8">
+        {/* Phones: a bar pinned to the bottom so the one action is always in
+            reach (same pattern as Post). Desktop: the foot of the column. */}
+        <div
+          ref={barRef}
+          className="max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-20 max-lg:border-t max-lg:border-hairline max-lg:bg-panel max-lg:px-4 max-lg:pt-3 max-lg:pb-[max(12px,var(--sab))] sm:max-lg:px-6 lg:mt-auto lg:border-t lg:border-hairline lg:pt-6"
+        >
           {gateReason ? (
-            <p id={reasonId} className="mb-2 text-center text-sm text-ink-hint">
+            <p
+              id={REASON_ID}
+              className="mb-2 text-sm font-medium text-warning-ink max-lg:text-center"
+            >
               {gateReason}
             </p>
           ) : null}
@@ -310,11 +386,11 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
             size="lg"
             fullWidth
             loading={submitting}
-            aria-disabled={Boolean(gateReason)}
-            aria-describedby={gateReason ? reasonId : undefined}
-            onClick={() => void createPost()}
+            disabled={!needsSignature && Boolean(gateReason)}
+            aria-describedby={gateReason ? REASON_ID : undefined}
+            onClick={primaryAction}
           >
-            Create post
+            {needsSignature ? "Get customer's signature" : "Create post"}
           </Button>
         </div>
       </section>
@@ -342,7 +418,9 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
         onVehicleDecoded={(vehicle) => {
           if (pendingRelease && pendingRelease.vin !== vehicle.vin) {
             setPendingRelease(null);
-            setLocalError("Vehicle changed — get the signature again");
+            setLocalError(
+              "You changed the vehicle, so the customer needs to sign again.",
+            );
           }
           setPostDraft({ ...draft, decodedVehicle: vehicle });
         }}

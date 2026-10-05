@@ -74,7 +74,7 @@ describe("frontend accessibility repairs", () => {
     expect(canvas.style.width).toBe("320px");
     expect(canvas.width).toBe(320);
 
-    await user.click(screen.getByRole("button", { name: "Type name" }));
+    await user.click(screen.getByRole("button", { name: "Type name instead" }));
     await user.type(
       screen.getByLabelText("Type the customer’s full legal name"),
       "Jane Smith",
