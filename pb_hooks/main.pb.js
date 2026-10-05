@@ -5720,6 +5720,10 @@ routerAdd("PATCH", "/api/app/dealers/:id", (c) => {
     if (data.name !== undefined && !data.name) {
       return c.json(400, { error: "Dealer name is required" });
     }
+    // The creative-system rollout flag is the system administrator's switch.
+    // A manager's save never changes it. The field is ignored rather than
+    // rejected, so a settings form that echoes the stored value still saves.
+    if (!isSuperAdmin) delete data.creative_system_v2;
 
     const form = new RecordUpsertForm($app, target);
     form.setFullManageAccess(true);
