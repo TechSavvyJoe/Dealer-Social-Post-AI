@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
-import { Clock } from "lucide-react";
+import { Badge } from "./ui/Badge";
+import { Button } from "./ui/Button";
 import { cn } from "../utils/classNames";
 import {
   DAY_LABELS,
@@ -37,8 +38,9 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
   disabled = false,
 }) => {
   const controlIdPrefix = `hours-${React.useId().replace(/:/g, "")}`;
+  const headingId = `${controlIdPrefix}-heading`;
   const selectClass =
-    "rounded-lg border border-hairline bg-surface-950/60 px-2 py-1.5 text-sm text-surface-100 focus:border-primary-400 focus:outline-none disabled:opacity-50";
+    "min-h-11 rounded-sm border border-strong bg-panel-raised px-2 text-base text-ink transition-colors duration-120 ease-out focus:border-brand-ink disabled:cursor-not-allowed disabled:opacity-50";
 
   const updateDay = (day: DayKey, patch: Partial<WeekHours[DayKey]>) => {
     onChange({
@@ -76,62 +78,55 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
 
   const rows = useMemo(() => DAY_ORDER, []);
 
+  // One panel with hairline-separated day rows: no card per weekday.
   return (
     <div
+      role="group"
+      aria-labelledby={headingId}
       className={cn(
-        "space-y-3 rounded-xl border border-hairline bg-surface-950/40 p-3 sm:p-4",
+        "rounded-md border border-hairline bg-panel px-4 py-3 sm:px-5",
         className,
       )}
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-sm font-semibold text-surface-50">
-          <Clock className="h-4 w-4 text-primary-300" aria-hidden="true" />
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline pb-2">
+        <h4 id={headingId} className="text-ink">
           Business hours
-        </div>
-        <button
+        </h4>
+        <Button
           type="button"
+          variant="ghost"
+          size="md"
           disabled={disabled || !value.mon.open}
           onClick={copyWeekdays}
-          className="text-xs font-semibold text-ink-2 underline decoration-brand-ink/60 underline-offset-4 hover:text-ink disabled:opacity-40"
         >
           Copy Mon → weekdays
-        </button>
+        </Button>
       </div>
 
-      <div className="space-y-2" role="list" aria-label="Hours by day">
+      <div role="list" aria-label="Hours by day">
         {rows.map((day) => {
           const row = value[day];
           return (
             <div
               key={day}
               role="listitem"
-              className={cn(
-                "grid grid-cols-1 items-center gap-2 rounded-lg border px-3 py-2 sm:grid-cols-[5.5rem_1fr]",
-                row.open
-                  ? "border-primary-500/30 bg-primary-500/5"
-                  : "border-hairline bg-fill-subtle opacity-80",
-              )}
+              className="grid grid-cols-1 items-center gap-2 border-b border-hairline py-3 last:border-b-0 sm:grid-cols-[8rem_1fr]"
             >
               <button
                 type="button"
                 disabled={disabled}
                 onClick={() => updateDay(day, { open: !row.open })}
-                className="flex items-center gap-2 text-left"
+                className="flex min-h-11 items-center gap-3 rounded-sm text-left disabled:cursor-not-allowed disabled:opacity-50"
                 aria-pressed={row.open}
               >
-                <span className="w-10 text-sm font-semibold text-surface-100">
+                <span className="w-10 text-sm font-semibold text-ink">
                   {DAY_LABELS[day]}
                 </span>
-                <span
-                  className={cn(
-                    "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-                    row.open
-                      ? "bg-success-500/15 text-success-300 [.theme-light_&]:text-success-900"
-                      : "bg-surface-800 text-surface-400",
-                  )}
-                >
-                  {row.open ? "Open" : "Closed"}
-                </span>
+                {row.open ? (
+                  <Badge variant="success">Open</Badge>
+                ) : (
+                  <Badge variant="neutral">Closed</Badge>
+                )}
               </button>
 
               {row.open ? (
@@ -155,7 +150,7 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
                       </option>
                     ))}
                   </select>
-                  <span className="text-xs text-ink-2">to</span>
+                  <span className="text-sm text-ink-2">to</span>
                   <label
                     className="sr-only"
                     htmlFor={`${controlIdPrefix}-close-${day}`}
@@ -180,7 +175,7 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
                   </select>
                 </div>
               ) : (
-                <p className="text-xs text-ink-2">
+                <p className="text-caption text-ink-2">
                   Tap the day to mark it open and set hours
                 </p>
               )}
@@ -190,8 +185,8 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
       </div>
 
       {preview ? (
-        <p className="text-xs text-surface-400">
-          Preview: <span className="font-mono text-ink-2">{preview}</span>
+        <p className="border-t border-hairline pt-3 text-sm text-ink-2">
+          Preview: <span className="text-ink">{preview}</span>
         </p>
       ) : null}
     </div>

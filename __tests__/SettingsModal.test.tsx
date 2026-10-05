@@ -33,14 +33,14 @@ describe("SettingsModal", () => {
     });
   });
 
-  it("distinguishes device preferences from the store-managed image default", () => {
+  it("describes image quality as the device preference it is", () => {
+    // Generation reads the device choice only; the store's saved tier is not
+    // applied, so the modal must not claim the store manages it.
     renderModal();
     expect(screen.getByText("Saved only on this device.")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        /Northside Motors currently manages the store default as studio/,
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Your device preference.")).toBeInTheDocument();
+    expect(screen.queryByText(/manages the store default/)).toBeNull();
+    expect(screen.queryByText(/team-wide default/)).toBeNull();
     expect(
       screen.queryByRole("button", { name: /Open dealership setup/ }),
     ).not.toBeInTheDocument();

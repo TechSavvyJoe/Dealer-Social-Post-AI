@@ -156,12 +156,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         <div>
           <h3 className="text-lg font-semibold text-ink">Image quality</h3>
-          <p className="mt-1 text-sm text-ink-2">
-            Your device preference
-            {dealer?.image_quality_tier
-              ? `; ${dealer.name} currently manages the store default as ${dealer.image_quality_tier}.`
-              : ". The store can set a team-wide default in manager setup."}
-          </p>
+          {/* Generation reads this device's choice only; the store's saved tier
+              is not applied, so this copy must not claim the store manages it. */}
+          <p className="mt-1 text-sm text-ink-2">Your device preference.</p>
           <div
             className="mt-3 grid gap-2 sm:grid-cols-2"
             role="group"

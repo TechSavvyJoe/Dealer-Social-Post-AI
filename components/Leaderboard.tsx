@@ -1,6 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { m, AnimatePresence } from "framer-motion";
-import { Trophy, Film, ShieldCheck, Loader2, RefreshCw, Download } from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Trophy, Film, ShieldCheck, RefreshCw, Download } from "lucide-react";
 import { Button } from "./ui/Button";
 import { EmptyState } from "./ui/EmptyState";
 import { ErrorBanner } from "./ui/ErrorBanner";
@@ -12,11 +11,15 @@ import { useAppStore } from "../stores/appStore";
 
 type RangeKey = "week" | "month" | "30d" | "all";
 
-const RANGES: { key: RangeKey; label: string; days?: number }[] = [
-  { key: "week", label: "This week" },
-  { key: "month", label: "This month" },
-  { key: "30d", label: "Last 30 days" },
-  { key: "all", label: "All-time" },
+/**
+ * `phrase` finishes "N posts …" and "No posts …", so the summary line names
+ * the active range in the manager's words instead of "in window".
+ */
+const RANGES: { key: RangeKey; label: string; phrase: string }[] = [
+  { key: "week", label: "This week", phrase: "this week" },
+  { key: "month", label: "This month", phrase: "this month" },
+  { key: "30d", label: "Last 30 days", phrase: "in the last 30 days" },
+  { key: "all", label: "All time", phrase: "all time" },
 ];
 
 /**
@@ -65,19 +68,6 @@ const startOfRange = (range: RangeKey): Date => {
   }
 };
 
-const ordinal = (n: number) => {
-  const s = ["th", "st", "nd", "rd"];
-  const v = n % 100;
-  return n + (s[(v - 20) % 10] || s[v] || s[0]);
-};
-
-const trophyTint = (rank: number) => {
-  if (rank === 0) return "text-amber-400";
-  if (rank === 1) return "text-surface-300";
-  if (rank === 2) return "text-orange-400";
-  return "text-surface-500";
-};
-
 export const Leaderboard: React.FC = () => {
   const currentDealer = useAppStore((s) => s.currentDealer);
   const [range, setRange] = useState<RangeKey>("week");
@@ -110,6 +100,7 @@ export const Leaderboard: React.FC = () => {
   }, [load]);
 
   const total = entries.reduce((acc, e) => acc + e.count, 0);
+  const rangePhrase = RANGES.find((r) => r.key === range)?.phrase ?? RANGES[0].phrase;
 
   const exportCsv = React.useCallback(() => {
     const rows = [
@@ -156,49 +147,24 @@ export const Leaderboard: React.FC = () => {
   }, [entries, currentDealer?.name, range]);
 
   return (
-    <m.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="rounded-lg border border-hairline bg-surface-overlay p-4 sm:p-6 space-y-4"
+    <section
+      aria-labelledby="leaderboard-heading"
+      className="space-y-4 rounded-md border border-hairline bg-panel p-5 sm:p-6"
     >
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
-          {/* Brand accent stripe — visible white-label cue regardless of logo presence */}
-          <div
-            className="h-8 w-1.5 rounded-full"
-            style={{ background: "var(--brand-primary)" }}
-            aria-hidden="true"
-          />
-          <div>
-            <h3 className="text-xl font-bold text-surface-50 flex items-center gap-2">
-              <Trophy className="h-5 w-5 text-amber-400" />
-              Salesperson leaderboard
-            </h3>
-            <p className="text-xs text-surface-400">
-              {total} post{total === 1 ? "" : "s"} in window
-            </p>
-          </div>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h3 id="leaderboard-heading" className="text-ink">
+            Salesperson leaderboard
+          </h3>
+          <p className="mt-0.5 text-sm text-ink-2">
+            {`${total} post${total === 1 ? "" : "s"} ${rangePhrase.toLowerCase()}`}
+          </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex bg-surface-950/60 p-1 rounded-xl border border-surface-800">
-            {RANGES.map((r) => (
-              <button
-                key={r.key}
-                onClick={() => setRange(r.key)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  range === r.key
-                    ? "bg-primary-500/30 text-primary-100 [.theme-light_&]:text-primary-950"
-                    : "text-surface-400 hover:text-surface-200"
-                }`}
-              >
-                {r.label}
-              </button>
-            ))}
-          </div>
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="ghost"
-            size="sm"
-            leftIcon={<Download className="h-3.5 w-3.5" />}
+            size="md"
+            leftIcon={<Download className="h-4 w-4" />}
             onClick={exportCsv}
             disabled={entries.length === 0}
             title="Export leaderboard as CSV"
@@ -207,14 +173,9 @@ export const Leaderboard: React.FC = () => {
           </Button>
           <Button
             variant="ghost"
-            size="sm"
-            leftIcon={
-              loading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" />
-              )
-            }
+            size="md"
+            leftIcon={<RefreshCw className="h-4 w-4" />}
+            loading={loading}
             onClick={() => void load()}
             disabled={loading}
           >
@@ -223,131 +184,105 @@ export const Leaderboard: React.FC = () => {
         </div>
       </div>
 
+      <div
+        role="group"
+        aria-label="Leaderboard range"
+        className="grid grid-cols-2 gap-1 rounded-sm border border-hairline bg-panel-raised p-1 sm:inline-grid sm:grid-cols-4"
+      >
+        {RANGES.map((r) => {
+          const selected = range === r.key;
+          return (
+            <button
+              key={r.key}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => setRange(r.key)}
+              className={cn(
+                "min-h-11 rounded-sm px-3 text-sm font-semibold transition-colors duration-120 ease-out",
+                selected ? "bg-overlay text-ink" : "text-ink-2 hover:text-ink",
+              )}
+            >
+              {r.label}
+            </button>
+          );
+        })}
+      </div>
+
       {error && <ErrorBanner message={error} onRetry={() => void load()} />}
 
-      <AnimatePresence mode="wait">
-        {loading && entries.length === 0 ? (
-          <m.div
-            key="loading"
-            className="space-y-2"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            aria-label="Loading leaderboard"
-          >
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-3 rounded-xl border border-surface-800 bg-surface-900/40 px-3 py-2.5"
-              >
-                <Skeleton variant="circular" width={36} height={36} />
-                <div className="flex-1 space-y-2">
-                  <Skeleton width="45%" height={12} />
-                  <Skeleton width="30%" height={10} />
-                </div>
-                <Skeleton width={32} height={24} />
+      {loading && entries.length === 0 ? (
+        <div className="divide-y divide-hairline" aria-label="Loading leaderboard">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 py-3">
+              <Skeleton width={24} height={24} />
+              <div className="flex-1 space-y-2">
+                <Skeleton width="45%" height={12} />
+                <Skeleton width="30%" height={10} />
               </div>
-            ))}
-          </m.div>
-        ) : entries.length === 0 ? (
-          <m.div
-            key="empty"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <EmptyState
-              icon={Trophy}
-              title="No posts yet in this window"
-              description="Tell your team — first one on the board gets bragging rights."
-            />
-          </m.div>
-        ) : (
-          <m.ul
-            key="entries"
-            className="space-y-2"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            {entries.map((entry, idx) => (
-              <m.li
-                key={entry.salesperson}
-                initial={{ opacity: 0, x: -8 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: idx * 0.03 }}
-                className={cn(
-                  "flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors",
-                  idx === 0
-                    ? "border-amber-400/30 bg-amber-500/[0.06]"
-                    : "border-surface-800 bg-surface-900/40",
-                )}
+              <Skeleton width={32} height={24} />
+            </div>
+          ))}
+        </div>
+      ) : entries.length === 0 ? (
+        <EmptyState
+          icon={Trophy}
+          title={range === "all" ? "No posts yet" : `No posts ${rangePhrase}`}
+          description="Tell your team — first one on the board gets bragging rights."
+        />
+      ) : (
+        <ol className="divide-y divide-hairline" aria-label="Salespeople by posts">
+          {entries.map((entry, idx) => (
+            <li key={entry.salesperson} className="flex items-center gap-3 py-3">
+              <span
+                className="grid h-6 w-6 shrink-0 place-items-center rounded-sm bg-panel-raised font-display text-sm font-medium tabular-nums text-ink"
+                aria-hidden="true"
               >
-                <div
-                  className={cn(
-                    "flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center",
-                    idx === 0 ? "bg-amber-500/15" : "bg-fill-subtle",
-                  )}
-                >
-                  {idx < 3 ? (
-                    <Trophy className={`h-4 w-4 ${trophyTint(idx)}`} />
-                  ) : (
-                    <span className="text-xs text-surface-400 font-semibold tabular-nums">
-                      {ordinal(idx + 1)}
+                {idx + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold text-ink">
+                  {entry.salesperson}
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-ink-2">
+                  {entry.videoCount > 0 && (
+                    <span className="flex items-center gap-1" title="Posts with video">
+                      <Film className="h-3.5 w-3.5" aria-hidden="true" />
+                      {entry.videoCount}
+                      <span className="sr-only"> with video</span>
                     </span>
                   )}
+                  {entry.releaseCount > 0 && (
+                    <span
+                      className="flex items-center gap-1"
+                      title="Posts with signed release"
+                    >
+                      <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                      {entry.releaseCount}
+                      <span className="sr-only"> with a signed release</span>
+                    </span>
+                  )}
+                  {(() => {
+                    const t = entry.lastPostedAt ? Date.parse(entry.lastPostedAt) : NaN;
+                    return Number.isNaN(t) ? null : (
+                      <span>Last {new Date(t).toLocaleDateString()}</span>
+                    );
+                  })()}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-surface-50 truncate">
-                    {entry.salesperson}
-                  </div>
-                  <div className="text-[11px] text-surface-400 flex items-center gap-3 mt-0.5">
-                    {entry.videoCount > 0 && (
-                      <span
-                        className="flex items-center gap-1 text-primary-300/80"
-                        title="Posts with video"
-                      >
-                        <Film className="h-3 w-3" /> {entry.videoCount}
-                      </span>
-                    )}
-                    {entry.releaseCount > 0 && (
-                      <span
-                        className="flex items-center gap-1 text-success-300/80"
-                        title="Posts with signed release"
-                      >
-                        <ShieldCheck className="h-3 w-3" /> {entry.releaseCount}
-                      </span>
-                    )}
-                    {(() => {
-                      const t = entry.lastPostedAt
-                        ? Date.parse(entry.lastPostedAt)
-                        : NaN;
-                      return Number.isNaN(t) ? null : (
-                        <span>Last {new Date(t).toLocaleDateString()}</span>
-                      );
-                    })()}
-                  </div>
+              </div>
+              {/* Hero metric — the count is the point of a leaderboard, so it
+                  dominates the row. */}
+              <div className="shrink-0 text-right">
+                <div className="font-display text-2xl font-semibold leading-7 tabular-nums text-ink">
+                  {entry.count}
                 </div>
-                {/* Hero metric — the count is the point of a leaderboard, so it
-                    dominates the row. */}
-                <div className="flex-shrink-0 text-right leading-none">
-                  <div
-                    className={cn(
-                      "text-2xl font-bold tabular-nums",
-                      idx === 0 ? "text-amber-200" : "text-surface-50",
-                    )}
-                  >
-                    {entry.count}
-                  </div>
-                  <div className="text-[10px] uppercase tracking-wider text-surface-400 mt-0.5">
-                    {entry.count === 1 ? "post" : "posts"}
-                  </div>
+                <div className="text-caption text-ink-2">
+                  {entry.count === 1 ? "post" : "posts"}
                 </div>
-              </m.li>
-            ))}
-          </m.ul>
-        )}
-      </AnimatePresence>
-    </m.div>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
   );
 };

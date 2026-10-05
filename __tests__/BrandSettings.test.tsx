@@ -1,5 +1,13 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DealerSettingsCard } from "../components/DealerAdminDashboard";
 import { PersonEditModal } from "../components/PersonEditModal";
@@ -79,24 +87,68 @@ describe("dealer Brand section", () => {
     fireEvent.click(creative);
     expect(creative).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("region", { name: "Brand" })).not.toHaveClass("hidden");
+    // Four setup areas: Workflow has safe defaults, so it is not a task.
     expect(
       screen.getByRole("progressbar", { name: "Store setup progress" }),
-    ).toHaveAttribute("aria-valuemax", "5");
+    ).toHaveAttribute("aria-valuemax", "4");
   });
 
-  it("persists advanced approval and team permission fields through validated server fields", async () => {
+  it("persists team feature access through the validated server field", async () => {
     const { onSaved } = renderSettings();
     fireEvent.click(screen.getByRole("button", { name: /Workflow/ }));
     fireEvent.click(screen.getByRole("button", { name: "Advanced workflow controls" }));
-    fireEvent.change(screen.getByLabelText("Policy"), { target: { value: "always" } });
     fireEvent.click(screen.getByRole("switch", { name: /Playful/ }));
 
     const payload = await save(onSaved);
-    expect(JSON.parse(String(payload.approval_policy))).toEqual({ mode: "always" });
     expect(JSON.parse(String(payload.feature_permissions))).toEqual({
       playful: { team: false, people: {} },
     });
     expect(payload).not.toHaveProperty("category_destinations");
+  });
+
+  it("drops the free text editing switch but keeps whatever is stored for it", async () => {
+    const { onSaved } = renderSettings({
+      ...baseDealer,
+      feature_permissions: {
+        freeTextEdit: { team: false, people: { "person-1": true } },
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Workflow/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced workflow controls" }));
+    expect(screen.queryByRole("switch", { name: /Free text/ })).toBeNull();
+    expect(screen.getAllByRole("switch").map((el) => el.textContent)).toEqual(
+      expect.arrayContaining(["Playful", "Video"]),
+    );
+    // No promise the UI cannot keep: nothing sets per-person overrides.
+    expect(screen.queryByText(/individual override/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("switch", { name: /Video/ }));
+    const payload = await save(onSaved);
+    expect(JSON.parse(String(payload.feature_permissions))).toEqual({
+      freeTextEdit: { team: false, people: { "person-1": true } },
+      video: { team: false, people: {} },
+    });
+  });
+
+  it("explains channels by post type in plain words", () => {
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: /Workflow/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced workflow controls" }));
+    expect(
+      screen.getByText(/^Salespeople only see the channels you leave checked\./),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/creative resolver/)).toBeNull();
+  });
+
+  it("states that each device still uses its own image quality", () => {
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: /Creative/ }));
+    expect(
+      screen.getByText(
+        "Your choice is saved for the store. For now, each device still uses its own image quality setting.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/higher-cost tier/)).toBeNull();
   });
 
   it("reports the active streamlined resolver when the dealer flag is on", () => {
@@ -163,7 +215,7 @@ describe("dealer Brand section", () => {
     fireEvent.click(screen.getByRole("button", { name: /Creative/ }));
 
     const overlay = screen.getByText(/^Pick which design styles your team can use/);
-    expect(overlay).toHaveTextContent(/Star one to preselect it/);
+    expect(overlay).toHaveTextContent(/Set one as the default to preselect it/);
     expect(screen.getByText("Image overlay styles")).toBeInTheDocument();
     expect(screen.getAllByText("available to salespeople").length).toBeGreaterThan(0);
   });
@@ -223,8 +275,8 @@ describe("dealer Brand section", () => {
     expect(Math.abs(doHelp.length - dontHelp.length)).toBeLessThanOrEqual(1);
   });
 
-  // The bar is sticky, so the card has to reserve room for it or the last
-  // control sits permanently underneath.
+  // The bar is sticky, so the settings column has to reserve room for it or
+  // the last control sits permanently underneath.
   it("reserves bottom padding at least as tall as the sticky save bar", () => {
     renderSettings();
 
@@ -232,10 +284,10 @@ describe("dealer Brand section", () => {
     expect(bar.className).toContain("sticky");
     expect(bar.className).toContain("min-h-14");
 
-    const card = bar.parentElement as HTMLElement;
-    expect(card.className).toContain("pb-20");
-    // sm:p-6 would otherwise win back the bottom padding at desktop width.
-    expect(card.className).toContain("sm:pb-20");
+    const column = bar.parentElement as HTMLElement;
+    expect(column.className).toContain("pb-20");
+    // No responsive padding may win the bottom padding back.
+    expect(column.className).not.toMatch(/\bsm:p(?:b|y)?-/);
   });
 
   it("marks the form dirty when a look is chosen and saves signature_look with its tone", async () => {
@@ -263,8 +315,9 @@ describe("dealer Brand section", () => {
     expect(payload.motion_signature).toBe("");
     expect(payload.logo_placement).toBe("");
     expect(payload.image_quality_tier).toBe("");
-    // Phase 2 fields are never sent, so the server leaves them untouched.
-    expect(payload).not.toHaveProperty("approval_policy");
+    // Approval is off, so the policy is always sent cleared; untouched
+    // destinations and permissions are not sent, so the server keeps them.
+    expect(payload.approval_policy).toBe("");
     expect(payload).not.toHaveProperty("category_destinations");
     expect(payload).not.toHaveProperty("feature_permissions");
     // Existing fields still ride along through the same PATCH.
@@ -463,6 +516,219 @@ describe("dealer Brand section", () => {
   });
 });
 
+const openWorkflow = () =>
+  fireEvent.click(screen.getByRole("button", { name: /^Workflow/ }));
+const requireApproval = () =>
+  fireEvent.click(screen.getByRole("radio", { name: "Require manager approval" }));
+const reviewScope = (name: string) => screen.getByRole("radio", { name });
+const policyOf = (payload: SavedFields) =>
+  payload.approval_policy === "" ? null : JSON.parse(String(payload.approval_policy));
+
+// The server (pb_hooks/requestPolicies.js initialApprovalStatus) treats
+// requires_approval as the switch and approval_policy as a narrowing that only
+// applies while it is on. Every option below has to save exactly that pair.
+// Each case renders the full settings card; give it room on a loaded machine.
+describe("manager approval", { timeout: 90_000 }, () => {
+  it("shows the review choice only while approval is required, directly under the switch", () => {
+    renderSettings();
+    openWorkflow();
+    expect(screen.queryByRole("radio", { name: "Every post" })).toBeNull();
+    // Nothing about approval hides behind the advanced disclosure any more.
+    expect(screen.queryByLabelText("Policy")).toBeNull();
+
+    requireApproval();
+    for (const name of [
+      "Every post",
+      "Each person's first posts",
+      "Selected post types",
+    ]) {
+      expect(reviewScope(name)).toBeInTheDocument();
+    }
+    expect(reviewScope("Every post")).toBeChecked();
+    expect(screen.queryByText(/simple (?:choice|setting) above/)).toBeNull();
+  });
+
+  it("saves no approval with the policy cleared", async () => {
+    const { onSaved } = renderSettings({
+      ...baseDealer,
+      requires_approval: true,
+      approval_policy: { mode: "first_n", firstN: 4 },
+    });
+    openWorkflow();
+    fireEvent.click(screen.getByRole("radio", { name: "No approval required" }));
+
+    const payload = await save(onSaved);
+    expect(payload.requires_approval).toBe(false);
+    expect(payload.approval_policy).toBe("");
+  });
+
+  it("saves every post as approval on with the policy cleared", async () => {
+    const { onSaved } = renderSettings();
+    openWorkflow();
+    requireApproval();
+
+    const payload = await save(onSaved);
+    expect(payload.requires_approval).toBe(true);
+    expect(policyOf(payload)).toBeNull();
+  });
+
+  it("saves each person's first posts with the number to approve", async () => {
+    const { onSaved } = renderSettings();
+    openWorkflow();
+    requireApproval();
+    fireEvent.click(reviewScope("Each person's first posts"));
+    const count = screen.getByLabelText("Approved posts per person");
+    expect(count).toHaveValue(3);
+    expect(
+      screen.getByText(
+        "Each person's posts are reviewed until you have approved this many.",
+      ),
+    ).toBeInTheDocument();
+    // An out-of-range entry is clamped when the field is left, not mid-typing.
+    fireEvent.change(count, { target: { value: "500" } });
+    expect(count).toHaveValue(500);
+    fireEvent.blur(count);
+    expect(count).toHaveValue(100);
+    // Backspace can empty the field, so typing a new number replaces the old
+    // one instead of being appended to it ("3" then "10" is 10, not 310).
+    fireEvent.change(count, { target: { value: "" } });
+    expect(count).toHaveValue(null);
+    fireEvent.change(count, { target: { value: "1" } });
+    fireEvent.change(count, { target: { value: "10" } });
+    expect(count).toHaveValue(10);
+    fireEvent.change(count, { target: { value: "" } });
+    fireEvent.blur(count);
+    expect(count).toHaveValue(10);
+    fireEvent.change(count, { target: { value: "5" } });
+
+    const payload = await save(onSaved);
+    expect(payload.requires_approval).toBe(true);
+    expect(policyOf(payload)).toEqual({ mode: "first_n", firstN: 5 });
+  });
+
+  it("saves selected post types and never lets the last one be cleared", async () => {
+    const { onSaved } = renderSettings();
+    openWorkflow();
+    requireApproval();
+    fireEvent.click(reviewScope("Selected post types"));
+    expect(
+      screen.getByText(
+        "Posts that involve a customer are always reviewed when Deliveries is checked. Review follows the post type the salesperson picks.",
+      ),
+    ).toBeInTheDocument();
+    const types = screen.getByRole("group", { name: "Post types to review" });
+    const deliveries = within(types).getByRole("checkbox", { name: "Deliveries" });
+    expect(deliveries).toBeChecked();
+    // The only checked type cannot be cleared; an empty list would mean every post.
+    expect(deliveries).toBeDisabled();
+    fireEvent.click(within(types).getByRole("checkbox", { name: "Service" }));
+    expect(deliveries).toBeEnabled();
+    fireEvent.click(deliveries);
+    fireEvent.click(within(types).getByRole("checkbox", { name: "Team" }));
+
+    const payload = await save(onSaved);
+    expect(payload.requires_approval).toBe(true);
+    expect(policyOf(payload)).toEqual({
+      mode: "per_category",
+      categories: ["service", "team"],
+    });
+  });
+
+  it("never sends the none or always modes", async () => {
+    for (const choice of [
+      "Every post",
+      "Each person's first posts",
+      "Selected post types",
+    ]) {
+      const { onSaved } = renderSettings();
+      openWorkflow();
+      requireApproval();
+      fireEvent.click(reviewScope(choice));
+      const payload = await save(onSaved);
+      expect(String(payload.approval_policy)).not.toMatch(/"(?:none|always)"/);
+      cleanup();
+    }
+  });
+
+  it("reads a saved narrowing back and starts clean", () => {
+    const { onDirtyChange } = renderSettings({
+      ...baseDealer,
+      requires_approval: true,
+      approval_policy: { mode: "per_category", categories: ["team", "deliveries"] },
+    });
+    openWorkflow();
+    expect(reviewScope("Selected post types")).toBeChecked();
+    const types = screen.getByRole("group", { name: "Post types to review" });
+    expect(within(types).getByRole("checkbox", { name: "Deliveries" })).toBeChecked();
+    expect(within(types).getByRole("checkbox", { name: "Team" })).toBeChecked();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("shows stored policies the server treats as every post as every post, without a phantom edit", () => {
+    for (const approval_policy of [
+      { mode: "always" as const },
+      { mode: "none" as const },
+      { mode: "per_category" as const, categories: [] },
+    ]) {
+      const { onDirtyChange } = renderSettings({
+        ...baseDealer,
+        requires_approval: true,
+        approval_policy,
+      });
+      openWorkflow();
+      expect(reviewScope("Every post")).toBeChecked();
+      expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+      cleanup();
+    }
+  });
+});
+
+describe("store setup progress", () => {
+  const readyArea = (name: RegExp) =>
+    within(
+      screen.getByRole("navigation", { name: "Dealership settings sections" }),
+    ).getByRole("button", { name });
+
+  it("counts areas from the saved record, not from unsaved typing", () => {
+    renderSettings(unsavedDealer);
+    expect(screen.getByText("0 of 4 areas ready")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Website"), {
+      target: { value: "https://southside.example" },
+    });
+    fireEvent.change(screen.getByLabelText("Phone"), { target: { value: "555-0100" } });
+    fireEvent.change(screen.getByLabelText("Address (one line)"), {
+      target: { value: "1 Main St" },
+    });
+    expect(screen.getByText("0 of 4 areas ready")).toBeInTheDocument();
+    expect(readyArea(/^Store profile/)).not.toHaveAccessibleName(/ready/);
+  });
+
+  it("marks saved areas ready, never counts Workflow, and does not count the website as a channel", () => {
+    renderSettings({
+      ...unsavedDealer,
+      website: "https://southside.example",
+      phone: "555-0100",
+      address: "1 Main St",
+      brand_voice: "Plain and friendly.",
+      requires_approval: false,
+      employee_disclosure_text: "I work at {dealer}.",
+    });
+    expect(screen.getByText("2 of 4 areas ready")).toBeInTheDocument();
+    expect(readyArea(/^Store profile/)).toHaveAccessibleName(/^Store profile, ready/);
+    expect(readyArea(/^Voice/)).toHaveAccessibleName(/^Voice, ready/);
+    expect(readyArea(/^Channels/)).not.toHaveAccessibleName(/ready/);
+    expect(readyArea(/^Workflow/)).not.toHaveAccessibleName(/ready/);
+  });
+
+  it("shows the per-area check at every width", () => {
+    renderSettings({ ...unsavedDealer, brand_voice: "Plain and friendly." });
+    const voice = readyArea(/^Voice/);
+    const check = voice.querySelector("svg");
+    expect(check).not.toBeNull();
+    expect(check?.getAttribute("class") || "").not.toMatch(/\bhidden\b/);
+  });
+});
+
 const salesperson: Person = {
   id: "person-1",
   dealer: "dealer-1",
@@ -497,6 +763,44 @@ describe("dealer settings dirty tracking", () => {
 
     expect(fields.hours).toBe(serializeHours(defaultWeekHours()));
     expect(fields.enabled_styles).toBe(Object.values(StyleOption).join(","));
+  });
+
+  it("keeps what was typed while a save was in flight", async () => {
+    let finishSave: () => void = () => undefined;
+    const onSaved = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    render(
+      <DealerSettingsCard
+        dealer={baseDealer}
+        onSaved={onSaved}
+        onDirtyChange={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Website"), {
+      target: { value: "  https://northside.example  " },
+    });
+    fireEvent.change(screen.getByLabelText("Phone"), {
+      target: { value: "517-555-0100" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+
+    // Typed after the request left: not part of this save.
+    fireEvent.change(screen.getByLabelText("Phone"), {
+      target: { value: "517-555-0177" },
+    });
+    await act(async () => {
+      finishSave();
+    });
+
+    // A submitted field re-bases onto its stored (trimmed) form ...
+    expect(screen.getByLabelText("Website")).toHaveValue("https://northside.example");
+    // ... but the later typing survives instead of snapping back.
+    expect(screen.getByLabelText("Phone")).toHaveValue("517-555-0177");
   });
 });
 
@@ -636,17 +940,23 @@ describe("FTC team-member disclosure setting", () => {
   });
 
   it("keeps selected-state pills readable in Sunlight (light) theme", () => {
-    // success-100 / warning-100 ink on a pale tinted fill measures about 1.5:1
-    // in light theme, which made the selected pill render as an empty capsule.
+    // The selected pill used ramp ink (success-100 / warning-100) that fell to
+    // about 1.5:1 in light theme. Light Table tokens resolve per theme, so the
+    // selected state is ink on the brand tint, with no per-theme override.
     renderSettings();
     for (const name of [/add the disclosure/i, /no approval required/i]) {
-      expect(screen.getByRole("radio", { name }).className).toContain(
-        "[.theme-light_&]:text-success-900",
-      );
+      const selected = screen.getByRole("radio", { name });
+      expect(selected).toHaveAttribute("aria-checked", "true");
+      expect(selected.className).toContain("text-ink");
+      expect(selected.className).toContain("bg-brand-tint");
     }
     fireEvent.click(screen.getByRole("radio", { name: /turn it off/i }));
-    expect(screen.getByRole("radio", { name: /turn it off/i }).className).toContain(
-      "[.theme-light_&]:text-warning-900",
-    );
+    const off = screen.getByRole("radio", { name: /turn it off/i });
+    expect(off.className).toContain("text-ink");
+    expect(off.className).toContain("bg-brand-tint");
+    for (const radio of screen.getAllByRole("radio")) {
+      expect(radio.className).not.toContain("theme-light");
+      expect(radio.className).not.toMatch(/text-(?:success|warning)-\d/);
+    }
   });
 });

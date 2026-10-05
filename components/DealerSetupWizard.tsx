@@ -1,20 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { m, AnimatePresence } from "framer-motion";
-import {
-  Sparkles,
-  Palette,
-  Ban,
-  Trophy,
-  Check,
-  Loader2,
-  ChevronRight,
-  ChevronLeft,
-  Building2,
-  Wand2,
-  Phone,
-  Hash,
-  Image as ImageIcon,
-} from "lucide-react";
+import { Check, ChevronRight, ChevronLeft } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Input, Textarea } from "./ui/Input";
 import { Dealer, StyleOption } from "../types";
@@ -39,9 +25,9 @@ interface DealerSetupWizardProps {
 
 /**
  * Multi-step first-time setup. Renders when the dealer is missing key
- * customization (brand_voice + brand_color). Each step has its own validation
- * and the user can skip ahead. On the last step we POST all of the new fields
- * in a single update and dismiss.
+ * customization (brand_voice + brand_color). The manager can jump to any
+ * step; Finish setup POSTs every changed field in a single update, and only
+ * a save that resolved shows the success state and dismisses the wizard.
  *
  * Why bother: a dealer who never sets brand_voice gets generic captions and
  * thinks the product is mediocre. A 90-second wizard at first login captures
@@ -55,22 +41,82 @@ type StepId =
   | "color"
   | "hashtags"
   | "overlays"
-  | "approval"
-  | "done";
+  | "approval";
 
-const STEPS: Array<{ id: StepId; title: string; icon: typeof Sparkles }> = [
-  { id: "contact", title: "Contact", icon: Phone },
-  { id: "social", title: "Social", icon: Hash },
-  { id: "voice", title: "Voice", icon: Wand2 },
-  { id: "banned", title: "Banned", icon: Ban },
-  { id: "color", title: "Color", icon: Palette },
-  { id: "hashtags", title: "Hashtags", icon: Hash },
-  { id: "overlays", title: "Overlays", icon: ImageIcon },
-  { id: "approval", title: "Approval", icon: Trophy },
-  { id: "done", title: "Ready", icon: Check },
+/**
+ * The steps a manager can open. There is deliberately no "done" step here:
+ * success is a state the wizard reaches after a save resolves, never a place
+ * a manager can navigate to (a clickable "Ready" chip used to claim the store
+ * was set up, then dismiss the wizard for good, without saving anything).
+ */
+const STEPS: Array<{ id: StepId; title: string }> = [
+  { id: "contact", title: "Contact" },
+  { id: "social", title: "Social" },
+  { id: "voice", title: "Voice" },
+  { id: "banned", title: "Banned" },
+  { id: "color", title: "Color" },
+  { id: "hashtags", title: "Hashtags" },
+  { id: "overlays", title: "Overlays" },
+  { id: "approval", title: "Approval" },
 ];
 
+/**
+ * The checklist counts what a manager has to fill in. Approval is a choice
+ * with a safe default, not a task, so it never counts as done or undone.
+ */
+const SETUP_TASKS = STEPS.filter((item) => item.id !== "approval");
+
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+const hasSavedText = (value?: string | null) => Boolean(value && value.trim());
+
+/** Completion is read from the saved record, never from unsaved form state. */
+const savedStepComplete = (dealer: Dealer, id: StepId): boolean => {
+  switch (id) {
+    case "contact":
+      return (
+        hasSavedText(dealer.website) &&
+        hasSavedText(dealer.phone) &&
+        hasSavedText(dealer.address)
+      );
+    case "social":
+      return [
+        dealer.facebook_url,
+        dealer.facebook_page_tag,
+        dealer.instagram_handle,
+        dealer.tiktok_handle,
+        dealer.x_handle,
+        dealer.linkedin_company_tag,
+        dealer.gbp_url,
+      ].some(hasSavedText);
+    case "voice":
+      return hasSavedText(dealer.brand_voice);
+    case "banned":
+      return hasSavedText(dealer.banned_phrases);
+    case "color":
+      return HEX_RE.test((dealer.brand_color || "").trim());
+    case "hashtags":
+      return (
+        hasSavedText(dealer.default_hashtags) || hasSavedText(dealer.default_footer)
+      );
+    case "overlays":
+      return hasSavedText(dealer.enabled_styles) || hasSavedText(dealer.default_style);
+    case "approval":
+      return false;
+  }
+};
+
+const parseEnabledStyles = (raw?: string): Set<string> => {
+  const trimmed = (raw || "").trim();
+  return trimmed
+    ? new Set(
+        trimmed
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      )
+    : new Set<string>(Object.values(StyleOption)); // default: all enabled
+};
 
 export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
   dealer,
@@ -79,6 +125,8 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
 }) => {
   const [stepIdx, setStepIdx] = useState(0);
   const step = STEPS[stepIdx];
+  const [finished, setFinished] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
 
   // Contact + identity
   const [website, setWebsite] = useState(dealer.website || "");
@@ -113,24 +161,71 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
   const [defaultFooter, setDefaultFooter] = useState(dealer.default_footer || "");
 
   // Overlay preferences — parsed sets of enabled style ids
-  const initialEnabledStyles = (() => {
-    const raw = (dealer.enabled_styles || "").trim();
-    return raw
-      ? new Set(
-          raw
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-        )
-      : new Set<string>(Object.values(StyleOption)); // default: all enabled
-  })();
-  const [enabledStyles, setEnabledStyles] = useState<Set<string>>(initialEnabledStyles);
+  const [enabledStyles, setEnabledStyles] = useState<Set<string>>(() =>
+    parseEnabledStyles(dealer.enabled_styles),
+  );
   const [defaultStyle, setDefaultStyle] = useState<string>(dealer.default_style || "");
 
   const [requiresApproval, setRequiresApproval] = useState(!!dealer.requires_approval);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The Settings tab can save while this wizard is open. Every field the
+  // manager has not edited here follows the newly saved record, so Finish
+  // setup never writes a stale value back over that save, and Later never
+  // warns about entries that are already saved. A field edited here keeps
+  // what was typed.
+  const syncedDealer = useRef(dealer);
+  useEffect(() => {
+    const was = syncedDealer.current;
+    if (was === dealer) return;
+    syncedDealer.current = dealer;
+    const follow = <T,>(
+      set: React.Dispatch<React.SetStateAction<T>>,
+      before: T,
+      after: T,
+      same: (a: T, b: T) => boolean = Object.is,
+    ) => {
+      if (same(before, after)) return;
+      set((current) => (same(current, before) ? after : current));
+    };
+    const text = (
+      set: React.Dispatch<React.SetStateAction<string>>,
+      before?: string | null,
+      after?: string | null,
+    ) => follow(set, before || "", after || "");
+    text(setWebsite, was.website, dealer.website);
+    text(setPhone, was.phone, dealer.phone);
+    text(setAddress, was.address, dealer.address);
+    text(setTagline, was.tagline, dealer.tagline);
+    text(setFacebookUrl, was.facebook_url, dealer.facebook_url);
+    text(setFacebookPageTag, was.facebook_page_tag, dealer.facebook_page_tag);
+    text(setInstagramHandle, was.instagram_handle, dealer.instagram_handle);
+    text(setTiktokHandle, was.tiktok_handle, dealer.tiktok_handle);
+    text(setXHandle, was.x_handle, dealer.x_handle);
+    text(setLinkedinCompanyTag, was.linkedin_company_tag, dealer.linkedin_company_tag);
+    text(setGbpUrl, was.gbp_url, dealer.gbp_url);
+    text(setVoice, was.brand_voice, dealer.brand_voice);
+    text(setBanned, was.banned_phrases, dealer.banned_phrases);
+    text(setColor, was.brand_color, dealer.brand_color);
+    text(setDefaultHashtags, was.default_hashtags, dealer.default_hashtags);
+    text(setDefaultFooter, was.default_footer, dealer.default_footer);
+    text(setDefaultStyle, was.default_style, dealer.default_style);
+    follow(
+      setHoursWeek,
+      parseHoursString(was.hours) || defaultWeekHours(),
+      parseHoursString(dealer.hours) || defaultWeekHours(),
+      (a, b) => serializeHours(a) === serializeHours(b),
+    );
+    follow(
+      setEnabledStyles,
+      parseEnabledStyles(was.enabled_styles),
+      parseEnabledStyles(dealer.enabled_styles),
+      (a, b) => Array.from(a).sort().join(",") === Array.from(b).sort().join(","),
+    );
+    follow(setRequiresApproval, !!was.requires_approval, !!dealer.requires_approval);
+  }, [dealer]);
 
   const toggleStyle = (id: string) => {
     setEnabledStyles((prev) => {
@@ -151,82 +246,117 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
   const next = () => setStepIdx((i) => Math.min(i + 1, STEPS.length - 1));
   const prev = () => setStepIdx((i) => Math.max(0, i - 1));
 
+  /**
+   * Every field that differs from a baseline. Saving compares hours and
+   * overlay styles against the raw stored columns, so a first save persists
+   * the derived defaults (a full week, every style). The "anything typed?"
+   * check compares against those same derived defaults instead, so an
+   * untouched wizard never reads as unsaved work.
+   */
+  const buildFields = (baseline: "stored" | "derived") => {
+    const diff = <T extends string | boolean>(key: string, next: T, prev: T) =>
+      next !== prev ? { [key]: next } : {};
+    const savedHours =
+      baseline === "derived"
+        ? serializeHours(parseHoursString(dealer.hours) || defaultWeekHours())
+        : dealer.hours || "";
+    const savedStyles =
+      baseline === "derived"
+        ? Array.from(parseEnabledStyles(dealer.enabled_styles)).join(",")
+        : dealer.enabled_styles || "";
+    const fields: Record<string, string | boolean> = {
+      ...diff("brand_voice", voice.trim(), dealer.brand_voice || ""),
+      ...diff("banned_phrases", banned.trim(), dealer.banned_phrases || ""),
+      ...diff("brand_color", color.trim(), dealer.brand_color || ""),
+      ...diff("website", website.trim(), dealer.website || ""),
+      ...diff("phone", phone.trim(), dealer.phone || ""),
+      ...diff("address", address.trim(), dealer.address || ""),
+      ...diff("hours", hours.trim(), savedHours),
+      ...diff("tagline", tagline.trim(), dealer.tagline || ""),
+      ...diff("facebook_url", facebookUrl.trim(), dealer.facebook_url || ""),
+      ...diff(
+        "facebook_page_tag",
+        normalizeDealerSocialProfileValue("facebook_page_tag", facebookPageTag),
+        normalizeDealerSocialProfileValue(
+          "facebook_page_tag",
+          dealer.facebook_page_tag,
+        ),
+      ),
+      ...diff(
+        "instagram_handle",
+        normalizeDealerSocialProfileValue("instagram_handle", instagramHandle),
+        normalizeDealerSocialProfileValue("instagram_handle", dealer.instagram_handle),
+      ),
+      ...diff(
+        "tiktok_handle",
+        normalizeDealerSocialProfileValue("tiktok_handle", tiktokHandle),
+        normalizeDealerSocialProfileValue("tiktok_handle", dealer.tiktok_handle),
+      ),
+      ...diff(
+        "x_handle",
+        normalizeDealerSocialProfileValue("x_handle", xHandle),
+        normalizeDealerSocialProfileValue("x_handle", dealer.x_handle),
+      ),
+      ...diff(
+        "linkedin_company_tag",
+        normalizeDealerSocialProfileValue("linkedin_company_tag", linkedinCompanyTag),
+        normalizeDealerSocialProfileValue(
+          "linkedin_company_tag",
+          dealer.linkedin_company_tag,
+        ),
+      ),
+      ...diff("gbp_url", gbpUrl.trim(), dealer.gbp_url || ""),
+      ...diff(
+        "default_hashtags",
+        defaultHashtags.trim(),
+        dealer.default_hashtags || "",
+      ),
+      ...diff("default_footer", defaultFooter.trim(), dealer.default_footer || ""),
+      ...diff("enabled_styles", Array.from(enabledStyles).join(","), savedStyles),
+      ...diff("default_style", defaultStyle, dealer.default_style || ""),
+    };
+    if (requiresApproval !== !!dealer.requires_approval) {
+      fields.requires_approval = requiresApproval;
+      // "Manager approves first" means every post. Clear any stored narrowing
+      // (the server applies approval_policy only while approval is on) so the
+      // choice made here is exactly what the server enforces.
+      if (requiresApproval) fields.approval_policy = "";
+    }
+    return fields;
+  };
+
+  const hasUnsavedEntries = Object.keys(buildFields("derived")).length > 0;
+
   const handleFinish = async () => {
     setError(null);
     if (color && !HEX_RE.test(color.trim())) {
       setError("Brand color should be a hex value like #1d4ed8.");
       return;
     }
+    const fields = buildFields("stored");
+    const nothingToSave = Object.keys(fields).length === 0;
+    // "<dealer> is set up" is claimed only after a save, or for a store that
+    // already has its voice and colour saved. Otherwise there is nothing true
+    // to report, and the wizard must not dismiss itself for good.
+    if (nothingToSave) {
+      const missing = [
+        !savedStepComplete(dealer, "voice") && "brand voice",
+        !savedStepComplete(dealer, "color") && "brand color",
+      ].filter(Boolean);
+      if (missing.length > 0) {
+        setError(
+          `Nothing to save yet. Add your ${missing.join(" and ")}, or choose Later to finish another time.`,
+        );
+        return;
+      }
+    }
     setSaving(true);
     try {
-      const diff = <T extends string | boolean>(key: string, next: T, prev: T) =>
-        next !== prev ? { [key]: next } : {};
-      const fields: Record<string, string | boolean> = {
-        ...diff("brand_voice", voice.trim(), dealer.brand_voice || ""),
-        ...diff("banned_phrases", banned.trim(), dealer.banned_phrases || ""),
-        ...diff("brand_color", color.trim(), dealer.brand_color || ""),
-        ...diff("website", website.trim(), dealer.website || ""),
-        ...diff("phone", phone.trim(), dealer.phone || ""),
-        ...diff("address", address.trim(), dealer.address || ""),
-        ...diff("hours", hours.trim(), dealer.hours || ""),
-        ...diff("tagline", tagline.trim(), dealer.tagline || ""),
-        ...diff("facebook_url", facebookUrl.trim(), dealer.facebook_url || ""),
-        ...diff(
-          "facebook_page_tag",
-          normalizeDealerSocialProfileValue("facebook_page_tag", facebookPageTag),
-          normalizeDealerSocialProfileValue(
-            "facebook_page_tag",
-            dealer.facebook_page_tag,
-          ),
-        ),
-        ...diff(
-          "instagram_handle",
-          normalizeDealerSocialProfileValue("instagram_handle", instagramHandle),
-          normalizeDealerSocialProfileValue(
-            "instagram_handle",
-            dealer.instagram_handle,
-          ),
-        ),
-        ...diff(
-          "tiktok_handle",
-          normalizeDealerSocialProfileValue("tiktok_handle", tiktokHandle),
-          normalizeDealerSocialProfileValue("tiktok_handle", dealer.tiktok_handle),
-        ),
-        ...diff(
-          "x_handle",
-          normalizeDealerSocialProfileValue("x_handle", xHandle),
-          normalizeDealerSocialProfileValue("x_handle", dealer.x_handle),
-        ),
-        ...diff(
-          "linkedin_company_tag",
-          normalizeDealerSocialProfileValue("linkedin_company_tag", linkedinCompanyTag),
-          normalizeDealerSocialProfileValue(
-            "linkedin_company_tag",
-            dealer.linkedin_company_tag,
-          ),
-        ),
-        ...diff("gbp_url", gbpUrl.trim(), dealer.gbp_url || ""),
-        ...diff(
-          "default_hashtags",
-          defaultHashtags.trim(),
-          dealer.default_hashtags || "",
-        ),
-        ...diff("default_footer", defaultFooter.trim(), dealer.default_footer || ""),
-        ...diff(
-          "enabled_styles",
-          Array.from(enabledStyles).join(","),
-          dealer.enabled_styles || "",
-        ),
-        ...diff("default_style", defaultStyle, dealer.default_style || ""),
-      };
-      if (requiresApproval !== !!dealer.requires_approval) {
-        fields.requires_approval = requiresApproval;
-      }
-      if (Object.keys(fields).length > 0) {
+      if (!nothingToSave) {
         await onSave(fields);
       }
       triggerHapticFeedback();
-      setStepIdx(STEPS.length - 1); // "done"
+      setFinished(true);
     } catch (err) {
       setError(toUiMessage(err, "Could not save your setup."));
     } finally {
@@ -234,521 +364,505 @@ export const DealerSetupWizard: React.FC<DealerSetupWizardProps> = ({
     }
   };
 
-  // Auto-dismiss after the "done" step has been visible for a moment
+  // Auto-dismiss only after a save has resolved and the success state shows.
   useEffect(() => {
-    if (step.id === "done" && onDismiss) {
+    if (finished && onDismiss) {
       const t = window.setTimeout(onDismiss, 1800);
       return () => window.clearTimeout(t);
     }
-  }, [step.id, onDismiss]);
+  }, [finished, onDismiss]);
 
-  const stepComplete = (id: StepId): boolean => {
-    if (id === "contact")
-      return Boolean(website.trim() && phone.trim() && address.trim());
-    if (id === "social")
-      return Boolean(facebookUrl.trim() || instagramHandle.trim() || gbpUrl.trim());
-    if (id === "voice") return Boolean(voice.trim());
-    if (id === "banned") return Boolean(banned.trim());
-    if (id === "color") return HEX_RE.test(color.trim());
-    if (id === "hashtags")
-      return Boolean(defaultHashtags.trim() || defaultFooter.trim());
-    if (id === "overlays")
-      return Boolean(dealer.enabled_styles?.trim() || defaultStyle);
-    if (id === "approval") return dealer.requires_approval !== undefined;
-    return step.id === "done";
+  const handleLater = () => {
+    if (!onDismiss) return;
+    if (hasUnsavedEntries && !confirmLeave) {
+      setConfirmLeave(true);
+      return;
+    }
+    onDismiss();
   };
-  const completedSteps = STEPS.slice(0, -1).filter((item) =>
-    stepComplete(item.id),
+
+  const completedSteps = SETUP_TASKS.filter((item) =>
+    savedStepComplete(dealer, item.id),
   ).length;
 
   return (
-    <m.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="bg-fill-subtle border border-primary-500/30 rounded-2xl p-4 sm:p-6 space-y-4"
+    <section
+      aria-labelledby="dealer-setup-heading"
+      className="space-y-5 rounded-md border border-hairline bg-panel p-5 sm:p-6"
     >
-      <div className="flex items-center gap-3">
-        <div
-          className="h-8 w-1.5 rounded-full"
-          style={{
-            background:
-              "linear-gradient(180deg, var(--brand-primary-400), var(--brand-primary))",
-          }}
-          aria-hidden="true"
-        />
-        <div className="flex-1">
-          <h3 className="text-xl font-bold text-surface-50 flex items-center gap-2">
-            <Building2 className="h-5 w-5 text-primary-300" />
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h3 id="dealer-setup-heading" className="text-ink">
             Set up {dealer.name}
           </h3>
-          <p className="text-xs text-surface-400">
+          <p className="mt-1 text-sm text-ink-2">
             90 seconds to make every post sound like your dealership instead of generic
             AI.
           </p>
         </div>
-        {onDismiss && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onDismiss}
-            className="text-surface-400 hover:text-surface-200"
-          >
+        {onDismiss && !finished && (
+          <Button variant="ghost" size="md" onClick={handleLater}>
             Later
           </Button>
         )}
       </div>
 
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-hairline bg-panel px-3 py-2">
-        <div>
-          <div className="text-xs font-semibold text-ink">Setup checklist</div>
-          <div className="text-2xs text-ink-2">
-            {completedSteps} of {STEPS.length - 1} complete · choose any step
+      {confirmLeave && !finished ? (
+        <div
+          role="alert"
+          className="space-y-3 rounded-sm border border-warning-ink/30 bg-warning-fill px-3 py-3"
+        >
+          <p className="text-sm text-warning-ink">
+            What you entered here has not been saved. Leave setup anyway?
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => setConfirmLeave(false)}
+            >
+              Keep setting up
+            </Button>
+            <Button variant="ghost" size="md" onClick={() => onDismiss?.()}>
+              Leave without saving
+            </Button>
           </div>
         </div>
-        <div className="h-2 w-24 overflow-hidden rounded-full bg-fill-subtle">
-          <div
-            className="h-full bg-brand-fill"
-            style={{ width: `${(completedSteps / (STEPS.length - 1)) * 100}%` }}
-          />
-        </div>
-      </div>
+      ) : null}
 
-      {/* Compact, clickable step indicator. */}
-      <div
-        className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5"
-        aria-label="Setup steps"
-      >
-        {STEPS.map((s, i) => {
-          const Icon = s.icon;
-          const active = i === stepIdx;
-          const done = stepComplete(s.id);
-          return (
-            <button
-              key={s.id}
-              type="button"
-              aria-current={active ? "step" : undefined}
-              onClick={() => setStepIdx(i)}
-              className={cn(
-                "flex min-h-11 items-center gap-2 rounded-sm border px-3 text-left text-xs",
-                active
-                  ? "border-brand-ink bg-brand-tint text-ink"
-                  : "border-hairline bg-panel-raised text-ink-2 hover:border-strong",
-              )}
-            >
-              {done ? (
-                <Check className="h-4 w-4 text-success-ink" aria-hidden="true" />
-              ) : (
-                <Icon className="h-4 w-4" aria-hidden="true" />
-              )}
-              {s.title}
-            </button>
-          );
-        })}
-      </div>
-
-      <AnimatePresence mode="wait">
-        <m.div
-          key={step.id}
-          initial={{ opacity: 0, x: 8 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -8 }}
-          transition={{ duration: 0.2 }}
-          className="min-h-[140px]"
+      {finished ? (
+        <div
+          className="flex flex-col items-center gap-3 py-8 text-center"
+          role="status"
         >
-          {step.id === "contact" && (
-            <div className="space-y-3">
-              <p className="text-sm text-surface-200">
-                Contact info shown in posts, on receipts, and in your dashboard. None of
-                it is required — set whatever you want surfaced.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <Input
-                  label="Website"
-                  value={website}
-                  onChange={(e) => setWebsite(e.target.value)}
-                  placeholder="https://yourdealership.com"
-                  fullWidth
-                  className="bg-fill-subtle border-hairline focus:border-primary-400"
-                />
-                <Input
-                  label="Phone"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="(313) 555-0100"
-                  fullWidth
-                  className="bg-fill-subtle border-hairline focus:border-primary-400"
-                />
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-success-fill">
+            <Check className="h-7 w-7 text-success-ink" aria-hidden="true" />
+          </div>
+          <div className="text-lg font-semibold text-ink">{dealer.name} is set up</div>
+          <div className="text-sm text-ink-2">
+            You can change any of this later in Dealership settings.
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-ink">Setup checklist</div>
+              <div className="text-caption text-ink-2">
+                {completedSteps} of {SETUP_TASKS.length} complete. Pick any step.
               </div>
-              <Input
-                label="Address (one line)"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder="123 Main St, Detroit MI 48201"
-                fullWidth
-                className="bg-fill-subtle border-hairline focus:border-primary-400"
-              />
-              <HoursPicker value={hoursWeek} onChange={setHoursWeek} preview={hours} />
-              <Input
-                label="Tagline"
-                value={tagline}
-                onChange={(e) => setTagline(e.target.value)}
-                placeholder="Family-owned since 1985 · No-haggle pricing"
-                fullWidth
-                className="bg-fill-subtle border-hairline focus:border-primary-400"
+            </div>
+            <div
+              className="h-1 w-24 overflow-hidden rounded-full bg-panel-raised"
+              role="progressbar"
+              aria-label="Setup progress"
+              aria-valuemin={0}
+              aria-valuemax={SETUP_TASKS.length}
+              aria-valuenow={completedSteps}
+            >
+              <div
+                className="h-full bg-brand-fill"
+                style={{ width: `${(completedSteps / SETUP_TASKS.length) * 100}%` }}
               />
             </div>
-          )}
+          </div>
 
-          {step.id === "social" && (
-            <div className="space-y-3">
-              <p className="text-sm text-surface-200">
-                Where you post. The Share dialog uses these to deep-link into the right
-                account when you publish.
-              </p>
-              <Input
-                label="Facebook page URL"
-                value={facebookUrl}
-                onChange={(e) => setFacebookUrl(e.target.value)}
-                placeholder="https://www.facebook.com/yourdealership"
-                fullWidth
-                className="bg-fill-subtle border-hairline focus:border-primary-400"
-              />
-              <Input
-                label="Facebook Page tag"
-                value={facebookPageTag}
-                onChange={(e) => setFacebookPageTag(e.target.value)}
-                placeholder="@Your Dealership"
-                helperText="Added to Facebook and Marketplace captions. Tap Facebook's Page suggestion if it appears."
-                fullWidth
-                className="bg-fill-subtle border-hairline focus:border-primary-400"
-              />
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <Input
-                  label="Instagram"
-                  value={instagramHandle}
-                  onChange={(e) => setInstagramHandle(e.target.value)}
-                  placeholder="@yourdealership"
-                  fullWidth
-                  className="bg-fill-subtle border-hairline focus:border-primary-400"
-                />
-                <Input
-                  label="TikTok"
-                  value={tiktokHandle}
-                  onChange={(e) => setTiktokHandle(e.target.value)}
-                  placeholder="@yourdealership"
-                  fullWidth
-                  className="bg-fill-subtle border-hairline focus:border-primary-400"
-                />
-                <Input
-                  label="X / Twitter"
-                  value={xHandle}
-                  onChange={(e) => setXHandle(e.target.value)}
-                  placeholder="@yourdealership"
-                  fullWidth
-                  className="bg-fill-subtle border-hairline focus:border-primary-400"
-                />
-                <Input
-                  label="LinkedIn company tag"
-                  value={linkedinCompanyTag}
-                  onChange={(e) => setLinkedinCompanyTag(e.target.value)}
-                  placeholder="@your-company"
-                  helperText="LinkedIn may ask you to select the company suggestion once."
-                  fullWidth
-                  className="bg-fill-subtle border-hairline focus:border-primary-400"
-                />
-              </div>
-              <Input
-                label="Google Business Profile URL"
-                value={gbpUrl}
-                onChange={(e) => setGbpUrl(e.target.value)}
-                placeholder="https://g.page/yourdealership"
-                fullWidth
-                className="bg-fill-subtle border-hairline focus:border-primary-400"
-              />
-            </div>
-          )}
+          {/* Compact, clickable step indicator: only the real steps. */}
+          <nav
+            className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+            aria-label="Setup steps"
+          >
+            {STEPS.map((s, i) => {
+              const active = i === stepIdx;
+              const done = savedStepComplete(dealer, s.id);
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  aria-current={active ? "step" : undefined}
+                  onClick={() => setStepIdx(i)}
+                  className={cn(
+                    "flex min-h-11 items-center justify-between gap-2 rounded-sm border px-3 text-left text-sm font-medium transition-colors duration-120 ease-out",
+                    active
+                      ? "border-brand-ink bg-brand-tint text-ink"
+                      : "border-hairline bg-panel-raised text-ink-2 hover:border-strong",
+                  )}
+                >
+                  {s.title}
+                  {done ? (
+                    <>
+                      <Check
+                        className="h-4 w-4 shrink-0 text-success-ink"
+                        aria-hidden="true"
+                      />
+                      <span className="sr-only">, complete</span>
+                    </>
+                  ) : null}
+                </button>
+              );
+            })}
+          </nav>
 
-          {step.id === "hashtags" && (
-            <div className="space-y-3">
-              <p className="text-sm text-surface-200">
-                Hashtags and a CTA the AI will weave into every post. One hashtag per
-                line. Footer is appended after the caption (e.g. "Stop by 123 Main St —
-                open until 9pm").
-              </p>
-              <Textarea
-                label="Default hashtags"
-                value={defaultHashtags}
-                onChange={(e) => setDefaultHashtags(e.target.value)}
-                rows={3}
-                placeholder={"#YourDealership\n#DetroitFord\n#NewRide"}
-                fullWidth
-                className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono text-sm"
-              />
-              <Textarea
-                label="Default footer / CTA"
-                value={defaultFooter}
-                onChange={(e) => setDefaultFooter(e.target.value)}
-                rows={2}
-                placeholder="Stop by 123 Main St — open until 9pm. Call us at (313) 555-0100."
-                fullWidth
-                className="bg-fill-subtle border-hairline focus:border-primary-400"
-              />
-            </div>
-          )}
-
-          {step.id === "overlays" && (
-            <div className="space-y-3">
-              <p className="text-sm text-surface-200">
-                Pick which design styles your team can use. Anything you disable
-                disappears from the salesperson picker. The starred style is preselected
-                when they open the customizer.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {Object.values(StyleOption).map((s) => {
-                  const enabled = enabledStyles.has(s);
-                  const isDefault = defaultStyle === s;
-                  return (
-                    <div
-                      key={s}
-                      className={cn(
-                        "rounded-xl border px-3 py-2.5 flex items-center justify-between gap-2",
-                        enabled
-                          ? "border-primary-500/40 bg-primary-500/5"
-                          : "border-hairline bg-fill-subtle opacity-60",
-                      )}
-                    >
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold text-surface-50">{s}</div>
-                        <div className="text-[10px] text-surface-400">
-                          {enabled ? "available to salespeople" : "hidden"}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          disabled={!enabled}
-                          onClick={() => setDefaultStyle(isDefault ? "" : s)}
-                          className={cn(
-                            "text-[10px] px-2 py-1 rounded-md transition-colors",
-                            isDefault
-                              ? "bg-amber-500/30 text-amber-100"
-                              : "bg-fill-subtle hover:bg-fill-hover text-surface-300",
-                            !enabled && "opacity-30 cursor-not-allowed",
-                          )}
-                          title={
-                            isDefault
-                              ? "This is the default — tap to unset"
-                              : "Mark as default"
-                          }
-                        >
-                          {isDefault ? "★ default" : "Set default"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => toggleStyle(s)}
-                          className={cn(
-                            "text-[10px] px-2 py-1 rounded-md transition-colors",
-                            enabled
-                              ? "bg-fill-subtle hover:bg-fill-hover text-surface-300"
-                              : "bg-success-500/20 hover:bg-success-500/30 text-success-100 [.theme-light_&]:text-success-900",
-                          )}
-                        >
-                          {enabled ? "Disable" : "Enable"}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <p className="text-[11px] text-surface-400">
-                Fun Mode artistic transforms (cartoon / vintage / neon / superhero,
-                etc.) can be tuned later from the settings panel.
-              </p>
-            </div>
-          )}
-
-          {step.id === "voice" && (
-            <div className="space-y-2">
-              <p className="text-sm text-surface-200">
-                Tell the AI how your dealership sounds. The more specific, the less
-                generic the captions.
-              </p>
-              <Textarea
-                label="Brand voice"
-                value={voice}
-                onChange={(e) => setVoice(e.target.value)}
-                placeholder={`e.g. "Confident, no exclamation points, never use 'family-owned'. Lead with the customer, not the car. Local Detroit references are good."`}
-                rows={4}
-                fullWidth
-                className="bg-fill-subtle border-hairline focus:border-primary-400"
-              />
-              <p className="text-[11px] text-surface-400">
-                Examples that work: tone words ("warm, no hype"), forbidden clichés
-                ("don't say 'amazing deal'"), local color ("we're a Detroit shop —
-                Tigers, Lions, never Buckeyes").
-              </p>
-            </div>
-          )}
-
-          {step.id === "banned" && (
-            <div className="space-y-2">
-              <p className="text-sm text-surface-200">
-                Phrases the AI must never use. One per line or comma-separated.
-              </p>
-              <Textarea
-                label="Banned phrases"
-                value={banned}
-                onChange={(e) => setBanned(e.target.value)}
-                placeholder={`guaranteed approval\nno credit check\nlowest price guaranteed\nbest deal in town`}
-                rows={4}
-                fullWidth
-                className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono text-sm"
-              />
-              <p className="text-[11px] text-surface-400">
-                FTC + most OEM brand standards prohibit "guaranteed approval", "no
-                credit check", "lowest price guaranteed". Pre-filled suggestions above —
-                keep them or replace.
-              </p>
-            </div>
-          )}
-
-          {step.id === "color" && (
-            <div className="space-y-2">
-              <p className="text-sm text-surface-200">
-                Your dealership's primary brand color. Used to tint buttons + accents
-                across the app.
-              </p>
-              <div className="flex items-center gap-3">
-                <input
-                  type="color"
-                  value={HEX_RE.test(color) ? color : "#1d4ed8"}
-                  onChange={(e) => setColor(e.target.value)}
-                  className="h-12 w-16 rounded-lg border border-hairline bg-transparent cursor-pointer"
-                  aria-label="Pick brand color"
-                />
-                <Input
-                  label="Hex value"
-                  value={color}
-                  onChange={(e) => setColor(e.target.value)}
-                  placeholder="#1d4ed8"
-                  fullWidth
-                  className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono"
-                />
-              </div>
-              {color && HEX_RE.test(color) && (
-                <div className="flex items-center gap-2 mt-2 text-[11px] text-surface-400">
-                  <div className="h-4 w-4 rounded-full" style={{ background: color }} />
-                  Preview
+          <AnimatePresence mode="wait" initial={false}>
+            <m.div
+              key={step.id}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="min-h-[140px]"
+            >
+              {step.id === "contact" && (
+                <div className="space-y-4">
+                  <p className="text-sm text-ink-2">
+                    Contact info shown in posts, on receipts, and in your dashboard.
+                    None of it is required — set whatever you want surfaced.
+                  </p>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Input
+                      label="Website"
+                      value={website}
+                      onChange={(e) => setWebsite(e.target.value)}
+                      placeholder="https://yourdealership.com"
+                      fullWidth
+                    />
+                    <Input
+                      label="Phone"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="(313) 555-0100"
+                      fullWidth
+                    />
+                  </div>
+                  <Input
+                    label="Address (one line)"
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="123 Main St, Detroit MI 48201"
+                    fullWidth
+                  />
+                  <HoursPicker
+                    value={hoursWeek}
+                    onChange={setHoursWeek}
+                    preview={hours}
+                  />
+                  <Input
+                    label="Tagline"
+                    value={tagline}
+                    onChange={(e) => setTagline(e.target.value)}
+                    placeholder="Family-owned since 1985 · No-haggle pricing"
+                    fullWidth
+                  />
                 </div>
               )}
-            </div>
-          )}
 
-          {step.id === "approval" && (
-            <div className="space-y-3">
-              <p className="text-sm text-surface-200">
-                Should every salesperson post require manager approval before it's
-                counted as published? You can change this anytime.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setRequiresApproval(false)}
-                  className={cn(
-                    "p-3 rounded-xl border text-left text-sm transition-colors",
-                    !requiresApproval
-                      ? "border-success-500/50 bg-success-500/10 text-success-100 [.theme-light_&]:text-success-900"
-                      : "border-hairline bg-fill-subtle text-surface-300 hover:border-strong",
-                  )}
-                >
-                  <div className="font-semibold">No review needed</div>
-                  <div className="text-[11px] mt-1 opacity-80">
-                    Faster — salespeople post immediately. Best when the team is
-                    experienced.
+              {step.id === "social" && (
+                <div className="space-y-4">
+                  <p className="text-sm text-ink-2">
+                    Where your team posts. Sharing uses these to open the right account.
+                  </p>
+                  <Input
+                    label="Facebook page URL"
+                    value={facebookUrl}
+                    onChange={(e) => setFacebookUrl(e.target.value)}
+                    placeholder="https://www.facebook.com/yourdealership"
+                    fullWidth
+                  />
+                  <Input
+                    label="Facebook Page tag"
+                    value={facebookPageTag}
+                    onChange={(e) => setFacebookPageTag(e.target.value)}
+                    placeholder="@Your Dealership"
+                    helperText="Added to Facebook and Marketplace captions. Tap Facebook's Page suggestion if it appears."
+                    fullWidth
+                  />
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Input
+                      label="Instagram"
+                      value={instagramHandle}
+                      onChange={(e) => setInstagramHandle(e.target.value)}
+                      placeholder="@yourdealership"
+                      fullWidth
+                    />
+                    <Input
+                      label="TikTok"
+                      value={tiktokHandle}
+                      onChange={(e) => setTiktokHandle(e.target.value)}
+                      placeholder="@yourdealership"
+                      fullWidth
+                    />
+                    <Input
+                      label="X / Twitter"
+                      value={xHandle}
+                      onChange={(e) => setXHandle(e.target.value)}
+                      placeholder="@yourdealership"
+                      fullWidth
+                    />
+                    <Input
+                      label="LinkedIn company tag"
+                      value={linkedinCompanyTag}
+                      onChange={(e) => setLinkedinCompanyTag(e.target.value)}
+                      placeholder="@your-company"
+                      helperText="LinkedIn may ask you to select the company suggestion once."
+                      fullWidth
+                    />
                   </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRequiresApproval(true)}
-                  className={cn(
-                    "p-3 rounded-xl border text-left text-sm transition-colors",
-                    requiresApproval
-                      ? "border-warning-500/50 bg-warning-500/10 text-warning-100 [.theme-light_&]:text-warning-900"
-                      : "border-hairline bg-fill-subtle text-surface-300 hover:border-strong",
-                  )}
-                >
-                  <div className="font-semibold">Manager approves first</div>
-                  <div className="text-[11px] mt-1 opacity-80">
-                    Safer — GSM reviews every post before it's marked published.
-                    Recommended for new teams.
+                  <Input
+                    label="Google Business Profile URL"
+                    value={gbpUrl}
+                    onChange={(e) => setGbpUrl(e.target.value)}
+                    placeholder="https://g.page/yourdealership"
+                    fullWidth
+                  />
+                </div>
+              )}
+
+              {step.id === "hashtags" && (
+                <div className="space-y-4">
+                  <p className="text-sm text-ink-2">
+                    Hashtags and a CTA the AI will weave into every post. One hashtag
+                    per line. Footer is appended after the caption (e.g. "Stop by 123
+                    Main St — open until 9pm").
+                  </p>
+                  <Textarea
+                    label="Default hashtags"
+                    value={defaultHashtags}
+                    onChange={(e) => setDefaultHashtags(e.target.value)}
+                    rows={3}
+                    placeholder={"#YourDealership\n#DetroitFord\n#NewRide"}
+                    fullWidth
+                  />
+                  <Textarea
+                    label="Default footer / CTA"
+                    value={defaultFooter}
+                    onChange={(e) => setDefaultFooter(e.target.value)}
+                    rows={2}
+                    placeholder="Stop by 123 Main St — open until 9pm. Call us at (313) 555-0100."
+                    fullWidth
+                  />
+                </div>
+              )}
+
+              {step.id === "overlays" && (
+                <div className="space-y-4">
+                  <p className="text-sm text-ink-2">
+                    Pick which design styles your team can use. Anything you disable
+                    disappears from the salesperson picker. The default style is
+                    preselected when they open the customizer.
+                  </p>
+                  <ul className="divide-y divide-hairline rounded-md border border-hairline bg-panel">
+                    {Object.values(StyleOption).map((s) => {
+                      const enabled = enabledStyles.has(s);
+                      const isDefault = defaultStyle === s;
+                      return (
+                        <li
+                          key={s}
+                          className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-3"
+                        >
+                          <div className={cn("min-w-0", !enabled && "opacity-60")}>
+                            <div className="text-sm font-semibold text-ink">{s}</div>
+                            <div className="text-caption text-ink-2">
+                              {enabled ? "available to salespeople" : "hidden"}
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <Button
+                              type="button"
+                              variant={isDefault ? "secondary" : "ghost"}
+                              size="md"
+                              aria-pressed={isDefault}
+                              disabled={!enabled}
+                              onClick={() => setDefaultStyle(isDefault ? "" : s)}
+                              title={
+                                isDefault
+                                  ? "This is the default — tap to unset"
+                                  : "Mark as default"
+                              }
+                            >
+                              {isDefault ? "Default" : "Set default"}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant={enabled ? "ghost" : "secondary"}
+                              size="md"
+                              onClick={() => toggleStyle(s)}
+                            >
+                              {enabled ? "Disable" : "Enable"}
+                            </Button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p className="text-caption text-ink-2">
+                    Playful styles can be set later in Dealership settings.
+                  </p>
+                </div>
+              )}
+
+              {step.id === "voice" && (
+                <div className="space-y-3">
+                  <p className="text-sm text-ink-2">
+                    Tell the AI how your dealership sounds. The more specific, the less
+                    generic the captions.
+                  </p>
+                  <Textarea
+                    label="Brand voice"
+                    value={voice}
+                    onChange={(e) => setVoice(e.target.value)}
+                    placeholder={`e.g. "Confident, no exclamation points, never use 'family-owned'. Lead with the customer, not the car. Local Detroit references are good."`}
+                    rows={4}
+                    fullWidth
+                  />
+                  <p className="text-caption text-ink-2">
+                    Examples that work: tone words ("warm, no hype"), forbidden clichés
+                    ("don't say 'amazing deal'"), local color ("we're a Detroit shop —
+                    Tigers, Lions, never Buckeyes").
+                  </p>
+                </div>
+              )}
+
+              {step.id === "banned" && (
+                <div className="space-y-3">
+                  <p className="text-sm text-ink-2">
+                    Phrases the AI must never use. One per line or comma-separated.
+                  </p>
+                  <Textarea
+                    label="Banned phrases"
+                    value={banned}
+                    onChange={(e) => setBanned(e.target.value)}
+                    placeholder={`guaranteed approval\nno credit check\nlowest price guaranteed\nbest deal in town`}
+                    rows={4}
+                    fullWidth
+                  />
+                  <p className="text-caption text-ink-2">
+                    FTC + most OEM brand standards prohibit "guaranteed approval", "no
+                    credit check", "lowest price guaranteed". Use the examples above as
+                    a starting point.
+                  </p>
+                </div>
+              )}
+
+              {step.id === "color" && (
+                <div className="space-y-3">
+                  <p className="text-sm text-ink-2">
+                    Your dealership's primary brand color. Used for the main action
+                    buttons across the app.
+                  </p>
+                  <div className="flex items-end gap-3">
+                    <input
+                      type="color"
+                      value={HEX_RE.test(color) ? color : "#1d4ed8"}
+                      onChange={(e) => setColor(e.target.value)}
+                      className="h-11 w-16 shrink-0 cursor-pointer rounded-sm border border-strong bg-transparent"
+                      aria-label="Pick brand color"
+                    />
+                    <Input
+                      label="Hex value"
+                      value={color}
+                      onChange={(e) => setColor(e.target.value)}
+                      placeholder="#1d4ed8"
+                      fullWidth
+                    />
                   </div>
-                </button>
-              </div>
+                </div>
+              )}
+
+              {step.id === "approval" && (
+                <div className="space-y-4">
+                  <p className="text-sm text-ink-2">
+                    Should a manager approve every post before a salesperson can share
+                    it? You can change this anytime in Dealership settings, including
+                    reviewing only some posts.
+                  </p>
+                  <div
+                    className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+                    role="group"
+                    aria-label="Manager approval"
+                  >
+                    <button
+                      type="button"
+                      aria-pressed={!requiresApproval}
+                      onClick={() => setRequiresApproval(false)}
+                      className={cn(
+                        "rounded-sm border p-3 text-left text-sm transition-colors duration-120 ease-out",
+                        !requiresApproval
+                          ? "border-brand-ink bg-brand-tint text-ink"
+                          : "border-hairline bg-panel text-ink hover:border-strong",
+                      )}
+                    >
+                      <div className="font-semibold">No review needed</div>
+                      <div className="mt-1 text-caption text-ink-2">
+                        Faster. Salespeople share as soon as a post is ready. Best when
+                        the team is experienced.
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={requiresApproval}
+                      onClick={() => setRequiresApproval(true)}
+                      className={cn(
+                        "rounded-sm border p-3 text-left text-sm transition-colors duration-120 ease-out",
+                        requiresApproval
+                          ? "border-brand-ink bg-brand-tint text-ink"
+                          : "border-hairline bg-panel text-ink hover:border-strong",
+                      )}
+                    >
+                      <div className="font-semibold">Manager approves first</div>
+                      <div className="mt-1 text-caption text-ink-2">
+                        Safer. A manager approves every post before it can be shared.
+                        Recommended for new teams.
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </m.div>
+          </AnimatePresence>
+
+          {error && (
+            <div
+              role="alert"
+              className="rounded-sm border border-error-ink/30 bg-error-fill px-3 py-2 text-sm text-error-ink"
+            >
+              {error}
             </div>
           )}
 
-          {step.id === "done" && (
-            <div className="flex flex-col items-center gap-3 py-8 text-center">
-              <div className="w-14 h-14 rounded-full bg-success-500/20 flex items-center justify-center">
-                <Check className="h-7 w-7 text-success-400" />
-              </div>
-              <div className="text-lg font-semibold text-surface-50">
-                {dealer.name} is set up
-              </div>
-              <div className="text-xs text-surface-400">
-                You can change any of this anytime from the dealer card.
-              </div>
-            </div>
-          )}
-        </m.div>
-      </AnimatePresence>
-
-      {error && (
-        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs [.theme-light_&]:text-error-800">
-          {error}
-        </div>
-      )}
-
-      {step.id !== "done" && (
-        <div className="flex items-center justify-between gap-2 pt-2 border-t border-hairline">
-          <Button
-            variant="ghost"
-            size="sm"
-            leftIcon={<ChevronLeft className="h-3.5 w-3.5" />}
-            onClick={prev}
-            disabled={stepIdx === 0 || saving}
-          >
-            Back
-          </Button>
-          {stepIdx < STEPS.findIndex((s) => s.id === "approval") ? (
+          <div className="flex items-center justify-between gap-2 border-t border-hairline pt-4">
             <Button
-              variant="filled"
-              size="sm"
-              rightIcon={<ChevronRight className="h-3.5 w-3.5" />}
-              onClick={next}
-              disabled={saving}
+              variant="ghost"
+              size="md"
+              leftIcon={<ChevronLeft className="h-4 w-4" />}
+              onClick={prev}
+              disabled={stepIdx === 0 || saving}
             >
-              Next
+              Back
             </Button>
-          ) : (
-            <Button
-              variant="filled"
-              size="sm"
-              leftIcon={
-                saving ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Sparkles className="h-3.5 w-3.5" />
-                )
-              }
-              onClick={handleFinish}
-              disabled={saving}
-            >
-              {saving ? "Saving…" : "Finish setup"}
-            </Button>
-          )}
-        </div>
+            {stepIdx < STEPS.length - 1 ? (
+              <Button
+                variant="primary"
+                size="md"
+                rightIcon={<ChevronRight className="h-4 w-4" />}
+                onClick={next}
+                disabled={saving}
+              >
+                Next
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                size="md"
+                loading={saving}
+                onClick={handleFinish}
+                disabled={saving}
+              >
+                {saving ? "Saving…" : "Finish setup"}
+              </Button>
+            )}
+          </div>
+        </>
       )}
-    </m.div>
+    </section>
   );
 };

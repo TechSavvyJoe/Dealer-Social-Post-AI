@@ -1,30 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { m } from "framer-motion";
 import {
-  Settings,
-  Users,
-  Palette,
-  Ban,
-  Wand2,
-  Trophy,
-  LogOut,
   Loader2,
-  Save,
-  ShieldCheck,
   Pencil,
   Check,
   Copy,
   X,
   ChevronRight,
-  Link2,
   RefreshCw,
   ExternalLink,
-  Store,
-  MessageSquareText,
-  Workflow,
 } from "lucide-react";
 import { PersonEditModal } from "./PersonEditModal";
 import type { CredentialResult, Person } from "../services/salespeople";
+import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
 import { Input, Select, Textarea } from "./ui/Input";
 import { Modal } from "./ui/Modal";
@@ -165,14 +152,147 @@ const CATEGORY_LABELS: Record<BrandCategoryId, string> = {
   community: "Community",
   team: "Team",
 };
+const CATEGORY_IDS = Object.keys(CATEGORY_LABELS) as BrandCategoryId[];
 
-const SETTINGS_ICONS = {
-  profile: Store,
-  channels: Link2,
-  voice: MessageSquareText,
-  creative: Palette,
-  workflow: Workflow,
+const isBrandCategory = (value: unknown): value is BrandCategoryId =>
+  typeof value === "string" && (CATEGORY_IDS as string[]).includes(value);
+
+/**
+ * Store setup counts only the areas a manager has to fill in. Workflow is not
+ * one of them: approval and the disclosure have safe defaults, so counting
+ * them would report a store "ready" that nobody has touched.
+ */
+type SetupArea = Exclude<SettingsSection, "workflow">;
+const SETUP_AREAS: readonly SetupArea[] = ["profile", "channels", "voice", "creative"];
+
+const hasSavedText = (value?: string | null) => Boolean(value && value.trim());
+
+/** Completion is read from the saved record, never from unsaved form state. */
+const setupAreasReady = (
+  saved: NonNullable<ReturnType<typeof useAppStore.getState>["currentDealer"]>,
+): Record<SetupArea, boolean> => ({
+  profile:
+    hasSavedText(saved.website) &&
+    hasSavedText(saved.phone) &&
+    hasSavedText(saved.address),
+  channels: [
+    saved.facebook_url,
+    saved.facebook_page_tag,
+    saved.instagram_handle,
+    saved.tiktok_handle,
+    saved.x_handle,
+    saved.linkedin_company_tag,
+    saved.gbp_url,
+  ].some(hasSavedText),
+  voice: hasSavedText(saved.brand_voice),
+  creative: isSignatureLook(saved.signature_look) || hasSavedText(saved.default_style),
+});
+
+// ---------------------------------------------------------------------------
+// Manager approval. The server (pb_hooks/requestPolicies.js
+// initialApprovalStatus) treats requires_approval as the switch and
+// approval_policy as a narrowing that only applies while the switch is on.
+// The form therefore never stores "none" or "always": off and "every post"
+// both store null, and a narrowing is stored only while review is on.
+// ---------------------------------------------------------------------------
+type ReviewScope = "every" | "first_n" | "per_category";
+const APPROVAL_FIRST_N_MIN = 1;
+const APPROVAL_FIRST_N_MAX = 100;
+const DEFAULT_APPROVAL_FIRST_N = 3;
+
+interface ReviewChoice {
+  scope: ReviewScope;
+  firstN: number;
+  categories: BrandCategoryId[];
+}
+
+const REVIEW_SCOPE_OPTIONS: ReadonlyArray<{ id: ReviewScope; label: string }> = [
+  { id: "every", label: "Every post" },
+  { id: "first_n", label: "Each person's first posts" },
+  { id: "per_category", label: "Selected post types" },
+];
+
+const orderCategories = (ids: readonly BrandCategoryId[]): BrandCategoryId[] =>
+  CATEGORY_IDS.filter((id) => ids.includes(id));
+
+/** Read a saved policy the way the server applies it. */
+const readReviewChoice = (
+  requiresApproval: boolean,
+  policy: ApprovalPolicy | null | undefined,
+): ReviewChoice => {
+  const fallback: ReviewChoice = {
+    scope: "every",
+    firstN: DEFAULT_APPROVAL_FIRST_N,
+    categories: ["deliveries"],
+  };
+  if (!requiresApproval || !policy || typeof policy !== "object") return fallback;
+  if (policy.mode === "first_n") {
+    const firstN = Number(policy.firstN);
+    return Number.isInteger(firstN) &&
+      firstN >= APPROVAL_FIRST_N_MIN &&
+      firstN <= APPROVAL_FIRST_N_MAX
+      ? { ...fallback, scope: "first_n", firstN }
+      : fallback;
+  }
+  if (policy.mode === "per_category") {
+    const categories = orderCategories(
+      (Array.isArray(policy.categories) ? policy.categories : []).filter(
+        isBrandCategory,
+      ),
+    );
+    // An empty list reviews every post on the server, so show it that way.
+    return categories.length > 0
+      ? { ...fallback, scope: "per_category", categories }
+      : fallback;
+  }
+  return fallback;
 };
+
+/** The approval_policy value to store for a review switch and choice. */
+const toApprovalPolicy = (
+  requiresApproval: boolean,
+  choice: ReviewChoice,
+): ApprovalPolicy | null => {
+  if (!requiresApproval) return null;
+  if (choice.scope === "first_n") return { mode: "first_n", firstN: choice.firstN };
+  if (choice.scope === "per_category" && choice.categories.length > 0) {
+    return { mode: "per_category", categories: orderCategories(choice.categories) };
+  }
+  return null;
+};
+
+const clampFirstN = (value: number) =>
+  Math.min(
+    APPROVAL_FIRST_N_MAX,
+    Math.max(APPROVAL_FIRST_N_MIN, Math.round(value) || APPROVAL_FIRST_N_MIN),
+  );
+
+/** Selected option tile: the one selection treatment used across settings. */
+const optionTileClass = (selected: boolean) =>
+  cn(
+    "rounded-sm border text-left transition-colors duration-120 ease-out",
+    selected
+      ? "border-brand-ink bg-brand-tint text-ink"
+      : "border-hairline bg-panel text-ink hover:border-strong",
+  );
+
+/** The visual half of a role="switch" button; the button carries the state. */
+const SwitchTrack: React.FC<{ on: boolean }> = ({ on }) => (
+  <span
+    aria-hidden="true"
+    className={cn(
+      "flex h-6 w-11 shrink-0 items-center rounded-full border px-0.5 transition-colors duration-120 ease-out",
+      on ? "border-brand-fill bg-brand-fill" : "border-strong bg-fill-hover",
+    )}
+  >
+    <span
+      className={cn(
+        "block h-5 w-5 rounded-full transition-transform duration-120 ease-out motion-reduce:transition-none",
+        on ? "translate-x-[18px] bg-brand-foreground" : "bg-ink-2",
+      )}
+    />
+  </span>
+);
 
 const DESTINATION_LABELS: Record<string, string> = {
   facebook_feed: "Facebook",
@@ -241,15 +361,15 @@ const PhraseChipEditor: React.FC<PhraseChipEditorProps> = ({
 
   return (
     <div className="space-y-2">
-      <div className="text-xs font-semibold text-surface-200">{label}</div>
+      <div className="text-sm font-medium text-ink-2">{label}</div>
       <ul className="flex flex-wrap gap-1.5" aria-label={`${label} phrases`}>
         {phrases.length === 0 ? (
-          <li className="text-[11px] text-ink-2">None yet</li>
+          <li className="text-caption text-ink-2">None yet</li>
         ) : (
           phrases.map((phrase) => (
             <li
               key={phrase}
-              className="inline-flex items-center gap-1 rounded-full border border-hairline bg-fill-subtle px-2.5 py-1 text-xs text-surface-100"
+              className="inline-flex items-center gap-1 rounded-full border border-hairline bg-panel-raised py-1 pl-3 pr-1 text-sm text-ink"
             >
               <span>{phrase}</span>
               <button
@@ -259,9 +379,9 @@ const PhraseChipEditor: React.FC<PhraseChipEditorProps> = ({
                   onChange(phrases.filter((existing) => existing !== phrase));
                   setError(null);
                 }}
-                className="inline-flex h-5 w-5 items-center justify-center rounded-full text-surface-400 hover:bg-fill-hover hover:text-surface-100"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-full text-ink-2 transition-colors duration-120 hover:bg-fill-hover hover:text-ink"
               >
-                <X className="h-3 w-3" aria-hidden="true" />
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
             </li>
           ))
@@ -287,13 +407,12 @@ const PhraseChipEditor: React.FC<PhraseChipEditorProps> = ({
           error={error || undefined}
           helperText={full ? `All ${BRAND_VOICE_MAX_ITEMS} slots used` : helperText}
           fullWidth
-          className="bg-fill-subtle border-hairline focus:border-primary-400"
         />
         <Button
           type="button"
-          variant="outline"
-          size="sm"
-          className="min-h-11 shrink-0"
+          variant="secondary"
+          size="md"
+          className="shrink-0"
           disabled={full || !collapsePhrase(draft)}
           aria-label={`Add ${lowerLabel} phrase`}
           onClick={add}
@@ -343,60 +462,53 @@ const DealerWebsiteConnectionCard: React.FC = () => {
   const ready = destinations.find((destination) => destination.enabled);
   return (
     <section
-      className="rounded-lg border border-hairline bg-panel p-4 sm:p-5"
+      className="rounded-md border border-hairline bg-panel p-5 sm:p-6"
       aria-labelledby="website-connection-heading"
     >
-      <div className="flex items-start gap-3">
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-sm bg-panel-raised text-brand-ink">
-          <Link2 className="h-5 w-5" aria-hidden="true" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <h3 id="website-connection-heading" className="font-semibold text-ink">
-            Customer website connection
-          </h3>
-          {loading ? (
-            <p className="mt-1 text-sm text-ink-2">Checking the private draft route…</p>
-          ) : error ? (
-            <div className="mt-1">
-              <p role="alert" className="text-sm text-error-ink">
-                {error}
-              </p>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="mt-2"
-                leftIcon={<RefreshCw className="h-4 w-4" />}
-                onClick={() => setRequestKey((key) => key + 1)}
-              >
-                Retry
-              </Button>
-            </div>
-          ) : ready ? (
-            <div className="mt-1 text-sm text-ink-2">
-              <p>
-                Connected to {ready.label}. Posts prepare private drafts; your team
-                still reviews and publishes them in Customer Hub.
-              </p>
-              {ready.siteUrl ? (
-                <a
-                  href={ready.siteUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-2 inline-flex min-h-11 items-center gap-1 text-brand-ink"
-                >
-                  Open website <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                </a>
-              ) : null}
-            </div>
-          ) : (
-            <p className="mt-1 text-sm text-ink-2">
-              No private website draft destination is configured for this dealership.
-              Contact your system administrator to connect one.
-            </p>
-          )}
+      <h3 id="website-connection-heading" className="text-ink">
+        Customer website connection
+      </h3>
+      {loading ? (
+        <p className="mt-1 text-sm text-ink-2">Checking the private draft route…</p>
+      ) : error ? (
+        <div className="mt-1">
+          <p role="alert" className="text-sm text-error-ink">
+            {error}
+          </p>
+          <Button
+            type="button"
+            variant="secondary"
+            size="md"
+            className="mt-3"
+            leftIcon={<RefreshCw className="h-4 w-4" />}
+            onClick={() => setRequestKey((key) => key + 1)}
+          >
+            Retry
+          </Button>
         </div>
-      </div>
+      ) : ready ? (
+        <div className="mt-1 text-sm text-ink-2">
+          <p>
+            Connected to {ready.label}. Posts prepare private drafts; your team still
+            reviews and publishes them in Customer Hub.
+          </p>
+          {ready.siteUrl ? (
+            <a
+              href={ready.siteUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-flex min-h-11 items-center gap-1 text-brand-ink"
+            >
+              Open website <ExternalLink className="h-4 w-4" aria-hidden="true" />
+            </a>
+          ) : null}
+        </div>
+      ) : (
+        <p className="mt-1 text-sm text-ink-2">
+          No private website draft destination is configured for this dealership.
+          Contact your system administrator to connect one.
+        </p>
+      )}
     </section>
   );
 };
@@ -450,8 +562,14 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
       setWizardDismissed(false);
     }
   }, [dealer?.id]);
-  const showWizard =
-    !wizardDismissed && dealer && (!dealer.brand_voice || !dealer.brand_color);
+  const needsSetup = Boolean(dealer && (!dealer.brand_voice || !dealer.brand_color));
+  // The wizard's own Finish setup can fill in the voice and colour. While that
+  // save is in flight and its success state shows, wizardFinishing keeps the
+  // wizard on screen until it dismisses itself. Nothing else sets it: a
+  // Settings-tab save that completes the store makes the wizard go away, so it
+  // can never linger holding entries older than that save.
+  const [wizardFinishing, setWizardFinishing] = useState(false);
+  const showWizard = !wizardDismissed && dealer && (needsSetup || wizardFinishing);
 
   useEffect(() => {
     if (!settingsDirty) return;
@@ -465,8 +583,8 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
 
   if (!dealer) {
     return (
-      <div className="p-8 text-center text-surface-300">
-        <Loader2 className="w-6 h-6 animate-spin mx-auto" />
+      <div className="p-8 text-center text-ink-2">
+        <Loader2 className="mx-auto h-6 w-6 animate-spin" aria-hidden="true" />
       </div>
     );
   }
@@ -477,9 +595,24 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
       fd.append(k, typeof v === "boolean" ? (v ? "true" : "false") : v),
     );
     const updated = await db.updateDealerWithFile(dealer.id, fd);
+    // The PATCH body carries structured brand fields as JSON text ("[]", "",
+    // '{"mode":"first_n",…}'), and the route answers with only { id }. Merge
+    // the decoded values so the session dealer keeps arrays, objects and null
+    // — the settings form compares against these, and the creative and
+    // approval resolvers read them. Plain text fields and booleans are
+    // already in their stored form.
+    const decodedBrand = db.pickDealerBrandFields(fields);
+    const decoded: Record<string, unknown> = { ...fields };
+    for (const key of db.DEALER_BRAND_FIELDS) {
+      if (key in fields) decoded[key] = decodedBrand[key];
+    }
     useAppStore.setState((s) => ({
       currentDealer: s.currentDealer
-        ? { ...s.currentDealer, ...fields, ...updated }
+        ? {
+            ...s.currentDealer,
+            ...(decoded as Partial<typeof s.currentDealer>),
+            ...updated,
+          }
         : s.currentDealer,
     }));
     return updated;
@@ -516,45 +649,49 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
   };
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-4 p-0 sm:space-y-6 sm:p-2 lg:p-4">
-      {/* Header with dealership identity + role chip */}
-      <m.div
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="hidden flex-wrap items-center justify-between gap-3 sm:flex"
-      >
-        <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+    <div className="mx-auto w-full max-w-5xl space-y-6 p-0 sm:p-2 lg:p-4">
+      {/* Dealership identity. On phones the app header already shows the
+          dealer, so this block is visually hidden there, but it stays in the
+          accessibility tree: it holds the page's only h1. */}
+      <div className="sr-only flex-wrap items-center justify-between gap-3 sm:not-sr-only sm:flex">
+        <div className="flex min-w-0 items-center gap-3">
           {dealer.logo ? (
             <img
               src={dealer.logo}
               alt={`${dealer.name} logo`}
-              className="h-10 w-10 shrink-0 rounded-xl object-contain bg-fill-hover p-1 ring-1 ring-hairline sm:h-12 sm:w-12"
+              className="h-12 w-12 shrink-0 rounded-sm border border-hairline bg-panel-raised object-contain p-1"
             />
           ) : (
             <div
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg font-bold text-white shadow-lg sm:h-12 sm:w-12 sm:text-xl"
-              style={{ background: "var(--brand-primary)" }}
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-sm bg-brand-fill font-display text-xl font-semibold text-brand-foreground"
+              aria-hidden="true"
             >
               {dealer.name.charAt(0)}
             </div>
           )}
           <div className="min-w-0">
-            <h1 className="truncate text-lg font-bold text-surface-50 sm:text-xl">
-              {dealer.name}
-            </h1>
-            <div className="flex items-center gap-2 text-[11px] text-surface-400">
-              <ShieldCheck className="h-3 w-3 text-success-300" />
-              Manager dashboard
-            </div>
+            <h1 className="truncate text-2xl leading-7 text-ink">{dealer.name}</h1>
+            <p className="text-sm text-ink-2">Manager dashboard</p>
           </div>
         </div>
-      </m.div>
+      </div>
 
       {showWizard && (
         <DealerSetupWizard
           dealer={dealer}
-          onSave={handleWizardSave}
+          onSave={async (fields) => {
+            // Set before the store update, so the record that completes the
+            // store never unmounts the wizard ahead of its success state.
+            setWizardFinishing(true);
+            try {
+              return await handleWizardSave(fields);
+            } catch (err) {
+              setWizardFinishing(false);
+              throw err;
+            }
+          }}
           onDismiss={() => {
+            setWizardFinishing(false);
             setWizardDismissed(true);
             try {
               localStorage.setItem(`dsp.dealerSetupDismissed.v1.${dealer.id}`, "1");
@@ -565,21 +702,23 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
         />
       )}
 
-      {/* Tabs — sticky on mobile so managers can switch without scrolling up */}
-      <div className="sticky top-0 z-20 -mx-0 bg-surface-950/90 py-1 backdrop-blur-md sm:static sm:bg-transparent sm:py-0 sm:backdrop-blur-none">
+      {/* Tabs — text tabs with a brand underline on the selected one, the same
+          pattern as the system-admin hub. Sticky on phones so managers can
+          switch without scrolling up. */}
+      <div className="sticky top-0 z-20 border-b border-hairline bg-canvas sm:static">
         <div
           role="tablist"
           aria-label="Manager dashboard"
-          className="flex w-full gap-1 rounded-xl border border-surface-800 bg-surface-950/60 p-1 sm:inline-flex sm:w-auto"
+          className="flex w-full gap-6 sm:w-auto"
         >
           {(
             [
-              { key: "overview", label: "Overview", icon: Trophy },
-              { key: "settings", label: "Settings", icon: Settings },
-              { key: "team", label: "Team", icon: Users },
-            ] as Array<{ key: Tab; label: string; icon: typeof Trophy }>
+              { key: "overview", label: "Overview" },
+              { key: "settings", label: "Settings" },
+              { key: "team", label: "Team" },
+            ] as Array<{ key: Tab; label: string }>
           ).map((t) => {
-            const Icon = t.icon;
+            const selected = tab === t.key;
             return (
               <button
                 ref={(element) => {
@@ -589,22 +728,21 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
                 id={`manager-tab-${t.key}`}
                 role="tab"
                 type="button"
-                aria-selected={tab === t.key}
+                aria-selected={selected}
                 aria-controls={`manager-panel-${t.key}`}
-                tabIndex={tab === t.key ? 0 : -1}
+                tabIndex={selected ? 0 : -1}
                 onClick={() => {
                   triggerHapticFeedback();
                   requestTab(t.key);
                 }}
                 onKeyDown={(event) => handleTabKeyDown(event, t.key)}
                 className={cn(
-                  "flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors sm:min-h-0 sm:flex-none sm:gap-2 sm:px-4",
-                  tab === t.key
-                    ? "bg-brand-fill text-brand-foreground"
-                    : "text-surface-400 hover:text-surface-200",
+                  "relative -mb-px flex min-h-11 flex-1 items-center justify-center border-b-2 px-1 text-sm font-semibold transition-colors duration-120 ease-out sm:flex-none",
+                  selected
+                    ? "border-brand-fill text-ink"
+                    : "border-transparent text-ink-2 hover:text-ink",
                 )}
               >
-                <Icon className="h-4 w-4 shrink-0" />
                 {t.label}
               </button>
             );
@@ -617,7 +755,7 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
           id="manager-panel-overview"
           role="tabpanel"
           aria-labelledby="manager-tab-overview"
-          className="space-y-4 sm:space-y-6"
+          className="space-y-6"
         >
           <Leaderboard />
           <ApprovalQueue />
@@ -630,7 +768,7 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
           id="manager-panel-settings"
           role="tabpanel"
           aria-labelledby="manager-tab-settings"
-          className="space-y-4 sm:space-y-6"
+          className="space-y-6"
         >
           <DealerSettingsCard
             dealer={dealer}
@@ -655,7 +793,7 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
         title="Discard unsaved settings?"
         footer={
           <>
-            <Button variant="outline" fullWidth onClick={() => setPendingTab(null)}>
+            <Button variant="secondary" fullWidth onClick={() => setPendingTab(null)}>
               Keep editing
             </Button>
             <Button
@@ -675,7 +813,7 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
           </>
         }
       >
-        <p className="text-sm text-surface-300">
+        <p className="text-sm text-ink-2">
           You have dealership settings that have not been saved. Leaving this tab will
           discard them.
         </p>
@@ -780,9 +918,17 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
   const [color, setColor] = useState(dealer.brand_color || "");
   const [oem, setOem] = useState(dealer.oem_affiliation || "");
   const [approval, setApproval] = useState(!!dealer.requires_approval);
-  const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy | null>(
-    dealer.approval_policy ?? null,
+  const [reviewChoice, setReviewChoice] = useState<ReviewChoice>(() =>
+    readReviewChoice(!!dealer.requires_approval, dealer.approval_policy),
   );
+  // What is typed in "Approved posts per person" while the field is being
+  // edited. It may be empty or out of range; the saved choice keeps the last
+  // valid, clamped number, and the field shows that again on blur.
+  const [firstNDraft, setFirstNDraft] = useState<string | null>(null);
+  const reviewGroupId = React.useId();
+  const firstNHelpId = React.useId();
+  const categoryHelpId = React.useId();
+  const setupHeadingId = React.useId();
   const [categoryDestinations, setCategoryDestinations] =
     useState<CategoryDestinations | null>(dealer.category_destinations ?? null);
   const [featurePermissions, setFeaturePermissions] =
@@ -871,8 +1017,16 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
     JSON.stringify(currentMotionSignature) !== JSON.stringify(savedMotionSignature) ||
     JSON.stringify(currentLogoPlacement) !== JSON.stringify(savedLogoPlacement) ||
     imageQualityTier !== (dealer.image_quality_tier || "");
+  // Both sides go through the same normalisation, so a saved "always" / "none"
+  // / empty-category policy (all of which review every post) never reads as an
+  // unsaved edit.
+  const approvalPolicy = toApprovalPolicy(approval, reviewChoice);
+  const savedApprovalPolicy = toApprovalPolicy(
+    !!dealer.requires_approval,
+    readReviewChoice(!!dealer.requires_approval, dealer.approval_policy),
+  );
   const workflowDirty =
-    JSON.stringify(approvalPolicy) !== JSON.stringify(dealer.approval_policy ?? null) ||
+    JSON.stringify(approvalPolicy) !== JSON.stringify(savedApprovalPolicy) ||
     JSON.stringify(categoryDestinations) !==
       JSON.stringify(dealer.category_destinations ?? null) ||
     JSON.stringify(featurePermissions) !==
@@ -992,9 +1146,12 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
     }
     setSaving(true);
     try {
-      // Approval policy, category destinations, and feature permissions are
-      // deliberately absent: the server leaves any field it does not receive
-      // untouched, and their UI arrives in phase 2.
+      // The approval policy is always sent, already normalised: null whenever
+      // review is off or covers every post, so the stored value can never
+      // disagree with what this form shows. Category destinations and feature
+      // permissions are sent only when they changed, so a save that does not
+      // touch them leaves the stored value (including any per-person entries)
+      // exactly as it is.
       const brandFields = db.encodeDealerBrandFields({
         signature_look: signatureLook,
         alternate_look: alternateLook,
@@ -1008,10 +1165,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
         motion_signature: currentMotionSignature,
         logo_placement: currentLogoPlacement,
         image_quality_tier: imageQualityTier,
-        ...(JSON.stringify(approvalPolicy) !==
-        JSON.stringify(dealer.approval_policy ?? null)
-          ? { approval_policy: approvalPolicy }
-          : {}),
+        approval_policy: approvalPolicy,
         ...(JSON.stringify(categoryDestinations) !==
         JSON.stringify(dealer.category_destinations ?? null)
           ? { category_destinations: categoryDestinations }
@@ -1021,42 +1175,91 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           ? { feature_permissions: featurePermissions }
           : {}),
       });
-      const fields: Record<string, string | boolean> = {
-        ...brandFields,
-        brand_voice: voice.trim(),
-        banned_phrases: banned.trim(),
-        brand_color: color.trim(),
-        oem_affiliation: oem.trim(),
-        requires_approval: approval,
-        employee_disclosure_disabled: !disclosureOn,
-        employee_disclosure_text: disclosureText.trim(),
+      // The exact text values that will be stored. After the save the form is
+      // re-based onto these, so trimmed or normalised input never leaves the
+      // card reporting a phantom unsaved change.
+      const stored = {
+        voice: voice.trim(),
+        banned: banned.trim(),
+        color: color.trim(),
+        oem: oem.trim(),
+        disclosureText: disclosureText.trim(),
         website: website.trim(),
         phone: phone.trim(),
         address: address.trim(),
-        hours: hoursSerialized,
         tagline: tagline.trim(),
-        facebook_url: facebookUrl.trim(),
-        facebook_page_tag: normalizeDealerSocialProfileValue(
+        facebookUrl: facebookUrl.trim(),
+        facebookPageTag: normalizeDealerSocialProfileValue(
           "facebook_page_tag",
           facebookPageTag,
         ),
-        instagram_handle: normalizeDealerSocialProfileValue(
+        instagramHandle: normalizeDealerSocialProfileValue(
           "instagram_handle",
           instagramHandle,
         ),
-        tiktok_handle: normalizeDealerSocialProfileValue("tiktok_handle", tiktokHandle),
-        x_handle: normalizeDealerSocialProfileValue("x_handle", xHandle),
-        linkedin_company_tag: normalizeDealerSocialProfileValue(
+        tiktokHandle: normalizeDealerSocialProfileValue("tiktok_handle", tiktokHandle),
+        xHandle: normalizeDealerSocialProfileValue("x_handle", xHandle),
+        linkedinCompanyTag: normalizeDealerSocialProfileValue(
           "linkedin_company_tag",
           linkedinCompanyTag,
         ),
-        gbp_url: gbpUrl.trim(),
-        default_hashtags: defaultHashtags.trim(),
-        default_footer: defaultFooter.trim(),
+        gbpUrl: gbpUrl.trim(),
+        defaultHashtags: defaultHashtags.trim(),
+        defaultFooter: defaultFooter.trim(),
+      };
+      const fields: Record<string, string | boolean> = {
+        ...brandFields,
+        brand_voice: stored.voice,
+        banned_phrases: stored.banned,
+        brand_color: stored.color,
+        oem_affiliation: stored.oem,
+        requires_approval: approval,
+        employee_disclosure_disabled: !disclosureOn,
+        employee_disclosure_text: stored.disclosureText,
+        website: stored.website,
+        phone: stored.phone,
+        address: stored.address,
+        hours: hoursSerialized,
+        tagline: stored.tagline,
+        facebook_url: stored.facebookUrl,
+        facebook_page_tag: stored.facebookPageTag,
+        instagram_handle: stored.instagramHandle,
+        tiktok_handle: stored.tiktokHandle,
+        x_handle: stored.xHandle,
+        linkedin_company_tag: stored.linkedinCompanyTag,
+        gbp_url: stored.gbpUrl,
+        default_hashtags: stored.defaultHashtags,
+        default_footer: stored.defaultFooter,
         enabled_styles: enabledStylesStr,
         default_style: defaultStyle,
       };
       await onSaved(fields);
+      // Re-base only a field that still holds the value that was submitted:
+      // anything typed while the save was in flight stays as typed (and the
+      // form stays dirty), rather than being replaced by the saved snapshot.
+      const rebase = (
+        set: React.Dispatch<React.SetStateAction<string>>,
+        submitted: string,
+        saved: string,
+      ) => set((current) => (current === submitted ? saved : current));
+      rebase(setVoice, voice, stored.voice);
+      rebase(setBanned, banned, stored.banned);
+      rebase(setColor, color, stored.color);
+      rebase(setOem, oem, stored.oem);
+      rebase(setDisclosureText, disclosureText, stored.disclosureText);
+      rebase(setWebsite, website, stored.website);
+      rebase(setPhone, phone, stored.phone);
+      rebase(setAddress, address, stored.address);
+      rebase(setTagline, tagline, stored.tagline);
+      rebase(setFacebookUrl, facebookUrl, stored.facebookUrl);
+      rebase(setFacebookPageTag, facebookPageTag, stored.facebookPageTag);
+      rebase(setInstagramHandle, instagramHandle, stored.instagramHandle);
+      rebase(setTiktokHandle, tiktokHandle, stored.tiktokHandle);
+      rebase(setXHandle, xHandle, stored.xHandle);
+      rebase(setLinkedinCompanyTag, linkedinCompanyTag, stored.linkedinCompanyTag);
+      rebase(setGbpUrl, gbpUrl, stored.gbpUrl);
+      rebase(setDefaultHashtags, defaultHashtags, stored.defaultHashtags);
+      rebase(setDefaultFooter, defaultFooter, stored.defaultFooter);
       setSavedAt(new Date());
     } catch (err) {
       setError(toUiMessage(err, "Could not save these settings."));
@@ -1065,80 +1268,76 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
     }
   };
 
-  const sectionComplete: Record<SettingsSection, boolean> = {
-    profile: Boolean(website.trim() && phone.trim() && address.trim()),
-    channels: Boolean(
-      facebookUrl.trim() || instagramHandle.trim() || gbpUrl.trim() || website.trim(),
-    ),
-    voice: Boolean(voice.trim() && (voiceDo.length > 0 || voiceDont.length > 0)),
-    creative: Boolean(signatureLook || defaultStyle),
-    workflow: Boolean(
-      approvalPolicy || dealer.requires_approval !== undefined || disclosureText.trim(),
-    ),
-  };
-  const completeCount = Object.values(sectionComplete).filter(Boolean).length;
+  const areaReady = setupAreasReady(dealer);
+  const completeCount = SETUP_AREAS.filter((area) => areaReady[area]).length;
+  const sectionReady = (section: SettingsSection) =>
+    section !== "workflow" && areaReady[section];
 
-  // pb-20 (80px) reserves at least the sticky save bar's own footprint —
-  // min-h-14 (56px) plus its bottom-2 (8px) offset — so the last control is
-  // never trapped underneath the bar. sm:pb-20 re-asserts it past sm:p-6.
+  const toggleReviewCategory = (category: BrandCategoryId) => {
+    setReviewChoice((current) => {
+      const checked = current.categories.includes(category);
+      // At least one post type stays checked; an empty list would review
+      // every post, which is what "Every post" is for.
+      if (checked && current.categories.length === 1) return current;
+      return {
+        ...current,
+        categories: orderCategories(
+          checked
+            ? current.categories.filter((id) => id !== category)
+            : [...current.categories, category],
+        ),
+      };
+    });
+  };
+
+  // The settings sit directly on the canvas: no outer card, sections separated
+  // by 32 px and a title-2. pb-20 (80px) reserves at least the sticky save
+  // bar's own footprint — min-h-14 (56px) plus its bottom-2 (8px) offset — so
+  // the last control is never trapped underneath the bar.
   return (
-    <m.div
-      initial={{ y: 8 }}
-      animate={{ y: 0 }}
-      className="relative isolate overflow-clip rounded-xl border border-hairline bg-surface-overlay p-3 pb-20 sm:p-6 sm:pb-20 space-y-4 sm:space-y-6 shadow-sm"
-    >
-      <div
-        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-48 bg-gradient-to-b from-brand-tint to-transparent"
-        aria-hidden="true"
-      />
-      <div className="flex items-center gap-3 border-b border-hairline pb-3 sm:gap-4 sm:pb-6">
-        <div className="hidden h-16 w-16 shrink-0 items-center justify-center rounded-xl border border-brand-ink/20 bg-panel text-brand-ink shadow-sm sm:flex">
-          <Store className="h-6 w-6 sm:h-7 sm:w-7" aria-hidden="true" />
-        </div>
+    <div className="relative space-y-8 pb-20">
+      <header>
         <div>
-          <p className="mb-1 hidden text-xs font-semibold uppercase tracking-[0.12em] text-ink-2 sm:block">
-            Built around your dealership
-          </p>
-          <h3 className="font-display text-xl font-semibold text-surface-50 sm:text-3xl">
+          <h2 className="text-3xl leading-8 text-ink sm:text-4xl sm:leading-10">
             Dealership settings
-          </h3>
-          <p className="mt-1 hidden text-sm text-ink-2 sm:block">
+          </h2>
+          <p className="mt-1 text-sm text-ink-2">
             Your brand, your voice, your team's way of working.
           </p>
         </div>
-      </div>
+      </header>
 
-      <div className="sm:rounded-lg sm:border sm:border-hairline sm:bg-panel sm:p-4 sm:shadow-sm">
-        <div className="flex items-center justify-between gap-3">
+      <section aria-labelledby={setupHeadingId} className="space-y-3">
+        <div className="flex items-end justify-between gap-3">
           <div>
-            <h4 className="hidden text-sm font-semibold text-ink sm:block">
+            <h3 id={setupHeadingId} className="text-ink">
               Store setup
-            </h4>
-            <p className="text-xs text-ink-2">
-              {completeCount} of {SETTINGS_SECTIONS.length} areas ready
+            </h3>
+            <p className="text-sm text-ink-2">
+              {completeCount} of {SETUP_AREAS.length} areas ready
             </p>
           </div>
           <div
-            className="h-2 w-24 overflow-hidden rounded-full bg-fill-subtle"
+            className="mb-1.5 h-1 w-24 overflow-hidden rounded-full bg-panel-raised"
             role="progressbar"
             aria-label="Store setup progress"
             aria-valuemin={0}
-            aria-valuemax={SETTINGS_SECTIONS.length}
+            aria-valuemax={SETUP_AREAS.length}
             aria-valuenow={completeCount}
           >
             <div
-              className="h-full bg-brand-fill transition-[width]"
-              style={{ width: `${(completeCount / SETTINGS_SECTIONS.length) * 100}%` }}
+              className="h-full bg-brand-fill transition-[width] duration-180 ease-out"
+              style={{ width: `${(completeCount / SETUP_AREAS.length) * 100}%` }}
             />
           </div>
         </div>
         <nav
-          className="mt-2 flex gap-2 overflow-x-auto pb-1 sm:mt-4 sm:grid sm:grid-cols-5 sm:overflow-visible sm:pb-0"
+          className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:grid-cols-5 sm:overflow-visible sm:px-0 sm:pb-0"
           aria-label="Dealership settings sections"
         >
           {SETTINGS_SECTIONS.map((section) => {
             const selected = settingsSection === section.id;
-            const SectionIcon = SETTINGS_ICONS[section.id];
+            const ready = sectionReady(section.id);
             return (
               <button
                 key={section.id}
@@ -1146,48 +1345,41 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
                 aria-current={selected ? "page" : undefined}
                 onClick={() => setSettingsSection(section.id)}
                 className={cn(
-                  "group relative flex min-h-11 shrink-0 items-center gap-2 rounded-md border px-3 py-2 text-left transition-colors sm:block sm:py-3",
-                  selected
-                    ? "border-brand-ink bg-brand-tint text-ink shadow-sm"
-                    : "border-hairline bg-panel-raised text-ink-2 hover:border-strong",
+                  "flex min-h-11 shrink-0 flex-col justify-center gap-1 px-3 py-2 sm:py-3",
+                  optionTileClass(selected),
                 )}
               >
-                <span className="flex items-center justify-between gap-2 sm:mb-2">
-                  <SectionIcon
-                    className={cn(
-                      "h-4 w-4 sm:h-5 sm:w-5",
-                      selected ? "text-brand-ink" : "text-ink-2",
-                    )}
-                    aria-hidden="true"
-                  />
-                  {sectionComplete[section.id] ? (
-                    <Check
-                      className="hidden h-3.5 w-3.5 text-success-ink sm:block"
-                      aria-hidden="true"
-                    />
+                <span className="flex w-full items-center justify-between gap-2">
+                  <span className="text-sm font-semibold">{section.label}</span>
+                  {ready ? (
+                    <>
+                      <Check
+                        className="h-4 w-4 shrink-0 text-success-ink"
+                        aria-hidden="true"
+                      />
+                      <span className="sr-only">, ready</span>
+                    </>
                   ) : null}
                 </span>
-                <span className="text-xs font-semibold">{section.label}</span>
-                <span className="mt-1 hidden text-2xs leading-4 text-ink-2 lg:block">
+                <span className="hidden text-caption text-ink-2 lg:block">
                   {section.description}
                 </span>
               </button>
             );
           })}
         </nav>
-      </div>
+      </section>
 
       {/* ---- Contact + identity ---- */}
-      <section className={cn("space-y-2", settingsSection !== "profile" && "hidden")}>
-        <div className="text-sm font-semibold text-surface-50">Contact & identity</div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      <section className={cn("space-y-4", settingsSection !== "profile" && "hidden")}>
+        <h3 className="text-ink">Contact & identity</h3>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Input
             label="Website"
             value={website}
             onChange={(e) => setWebsite(e.target.value)}
             placeholder="https://yourdealership.com"
             fullWidth
-            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
           <Input
             label="Phone"
@@ -1195,7 +1387,6 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             onChange={(e) => setPhone(e.target.value)}
             placeholder="(313) 555-0100"
             fullWidth
-            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
         </div>
         <Input
@@ -1204,7 +1395,6 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           onChange={(e) => setAddress(e.target.value)}
           placeholder="123 Main St, Detroit MI 48201"
           fullWidth
-          className="bg-fill-subtle border-hairline focus:border-primary-400"
         />
         <HoursPicker
           value={hoursWeek}
@@ -1217,21 +1407,19 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           onChange={(e) => setTagline(e.target.value)}
           placeholder="Family-owned since 1985 · No-haggle pricing"
           fullWidth
-          className="bg-fill-subtle border-hairline focus:border-primary-400"
         />
       </section>
 
       {/* ---- Social handles ---- */}
-      <section className={cn("space-y-2", settingsSection !== "channels" && "hidden")}>
-        <div className="text-sm font-semibold text-surface-50">Social presence</div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <section className={cn("space-y-4", settingsSection !== "channels" && "hidden")}>
+        <h3 className="text-ink">Social presence</h3>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Input
             label="Facebook page URL"
             value={facebookUrl}
             onChange={(e) => setFacebookUrl(e.target.value)}
             placeholder="https://www.facebook.com/yourdealership"
             fullWidth
-            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
           <Input
             label="Facebook Page tag"
@@ -1240,17 +1428,15 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             placeholder="@Your Dealership"
             helperText="Added to Facebook/Marketplace captions. Facebook may ask the salesperson to tap the Page suggestion once."
             fullWidth
-            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
         </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Input
             label="Instagram"
             value={instagramHandle}
             onChange={(e) => setInstagramHandle(e.target.value)}
             placeholder="@yourdealership"
             fullWidth
-            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
           <Input
             label="TikTok"
@@ -1258,7 +1444,6 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             onChange={(e) => setTiktokHandle(e.target.value)}
             placeholder="@yourdealership"
             fullWidth
-            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
           <Input
             label="X / Twitter"
@@ -1266,7 +1451,6 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             onChange={(e) => setXHandle(e.target.value)}
             placeholder="@yourdealership"
             fullWidth
-            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
           <Input
             label="LinkedIn company tag"
@@ -1275,7 +1459,6 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             placeholder="@your-company"
             helperText="LinkedIn may ask the salesperson to choose the company suggestion."
             fullWidth
-            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
         </div>
         <Input
@@ -1284,7 +1467,6 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           onChange={(e) => setGbpUrl(e.target.value)}
           placeholder="https://g.page/yourdealership"
           fullWidth
-          className="bg-fill-subtle border-hairline focus:border-primary-400"
         />
       </section>
 
@@ -1294,15 +1476,12 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
         aria-label="Brand"
       >
         <div>
-          <div className="flex items-center gap-2 text-sm font-semibold text-surface-50">
-            <Palette className="w-4 h-4 text-primary-300" />
-            Brand
-          </div>
-          <p className="text-[11px] text-surface-400">
+          <h3 className="text-ink">Brand</h3>
+          <p className="mt-1 text-sm text-ink-2">
             One house style for every post: salespeople never pick image style, tone, or
             video look themselves.
           </p>
-          <p className="mt-2 rounded-lg border border-hairline bg-fill-subtle px-3 py-2 text-[11px] text-surface-300">
+          <p className="mt-3 rounded-sm border border-hairline bg-panel px-3 py-2 text-sm text-ink-2">
             {dealer.creative_system_v2
               ? "Active for your store. The signature look, destinations and feature permissions control new posts."
               : "Your store is using the classic style choices below. Configure a signature look now, then ask your system administrator to enable the streamlined creative system when your team is ready."}
@@ -1311,7 +1490,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
 
         {/* Signature look */}
         <div className="space-y-2">
-          <div id={lookGroupId} className="text-xs font-semibold text-surface-200">
+          <div id={lookGroupId} className="text-sm font-medium text-ink-2">
             Signature look
           </div>
           <div
@@ -1349,19 +1528,12 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
                   aria-describedby={`${lookGroupId}-${option.id}`}
                   tabIndex={focusable ? 0 : -1}
                   onClick={() => selectLook(option.id)}
-                  className={cn(
-                    "rounded-xl border px-3 py-2.5 text-left transition-colors",
-                    selected
-                      ? "border-primary-500/40 bg-primary-500/5"
-                      : "border-hairline bg-fill-subtle hover:bg-fill-hover",
-                  )}
+                  className={cn("min-h-11 px-3 py-2.5", optionTileClass(selected))}
                 >
-                  <div className="text-sm font-semibold text-surface-50">
-                    {option.label}
-                  </div>
+                  <div className="text-sm font-semibold text-ink">{option.label}</div>
                   <div
                     id={`${lookGroupId}-${option.id}`}
-                    className="text-[11px] text-surface-400"
+                    className="mt-0.5 text-caption text-ink-2"
                   >
                     {option.description}
                   </div>
@@ -1408,8 +1580,8 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
         </Select>
 
         {/* Motion signature */}
-        <fieldset className="space-y-2">
-          <legend className="text-xs font-semibold text-surface-200">
+        <fieldset className="space-y-3">
+          <legend className="mb-2 text-sm font-medium text-ink-2">
             Motion signature
           </legend>
           <Select
@@ -1430,14 +1602,14 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
               </option>
             ))}
           </Select>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <div className="text-[11px] font-medium text-surface-300">Aspects</div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <div className="text-sm font-medium text-ink-2">Aspects</div>
               {motionAspectOptions.map((option) => (
                 <label
                   key={option.value}
                   className={cn(
-                    "flex min-h-11 items-center gap-2 rounded-lg border border-hairline bg-fill-subtle px-3 text-sm text-surface-100",
+                    "flex min-h-11 items-center gap-3 rounded-sm border border-hairline bg-panel px-3 text-sm text-ink",
                     !motionStyle && "opacity-60",
                   )}
                 >
@@ -1452,7 +1624,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
                       if (isMotionAspect(option.value))
                         toggleMotionAspect(option.value);
                     }}
-                    className="h-4 w-4 rounded border-surface-600 bg-surface-900 text-primary-500 focus:ring-primary-500"
+                    className="h-4 w-4 accent-brand-fill"
                   />
                   {option.label}
                 </label>
@@ -1478,8 +1650,8 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
         </fieldset>
 
         {/* Logo placement */}
-        <fieldset className="space-y-2">
-          <legend className="text-xs font-semibold text-surface-200">
+        <fieldset className="space-y-3">
+          <legend className="mb-2 text-sm font-medium text-ink-2">
             Logo placement
           </legend>
           <div
@@ -1497,10 +1669,8 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
                   aria-checked={selected}
                   onClick={() => setLogoCorner(option.id)}
                   className={cn(
-                    "min-h-11 rounded-lg border px-3 py-2 text-sm transition-colors",
-                    selected
-                      ? "border-primary-500/40 bg-primary-500/5 text-primary-100 [.theme-light_&]:text-primary-950"
-                      : "border-hairline bg-fill-subtle text-surface-300 hover:bg-fill-hover",
+                    "min-h-11 px-3 py-2 text-sm",
+                    optionTileClass(selected),
                   )}
                 >
                   {option.label}
@@ -1511,7 +1681,7 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           <div className="flex items-center gap-3">
             <label
               htmlFor={logoScaleId}
-              className="shrink-0 text-[11px] font-medium text-surface-300"
+              className="shrink-0 text-sm font-medium text-ink-2"
             >
               Logo size
             </label>
@@ -1524,11 +1694,11 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
               value={Math.round(logoScale * 100)}
               disabled={!logoCorner}
               onChange={(event) => setLogoScale(Number(event.target.value) / 100)}
-              className="w-full accent-primary-500 disabled:opacity-50"
+              className="min-h-11 w-full accent-brand-fill disabled:opacity-50"
             />
             <output
               htmlFor={logoScaleId}
-              className="w-12 shrink-0 text-right font-mono text-xs text-surface-200"
+              className="w-12 shrink-0 text-right text-sm tabular-nums text-ink"
             >
               {Math.round(logoScale * 100)}%
             </output>
@@ -1536,8 +1706,8 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
-                className="min-h-9 shrink-0"
+                size="md"
+                className="shrink-0"
                 onClick={() => {
                   setLogoCorner("");
                   setLogoScale(LOGO_SCALE_DEFAULT);
@@ -1547,18 +1717,18 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
               </Button>
             ) : null}
           </div>
-          <p className="text-[11px] text-surface-400">
+          <p className="text-caption text-ink-2">
             Percent of the image width. The look decides the rest of the layout.
           </p>
         </fieldset>
 
         {/* Image quality */}
         <div className="space-y-2">
-          <div className="text-xs font-semibold text-surface-200">Image quality</div>
+          <div className="text-sm font-medium text-ink-2">Image quality</div>
           <div
             role="radiogroup"
             aria-label="Image quality"
-            className="flex flex-col gap-2 sm:flex-row sm:items-center"
+            className="grid grid-cols-2 gap-2 sm:flex sm:items-center"
           >
             {(
               [
@@ -1575,10 +1745,8 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
                   aria-checked={selected}
                   onClick={() => setImageQualityTier(option.id)}
                   className={cn(
-                    "min-h-11 rounded-lg border px-3 py-2 text-sm transition-colors",
-                    selected
-                      ? "border-primary-500/40 bg-primary-500/5 text-primary-100 [.theme-light_&]:text-primary-950"
-                      : "border-hairline bg-fill-subtle text-surface-300 hover:bg-fill-hover",
+                    "min-h-11 px-4 py-2 text-sm sm:min-w-32",
+                    optionTileClass(selected),
                   )}
                 >
                   {option.label}
@@ -1586,18 +1754,16 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
               );
             })}
           </div>
-          <p className="text-[11px] text-surface-400">
-            Studio renders at the higher-cost tier for every post.
+          <p className="text-caption text-ink-2">
+            Your choice is saved for the store. For now, each device still uses its own
+            image quality setting.
           </p>
         </div>
       </section>
 
       {/* ---- Voice ---- */}
-      <section className={cn("space-y-2", settingsSection !== "voice" && "hidden")}>
-        <div className="flex items-center gap-2 text-sm font-semibold text-surface-50">
-          <Wand2 className="w-4 h-4 text-primary-300" />
-          Brand voice
-        </div>
+      <section className={cn("space-y-4", settingsSection !== "voice" && "hidden")}>
+        <h3 className="text-ink">Brand voice</h3>
         <Textarea
           label=""
           aria-label="Brand voice"
@@ -1606,9 +1772,8 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           rows={4}
           fullWidth
           placeholder={`e.g. "Confident, no exclamation points, never 'family-owned'. Local Detroit references are good."`}
-          className="bg-fill-subtle border-hairline focus:border-primary-400"
         />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {/*
             Both columns sit side by side at desktop width, so the placeholder has
             to fit its own field and the two helper lines have to wrap the same
@@ -1632,10 +1797,8 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
       </section>
 
       {/* ---- Default hashtags + footer ---- */}
-      <section className={cn("space-y-2", settingsSection !== "voice" && "hidden")}>
-        <div className="text-sm font-semibold text-surface-50">
-          Defaults applied to every post
-        </div>
+      <section className={cn("space-y-4", settingsSection !== "voice" && "hidden")}>
+        <h3 className="text-ink">Defaults applied to every post</h3>
         <Textarea
           label="Default hashtags (one per line)"
           value={defaultHashtags}
@@ -1643,7 +1806,6 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           rows={3}
           fullWidth
           placeholder={"#YourDealership\n#DetroitFord\n#NewRide"}
-          className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono text-sm"
         />
         <button
           type="button"
@@ -1653,40 +1815,26 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           aria-describedby={hashtagLockHelpId}
           onClick={() => setHashtagsLocked((value) => !value)}
           className={cn(
-            "flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
-            hashtagsLocked
-              ? "border-primary-500/40 bg-primary-500/5"
-              : "border-hairline bg-fill-subtle hover:bg-fill-hover",
+            "flex min-h-11 w-full items-center justify-between gap-3 px-3 py-3",
+            optionTileClass(hashtagsLocked),
           )}
         >
           <span className="min-w-0">
             <span
               id={hashtagLockLabelId}
-              className="block text-sm font-medium text-surface-100"
+              className="block text-sm font-medium text-ink"
             >
               Always include every hashtag above
             </span>
-            <span id={hashtagLockHelpId} className="block text-[11px] text-ink-2">
+            <span
+              id={hashtagLockHelpId}
+              className="mt-0.5 block text-caption text-ink-2"
+            >
               Keeps these tags on every post no matter the platform cap. Discovery
               hashtags only fill the remaining slots.
             </span>
           </span>
-          <span
-            aria-hidden="true"
-            className={cn(
-              "flex h-6 w-11 shrink-0 items-center rounded-full border px-0.5 transition-colors",
-              hashtagsLocked
-                ? "border-primary-400 bg-primary-500"
-                : "border-hairline bg-fill-hover",
-            )}
-          >
-            <span
-              className={cn(
-                "block h-5 w-5 rounded-full bg-white transition-transform",
-                hashtagsLocked && "translate-x-5",
-              )}
-            />
-          </span>
+          <SwitchTrack on={hashtagsLocked} />
         </button>
         <Textarea
           label="Default footer / CTA"
@@ -1695,72 +1843,56 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           rows={2}
           fullWidth
           placeholder="Stop by 123 Main St — open until 9pm. Call us at (313) 555-0100."
-          className="bg-fill-subtle border-hairline focus:border-primary-400"
         />
       </section>
 
       {/* ---- Image overlay management ---- */}
-      <section className={cn("space-y-2", settingsSection !== "creative" && "hidden")}>
-        <div className="text-sm font-semibold text-surface-50">
-          Image overlay styles
-        </div>
-        <p className="text-[11px] text-surface-400">
+      <section className={cn("space-y-4", settingsSection !== "creative" && "hidden")}>
+        <h3 className="text-ink">Image overlay styles</h3>
+        <p className="text-sm text-ink-2">
           {dealer.creative_system_v2
             ? "Classic style choices are kept for older saved work. New posts use the signature look above."
-            : "Pick which design styles your team can use today. Star one to preselect it when a salesperson opens the customizer."}
+            : "Pick which design styles your team can use today. Set one as the default to preselect it when a salesperson opens the customizer."}
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <ul className="divide-y divide-hairline rounded-md border border-hairline bg-panel">
           {Object.values(StyleOption).map((s) => {
             const enabled = enabledStyles.has(s);
             const isDefault = defaultStyle === s;
             return (
-              <div
+              <li
                 key={s}
-                className={cn(
-                  "rounded-xl border px-3 py-2.5 flex items-center justify-between gap-2",
-                  enabled
-                    ? "border-primary-500/40 bg-primary-500/5"
-                    : "border-hairline bg-fill-subtle opacity-60",
-                )}
+                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-3"
               >
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-surface-50">{s}</div>
-                  <div className="text-[10px] text-surface-400">
+                <div className={cn("min-w-0", !enabled && "opacity-60")}>
+                  <div className="text-sm font-semibold text-ink">{s}</div>
+                  <div className="text-caption text-ink-2">
                     {enabled ? "available to salespeople" : "hidden"}
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <button
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button
                     type="button"
+                    variant={isDefault ? "secondary" : "ghost"}
+                    size="md"
+                    aria-pressed={isDefault}
                     disabled={!enabled}
                     onClick={() => setDefaultStyle(isDefault ? "" : s)}
-                    className={cn(
-                      "text-[10px] px-2 py-1 rounded-md transition-colors",
-                      isDefault
-                        ? "bg-amber-500/30 text-amber-100"
-                        : "bg-fill-subtle hover:bg-fill-hover text-surface-300",
-                      !enabled && "opacity-30 cursor-not-allowed",
-                    )}
                   >
-                    {isDefault ? "★ default" : "Set default"}
-                  </button>
-                  <button
+                    {isDefault ? "Default" : "Set default"}
+                  </Button>
+                  <Button
                     type="button"
+                    variant={enabled ? "ghost" : "secondary"}
+                    size="md"
                     onClick={() => toggleStyle(s)}
-                    className={cn(
-                      "text-[10px] px-2 py-1 rounded-md transition-colors",
-                      enabled
-                        ? "bg-fill-subtle hover:bg-fill-hover text-surface-300"
-                        : "bg-success-500/20 hover:bg-success-500/30 text-success-100 [.theme-light_&]:text-success-900",
-                    )}
                   >
                     {enabled ? "Disable" : "Enable"}
-                  </button>
+                  </Button>
                 </div>
-              </div>
+              </li>
             );
           })}
-        </div>
+        </ul>
       </section>
 
       {settingsSection === "creative" ? (
@@ -1772,11 +1904,8 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
         />
       ) : null}
 
-      <section className={cn("space-y-2", settingsSection !== "voice" && "hidden")}>
-        <div className="flex items-center gap-2 text-sm font-semibold text-surface-50">
-          <Ban className="w-4 h-4 text-error-300 [.theme-light_&]:text-error-800" />
-          Banned phrases
-        </div>
+      <section className={cn("space-y-4", settingsSection !== "voice" && "hidden")}>
+        <h3 className="text-ink">Banned phrases</h3>
         <Textarea
           label=""
           aria-label="Banned phrases (one per line)"
@@ -1785,27 +1914,23 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
           rows={4}
           fullWidth
           placeholder={`guaranteed approval\nno credit check\nlowest price guaranteed`}
-          className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono text-sm"
         />
       </section>
 
       <section
         className={cn(
-          "grid grid-cols-1 gap-4 sm:grid-cols-2",
+          "grid grid-cols-1 gap-8 sm:grid-cols-2 sm:gap-6",
           settingsSection !== "profile" && "hidden",
         )}
       >
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-sm font-semibold text-surface-50">
-            <Palette className="w-4 h-4 text-primary-300" />
-            Brand color
-          </div>
+        <div className="space-y-4">
+          <h3 className="text-ink">Brand color</h3>
           <div className="flex items-center gap-2">
             <input
               type="color"
               value={HEX_RE.test(color) ? color : "#1d4ed8"}
               onChange={(e) => setColor(e.target.value)}
-              className="h-10 w-14 rounded-lg border border-hairline bg-transparent cursor-pointer"
+              className="h-11 w-14 shrink-0 cursor-pointer rounded-sm border border-strong bg-transparent"
               aria-label="Pick brand color"
             />
             <Input
@@ -1815,12 +1940,11 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
               onChange={(e) => setColor(e.target.value)}
               placeholder="#1d4ed8"
               fullWidth
-              className="bg-fill-subtle border-hairline focus:border-primary-400 font-mono"
             />
           </div>
         </div>
-        <div className="space-y-2">
-          <div className="text-sm font-semibold text-surface-50">OEM affiliation</div>
+        <div className="space-y-4">
+          <h3 className="text-ink">OEM affiliation</h3>
           <Input
             label=""
             aria-label="OEM affiliation"
@@ -1828,224 +1952,17 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             onChange={(e) => setOem(e.target.value)}
             placeholder="Ford, GM, Stellantis, Independent…"
             fullWidth
-            className="bg-fill-subtle border-hairline focus:border-primary-400"
           />
         </div>
       </section>
 
-      <section
-        className={cn("space-y-3", settingsSection !== "workflow" && "hidden")}
-        aria-label="Advanced workflow controls"
-      >
-        <button
-          type="button"
-          aria-expanded={advancedOpen}
-          onClick={() => setAdvancedOpen((open) => !open)}
-          className="flex min-h-11 w-full items-center justify-between rounded-sm border border-hairline bg-panel-raised px-3 text-left text-sm font-semibold text-ink hover:border-strong"
-        >
-          Advanced workflow controls
-          <ChevronRight
-            className={cn("h-4 w-4 transition-transform", advancedOpen && "rotate-90")}
-            aria-hidden="true"
-          />
-        </button>
-        {advancedOpen ? (
-          <div className="space-y-5 rounded-md border border-hairline bg-panel p-4">
-            <div>
-              <h4 className="text-sm font-semibold text-ink">Approval policy</h4>
-              <p className="mt-1 text-xs text-ink-2">
-                Use the simple choice above for most stores. This policy narrows review
-                by first posts or category.
-              </p>
-              <Select
-                label="Policy"
-                value={approvalPolicy?.mode || "legacy"}
-                onChange={(event) => {
-                  const mode = event.target.value;
-                  if (mode === "legacy") setApprovalPolicy(null);
-                  else if (mode === "first_n")
-                    setApprovalPolicy({ mode: "first_n", firstN: 3 });
-                  else if (mode === "per_category")
-                    setApprovalPolicy({
-                      mode: "per_category",
-                      categories: ["deliveries"],
-                    });
-                  else setApprovalPolicy({ mode: mode as "none" | "always" });
-                }}
-                fullWidth
-                className="mt-2"
-              >
-                <option value="legacy">Use the simple setting above</option>
-                <option value="none">No posts</option>
-                <option value="always">Every post</option>
-                <option value="first_n">First posts from each person</option>
-                <option value="per_category">Selected categories</option>
-              </Select>
-              {approvalPolicy?.mode === "first_n" ? (
-                <Input
-                  type="number"
-                  min={1}
-                  max={100}
-                  label="Number of first posts"
-                  value={approvalPolicy.firstN || 1}
-                  onChange={(event) =>
-                    setApprovalPolicy({
-                      mode: "first_n",
-                      firstN: Math.min(
-                        100,
-                        Math.max(1, Number(event.target.value) || 1),
-                      ),
-                    })
-                  }
-                  className="mt-2"
-                />
-              ) : null}
-              {approvalPolicy?.mode === "per_category" ? (
-                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {(Object.keys(CATEGORY_LABELS) as BrandCategoryId[]).map(
-                    (category) => {
-                      const selected =
-                        approvalPolicy.categories?.includes(category) === true;
-                      return (
-                        <label
-                          key={category}
-                          className="flex min-h-11 items-center gap-2 rounded-sm border border-hairline px-3 text-sm text-ink-2"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            onChange={() =>
-                              setApprovalPolicy({
-                                mode: "per_category",
-                                categories: selected
-                                  ? (approvalPolicy.categories || []).filter(
-                                      (id) => id !== category,
-                                    )
-                                  : [...(approvalPolicy.categories || []), category],
-                              })
-                            }
-                          />
-                          {CATEGORY_LABELS[category]}
-                        </label>
-                      );
-                    },
-                  )}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="border-t border-hairline pt-4">
-              <h4 className="text-sm font-semibold text-ink">Team feature access</h4>
-              <p className="mt-1 text-xs text-ink-2">
-                Team defaults apply unless a person already has an individual override.
-              </p>
-              <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                {(
-                  [
-                    ["playful", "Playful"],
-                    ["video", "Video"],
-                    ["freeTextEdit", "Free text editing"],
-                  ] as Array<[FeaturePermissionKey, string]>
-                ).map(([key, label]) => {
-                  const enabled = featurePermissions?.[key]?.team !== false;
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      role="switch"
-                      aria-checked={enabled}
-                      onClick={() =>
-                        setFeaturePermissions((current) => ({
-                          ...(current || {}),
-                          [key]: {
-                            team: !enabled,
-                            people: current?.[key]?.people || {},
-                          },
-                        }))
-                      }
-                      className={cn(
-                        "min-h-11 rounded-sm border px-3 text-left text-sm",
-                        enabled
-                          ? "border-brand-ink bg-brand-tint text-ink"
-                          : "border-hairline bg-panel-raised text-ink-2",
-                      )}
-                    >
-                      {label} · {enabled ? "On" : "Off"}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="border-t border-hairline pt-4">
-              <h4 className="text-sm font-semibold text-ink">Channels by post type</h4>
-              <p className="mt-1 text-xs text-ink-2">
-                These choices are enforced by the store creative resolver. At least one
-                channel remains selected for each customized category.
-              </p>
-              <div className="mt-3 space-y-3">
-                {(Object.keys(CATEGORY_OUTPUTS) as BrandCategoryId[]).map(
-                  (category) => {
-                    const output = CATEGORY_OUTPUTS[category];
-                    const configured = categoryDestinations?.[category];
-                    const selected = configured?.platformIds || [...output.platformIds];
-                    return (
-                      <div
-                        key={category}
-                        className="rounded-sm border border-hairline bg-panel-raised p-3"
-                      >
-                        <div className="text-sm font-semibold text-ink">
-                          {CATEGORY_LABELS[category]}
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {output.platformIds.map((platformId) => {
-                            const checked = selected.includes(platformId);
-                            return (
-                              <label
-                                key={platformId}
-                                className="flex min-h-11 items-center gap-2 rounded-sm border border-hairline px-3 text-xs text-ink-2"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={() => {
-                                    const nextIds = checked
-                                      ? selected.filter((id) => id !== platformId)
-                                      : [...selected, platformId];
-                                    if (nextIds.length === 0) return;
-                                    setCategoryDestinations((current) => ({
-                                      ...(current || {}),
-                                      [category]: {
-                                        platformIds: nextIds,
-                                        formatIds: configured?.formatIds || [
-                                          ...output.formatIds,
-                                        ],
-                                        video: configured?.video ?? output.videoAllowed,
-                                      },
-                                    }));
-                                  }}
-                                />
-                                {DESTINATION_LABELS[platformId] || platformId}
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  },
-                )}
-              </div>
-            </div>
-          </div>
-        ) : null}
-      </section>
-
-      <section className={cn("space-y-2", settingsSection !== "workflow" && "hidden")}>
-        <div className="text-sm font-semibold text-surface-50">Manager approval</div>
+      {/* ---- Manager approval ---- */}
+      <section className={cn("space-y-4", settingsSection !== "workflow" && "hidden")}>
+        <h3 className="text-ink">Manager approval</h3>
         <div
           role="radiogroup"
           aria-label="Manager approval requirement"
-          className="flex flex-col gap-2 sm:flex-row sm:items-center"
+          className="grid grid-cols-1 gap-2 sm:grid-cols-2"
           onKeyDown={(event) => {
             if (
               !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
@@ -2067,10 +1984,8 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             tabIndex={!approval ? 0 : -1}
             onClick={() => setApproval(false)}
             className={cn(
-              "px-3 py-2 rounded-lg text-sm transition-colors border",
-              !approval
-                ? "border-success-500/40 bg-success-500/10 text-success-100 [.theme-light_&]:text-success-900"
-                : "border-hairline bg-fill-subtle text-surface-300",
+              "min-h-11 px-4 py-3 text-sm font-semibold",
+              optionTileClass(!approval),
             )}
           >
             No approval required
@@ -2083,30 +1998,148 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             tabIndex={approval ? 0 : -1}
             onClick={() => setApproval(true)}
             className={cn(
-              "px-3 py-2 rounded-lg text-sm transition-colors border",
-              approval
-                ? "border-warning-500/40 bg-warning-500/10 text-warning-100 [.theme-light_&]:text-warning-900"
-                : "border-hairline bg-fill-subtle text-surface-300",
+              "min-h-11 px-4 py-3 text-sm font-semibold",
+              optionTileClass(approval),
             )}
           >
             Require manager approval
           </button>
         </div>
+
+        {approval ? (
+          <div className="space-y-4 rounded-md border border-hairline bg-panel p-4 sm:p-5">
+            <div>
+              <div id={reviewGroupId} className="text-sm font-medium text-ink-2">
+                Posts that are reviewed
+              </div>
+              <div
+                role="radiogroup"
+                aria-labelledby={reviewGroupId}
+                className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3"
+              >
+                {REVIEW_SCOPE_OPTIONS.map((option) => {
+                  const selected = reviewChoice.scope === option.id;
+                  return (
+                    <label
+                      key={option.id}
+                      className={cn(
+                        "flex min-h-11 cursor-pointer items-center gap-3 px-3 py-2.5 text-sm font-medium",
+                        optionTileClass(selected),
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        name={reviewGroupId}
+                        value={option.id}
+                        checked={selected}
+                        onChange={() => {
+                          setFirstNDraft(null);
+                          setReviewChoice((current) => ({
+                            ...current,
+                            scope: option.id,
+                          }));
+                        }}
+                        className="h-4 w-4 shrink-0 accent-brand-fill"
+                      />
+                      {option.label}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            {reviewChoice.scope === "first_n" ? (
+              <div className="max-w-xs">
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  min={APPROVAL_FIRST_N_MIN}
+                  max={APPROVAL_FIRST_N_MAX}
+                  step={1}
+                  label="Approved posts per person"
+                  value={firstNDraft ?? String(reviewChoice.firstN)}
+                  onChange={(event) => {
+                    const raw = event.target.value;
+                    setFirstNDraft(raw);
+                    const next = Number(raw);
+                    if (raw.trim() === "" || !Number.isFinite(next)) return;
+                    setReviewChoice((current) => ({
+                      ...current,
+                      firstN: clampFirstN(next),
+                    }));
+                  }}
+                  onBlur={() => setFirstNDraft(null)}
+                  aria-describedby={firstNHelpId}
+                  fullWidth
+                />
+                <p id={firstNHelpId} className="mt-1.5 px-1 text-caption text-ink-2">
+                  Each person's posts are reviewed until you have approved this many.
+                </p>
+              </div>
+            ) : null}
+
+            {reviewChoice.scope === "per_category" ? (
+              <div>
+                <div
+                  id={`${reviewGroupId}-types`}
+                  className="text-sm font-medium text-ink-2"
+                >
+                  Post types to review
+                </div>
+                <div
+                  role="group"
+                  aria-labelledby={`${reviewGroupId}-types`}
+                  aria-describedby={categoryHelpId}
+                  className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3"
+                >
+                  {CATEGORY_IDS.map((category) => {
+                    const checked = reviewChoice.categories.includes(category);
+                    const onlyOne = checked && reviewChoice.categories.length === 1;
+                    return (
+                      <label
+                        key={category}
+                        className={cn(
+                          "flex min-h-11 items-center gap-3 px-3 text-sm",
+                          optionTileClass(checked),
+                          onlyOne ? "cursor-not-allowed" : "cursor-pointer",
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={onlyOne}
+                          onChange={() => toggleReviewCategory(category)}
+                          className="h-4 w-4 shrink-0 accent-brand-fill"
+                        />
+                        {CATEGORY_LABELS[category]}
+                      </label>
+                    );
+                  })}
+                </div>
+                <p id={categoryHelpId} className="mt-2 px-1 text-caption text-ink-2">
+                  Posts that involve a customer are always reviewed when Deliveries is
+                  checked. Review follows the post type the salesperson picks.
+                </p>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
-      <section className={cn("space-y-2", settingsSection !== "workflow" && "hidden")}>
-        <div className="text-sm font-semibold text-surface-50">
-          Team-member disclosure
+      {/* ---- Team-member disclosure ---- */}
+      <section className={cn("space-y-4", settingsSection !== "workflow" && "hidden")}>
+        <div>
+          <h3 className="text-ink">Team-member disclosure</h3>
+          <p className="mt-1 text-sm text-ink-2">
+            The FTC requires a salesperson posting about your inventory to say they work
+            here. This line is added to the top of every post, where it stays visible
+            above the &ldquo;see more&rdquo; fold.
+          </p>
         </div>
-        <p className="text-xs text-surface-300">
-          The FTC requires a salesperson posting about your inventory to say they work
-          here. This line is added to the top of every post, where it stays visible
-          above the &ldquo;see more&rdquo; fold.
-        </p>
         <div
           role="radiogroup"
           aria-label="Team-member disclosure"
-          className="flex flex-col gap-2 sm:flex-row sm:items-center"
+          className="grid grid-cols-1 gap-2 sm:grid-cols-2"
         >
           <button
             type="button"
@@ -2115,10 +2148,8 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             tabIndex={disclosureOn ? 0 : -1}
             onClick={() => setDisclosureOn(true)}
             className={cn(
-              "px-3 py-2 rounded-lg text-sm transition-colors border",
-              disclosureOn
-                ? "border-success-500/40 bg-success-500/10 text-success-100 [.theme-light_&]:text-success-900"
-                : "border-hairline bg-fill-subtle text-surface-300",
+              "min-h-11 px-4 py-3 text-sm font-semibold",
+              optionTileClass(disclosureOn),
             )}
           >
             Add the disclosure
@@ -2130,10 +2161,8 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
             tabIndex={!disclosureOn ? 0 : -1}
             onClick={() => setDisclosureOn(false)}
             className={cn(
-              "px-3 py-2 rounded-lg text-sm transition-colors border",
-              !disclosureOn
-                ? "border-warning-500/40 bg-warning-500/10 text-warning-100 [.theme-light_&]:text-warning-900"
-                : "border-hairline bg-fill-subtle text-surface-300",
+              "min-h-11 px-4 py-3 text-sm font-semibold",
+              optionTileClass(!disclosureOn),
             )}
           >
             Turn it off
@@ -2142,29 +2171,31 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
         {!disclosureOn && (
           <p
             role="alert"
-            className="rounded-lg border border-warning-500/40 bg-warning-500/10 px-3 py-2 text-xs text-warning-100 [.theme-light_&]:text-warning-900"
+            className="rounded-sm border border-warning-ink/30 bg-warning-fill px-3 py-2 text-sm text-warning-ink"
           >
             Your team&rsquo;s posts will carry no material-connection disclosure.
             Confirm this with your compliance officer before saving.
           </p>
         )}
-        <label
-          htmlFor="employee-disclosure-text"
-          className="block text-xs text-surface-300"
-        >
-          Wording (optional). Use <code>{"{dealer}"}</code> for your dealership name.
-        </label>
-        <textarea
-          id="employee-disclosure-text"
-          value={disclosureText}
-          onChange={(e) => setDisclosureText(e.target.value.slice(0, 280))}
-          maxLength={280}
-          rows={2}
-          disabled={!disclosureOn}
-          placeholder={DEFAULT_EMPLOYEE_DISCLOSURE_TEMPLATE}
-          className="w-full rounded-lg border border-hairline bg-fill-subtle px-3 py-2 text-sm text-surface-100 placeholder:text-surface-400 focus:border-primary-400 disabled:opacity-50"
-        />
-        <p className="text-xs text-surface-400">
+        <div>
+          <label
+            htmlFor="employee-disclosure-text"
+            className="mb-1.5 block text-sm font-medium text-ink-2"
+          >
+            Wording (optional). Use <code>{"{dealer}"}</code> for your dealership name.
+          </label>
+          <textarea
+            id="employee-disclosure-text"
+            value={disclosureText}
+            onChange={(e) => setDisclosureText(e.target.value.slice(0, 280))}
+            maxLength={280}
+            rows={2}
+            disabled={!disclosureOn}
+            placeholder={DEFAULT_EMPLOYEE_DISCLOSURE_TEMPLATE}
+            className="w-full rounded-sm border border-strong bg-panel-raised px-3 py-2 text-base text-ink placeholder:text-ink-hint transition-colors duration-120 ease-out focus:border-brand-ink disabled:cursor-not-allowed disabled:opacity-50"
+          />
+        </div>
+        <p className="text-sm text-ink-2">
           Preview:{" "}
           {buildEmployeeDisclosure({
             name: dealer.name,
@@ -2174,10 +2205,140 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
         </p>
       </section>
 
+      {/* ---- Advanced: team feature access and channels by post type ---- */}
+      <section
+        className={cn("space-y-4", settingsSection !== "workflow" && "hidden")}
+        aria-label="Advanced workflow controls"
+      >
+        <button
+          type="button"
+          aria-expanded={advancedOpen}
+          onClick={() => setAdvancedOpen((open) => !open)}
+          className="flex min-h-11 w-full items-center justify-between rounded-sm border border-hairline bg-panel px-4 text-left text-sm font-semibold text-ink transition-colors duration-120 ease-out hover:border-strong"
+        >
+          Advanced workflow controls
+          <ChevronRight
+            className={cn(
+              "h-4 w-4 text-ink-2 transition-transform duration-180 ease-out motion-reduce:transition-none",
+              advancedOpen && "rotate-90",
+            )}
+            aria-hidden="true"
+          />
+        </button>
+        {advancedOpen ? (
+          <div className="space-y-8">
+            <div className="space-y-3">
+              <h4 className="text-ink">Team feature access</h4>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {(
+                  [
+                    ["playful", "Playful"],
+                    ["video", "Video"],
+                  ] as Array<[FeaturePermissionKey, string]>
+                ).map(([key, label]) => {
+                  const enabled = featurePermissions?.[key]?.team !== false;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      role="switch"
+                      aria-checked={enabled}
+                      onClick={() =>
+                        setFeaturePermissions((current) => ({
+                          ...(current || {}),
+                          [key]: {
+                            team: !enabled,
+                            people: current?.[key]?.people || {},
+                          },
+                        }))
+                      }
+                      className={cn(
+                        "flex min-h-11 items-center justify-between gap-3 px-3 py-2.5 text-sm font-medium",
+                        optionTileClass(enabled),
+                      )}
+                    >
+                      {label}
+                      <SwitchTrack on={enabled} />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <h4 className="text-ink">Channels by post type</h4>
+                <p className="mt-1 text-sm text-ink-2">
+                  Salespeople only see the channels you leave checked. Each post type
+                  keeps at least one.
+                </p>
+              </div>
+              <ul className="divide-y divide-hairline rounded-md border border-hairline bg-panel">
+                {(Object.keys(CATEGORY_OUTPUTS) as BrandCategoryId[]).map(
+                  (category) => {
+                    const output = CATEGORY_OUTPUTS[category];
+                    const configured = categoryDestinations?.[category];
+                    const selected = configured?.platformIds || [...output.platformIds];
+                    return (
+                      <li key={category} className="px-4 py-3">
+                        <div className="text-sm font-semibold text-ink">
+                          {CATEGORY_LABELS[category]}
+                        </div>
+                        <div
+                          role="group"
+                          aria-label={`${CATEGORY_LABELS[category]} channels`}
+                          className="mt-2 flex flex-wrap gap-2"
+                        >
+                          {output.platformIds.map((platformId) => {
+                            const checked = selected.includes(platformId);
+                            return (
+                              <label
+                                key={platformId}
+                                className={cn(
+                                  "flex min-h-11 cursor-pointer items-center gap-2 px-3 text-sm",
+                                  optionTileClass(checked),
+                                )}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => {
+                                    const nextIds = checked
+                                      ? selected.filter((id) => id !== platformId)
+                                      : [...selected, platformId];
+                                    if (nextIds.length === 0) return;
+                                    setCategoryDestinations((current) => ({
+                                      ...(current || {}),
+                                      [category]: {
+                                        platformIds: nextIds,
+                                        formatIds: configured?.formatIds || [
+                                          ...output.formatIds,
+                                        ],
+                                        video: configured?.video ?? output.videoAllowed,
+                                      },
+                                    }));
+                                  }}
+                                  className="h-4 w-4 shrink-0 accent-brand-fill"
+                                />
+                                {DESTINATION_LABELS[platformId] || platformId}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </li>
+                    );
+                  },
+                )}
+              </ul>
+            </div>
+          </div>
+        ) : null}
+      </section>
+
       {error && (
         <div
           role="alert"
-          className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs [.theme-light_&]:text-error-800"
+          className="rounded-sm border border-error-ink/30 bg-error-fill px-3 py-2 text-sm text-error-ink"
         >
           {error}
         </div>
@@ -2185,35 +2346,29 @@ export const DealerSettingsCard: React.FC<DealerSettingsProps> = ({
 
       <div
         data-testid="dealer-settings-save-bar"
-        className="sticky bottom-2 z-10 flex min-h-14 items-center justify-between rounded-xl border border-hairline bg-surface-950/95 px-3 py-3 shadow-elevation-3 backdrop-blur-xl"
+        className="sticky bottom-2 z-10 flex min-h-14 items-center justify-between gap-3 rounded-md border border-hairline bg-overlay px-3 py-2 sm:px-4"
       >
-        <div className="text-[11px] text-surface-400">
-          {savedAt
-            ? `Saved ${savedAt.toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}`
-            : dirty
-              ? "Unsaved changes"
+        <div className="text-sm text-ink-2" aria-live="polite">
+          {dirty
+            ? "Unsaved changes"
+            : savedAt
+              ? `Saved ${savedAt.toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}`
               : "Up to date"}
         </div>
         <Button
-          variant="filled"
-          size="sm"
+          variant="primary"
+          size="md"
           disabled={!dirty || saving}
-          leftIcon={
-            saving ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Save className="w-3.5 h-3.5" />
-            )
-          }
+          loading={saving}
           onClick={handleSave}
         >
           {saving ? "Saving…" : "Save changes"}
         </Button>
       </div>
-    </m.div>
+    </div>
   );
 };
 
@@ -2425,58 +2580,39 @@ export const DealerTeamCard: React.FC = () => {
   };
 
   return (
-    <m.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="rounded-lg border border-hairline bg-surface-overlay p-4 sm:p-6 space-y-4"
-    >
-      <div className="flex items-center gap-3">
-        <div
-          className="h-8 w-1.5 rounded-full"
-          style={{ background: "var(--brand-primary)" }}
-          aria-hidden="true"
-        />
-        <div>
-          <h3 className="text-xl font-bold text-surface-50 flex items-center gap-2">
-            <Users className="w-5 h-5 text-primary-300" />
-            Your team
-          </h3>
-          <p className="text-xs text-surface-400">
-            Each salesperson gets a personal 4-digit code for sign-in and is tied to
-            their posts automatically. Deactivate anyone who leaves — historical posts
-            stay intact.
-          </p>
-        </div>
+    <div className="space-y-6 rounded-md border border-hairline bg-panel p-5 sm:p-6">
+      <div>
+        <h3 className="text-ink">Your team</h3>
+        <p className="mt-1 text-sm text-ink-2">
+          Each salesperson gets a personal 4-digit code for sign-in and is tied to their
+          posts automatically. Deactivate anyone who leaves — historical posts stay
+          intact.
+        </p>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-end">
-        <div className="flex-1">
-          <label
-            htmlFor="manager-add-salesperson"
-            className="text-xs font-medium text-surface-300 uppercase tracking-wide"
-          >
-            Add salesperson
-          </label>
-          <input
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+        <div className="min-w-0 flex-1">
+          <Input
             id="manager-add-salesperson"
+            label="Add salesperson"
             type="text"
             value={newName}
             onChange={(e) => setNewName(e.target.value.slice(0, 120))}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || !newName.trim() || saving) return;
+              event.preventDefault();
+              void handleAdd();
+            }}
             placeholder="e.g. Sarah Chen"
-            className="mt-1 w-full bg-fill-subtle border border-hairline rounded-lg px-3 py-2 text-sm text-surface-100 focus:border-primary-400 focus:outline-none"
+            fullWidth
           />
         </div>
         <Button
-          variant="filled"
+          variant="primary"
           size="md"
+          className="w-full sm:w-auto"
           disabled={!newName.trim() || saving}
-          leftIcon={
-            saving ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Users className="w-4 h-4" />
-            )
-          }
+          loading={saving}
           onClick={handleAdd}
         >
           Add
@@ -2485,31 +2621,30 @@ export const DealerTeamCard: React.FC = () => {
 
       {oneTimeCode && (
         <div
-          className="rounded-xl border border-warning-400/30 bg-warning-500/10 px-3 py-3 text-sm text-warning-50 [.theme-light_&]:text-warning-900"
+          className="rounded-md border border-warning-ink/30 bg-warning-fill p-4 text-sm text-ink"
           role="status"
           aria-label="Access code ready to share"
         >
-          <div className="font-semibold">
+          <div className="font-semibold text-ink">
             {oneTimeCode.name}&apos;s access code is ready
           </div>
-          <p className="mt-1 text-xs text-warning-100/80">
+          <p className="mt-1 text-ink-2">
             Copy this one-time access code and share it privately. This handoff stays
             here until you mark it as shared.
           </p>
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <span className="flex-1 rounded-lg border border-hairline bg-surface-950/70 px-3 py-2.5 text-center font-mono text-lg tracking-[0.3em] text-surface-50">
+            <span className="flex min-h-11 flex-1 items-center justify-center rounded-sm border border-hairline bg-panel-raised px-3 font-display text-2xl tabular-nums tracking-[0.3em] text-ink">
               {oneTimeCode.pin}
             </span>
             <Button
-              variant="outline"
-              size="sm"
-              className="min-h-11"
+              variant="secondary"
+              size="md"
               disabled={codeBusy}
               leftIcon={
                 codeCopied ? (
-                  <Check className="h-3.5 w-3.5" />
+                  <Check className="h-4 w-4" />
                 ) : (
-                  <Copy className="h-3.5 w-3.5" />
+                  <Copy className="h-4 w-4" />
                 )
               }
               onClick={() => void handleCopyOneTimeCode()}
@@ -2518,16 +2653,9 @@ export const DealerTeamCard: React.FC = () => {
             </Button>
             <Button
               variant="primary"
-              size="sm"
-              className="min-h-11"
+              size="md"
               disabled={codeBusy}
-              leftIcon={
-                codeBusy ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Check className="h-3.5 w-3.5" />
-                )
-              }
+              loading={codeBusy}
               onClick={() => void handleAcknowledgeOneTimeCode()}
             >
               {codeBusy ? "Updating…" : "Mark as shared"}
@@ -2537,79 +2665,55 @@ export const DealerTeamCard: React.FC = () => {
       )}
 
       {error && (
-        <div className="rounded-xl border border-error-700/50 bg-error-900/40 px-3 py-2 text-error-100 text-xs [.theme-light_&]:text-error-800">
+        <div
+          role="alert"
+          className="rounded-sm border border-error-ink/30 bg-error-fill px-3 py-2 text-sm text-error-ink"
+        >
           {error}
         </div>
       )}
 
       {loading ? (
-        <div className="py-12 flex items-center justify-center text-surface-400 text-sm">
-          <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading roster…
+        <div className="flex items-center justify-center py-12 text-sm text-ink-2">
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" aria-hidden="true" /> Loading
+          roster…
         </div>
       ) : roster.length === 0 ? (
-        <div className="py-12 text-center text-sm text-surface-400">
+        <div className="py-12 text-center text-sm text-ink-2">
           No one on the roster yet — add your first teammate above.
         </div>
       ) : (
-        <ul className="space-y-2">
+        <ul className="divide-y divide-hairline border-t border-hairline">
           {roster.map((p) => (
             <li
               key={p.id || `loose:${p.name}`}
-              className={cn(
-                "flex items-center justify-between rounded-xl border px-3 py-2.5 transition-colors",
-                p.active
-                  ? p.pinNeedsDistribution
-                    ? "border-warning-400/25 bg-warning-500/[0.06]"
-                    : "border-hairline bg-surface-900/40"
-                  : "border-hairline bg-surface-900/20 opacity-60",
-              )}
+              className="flex items-center justify-between gap-3 py-3"
             >
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-surface-50 flex items-center gap-2 flex-wrap">
+              <div className={cn("min-w-0", !p.active && "opacity-60")}>
+                <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-ink">
                   {p.name}
-                  {!p.id && (
-                    <span className="text-[10px] uppercase tracking-wide text-warning-300 font-semibold">
-                      unrostered
-                    </span>
-                  )}
-                  {!p.active && p.id && (
-                    <span className="text-[10px] uppercase tracking-wide text-surface-400 font-semibold">
-                      inactive
-                    </span>
-                  )}
-                  {p.id && (
-                    <span
-                      className={cn(
-                        "text-[10px] uppercase tracking-wide font-semibold rounded-full px-2 py-0.5",
-                        p.pinNeedsDistribution
-                          ? "bg-warning-500/15 text-warning-200 [.theme-light_&]:text-warning-800"
-                          : p.hasPin
-                            ? "bg-success-500/10 text-success-300 [.theme-light_&]:text-success-900"
-                            : "bg-surface-800 text-surface-400",
-                      )}
-                    >
-                      {p.pinNeedsDistribution
-                        ? "Code to share"
-                        : p.hasPin
-                          ? "Code set"
-                          : "No code"}
-                    </span>
-                  )}
+                  {!p.id && <Badge variant="neutral">Not on roster</Badge>}
+                  {!p.active && p.id && <Badge variant="neutral">Inactive</Badge>}
+                  {p.id &&
+                    (p.pinNeedsDistribution ? (
+                      <Badge variant="warning">Code to share</Badge>
+                    ) : p.hasPin ? (
+                      <Badge variant="success">Code set</Badge>
+                    ) : (
+                      <Badge variant="neutral">No code</Badge>
+                    ))}
                 </div>
-                <div className="text-[11px] text-surface-400">
+                <div className="mt-0.5 text-caption text-ink-2">
                   {p.count > 0
                     ? `${p.count} post${p.count === 1 ? "" : "s"}${
                         p.lastAt
-                          ? ` · last ${new Date(p.lastAt).toLocaleDateString()}`
+                          ? `, last on ${new Date(p.lastAt).toLocaleDateString()}`
                           : ""
                       }`
                     : "No posts yet"}
                 </div>
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <span className="text-lg font-bold text-surface-50 tabular-nums">
-                  {p.count}
-                </span>
+              <div className="flex shrink-0 items-center gap-2">
                 {p.id ? (
                   <>
                     <button
@@ -2626,36 +2730,33 @@ export const DealerTeamCard: React.FC = () => {
                           hasManagerLogin: false,
                         })
                       }
-                      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md bg-fill-subtle text-surface-300 hover:bg-fill-hover"
+                      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-sm text-ink-2 transition-colors duration-120 ease-out hover:bg-fill-subtle hover:text-ink"
                       title="Edit profile"
                       aria-label={`Edit ${p.name}`}
                     >
-                      <Pencil className="h-4 w-4" />
+                      <Pencil className="h-4 w-4" aria-hidden="true" />
                     </button>
-                    <button
+                    <Button
                       type="button"
+                      variant={p.active ? "ghost" : "secondary"}
+                      size="md"
                       onClick={() => p.id && handleToggleActive(p.id, p.active)}
-                      className={cn(
-                        "min-h-11 text-[11px] px-3 py-2 rounded-md transition-colors",
-                        p.active
-                          ? "bg-fill-subtle hover:bg-fill-hover text-surface-300"
-                          : "bg-success-500/20 hover:bg-success-500/30 text-success-100 [.theme-light_&]:text-success-900",
-                      )}
                       title={p.active ? "Deactivate" : "Reactivate"}
                     >
                       {p.active ? "Deactivate" : "Reactivate"}
-                    </button>
+                    </Button>
                   </>
                 ) : (
-                  <button
+                  <Button
                     type="button"
+                    variant="secondary"
+                    size="md"
                     onClick={() => handlePromoteLoose(p.name)}
                     disabled={saving}
-                    className="min-h-11 text-[11px] px-3 py-2 rounded-md bg-primary-500/20 hover:bg-primary-500/30 text-primary-100 transition-colors disabled:opacity-50 [.theme-light_&]:text-primary-950"
                     title="Add this person to the formal roster"
                   >
                     Add to roster
-                  </button>
+                  </Button>
                 )}
               </div>
             </li>
@@ -2678,6 +2779,6 @@ export const DealerTeamCard: React.FC = () => {
           void load();
         }}
       />
-    </m.div>
+    </div>
   );
 };

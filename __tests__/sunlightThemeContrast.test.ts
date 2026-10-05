@@ -162,12 +162,11 @@ describe("Sunlight Mode keeps selected controls readable", () => {
     expect(modal).toContain("on-overlay");
   });
 
-  it("keeps the dealer settings selected pills legible", () => {
-    // DealerAdminDashboard.tsx is PR3, not yet migrated: it still carries the
-    // override literal, so this per-file pin stays until it migrates too.
+  it("keeps the dealer settings free of per-theme override literals", () => {
+    // DealerAdminDashboard.tsx now sits on the Light Table tokens, so a
+    // `[.theme-light_&]` override there would only hide a hardcoded ramp.
     const dashboard = read("components/DealerAdminDashboard.tsx");
-    expect(dashboard).toContain("[.theme-light_&]:text-success-900");
-    expect(dashboard).toContain("[.theme-light_&]:text-warning-900");
+    expect(dashboard).not.toContain("[.theme-light_&");
   });
 
   it("uses no hardcoded text-white on a theme-aware fill in the schedule dialog", () => {
