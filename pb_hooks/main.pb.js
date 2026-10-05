@@ -2641,7 +2641,36 @@ routerAdd("POST", "/api/app/posts", (c) => {
       ? context.person.getString("name")
       : "System Admin";
 
-    const approvalStatus = policies.initialApprovalStatus(dealer);
+    // A store's approval policy is applied only from server-resolved facts:
+    // the scenario's brand category, whether the post involves a customer, and
+    // how many of the author's posts a manager has approved. Anything unknown
+    // is reviewed (see policies.initialApprovalStatus).
+    const approvalMapping = websitePublications.resolveWebsiteMapping(
+      scenarioId,
+      dealer.getString("custom_scenarios"),
+    );
+    const approvalStatus = policies.initialApprovalStatus(dealer, {
+      category: approvalMapping ? approvalMapping.category : "",
+      involvesCustomer:
+        releaseRequired ||
+        !approvalMapping ||
+        approvalMapping.kind === "customer_story",
+      countApprovedPosts: function () {
+        if (!salespersonId) return NaN;
+        const row = new DynamicModel({ total: 0 });
+        $app
+          .dao()
+          .db()
+          .newQuery(
+            "SELECT COUNT(*) AS total FROM posts " +
+              "WHERE dealer = {:dealer} AND salesperson_id = {:person} " +
+              "AND approval_status = 'approved'",
+          )
+          .bind({ dealer: dealer.id, person: salespersonId })
+          .one(row);
+        return Number(row.total);
+      },
+    });
     let caption = helpers.assertString((body.caption || "").toString().trim(), 12000);
     let disclosures = helpers.assertString(
       (body.disclosures || "").toString().trim(),
@@ -5691,6 +5720,10 @@ routerAdd("PATCH", "/api/app/dealers/:id", (c) => {
     if (data.name !== undefined && !data.name) {
       return c.json(400, { error: "Dealer name is required" });
     }
+    // The creative-system rollout flag is the system administrator's switch.
+    // A manager's save never changes it. The field is ignored rather than
+    // rejected, so a settings form that echoes the stored value still saves.
+    if (!isSuperAdmin) delete data.creative_system_v2;
 
     const form = new RecordUpsertForm($app, target);
     form.setFullManageAccess(true);
