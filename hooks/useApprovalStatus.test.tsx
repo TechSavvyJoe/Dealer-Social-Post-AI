@@ -112,7 +112,7 @@ describe("useApprovalStatus", () => {
     });
     expect(result.current.approvalStatus).toBe("approved");
     expect(mocks.toastSuccess).toHaveBeenCalledWith(
-      "Manager approved this post. Delivery is unlocked.",
+      "Your manager approved this post. You can share it now.",
     );
 
     mocks.getPostApprovalStatus.mockClear();

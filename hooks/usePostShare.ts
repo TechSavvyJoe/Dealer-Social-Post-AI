@@ -12,6 +12,8 @@ import {
   type PublishStatus,
 } from "../services/publishTargets";
 import { recordPostShared } from "../services/posts";
+import { ApiError } from "../services/apiErrors";
+import { logError } from "../utils/telemetry";
 import { connectionManager } from "../utils/connectionManager";
 import { useAppStore } from "../stores/appStore";
 import { toUiMessage } from "../utils/errorMessages";
@@ -196,7 +198,18 @@ export const usePostShare = ({
           );
         }
         pendingRecordRef.current = null;
-      } catch {
+      } catch (error) {
+        // The share itself already happened and is shown locally. A rejected
+        // receipt (stale revision, delivery lock) can only be rejected again,
+        // so only a transport failure is retried when the device reconnects.
+        if (error instanceof ApiError && error.status < 500) {
+          logError("post.share_receipt_rejected", {
+            postId: post.postId,
+            code: error.code || String(error.status),
+          });
+          pendingRecordRef.current = null;
+          return;
+        }
         pendingRecordRef.current = {
           postId: post.postId,
           channel: channelId,

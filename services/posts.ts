@@ -188,6 +188,8 @@ export const projectShareSummary = (
 
 export interface PostApprovalStatus {
   id: string;
+  /** Revision after the latest server-side write (absent from an older backend). */
+  post_revision?: string;
   approval_status: ApprovalStatus;
   approved_by?: string;
   rejection_reason?: string;
@@ -198,6 +200,8 @@ export interface PostApprovalStatus {
 export interface PostVideoStatus {
   id: string;
   has_video: true;
+  /** Revision after has_video was saved (absent from an older backend). */
+  post_revision?: string;
 }
 
 /**

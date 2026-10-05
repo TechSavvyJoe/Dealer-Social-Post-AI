@@ -5,6 +5,7 @@ import type {
   DeliveryCaption,
 } from "../utils/complianceDisclosures";
 import { logError } from "../utils/telemetry";
+import { ApiError } from "../services/apiErrors";
 import type { GeneratedPost } from "../types";
 import { useAppStore } from "../stores/appStore";
 
@@ -15,7 +16,14 @@ export interface PendingDraftSync {
   platformCaptions?: Record<string, string>;
 }
 
-export type DraftAutosaveStatus = "idle" | "saving" | "saved" | "failed";
+export type DraftAutosaveStatus = "idle" | "saving" | "saved" | "failed" | "conflict";
+
+/**
+ * Another tab or device saved this post after this editor loaded it. Saving
+ * again would overwrite that edit, so autosave stops until the post is reopened.
+ */
+export const DRAFT_CONFLICT_MESSAGE =
+  "This post changed on another device or tab. Reopen it from My work to keep editing.";
 
 export interface UseDraftAutosaveOptions {
   post: GeneratedPost;
@@ -73,6 +81,11 @@ export const useDraftAutosave = ({
   });
   /** Server revision returned by the latest exact draft save. */
   const lastRevisionRef = useRef<string | null>(post.postRevision || null);
+  /** Set once the server reports a newer edit; cleared when another post loads. */
+  const conflictRef = useRef(false);
+  useEffect(() => {
+    conflictRef.current = false;
+  }, [post.postId]);
   useEffect(() => {
     // Release linking and other same-post server transitions can advance the
     // revision outside autosave. Adopt the revision carried by the live post;
@@ -89,12 +102,16 @@ export const useDraftAutosave = ({
     if (!draft || !post.postId || !editable) return Promise.resolve(true);
 
     const operation = draftSyncChainRef.current.then(async () => {
+      // Retrying with the stale token can only fail again and would never
+      // tell the salesperson why; keep the conflict state until a reopen.
+      if (conflictRef.current) {
+        if (draftSyncMountedRef.current) setStatus("conflict");
+        return false;
+      }
       try {
         const expectedPostRevision = lastRevisionRef.current;
         if (!expectedPostRevision) {
-          throw new Error(
-            "This saved post is missing its revision. Reopen it from My work before editing.",
-          );
+          throw new Error("Reopen this post from My work to keep going.");
         }
         const updated = await updatePostDraft(post.postId as string, {
           ...draft,
@@ -144,11 +161,16 @@ export const useDraftAutosave = ({
         }
         return true;
       } catch (err) {
-        logError("post.draft_sync_failed", {
+        const conflict =
+          err instanceof ApiError &&
+          (err.code === "POST_DRAFT_REVISION_CONFLICT" ||
+            err.code === "POST_DRAFT_REVISION_REQUIRED");
+        if (conflict) conflictRef.current = true;
+        logError(conflict ? "post.draft_sync_conflict" : "post.draft_sync_failed", {
           postId: post.postId,
           message: err instanceof Error ? err.message : String(err),
         });
-        if (draftSyncMountedRef.current) setStatus("failed");
+        if (draftSyncMountedRef.current) setStatus(conflict ? "conflict" : "failed");
         return false;
       }
     });

@@ -5,8 +5,13 @@ import { cn } from "../../utils/classNames";
 interface ErrorBannerProps {
   /** The error message to display. */
   message: string;
-  /** Optional retry handler — renders an inline "Try again" affordance. */
+  /** Optional handler — renders an inline action, "Try again" by default. */
   onRetry?: () => void;
+  /**
+   * Name the action for what it does. A handler that only clears the message
+   * must say "Dismiss"; "Try again" promises a retry.
+   */
+  actionLabel?: string;
   className?: string;
 }
 
@@ -18,6 +23,7 @@ interface ErrorBannerProps {
 export const ErrorBanner: React.FC<ErrorBannerProps> = ({
   message,
   onRetry,
+  actionLabel = "Try again",
   className,
 }) => (
   <div
@@ -40,8 +46,8 @@ export const ErrorBanner: React.FC<ErrorBannerProps> = ({
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-ink/70 rounded",
         )}
       >
-        <RefreshCw className="h-3 w-3" />
-        Try again
+        {actionLabel === "Try again" ? <RefreshCw className="h-3 w-3" /> : null}
+        {actionLabel}
       </button>
     )}
   </div>

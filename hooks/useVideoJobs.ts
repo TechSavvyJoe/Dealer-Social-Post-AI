@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GeneratedPost, VideoRequestOptions, VideoStyle } from "../types";
 import { useToast } from "../components/ui/Toast";
 import { markPostVideoGenerated } from "../services/posts";
+import { adoptPostRevision } from "../utils/postRevision";
 import type { ResolvedMotion } from "../services/creativeSystem";
 import type { PlannedPlatformDelivery } from "../services/platformOutputs";
 import { archiveDealerMedia } from "../utils/creativeStorage";
@@ -301,7 +302,8 @@ export const useVideoJobs = ({
         toast.success("Video ready — tap play if it does not start.");
         if (post.postId) {
           try {
-            await markPostVideoGenerated(post.postId);
+            const marked = await markPostVideoGenerated(post.postId);
+            adoptPostRevision(post.postId, marked?.post_revision);
           } catch (_err) {
             // The paid render succeeded, so keep it usable. Be explicit that
             // only the history metric failed rather than misreporting the

@@ -36,7 +36,7 @@ import type { DealerIdentityGrounding } from "../services/posts";
 import { useAppStore } from "../stores/appStore";
 import { useApprovalStatus } from "../hooks/useApprovalStatus";
 import { useReleaseRepair } from "../hooks/useReleaseRepair";
-import { useDraftAutosave } from "../hooks/useDraftAutosave";
+import { useDraftAutosave, DRAFT_CONFLICT_MESSAGE } from "../hooks/useDraftAutosave";
 import { useWebsiteHandoff } from "../hooks/useWebsiteHandoff";
 import { useVideoJobs } from "../hooks/useVideoJobs";
 import { usePreparedDelivery } from "../hooks/usePreparedDelivery";
@@ -428,11 +428,13 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     ],
   );
   const autosaveBlockedReason =
-    autosave.status === "saving"
-      ? "Saving the current caption and image before delivery."
-      : autosave.status === "failed"
-        ? "The current caption and image must be saved before delivery. Retry the draft save."
-        : undefined;
+    autosave.status === "conflict"
+      ? DRAFT_CONFLICT_MESSAGE
+      : autosave.status === "saving"
+        ? "Saving the current caption and image before delivery."
+        : autosave.status === "failed"
+          ? "The current caption and image must be saved before delivery. Retry the draft save."
+          : undefined;
   const expectedPostRevision =
     post.postRevision || autosave.lastRevisionRef.current || undefined;
   const share = usePostShare({
@@ -716,11 +718,13 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
                 ? "Saving draft…"
                 : autosave.status === "saved"
                   ? "Draft saved"
-                  : autosave.status === "failed"
-                    ? "Draft save failed"
-                    : post.postId
-                      ? "Saved to My work"
-                      : "Not saved yet"}
+                  : autosave.status === "conflict"
+                    ? "Changed on another device"
+                    : autosave.status === "failed"
+                      ? "Draft save failed"
+                      : post.postId
+                        ? "Saved to My work"
+                        : "Not saved yet"}
             </span>
             {approval.approvalCheckError || website.checkError || release.notice ? (
               <span className="text-right">
