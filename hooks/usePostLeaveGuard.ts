@@ -1,6 +1,7 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { triggerHapticFeedback } from "../utils/haptics";
 import { useToast } from "../components/ui/Toast";
+import { useAppStore, type PostBusyReason } from "../stores/appStore";
 
 export interface UsePostLeaveGuardOptions {
   hasSavedMedia: boolean;
@@ -36,6 +37,13 @@ export interface UsePostLeaveGuardResult {
  * work (hasWorkAtRisk) requires confirmation before starting over or
  * remixing.
  *
+ * Amendments A4: the busy state is also published to the store as
+ * `postBusy` ("website" while the final website handoff is in flight, "image"
+ * while a render or caption update runs) for as long as this hook is mounted.
+ * The app shell's exits (header Back, My work, Log out, Escape, Done) and the
+ * browser Back guard read it and refuse to leave the Post screen with the
+ * original toast, so a paid render can never land on an unmounted screen.
+ *
  * `useDraftAutosave`'s in-flight/failed status and a future
  * `useVideoJobs.atRisk` are documented inputs for a fuller "at risk" signal,
  * but are not wired into `atRisk` here: PR2-0 is an invisible extraction, and
@@ -53,6 +61,21 @@ export const usePostLeaveGuard = ({
   websiteSending,
 }: UsePostLeaveGuardOptions): UsePostLeaveGuardResult => {
   const toast = useToast();
+
+  const busyReason: PostBusyReason = websiteSending
+    ? "website"
+    : imageBusy || textBusy
+      ? "image"
+      : null;
+  useEffect(() => {
+    useAppStore.getState().setPostBusy(busyReason);
+  }, [busyReason]);
+  useEffect(
+    () => () => {
+      useAppStore.getState().setPostBusy(null);
+    },
+    [],
+  );
 
   const atRisk =
     !hasSavedMedia ||

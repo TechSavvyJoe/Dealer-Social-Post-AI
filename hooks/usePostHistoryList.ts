@@ -13,7 +13,7 @@ import {
   websitePublicationPollDelay,
 } from "../services/websitePublishing";
 import { useAppStore } from "../stores/appStore";
-import { AppStep, type GeneratedPost } from "../types";
+import type { GeneratedPost } from "../types";
 import { toUiMessage } from "../utils/errorMessages";
 import { toPublicCustomerLabel } from "../utils/customerIdentity";
 import {
@@ -42,10 +42,7 @@ export const usePostHistoryList = ({
   const dealer = useAppStore((s) => s.currentDealer);
   const role = useAppStore((s) => s.role);
   const currentPersonId = useAppStore((s) => s.currentPerson?.id || "");
-  const setGeneratedPost = useAppStore((s) => s.setGeneratedPost);
-  const setSelectedImage = useAppStore((s) => s.setSelectedImage);
-  const setGenerationParams = useAppStore((s) => s.setGenerationParams);
-  const setStep = useAppStore((s) => s.setStep);
+  const openSavedPost = useAppStore((s) => s.openSavedPost);
   const { success: toastSuccess, error: toastError } = useToast();
   const [items, setItems] = useState<PostRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -195,7 +192,7 @@ export const usePostHistoryList = ({
   const openCreative = useCallback(
     async (post: PostRecord) => {
       if (!post.creative_image_url) {
-        toastError("No stored image for this post — only caption logs exist.");
+        toastError("This post has no saved image to open, only its caption.");
         return;
       }
       if (post.image_review_required) {
@@ -229,22 +226,20 @@ export const usePostHistoryList = ({
         // A stored creative may come from another device/session, so it does
         // not have the original capture needed for a true same-photo remix.
         // Clear any stale capture and expose only safe share/export actions.
+        // Without a handler (the manager dashboard's history list) the store
+        // opens it exactly as the app's own handler does, so Back returns to
+        // the dashboard and no draft or signature survives under it.
         if (onPostReady) onPostReady(generated);
-        else {
-          setSelectedImage(null);
-          setGenerationParams(null);
-          setGeneratedPost(generated);
-          setStep(AppStep.RESULT);
-        }
+        else openSavedPost(generated);
         onOpenCreative?.();
-        toastSuccess("Creative reopened — share or export without regenerating.");
+        toastSuccess("Post reopened. Share it without making a new one.");
       } catch (err) {
         if (
           mountedRef.current &&
           requestId === openRequestRef.current &&
           authEpoch === useAppStore.getState().authEpoch
         )
-          toastError(toUiMessage(err, "Could not open this creative."));
+          toastError(toUiMessage(err, "Could not open this post."));
       } finally {
         if (mountedRef.current && requestId === openRequestRef.current)
           setOpeningId(null);
@@ -256,10 +251,7 @@ export const usePostHistoryList = ({
       currentPersonId,
       identityGrounding,
       role,
-      setGeneratedPost,
-      setGenerationParams,
-      setSelectedImage,
-      setStep,
+      openSavedPost,
       toastError,
       toastSuccess,
     ],

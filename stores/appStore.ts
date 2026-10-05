@@ -45,6 +45,21 @@ export interface LoginResult {
   retryAfterSeconds?: number;
 }
 
+/**
+ * Why the Post screen cannot be left right now (amendments A4): a paid image
+ * render or caption update is still running ("image"), or the final website
+ * handoff is in flight ("website"). Published by usePostLeaveGuard; every exit
+ * from POST refuses to leave while it is set.
+ */
+export type PostBusyReason = "image" | "website" | null;
+
+/** The surfaces a saved post can be reopened from, so Back returns there. */
+const POST_OPEN_SURFACES: readonly AppStep[] = [
+  AppStep.HOME,
+  AppStep.WORK,
+  AppStep.DEALER_ADMIN,
+];
+
 export type SessionLoginRequest =
   | { authType: "code"; dealerCode: string }
   | { authType: "manager_password"; username: string; password: string }
@@ -90,6 +105,7 @@ interface AppState {
   pendingRelease: PendingRelease | null;
   pendingPhoto: ImageSelection | null;
   postWorkAtRisk: boolean;
+  postBusy: PostBusyReason;
   postReturnStep: AppStep | null;
   error: string | null;
   isRestoringSession: boolean;
@@ -116,7 +132,16 @@ interface AppState {
   setPendingRelease: (release: PendingRelease | null) => void;
   setPendingPhoto: (photo: ImageSelection | null) => void;
   setPostWorkAtRisk: (atRisk: boolean) => void;
+  setPostBusy: (reason: PostBusyReason) => void;
   setPostReturnStep: (step: AppStep | null) => void;
+  /**
+   * Replace the workspace with a saved post and open it (amendments B13). The
+   * one way every surface reopens a post, so Back always returns to the surface
+   * it was opened from (Home, My work or the dealership dashboard) and no stale
+   * photo, draft or signature survives under it. The caller supersedes any
+   * generation still running first; the store cannot reach it.
+   */
+  openSavedPost: (post: GeneratedPost) => void;
   setPreferences: (
     prefs: Partial<{
       theme: "dark" | "light" | "system";
@@ -258,6 +283,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   pendingRelease: null,
   pendingPhoto: null,
   postWorkAtRisk: false,
+  postBusy: null,
   postReturnStep: null,
   error: null,
   isRestoringSession: true,
@@ -296,6 +322,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       pendingRelease: null,
       pendingPhoto: null,
       postWorkAtRisk: false,
+      postBusy: null,
       postReturnStep: null,
       error: null,
       authEpoch: get().authEpoch + 1,
@@ -356,6 +383,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             pendingRelease: null,
             pendingPhoto: null,
             postWorkAtRisk: false,
+            postBusy: null,
             postReturnStep: null,
           }
         : { step },
@@ -436,7 +464,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPendingRelease: (pendingRelease) => set({ pendingRelease }),
   setPendingPhoto: (pendingPhoto) => set({ pendingPhoto }),
   setPostWorkAtRisk: (postWorkAtRisk) => set({ postWorkAtRisk }),
+  setPostBusy: (postBusy) => {
+    if (get().postBusy !== postBusy) set({ postBusy });
+  },
   setPostReturnStep: (postReturnStep) => set({ postReturnStep }),
+  openSavedPost: (post) => {
+    const { step, role } = get();
+    const returnStep = POST_OPEN_SURFACES.includes(step)
+      ? step
+      : role === "salesperson"
+        ? AppStep.WORK
+        : AppStep.DEALER_ADMIN;
+    get().setPostReturnStep(returnStep);
+    get().setGeneratedPost(post);
+    get().setSelectedImage(null);
+    get().setGenerationParams(null);
+    get().setPostDraft(null);
+    get().setPendingRelease(null);
+    get().setError(null);
+    get().setStep(AppStep.POST);
+  },
   setError: (error) => set({ error }),
 
   setPreferences: (prefs) => {
@@ -589,6 +636,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       pendingRelease: null,
       pendingPhoto: null,
       postWorkAtRisk: false,
+      postBusy: null,
       postReturnStep: null,
       error: null,
       step: AppStep.LOGIN,
@@ -625,6 +673,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       pendingRelease: null,
       pendingPhoto: null,
       postWorkAtRisk: false,
+      postBusy: null,
       postReturnStep: null,
       error: null,
       step: nextStep,
@@ -756,6 +805,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             pendingRelease: null,
             pendingPhoto: null,
             postWorkAtRisk: false,
+            postBusy: null,
             postReturnStep: null,
             step: restoredStep,
             imageQualityTier: session?.imageQualityTier ?? "standard",
@@ -843,6 +893,7 @@ if (typeof window !== "undefined") {
       pendingRelease: null,
       pendingPhoto: null,
       postWorkAtRisk: false,
+      postBusy: null,
       postReturnStep: null,
       error: null,
       role: "salesperson",

@@ -6,17 +6,23 @@ import { useAppStore } from "../stores/appStore";
 import { useUrlStepSync } from "../hooks/useUrlStepSync";
 const Harness = ({
   onBlocked,
+  onBusy,
   managementDirty,
   onManagement,
+  onDraft,
 }: {
   onBlocked?: () => void;
+  onBusy?: (message: string) => void;
   managementDirty?: boolean;
   onManagement?: (target: AppStep) => void;
+  onDraft?: (target: AppStep) => void;
 }) => {
   useUrlStepSync({
     onBlockedResultBack: onBlocked,
+    onBusyResultBack: onBusy,
     managementDirty,
     onBlockedManagementBack: onManagement,
+    onBlockedDraftBack: onDraft,
   });
   return null;
 };
@@ -34,7 +40,9 @@ describe("streamlined URL navigation", () => {
       selectedImage: "photo",
       generatedPost: null,
       postDraft: { categoryId: "inventory", scenarioId: "new_arrival" },
+      pendingRelease: null,
       postWorkAtRisk: false,
+      postBusy: null,
       postReturnStep: null,
     });
   });
@@ -94,6 +102,58 @@ describe("streamlined URL navigation", () => {
     act(() => popTo("#/work"));
     expect(blocked).toHaveBeenCalledTimes(2);
   });
+  it("restores a Back pressed while a render or the website handoff is running (A4)", () => {
+    const blocked = vi.fn();
+    const busy = vi.fn();
+    useAppStore.setState({
+      step: AppStep.POST,
+      generatedPost: { image: "photo", text: "caption", postId: "post-1" },
+      postReturnStep: AppStep.WORK,
+      postBusy: "image",
+    });
+    render(<Harness onBlocked={blocked} onBusy={busy} />);
+    act(() => popTo("#/work"));
+    expect(useAppStore.getState().step).toBe(AppStep.POST);
+    expect(window.location.hash).toBe("#/post");
+    expect(busy).toHaveBeenLastCalledWith(
+      "Wait for the current update to finish before leaving this post.",
+    );
+    // Busy wins over the at-risk confirm, exactly as the old screen's guard.
+    act(() => useAppStore.setState({ postBusy: "website", postWorkAtRisk: true }));
+    act(() => popTo("#/home"));
+    expect(useAppStore.getState().step).toBe(AppStep.POST);
+    expect(window.location.hash).toBe("#/post");
+    expect(busy).toHaveBeenLastCalledWith(
+      "Wait for the final website handoff to finish before leaving this post.",
+    );
+    expect(busy).toHaveBeenCalledTimes(2);
+    expect(blocked).not.toHaveBeenCalled();
+    // Once it settles the saved post leaves normally.
+    act(() => useAppStore.setState({ postBusy: null, postWorkAtRisk: false }));
+    act(() => popTo("#/work"));
+    expect(useAppStore.getState().step).toBe(AppStep.WORK);
+    expect(busy).toHaveBeenCalledTimes(2);
+  });
+  it("a Back redirected onto the current step does not swallow the next history entry", () => {
+    render(<Harness />);
+    act(() => useAppStore.setState({ postDraft: null, selectedImage: null }));
+    // A stale Details entry with no draft lands back on Home, unchanged.
+    act(() => popTo("#/details"));
+    expect(useAppStore.getState().step).toBe(AppStep.HOME);
+    expect(window.location.hash).toBe("#/home");
+    // The next real navigation still writes its own entry.
+    const push = vi.spyOn(window.history, "pushState");
+    act(() => {
+      useAppStore.setState({
+        selectedImage: "photo",
+        postDraft: { categoryId: "inventory", scenarioId: "new_arrival" },
+      });
+      useAppStore.getState().setStep(AppStep.DETAILS);
+    });
+    expect(window.location.hash).toBe("#/details");
+    expect(push).toHaveBeenCalledWith(null, "", "#/details");
+    push.mockRestore();
+  });
   it("allows saved work to leave and returns reopened posts to their source", () => {
     useAppStore.setState({
       step: AppStep.POST,
@@ -104,6 +164,22 @@ describe("streamlined URL navigation", () => {
     act(() => popTo("#/details"));
     expect(useAppStore.getState().step).toBe(AppStep.WORK);
     expect(window.location.hash).toBe("#/work");
+  });
+  it("asks before browser Back to Home drops a signed release from Details", () => {
+    const onDraft = vi.fn();
+    const release = { customerName: "Maria Lopez", signaturePngDataUrl: "signature" };
+    useAppStore.setState({ step: AppStep.DETAILS, pendingRelease: release });
+    render(<Harness onDraft={onDraft} />);
+    act(() => popTo("#/home"));
+    expect(onDraft).toHaveBeenCalledWith(AppStep.HOME);
+    expect(useAppStore.getState().step).toBe(AppStep.DETAILS);
+    expect(useAppStore.getState().pendingRelease).toBe(release);
+    expect(window.location.hash).toBe("#/details");
+    // Unsigned, Back goes Home as before.
+    act(() => useAppStore.setState({ pendingRelease: null }));
+    act(() => popTo("#/home"));
+    expect(onDraft).toHaveBeenCalledTimes(1);
+    expect(useAppStore.getState().step).toBe(AppStep.HOME);
   });
   it("preserves unsaved dealership settings on browser Back", () => {
     const onManagement = vi.fn();

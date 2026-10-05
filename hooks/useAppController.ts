@@ -259,20 +259,13 @@ export const useAppController = () => {
     [generationProps.supersedeGeneration],
   );
 
+  // Back from the reopened post returns to the surface it was opened from
+  // (Home's preview, My work or the dealership dashboard): openSavedPost
+  // records the current step, never a role-derived guess (amendments B13).
   const handleOpenPost = useCallback(
     (post: GeneratedPost) => {
       generationProps.supersedeGeneration();
-      const store = useAppStore.getState();
-      store.setPostReturnStep(
-        store.role === "salesperson" ? AppStep.WORK : AppStep.DEALER_ADMIN,
-      );
-      store.setGeneratedPost(post);
-      store.setSelectedImage(null);
-      store.setGenerationParams(null);
-      store.setPostDraft(null);
-      store.setPendingRelease(null);
-      store.setError(null);
-      store.setStep(AppStep.POST);
+      useAppStore.getState().openSavedPost(post);
     },
     [generationProps.supersedeGeneration],
   );

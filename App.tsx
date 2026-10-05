@@ -1,18 +1,30 @@
-import React, { Suspense, useEffect, useRef, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Header } from "./components/Header";
 import { ImpersonationBanner } from "./components/ImpersonationBanner";
 import { MainContent } from "./components/MainContent";
 import { OfflineBanner } from "./components/OfflineBanner";
 import { useAppController } from "./hooks/useAppController";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
-import { postHasWorkAtRisk, useUrlStepSync } from "./hooks/useUrlStepSync";
-import { AppStep } from "./types";
+import {
+  postBusyMessage,
+  postHasWorkAtRisk,
+  useUrlStepSync,
+} from "./hooks/useUrlStepSync";
+import {
+  AppStep,
+  type ApprovalPolicyMode,
+  type Dealer,
+  type GeneratedPost,
+  type ImageSelection,
+} from "./types";
 import { useToast } from "./components/ui/Toast";
 import { useAppStore } from "./stores/appStore";
 import { Modal } from "./components/ui/Modal";
 import { Button } from "./components/ui/Button";
 import { PwaUpdatePrompt } from "./components/PwaUpdatePrompt";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { homeTilesForDealer } from "./services/storeDefaults";
+
 interface PanelBoundaryProps {
   children: React.ReactNode;
   /** Surface name used in the compact fallback copy. */
@@ -44,7 +56,7 @@ export class PanelErrorBoundary extends ErrorBoundary {
     return (
       <div
         role="alert"
-        className="mx-auto my-3 w-full max-w-md rounded-xl border border-strong bg-panel px-4 py-3"
+        className="mx-auto my-3 w-full max-w-md rounded-md border border-strong bg-panel px-4 py-3"
       >
         <p className="text-sm font-semibold text-error-ink">
           {panelName} could not open
@@ -53,13 +65,12 @@ export class PanelErrorBoundary extends ErrorBoundary {
           The rest of your workspace is untouched. Try opening it again.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={this.handleRetryPanel}>
+          <Button variant="secondary" onClick={this.handleRetryPanel}>
             Try again
           </Button>
           {onDismiss && (
             <Button
-              variant="plain"
-              size="sm"
+              variant="ghost"
               onClick={() => {
                 this.handleRetryPanel();
                 onDismiss();
@@ -100,6 +111,49 @@ const LazySettingsModal = React.lazy(() =>
     default: mod.SettingsModal,
   })),
 );
+/**
+ * The approval modes that only narrow review while it is on: the server
+ * decides per post whether it waits (pb_hooks/requestPolicies.js
+ * initialApprovalStatus), so the client cannot promise either outcome.
+ */
+const NARROWING_APPROVAL_MODES: readonly ApprovalPolicyMode[] = [
+  "per_category",
+  "first_n",
+];
+
+/** Tolerates a policy still held as its stored JSON text after a settings save. */
+const approvalPolicyMode = (dealer: Dealer | null): ApprovalPolicyMode | null => {
+  let policy: unknown = dealer?.approval_policy;
+  if (typeof policy === "string") {
+    try {
+      policy = JSON.parse(policy);
+    } catch {
+      return null;
+    }
+  }
+  const mode = (policy as { mode?: unknown } | null)?.mode;
+  return typeof mode === "string" ? (mode as ApprovalPolicyMode) : null;
+};
+
+/**
+ * The B5 outcome toast once a cancelled run's save lands in My work. Review is
+ * switched on by requires_approval; a narrowing policy then lets the server
+ * decide whether this post waits, so the toast only says where it went.
+ */
+const cancelSavedMessage = (
+  requiresApproval: boolean,
+  dealer: Dealer | null,
+): string => {
+  if (!requiresApproval) return "Saved to My work as a draft";
+  const mode = approvalPolicyMode(dealer);
+  return mode && NARROWING_APPROVAL_MODES.includes(mode)
+    ? "Saved to My work"
+    : "Saved to My work · waiting for approval";
+};
+
+/** Which question the leave dialog is asking. */
+type LeaveKind = "post" | "settings" | "draft";
+
 const AppContent: React.FC = () => {
   const app = useAppController();
   const { step, currentDealer, selectedImage, generatedPost, isRestoringSession } = app;
@@ -107,8 +161,11 @@ const AppContent: React.FC = () => {
   const isImpersonating = useAppStore((s) => s.isImpersonating);
   const theme = useAppStore((s) => s.theme);
   const postWorkAtRisk = useAppStore((s) => s.postWorkAtRisk);
+  const postDraft = useAppStore((s) => s.postDraft);
+  const pendingRelease = useAppStore((s) => s.pendingRelease);
   const settingsEverOpened = useMountedOnce(app.isSettingsOpen);
   const [leaveOpen, setLeaveOpen] = useState(false);
+  const [leaveKind, setLeaveKind] = useState<LeaveKind>("post");
   const leaveAction = useRef<(() => void) | null>(null);
   const [workReturnStep, setWorkReturnStep] = useState<AppStep | null>(null);
   const [managementDirty, setManagementDirty] = useState(false);
@@ -132,31 +189,71 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     mainRef.current?.scrollTo?.({ top: 0 });
   }, [step]);
+  // Leaving My work by any route (browser Back included) spends where its
+  // Back would have returned, so a later visit never bounces to a stale step.
+  const stepBefore = useRef(step);
+  useEffect(() => {
+    if (stepBefore.current === AppStep.WORK && step !== AppStep.WORK)
+      setWorkReturnStep(null);
+    stepBefore.current = step;
+  }, [step]);
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const update = () => {
       const dark = theme === "dark" || (theme === "system" && media.matches);
       document.documentElement.classList.toggle("theme-light", !dark);
-      document
-        .querySelector('meta[name="theme-color"]')
-        ?.setAttribute("content", dark ? "#121416" : "#f4f4f2");
+      // The browser chrome takes the canvas token of the theme just applied,
+      // so it can never drift from the page (index.html seeds it at boot).
+      const canvas = getComputedStyle(document.documentElement)
+        .getPropertyValue("--canvas")
+        .trim();
+      if (canvas)
+        document
+          .querySelector('meta[name="theme-color"]')
+          ?.setAttribute("content", `rgb(${canvas.split(/\s+/).join(", ")})`);
     };
     update();
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, [theme]);
 
+  const confirmLeave = (kind: LeaveKind, action: () => void) => {
+    leaveAction.current = action;
+    setLeaveKind(kind);
+    setLeaveOpen(true);
+  };
+  /**
+   * Every exit from the current screen goes through here: header Back, My
+   * work, Log out, Escape, Done, Remix and Settings' dealer setup. Creating
+   * cannot be left; a Post screen still rendering or sending the website
+   * handoff refuses with the original toast (A4); unsaved work asks first.
+   */
   const requestLeave = (action: () => void) => {
     if (step === AppStep.CREATING) return;
-    if (
-      (step === AppStep.POST && postHasWorkAtRisk()) ||
-      (step === AppStep.DEALER_ADMIN && managementDirty)
-    ) {
-      leaveAction.current = action;
-      setLeaveOpen(true);
+    if (step === AppStep.POST) {
+      const busy = postBusyMessage();
+      if (busy) {
+        toast.warning(busy);
+        return;
+      }
+    }
+    if (step === AppStep.POST && postHasWorkAtRisk()) {
+      confirmLeave("post", action);
+      return;
+    }
+    if (step === AppStep.DEALER_ADMIN && managementDirty) {
+      confirmLeave("settings", action);
       return;
     }
     action();
+  };
+  /** A return step is only usable while the state it renders still exists. */
+  const canReturnTo = (target: AppStep): boolean => {
+    const state = useAppStore.getState();
+    if (target === AppStep.DETAILS)
+      return Boolean(state.selectedImage && state.postDraft);
+    if (target === AppStep.POST) return Boolean(state.generatedPost);
+    return true;
   };
   const goBack = () =>
     requestLeave(() => {
@@ -166,16 +263,53 @@ const AppContent: React.FC = () => {
         else if (selectedImage) app.startRemix();
         else app.setStep(AppStep.WORK);
       } else if (step === AppStep.WORK && workReturnStep !== null) {
-        app.setStep(workReturnStep);
+        const target = workReturnStep;
         setWorkReturnStep(null);
+        // Never open an empty Details or Post: if what it showed is gone,
+        // start again from Home as the URL guard does.
+        if (canReturnTo(target)) app.setStep(target);
+        else app.reset();
+      } else if (step === AppStep.DETAILS && state.pendingRelease) {
+        // Back to Home clears Details: a signed release is only discarded
+        // after the salesperson says so (B13).
+        confirmLeave("draft", app.reset);
       } else app.reset();
     });
   const openWork = () =>
     requestLeave(() => {
-      setWorkReturnStep(
-        step === AppStep.DETAILS || step === AppStep.POST ? step : null,
-      );
+      // A second My work tap on My work keeps where Back returns to.
+      if (step !== AppStep.WORK)
+        setWorkReturnStep(
+          step === AppStep.DETAILS || step === AppStep.POST ? step : null,
+        );
       app.setStep(AppStep.WORK);
+    });
+  /**
+   * Opening a saved post or reusing a photo replaces the whole workspace. A
+   * Details draft still in progress (photo, details, perhaps the customer's
+   * signature) is only discarded after the salesperson says so (B13).
+   */
+  const replaceWorkspace = (action: () => void) => {
+    const run = () => {
+      setWorkReturnStep(null);
+      action();
+    };
+    const state = useAppStore.getState();
+    if (state.selectedImage && state.postDraft && !state.generatedPost) {
+      confirmLeave("draft", run);
+      return;
+    }
+    run();
+  };
+  const openPost = (post: GeneratedPost) =>
+    replaceWorkspace(() => app.handleOpenPost(post));
+  const reusePhoto = (selection: ImageSelection) =>
+    replaceWorkspace(() => {
+      app.supersedeGeneration();
+      app.reset();
+      useAppStore.getState().setPendingPhoto(selection);
+      app.setStep(AppStep.HOME);
+      useAppStore.getState().setPendingPhoto(selection);
     });
   const requestLogout = () =>
     requestLeave(() => {
@@ -184,17 +318,17 @@ const AppContent: React.FC = () => {
   useUrlStepSync({
     managementDirty,
     onBlockedManagementBack: (target) => {
-      leaveAction.current = () => app.setStep(target);
-      setLeaveOpen(true);
+      confirmLeave("settings", () => app.setStep(target));
     },
+    onBusyResultBack: (message) => toast.warning(message),
+    onBlockedDraftBack: (target) => confirmLeave("draft", () => app.setStep(target)),
     onBlockedResultBack: () => {
-      leaveAction.current = () => {
+      confirmLeave("post", () => {
         const state = useAppStore.getState();
         if (state.postReturnStep !== null) app.setStep(state.postReturnStep);
         else if (state.selectedImage) app.startRemix();
         else app.reset();
-      };
-      setLeaveOpen(true);
+      });
     },
   });
   useKeyboardShortcuts({
@@ -215,19 +349,29 @@ const AppContent: React.FC = () => {
   const cancelGeneration = () => {
     const result = app.cancelGeneration();
     if (result.status === "saving") {
+      const dealerAtCancel = useAppStore.getState().currentDealer;
       toast.info("Finishing the save in My work…");
       void result.saved.then((saved) => {
         if (saved)
-          toast.info(
-            result.requiresApproval
-              ? "Saved to My work · waiting for approval"
-              : "Saved to My work as a draft",
-          );
+          toast.info(cancelSavedMessage(result.requiresApproval, dealerAtCancel));
         else
           toast.warning("The post could not be saved. Your photo is still in Details.");
       });
     }
   };
+  // The header names the step by its category tile ("Delivery", "New
+  // arrival"), as the Details and Post artboards do; My work keeps its name.
+  const tiles = useMemo(() => homeTilesForDealer(currentDealer), [currentDealer]);
+  const tileLabel = (scenarioId: string | undefined): string =>
+    tiles.find((tile) => tile.scenarioId === scenarioId)?.label || "Post";
+  const flowTitle =
+    step === AppStep.DETAILS
+      ? tileLabel(postDraft?.scenarioId)
+      : step === AppStep.POST
+        ? tileLabel(generatedPost?.scenarioId || postDraft?.scenarioId)
+        : step === AppStep.WORK
+          ? "My work"
+          : undefined;
   if (isRestoringSession)
     return (
       <main
@@ -255,15 +399,7 @@ const AppContent: React.FC = () => {
               ? goBack
               : undefined
           }
-          flowTitle={
-            step === AppStep.DETAILS
-              ? "Post details"
-              : step === AppStep.POST
-                ? "Your post"
-                : step === AppStep.WORK
-                  ? "My work"
-                  : undefined
-          }
+          flowTitle={flowTitle}
           navigationDisabled={step === AppStep.CREATING}
         />
       )}
@@ -294,14 +430,8 @@ const AppContent: React.FC = () => {
           onLogin={app.handleLogin}
           onImageSelected={app.handleImageSelected}
           onPhotoPicked={app.handlePhotoPicked}
-          onOpenPost={app.handleOpenPost}
-          onReusePhoto={(selection) => {
-            app.supersedeGeneration();
-            app.reset();
-            useAppStore.getState().setPendingPhoto(selection);
-            app.setStep(AppStep.HOME);
-            useAppStore.getState().setPendingPhoto(selection);
-          }}
+          onOpenPost={openPost}
+          onReusePhoto={reusePhoto}
           onReset={() => requestLeave(app.reset)}
           onBackFromWork={goBack}
           onManagementDirtyChange={setManagementDirty}
@@ -350,13 +480,23 @@ const AppContent: React.FC = () => {
       <Modal
         isOpen={leaveOpen}
         onClose={() => setLeaveOpen(false)}
-        title={managementDirty ? "Leave unsaved store settings?" : "Leave this post?"}
+        title={
+          leaveKind === "settings"
+            ? "Leave unsaved store settings?"
+            : leaveKind === "draft"
+              ? "Discard the post in progress?"
+              : "Leave this post?"
+        }
         description={
-          managementDirty
+          leaveKind === "settings"
             ? "Save your dealership settings before leaving, or discard these changes."
-            : postWorkAtRisk
-              ? "Changes are still saving or work is in progress."
-              : "This post has not been saved yet."
+            : leaveKind === "draft"
+              ? pendingRelease
+                ? "Your photo, details and the customer's signature will be cleared."
+                : "Your photo and details will be cleared."
+              : postWorkAtRisk
+                ? "Changes are still saving or work is in progress."
+                : "This post has not been saved yet."
         }
         size="sm"
         footer={
@@ -372,12 +512,16 @@ const AppContent: React.FC = () => {
                 leaveAction.current = null;
               }}
             >
-              Leave anyway
+              {leaveKind === "draft" ? "Discard post" : "Leave anyway"}
             </Button>
           </>
         }
       >
-        <p className="text-sm text-ink-2">Leaving now may lose your latest changes.</p>
+        <p className="text-sm text-ink-2">
+          {leaveKind === "draft"
+            ? "Posts you already created stay in My work."
+            : "Leaving now may lose your latest changes."}
+        </p>
       </Modal>
     </div>
   );
