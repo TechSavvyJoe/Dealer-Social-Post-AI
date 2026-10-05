@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, Sparkles, Upload } from "lucide-react";
+import { Images, LoaderCircle, Upload } from "lucide-react";
 import type { BrandCategoryId, GeneratedPost, ImageSelection } from "../types";
 import { useAppStore } from "../stores/appStore";
 import { homeTilesForDealer, type HomeTile } from "../services/storeDefaults";
 import { usePhotoIntake } from "../hooks/usePhotoIntake";
 import { usePostHistoryList } from "../hooks/usePostHistoryList";
+import { cn } from "../utils/classNames";
 import { CategoryTiles } from "./home/CategoryTiles";
 import { MyWorkPreview } from "./home/MyWorkPreview";
+import { Button } from "./ui/Button";
 import { ErrorBanner } from "./ui/ErrorBanner";
 
 export interface HomeProps {
@@ -29,6 +31,12 @@ export const Home: React.FC<HomeProps> = ({
   const pendingPhoto = useAppStore((state) => state.pendingPhoto);
   const setPendingPhoto = useAppStore((state) => state.setPendingPhoto);
   const activeTileRef = useRef<HomeTile | null>(null);
+  const libraryInputRef = useRef<HTMLInputElement | null>(null);
+  const pageHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const waitingHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  // Set only when a photo arrives without a category in this visit (library or
+  // drop), so a photo restored from the store never steals focus on mount.
+  const focusWaitingPhotoRef = useRef(false);
   const [droppedPhoto, setDroppedPhoto] = useState<ImageSelection | null>(pendingPhoto);
   const tiles = homeTilesForDealer(dealer);
   const {
@@ -49,6 +57,7 @@ export const Home: React.FC<HomeProps> = ({
         onPhotoPicked(selection, activeTile.categoryId, activeTile.scenarioId);
         activeTileRef.current = null;
       } else {
+        focusWaitingPhotoRef.current = true;
         setPendingPhoto(selection);
         setDroppedPhoto(selection);
       }
@@ -65,76 +74,114 @@ export const Home: React.FC<HomeProps> = ({
     [intake],
   );
 
+  // The library photo has no category yet (no active tile: `handleFile` clears
+  // it when its photo settles, and this row is disabled until then). It waits
+  // on Home until the next tile tap assigns one, the same path a drop takes.
+  const handleLibraryFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) void intake.processFile(file);
+  };
+
   useEffect(() => {
     if (pendingPhoto !== droppedPhoto) setDroppedPhoto(pendingPhoto);
   }, [droppedPhoto, pendingPhoto]);
 
+  useEffect(() => {
+    if (!droppedPhoto || !focusWaitingPhotoRef.current) return;
+    focusWaitingPhotoRef.current = false;
+    waitingHeadingRef.current?.focus();
+  }, [droppedPhoto]);
+
+  // A waiting photo turns every tile tap into "use this photo", so without
+  // this a wrong library pick or drop could not be undone from Home. The card
+  // (and its focused button) unmounts, so focus goes back to the page heading.
+  const removeWaitingPhoto = () => {
+    setPendingPhoto(null);
+    setDroppedPhoto(null);
+    pageHeadingRef.current?.focus();
+  };
+
+  const photoWaiting = Boolean(droppedPhoto);
+
   return (
     <div className="mx-auto w-full max-w-[1240px] px-4 pb-12 pt-5 sm:px-6 lg:grid lg:grid-cols-[minmax(0,1.65fr)_minmax(330px,.75fr)] lg:gap-10 lg:px-8 lg:pt-10 xl:gap-14">
       <section>
-        <div className="flex items-start gap-3 sm:gap-4">
-          <span className="mt-1 grid h-10 w-10 shrink-0 place-items-center rounded-md border border-strong bg-brand-tint text-brand-ink sm:h-12 sm:w-12">
-            <Sparkles className="h-5 w-5 sm:h-6 sm:w-6" aria-hidden="true" />
-          </span>
-          <div>
-            <p className="mb-1 text-2xs font-semibold uppercase tracking-[0.16em] text-brand-ink">
-              Create a post
+        <h1
+          ref={pageHeadingRef}
+          tabIndex={-1}
+          className="font-display text-3xl font-semibold text-ink sm:text-4xl"
+        >
+          What are you posting?
+        </h1>
+        {/* Always mounted so the change is announced, not just shown. */}
+        <div role="status">
+          {intake.isProcessing ? (
+            <p className="mt-2 flex items-center gap-2 text-base text-ink">
+              <LoaderCircle
+                className="h-4 w-4 motion-safe:animate-spin"
+                aria-hidden="true"
+              />
+              Getting your photo ready…
             </p>
-            <h1 className="font-display text-3xl font-semibold text-ink sm:text-4xl">
-              What are you posting?
-            </h1>
+          ) : null}
+        </div>
+        {intake.isProcessing || photoWaiting ? null : (
+          <>
             <p className="mt-2 text-base text-ink-2 md:hidden">
               Pick one and the camera opens.
             </p>
             <p className="mt-2 hidden text-base text-ink-2 md:block">
               Pick one, then take or choose the photo.
             </p>
-          </div>
-        </div>
+          </>
+        )}
 
         {intake.error ? (
           <ErrorBanner
             message={intake.error}
             onRetry={() => intake.setError(null)}
-            className="mt-5"
+            actionLabel="Dismiss"
+            className="mt-6"
           />
         ) : null}
 
         {droppedPhoto ? (
-          <div className="mt-7 overflow-hidden rounded-lg border border-strong bg-panel-raised">
-            <div className="h-1 bg-brand-fill" aria-hidden="true" />
-            <div className="flex items-center gap-3">
-              <img
-                src={droppedPhoto.workingImage}
-                alt="Selected"
-                className="m-3 h-20 w-20 rounded-md border border-hairline object-cover"
-              />
-              <div className="py-3 pr-4">
-                <p className="text-2xs font-semibold uppercase tracking-[0.12em] text-brand-ink">
-                  Photo ready
-                </p>
-                <h2 className="font-semibold text-ink">Pick what this photo is for</h2>
-                <p className="mt-0.5 text-sm text-ink-2">
-                  We&apos;ll use this image for the category you choose.
-                </p>
-              </div>
+          <div className="mt-6 flex items-start gap-3 rounded-md border border-strong bg-panel-raised p-3">
+            <img
+              src={droppedPhoto.workingImage}
+              alt="Your photo"
+              className="h-20 w-20 shrink-0 rounded-sm border border-hairline object-cover"
+            />
+            <div className="min-w-0">
+              <h2
+                ref={waitingHeadingRef}
+                tabIndex={-1}
+                className="text-lg font-semibold text-ink"
+              >
+                Pick what this photo is for
+              </h2>
+              <p className="mt-0.5 text-sm text-ink-2">
+                Tap a category below to start the post.
+              </p>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={removeWaitingPhoto}
+                className="-ml-2 mt-1 min-h-11 px-2"
+              >
+                Remove photo
+              </Button>
             </div>
           </div>
         ) : null}
 
-        <div className="mt-8">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-2">
-              Choose a category
-            </p>
-            <span className="hidden text-xs text-ink-hint sm:inline">
-              Photo first · AI next
-            </span>
-          </div>
+        <div className="mt-6">
           <CategoryTiles
             tiles={tiles}
             usualCategory={person?.defaultCategory}
             disabled={intake.isProcessing}
+            photoWaiting={photoWaiting}
             onFile={handleFile}
             onSelect={(tile) => {
               if (!droppedPhoto) return false;
@@ -145,12 +192,42 @@ export const Home: React.FC<HomeProps> = ({
             }}
           />
         </div>
-        <p className="mt-5 hidden items-center gap-2 text-sm text-ink-hint md:flex">
-          {intake.isDraggingOver ? (
-            <Upload className="h-4 w-4" />
-          ) : (
-            <Camera className="h-4 w-4" />
+
+        {/* Phones: the tiles open the camera, so the library is one row here
+            instead of a button on every tile. Wider screens' tiles already
+            open the file picker. */}
+        <div className="mt-4 md:hidden">
+          <input
+            ref={libraryInputRef}
+            type="file"
+            accept="image/*"
+            className="sr-only"
+            tabIndex={-1}
+            aria-hidden="true"
+            aria-label="Choose a photo from your library"
+            onChange={handleLibraryFile}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={<Images />}
+            disabled={intake.isProcessing}
+            onClick={() => libraryInputRef.current?.click()}
+            className="-ml-2 min-h-11 px-2 text-brand-ink"
+          >
+            Choose from library
+          </Button>
+        </div>
+
+        <p
+          className={cn(
+            "mt-6 hidden items-center gap-2 text-sm md:flex",
+            intake.isDraggingOver ? "text-ink" : "text-ink-hint",
           )}
+        >
+          {intake.isDraggingOver ? (
+            <Upload className="h-4 w-4" aria-hidden="true" />
+          ) : null}
           {intake.isDraggingOver
             ? "Drop the photo now."
             : "Or drop a photo anywhere on this page."}
