@@ -39,4 +39,21 @@ describe("HoursPicker", () => {
     }
     expect(copied.sat).toEqual(value.sat);
   });
+
+  it("drops its box inside the manager's settings and takes the row's title", () => {
+    render(
+      <HoursPicker value={week()} onChange={vi.fn()} title="Hours" framed={false} />,
+    );
+    const group = screen.getByRole("group", { name: "Hours" });
+    expect(group.className).not.toMatch(/\brounded|\bbg-|\bborder\b/);
+    expect(screen.queryByRole("heading", { name: "Hours" })).toBeNull();
+    expect(within(group).getAllByRole("listitem")).toHaveLength(7);
+  });
+
+  it("keeps its panel and heading by default, for the wizard and the admin form", () => {
+    render(<HoursPicker value={week()} onChange={vi.fn()} />);
+    const group = screen.getByRole("group", { name: "Business hours" });
+    expect(group.className).toContain("rounded-md");
+    expect(screen.getByRole("heading", { name: "Business hours" })).toBeInTheDocument();
+  });
 });

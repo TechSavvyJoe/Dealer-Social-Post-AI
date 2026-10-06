@@ -18,6 +18,15 @@ interface HoursPickerProps {
   preview?: string;
   className?: string;
   disabled?: boolean;
+  /** The group's name. Default "Business hours". */
+  title?: string;
+  /**
+   * Draw the week in its own panel (the default). The manager's settings pass
+   * false: there the week is one row of a form that sits on the canvas, so the
+   * day rows keep their hairlines and lose the box, and the title reads as a
+   * field label.
+   */
+  framed?: boolean;
 }
 
 const DAY_ACCESSIBLE_LABELS: Record<DayKey, string> = {
@@ -36,6 +45,8 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
   preview,
   className,
   disabled = false,
+  title = "Business hours",
+  framed = true,
 }) => {
   const controlIdPrefix = `hours-${React.useId().replace(/:/g, "")}`;
   const headingId = `${controlIdPrefix}-heading`;
@@ -84,14 +95,25 @@ export const HoursPicker: React.FC<HoursPickerProps> = ({
       role="group"
       aria-labelledby={headingId}
       className={cn(
-        "rounded-md border border-hairline bg-panel px-4 py-3 sm:px-5",
+        framed && "rounded-md border border-hairline bg-panel px-4 py-3 sm:px-5",
         className,
       )}
     >
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline pb-2">
-        <h4 id={headingId} className="text-ink">
-          Business hours
-        </h4>
+      <div
+        className={cn(
+          "flex flex-wrap items-center justify-between gap-2 border-b border-hairline",
+          framed ? "pb-2" : "pb-1",
+        )}
+      >
+        {framed ? (
+          <h4 id={headingId} className="text-ink">
+            {title}
+          </h4>
+        ) : (
+          <p id={headingId} className="text-sm font-medium text-ink-2">
+            {title}
+          </p>
+        )}
         <Button
           type="button"
           variant="ghost"

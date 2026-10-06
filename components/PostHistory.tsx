@@ -32,6 +32,7 @@ import {
 import { toPublicCustomerLabel } from "../utils/customerIdentity";
 import { savedPostIdentityIsSafe } from "../utils/historyPost";
 import { usePostHistoryList } from "../hooks/usePostHistoryList";
+import type { GeneratedPost } from "../types";
 
 const STATUS_FILTERS: Array<{ key: ApprovalStatus | "all"; label: string }> = [
   { key: "all", label: "All" },
@@ -134,9 +135,17 @@ const websiteStatusBadge = (
  */
 interface PostHistoryProps {
   onOpenCreative?: () => void;
+  /**
+   * Receives a reopened post instead of the store's direct open, so the
+   * caller's own guarded path (the manager dashboard's `onOpenPost`) opens it.
+   */
+  onPostReady?: (post: GeneratedPost) => void;
 }
 
-export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
+export const PostHistory: React.FC<PostHistoryProps> = ({
+  onOpenCreative,
+  onPostReady,
+}) => {
   const {
     dealer,
     role,
@@ -156,7 +165,7 @@ export const PostHistory: React.FC<PostHistoryProps> = ({ onOpenCreative }) => {
     load,
     openCreative,
     retryWebsite,
-  } = usePostHistoryList({ onOpenCreative });
+  } = usePostHistoryList({ onOpenCreative, onPostReady });
 
   const exportCsv = useCallback(() => {
     const rows = [

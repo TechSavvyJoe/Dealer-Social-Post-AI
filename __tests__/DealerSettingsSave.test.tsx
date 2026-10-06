@@ -124,6 +124,7 @@ describe("dealership settings save", { timeout: 90_000 }, () => {
     );
     fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
     expect(screen.getByRole("heading", { name: "Dealership settings" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /^Voice/ }));
     expect(
       within(screen.getByRole("list", { name: "Do phrases" })).getByText(
         "Use first names",
@@ -136,7 +137,7 @@ describe("dealership settings save", { timeout: 90_000 }, () => {
   it("keeps the open section after a save", async () => {
     renderDashboard();
     fireEvent.click(screen.getByRole("button", { name: /^Voice/ }));
-    fireEvent.change(screen.getByLabelText("Brand voice"), {
+    fireEvent.change(screen.getByLabelText("How captions should sound"), {
       target: { value: "Warm, direct and local. " },
     });
     fireEvent.click(saveButton());
@@ -156,7 +157,7 @@ describe("dealership settings save", { timeout: 90_000 }, () => {
     fireEvent.click(screen.getByRole("button", { name: /^Workflow/ }));
     fireEvent.click(screen.getByRole("radio", { name: "Require manager approval" }));
     fireEvent.click(screen.getByRole("radio", { name: "Each person's first posts" }));
-    fireEvent.change(screen.getByLabelText("Approved posts per person"), {
+    fireEvent.change(screen.getByLabelText("Posts to approve first"), {
       target: { value: "4" },
     });
     fireEvent.click(saveButton());
@@ -176,7 +177,58 @@ describe("dealership settings save", { timeout: 90_000 }, () => {
     expect(
       screen.getByRole("radio", { name: "Each person's first posts" }),
     ).toBeChecked();
-    expect(screen.getByLabelText("Approved posts per person")).toHaveValue(4);
+    expect(screen.getByLabelText("Posts to approve first")).toHaveValue(4);
+    expect(saveButton()).toBeDisabled();
+  });
+});
+
+describe("structured workflow fields after a save", { timeout: 90_000 }, () => {
+  it("keeps category destinations and feature permissions as objects the form reads back clean", async () => {
+    const { onSettingsDirtyChange } = renderDashboard();
+    fireEvent.click(screen.getByRole("button", { name: /^Workflow/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced workflow controls" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Video" }));
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Service channels" })).getByRole(
+        "checkbox",
+        { name: "Google Business" },
+      ),
+    );
+    fireEvent.click(saveButton());
+    await screen.findByText(/^Saved /);
+
+    // The wire format is JSON text ...
+    expect(JSON.parse(String(savedForm().get("feature_permissions")))).toEqual({
+      video: { team: false, people: {} },
+    });
+    expect(
+      JSON.parse(String(savedForm().get("category_destinations"))).service.platformIds,
+    ).toEqual(["facebook_feed"]);
+    // ... and the session dealer holds the decoded objects, never that text.
+    const saved = useAppStore.getState().currentDealer!;
+    expect(saved.feature_permissions).toEqual({ video: { team: false, people: {} } });
+    expect(typeof saved.category_destinations).toBe("object");
+    expect(saved.category_destinations?.service?.platformIds).toEqual([
+      "facebook_feed",
+    ]);
+    expect(saveButton()).toBeDisabled();
+    await waitFor(() => expect(onSettingsDirtyChange).toHaveBeenLastCalledWith(false));
+
+    // Coming back, the form reads them as saved.
+    fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Workflow/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced workflow controls" }));
+    expect(screen.getByRole("switch", { name: "Video" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(
+      within(screen.getByRole("group", { name: "Service channels" })).getByRole(
+        "checkbox",
+        { name: "Google Business" },
+      ),
+    ).not.toBeChecked();
     expect(saveButton()).toBeDisabled();
   });
 });
@@ -189,11 +241,13 @@ describe("setup wizard beside the settings form", { timeout: 90_000 }, () => {
     renderDashboard();
     expect(queryWizard()).not.toBeNull();
 
-    fireEvent.change(panel().getByLabelText("Brand color hex value"), {
+    // Store color lives under Creative now; the edit survives the section switch.
+    fireEvent.click(panel().getByRole("button", { name: /^Creative/ }));
+    fireEvent.change(panel().getByLabelText("Store color"), {
       target: { value: "#123456" },
     });
     fireEvent.click(panel().getByRole("button", { name: /^Voice/ }));
-    fireEvent.change(panel().getByLabelText("Brand voice"), {
+    fireEvent.change(panel().getByLabelText("How captions should sound"), {
       target: { value: "Warm and direct." },
     });
     fireEvent.click(saveButton());
