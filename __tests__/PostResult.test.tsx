@@ -707,9 +707,14 @@ describe("PostResult job-first flow", () => {
           name: "Copy caption",
         }),
       );
-      expect(writeText).toHaveBeenCalledWith(
-        expect.stringContaining(`Delivery day!\n\n${mention}`),
+      // The page tag is added after the compliance scan, so it closes the
+      // caption on its own line instead of sitting inside the body.
+      const copied = String(
+        (writeText.mock.calls[0] as unknown[] | undefined)?.[0] ?? "",
       );
+      expect(copied).toContain("Delivery day!");
+      expect(copied.endsWith(`\n\n${mention}`)).toBe(true);
+      expect(copied.split(mention)).toHaveLength(2);
     },
   );
 
@@ -746,8 +751,9 @@ describe("PostResult job-first flow", () => {
         name: "Copy caption",
       }),
     );
-    expect(writeText.mock.calls[0]?.[0]).toContain(
-      "Visible primary caption.\n\n@BobMaxeyFordofHowell",
+    expect(writeText.mock.calls[0]?.[0]).toContain("Visible primary caption.");
+    expect(writeText.mock.calls[0]?.[0]?.endsWith("\n\n@BobMaxeyFordofHowell")).toBe(
+      true,
     );
     expect(writeText.mock.calls[0]?.[0]).not.toContain("Hidden Facebook caption.");
 
@@ -757,8 +763,9 @@ describe("PostResult job-first flow", () => {
         name: "Copy caption",
       }),
     );
-    expect(writeText.mock.calls[1]?.[0]).toContain(
-      "Hidden Facebook caption.\n\n@BobMaxeyFordofHowell",
+    expect(writeText.mock.calls[1]?.[0]).toContain("Hidden Facebook caption.");
+    expect(writeText.mock.calls[1]?.[0]?.endsWith("\n\n@BobMaxeyFordofHowell")).toBe(
+      true,
     );
   });
 
