@@ -76,7 +76,8 @@
     },
     "postcss": {
       "nanoid": "^3.3.18"
-    }
+    },
+    "postcss-selector-parser": "^7.1.6"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
