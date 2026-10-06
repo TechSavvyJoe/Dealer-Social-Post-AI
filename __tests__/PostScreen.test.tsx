@@ -24,7 +24,13 @@ type ShareOptions = {
 type LeaveGuardOptions = {
   hasSavedMedia: boolean;
   imageBusy: boolean;
+  textBusy: boolean;
   websiteSending: boolean;
+};
+
+type WebsiteHandoffOptions = {
+  imageBusy: boolean;
+  textBusy: boolean;
 };
 
 const mocks = vi.hoisted(() => ({
@@ -39,6 +45,7 @@ const mocks = vi.hoisted(() => ({
   openTarget: vi.fn(() => "native" as const),
   usePostShare: vi.fn(),
   usePostLeaveGuard: vi.fn(),
+  useWebsiteHandoff: vi.fn(),
   creativeTryAnother: vi.fn(async () => undefined),
   creativeChangeLook: vi.fn(async () => undefined),
   creativeAddVideo: vi.fn(async () => undefined),
@@ -160,21 +167,25 @@ vi.mock("../hooks/useDraftAutosave", async (importOriginal) => {
   };
 });
 vi.mock("../hooks/useWebsiteHandoff", () => ({
-  useWebsiteHandoff: ({ post }: { post: GeneratedPost }) => ({
-    websiteDraft: post.websiteDraft,
-    publication:
-      post.websitePublication ??
-      (post.websiteDraft?.enabled
-        ? ({ status: "not_requested" } as WebsitePublication)
-        : undefined),
-    checkError: null,
-    sending: mocks.websiteState.sending ?? false,
-    retrying: false,
-    reviewUrl: mocks.websiteState.reviewUrl,
-    handoffStarted: mocks.websiteState.handoffStarted ?? false,
-    send: mocks.websiteSend,
-    retry: mocks.websiteRetry,
-  }),
+  useWebsiteHandoff: (options: WebsiteHandoffOptions & { post: GeneratedPost }) => {
+    mocks.useWebsiteHandoff(options);
+    const { post } = options;
+    return {
+      websiteDraft: post.websiteDraft,
+      publication:
+        post.websitePublication ??
+        (post.websiteDraft?.enabled
+          ? ({ status: "not_requested" } as WebsitePublication)
+          : undefined),
+      checkError: null,
+      sending: mocks.websiteState.sending ?? false,
+      retrying: false,
+      reviewUrl: mocks.websiteState.reviewUrl,
+      handoffStarted: mocks.websiteState.handoffStarted ?? false,
+      send: mocks.websiteSend,
+      retry: mocks.websiteRetry,
+    };
+  },
 }));
 vi.mock("../hooks/useVideoJobs", () => ({
   useVideoJobs: () => ({
@@ -323,6 +334,20 @@ const lastShareOptions = (): ShareOptions =>
 
 const lastLeaveGuardOptions = (): LeaveGuardOptions =>
   mocks.usePostLeaveGuard.mock.lastCall?.[0] as LeaveGuardOptions;
+
+const lastWebsiteOptions = (): WebsiteHandoffOptions =>
+  mocks.useWebsiteHandoff.mock.lastCall?.[0] as WebsiteHandoffOptions;
+
+/** A promise the test settles by hand, to hold work in flight. */
+const deferred = () => {
+  let resolve!: () => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+};
 
 const outboundParts = () =>
   Array.from(
@@ -667,14 +692,14 @@ describe("PostScreen", () => {
     const user = userEvent.setup();
     mocks.shareState = {
       feedback: {
-        title: "Shared to Facebook",
+        title: "Shared · Facebook",
         detail:
           "Caption copied. Paste it into your Facebook post, then tap Post there.",
         via: "share_sheet",
       },
     };
     renderScreen();
-    expect(screen.getByText("Shared to Facebook")).toBeInTheDocument();
+    expect(screen.getByText("Shared · Facebook")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Done" })).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Copy caption" }));
     expect(mocks.copyCaption).toHaveBeenCalledTimes(1);
@@ -760,6 +785,128 @@ describe("PostScreen", () => {
     renderScreen();
     expect(lastLeaveGuardOptions().imageBusy).toBe(true);
   });
+
+  /** What a caption rewrite needs besides the photo: the brief it ran with. */
+  const rewriteParams = {
+    style: StyleOption.Modern,
+    tone: ToneOption.Excited,
+    customerName: "",
+  };
+
+  it.each([
+    ["succeeds", (rewrite: ReturnType<typeof deferred>) => rewrite.resolve()],
+    [
+      "fails",
+      (rewrite: ReturnType<typeof deferred>) =>
+        rewrite.reject(new Error("Failed to regenerate text.")),
+    ],
+  ] as const)(
+    "holds leaving and the website send while a starter-caption rewrite runs, until it %s",
+    async (_outcome, settle) => {
+      const user = userEvent.setup();
+      useAppStore.setState({ generationParams: rewriteParams });
+      const rewrite = deferred();
+      const onRegenerateText = vi.fn(() => rewrite.promise);
+      renderScreen({
+        onRegenerateText,
+        post: { ...basePost, isBasicFallback: true, websiteDraft },
+      });
+      expect(lastLeaveGuardOptions().textBusy).toBe(false);
+      expect(lastWebsiteOptions().textBusy).toBe(false);
+
+      const banner = screen.getByTestId("post-status-banner");
+      expect(banner).toHaveTextContent("Using a safe starter caption");
+      await user.click(within(banner).getByRole("button", { name: "Try AI again" }));
+      expect(onRegenerateText).toHaveBeenCalledTimes(1);
+      expect(lastLeaveGuardOptions().textBusy).toBe(true);
+      expect(lastWebsiteOptions().textBusy).toBe(true);
+      // One update at a time: the rewrite holds its own button (shown as
+      // running) and the tools that would change the post underneath it.
+      const tryAgain = within(banner).getByRole("button", { name: "Try AI again" });
+      expect(tryAgain).toBeDisabled();
+      expect(tryAgain).toHaveAttribute("aria-busy", "true");
+      expect(screen.getByRole("button", { name: "Try another" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Send website draft" })).toBeDisabled();
+
+      settle(rewrite);
+      await waitFor(() => expect(lastLeaveGuardOptions().textBusy).toBe(false));
+      expect(lastWebsiteOptions().textBusy).toBe(false);
+      expect(screen.getByRole("button", { name: "Try another" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Send website draft" })).toBeEnabled();
+    },
+  );
+
+  it.each([
+    ["a render (Try another) runs", () => (mocks.creativeState = { busy: true })],
+    ["the website draft is sending", () => (mocks.websiteState = { sending: true })],
+  ])(
+    "holds Try AI again while %s without showing a rewrite as running",
+    async (_case, startOther) => {
+      const user = userEvent.setup();
+      useAppStore.setState({ generationParams: rewriteParams });
+      startOther();
+      const onRegenerateText = vi.fn(() => Promise.resolve());
+      renderScreen({ onRegenerateText, post: { ...basePost, isBasicFallback: true } });
+      const banner = screen.getByTestId("post-status-banner");
+      expect(banner).toHaveTextContent("Using a safe starter caption");
+      const tryAgain = within(banner).getByRole("button", { name: "Try AI again" });
+      // No rewrite is running, so the button is not busy (no spinner, no
+      // aria-busy); pressing it explains the wait and starts nothing.
+      expect(tryAgain).not.toHaveAttribute("aria-busy");
+      await user.click(tryAgain);
+      expect(onRegenerateText).not.toHaveBeenCalled();
+      expect(
+        await screen.findByText("Wait for the current update to finish first."),
+      ).toBeInTheDocument();
+      expect(lastLeaveGuardOptions().textBusy).toBe(false);
+    },
+  );
+
+  it.each([
+    [
+      "a post reopened from My work (no original photo)",
+      () =>
+        useAppStore.setState({ selectedImage: null, generationParams: rewriteParams }),
+      {},
+      "The AI caption was unavailable. You can keep this copy or edit it.",
+    ],
+    [
+      "a post with no brief to rewrite from",
+      () => useAppStore.setState({ generationParams: null }),
+      {},
+      "The AI caption was unavailable. You can keep this copy or edit it.",
+    ],
+    [
+      "a read-only post",
+      () => useAppStore.setState({ generationParams: rewriteParams }),
+      { historyReadOnly: true },
+      "The AI caption was unavailable.",
+    ],
+    [
+      "a reopened post while its website draft is sending (caption locked)",
+      () => {
+        useAppStore.setState({ selectedImage: null, generationParams: rewriteParams });
+        mocks.websiteState = { sending: true };
+      },
+      {},
+      "The AI caption was unavailable.",
+    ],
+  ] as const)(
+    "offers no caption rewrite on %s and promises none",
+    (_case, arrange, postOverrides, message) => {
+      arrange();
+      renderScreen({ post: { ...basePost, isBasicFallback: true, ...postOverrides } });
+      const banner = screen.getByTestId("post-status-banner");
+      expect(banner).toHaveTextContent("Using a safe starter caption");
+      expect(within(banner).getByText(message)).toBeInTheDocument();
+      expect(within(banner).queryByRole("button", { name: "Try AI again" })).toBeNull();
+      expect(banner).not.toHaveTextContent("try once more");
+      // The sentence offers an edit exactly when the caption can be edited.
+      const editCaption = screen.queryByRole("button", { name: "Edit caption" });
+      if (message.includes("edit it")) expect(editCaption).not.toBeNull();
+      else expect(editCaption).toBeNull();
+    },
+  );
 
   it("hides creative tools during approval and keeps read-only posts non-editable", () => {
     const { rerender } = renderScreen({
@@ -850,6 +997,46 @@ describe("PostScreen", () => {
   });
 
   describe("what is previewed is what ships", () => {
+    it("tags the store on every channel, even when the post has no per-channel captions", async () => {
+      const user = userEvent.setup();
+      useAppStore.setState({
+        currentDealer: {
+          ...dealer,
+          facebook_page_tag: "BobMaxeyFordHowell",
+          instagram_handle: "bobmaxeyford",
+        },
+      });
+      // basePost has no platformCaptions: one caption, no pack.
+      renderScreen();
+      await waitFor(() => expect(lastShareOptions().channelId).toBe("facebook_feed"));
+      const facebook = lastShareOptions().content.text;
+      expect(facebook).toContain("Congratulations to Maria on her new Bronco.");
+      expect(facebook.endsWith("\n\n@BobMaxeyFordHowell")).toBe(true);
+      expect(outboundParts().find((part) => part.part === "body")?.text).toBe(facebook);
+
+      await user.click(screen.getByRole("button", { name: "Instagram" }));
+      await waitFor(() => expect(lastShareOptions().channelId).toBe("instagram_feed"));
+      const instagram = lastShareOptions().content.text;
+      expect(instagram.endsWith("\n\n@bobmaxeyford")).toBe(true);
+      expect(instagram).not.toContain("@BobMaxeyFordHowell");
+    });
+
+    it("asks for a caption when it is cleared, instead of sharing brand-kit filler", async () => {
+      const user = userEvent.setup();
+      renderScreen({ isDesktopLayout: true });
+      await user.click(screen.getByRole("button", { name: "Edit caption" }));
+      const textarea = screen.getByRole("textbox", { name: "Caption" });
+      await user.clear(textarea);
+      fireEvent.blur(textarea);
+      expect(
+        await screen.findByText("Write a caption to share this post."),
+      ).toBeInTheDocument();
+      // The real usePostShare prepares nothing for empty text, so Share, Copy
+      // and Download all lock; before, the scanned fallback was filler.
+      expect(lastShareOptions().content.text).toBe("");
+      expect(screen.getByTestId("post-outbound-preview")).not.toHaveTextContent("#");
+    });
+
     it("derives every channel from the caption on screen, not an unseen AI variant", async () => {
       const user = userEvent.setup();
       renderScreen({

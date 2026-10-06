@@ -24,6 +24,11 @@ import {
   type PrimaryImageProfile,
 } from "./platformCopy";
 import { buildEmployeeDisclosure } from "../utils/complianceDisclosures";
+// utils/postLabels imports homeTilesForDealer from this module, so the two form
+// an import cycle. That is safe only while each side reads the other's exports
+// inside functions, never while its module body is evaluating: use
+// CHANNEL_LABELS at call time only.
+import { CHANNEL_LABELS } from "../utils/postLabels";
 import { dealershipMentionFor } from "../utils/socialAttribution";
 
 export interface HomeTile {
@@ -106,19 +111,11 @@ export interface StoreDefaults {
   tone: ReturnType<typeof resolveCreative>["tone"];
 }
 
-const CHANNEL_LABELS: Record<string, string> = {
-  facebook_feed: "Facebook",
-  instagram_feed: "Instagram",
-  instagram_story: "Instagram",
-  marketplace: "Marketplace",
-  gbp: "Google",
-  linkedin: "LinkedIn",
-};
-
 /**
  * Chip order per post type. One chip per label: the first kept id wins, so the
  * Instagram story stands in for Instagram only when the manager unchecked the
- * Instagram feed.
+ * Instagram feed. The names come from `CHANNEL_LABELS` in utils/postLabels, the
+ * list My work uses, so a share keeps its name from the chip to the history.
  */
 const CHANNEL_ORDER: Record<BrandCategoryId, readonly string[]> = {
   deliveries: ["facebook_feed", "instagram_feed", "instagram_story"],

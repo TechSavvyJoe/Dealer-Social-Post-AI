@@ -187,7 +187,10 @@ describe("buildGenerationRequest", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.reason).toBe("identity");
-      expect(result.message).toContain("Alex");
+      // Shown above the disabled "Create post", so it uses the button's words.
+      expect(result.message).toBe(
+        "Your personal line appears to name someone other than Alex. Fix it before you create the post.",
+      );
     }
   });
 

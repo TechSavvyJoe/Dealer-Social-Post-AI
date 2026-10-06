@@ -17,6 +17,7 @@ import { logError } from "../utils/telemetry";
 import { connectionManager } from "../utils/connectionManager";
 import { useAppStore } from "../stores/appStore";
 import { toUiMessage } from "../utils/errorMessages";
+import { sharedLabel } from "../utils/postLabels";
 
 export type PostSharePreparationStatus = "idle" | "preparing" | "ready" | "failed";
 
@@ -356,11 +357,17 @@ export const usePostShare = ({
         });
     void flushDraft();
     return sharePromise.then((result) => {
+      // Only an error is a failure. A share, a closed sheet or the manual
+      // fallback each replace an earlier failure; keeping it would leave the
+      // screen on Try again after a share that went through.
+      if (result.kind !== "error") setPreparationError(null);
       if (result.kind === "shared") {
         setFallbackActive(false);
         sharedViaSheetRef.current = true;
         setFeedback({
-          title: `Shared to ${channelLabel}`,
+          // The same words My work and Home use: the sheet does not say
+          // which app received the post.
+          title: sharedLabel(channelId),
           // Facebook drops shared text, so the caption only arrives if the
           // clipboard has it. Say which, and how to get it if it does not.
           detail: result.captionCopied
@@ -384,6 +391,7 @@ export const usePostShare = ({
     });
   }, [
     activePrepared,
+    channelId,
     channelLabel,
     effectiveBlockedReason,
     flushDraft,

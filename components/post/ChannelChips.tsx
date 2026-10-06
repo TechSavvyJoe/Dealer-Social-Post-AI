@@ -44,13 +44,11 @@ export const ChannelChips: React.FC<ChannelChipsProps> = ({
               onClick={() => onSelect(channel)}
               className={chipClass(selected)}
             >
-              {/* A 16 px mark: the glyph's own tile shadow is not part of the chip. */}
               <PlatformGlyph
                 platformId={channel.id}
                 label={channel.label}
                 decorative
-                size="sm"
-                className="h-4 w-4 !shadow-none [&>svg]:h-3 [&>svg]:w-3"
+                size="xs"
               />
               <span>{channel.label}</span>
               {shared ? (

@@ -54,6 +54,7 @@ import { usePostShare } from "../hooks/usePostShare";
 import { usePostCreativeTools } from "../hooks/usePostCreativeTools";
 import { usePostLeaveGuard } from "../hooks/usePostLeaveGuard";
 import { Button } from "./ui/Button";
+import { useToast } from "./ui/Toast";
 import { ChannelChips, chipClass } from "./post/ChannelChips";
 import { LockBanner, type LockBannerProps } from "./post/LockBanner";
 import { PostPreviewCard } from "./post/PostPreviewCard";
@@ -177,6 +178,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   const postDraft = useAppStore((state) => state.postDraft);
   const generationParams = useAppStore((state) => state.generationParams);
   const setPostWorkAtRisk = useAppStore((state) => state.setPostWorkAtRisk);
+  const toast = useToast();
   const dealerId = currentDealer?.id || "";
   const salespersonName = currentPerson?.name || "Salesperson";
   const scenarioId =
@@ -213,6 +215,26 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     previousPostTextRef.current = post.text;
     setCaption(post.text);
   }, [post.text]);
+
+  // "Try AI again" on the starter-caption banner rewrites the caption outside
+  // the creative tools, so the screen tracks it itself: while it runs, leaving
+  // and the website send wait, as they do for a render.
+  const [captionRewriting, setCaptionRewriting] = useState(false);
+  const captionRewritingRef = useRef(false);
+  const rewriteCaption = useCallback(async () => {
+    if (captionRewritingRef.current) return;
+    captionRewritingRef.current = true;
+    setCaptionRewriting(true);
+    try {
+      await onRegenerateText();
+    } catch {
+      // The generation hook reports a failed rewrite itself (the screen's
+      // error banner and a toast); here it only ends the busy state.
+    } finally {
+      captionRewritingRef.current = false;
+      setCaptionRewriting(false);
+    }
+  }, [onRegenerateText]);
 
   const deliveryLanguageAllowed = useMemo(
     () =>
@@ -269,7 +291,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     dealerId,
     dealer: currentDealer,
     imageBusy: video.isVideoLoading,
-    textBusy: false,
+    textBusy: captionRewriting,
     onPrepareFinalWebsiteDraft,
     captions: {
       activeCaptionPlatform: null,
@@ -387,6 +409,8 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     onFunMode,
     video,
   });
+  /** One update at a time: a render or a caption rewrite holds the others. */
+  const postChanging = creative.busy || captionRewriting;
   const preparedDelivery = usePreparedDelivery({
     post,
     resultIdentity,
@@ -418,10 +442,24 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedChannelId, video.videoUrl]);
 
+  // Every channel the salesperson can pick gets its own outgoing caption. In
+  // this mode the pack's values are never read (bodyEditSupersedesPack), only
+  // its keys, and a post saved without per-channel captions (one channel, or a
+  // failed pack step) has none: its share fell back to the bare caption, with
+  // no page tag and no per-channel scan.
+  const availableChannelKey = availableChannels.map((channel) => channel.id).join(",");
+  const sharePack = useMemo(() => {
+    const ids = new Set<string>([
+      ...Object.keys(effectivePack || {}),
+      ...availableChannelKey.split(",").filter(Boolean),
+      selectedChannelId,
+    ]);
+    return Object.fromEntries([...ids].map((id) => [id, caption]));
+  }, [availableChannelKey, caption, effectivePack, selectedChannelId]);
   const shareCaptions = useMemo(
     () =>
       buildShareCaptions({
-        effectivePack,
+        effectivePack: sharePack,
         activeCaptionPlatform: null,
         editedText: caption,
         dealer: currentDealer,
@@ -438,9 +476,9 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
       caption,
       currentDealer,
       deliveryLanguageAllowed,
-      effectivePack,
       identityContext,
       locks.identityMessage,
+      sharePack,
     ],
   );
   const selectedCaption = shareCaptions?.[selectedChannelId];
@@ -450,7 +488,10 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   );
   const shareContent = useMemo(
     () => ({
-      text: selectedCaption?.text || captionAnalysis.caption,
+      // An emptied caption shares nothing, so Share asks for a caption. The
+      // scanned fallback would otherwise ship the brand-kit filler that
+      // analyzeCaptionForDelivery writes for an empty body.
+      text: caption.trim() ? selectedCaption?.text || captionAnalysis.caption : "",
       disclosures:
         selectedCaption?.disclosures || captionSetAnalysis.disclosures || undefined,
       requiredPrefix: employeeDisclosure || undefined,
@@ -462,6 +503,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
       preparedFile: preparedDelivery.activePreparedSave?.file,
     }),
     [
+      caption,
       captionAnalysis.caption,
       captionSetAnalysis.disclosures,
       employeeDisclosure,
@@ -510,7 +552,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     // Image renders and the website send block leaving; a running video is
     // only a confirm (video.atRisk above), so it is not counted as busy here.
     imageBusy: creative.busy && !video.isVideoLoading,
-    textBusy: false,
+    textBusy: captionRewriting,
     websiteSending: website.sending,
   });
   useEffect(() => {
@@ -585,6 +627,12 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     approval.reviewRequired || website.handoffStarted || historyReadOnly;
   const canChangeLook =
     !hideCreativeTools && Boolean(selectedImage) && defaults.looks.length > 1;
+  // "Try AI again" rewrites the caption from the original photo and brief,
+  // which a post reopened from My work no longer has (the rewrite refuses
+  // without them), and only on a post that can still change, the same terms
+  // as the creative tools.
+  const canRewriteCaption =
+    !hideCreativeTools && Boolean(selectedImage) && Boolean(generationParams);
   const isSaved = Boolean(post.postId);
   const approvalPending =
     approval.reviewRequired && approval.approvalStatus === "pending";
@@ -706,12 +754,34 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     // to make, a failure or the latest share guidance all outrank it, so the
     // button the bar points to (Retry save, Open My work, Try again) is shown.
     if (post.isBasicFallback) {
+      if (canRewriteCaption) {
+        return {
+          title: "Using a safe starter caption",
+          message:
+            "The AI caption was unavailable. You can keep this copy or try once more.",
+          actionLabel: "Try AI again",
+          // The spinner is for the rewrite itself only.
+          actionBusy: captionRewriting,
+          // One update at a time, both ways: a render (Try another rewrites
+          // the caption too) or a website send holds the rewrite, as the
+          // rewrite holds them. The button says so when pressed instead of
+          // showing a rewrite that is not running.
+          onAction: () => {
+            if (creative.busy || website.sending) {
+              toast.warning("Wait for the current update to finish first.");
+              return;
+            }
+            void rewriteCaption();
+          },
+        };
+      }
+      // No rewrite to offer, so the sentence promises an edit only when the
+      // caption can be edited right now (not during a website send either).
       return {
         title: "Using a safe starter caption",
-        message:
-          "The AI caption was unavailable. You can keep this copy or try once more.",
-        actionLabel: "Try AI again",
-        onAction: () => void onRegenerateText(),
+        message: editable
+          ? "The AI caption was unavailable. You can keep this copy or edit it."
+          : "The AI caption was unavailable.",
       };
     }
     return null;
@@ -760,7 +830,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   const websiteRetryLabel =
     publication?.status === "draft_ready" ? "Check status again" : "Retry";
   const websiteCanSend = !publication || publication.status === "not_requested";
-  const websiteSendDisabled = website.sending || locks.deliveryLocked || creative.busy;
+  const websiteSendDisabled = website.sending || locks.deliveryLocked || postChanging;
   const websiteSendLabel = locks.deliveryLocked
     ? `Send website draft unavailable. ${locks.primary.message}`
     : "Send website draft";
@@ -893,7 +963,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
                 type="button"
                 role="radio"
                 aria-checked={checked}
-                disabled={creative.busy}
+                disabled={postChanging}
                 onClick={() => {
                   if (!checked) void creative.changeLook(look);
                 }}
@@ -914,7 +984,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
           <select
             id="post-look"
             value={creative.selectedLookId}
-            disabled={creative.busy}
+            disabled={postChanging}
             onChange={(event) => {
               const look = defaults.looks.find(
                 (option) => option.id === event.target.value,
@@ -946,7 +1016,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
             variant="secondary"
             size="md"
             leftIcon={<RefreshCw />}
-            disabled={creative.busy || creative.tryAnotherUsed}
+            disabled={postChanging || creative.tryAnotherUsed}
             aria-label={
               creative.tryAnotherUsed
                 ? "Try another unavailable. Already used once on this post."
@@ -961,7 +1031,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
               variant="secondary"
               size="md"
               leftIcon={<Film />}
-              disabled={creative.busy}
+              disabled={postChanging}
               onClick={() => void creative.addVideo()}
             >
               Add video
@@ -972,7 +1042,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
               variant="secondary"
               size="md"
               leftIcon={<Smile />}
-              disabled={creative.busy}
+              disabled={postChanging}
               onClick={() => void creative.togglePlayful()}
             >
               Playful

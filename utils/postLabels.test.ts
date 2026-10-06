@@ -12,6 +12,7 @@ import {
   postCategoryLabel,
   postDayLabel,
   postStatusCopy,
+  sharedLabel,
 } from "./postLabels";
 
 const dealer = (overrides: Partial<Dealer> = {}) =>
@@ -38,6 +39,34 @@ describe("channelLabel", () => {
     expect(channelLabel("")).toBe("another app");
     expect(channelLabel(undefined)).toBe("another app");
     expect(channelLabel("toString")).toBe("another app");
+  });
+});
+
+describe("sharedLabel", () => {
+  it("names a share-sheet share by its channel, never as a share to it", () => {
+    expect(sharedLabel("facebook_feed")).toBe("Shared · Facebook");
+    expect(sharedLabel("gbp")).toBe("Shared · Google");
+    expect(sharedLabel("pinterest")).toBe("Shared · another app");
+    expect(sharedLabel(undefined)).toBe("Shared · another app");
+  });
+
+  it("is the label My work and Home show for the same share", () => {
+    const record = {
+      share_summary: {
+        count: 1,
+        last_via: "share_sheet" as const,
+        last_channel: "linkedin",
+        sheet_count: 1,
+        last_sheet_channel: "linkedin",
+        last_sheet_at: "2026-10-05 15:12:00.000Z",
+      },
+    };
+    expect(postStatusCopy(record, { surface: "work" }).label).toBe(
+      sharedLabel("linkedin"),
+    );
+    expect(postStatusCopy(record, { surface: "home" }).label).toMatch(
+      /^Shared · LinkedIn · /,
+    );
   });
 });
 

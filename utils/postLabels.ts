@@ -1,6 +1,7 @@
 /**
- * One set of names for what a post is and where it went, shared by My work and
- * Home's My work preview. Each screen used to keep its own small map, and each
+ * One set of names for what a post is and where it went, shared by My work,
+ * Home's My work preview and the Post screen's share confirmation. Each screen
+ * used to keep its own small map, and each
  * fell through to the wrong answer: a LinkedIn or Google share read as
  * "Facebook" and a Promotion or Community post read as a bare "Post".
  */
@@ -38,6 +39,14 @@ const ownLabel = (labels: Readonly<Record<string, string>>, key: string) =>
 
 export const channelLabel = (channel?: string | null): string =>
   ownLabel(CHANNEL_LABELS, (channel || "").trim()) ?? UNKNOWN_CHANNEL_LABEL;
+
+/**
+ * "Shared · Facebook": the one name for a share-sheet share, on the Post
+ * screen, My work and Home alike. Never "Shared to Facebook": the share sheet
+ * does not tell the app which app received the post (amendment B1).
+ */
+export const sharedLabel = (channel?: string | null): string =>
+  `Shared · ${channelLabel(channel)}`;
 
 /** The six Home categories, named exactly as their tiles are. */
 export const CATEGORY_LABELS: Readonly<Record<BrandCategoryId, string>> = Object.freeze(
@@ -169,7 +178,7 @@ export const postStatusCopy = (
   const share = record.share_summary ? shareStatusDetail(record.share_summary) : null;
   switch (status) {
     case "shared": {
-      const label = `Shared · ${channelLabel(share?.channel)}`;
+      const label = sharedLabel(share?.channel);
       if (surface === "work") {
         return { status, label, detail: "sent to the share sheet", tone: "success" };
       }

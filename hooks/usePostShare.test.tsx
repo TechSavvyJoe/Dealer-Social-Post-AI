@@ -29,6 +29,7 @@ vi.mock("../utils/telemetry", async (importOriginal) => ({
 import { usePostShare } from "./usePostShare";
 import { useAppStore } from "../stores/appStore";
 import { ApiError } from "../services/apiErrors";
+import { sharedLabel } from "../utils/postLabels";
 
 const file = new File(["image"], "facebook.jpg", { type: "image/jpeg" });
 const post: GeneratedPost = {
@@ -146,7 +147,7 @@ describe("usePostShare", () => {
       via: "share_sheet",
       expectedPostRevision: "revision-1",
     });
-    expect(result.current.feedback?.title).toBe("Shared to Facebook");
+    expect(result.current.feedback?.title).toBe("Shared · Facebook");
     expect(useAppStore.getState().generatedPost?.sharedTo).toHaveLength(1);
   });
 
@@ -282,7 +283,7 @@ describe("usePostShare", () => {
       await shareOnce(result);
 
       expect(result.current.feedback).toEqual({
-        title: "Shared to Facebook",
+        title: "Shared · Facebook",
         detail,
         via: "share_sheet",
       });
@@ -380,8 +381,53 @@ describe("usePostShare", () => {
       await result.current.share();
     });
     expect(result.current.fallbackActive).toBe(false);
-    expect(result.current.feedback?.title).toBe("Shared to Facebook");
+    expect(result.current.feedback?.title).toBe("Shared · Facebook");
   });
+
+  it("names a share by its channel in the words My work and Home use", async () => {
+    const input = options("Delivery day", "instagram_feed");
+    const { result } = renderHook(() => usePostShare(input));
+    await shareOnce(result);
+    expect(result.current.feedback?.title).toBe("Shared · Instagram");
+    expect(result.current.feedback?.title).toBe(sharedLabel("instagram_feed"));
+  });
+
+  it.each([
+    [
+      "shared",
+      { kind: "shared", via: "web-share", pasteRequired: true, captionCopied: true },
+    ],
+    [
+      "fallback",
+      {
+        kind: "fallback",
+        via: "download-copy",
+        pasteRequired: true,
+        message: "The share sheet didn't open.",
+      },
+    ],
+    ["cancelled", { kind: "cancelled", pasteRequired: true, message: "Cancelled." }],
+  ] as const)(
+    "clears an earlier share failure once a retry comes back %s",
+    async (_kind, outcome) => {
+      mocks.sharePrepared
+        .mockResolvedValueOnce({ kind: "error", message: "You're offline." })
+        .mockResolvedValueOnce(outcome);
+      // A stable input, as the Post screen passes: a new content object on
+      // every render would re-run preparation and hide the stale failure.
+      const input = options();
+      const { result } = renderHook(() => usePostShare(input));
+      await shareOnce(result);
+      expect(result.current.preparationError).toBe("You're offline.");
+      expect(result.current.preparationStatus).toBe("failed");
+
+      await act(async () => {
+        await result.current.share();
+      });
+      expect(result.current.preparationError).toBeNull();
+      expect(result.current.preparationStatus).toBe("ready");
+    },
+  );
 
   it("knows a reopened post already shared to this channel has its media in the post", async () => {
     const shared: GeneratedPost = {
@@ -519,7 +565,7 @@ describe("usePostShare", () => {
         errorCode: code,
       });
       // The share itself happened, so it still shows on this device.
-      expect(result.current.feedback?.title).toBe("Shared to Facebook");
+      expect(result.current.feedback?.title).toBe("Shared · Facebook");
 
       await reconnect();
       expect(mocks.recordPostShared).toHaveBeenCalledTimes(1);

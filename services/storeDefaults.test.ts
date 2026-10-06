@@ -7,6 +7,7 @@ import {
   type Dealer,
 } from "../types";
 import { buildEmployeeDisclosure } from "../utils/complianceDisclosures";
+import { UNKNOWN_CHANNEL_LABEL, channelLabel } from "../utils/postLabels";
 import { resolveCreative } from "./creativeSystem";
 import type { PersonSummary } from "./salespeople";
 import {
@@ -331,6 +332,41 @@ describe("store defaults: manager settings on a store without the creative syste
     );
     expect(storyOnly.channels).toEqual([{ id: "instagram_story", label: "Instagram" }]);
     expect(storyOnly.defaultChannelId).toBe("instagram_story");
+  });
+
+  it("names every channel chip exactly as My work names the share", () => {
+    // Every chip the Post screen can show: each post type's defaults, plus the
+    // story standing in for an unchecked Instagram feed.
+    const storyOnly = dealer({
+      category_destinations: {
+        deliveries: {
+          platformIds: ["instagram_story"],
+          formatIds: ["story_vertical"],
+          video: true,
+        },
+      },
+    });
+    const chips = [
+      ...CATEGORIES.flatMap(({ categoryId }) => resolve(dealer(), categoryId).channels),
+      ...resolve(storyOnly, "deliveries").channels,
+    ];
+    expect([...new Set(chips.map((chip) => chip.id))]).toEqual(
+      expect.arrayContaining([
+        "facebook_feed",
+        "instagram_feed",
+        "instagram_story",
+        "marketplace",
+        "gbp",
+        "linkedin",
+      ]),
+    );
+    for (const chip of chips) {
+      expect(chip.label).not.toBe(UNKNOWN_CHANNEL_LABEL);
+      expect({ id: chip.id, label: chip.label }).toEqual({
+        id: chip.id,
+        label: channelLabel(chip.id),
+      });
+    }
   });
 
   it("lets a per-person override win over the team setting", () => {

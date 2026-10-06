@@ -1,6 +1,7 @@
 import React from "react";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { cn } from "../../utils/classNames";
+import { Button } from "./Button";
 
 interface ErrorBannerProps {
   /** The error message to display. */
@@ -19,6 +20,11 @@ interface ErrorBannerProps {
  * One canonical inline error treatment for data views. Previously every
  * surface hand-rolled its own error box (bg-error-900/40 vs /50 vs error/10),
  * which read as inconsistent. This is the single source of truth.
+ *
+ * The message is 14 px: error text is never 12 px. The action is a full 44 px
+ * target, vertically centred on the message. Its negative block margin equals
+ * the banner's padding, so on a one-line message the target fills the
+ * banner's inner height exactly and adds nothing to it.
  */
 export const ErrorBanner: React.FC<ErrorBannerProps> = ({
   message,
@@ -30,25 +36,24 @@ export const ErrorBanner: React.FC<ErrorBannerProps> = ({
     role="alert"
     className={cn(
       "flex items-start gap-2.5 rounded-md border border-error-ink/30 bg-error-fill",
-      "px-3.5 py-2.5 text-xs text-error-ink",
+      "px-3.5 py-3 text-sm text-error-ink",
       className,
     )}
   >
-    <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-error-ink" />
-    <span className="flex-1 leading-relaxed">{message}</span>
+    <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
+    <span className="min-w-0 flex-1">{message}</span>
     {onRetry && (
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
+        disableHaptics
         onClick={onRetry}
-        className={cn(
-          "flex-shrink-0 inline-flex items-center gap-1 font-semibold text-error-ink",
-          "hover:opacity-80 transition-opacity duration-120 ease-out",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error-ink/70 rounded",
-        )}
+        leftIcon={actionLabel === "Try again" ? <RefreshCw /> : undefined}
+        className="-my-3 -mr-2.5 min-h-11 flex-shrink-0 self-center px-2.5 text-error-ink"
       >
-        {actionLabel === "Try again" ? <RefreshCw className="h-3 w-3" /> : null}
         {actionLabel}
-      </button>
+      </Button>
     )}
   </div>
 );
