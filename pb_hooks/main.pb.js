@@ -1027,6 +1027,9 @@ routerAdd("GET", "/api/app/connections", (c) => {
         configured: websiteConfigured,
         enabled: websiteConfigured,
         verification: "not_tested",
+        // A dealer record id, not a credential: the admin hub names the
+        // dealership the website destination is mapped to.
+        dealerId: configuredWebsiteDealer,
       },
       walkaround: {
         configured: walkaroundConfigured,
@@ -5744,6 +5747,8 @@ routerAdd("PATCH", "/api/app/dealers/:id", (c) => {
     // A manager's save never changes it. The field is ignored rather than
     // rejected, so a settings form that echoes the stored value still saves.
     if (!isSuperAdmin) delete data.creative_system_v2;
+    // Setup notes are the system administrator's alone; ignored, not rejected.
+    if (!isSuperAdmin) delete data.setup_notes;
 
     const form = new RecordUpsertForm($app, target);
     form.setFullManageAccess(true);
@@ -5853,38 +5858,16 @@ routerAdd("GET", "/api/app/dealers", (c) => {
     }
     const page = records.slice(startIndex, startIndex + pageLimit);
     const hasMore = startIndex + page.length < records.length;
-    const items = page.map((r) => ({
-      id: r.id,
-      name: r.getString("name"),
-      logo: r.getString("logo")
-        ? `/api/files/dealers/${r.id}/${r.getString("logo")}`
-        : "",
-      brand_voice: r.getString("brand_voice"),
-      banned_phrases: r.getString("banned_phrases"),
-      oem_affiliation: r.getString("oem_affiliation"),
-      requires_approval: r.getBool
-        ? r.getBool("requires_approval")
-        : !!r.get("requires_approval"),
-      brand_color: r.getString("brand_color"),
-      website: r.getString("website"),
-      phone: r.getString("phone"),
-      address: r.getString("address"),
-      hours: r.getString("hours"),
-      tagline: r.getString("tagline"),
-      facebook_url: r.getString("facebook_url"),
-      facebook_page_tag: r.getString("facebook_page_tag"),
-      instagram_handle: r.getString("instagram_handle"),
-      tiktok_handle: r.getString("tiktok_handle"),
-      x_handle: r.getString("x_handle"),
-      linkedin_company_tag: r.getString("linkedin_company_tag"),
-      gbp_url: r.getString("gbp_url"),
-      default_hashtags: r.getString("default_hashtags"),
-      default_footer: r.getString("default_footer"),
-      enabled_styles: r.getString("enabled_styles"),
-      default_style: r.getString("default_style"),
-      enabled_fun_styles: r.getString("enabled_fun_styles"),
-      custom_scenarios: r.getString("custom_scenarios"),
-    }));
+    // The shared serializer, so the system administrator sees the same
+    // settings the store's own session does (creative-system switch, look,
+    // approval rule, disclosure). It never includes code or admin_code.
+    // Setup notes are added here and only here: this route is system-admin
+    // only, and serializeDealer (the session payload) must never carry them.
+    const items = page.map((r) =>
+      Object.assign(helpers.serializeDealer(r), {
+        setup_notes: r.getString("setup_notes"),
+      }),
+    );
     const payload = { items: items, total: records.length };
     if (hasMore && page.length) payload.nextCursor = page[page.length - 1].id;
     return c.json(200, payload);

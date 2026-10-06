@@ -3270,6 +3270,22 @@ const DEALER_TEXT_FIELD_LIMITS = {
   playful_style: 80,
 };
 
+/**
+ * Dealer text only a system administrator reads or writes. Kept out of
+ * DEALER_TEXT_FIELD_LIMITS on purpose, so the admin-only rule is visible
+ * where the limits live:
+ *  - PATCH /api/app/dealers/:id drops these fields for every other role;
+ *    POST /api/app/dealers is already system-admin only.
+ *  - serializeDealer never returns them, so no login, session restore or
+ *    impersonation payload carries them. Only GET /api/app/dealers (system
+ *    admin only) adds them to its items.
+ * Each limit must match the field's max in its migration.
+ */
+const DEALER_ADMIN_TEXT_FIELD_LIMITS = {
+  // The administrator's own setup notes for a store (migration 1752400000).
+  setup_notes: 4000,
+};
+
 const DEALER_SOCIAL_USERNAME_RULES = {
   instagram_handle: {
     label: "Instagram handle",
@@ -3713,6 +3729,23 @@ function dealerMutationData(body, allowCode, allowAdminCode) {
     data[field] = assertString(value, DEALER_TEXT_FIELD_LIMITS[field]);
   }
 
+  // System-administrator text. Validated here like any other text field; the
+  // PATCH route removes it for every role except super_admin. Stored as typed
+  // (no trim, newlines kept), except that the CRLF a browser writes for each
+  // line break in multipart form data becomes LF, so the limit counts a line
+  // break once, as the textarea that typed it did.
+  const adminTextFields = Object.keys(DEALER_ADMIN_TEXT_FIELD_LIMITS);
+  for (let i = 0; i < adminTextFields.length; i++) {
+    const field = adminTextFields[i];
+    if (body[field] === undefined) continue;
+    // PocketBase 0.22 turns a multipart value that reads as a number or a
+    // boolean into one ("0" -> 0, "false" -> false); keep its text instead of
+    // letting `|| ""` erase it.
+    const raw = body[field];
+    const value = (raw === null ? "" : String(raw)).replace(/\r\n?/g, "\n");
+    data[field] = assertString(value, DEALER_ADMIN_TEXT_FIELD_LIMITS[field]);
+  }
+
   // Login no longer uses dealers.code / admin_code for store access. They are
   // accepted only for one legacy client compatibility release and are never
   // populated on the canonical system dealer.
@@ -4049,10 +4082,18 @@ function dealerOwnsProviderResource(dealerId, input) {
  */
 function serializeDealer(record) {
   let logoUrl = record.getString("logo");
-  if (logoUrl && !logoUrl.startsWith("http")) {
+  // A stored file name gets the file route; only an absolute URL is left as
+  // is. A plain prefix test sent an uploaded "https-logo_x1.png" nowhere.
+  if (logoUrl && !/^https?:\/\//i.test(logoUrl)) {
     logoUrl = `/api/files/dealers/${record.id}/${logoUrl}`;
   }
 
+  // This object is the session payload: login, session restore and
+  // impersonation all send it. Never add `setup_notes` (or any other
+  // DEALER_ADMIN_TEXT_FIELD_LIMITS field) here: the notes are the system
+  // administrator's alone, and a manager, a salesperson, or an administrator
+  // opened as a manager must not receive them. GET /api/app/dealers adds the
+  // notes to its own items instead.
   return {
     id: record.id,
     name: record.getString("name"),
@@ -4366,6 +4407,7 @@ module.exports = {
   IMAGE_QUALITY_TIER_VALUES,
   BRAND_CATEGORY_IDS,
   DEALER_JSON_FIELD_LIMITS,
+  DEALER_ADMIN_TEXT_FIELD_LIMITS,
   restrictDealerLogoSchema,
   dealerLogoFile,
   assertDealerCredentialAvailable,
