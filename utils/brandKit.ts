@@ -24,6 +24,31 @@ export interface DealerBrandKit {
   required_hashtags_locked?: boolean;
 }
 
+/** The dealer fields the brand kit reads, as the saved record names them. */
+export interface DealerBrandKitSource {
+  name?: string;
+  default_hashtags?: string;
+  default_footer?: string;
+  required_hashtags_locked?: boolean;
+}
+
+/**
+ * The brand kit for a dealer record, exactly as generation builds it
+ * (hooks/useGeneration.ts `brandKitFromDealer`), so any other caller that
+ * needs the store's footer and hashtags applies the same kit.
+ */
+export const dealerBrandKit = (
+  dealer?: DealerBrandKitSource | null,
+): DealerBrandKit | null => {
+  if (!dealer) return null;
+  return {
+    name: dealer.name,
+    default_hashtags: dealer.default_hashtags,
+    default_footer: dealer.default_footer,
+    required_hashtags_locked: dealer.required_hashtags_locked === true,
+  };
+};
+
 /**
  * Agency discovery tags used when AI or dealer kit leave a caption under-tagged.
  * Ordered by dealership marketing usefulness (delivery → social proof → intent).

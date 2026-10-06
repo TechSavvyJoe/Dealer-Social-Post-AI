@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { Dealer } from "../types";
 import {
   describeApproval,
+  describeApprovalShort,
   dealerSetupStatus,
   displayUrl,
   missingSummary,
+  SETTINGS_SECTION_LABELS,
+  settingsSectionStatus,
+  type SettingsSectionId,
   type SetupRowId,
 } from "./dealerSetupStatus";
 
@@ -36,11 +40,19 @@ const row = (dealer: Dealer, id: SetupRowId) => {
 };
 
 describe("dealerSetupStatus", () => {
-  it("counts the seven store areas and reports a complete store as ready", () => {
+  it("counts the six store areas and reports a complete store as ready", () => {
     const status = dealerSetupStatus(complete);
-    expect(status.total).toBe(7);
-    expect(status.ready).toBe(7);
-    expect(status.summary).toBe("7 of 7 set up");
+    expect(status.total).toBe(6);
+    expect(status.ready).toBe(6);
+    expect(status.summary).toBe("6 of 6 set up");
+    expect(status.rows.filter((r) => r.counts).map((r) => r.id)).toEqual([
+      "profile",
+      "brand",
+      "facebook",
+      "instagram",
+      "voice",
+      "look",
+    ]);
     expect(status.missing).toEqual([]);
     expect(status.rows.map((r) => r.id)).toEqual([
       "profile",
@@ -88,7 +100,7 @@ describe("dealerSetupStatus", () => {
       instagram_handle: "",
       signature_look: "",
     });
-    expect(status.summary).toBe("4 of 7 set up");
+    expect(status.summary).toBe("3 of 6 set up");
     expect(missingSummary(status)).toBe("Store profile, Instagram and Signature look");
     const profile = row({ ...complete, phone: "", address: "" }, "profile");
     expect(profile.state).toBe("missing");
@@ -105,9 +117,6 @@ describe("dealerSetupStatus", () => {
     ).toBe(
       "Add the Facebook page URL and page tag: open as the manager, then Settings > Channels.",
     );
-    expect(row({ ...complete, gbp_url: "" }, "gbp").guidance).toBe(
-      "Add the Google Business Profile URL: open as the manager, then Settings > Channels.",
-    );
     expect(row({ ...complete, brand_voice: "" }, "voice").guidance).toBe(
       "Write the brand voice: open as the manager, then Settings > Voice.",
     );
@@ -116,16 +125,16 @@ describe("dealerSetupStatus", () => {
     );
   });
 
-  it("points the logo to Edit on the card and the brand color to the manager", () => {
+  it("offers both ways to add the logo and sends the brand color to Creative", () => {
     expect(row({ ...complete, logo: undefined }, "brand").guidance).toBe(
-      "Upload the logo: choose Edit on this card.",
+      "Upload the logo with Edit on this card, or open as the manager, then Settings > Creative.",
     );
     expect(row({ ...complete, brand_color: "" }, "brand").guidance).toBe(
-      "Set the brand color: open as the manager, then Settings > Store profile.",
+      "Set the brand color: open as the manager, then Settings > Creative.",
     );
     const neither = row({ ...complete, logo: "", brand_color: undefined }, "brand");
     expect(neither.guidance).toBe(
-      "Upload the logo with Edit on this card; for the brand color, open as the manager, then Settings > Store profile.",
+      "Upload the logo with Edit on this card, or open as the manager, then Settings > Creative to add the logo and brand color.",
     );
     expect(neither.swatch).toBeUndefined();
   });
@@ -142,7 +151,7 @@ describe("dealerSetupStatus", () => {
     const withTiktok = row({ ...complete, tiktok_handle: "@bobmaxey" }, "tiktok");
     expect(withTiktok.state).toBe("ready");
     expect(withTiktok.value).toEqual(["@bobmaxey"]);
-    expect(dealerSetupStatus({ ...complete, tiktok_handle: "bobmaxey" }).total).toBe(7);
+    expect(dealerSetupStatus({ ...complete, tiktok_handle: "bobmaxey" }).total).toBe(6);
   });
 
   it("reports the team-member disclosure on unless the store opted out", () => {
@@ -183,9 +192,10 @@ describe("dealerSetupStatus", () => {
     expect(row(legacy, "disclosure").state).toBe("unknown");
     expect(row(legacy, "creative_system").state).toBe("unknown");
     expect(row(legacy, "approval").value).toEqual(["Review is on"]);
-    expect(status.total).toBe(6);
-    expect(status.summary).toBe("6 of 6 set up");
+    expect(status.total).toBe(5);
+    expect(status.summary).toBe("5 of 5 set up");
     expect(status.missing).toEqual([]);
+    expect(row(legacy, "look").reason).toBeNull();
   });
 });
 
@@ -255,7 +265,7 @@ describe("store hours", () => {
       "2798 E Grand River Ave, Howell, MI",
       "Hours: Mon–Fri 9 AM–8 PM, Sat 9 AM–6 PM",
     ]);
-    expect(dealerSetupStatus(withHours).summary).toBe("7 of 7 set up");
+    expect(dealerSetupStatus(withHours).summary).toBe("6 of 6 set up");
     // A store without hours is still set up, and hours never fill a missing field.
     expect(row({ ...complete, hours: "  " }, "profile").state).toBe("ready");
     const noPhone = row({ ...withHours, phone: "" }, "profile");
@@ -270,5 +280,227 @@ describe("displayUrl", () => {
   it("drops the scheme, www and trailing slash", () => {
     expect(displayUrl(" https://www.example.com/ ")).toBe("example.com");
     expect(displayUrl("http://example.com/inventory/")).toBe("example.com/inventory");
+  });
+});
+
+describe("Google Business Profile is optional", () => {
+  it("is never missing and never counted, saved or not", () => {
+    const unsaved = row({ ...complete, gbp_url: "" }, "gbp");
+    expect(unsaved.state).toBe("optional");
+    expect(unsaved.counts).toBe(false);
+    expect(unsaved.attention).toBe(false);
+    expect(unsaved.reason).toBeNull();
+    expect(unsaved.guidance).toBe(
+      "Optional: if the store posts on Google Business Profile, open as the manager, then Settings > Channels.",
+    );
+    const status = dealerSetupStatus({ ...complete, gbp_url: "" });
+    expect(status.summary).toBe("6 of 6 set up");
+    expect(status.missing).toEqual([]);
+    const saved = row(complete, "gbp");
+    expect(saved.state).toBe("ready");
+    expect(saved.counts).toBe(false);
+    expect(saved.value).toEqual(["g.page/r/bob-maxey-ford"]);
+  });
+});
+
+describe("sections and reasons", () => {
+  const expectedSections: Record<SetupRowId, SettingsSectionId | null> = {
+    profile: "profile",
+    brand: "creative",
+    facebook: "channels",
+    instagram: "channels",
+    gbp: "channels",
+    tiktok: "channels",
+    x: "channels",
+    linkedin: "channels",
+    voice: "voice",
+    look: "creative",
+    approval: "workflow",
+    disclosure: "workflow",
+    creative_system: null,
+  };
+
+  it("names the settings section that fixes every row", () => {
+    const rows = dealerSetupStatus(complete).rows;
+    expect(Object.fromEntries(rows.map((r) => [r.id, r.section]))).toEqual(
+      expectedSections,
+    );
+  });
+
+  /** Nothing saved at all, but the server reports the creative fields. */
+  const empty: Dealer = {
+    id: "dealer-2",
+    name: "Lakeside Kia",
+    signature_look: "",
+    requires_approval: false,
+    approval_policy: null,
+    employee_disclosure_disabled: false,
+    creative_system_v2: true,
+  };
+
+  it("sets a reason exactly when a row is missing", () => {
+    for (const dealer of [complete, empty, { ...empty, creative_system_v2: false }]) {
+      for (const r of dealerSetupStatus(dealer).rows) {
+        if (r.state === "missing") {
+          expect(r.reason, r.id).toMatch(/^[A-Z].*\.$/);
+        } else {
+          expect(r.reason, r.id).toBeNull();
+        }
+      }
+    }
+  });
+
+  it("says what each gap costs, and only what the code does", () => {
+    expect(row(empty, "profile").reason).toBe(
+      "The caption writer has no website, phone and address to mention.",
+    );
+    expect(row({ ...complete, phone: "" }, "profile").reason).toBe(
+      "The caption writer has no phone to mention.",
+    );
+    expect(row({ ...complete, logo: "" }, "brand").reason).toBe(
+      "Designed photos show the store name as text instead of a logo.",
+    );
+    expect(row({ ...complete, brand_color: "" }, "brand").reason).toBe(
+      "The app uses its default blue for this store.",
+    );
+    expect(row(empty, "brand").reason).toBe(
+      "Designed photos show the store name as text instead of a logo. The app uses its default blue for this store.",
+    );
+    expect(row(empty, "facebook").reason).toBe(
+      "Facebook captions cannot tag the store.",
+    );
+    expect(row({ ...complete, facebook_page_tag: "" }, "facebook").reason).toBe(
+      "Facebook captions cannot tag the store.",
+    );
+    // Nothing in the app reads the page address, so no cost is claimed for it.
+    expect(row({ ...complete, facebook_url: "" }, "facebook").reason).toBe(
+      "The page address is only kept on file; no post uses it.",
+    );
+    expect(row(empty, "instagram").reason).toBe(
+      "Instagram captions cannot tag the store.",
+    );
+    expect(row(empty, "voice").reason).toBe(
+      "Captions are written without the store's voice.",
+    );
+    expect(row(empty, "look").reason).toBe(
+      "Posts use the Showroom Look until one is chosen.",
+    );
+    expect(row({ ...empty, creative_system_v2: false }, "look").reason).toBe(
+      "Posts use the classic styles; no Look is applied.",
+    );
+  });
+});
+
+describe("settingsSectionStatus", () => {
+  it("labels every section and reads ready sections from the saved record", () => {
+    const sections = settingsSectionStatus(complete);
+    expect(Object.keys(sections)).toEqual([
+      "profile",
+      "channels",
+      "voice",
+      "creative",
+      "workflow",
+    ]);
+    for (const [id, label] of Object.entries(SETTINGS_SECTION_LABELS)) {
+      expect(sections[id as SettingsSectionId].label).toBe(label);
+      expect(sections[id as SettingsSectionId].id).toBe(id);
+    }
+    expect(sections.profile).toMatchObject({ ready: 1, total: 1, state: "ready" });
+    expect(sections.channels).toMatchObject({ ready: 2, total: 2, state: "ready" });
+    expect(sections.voice).toMatchObject({ ready: 1, total: 1, state: "ready" });
+    expect(sections.creative).toMatchObject({ ready: 2, total: 2, state: "ready" });
+  });
+
+  it("reports partial, empty and Workflow's none", () => {
+    const sections = settingsSectionStatus({
+      ...complete,
+      instagram_handle: "",
+      brand_voice: "",
+      logo: "",
+      signature_look: "",
+    });
+    expect(sections.channels).toMatchObject({ ready: 1, total: 2, state: "partial" });
+    expect(sections.voice).toMatchObject({ ready: 0, total: 1, state: "empty" });
+    expect(sections.creative).toMatchObject({ ready: 0, total: 2, state: "empty" });
+    expect(sections.profile.state).toBe("ready");
+    expect(sections.workflow).toMatchObject({ ready: 0, total: 0, state: "none" });
+    // Optional channels never move the Channels count.
+    expect(
+      settingsSectionStatus({ ...complete, gbp_url: "", tiktok_handle: "" }).channels,
+    ).toMatchObject({ ready: 2, total: 2, state: "ready" });
+  });
+
+  it("does not count a look the server did not report", () => {
+    const legacy: Dealer = { ...complete, signature_look: "" };
+    delete legacy.creative_system_v2;
+    expect(settingsSectionStatus(legacy).creative).toMatchObject({
+      ready: 1,
+      total: 1,
+      state: "ready",
+    });
+  });
+});
+
+describe("describeApprovalShort", () => {
+  it("names the rule in a few words", () => {
+    expect(describeApprovalShort(false, { mode: "first_n", firstN: 3 })).toBe("Off");
+    expect(describeApprovalShort(true, null)).toBe("Every post");
+    expect(describeApprovalShort(true, { mode: "first_n", firstN: 3 })).toBe(
+      "First 3 posts each",
+    );
+    expect(describeApprovalShort(true, { mode: "first_n", firstN: 1 })).toBe(
+      "First post each",
+    );
+    expect(
+      describeApprovalShort(true, {
+        mode: "per_category",
+        categories: ["deliveries", "promotions"],
+      }),
+    ).toBe("Deliveries and Promotions");
+  });
+
+  it("agrees with describeApproval on every input", () => {
+    const policies: Array<Parameters<typeof describeApproval>[1]> = [
+      null,
+      undefined,
+      { mode: "none" },
+      { mode: "always" },
+      { mode: "first_n" },
+      { mode: "first_n", firstN: 0 },
+      { mode: "first_n", firstN: -2 },
+      { mode: "first_n", firstN: 2.5 },
+      { mode: "first_n", firstN: "4" as unknown as number },
+      { mode: "first_n", firstN: 1 },
+      { mode: "first_n", firstN: 12 },
+      { mode: "per_category" },
+      { mode: "per_category", categories: [] },
+      { mode: "per_category", categories: ["bogus" as never] },
+      { mode: "per_category", categories: ["service"] },
+      { mode: "per_category", categories: ["deliveries", "deliveries"] },
+      { mode: "per_category", categories: ["team", "community", "inventory"] },
+      { mode: "mystery" as never },
+      "first_n" as never,
+    ];
+    for (const requiresApproval of [true, false]) {
+      for (const policy of policies) {
+        const long = describeApproval(requiresApproval, policy);
+        const short = describeApprovalShort(requiresApproval, policy);
+        const label = JSON.stringify({ requiresApproval, policy });
+        expect(long === "No approval required", label).toBe(short === "Off");
+        expect(long === "Every post", label).toBe(short === "Every post");
+        if (long.startsWith("Until each person has ")) {
+          const n = long.match(/has (\d+) approved/)?.[1];
+          expect(short, label).toBe(
+            n === "1" ? "First post each" : `First ${n} posts each`,
+          );
+        }
+        if (long.startsWith("Selected post types: ")) {
+          const types = long
+            .replace("Selected post types: ", "")
+            .replace(", plus any post with a customer", "");
+          expect(short, label).toBe(types);
+        }
+      }
+    }
   });
 });

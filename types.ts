@@ -391,6 +391,8 @@ export interface Dealer {
    * this polarity keeps every pre-existing dealership on the compliant side.
    */
   employee_disclosure_disabled?: boolean;
+  /** System administrators only. Never part of a session payload. */
+  setup_notes?: string;
 }
 
 // FIX: Added User interface to resolve import error in UserModal.tsx.

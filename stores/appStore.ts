@@ -37,6 +37,10 @@ import {
 } from "../services/apiErrors";
 import { AUTH_SESSION_REJECTED_EVENT, setActiveAuthEpoch } from "../utils/authBoundary";
 import { setActiveSalespersonName } from "../utils/identityContext";
+import {
+  isSettingsSectionId,
+  type SettingsSectionId,
+} from "../utils/dealerSetupStatus";
 
 export interface LoginResult {
   ok: boolean;
@@ -111,6 +115,14 @@ interface AppState {
   isRestoringSession: boolean;
   /** Monotonic identity boundary used to discard stale async provider results. */
   authEpoch: number;
+  /**
+   * The deep link from the system admin's setup board into one store's
+   * settings: the hub sets it, then opens the store as its manager; the
+   * manager dashboard reads it on mount, opens Settings on that section and
+   * clears it. Memory only: never written to the session snapshot or to any
+   * browser storage, so a reload or a new tab never replays it.
+   */
+  managerEntry: { section: SettingsSectionId } | null;
 
   // Preferences
   theme: "dark" | "light" | "system";
@@ -134,6 +146,7 @@ interface AppState {
   setPostWorkAtRisk: (atRisk: boolean) => void;
   setPostBusy: (reason: PostBusyReason) => void;
   setPostReturnStep: (step: AppStep | null) => void;
+  setManagerEntry: (entry: { section: SettingsSectionId } | null) => void;
   /**
    * Replace the workspace with a saved post and open it (amendments B13). The
    * one way every surface reopens a post, so Back always returns to the surface
@@ -288,6 +301,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: null,
   isRestoringSession: true,
   authEpoch: 0,
+  managerEntry: null,
   // Seed the theme synchronously from the persisted session so light-mode
   // users don't flash dark between mount and the async restore resolving.
   // New installs still open in the dealership-studio dark theme.
@@ -347,9 +361,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   impersonatePerson: async (personId: string) => {
-    const body = await impersonatePersonApi(personId);
+    let body: Awaited<ReturnType<typeof impersonatePersonApi>>;
+    try {
+      body = await impersonatePersonApi(personId);
+    } catch (error) {
+      // The hub stays where it is; a stale entry must not steer the next,
+      // unrelated "Open as manager" to a section nobody asked for.
+      set({ managerEntry: null });
+      throw error;
+    }
     clearSession();
     await clearAllCreatives();
+    // The deep link crosses this session swap (applyAuthPayload leaves it
+    // alone) but only into a manager session, the one screen that reads it.
+    if (body.role !== "dealer_admin") set({ managerEntry: null });
     get().applyAuthPayload({
       role: body.role,
       dealer: body.dealer as Dealer,
@@ -363,6 +388,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const body = await exitImpersonationApi();
     clearSession();
     await clearAllCreatives();
+    set({ managerEntry: null });
     get().applyAuthPayload({
       role: body.role,
       dealer: body.dealer as Dealer,
@@ -468,6 +494,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (get().postBusy !== postBusy) set({ postBusy });
   },
   setPostReturnStep: (postReturnStep) => set({ postReturnStep }),
+  setManagerEntry: (entry) =>
+    set({
+      // Copied, never shared, and only for a real section: the entry steers
+      // which settings section opens, so an unknown id is dropped.
+      managerEntry:
+        entry && isSettingsSectionId(entry.section) ? { section: entry.section } : null,
+    }),
   openSavedPost: (post) => {
     const { step, role } = get();
     const returnStep = POST_OPEN_SURFACES.includes(step)
@@ -545,6 +578,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         // with another dealer id and restored after the next reload.
         clearSession();
         await clearAllCreatives();
+        set({ managerEntry: null });
         get().applyAuthPayload({
           role: body.role,
           dealer,
@@ -641,6 +675,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       error: null,
       step: AppStep.LOGIN,
       role: "salesperson",
+      managerEntry: null,
       authEpoch: get().authEpoch + 1,
     });
     clearSession();
@@ -898,6 +933,7 @@ if (typeof window !== "undefined") {
       error: null,
       role: "salesperson",
       step: AppStep.LOGIN,
+      managerEntry: null,
       isRestoringSession: true,
       authEpoch: state.authEpoch + 1,
     });
