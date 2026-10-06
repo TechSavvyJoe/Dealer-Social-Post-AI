@@ -503,7 +503,7 @@ const GEMINI_MODEL_POLICY_SNAPSHOT = {
   version: 5,
   versionPinNote:
     "Deliberately pinned at 5. Reopen/deliver gates compare a stored post's model_policy_version against this number by exact equality (postImageReviewRequired in pb_hooks/requestPolicies.js), so bumping it would strand every already-archived creative behind a forced re-review. The v6 request capabilities (systemInstruction, responseMimeType plus the server-side responseJsonSchema registry) are purely additive and backward compatible with clients that never send them, so they ship under version 5.",
-  verifiedAt: "2026-09-02",
+  verifiedAt: "2026-10-05",
   models: {
     textQuality: "gemini-3.6-flash",
     textFast: "gemini-3.5-flash-lite",
