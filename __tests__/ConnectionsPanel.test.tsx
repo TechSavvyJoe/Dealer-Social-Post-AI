@@ -27,12 +27,12 @@ const fixture = {
   modelPolicyVersion: "5",
   capabilities: { veoNegativePrompt: true },
 };
-const mount = (dealers?: Dealer[]) =>
+const mount = (dealers?: Dealer[], onCheckAgain?: () => void) =>
   render(
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
-      <ConnectionsPanel dealers={dealers} />
+      <ConnectionsPanel dealers={dealers} onCheckAgain={onCheckAgain} />
     </QueryClientProvider>,
   );
 const card = (title: string) =>
@@ -61,9 +61,27 @@ describe("system-only connection diagnostics", () => {
         "2 of 3 required services configured and enabled. 0 of 2 optional fallbacks on.",
       ),
     ).toBeVisible();
-    expect(screen.getByText(/Configuration checks do not verify/)).toBeVisible();
+    const aside = screen.getByRole("complementary", { name: "Configuration status" });
     expect(
-      screen.getByRole("heading", { name: "AI providers & automation" }),
+      within(aside).getByText(
+        "It reads your configuration only. It does not call a provider or run a test.",
+      ),
+    ).toBeVisible();
+    expect(
+      within(aside).getByText(
+        "Keys and passwords are never shown here, only the names of the settings.",
+      ),
+    ).toBeVisible();
+    expect(
+      within(aside).getByText("Walkaround video pipeline needs setup"),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Providers and automation" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Only system admins see this page. Stores never see provider settings.",
+      ),
     ).toBeVisible();
     expect(within(card("Google Gemini")).getByText("Configured")).toBeVisible();
     expect(
@@ -94,6 +112,25 @@ describe("system-only connection diagnostics", () => {
     expect(screen.queryByText("Anthropic fallback")).not.toBeInTheDocument();
     expect(screen.queryByText("OpenAI fallback")).not.toBeInTheDocument();
   });
+  it("keeps the warning wording for a required service that is configured but off", async () => {
+    respondWith({
+      ...fixture,
+      automation: {
+        ...fixture.automation,
+        walkaround: { ...status, enabled: false },
+      },
+    });
+    mount();
+    expect(
+      await within(card("Walkaround video pipeline")).findByText(
+        "Configured, turned off",
+      ),
+    ).toHaveClass("text-warning-ink");
+    expect(within(card("Google Gemini")).getByText("Configured")).toHaveClass(
+      "text-ink",
+    );
+  });
+
   it("reports a healthy platform as done even with both fallbacks off", async () => {
     respondWith({
       ...fixture,
@@ -110,22 +147,77 @@ describe("system-only connection diagnostics", () => {
       screen.getByText("Every required service has its configuration in place."),
     ).toBeVisible();
   });
-  it("shows setup steps as a plain ordered list under a Setup title", async () => {
+  it("groups services into Required and Optional rows on the canvas", async () => {
+    mount();
+    await screen.findByText(/required services configured/);
+    const required = screen.getByRole("region", { name: "Required" });
+    const optional = screen.getByRole("region", { name: "Optional" });
+    for (const title of [
+      "Google Gemini",
+      "Customer website",
+      "Walkaround video pipeline",
+    ]) {
+      expect(within(required).getByRole("region", { name: title })).toBeVisible();
+    }
+    for (const title of ["Anthropic fallback", "OpenAI fallback"]) {
+      expect(within(optional).getByRole("region", { name: title })).toBeVisible();
+    }
+    expect(
+      within(optional).getByText(
+        "The app works without these. Turn one on only when you want it.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByText("Runtime health")).toBeVisible();
+  });
+
+  it("opens the steps and the setting names from Setup instructions", async () => {
     mount();
     await screen.findByText("Google Gemini");
-    fireEvent.click(screen.getAllByRole("button", { name: "Setup instructions" })[0]);
+    const toggle = within(card("Google Gemini")).getByRole("button", {
+      name: "Setup instructions",
+    });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     const setup = document.getElementById("connection-setup-gemini") as HTMLElement;
-    expect(within(setup).getByRole("heading", { name: "Setup" })).toBeVisible();
     const steps = setup.querySelector("ol") as HTMLElement;
-    expect(steps).not.toBeNull();
-    // A plain list on the card, not a second card nested inside it.
+    // A plain list in the row, not a second card nested inside it.
     expect(steps.parentElement).toBe(setup);
     expect(
       within(steps).getByText("Set the Gemini key on the backend host."),
     ).toBeVisible();
+    expect(within(setup).getByText("Setting name")).toBeVisible();
+    expect(within(setup).getByText("GEMINI_API_KEY")).toBeVisible();
+    expect(within(setup).getByText("Version 5")).toBeVisible();
     expect(
-      screen.getAllByRole("button", { name: "Setup instructions" })[0],
-    ).toHaveAttribute("aria-expanded", "true");
+      within(setup).getByRole("button", { name: "Copy variable names" }),
+    ).toBeVisible();
+  });
+
+  it("says when everything the app needs is set up, and checks again on request", async () => {
+    respondWith({
+      ...fixture,
+      automation: { customer_hub: status, walkaround: status },
+    });
+    const onCheckAgain = vi.fn();
+    mount(undefined, onCheckAgain);
+    const aside = screen.getByRole("complementary", { name: "Configuration status" });
+    expect(
+      await within(aside).findByText("Everything the app needs is set up"),
+    ).toBeVisible();
+    expect(
+      within(aside).getByRole("heading", { name: "What this page checks" }),
+    ).toBeVisible();
+    fireEvent.click(within(aside).getByRole("button", { name: "Check again" }));
+    expect(onCheckAgain).toHaveBeenCalledTimes(1);
+  });
+
+  it("refetches the status itself when no hub refresh is given", async () => {
+    mount();
+    await screen.findByText(/required services configured/);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
   });
   it("names the dealership the customer website is mapped to when the backend reports it", async () => {
     respondWith({

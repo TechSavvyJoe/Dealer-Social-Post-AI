@@ -1,10 +1,10 @@
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronDown, Copy } from "lucide-react";
+import { Check, ChevronDown, Copy, RefreshCw } from "lucide-react";
 import type { Dealer } from "../../types";
 import { useAppStore } from "../../stores/appStore";
 import { cn } from "../../utils/classNames";
-import { Badge } from "../ui/Badge";
+import { joinWords } from "../../utils/dealerSetupStatus";
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/Toast";
 import { SystemHealthPanel } from "../SystemHealthPanel";
@@ -34,7 +34,7 @@ const SERVICES = [
     group: "providers",
     optional: false,
     title: "Google Gemini",
-    description: "Primary caption, image and video generation.",
+    description: "Writes captions and makes the images and videos.",
     variables: ["GEMINI_API_KEY"],
     steps: [
       "Set the Gemini key on the backend host.",
@@ -142,14 +142,43 @@ const statusBadge = (
 const plural = (count: number, one: string, many: string) =>
   `${count} ${count === 1 ? one : many}`;
 
+/** The status in words at the right of a service row. */
+const StatusWords: React.FC<{
+  badge: ReturnType<typeof statusBadge>;
+}> = ({ badge }) => (
+  <span
+    className={cn(
+      "flex shrink-0 items-center gap-1.5 text-sm font-medium sm:w-44",
+      badge.variant === "success"
+        ? "text-ink"
+        : badge.variant === "warning"
+          ? "text-warning-ink"
+          : "text-ink-2",
+    )}
+  >
+    {badge.variant === "success" ? (
+      <Check className="h-4 w-4 shrink-0" strokeWidth={2.25} aria-hidden="true" />
+    ) : badge.variant === "warning" ? (
+      <span
+        aria-hidden="true"
+        className="inline-block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-warning-ink bg-warning-fill"
+      />
+    ) : null}
+    {badge.label}
+  </span>
+);
+
 /**
  * Global infrastructure is deliberately absent from dealership-manager views.
  * `dealers` is the loaded store list; leave it undefined while the list is
  * still loading (or failed) so a mapped store is never called missing.
+ * `onCheckAgain` is the hub's refresh; without it, "Check again" refetches
+ * this page's status alone.
  */
-export const ConnectionsPanel: React.FC<{ dealers?: readonly Dealer[] }> = ({
-  dealers,
-}) => {
+export const ConnectionsPanel: React.FC<{
+  dealers?: readonly Dealer[];
+  onCheckAgain?: () => void;
+}> = ({ dealers, onCheckAgain }) => {
   const role = useAppStore((s) => s.role);
   const authEpoch = useAppStore((s) => s.authEpoch);
   const [filter, setFilter] = useState<"all" | "attention">("all");
@@ -188,7 +217,10 @@ export const ConnectionsPanel: React.FC<{ dealers?: readonly Dealer[] }> = ({
   const requiredOn = required.filter((service) => isOn(status(service))).length;
   const optionalOn = optional.filter((service) => isOn(status(service))).length;
   const needsSetup = (service: Service) => !service.optional && !isOn(status(service));
-  const visible = SERVICES.filter((service) => filter === "all" || needsSetup(service));
+  const shown = (service: Service) => filter === "all" || needsSetup(service);
+  const visibleRequired = required.filter(shown);
+  const visibleOptional = optional.filter(shown);
+  const missingRequired = required.filter(needsSetup);
 
   const websiteState = data?.automation.customer_hub;
   const websiteDealerId = websiteState?.dealerId?.trim() || "";
@@ -208,49 +240,151 @@ export const ConnectionsPanel: React.FC<{ dealers?: readonly Dealer[] }> = ({
         ? `Mapped to dealership ${websiteDealerId}, which is not in the dealer list.`
         : null;
 
-  return (
-    <div className="space-y-8">
-      <section className="space-y-4" aria-labelledby="connections-heading">
-        <div>
-          <h3
-            id="connections-heading"
-            className="font-display text-2xl font-semibold text-ink"
-          >
-            AI providers & automation
-          </h3>
-          <p className="mt-1 max-w-2xl text-sm text-ink-2">
-            Your platform connections. Dealerships manage their posting preferences
-            separately.
-          </p>
-        </div>
-        {query.error ? (
-          <div
-            role="alert"
-            className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-error-fill p-4 text-sm text-error-ink"
-          >
-            <span className="min-w-0 flex-1">{query.error.message}</span>
-            <Button
-              variant="secondary"
-              size="md"
-              loading={query.isFetching}
-              onClick={() => void query.refetch()}
+  const checkAgain = onCheckAgain ?? (() => void query.refetch());
+
+  const serviceRow = (service: Service) => {
+    const badge = statusBadge(service, status(service));
+    const open = expanded === service.id;
+    const titleId = `connection-title-${service.id}`;
+    const setupId = `connection-setup-${service.id}`;
+    return (
+      <section
+        key={service.id}
+        aria-labelledby={titleId}
+        className="border-t border-hairline"
+      >
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 py-4">
+          <div className="min-w-0 flex-[1_1_17.5rem] space-y-0.5">
+            <h4
+              id={titleId}
+              className="text-[17px] font-semibold leading-[22px] text-ink"
             >
-              Try again
-            </Button>
+              {service.title}
+            </h4>
+            <p className="text-sm text-ink-2">{service.description}</p>
+            {service.id === "customer_hub" && websiteMapping ? (
+              <p className="text-sm text-ink">{websiteMapping}</p>
+            ) : null}
+          </div>
+          <StatusWords badge={badge} />
+          <Button
+            variant="ghost"
+            className="-mr-1 px-3 text-sm text-ink"
+            aria-expanded={open}
+            aria-controls={setupId}
+            onClick={() => setExpanded(open ? null : service.id)}
+            rightIcon={
+              <ChevronDown
+                className={cn(
+                  "text-ink-2 transition-transform duration-180 ease-out motion-reduce:transition-none",
+                  open && "rotate-180",
+                )}
+              />
+            }
+          >
+            Setup instructions
+          </Button>
+        </div>
+        {open ? (
+          <div id={setupId} className="flex flex-col gap-4 pb-5">
+            <ol className="max-w-[62ch] list-decimal space-y-1.5 pl-5 text-[15px] leading-[22px] text-ink">
+              {service.steps.map((text) => (
+                <li key={text}>{text}</li>
+              ))}
+            </ol>
+            <div className="flex flex-col gap-3 rounded-sm bg-panel px-4 py-3">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="text-sm text-ink-2">
+                  {service.variables.length === 1 ? "Setting name" : "Setting names"}
+                </span>
+                <ul className="flex flex-wrap gap-x-4 gap-y-1 break-all font-mono text-sm text-ink">
+                  {service.variables.map((name) => (
+                    <li key={name}>{name}</li>
+                  ))}
+                </ul>
+              </div>
+              {service.id === "gemini" && data ? (
+                <p className="flex items-baseline gap-3 text-sm">
+                  <span className="text-ink-2">Model policy</span>
+                  <span className="text-ink">Version {data.modelPolicyVersion}</span>
+                </p>
+              ) : null}
+              <p className="text-sm text-ink-2">
+                Set these in the backend’s secret settings. Credentials stay on the
+                server.
+              </p>
+              <Button
+                variant="secondary"
+                className="self-start px-3.5 text-sm"
+                leftIcon={<Copy />}
+                onClick={async () => {
+                  try {
+                    if (!navigator.clipboard?.writeText)
+                      throw new Error("Clipboard unavailable");
+                    await navigator.clipboard.writeText(service.variables.join("\n"));
+                    toast.success("Variable names copied.");
+                  } catch {
+                    toast.error("Could not copy. Select the names above instead.");
+                  }
+                }}
+              >
+                Copy variable names
+              </Button>
+            </div>
           </div>
         ) : null}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline pt-4">
-          <p role="status" className="text-sm text-ink-2">
-            {query.isPending
-              ? "Checking configuration…"
-              : data
-                ? `${requiredOn} of ${plural(required.length, "required service", "required services")} configured and enabled. ${optionalOn} of ${plural(optional.length, "optional fallback", "optional fallbacks")} on.`
-                : "Status unavailable"}
-          </p>
+      </section>
+    );
+  };
+
+  const overall = query.isPending
+    ? null
+    : data
+      ? missingRequired.length === 0
+        ? { done: true, text: "Everything the app needs is set up" }
+        : {
+            done: false,
+            text: `${joinWords(missingRequired.map((service) => service.title))} ${
+              missingRequired.length === 1 ? "needs" : "need"
+            } setup`,
+          }
+      : null;
+
+  return (
+    <div className="flex flex-wrap items-start gap-x-16 gap-y-10">
+      <div className="flex min-w-0 flex-[999_1_32.5rem] flex-col gap-9">
+        <section aria-labelledby="connections-heading" className="flex flex-col gap-4">
+          <div className="space-y-1">
+            <h2
+              id="connections-heading"
+              className="font-display text-[1.625rem] font-semibold leading-[1.875rem] tracking-[-0.01em] text-ink md:text-3xl"
+            >
+              Providers and automation
+            </h2>
+            <p className="text-sm text-ink-2 md:text-base">
+              Only system admins see this page. Stores never see provider settings.
+            </p>
+          </div>
+          {query.error ? (
+            <div
+              role="alert"
+              className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-error-fill p-4 text-sm text-error-ink"
+            >
+              <span className="min-w-0 flex-1">{query.error.message}</span>
+              <Button
+                variant="secondary"
+                size="md"
+                loading={query.isFetching}
+                onClick={() => void query.refetch()}
+              >
+                Try again
+              </Button>
+            </div>
+          ) : null}
           <div className="flex gap-1" role="group" aria-label="Connection filter">
             <Button
               variant={filter === "all" ? "secondary" : "ghost"}
-              size="md"
+              className="px-3.5 text-sm"
               aria-pressed={filter === "all"}
               onClick={() => setFilter("all")}
             >
@@ -258,166 +392,148 @@ export const ConnectionsPanel: React.FC<{ dealers?: readonly Dealer[] }> = ({
             </Button>
             <Button
               variant={filter === "attention" ? "secondary" : "ghost"}
-              size="md"
+              className="px-3.5 text-sm"
               aria-pressed={filter === "attention"}
               onClick={() => setFilter("attention")}
             >
               Needs setup
             </Button>
           </div>
-        </div>
-        <p className="text-caption text-ink-2">
-          Configuration checks do not verify provider access or complete a test
-          transaction.
-        </p>
-        <div className="grid items-start gap-3 lg:grid-cols-2">
-          {visible.map((service) => {
-            const state = status(service);
-            const badge = statusBadge(service, state);
-            const open = expanded === service.id;
-            const titleId = `connection-title-${service.id}`;
-            return (
-              <section
-                key={service.id}
-                aria-labelledby={titleId}
-                className="rounded-md border border-hairline bg-panel p-4 sm:p-5"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <h4
-                      id={titleId}
-                      className="font-display text-lg font-semibold text-ink"
-                    >
-                      {service.title}
-                    </h4>
-                    <p className="mt-1 text-sm text-ink-2">{service.description}</p>
-                    {service.id === "customer_hub" && websiteMapping ? (
-                      <p className="mt-1 text-sm text-ink">{websiteMapping}</p>
-                    ) : null}
-                  </div>
-                  <Badge variant={badge.variant}>{badge.label}</Badge>
+        </section>
+
+        {visibleRequired.length > 0 ? (
+          <section aria-labelledby="connections-required" className="flex flex-col">
+            <h3
+              id="connections-required"
+              className="mb-2.5 font-display text-[1.375rem] font-semibold leading-7 text-ink"
+            >
+              Required
+            </h3>
+            <div className="border-b border-hairline">
+              {visibleRequired.map(serviceRow)}
+            </div>
+          </section>
+        ) : filter === "attention" && data ? (
+          <p className="flex items-center gap-2 text-sm text-ink-2">
+            <Check
+              className="h-4 w-4 text-ink-2"
+              strokeWidth={2.25}
+              aria-hidden="true"
+            />
+            Every required service has its configuration in place.
+          </p>
+        ) : null}
+
+        {visibleOptional.length > 0 ? (
+          <section aria-labelledby="connections-optional" className="flex flex-col">
+            <h3
+              id="connections-optional"
+              className="font-display text-[1.375rem] font-semibold leading-7 text-ink"
+            >
+              Optional
+            </h3>
+            <p className="mb-2.5 mt-0.5 text-sm text-ink-2">
+              The app works without these. Turn one on only when you want it.
+            </p>
+            <div className="border-b border-hairline">
+              {visibleOptional.map(serviceRow)}
+            </div>
+          </section>
+        ) : null}
+
+        <section aria-labelledby="runtime-heading" className="flex flex-col gap-3">
+          <div className="space-y-0.5">
+            <h3
+              id="runtime-heading"
+              className="font-display text-[1.375rem] font-semibold leading-7 text-ink"
+            >
+              Runtime & recovery
+            </h3>
+            <p className="text-sm text-ink-2">
+              Service health, recent generation results and verified backup evidence.
+            </p>
+          </div>
+          <SystemHealthPanel />
+        </section>
+
+        {data ? (
+          <details className="border-y border-hairline">
+            <summary className="min-h-11 cursor-pointer py-3 text-[15px] font-semibold text-ink">
+              Runtime versions & capabilities
+            </summary>
+            <dl className="grid gap-3 border-t border-hairline py-4 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-ink-2">API contract</dt>
+                <dd className="mt-1 font-mono text-ink">{data.apiContractVersion}</dd>
+              </div>
+              <div>
+                <dt className="text-ink-2">Model policy</dt>
+                <dd className="mt-1 text-ink">{data.modelPolicyVersion}</dd>
+              </div>
+              {Object.entries(data.capabilities).map(([name, enabled]) => (
+                <div key={name}>
+                  <dt className="text-ink-2">
+                    {name === "veoNegativePrompt" ? "Video negative prompts" : name}
+                  </dt>
+                  <dd className="mt-1 text-ink">
+                    {enabled ? "Available" : "Unavailable"}
+                  </dd>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="md"
-                  className="-ml-3 mt-2"
-                  aria-expanded={open}
-                  aria-controls={`connection-setup-${service.id}`}
-                  onClick={() => setExpanded(open ? null : service.id)}
-                  rightIcon={
-                    <ChevronDown
-                      className={cn(
-                        "transition-transform duration-180 ease-out motion-reduce:transition-none",
-                        open && "rotate-180",
-                      )}
-                    />
-                  }
-                >
-                  Setup instructions
-                </Button>
-                {open ? (
-                  <div
-                    id={`connection-setup-${service.id}`}
-                    className="mt-2 space-y-3 border-t border-hairline pt-4"
-                  >
-                    <h5 className="font-display text-lg font-semibold text-ink">
-                      Setup
-                    </h5>
-                    <ol className="list-decimal space-y-2 pl-5 text-sm leading-relaxed text-ink-2">
-                      {service.steps.map((text) => (
-                        <li key={text}>{text}</li>
-                      ))}
-                    </ol>
-                    <details className="border-t border-hairline">
-                      <summary className="min-h-11 cursor-pointer py-3 text-sm font-semibold text-ink">
-                        Advanced configuration
-                      </summary>
-                      <p className="mb-3 text-sm text-ink-2">
-                        Set these variables in the backend’s secret settings.
-                        Credentials stay on the server.
-                      </p>
-                      <ul className="space-y-1 break-all font-mono text-xs text-ink-2">
-                        {service.variables.map((name) => (
-                          <li key={name}>{name}</li>
-                        ))}
-                      </ul>
-                      <Button
-                        variant="secondary"
-                        size="md"
-                        className="mb-1 mt-4"
-                        leftIcon={<Copy />}
-                        onClick={async () => {
-                          try {
-                            if (!navigator.clipboard?.writeText)
-                              throw new Error("Clipboard unavailable");
-                            await navigator.clipboard.writeText(
-                              service.variables.join("\n"),
-                            );
-                            toast.success("Variable names copied.");
-                          } catch {
-                            toast.error(
-                              "Could not copy. Select the names above instead.",
-                            );
-                          }
-                        }}
-                      >
-                        Copy variable names
-                      </Button>
-                    </details>
-                  </div>
-                ) : null}
-              </section>
-            );
-          })}
-          {filter === "attention" && data && visible.length === 0 ? (
-            <p className="flex items-center gap-2 py-2 text-sm text-ink-2">
-              <Check className="h-4 w-4 text-success-ink" aria-hidden="true" />
-              Every required service has its configuration in place.
+              ))}
+            </dl>
+          </details>
+        ) : null}
+      </div>
+
+      <aside
+        aria-label="Configuration status"
+        className="flex w-full flex-col gap-5 md:max-w-[21.25rem] md:flex-[1_1_17.5rem] md:pt-1"
+      >
+        <div className="flex flex-col gap-1.5">
+          {overall ? (
+            <p className="flex items-start gap-2 text-lg font-semibold text-ink">
+              {overall.done ? (
+                <Check
+                  className="mt-1 h-4 w-4 shrink-0"
+                  strokeWidth={2.25}
+                  aria-hidden="true"
+                />
+              ) : (
+                <span
+                  aria-hidden="true"
+                  className="mt-[5px] inline-block h-3.5 w-3.5 shrink-0 rounded-full border-2 border-warning-ink bg-warning-fill"
+                />
+              )}
+              {overall.text}
             </p>
           ) : null}
-        </div>
-      </section>
-      <section className="space-y-3" aria-labelledby="runtime-heading">
-        <div>
-          <h3
-            id="runtime-heading"
-            className="font-display text-2xl font-semibold text-ink"
-          >
-            Runtime & recovery
-          </h3>
-          <p className="mt-1 text-sm text-ink-2">
-            Service health, recent generation results and verified backup evidence.
+          <p role="status" className="text-sm text-ink-2">
+            {query.isPending
+              ? "Checking configuration…"
+              : data
+                ? `${requiredOn} of ${plural(required.length, "required service", "required services")} configured and enabled. ${optionalOn} of ${plural(optional.length, "optional fallback", "optional fallbacks")} on.`
+                : "Status unavailable"}
           </p>
         </div>
-        <SystemHealthPanel />
-      </section>
-      {data ? (
-        <details className="rounded-md border border-hairline bg-panel px-4 sm:px-5">
-          <summary className="min-h-11 cursor-pointer py-3 text-sm font-semibold text-ink">
-            Runtime versions & capabilities
-          </summary>
-          <dl className="grid gap-3 border-t border-hairline py-4 text-sm sm:grid-cols-2">
-            <div>
-              <dt className="text-ink-2">API contract</dt>
-              <dd className="mt-1 font-mono text-ink">{data.apiContractVersion}</dd>
-            </div>
-            <div>
-              <dt className="text-ink-2">Model policy</dt>
-              <dd className="mt-1 text-ink">{data.modelPolicyVersion}</dd>
-            </div>
-            {Object.entries(data.capabilities).map(([name, enabled]) => (
-              <div key={name}>
-                <dt className="text-ink-2">
-                  {name === "veoNegativePrompt" ? "Video negative prompts" : name}
-                </dt>
-                <dd className="mt-1 text-ink">
-                  {enabled ? "Available" : "Unavailable"}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        </details>
-      ) : null}
+        <div className="flex flex-col gap-3 border-t border-hairline pt-5">
+          <h3 className="text-base font-semibold text-ink">What this page checks</h3>
+          <p className="text-sm text-ink-2">
+            It reads your configuration only. It does not call a provider or run a test.
+          </p>
+          <p className="text-sm text-ink-2">
+            Keys and passwords are never shown here, only the names of the settings.
+          </p>
+          <Button
+            variant="secondary"
+            className="self-start px-3.5 text-sm"
+            loading={query.isFetching}
+            leftIcon={<RefreshCw />}
+            onClick={checkAgain}
+          >
+            Check again
+          </Button>
+        </div>
+      </aside>
     </div>
   );
 };
