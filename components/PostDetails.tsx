@@ -99,6 +99,10 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [websiteReady, setWebsiteReady] = useState(false);
+  const [websiteDiscovery, setWebsiteDiscovery] = useState<
+    "loading" | "ready" | "failed"
+  >("loading");
+  const [websiteDiscoveryAttempt, setWebsiteDiscoveryAttempt] = useState(0);
   const lineRef = useRef<HTMLTextAreaElement>(null);
   const focusLineOnOpen = useRef(false);
   const barRef = useRef<HTMLDivElement>(null);
@@ -128,11 +132,23 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
 
   useEffect(() => {
     const controller = new AbortController();
+    let active = true;
+    setWebsiteReady(false);
+    setWebsiteDiscovery("loading");
     void listWebsiteDestinations(controller.signal)
-      .then((items) => setWebsiteReady(items.length > 0))
-      .catch(() => setWebsiteReady(false));
-    return () => controller.abort();
-  }, [dealer?.id]);
+      .then((items) => {
+        if (!active) return;
+        setWebsiteReady(items.length > 0);
+        setWebsiteDiscovery("ready");
+      })
+      .catch(() => {
+        if (active) setWebsiteDiscovery("failed");
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [dealer?.id, websiteDiscoveryAttempt]);
 
   // Opening "Anything to mention?" swaps the row for the field, so focus
   // follows it instead of falling back to the page.
@@ -206,24 +222,31 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
   // Managers sign in as dealer admins and can add a channel themselves.
   const canSetUpStore = role === "dealer_admin" || role === "super_admin";
 
-  const gateReason = request.ok
-    ? null
-    : request.reason === "release_required"
-      ? request.detail === "release_already_used"
-        ? "This signature was used for your last post — get a new signature"
-        : null
-      : request.reason === "identity"
-        ? request.message || "Check the optional line before creating."
-        : request.reason === "no_destination"
-          ? canSetUpStore
-            ? "No place to share is set up for your store yet. Add one in dealership setup."
-            : "No place to share is set up for your store yet. Ask your manager."
-          : "The signature no longer matches this customer or vehicle — get a new signature.";
+  const gateReason =
+    (request.ok || request.reason === "no_destination") &&
+    websiteDiscovery === "loading"
+      ? "Checking your store’s destinations…"
+      : (request.ok || request.reason === "no_destination") &&
+          websiteDiscovery === "failed"
+        ? "Your store’s destinations could not be checked. Retry before creating."
+        : request.ok
+          ? null
+          : request.reason === "release_required"
+            ? request.detail === "release_already_used"
+              ? "This signature was used for your last post — get a new signature"
+              : null
+            : request.reason === "identity"
+              ? request.message || "Check the optional line before creating."
+              : request.reason === "no_destination"
+                ? canSetUpStore
+                  ? "No place to share is set up for your store yet. Add one in dealership setup."
+                  : "No place to share is set up for your store yet. Ask your manager."
+                : "The signature no longer matches this customer or vehicle — get a new signature.";
 
   const openRelease = () => setReleaseOpen(true);
 
   const createPost = async () => {
-    if (!request.ok || submitting) return;
+    if (!request.ok || submitting || websiteDiscovery !== "ready") return;
     setSubmitting(true);
     setLocalError(null);
     try {
@@ -380,6 +403,14 @@ const PostDetailsContent: React.FC<PostDetailsProps & { draft: PostDraft }> = ({
             >
               {gateReason}
             </p>
+          ) : null}
+          {websiteDiscovery === "failed" ? (
+            <Button
+              variant="secondary"
+              onClick={() => setWebsiteDiscoveryAttempt((value) => value + 1)}
+            >
+              Retry destinations
+            </Button>
           ) : null}
           <Button
             type="button"

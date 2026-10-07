@@ -140,7 +140,7 @@ describe("PostDetails", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows a signed release as Signed with the customer's name", () => {
+  it("shows a signed release as Signed with the customer's name", async () => {
     useAppStore.setState({
       pendingRelease: {
         customerName: "Maria Lopez",
@@ -149,6 +149,9 @@ describe("PostDetails", () => {
       },
     });
     renderDetails();
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     const row = signatureRow();
     expect(within(row).getByText("Signed")).toBeInTheDocument();
@@ -171,6 +174,9 @@ describe("PostDetails", () => {
     useAppStore.setState({ pendingRelease });
     renderDetails({ onGenerate });
 
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Create post" })).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Create post" }));
     await waitFor(() => expect(onGenerate).toHaveBeenCalledTimes(1));
     expect(onGenerate.mock.calls[0][5].capturedRelease).toBe(pendingRelease);
@@ -274,19 +280,25 @@ describe("PostDetails", () => {
     ).toBeInTheDocument();
   });
 
-  it("tells a salesperson to ask their manager when there is no place to share", () => {
+  it("tells a salesperson to ask their manager when there is no place to share", async () => {
     gate.override = { ok: false, reason: "no_destination" };
     renderDetails();
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(document.getElementById("create-post-reason")).toHaveTextContent(
       "No place to share is set up for your store yet. Ask your manager.",
     );
     expect(screen.getByRole("button", { name: "Create post" })).toBeDisabled();
   });
 
-  it("tells a manager where to add a place to share instead of to ask a manager", () => {
+  it("tells a manager where to add a place to share instead of to ask a manager", async () => {
     gate.override = { ok: false, reason: "no_destination" };
     useAppStore.setState({ role: "dealer_admin" });
     renderDetails();
+    await act(async () => {
+      await Promise.resolve();
+    });
     const reason = document.getElementById("create-post-reason");
     expect(reason).toHaveTextContent(
       "No place to share is set up for your store yet. Add one in dealership setup.",
@@ -403,6 +415,9 @@ describe("PostDetails", () => {
       },
     });
     renderDetails({ onGenerate: vi.fn().mockRejectedValue(new Error("network")) });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Create post" })).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Create post" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Creating the post stopped. Your photo and details are still here.",
@@ -421,15 +436,44 @@ describe("PostDetails", () => {
     expect(screen.getByRole("button", { name: "Change photo" })).toBeInTheDocument();
   });
 
-  it("hides the signature row for a non-customer category", () => {
+  it("hides the signature row for a non-customer category", async () => {
     useAppStore.setState({
       postDraft: { categoryId: "service", scenarioId: "service_promotion" },
     });
     renderDetails();
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(screen.queryByText("Customer's signature")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Get customer's signature" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create post" })).toBeEnabled();
+  });
+  it("waits for destination discovery and offers a retry after discovery fails", async () => {
+    const { listWebsiteDestinations } = await import("../services/websitePublishing");
+    let reject!: (reason: unknown) => void;
+    vi.mocked(listWebsiteDestinations).mockReturnValueOnce(
+      new Promise((_resolve, r) => {
+        reject = r;
+      }),
+    );
+    useAppStore.setState({
+      postDraft: { categoryId: "inventory", scenarioId: "new_arrival" },
+    });
+    const onGenerate = vi.fn();
+    renderDetails({ onGenerate });
+    const create = screen.getByRole("button", { name: "Create post" });
+    expect(create).toBeDisabled();
+    fireEvent.keyDown(window, { key: "Enter", metaKey: true });
+    expect(onGenerate).not.toHaveBeenCalled();
+    await act(async () => {
+      reject(new Error("offline"));
+    });
+    expect(create).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry destinations" }));
+    await waitFor(() => expect(create).toBeEnabled());
+    fireEvent.click(create);
+    expect(onGenerate).toHaveBeenCalledOnce();
   });
 });

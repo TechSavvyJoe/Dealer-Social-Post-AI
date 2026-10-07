@@ -346,4 +346,29 @@ describe("usePhotoIntake", () => {
       originalFilename: "car.jpg",
     });
   });
+  it("ignores another drop while the chosen photo is being normalized", async () => {
+    let resolve!: (value: string) => void;
+    vi.mocked(imageUtils.fileToNormalizedDataUrl).mockReturnValueOnce(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    const first = new File(["one"], "first.jpg", { type: "image/jpeg" });
+    const second = new File(["two"], "second.jpg", { type: "image/jpeg" });
+    const { result } = renderHook(() => usePhotoIntake({ onImageSelected }));
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.processFile(first);
+    });
+    await act(async () => {
+      await result.current.processFile(second);
+    });
+    expect(imageUtils.fileToNormalizedDataUrl).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolve("data:image/jpeg;base64,first");
+      await pending;
+    });
+    expect(onImageSelected).toHaveBeenCalledOnce();
+    expect(onImageSelected.mock.lastCall?.[0].originalFilename).toBe("first.jpg");
+  });
 });

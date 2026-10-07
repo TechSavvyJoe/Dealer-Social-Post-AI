@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AppStep, type Dealer } from "../types";
+import { AppStep, type Dealer, type GeneratedPost } from "../types";
 
 const mocks = vi.hoisted(() => ({
   impersonatePerson: vi.fn(),
   exitImpersonation: vi.fn(),
+  archiveDealerMedia: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("../services/salespeople", async (importOriginal) => ({
@@ -16,6 +17,8 @@ vi.mock("../utils/creativeStorage", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../utils/creativeStorage")>()),
   clearAllCreatives: vi.fn().mockResolvedValue(true),
   clearDealerCreatives: vi.fn().mockResolvedValue(true),
+  saveDealerCreative: vi.fn().mockResolvedValue(true),
+  archiveDealerMedia: mocks.archiveDealerMedia,
 }));
 
 import { useAppStore } from "./appStore";
@@ -155,5 +158,87 @@ describe("manager deep link (setManagerEntry)", () => {
     await useAppStore.getState().logout();
     expect(useAppStore.getState().step).toBe(AppStep.LOGIN);
     expect(useAppStore.getState().managerEntry).toBeNull();
+  });
+});
+
+describe("device recovery copy of a post image", () => {
+  const image = "data:image/png;base64,iVBORw0KGgo=";
+  const reopened = (patch: Partial<GeneratedPost>): GeneratedPost => ({
+    image,
+    text: "Congrats on the new ride!",
+    postId: "post-1",
+    approvalStatus: "n_a",
+    releaseStatus: "not_required",
+    imageReviewRequired: false,
+    ...patch,
+  });
+
+  beforeEach(() => {
+    useAppStore.setState({
+      currentDealer: store,
+      role: "salesperson",
+      step: AppStep.WORK,
+      generatedPost: null,
+    });
+  });
+
+  afterEach(() => {
+    useAppStore.setState({ generatedPost: null });
+  });
+
+  // My work reopens every one of these; the Post screen locks its Save, so a
+  // recovery copy would hand the same image to an unrestricted Save.
+  it.each<[string, Partial<GeneratedPost>]>([
+    ["waiting for approval", { approvalStatus: "pending" }],
+    ["sent back by a manager", { approvalStatus: "rejected" }],
+    ["never sent for approval", { approvalStatus: "submission_failed" }],
+    [
+      "approved (not the image a later edit would show)",
+      { approvalStatus: "approved" },
+    ],
+    ["held for image review", { imageReviewRequired: true }],
+    ["missing its saved photo release", { releaseStatus: "save_failed" }],
+  ])("is not kept when a post %s is reopened", (_, patch) => {
+    useAppStore.getState().openSavedPost(reopened(patch));
+    expect(useAppStore.getState().generatedPost?.image).toBe(image);
+    expect(useAppStore.getState().step).toBe(AppStep.POST);
+    expect(mocks.archiveDealerMedia).not.toHaveBeenCalled();
+  });
+
+  it("is not kept for a locked post set without the no-archive option", () => {
+    useAppStore.getState().setGeneratedPost(reopened({ approvalStatus: "pending" }));
+    expect(useAppStore.getState().generatedPost?.image).toBe(image);
+    expect(mocks.archiveDealerMedia).not.toHaveBeenCalled();
+  });
+
+  it("is still kept when an unlocked post is reopened", () => {
+    useAppStore.getState().openSavedPost(reopened({ releaseStatus: "saved" }));
+    expect(mocks.archiveDealerMedia).toHaveBeenCalledTimes(1);
+    expect(mocks.archiveDealerMedia).toHaveBeenCalledWith("dealer-7", {
+      kind: "generated-image",
+      source: image,
+      label: "Generated image",
+    });
+  });
+
+  it("is still skipped when the caller opts out for an unlocked post", () => {
+    useAppStore.getState().setGeneratedPost(reopened({}), { archive: false });
+    expect(mocks.archiveDealerMedia).not.toHaveBeenCalled();
+  });
+  it("clears the delivered claim when the saved creative changes", () => {
+    const post: GeneratedPost = {
+      postId: "post-shared",
+      postRevision: "rev-1",
+      image: "data:image/jpeg;base64,b25l",
+      text: "First caption",
+      sharedTo: [
+        { channel: "facebook_feed", via: "share_sheet", at: "2026-10-07T14:00:00Z" },
+      ],
+    };
+    useAppStore.setState({ generatedPost: post });
+    useAppStore
+      .getState()
+      .setGeneratedPost({ ...post, text: "Revised caption" }, { archive: false });
+    expect(useAppStore.getState().generatedPost?.sharedTo).toEqual([]);
   });
 });

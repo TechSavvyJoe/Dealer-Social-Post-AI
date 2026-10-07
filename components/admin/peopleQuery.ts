@@ -15,15 +15,10 @@ export interface PeopleQueryParams {
   search: string;
   codesToShare: boolean;
   cursor?: string;
+  includeInactive?: boolean;
 }
 
-/**
- * The roster query, shared by the Admins and Users tabs and the setup board.
- * The board's "first active manager" lookup asks for exactly the page the
- * Admins tab shows for that store (no search, no filter, first page), so both
- * read and refresh one cache entry: deactivating a manager on the Admins tab
- * refetches the same page the board reads.
- */
+/** Roster pages and active-only setup-board lookups have distinct cache keys. */
 export const peopleQueryKey = (params: PeopleQueryParams) =>
   [
     "people",
@@ -32,11 +27,12 @@ export const peopleQueryKey = (params: PeopleQueryParams) =>
     params.search,
     params.codesToShare,
     params.cursor,
+    params.includeInactive ?? true,
   ] as const;
 
 export const fetchPeoplePage = (params: PeopleQueryParams): Promise<PeoplePage> =>
   listPeoplePage({
-    includeInactive: true,
+    includeInactive: params.includeInactive ?? true,
     role: params.role,
     dealerId: params.dealerId || undefined,
     q: params.search,
@@ -45,13 +41,14 @@ export const fetchPeoplePage = (params: PeopleQueryParams): Promise<PeoplePage> 
     limit: PEOPLE_PAGE_SIZE,
   });
 
-/** The managers page the Admins tab shows for one store. */
+/** Active managers for the setup board, excluding retired accounts server-side. */
 export const storeManagersParams = (dealerId: string): PeopleQueryParams => ({
   role: "manager",
   dealerId,
   search: "",
   codesToShare: false,
   cursor: undefined,
+  includeInactive: false,
 });
 
 /** The first manager on that page who can be opened as. */

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fileToNormalizedDataUrl } from "../utils/imageUtils";
 import { toUiMessage } from "../utils/errorMessages";
 import type { ImageSelection } from "../types";
@@ -143,9 +143,11 @@ export function usePhotoIntake({
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const processingRef = useRef(false);
 
   const processFile = useCallback(
     async (file: File) => {
+      if (processingRef.current) return;
       if (!file.type.startsWith("image/") && !hasImageExtension(file.name)) {
         setError("Invalid file type. Please use an image file.");
         return;
@@ -159,6 +161,7 @@ export function usePhotoIntake({
 
       try {
         setError(null);
+        processingRef.current = true;
         setIsProcessing(true);
 
         // Process and normalize orientation - this handles EXIF rotation
@@ -186,6 +189,7 @@ export function usePhotoIntake({
               ),
         );
       } finally {
+        processingRef.current = false;
         setIsProcessing(false);
       }
     },

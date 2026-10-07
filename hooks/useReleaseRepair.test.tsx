@@ -169,4 +169,29 @@ describe("useReleaseRepair", () => {
     });
     expect(result.current.releaseStatus).toBe("saved");
   });
+  it("keeps a newer revision while a release-link reply is delayed", async () => {
+    let resolve!: (value: unknown) => void;
+    mocks.store.generatedPost = basePost;
+    mocks.linkReleaseToPostWithRetry.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    const { result } = renderHook(() => useReleaseRepair({ post: basePost }));
+    let retry!: Promise<void>;
+    act(() => {
+      retry = result.current.retry("manual");
+    });
+    mocks.store.generatedPost = { ...basePost, postRevision: "newer-revision" };
+    await act(async () => {
+      resolve({ post_revision: "older-link-revision" });
+      await retry;
+    });
+    expect(mocks.setGeneratedPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        postRevision: "newer-revision",
+        releaseStatus: "saved",
+      }),
+    );
+  });
 });

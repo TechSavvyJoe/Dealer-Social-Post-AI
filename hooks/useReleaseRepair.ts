@@ -67,11 +67,20 @@ export const useReleaseRepair = ({
       const releaseId = sourcePost.releaseId;
       const postId = sourcePost.postId;
       if (!releaseId || !postId || releaseRetryingRef.current) return;
+      const before = useAppStore.getState();
+      const observedRevision =
+        before.generatedPost?.postRevision ?? sourcePost.postRevision;
+      const authEpoch = before.authEpoch;
       releaseRetryingRef.current = true;
       setReleaseRetrying(true);
       setReleaseRetryNotice(null);
       try {
         const linked = await linkReleaseToPostWithRetry(releaseId, postId);
+        if (
+          useAppStore.getState().authEpoch !== authEpoch ||
+          currentPostPropRef.current.postId !== postId
+        )
+          return;
         setReleaseStatus("saved");
         setReleaseLinkStatus(undefined);
         const store = useAppStore.getState();
@@ -80,7 +89,10 @@ export const useReleaseRepair = ({
           const base = current || sourcePost;
           store.setGeneratedPost({
             ...base,
-            postRevision: linked.post_revision,
+            postRevision:
+              base.postRevision === observedRevision
+                ? linked.post_revision
+                : base.postRevision,
             releaseStatus: "saved",
             releaseLinkStatus: undefined,
           });

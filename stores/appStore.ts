@@ -58,6 +58,20 @@ export interface LoginResult {
  */
 export type PostBusyReason = "image" | "website" | null;
 
+/**
+ * A post whose image the Post screen will not let leave the phone: waiting
+ * for, refused or never sent for approval, held for image review, or with a
+ * photo release that did not save. Any approval status counts: a replaced
+ * image is never the one a manager saw. The same policy generation applies
+ * (hooks/useGeneration.ts), enforced here for every caller: a device recovery
+ * copy of such an image would give My work an unrestricted Save of exactly
+ * the image the Post screen locks, whether it was just made or reopened.
+ */
+export const postImageStaysOffDevice = (post: GeneratedPost): boolean =>
+  (post.approvalStatus ?? "n_a") !== "n_a" ||
+  Boolean(post.imageReviewRequired) ||
+  post.releaseStatus === "save_failed";
+
 /** The surfaces a saved post can be reopened from, so Back returns there. */
 const POST_OPEN_SURFACES: readonly AppStep[] = [
   AppStep.HOME,
@@ -135,6 +149,10 @@ interface AppState {
   setStep: (step: AppStep) => void;
   setCurrentDealer: (dealer: Dealer | null) => void;
   setSelectedImage: (image: string | null) => void;
+  /**
+   * A new image gets a device recovery copy unless `archive: false` or the
+   * post is locked (postImageStaysOffDevice), which no option can override.
+   */
   setGeneratedPost: (
     post: GeneratedPost | null,
     options?: { archive?: boolean },
@@ -458,12 +476,29 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setGeneratedPost: (post, options) => {
-    const previousImage = get().generatedPost?.image;
+    const previousPost = get().generatedPost;
+    const previousImage = previousPost?.image;
+    if (
+      post &&
+      previousPost &&
+      post.postId === previousPost.postId &&
+      (post.image !== previousPost.image ||
+        post.text !== previousPost.text ||
+        post.disclosures !== previousPost.disclosures ||
+        JSON.stringify(post.platformCaptions || {}) !==
+          JSON.stringify(previousPost.platformCaptions || {}))
+    )
+      post = { ...post, sharedTo: [] };
     set({ generatedPost: post });
     const { currentDealer, step, selectedImage } = get();
     if (currentDealer) {
       void saveDealerCreative(currentDealer.id, "generated", post?.image || null);
-      if (post?.image && post.image !== previousImage && options?.archive !== false) {
+      if (
+        post?.image &&
+        post.image !== previousImage &&
+        options?.archive !== false &&
+        !postImageStaysOffDevice(post)
+      ) {
         void archiveDealerMedia(currentDealer.id, {
           kind: "generated-image",
           source: post.image,

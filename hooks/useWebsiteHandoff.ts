@@ -74,6 +74,7 @@ export interface UseWebsiteHandoffResult {
   websiteDraft: WebsiteDraft | undefined;
   publication: WebsitePublication | undefined;
   checkError: string | null;
+  revisionRecoveryRequired: boolean;
   sending: boolean;
   retrying: boolean;
   reviewUrl: string | undefined;
@@ -112,6 +113,7 @@ export const useWebsiteHandoff = ({
     post.websiteDraft,
   );
   const [websiteCheckError, setWebsiteCheckError] = useState<string | null>(null);
+  const [revisionRecoveryRequired, setRevisionRecoveryRequired] = useState(false);
   const [websiteRetrying, setWebsiteRetrying] = useState(false);
   const [websiteSending, setWebsiteSending] = useState(false);
   /** Stops duplicate final sends before React can commit the disabled state. */
@@ -439,8 +441,12 @@ export const useWebsiteHandoff = ({
             persistWebsiteState(
               authoritative.websiteDraft ?? websiteDraft,
               authoritative,
+              { postRevision: undefined },
             );
-            setWebsiteCheckError(null);
+            setRevisionRecoveryRequired(true);
+            setWebsiteCheckError(
+              "Reopen this post from My work before sharing to another destination.",
+            );
             toast.warning(
               err instanceof ApiError && err.code === "WEBSITE_DRAFT_ALREADY_SENT"
                 ? "Another window already sent the final website draft. The sent copy and status were restored."
@@ -477,7 +483,10 @@ export const useWebsiteHandoff = ({
   return {
     websiteDraft,
     publication: websitePublication,
-    checkError: websiteCheckError,
+    checkError: revisionRecoveryRequired
+      ? "Reopen this post from My work before sharing to another destination."
+      : websiteCheckError,
+    revisionRecoveryRequired,
     sending: websiteSending,
     retrying: websiteRetrying,
     reviewUrl: websiteReviewUrl,

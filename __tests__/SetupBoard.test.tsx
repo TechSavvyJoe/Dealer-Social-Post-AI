@@ -354,7 +354,11 @@ describe("opening a store's settings as its manager", () => {
     const open = within(detail).getByRole("button", { name: "Open Channels" });
     await waitFor(() => expect(open).toBeEnabled());
     expect(mocks.listPeoplePage).toHaveBeenCalledWith(
-      expect.objectContaining({ role: "manager", dealerId: "dealer-2" }),
+      expect.objectContaining({
+        role: "manager",
+        dealerId: "dealer-2",
+        includeInactive: false,
+      }),
     );
     fireEvent.click(open);
     await waitFor(() => expect(impersonatePerson).toHaveBeenCalledWith("manager-1"));

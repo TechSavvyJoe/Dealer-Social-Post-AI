@@ -171,6 +171,8 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
   }
 
   const handleWizardSave = async (fields: Record<string, string | boolean>) => {
+    const authEpoch = useAppStore.getState().authEpoch;
+    const savedDealerId = dealer.id;
     const fd = new FormData();
     Object.entries(fields).forEach(([k, v]) =>
       fd.append(k, typeof v === "boolean" ? (v ? "true" : "false") : v),
@@ -188,13 +190,14 @@ export const DealerAdminDashboard: React.FC<DealerAdminDashboardProps> = ({
       if (key in fields) decoded[key] = decodedBrand[key];
     }
     useAppStore.setState((s) => ({
-      currentDealer: s.currentDealer
-        ? {
-            ...s.currentDealer,
-            ...(decoded as Partial<typeof s.currentDealer>),
-            ...updated,
-          }
-        : s.currentDealer,
+      currentDealer:
+        s.authEpoch === authEpoch && s.currentDealer?.id === savedDealerId
+          ? {
+              ...s.currentDealer,
+              ...(decoded as Partial<typeof s.currentDealer>),
+              ...updated,
+            }
+          : s.currentDealer,
     }));
     return updated;
   };

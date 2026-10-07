@@ -626,4 +626,16 @@ describe("App navigation", () => {
     render(<App />);
     expect(screen.getByTestId("flow-title")).toHaveTextContent(/^Post$/);
   });
+  it("asks before logging out and discarding a customer's signed Details draft", () => {
+    startSignedDetails();
+    render(<App />);
+    click("Log out");
+    expect(
+      screen.getByRole("dialog", { name: "Discard the post in progress?" }),
+    ).toBeInTheDocument();
+    expect(state().pendingRelease).toBe(release);
+    click("Keep working");
+    expect(state().step).toBe(AppStep.DETAILS);
+    expect(state().pendingRelease).toBe(release);
+  });
 });

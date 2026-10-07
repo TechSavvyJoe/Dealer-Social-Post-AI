@@ -474,14 +474,14 @@ test("Create post stores the signature first, Cancel keeps the draft, and the re
   // and the new post can never record a share.
   const phone = (page.viewportSize()?.width ?? 1440) < 1200;
   const deliver = page.getByRole("button", {
-    name: phone ? "Share to Facebook" : "Copy caption",
+    name: phone ? "Share to Instagram" : "Copy caption",
     exact: true,
   });
   await expect(deliver).toBeEnabled({ timeout: 15_000 });
   await deliver.click();
   await expect.poll(() => state.shares.length).toBe(1);
   expect(state.shares[0]).toMatchObject({
-    channel: "facebook_feed",
+    channel: "instagram_feed",
     via: phone ? "share_sheet" : "copy",
   });
   // A stubbed draft save answers DRAFT_REVISION, so that one is only valid
@@ -497,7 +497,7 @@ test("Create post stores the signature first, Cancel keeps the draft, and the re
   );
   // "Shared" follows a completed share-sheet share only, never a copy.
   if (phone) {
-    await expect(page.getByText("Shared · Facebook", { exact: true })).toBeVisible();
+    await expect(page.getByText("Shared · Instagram", { exact: true })).toBeVisible();
   }
 });
 

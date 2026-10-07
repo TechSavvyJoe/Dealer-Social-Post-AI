@@ -3814,7 +3814,8 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
         if (
           existing[i].getString("channel") === channel &&
           existing[i].getString("via") === via &&
-          existing[i].getString("created") >= dedupeSince
+          existing[i].getString("created") >= dedupeSince &&
+          existing[i].getString("created") >= current.getString("updated")
         ) {
           shared = existing[i];
           deduplicated = true;
@@ -4348,6 +4349,10 @@ routerAdd("GET", "/api/app/posts", (c) => {
     // rejects a JS array inside IN()), in chunks well under SQLite's limit.
     // A failed read leaves every summary null rather than failing the list.
     const shareSummaryByPost = {};
+    const pageRevisionByPost = {};
+    page.forEach((post) => {
+      pageRevisionByPost[post.id] = post.getString("updated");
+    });
     try {
       const pagePostIds = page.map((r) => r.id);
       for (let start = 0; start < pagePostIds.length; start += 200) {
@@ -4375,6 +4380,10 @@ routerAdd("GET", "/api/app/posts", (c) => {
           const postId = (shareRows[i].post || "").toString();
           const shareChannel = (shareRows[i].channel || "").toString();
           if (!postId || !shareChannel) continue;
+          // An older revision's receipt remains in history, but cannot say
+          // this saved copy has been delivered.
+          if ((shareRows[i].created || "").toString() < pageRevisionByPost[postId])
+            continue;
           let summary = shareSummaryByPost[postId];
           if (!summary) {
             // Rows arrive newest first, so the first row seen is the latest.

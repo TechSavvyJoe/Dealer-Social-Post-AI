@@ -367,4 +367,16 @@ describe("useVideoJobs", () => {
     });
     unmount();
   });
+  it("clears leave risk only for the completed clip that was delivered", async () => {
+    const { result } = renderHook(() => useVideoJobs(options()));
+    await act(async () => {
+      await result.current.startVideoJob(VideoStyle.GoldenRadiance, REEL);
+    });
+    expect(result.current.atRisk).toBe(true);
+    act(() => result.current.markVideoDelivered("blob:another-clip"));
+    expect(result.current.atRisk).toBe(true);
+    act(() => result.current.markVideoDelivered("blob:clip-1"));
+    expect(result.current.atRisk).toBe(false);
+    expect(result.current.videoUrl).toBe("blob:clip-1");
+  });
 });

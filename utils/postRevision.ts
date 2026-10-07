@@ -13,10 +13,17 @@ import { useAppStore } from "../stores/appStore";
 export const adoptPostRevision = (
   postId: string | undefined,
   revision: string | undefined,
+  observed?: { revision: string | undefined; authEpoch: number },
 ): void => {
   if (!postId || typeof revision !== "string" || !revision.trim()) return;
   const store = useAppStore.getState();
   const current = store.generatedPost;
+  if (
+    observed &&
+    (store.authEpoch !== observed.authEpoch ||
+      current?.postRevision !== observed.revision)
+  )
+    return;
   if (!current || current.postId !== postId || current.postRevision === revision) {
     return;
   }

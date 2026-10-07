@@ -348,4 +348,36 @@ describe("useWebsiteHandoff", () => {
       "Private website draft queued again.",
     );
   });
+  it("requires a reopen when an enqueue response is lost and the handoff was recorded", async () => {
+    mocks.store.generatedPost = { ...basePost, postRevision: "rev-0" };
+    mocks.getWebsitePublication.mockResolvedValue({ status: "not_requested" });
+    const { result } = renderHook(() =>
+      useWebsiteHandoff({
+        post: basePost,
+        dealerId: "dealer-1",
+        dealer: null,
+        imageBusy: false,
+        textBusy: false,
+        captions: baseCaptions,
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    mocks.enqueueWebsitePublication.mockRejectedValue(new TypeError("Failed to fetch"));
+    mocks.getWebsitePublication.mockResolvedValue({ status: "ready", websiteDraft });
+    await act(async () => {
+      await result.current.send({
+        autosave: stubAutosave(),
+        deliveryLocked: false,
+        deliveryGateMessage: "",
+      });
+    });
+    expect(result.current.revisionRecoveryRequired).toBe(true);
+    expect(result.current.checkError).toContain("Reopen this post");
+    expect(mocks.setGeneratedPost).toHaveBeenCalledWith(
+      expect.objectContaining({ postRevision: undefined }),
+    );
+  });
 });

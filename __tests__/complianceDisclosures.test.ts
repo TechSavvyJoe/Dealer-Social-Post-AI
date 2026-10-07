@@ -342,6 +342,8 @@ const PIN = {
   disclosures: "the compliance disclosures ride with the shared text",
   delivered: "the share hook delivers that content",
   previewProps: "the preview is handed what ships",
+  captionFit:
+    "the preview fits the selected destination budget with protected disclosures",
   previewSplit: "the preview splits the outbound text",
   previewRender: "the preview renders every outbound part, in the order it ships",
   deliveredCaptionFor: "deliveredCaptionFor prepends after appending the disclosures",
@@ -400,7 +402,7 @@ const DELIVERED_STRING_PINS: ReadonlyArray<{
       /\bdisclosures:\s*selectedCaption\?\.disclosures\s*\|\|\s*captionSetAnalysis\.disclosures\s*\|\|\s*undefined\s*,/.test(
         shareContentMemo(s),
       ) &&
-      /^const captionSetAnalysis = useMemo\(\s*\(\)\s*=>\s*analyzeCaptionSetForDelivery\(\s*\[\s*caption\s*,/.test(
+      /^const captionSetAnalysis = useMemo\(\s*\(\)\s*=>\s*analyzeCaptionSetForDelivery\(\s*\[\s*caption\s*\]/.test(
         captionSetAnalysisMemo(s),
       ),
   },
@@ -418,10 +420,25 @@ const DELIVERED_STRING_PINS: ReadonlyArray<{
     holds: (s) =>
       everySite(s, "<PostPreviewCard", "/>", (element) =>
         [
-          "outboundText={shareContent.text}",
+          "outboundText={previewOutboundText}",
           "employeeDisclosure={employeeDisclosure}",
           "disclosures={shareContent.disclosures}",
         ].every((prop) => element.includes(prop)),
+      ),
+  },
+  {
+    id: PIN.captionFit,
+    file: "postScreen",
+    holds: (s) =>
+      /fitPublishCaptionToBudget\(\s*shareContent,/.test(s) &&
+      /PUBLISH_TARGETS\.find\(\(target\) => target\.id === selectedChannelId\)\?\.charBudget/.test(
+        s,
+      ) &&
+      /const preparedCaption = shareContent\.text\.trim\(\) \? fittedCaption : "";/.test(
+        s,
+      ) &&
+      /const previewOutboundText =[\s\S]*?preparedCaption\.slice\(employeeDisclosure\.length\)\.trim\(\)[\s\S]*?: preparedCaption \|\| "";/.test(
+        s,
       ),
   },
   {
@@ -505,8 +522,8 @@ const DELIVERED_STRING_MUTANTS: ReadonlyArray<{
   {
     regression: "falls back to a scan that leaves out the caption on screen",
     file: "postScreen",
-    from: "[caption, ...Object.values(effectivePack || {})]",
-    to: "[...Object.values(effectivePack || {})]",
+    from: "[caption]",
+    to: "[]",
     fault: PIN.disclosures,
   },
   {
@@ -572,7 +589,7 @@ const DELIVERED_STRING_MUTANTS: ReadonlyArray<{
   {
     regression: "previews the editable body",
     file: "postScreen",
-    from: "outboundText={shareContent.text}",
+    from: "outboundText={previewOutboundText}",
     to: "outboundText={caption}",
     fault: PIN.previewProps,
   },
@@ -584,6 +601,20 @@ const DELIVERED_STRING_MUTANTS: ReadonlyArray<{
     from: "onCaptionBlur={() => setEditingCaption(false)}",
     to: "onCaptionBlur={() => setEditingCaption(false)}\n          />\n          <PostPreviewCard\n            outboundText={caption}\n            employeeDisclosure={employeeDisclosure}\n            disclosures={shareContent.disclosures}",
     fault: PIN.previewProps,
+  },
+  {
+    regression: "fits the preview without its required disclosures",
+    file: "postScreen",
+    from: "fitPublishCaptionToBudget(\n        shareContent,",
+    to: "fitPublishCaptionToBudget(\n        { text: caption },",
+    fault: PIN.captionFit,
+  },
+  {
+    regression: "previews a caption before fitting the destination budget",
+    file: "postScreen",
+    from: 'const preparedCaption = shareContent.text.trim() ? fittedCaption : "";',
+    to: 'const preparedCaption = shareContent.text.trim() ? shareContent.text : "";',
+    fault: PIN.captionFit,
   },
   {
     regression: "splits the editable body inside the preview",
@@ -654,8 +685,8 @@ const COMMENTED_OUT_MUTANTS: typeof DELIVERED_STRING_MUTANTS = [
   {
     regression: "comments out the outbound preview prop and previews the body",
     file: "postScreen",
-    from: "outboundText={shareContent.text}",
-    to: "// outboundText={shareContent.text}\n            outboundText={caption}",
+    from: "outboundText={previewOutboundText}",
+    to: "// outboundText={previewOutboundText}\n            outboundText={caption}",
     fault: PIN.previewProps,
   },
   {

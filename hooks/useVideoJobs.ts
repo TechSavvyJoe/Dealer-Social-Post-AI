@@ -23,6 +23,7 @@ export interface VideoJob {
   sourceCreativeKey: string;
   url?: string;
   error?: string;
+  delivered?: boolean;
 }
 
 export interface UseVideoJobsOptions {
@@ -77,6 +78,7 @@ export interface UseVideoJobsResult {
   retryVideoJob: (jobId: string) => Promise<void>;
   /** PostResult's former handleRemoveVideoJob. */
   removeVideoJob: (jobId: string) => void;
+  markVideoDelivered: (url: string) => void;
   /**
    * Brand mode "Add video": the dealership motion signature, not an option
    * matrix. Spec §4.3 — 9:16 · 6s · 720p · music on, style bound to the Look.
@@ -414,13 +416,23 @@ export const useVideoJobs = ({
     setVideoJobs((prev) => prev.filter((job) => job.id !== jobId));
   };
 
+  const markVideoDelivered = useCallback((url: string) => {
+    setVideoJobs((jobs) =>
+      jobs.map((job) =>
+        job.url === url && job.status === "completed"
+          ? { ...job, delivered: true }
+          : job,
+      ),
+    );
+  }, []);
+
   const atRisk =
     isVideoLoading ||
     videoJobs.some(
       (job) =>
         job.status === "queued" ||
         job.status === "processing" ||
-        (job.status === "completed" && Boolean(job.url)),
+        (job.status === "completed" && Boolean(job.url) && !job.delivered),
     );
 
   return {
@@ -443,6 +455,7 @@ export const useVideoJobs = ({
     startVideoJob,
     retryVideoJob,
     removeVideoJob,
+    markVideoDelivered,
     houseMotionOptions,
     atRisk,
   };

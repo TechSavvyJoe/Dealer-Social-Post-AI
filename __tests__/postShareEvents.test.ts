@@ -920,6 +920,23 @@ describe("POST /api/app/posts/:id/shared", () => {
     expect(harness.events).toHaveLength(3);
   });
 
+  it("records a new receipt after an edit even inside the deduplication window", () => {
+    const harness = shareHarness();
+    seedEvent(harness, "event-before-edit", {
+      channel: "facebook_feed",
+      via: "share_sheet",
+      msAgo: 30_000,
+    });
+    const result = harness.run({
+      postOverrides: { updated: dbTime(10_000) },
+      body: { channel: "facebook_feed", via: "share_sheet" },
+    });
+    expect(result.status).toBe(200);
+    expect(result.payload.deduplicated).toBe(false);
+    expect(harness.events).toHaveLength(2);
+    expect(harness.savedRecords).toHaveLength(1);
+  });
+
   it("records the same channel and method again after 60 seconds", () => {
     const harness = shareHarness();
     seedEvent(harness, "event-old", {
@@ -1094,6 +1111,19 @@ describe("GET /api/app/posts share_summary", () => {
     return { result, queries, errors };
   };
 
+  it("keeps earlier revision receipts out of the current saved post's share status", () => {
+    const { result } = runList([
+      {
+        dealer: "dealer-1",
+        post: "post-1",
+        channel: "facebook_feed",
+        via: "share_sheet",
+        created: "2026-09-20 09:00:00.000Z",
+      },
+    ]);
+    expect((result.payload.items as AnyRecord[])[0].share_summary).toBeNull();
+  });
+
   it("projects a derived summary per post, newest first, and null for an unshared post", () => {
     const { result, queries } = runList([
       {
@@ -1137,7 +1167,8 @@ describe("GET /api/app/posts share_summary", () => {
       "2026-09-20 10:00:00.000Z",
     ]);
     expect(items[0].share_summary).toEqual({
-      count: 3,
+      // The copy at 09:00 preceded the saved revision at 10:00.
+      count: 2,
       last_shared_at: "2026-09-22 09:00:00.000Z",
       last_channel: "facebook_feed",
       last_via: "share_sheet",
@@ -1312,6 +1343,7 @@ describe("share_summary client projection", () => {
         channels: ["facebook_feed", 7, "facebook_feed", "instagram_feed"],
       }),
     ).toEqual({
+      // The copy at 09:00 preceded the saved revision at 10:00.
       count: 2,
       last_shared_at: "2026-09-22 09:00:00.000Z",
       last_channel: "facebook_feed",
@@ -1338,6 +1370,7 @@ describe("share_summary client projection", () => {
         last_sheet_at: "2026-09-22 09:00:00.000Z",
       }),
     ).toEqual({
+      // The copy at 09:00 preceded the saved revision at 10:00.
       count: 2,
       last_shared_at: "2026-09-22 10:00:00.000Z",
       last_channel: "instagram_feed",

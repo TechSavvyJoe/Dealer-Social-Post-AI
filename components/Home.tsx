@@ -66,6 +66,7 @@ export const Home: React.FC<HomeProps> = ({
 
   const handleFile = useCallback(
     (file: File, tile: HomeTile) => {
+      if (activeTileRef.current || intake.isProcessing) return;
       activeTileRef.current = tile;
       void intake.processFile(file).finally(() => {
         if (activeTileRef.current === tile) activeTileRef.current = null;
