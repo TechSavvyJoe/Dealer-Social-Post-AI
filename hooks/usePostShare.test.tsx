@@ -149,6 +149,8 @@ describe("usePostShare", () => {
       channel: "facebook_feed",
       via: "share_sheet",
       expectedPostRevision: "revision-1",
+      captionMode: "primary",
+      disclosures: "",
     });
     expect(result.current.feedback?.title).toBe("Shared · Facebook");
     expect(useAppStore.getState().generatedPost?.sharedTo).toHaveLength(1);
@@ -199,11 +201,15 @@ describe("usePostShare", () => {
       channel: "facebook_feed",
       via: "copy",
       expectedPostRevision: "revision-1",
+      captionMode: "primary",
+      disclosures: "",
     });
     expect(mocks.recordPostShared).toHaveBeenCalledWith("post-1", {
       channel: "facebook_feed",
       via: "download",
       expectedPostRevision: "revision-1",
+      captionMode: "primary",
+      disclosures: "",
     });
   });
 
@@ -224,6 +230,8 @@ describe("usePostShare", () => {
       channel: "facebook_feed",
       via: "copy",
       expectedPostRevision: "revision-2",
+      captionMode: "primary",
+      disclosures: "",
     });
   });
 
@@ -601,6 +609,8 @@ describe("usePostShare", () => {
         channel: "facebook_feed",
         via: "share_sheet",
         expectedPostRevision: "revision-1",
+        captionMode: "primary",
+        disclosures: "",
       });
 
       // A flapping connection while the retry is still in flight adds nothing.
@@ -647,6 +657,8 @@ describe("usePostShare", () => {
       channel: "facebook_feed",
       via: "share_sheet",
       expectedPostRevision: "revision-1",
+      captionMode: "primary",
+      disclosures: "",
     });
   });
 
@@ -688,6 +700,8 @@ describe("usePostShare", () => {
       channel: "facebook_feed",
       via: "share_sheet",
       expectedPostRevision: "revision-1",
+      captionMode: "primary",
+      disclosures: "",
     });
   });
 
@@ -714,6 +728,8 @@ describe("usePostShare", () => {
       channel: "facebook_feed",
       via: "share_sheet",
       expectedPostRevision: "revision-1",
+      captionMode: "primary",
+      disclosures: "",
     });
   });
 

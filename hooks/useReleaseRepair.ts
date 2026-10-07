@@ -87,19 +87,40 @@ export const useReleaseRepair = ({
         const current = store.generatedPost;
         if (!current || current.postId === postId) {
           const base = current || sourcePost;
+          let revision = linked.post_revision;
+          if (base.postRevision !== observedRevision) {
+            // PocketBase revisions are server timestamps. Either operation
+            // may commit last, independently of when its response arrives.
+            const currentTime = Date.parse((base.postRevision || "").replace(" ", "T"));
+            const linkedTime = Date.parse(
+              (linked.post_revision || "").replace(" ", "T"),
+            );
+            revision =
+              Number.isFinite(currentTime) && Number.isFinite(linkedTime)
+                ? linkedTime > currentTime
+                  ? linked.post_revision
+                  : (base.postRevision as string)
+                : "";
+          }
           store.setGeneratedPost({
             ...base,
-            postRevision:
-              base.postRevision === observedRevision
-                ? linked.post_revision
-                : base.postRevision,
+            postRevision: revision || undefined,
             releaseStatus: "saved",
             releaseLinkStatus: undefined,
           });
         }
-        toast.success(
-          "Photo release saved to this post. Copy, share, save, and export are unlocked.",
-        );
+        if (!current || current.postId === postId) {
+          const live = useAppStore.getState().generatedPost;
+          if (live && !live.postRevision) {
+            toast.warning(
+              "Photo release saved. Reopen this post from My work before sharing.",
+            );
+          } else {
+            toast.success(
+              "Photo release saved to this post. Copy, share, save, and export are unlocked.",
+            );
+          }
+        }
       } catch (error) {
         logError("photo_release.link_retry_failed", {
           message: error instanceof Error ? error.message : String(error),

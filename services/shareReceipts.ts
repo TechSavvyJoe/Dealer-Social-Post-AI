@@ -12,6 +12,8 @@ export interface ShareReceipt {
   via: PostShareVia;
   /** Revision of the exact saved copy that was shared. */
   expectedPostRevision: string;
+  captionMode?: "primary";
+  disclosures?: string;
 }
 
 interface PendingReceipt extends ShareReceipt {
@@ -89,6 +91,8 @@ const retryPendingReceipts = (online: boolean): void => {
       channel: pending.channel,
       via: pending.via,
       expectedPostRevision: pending.expectedPostRevision,
+      captionMode: pending.captionMode,
+      disclosures: pending.disclosures,
     })
       .then((recorded) => {
         adoptReceiptRevision(
@@ -135,6 +139,8 @@ export const submitShareReceipt = async (receipt: ShareReceipt): Promise<void> =
       channel: receipt.channel,
       via: receipt.via,
       expectedPostRevision: receipt.expectedPostRevision,
+      captionMode: receipt.captionMode,
+      disclosures: receipt.disclosures,
     });
     adoptReceiptRevision(
       receipt.postId,

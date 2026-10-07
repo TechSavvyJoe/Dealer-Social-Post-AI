@@ -893,6 +893,90 @@ describe("POST /api/app/posts/:id/shared", () => {
     });
   });
 
+  it("records the visible approved caption without delivering hidden legacy variants", () => {
+    const postOverrides = {
+      approval_status: "approved",
+      platform_captions: JSON.stringify({
+        facebook_feed: "Guaranteed credit approval for everyone",
+      }),
+    };
+    const primary = shareHarness().run({
+      postOverrides,
+      body: {
+        channel: "facebook_feed",
+        via: "share_sheet",
+        caption_mode: "primary",
+        disclosures: "",
+      },
+    });
+    expect(primary.status).toBe(200);
+    const legacy = shareHarness().run({
+      postOverrides,
+      body: { channel: "facebook_feed", via: "share_sheet" },
+    });
+    expect(legacy.payload.code).toBe("CLAIMS_BLOCKED");
+  });
+
+  it("validates the actual canonical primary footer instead of a hidden variant's stored footer", () => {
+    const caption = "Congrats Michelle! Lease yours for $299/mo.";
+    const footer = realPolicies.canonicalPostComplianceSet([
+      caption,
+    ]).required_disclosures;
+    const result = shareHarness().run({
+      postOverrides: {
+        approval_status: "approved",
+        caption,
+        disclosures: "legacy-footer",
+        platform_captions: JSON.stringify({
+          facebook_feed: "Guaranteed credit approval",
+        }),
+      },
+      body: {
+        channel: "facebook_feed",
+        via: "copy",
+        caption_mode: "primary",
+        disclosures: footer,
+      },
+    });
+    expect(result.status).toBe(200);
+  });
+
+  it("enforces prohibited claims and canonical footers for the single visible caption", () => {
+    const invalid = shareHarness().run({
+      postOverrides: { caption: "Guaranteed credit approval" },
+      body: {
+        channel: "facebook_feed",
+        via: "copy",
+        caption_mode: "primary",
+        disclosures: "",
+      },
+    });
+    expect(invalid.payload.code).toBe("CLAIMS_BLOCKED");
+    const finance = shareHarness().run({
+      postOverrides: { caption: "Lease yours for $299/mo." },
+      body: {
+        channel: "facebook_feed",
+        via: "copy",
+        caption_mode: "primary",
+        disclosures: "",
+      },
+    });
+    expect(finance.payload.code).toBe("CLAIMS_BLOCKED");
+    expect(finance.payload.message).toContain("canonical");
+  });
+
+  it("requires an explicit valid caption mode rather than downgrading unknown clients", () => {
+    const result = shareHarness().run({
+      body: {
+        channel: "facebook_feed",
+        via: "copy",
+        caption_mode: "variants-disabled",
+      },
+    });
+    expect(result.status).toBe(400);
+    expect(result.payload.code).toBe("INVALID_SHARE_CAPTION_MODE");
+  });
+
   it("deduplicates the same channel and method within 60 seconds", () => {
     const harness = shareHarness();
     seedEvent(harness, "event-recent", {
@@ -920,9 +1004,9 @@ describe("POST /api/app/posts/:id/shared", () => {
     expect(harness.events).toHaveLength(3);
   });
 
-  it("records a new receipt after an edit even inside the deduplication window", () => {
+  it("preserves deduplication after metadata advances the post revision", () => {
     const harness = shareHarness();
-    seedEvent(harness, "event-before-edit", {
+    seedEvent(harness, "event-before-metadata", {
       channel: "facebook_feed",
       via: "share_sheet",
       msAgo: 30_000,
@@ -932,9 +1016,9 @@ describe("POST /api/app/posts/:id/shared", () => {
       body: { channel: "facebook_feed", via: "share_sheet" },
     });
     expect(result.status).toBe(200);
-    expect(result.payload.deduplicated).toBe(false);
-    expect(harness.events).toHaveLength(2);
-    expect(harness.savedRecords).toHaveLength(1);
+    expect(result.payload.deduplicated).toBe(true);
+    expect(harness.events).toHaveLength(1);
+    expect(harness.savedRecords).toHaveLength(0);
   });
 
   it("records the same channel and method again after 60 seconds", () => {
@@ -1111,7 +1195,7 @@ describe("GET /api/app/posts share_summary", () => {
     return { result, queries, errors };
   };
 
-  it("keeps earlier revision receipts out of the current saved post's share status", () => {
+  it("retains valid share history after a metadata-only revision change", () => {
     const { result } = runList([
       {
         dealer: "dealer-1",
@@ -1121,7 +1205,10 @@ describe("GET /api/app/posts share_summary", () => {
         created: "2026-09-20 09:00:00.000Z",
       },
     ]);
-    expect((result.payload.items as AnyRecord[])[0].share_summary).toBeNull();
+    expect((result.payload.items as AnyRecord[])[0].share_summary).toMatchObject({
+      count: 1,
+      sheet_count: 1,
+    });
   });
 
   it("projects a derived summary per post, newest first, and null for an unshared post", () => {
@@ -1167,8 +1254,8 @@ describe("GET /api/app/posts share_summary", () => {
       "2026-09-20 10:00:00.000Z",
     ]);
     expect(items[0].share_summary).toEqual({
-      // The copy at 09:00 preceded the saved revision at 10:00.
-      count: 2,
+      // Metadata timestamps never hide valid receipts for this creative.
+      count: 3,
       last_shared_at: "2026-09-22 09:00:00.000Z",
       last_channel: "facebook_feed",
       last_via: "share_sheet",
@@ -1291,6 +1378,38 @@ describe("recordPostShared", () => {
     expect(recorded).toMatchObject({ channel: "facebook_feed", deduplicated: false });
   });
 
+  it("declares the one visible caption and the footer actually delivered", async () => {
+    setActiveAuthEpoch(703);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({
+          id: "post-1",
+          channel: "facebook_feed",
+          via: "copy",
+          shared_at: "now",
+          deduplicated: false,
+          post_revision: "revision-1",
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    await recordPostShared("post-1", {
+      channel: "facebook_feed",
+      via: "copy",
+      expectedPostRevision: "revision-1",
+      captionMode: "primary",
+      disclosures: "Required footer",
+    });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({
+      channel: "facebook_feed",
+      via: "copy",
+      expected_post_revision: "revision-1",
+      caption_mode: "primary",
+      disclosures: "Required footer",
+    });
+  });
+
   it("surfaces a locked post as an error instead of a recorded share", async () => {
     setActiveAuthEpoch(702);
     vi.stubGlobal(
@@ -1343,7 +1462,6 @@ describe("share_summary client projection", () => {
         channels: ["facebook_feed", 7, "facebook_feed", "instagram_feed"],
       }),
     ).toEqual({
-      // The copy at 09:00 preceded the saved revision at 10:00.
       count: 2,
       last_shared_at: "2026-09-22 09:00:00.000Z",
       last_channel: "facebook_feed",
@@ -1370,7 +1488,6 @@ describe("share_summary client projection", () => {
         last_sheet_at: "2026-09-22 09:00:00.000Z",
       }),
     ).toEqual({
-      // The copy at 09:00 preceded the saved revision at 10:00.
       count: 2,
       last_shared_at: "2026-09-22 10:00:00.000Z",
       last_channel: "instagram_feed",

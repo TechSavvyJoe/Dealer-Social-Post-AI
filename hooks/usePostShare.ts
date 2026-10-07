@@ -223,10 +223,13 @@ export const usePostShare = ({
         channel: channelId,
         via,
         expectedPostRevision: expectedPostRevision as string,
+        captionMode: "primary",
+        disclosures: content.disclosures || "",
       });
     },
     [
       channelId,
+      content.disclosures,
       expectedPostRevision,
       mergeLocalShare,
       post.historyReadOnly,

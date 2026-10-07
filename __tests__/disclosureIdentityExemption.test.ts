@@ -740,7 +740,7 @@ describe("POST /api/app/posts saves a customer post that carries disclosures", (
 const runDraft = (
   body: AnyRecord,
   postOverrides: AnyRecord = {},
-  options: { omitExpectedRevision?: boolean } = {},
+  options: { omitExpectedRevision?: boolean; creativeFile?: boolean } = {},
 ) => {
   const source = routeSource(
     'routerAdd("PATCH", "/api/app/posts/:id/draft"',
@@ -748,11 +748,17 @@ const runDraft = (
   );
   const post = fakeRecord("post-1", storedPost(postOverrides));
   const saved: AnyRecord[] = [];
+  const queries: string[] = [];
   const log = vi.fn();
   const txDao = {
     db: () => ({
-      newQuery: () => ({
-        bind: () => ({ execute: () => ({ rowsAffected: () => 1 }) }),
+      newQuery: (sql: string) => ({
+        bind: () => ({
+          execute: () => {
+            queries.push(sql);
+            return { rowsAffected: () => 1 };
+          },
+        }),
       }),
     }),
     findRecordById: () => post,
@@ -778,7 +784,7 @@ const runDraft = (
           },
         }),
       },
-      $filesystem: {},
+      $filesystem: { fileFromMultipart: () => ({ name: "new-image.jpg" }) },
       RecordUpsertForm: function RecordUpsertForm() {
         let data: AnyRecord = {};
         return {
@@ -797,10 +803,49 @@ const runDraft = (
       findPublicationForPostWithDaoStrict: () => null,
     },
   );
-  return { result: handler(routeRequest()), saved, log };
+  return {
+    result: handler(
+      routeRequest({ formFile: () => (options.creativeFile ? {} : null) }),
+    ),
+    saved,
+    log,
+    queries,
+  };
 };
 
 describe("PATCH /api/app/posts/:id/draft", () => {
+  it("retains receipts when an unchanged draft only advances metadata", () => {
+    const valid = storedPost();
+    const { result, queries } = runDraft({
+      caption: valid.caption,
+      disclosures: valid.disclosures,
+      platform_captions: valid.platform_captions,
+    });
+    expect(result.status).toBe(200);
+    expect(queries.some((sql) => sql.startsWith("DELETE FROM post_share_events"))).toBe(
+      false,
+    );
+  });
+
+  it.each([false, true])(
+    "invalidates current-creative receipts atomically for a changed caption or image (%s)",
+    (creativeFile) => {
+      const valid = storedPost();
+      const caption = creativeFile ? valid.caption : "Another happy delivery!";
+      const { result, queries } = runDraft(
+        {
+          caption,
+          disclosures: creativeFile ? valid.disclosures : "",
+          platform_captions: JSON.stringify({ facebook_feed: caption }),
+        },
+        {},
+        { creativeFile },
+      );
+      expect(result.status).toBe(200);
+      expect(queries).toContain("DELETE FROM post_share_events WHERE post = {:post}");
+    },
+  );
+
   it("accepts an absent legacy revision but rejects a stale supplied revision", () => {
     const valid = storedPost();
     const legacy = runDraft(

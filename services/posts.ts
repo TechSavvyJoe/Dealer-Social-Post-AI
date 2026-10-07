@@ -799,6 +799,9 @@ export interface RecordPostSharedInput {
   via: PostShareVia;
   /** Revision of the exact saved copy that was exported. */
   expectedPostRevision: string;
+  /** One visible caption, with its actual protected footer; absent for legacy clients. */
+  captionMode?: "primary";
+  disclosures?: string;
 }
 
 export interface RecordedPostShare {
@@ -832,6 +835,9 @@ export const recordPostShared = async (
         channel: input.channel,
         via: input.via,
         expected_post_revision: input.expectedPostRevision,
+        ...(input.captionMode
+          ? { caption_mode: input.captionMode, disclosures: input.disclosures || "" }
+          : {}),
       }),
     },
   );

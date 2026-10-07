@@ -3305,12 +3305,27 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
       ) {
         throw new Error("website_draft_already_sent");
       }
+      const creativeChanged =
+        !!creativeFile ||
+        current.getString("caption") !== caption ||
+        current.getString("disclosures") !== disclosures ||
+        current.getString("platform_captions") !== parsedPlatformCaptions.serialized;
       const form = new RecordUpsertForm($app, current);
       form.setFullManageAccess(true);
       form.setDao(txDao);
       form.loadData(draftData);
       if (creativeFile) form.addFiles("creative_image", creativeFile);
       form.submit();
+      if (creativeChanged) {
+        // These bounded receipts describe the current creative. Clear them
+        // with the edit, while consent, approval, and website metadata writes
+        // retain valid deliveries of the same image and copy.
+        txDao
+          .db()
+          .newQuery("DELETE FROM post_share_events WHERE post = {:post}")
+          .bind({ post: current.id })
+          .execute();
+      }
       savedRecord = txDao.findRecordById("posts", current.id);
     });
 
@@ -3576,6 +3591,21 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
   }
   const channel = typeof body.channel === "string" ? body.channel.trim() : "";
   const via = typeof body.via === "string" ? body.via.trim() : "";
+  // Current clients deliver one visible caption. Older clients omit this and
+  // keep the full stored-variant policy until their compatibility window ends.
+  if (body.caption_mode !== undefined && body.caption_mode !== "primary") {
+    return c.json(400, {
+      error: "INVALID_SHARE_CAPTION_MODE",
+      code: "INVALID_SHARE_CAPTION_MODE",
+    });
+  }
+  const primaryCaptionMode = body.caption_mode === "primary";
+  if (primaryCaptionMode && typeof body.disclosures !== "string") {
+    return c.json(400, {
+      error: "INVALID_SHARE_DISCLOSURES",
+      code: "INVALID_SHARE_DISCLOSURES",
+    });
+  }
   // Phase A rollout compatibility mirrors draft saves: only true absence gets
   // the record revision loaded for this request. A malformed supplied value
   // never downgrades to legacy behavior, and the transaction rechecks either
@@ -3657,8 +3687,8 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
   }
 
   try {
-    // Both copy locks below read the stored caption set: the caption and
-    // every selected destination's caption.
+    // A current client declares its single visible caption and actual footer;
+    // legacy clients retain validation of all stored destination variants.
     const websitePublications = require(__hooks + "/websitePublications.js");
     const allowedPlatformIds = helpers.allowedPostPlatformIds();
     let platformIds = [];
@@ -3682,14 +3712,23 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
       ? parsedPlatformCaptions.value
       : {};
 
+    const deliveryCaptions = primaryCaptionMode
+      ? [record.getString("caption")]
+      : [record.getString("caption")].concat(Object.values(platformCaptions));
+    const deliveryDisclosures = primaryCaptionMode
+      ? typeof body.disclosures === "string"
+        ? body.disclosures
+        : ""
+      : record.getString("disclosures");
+
     // The claim lock the result screen enforces (utils/postLocks.ts), under
     // the current server policy: prohibited claims, this dealership's blocked
     // wording as configured now, and the canonical disclosures, over the same
     // stored caption set the draft save and the approval decision validate. A
     // phrase the dealership blocks after the post was saved locks it here too.
     const compliance = policies.validatePostComplianceSet(
-      [record.getString("caption")].concat(Object.values(platformCaptions)),
-      record.getString("disclosures"),
+      deliveryCaptions,
+      deliveryDisclosures,
       dealer.getString("banned_phrases"),
     );
     if (!compliance.ok) {
@@ -3745,9 +3784,7 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
     const copyReview = policies.reviewCustomerIdentityExcludingDisclosures(
       websitePublications.reviewPostCustomerIdentity,
       protectedCustomerName,
-      [record.getString("caption"), record.getString("disclosures")].concat(
-        Object.keys(platformCaptions).map((id) => platformCaptions[id]),
-      ),
+      deliveryCaptions.concat([deliveryDisclosures]),
       [
         websitePublications.groundedIdentityPhrase(dealer.getString("name")),
         websitePublications.groundedIdentityPhrase(dealer.getString("oem_affiliation")),
@@ -3814,8 +3851,7 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
         if (
           existing[i].getString("channel") === channel &&
           existing[i].getString("via") === via &&
-          existing[i].getString("created") >= dedupeSince &&
-          existing[i].getString("created") >= current.getString("updated")
+          existing[i].getString("created") >= dedupeSince
         ) {
           shared = existing[i];
           deduplicated = true;
@@ -4349,10 +4385,6 @@ routerAdd("GET", "/api/app/posts", (c) => {
     // rejects a JS array inside IN()), in chunks well under SQLite's limit.
     // A failed read leaves every summary null rather than failing the list.
     const shareSummaryByPost = {};
-    const pageRevisionByPost = {};
-    page.forEach((post) => {
-      pageRevisionByPost[post.id] = post.getString("updated");
-    });
     try {
       const pagePostIds = page.map((r) => r.id);
       for (let start = 0; start < pagePostIds.length; start += 200) {
@@ -4380,10 +4412,6 @@ routerAdd("GET", "/api/app/posts", (c) => {
           const postId = (shareRows[i].post || "").toString();
           const shareChannel = (shareRows[i].channel || "").toString();
           if (!postId || !shareChannel) continue;
-          // An older revision's receipt remains in history, but cannot say
-          // this saved copy has been delivered.
-          if ((shareRows[i].created || "").toString() < pageRevisionByPost[postId])
-            continue;
           let summary = shareSummaryByPost[postId];
           if (!summary) {
             // Rows arrive newest first, so the first row seen is the latest.
