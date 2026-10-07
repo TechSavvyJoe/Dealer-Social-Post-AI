@@ -27,7 +27,9 @@ export default defineConfig({
   // developer laptop when Playwright expands to every core. Two local workers
   // retain useful parallelism while keeping the full device matrix repeatable.
   workers: process.env.CI ? 1 : 2,
-  reporter: "html",
+  // CI prints each test by name as it finishes, so a run cut off by the job's
+  // time limit still shows which test failed; the HTML report stays local.
+  reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "html",
   use: {
     baseURL: externalBaseUrl || "http://localhost:5173",
     trace: "on-first-retry",

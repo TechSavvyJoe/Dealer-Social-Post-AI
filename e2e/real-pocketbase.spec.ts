@@ -154,8 +154,21 @@ const setupBoardRow = (page: Page, dealerName: string) =>
 
 const openSetupBoardStore = async (page: Page, dealerName: string) => {
   const opener = setupBoardRow(page, dealerName).getByRole("button");
-  // The board may be remounting after a session swap (sign-in, exit).
-  await expect(opener).toBeVisible({ timeout: 15_000 });
+  // The board may be remounting after a session swap (sign-in, exit). Over
+  // loopback http this test installs the swapped cookie itself (production
+  // gets it with the response), so the board's list request can race the
+  // swap. One reload settles it on the installed session; it is recorded so
+  // a board that needs it is never silent.
+  try {
+    await expect(opener).toBeVisible({ timeout: 10_000 });
+  } catch {
+    test.info().annotations.push({
+      type: "setup-board-reload",
+      description: `"${dealerName}" was not on the board 10 s after a session swap; reloaded once`,
+    });
+    await page.reload();
+    await expect(opener).toBeVisible({ timeout: 15_000 });
+  }
   if ((await opener.getAttribute("aria-expanded")) !== "true") await opener.click();
   await expect(opener).toHaveAttribute("aria-expanded", "true");
   const detailId = await opener.getAttribute("aria-controls");

@@ -68,7 +68,8 @@ jobs:
   playwright:
     name: Playwright e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 368 tests (Chromium and WebKit at eight sizes) on one worker.
+    timeout-minutes: 25
     needs: typecheck-and-test
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

@@ -757,6 +757,9 @@ test("My work reopens a saved post and shares it with the disclosure first", asy
 });
 
 test("system admin sees AI connections and setup guidance", async ({ page }, info) => {
+  // The axe scan of the long Connections page (setup steps open) passes 30 s
+  // on CI's phone projects; the settings test below needs the same room.
+  test.setTimeout(90_000);
   await fixture(page, "super_admin");
   await page.getByRole("tab", { name: "Connections" }).click();
   await expect(
