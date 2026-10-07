@@ -666,6 +666,44 @@ describe("replace logo", { timeout: 90_000 }, () => {
     // It saved at once; the settings form has nothing unsaved.
     expect(saveButton()).toBeDisabled();
   });
+
+  it("says the logo size reaches new photos once the first logo is uploaded", async () => {
+    const newLogo = "/api/files/dealers/dealer-1/logo_first_x1.png";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ dealer: { id: dealer.id, logo: newLogo } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    renderDashboard({
+      ...dealer,
+      logo: undefined,
+      logo_placement: { corner: "top_left", scale: 0.25 },
+    });
+    openSettings();
+    openSection("Creative");
+    fireEvent.click(screen.getByRole("button", { name: "Video and advanced" }));
+    // No logo yet: generation would use a text watermark and ask for no size.
+    expect(
+      screen.getByText(
+        "Percent of the photo width. Once you upload a logo, new designed photos ask for it at about this size.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.change(fileInput(), {
+      target: { files: [new File(["png"], "logo.png", { type: "image/png" })] },
+    });
+
+    expect(await screen.findByText("Logo updated")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Percent of the photo width. New designed photos ask for your logo at about this size.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("New designed photos ask for your logo in this corner."),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("every control that existed is still there", { timeout: 90_000 }, () => {

@@ -46,6 +46,7 @@ const mocks = vi.hoisted(() => ({
   usePostShare: vi.fn(),
   usePostLeaveGuard: vi.fn(),
   useWebsiteHandoff: vi.fn(),
+  useDraftAutosave: vi.fn(),
   creativeTryAnother: vi.fn(async () => undefined),
   creativeChangeLook: vi.fn(async () => undefined),
   creativeAddVideo: vi.fn(async () => undefined),
@@ -157,13 +158,16 @@ vi.mock("../hooks/useDraftAutosave", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../hooks/useDraftAutosave")>();
   return {
     DRAFT_CONFLICT_MESSAGE: actual.DRAFT_CONFLICT_MESSAGE,
-    useDraftAutosave: () => ({
-      status: mocks.autosaveStatus,
-      flush: vi.fn(async () => true),
-      retry: vi.fn(async () => true),
-      stage: vi.fn(),
-      lastRevisionRef: { current: "revision-1" },
-    }),
+    useDraftAutosave: (options: unknown) => {
+      mocks.useDraftAutosave(options);
+      return {
+        status: mocks.autosaveStatus,
+        flush: vi.fn(async () => true),
+        retry: vi.fn(async () => true),
+        stage: vi.fn(),
+        lastRevisionRef: { current: "revision-1" },
+      };
+    },
   };
 });
 vi.mock("../hooks/useWebsiteHandoff", () => ({
@@ -1057,6 +1061,38 @@ describe("PostScreen", () => {
       expect(outboundParts().find((part) => part.part === "body")?.text).toBe(
         content.text,
       );
+    });
+
+    it("opens an older post with saved per-channel captions and ships the caption on screen to every channel", async () => {
+      const user = userEvent.setup();
+      // Saved before the app stopped writing a caption per channel.
+      const savedCaptions = {
+        facebook_feed: "Maria picked up her Bronco today at Bob Maxey Ford of Howell!",
+        instagram_feed:
+          "Maria just drove off in her new Bronco! #BroncoNation #NewRide",
+      };
+      renderScreen({ post: { ...basePost, platformCaptions: savedCaptions } });
+
+      // Autosave and the website step still read the saved captions as before.
+      expect(mocks.useDraftAutosave).toHaveBeenLastCalledWith(
+        expect.objectContaining({ effectivePack: savedCaptions }),
+      );
+      expect(mocks.useWebsiteHandoff).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          captions: expect.objectContaining({ effectivePack: savedCaptions }),
+        }),
+      );
+
+      await waitFor(() => expect(lastShareOptions().channelId).toBe("facebook_feed"));
+      const facebook = lastShareOptions().content.text;
+      expect(facebook).toContain("Congratulations to Maria on her new Bronco.");
+      expect(facebook).not.toContain("picked up her Bronco today");
+
+      await user.click(screen.getByRole("button", { name: "Instagram" }));
+      await waitFor(() => expect(lastShareOptions().channelId).toBe("instagram_feed"));
+      const instagram = lastShareOptions().content.text;
+      expect(instagram).toContain("Congratulations to Maria on her new Bronco.");
+      expect(instagram).not.toContain("#BroncoNation");
     });
 
     it("hands the employee disclosure and the analysed disclosures to every share", () => {

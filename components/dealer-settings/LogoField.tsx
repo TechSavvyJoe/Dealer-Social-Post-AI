@@ -37,6 +37,37 @@ const readSavedLogo = async (dealerId: string): Promise<string | null> => {
   }
 };
 
+/**
+ * What the corner does, true for the form as it stands: generation asks the
+ * image model for the store's logo in the saved corner and size
+ * (services/logoPlacement.ts), and leaves the corner to the model when none
+ * is saved. "Ask for" because the model can still place it elsewhere.
+ */
+const placementHelp = (hasLogo: boolean, corner: LogoCorner | ""): string => {
+  if (!hasLogo) {
+    return "Once you upload a logo, new designed photos ask for it in the corner you pick.";
+  }
+  return corner
+    ? "New designed photos ask for your logo in this corner."
+    : "No corner picked, so each new designed photo picks one for your logo.";
+};
+
+/**
+ * The Logo size helper, true under the same rule as the corner's: the size
+ * reaches a prompt only with a corner picked and a logo on file. With no logo,
+ * generation uses the store name as a text watermark and asks for no size.
+ */
+export const logoSizeHelp = (hasLogo: boolean, corner: LogoCorner | ""): string => {
+  if (!corner) {
+    return hasLogo
+      ? "Percent of the photo width. Pick a corner under Placement on photos to use it."
+      : "Percent of the photo width. Upload a logo and pick a corner under Placement on photos to use it.";
+  }
+  return hasLogo
+    ? "Percent of the photo width. New designed photos ask for your logo at about this size."
+    : "Percent of the photo width. Once you upload a logo, new designed photos ask for it at about this size.";
+};
+
 interface LogoFieldProps {
   /** The saved record: the logo shown is the one on file. */
   dealer: Dealer;
@@ -230,7 +261,7 @@ export const LogoField: React.FC<LogoFieldProps> = ({
           })}
         </div>
         <p id={placementHelpId} className={cn("mt-2", ROW_HELPER)}>
-          Saved for your store. Designed photos do not use it yet.
+          {placementHelp(Boolean(shownLogo), corner)}
         </p>
         {corner ? (
           <div>

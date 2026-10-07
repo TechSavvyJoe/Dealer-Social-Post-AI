@@ -11,6 +11,7 @@ import {
   AppStep,
   GeneratedPost,
   ImageQualityTier,
+  LogoCornerCheck,
   MediaOutputMode,
   GenerationParams,
   SignatureLook,
@@ -28,6 +29,7 @@ import {
 } from "../services/publishPipeline";
 import type { DealerBrandKit } from "../utils/brandKit";
 import { logEvent, logError } from "../utils/telemetry";
+import { resolveImageQualityTier } from "../utils/imageQualityTier";
 import type { CapturedRelease } from "../services/photoReleases";
 import type { DecodedVehicle } from "../services/vinDecoder";
 import type { PlatformId, PrimaryImageProfile } from "../services/platformCopy";
@@ -212,6 +214,41 @@ export const mergeCaptionProvenance = (
   };
 };
 
+/**
+ * Swap only the logo-corner note on the image provenance after Regenerate
+ * image, Fun mode or Edit image. The rest of `aiMeta.image` (its attempt id
+ * keys the unsaved workspace) is left as it is. No note when the new image's
+ * corner is not known. Older saved posts may carry no image provenance at all
+ * (see mergeCaptionProvenance); they keep their metadata as it is.
+ */
+const withImageLogoCorner = (
+  current: GeneratedPost["aiMeta"] | undefined,
+  logoCorner: LogoCornerCheck | undefined,
+): GeneratedPost["aiMeta"] | undefined => {
+  if (!current?.image) return current;
+  const { logoCorner: previous, ...image } = current.image;
+  if (!previous && !logoCorner) return current;
+  return { ...current, image: logoCorner ? { ...image, logoCorner } : image };
+};
+
+/**
+ * The per-channel captions a post keeps after its caption is regenerated or
+ * AI-edited. One caption ships to every channel, and an older post's saved
+ * variants were written for the caption being replaced, so every saved
+ * channel now carries the new caption. The channel keys stay: a draft saved
+ * before platform_ids existed reopens its channel list from them
+ * (resolveHistoryPlatformIds). The Post screen does the same for a typed edit.
+ */
+const captionForSavedChannels = (
+  saved: Record<string, string> | undefined,
+  caption: string,
+): Record<string, string> | undefined => {
+  const channels = Object.keys(saved || {});
+  return channels.length > 0
+    ? Object.fromEntries(channels.map((channel) => [channel, caption]))
+    : undefined;
+};
+
 export interface GenerationMeta {
   salespersonName?: string;
   /** When the salesperson was picked from the dealer's roster, this is the salespeople record id. */
@@ -255,8 +292,8 @@ export interface GenerationMeta {
  *    when it was stored by an earlier attempt, because a retry reuses its id.
  *  - `design`: consent is settled and the provider is producing the caption
  *    and the image in parallel. `partsReady` says which half has landed.
- *  - `checks`: the identity guard, the prohibited-claims sanitizer, the
- *    destination caption pack and the private website draft.
+ *  - `checks`: the identity guard, the prohibited-claims sanitizer and the
+ *    private website draft.
  *  - `saving`: logPost (approval submission included), then the release link.
  */
 export type GenerationStage = "idle" | "signature" | "design" | "checks" | "saving";
@@ -384,7 +421,7 @@ export const useGeneration = () => {
     generatedPost,
     generationParams,
     preferredTone,
-    imageQualityTier,
+    deviceImageQualityTier,
     authEpoch,
     setGeneratedPost,
     setGenerationParams,
@@ -397,7 +434,7 @@ export const useGeneration = () => {
       generatedPost: state.generatedPost,
       generationParams: state.generationParams,
       preferredTone: state.preferredTone,
-      imageQualityTier: state.imageQualityTier,
+      deviceImageQualityTier: state.imageQualityTier,
       authEpoch: state.authEpoch,
       setGeneratedPost: state.setGeneratedPost,
       setGenerationParams: state.setGenerationParams,
@@ -405,6 +442,13 @@ export const useGeneration = () => {
       setStep: state.setStep,
     })),
   );
+  // Every image generation, regeneration and provenance record below uses
+  // this tier: the store's choice when a manager set one, otherwise this
+  // device's own setting.
+  const imageQualityTier = resolveImageQualityTier(
+    currentDealer?.image_quality_tier,
+    deviceImageQualityTier,
+  ).tier;
 
   const { runGeminiTask, loadGeminiService } = useGemini();
 
@@ -607,6 +651,7 @@ export const useGeneration = () => {
               params.meta?.customerIdentityRequired ?? true,
               signal,
               (part) => markPartReady(params.run, part),
+              currentDealer.logo_placement,
             );
           };
           // Cancel aborts the queued or running provider task.
@@ -734,16 +779,12 @@ export const useGeneration = () => {
       const pipeline = await loadPublishPipeline();
       if (variables.run.cancelled) return;
       const {
-        analyzeCaptionSetForDelivery,
         buildFallbackWebsiteDraft,
         buildWebsiteDraftPrompt,
         deliveryLanguageAllowedForBrief,
         logPost,
-        parsePlatformCaptionPack,
         parseWebsiteDraftResponse,
-        platformsToCaptionPackBrief,
         prepareCaptionForDelivery,
-        shouldGenerateCaptionPack,
         toPublicCustomerLabel,
       } = pipeline;
 
@@ -821,86 +862,16 @@ export const useGeneration = () => {
         imageAspectRatio: variables.imageAspectRatio,
       };
 
-      // Destination copy can run together after the approved primary
-      // caption/image exists. Both paths own safe fallbacks and never block the
-      // main post. Website preparation remains a private draft only.
-      const shouldPrepareCaptionPack =
-        shouldGenerateCaptionPack(platformIds) &&
-        Boolean(selectedImage && currentDealer);
+      // One caption ships to every channel (the Post screen shares the caption
+      // on screen), so no per-channel variants are written here. Website
+      // preparation runs after the approved primary caption/image exists, owns
+      // a safe fallback, never blocks the main post and stays a private draft.
       const shouldPrepareWebsite = Boolean(
         variables.meta?.websiteEnabled && currentDealer && finalPost.image,
       );
-      if (shouldPrepareCaptionPack || shouldPrepareWebsite) {
-        setProgressMessage("Finishing destination copy...");
+      if (shouldPrepareWebsite) {
+        setProgressMessage("Preparing the website draft...");
       }
-
-      const captionPackTask = async (): Promise<Record<string, string> | undefined> => {
-        if (!shouldPrepareCaptionPack || !selectedImage || !currentDealer) {
-          return undefined;
-        }
-        try {
-          const packBrief = platformsToCaptionPackBrief(
-            platformIds,
-            currentDealer.name,
-            preparedCaption.caption,
-          );
-          assertOperationAuthEpoch(variables.authEpoch);
-          const { generatePlatformCaptionPack } = await loadGeminiService();
-          assertOperationAuthEpoch(variables.authEpoch);
-          const rawPack = await runGeminiTask(
-            "ai.caption.pack",
-            (signal) => {
-              assertOperationAuthEpoch(variables.authEpoch);
-              return generatePlatformCaptionPack(
-                selectedImage,
-                packBrief,
-                variables.customerName,
-                variables.meta?.customerIdentityRequired ?? true,
-                signal,
-              );
-            },
-            undefined,
-            variables.run.controller.signal,
-          );
-          assertOperationAuthEpoch(variables.authEpoch);
-          const parsed = parsePlatformCaptionPack(rawPack, platformIds);
-          const cleaned: Record<string, string> = {};
-          for (const [id, caption] of Object.entries(parsed)) {
-            try {
-              const prepared = prepareCaptionForDelivery(
-                caption,
-                currentDealer.banned_phrases,
-                brandKitFromDealer(currentDealer),
-                deliveryLanguageAllowed,
-              );
-              if (
-                !customerIdentityIsSafe(pipeline, {
-                  caption: prepared.caption,
-                  customerName: finalPost.customerDisplayName,
-                  dealerName: currentDealer.name,
-                  oemAffiliation: currentDealer.oem_affiliation,
-                  vehicleDescription: variables.meta?.websiteVehicleDescription,
-                  identityRequired: finalPost.customerIdentityRequired,
-                })
-              ) {
-                continue;
-              }
-              cleaned[id] = prepared.caption;
-            } catch {
-              // Skip prohibited variants; primary caption remains usable.
-            }
-          }
-          return Object.keys(cleaned).length > 0 ? cleaned : undefined;
-        } catch (err) {
-          // A cancelled run aborted this call on purpose; it is not a failure.
-          if (variables.run.cancelled) return undefined;
-          logError("caption.pack_failed", {
-            message: err instanceof Error ? err.message : String(err),
-            platforms: platformIds,
-          });
-          return undefined;
-        }
-      };
 
       const websiteDraftTask = async () => {
         if (!shouldPrepareWebsite || !currentDealer) {
@@ -924,7 +895,6 @@ export const useGeneration = () => {
           assertOperationAuthEpoch(variables.authEpoch);
           const { generateWebsiteDraftMetadata } = await loadGeminiService();
           assertOperationAuthEpoch(variables.authEpoch);
-          // This call intentionally runs beside the queued caption-pack call.
           // The proxy/model layer owns retries; malformed JSON is handled by
           // the strict parser below.
           logEvent("ai.website.draft.start", {
@@ -951,19 +921,7 @@ export const useGeneration = () => {
         }
       };
 
-      const [platformCaptions, websiteDraft] = await Promise.all([
-        captionPackTask(),
-        websiteDraftTask(),
-      ]);
-      if (platformCaptions) {
-        finalPost.platformCaptions = platformCaptions;
-        const disclosureUnion = analyzeCaptionSetForDelivery(
-          [finalPost.text, ...Object.values(platformCaptions)],
-          currentDealer?.banned_phrases,
-        );
-        finalPost.disclosures = disclosureUnion.disclosures;
-        finalPost.disclosureCategories = disclosureUnion.disclosureCategories;
-      }
+      const websiteDraft = await websiteDraftTask();
       if (websiteDraft) finalPost.websiteDraft = websiteDraft;
       if (variables.authEpoch !== useAppStore.getState().authEpoch) return;
       // Last point where a cancel means nothing was created (B5).
@@ -1010,7 +968,6 @@ export const useGeneration = () => {
               imageAttemptId: finalPost.aiMeta?.image.attemptId,
               platformIds: finalPost.platformIds,
               mediaOutputMode: finalPost.mediaOutputMode,
-              platformCaptions: finalPost.platformCaptions,
               primaryFormatId: finalPost.primaryFormatId,
               imageAspectRatio: finalPost.imageAspectRatio,
               websiteDraft: finalPost.websiteDraft,
@@ -1339,6 +1296,8 @@ export const useGeneration = () => {
             request.customerIdentityRequired,
           ),
           signal,
+          undefined,
+          currentDealer.logo_placement,
         );
       });
       assertOperationAuthEpoch(operationAuthEpoch);
@@ -1354,13 +1313,14 @@ export const useGeneration = () => {
         operationAuthEpoch,
         image,
         params: override,
+        logoCorner: result.aiMeta.image.logoCorner,
       };
     },
     onMutate: () => setError(null),
     // This control promises an image-only refresh. Preserve the caption,
     // disclosure, release, approval, and owner-scoped post metadata rather
     // than replacing the entire reviewed result with the provider response.
-    onSuccess: ({ workspaceKey, operationAuthEpoch, image, params }) => {
+    onSuccess: ({ workspaceKey, operationAuthEpoch, image, params, logoCorner }) => {
       if (
         operationAuthEpoch !== useAppStore.getState().authEpoch ||
         !workspaceIsCurrent(workspaceKey)
@@ -1369,7 +1329,11 @@ export const useGeneration = () => {
       const currentPost = useAppStore.getState().generatedPost;
       if (currentPost) {
         if (params) useAppStore.getState().setGenerationParams(params);
-        setPostImage({ ...currentPost, image });
+        setPostImage({
+          ...currentPost,
+          image,
+          aiMeta: withImageLogoCorner(currentPost.aiMeta, logoCorner),
+        });
       }
     },
     onError: (err) => {
@@ -1492,6 +1456,7 @@ export const useGeneration = () => {
             ).imageAspectRatio,
           generationParams?.creativeBrief,
           signal,
+          currentDealer.logo_placement,
         );
       });
       assertOperationAuthEpoch(operationAuthEpoch);
@@ -1517,7 +1482,13 @@ export const useGeneration = () => {
       )
         return;
       const currentPost = useAppStore.getState().generatedPost;
-      if (currentPost) setPostImage({ ...currentPost, image });
+      // The earlier image's logo-corner note no longer describes this one.
+      if (currentPost)
+        setPostImage({
+          ...currentPost,
+          image,
+          aiMeta: withImageLogoCorner(currentPost.aiMeta, undefined),
+        });
     },
     onError: (err) => {
       const normalized = normalizeError(err);
@@ -1559,6 +1530,7 @@ export const useGeneration = () => {
               sourcePost.platformIds ?? generationParams?.platformIds,
             ).imageAspectRatio,
           signal,
+          currentDealer.logo_placement,
         );
       });
       assertOperationAuthEpoch(operationAuthEpoch);
@@ -1584,7 +1556,13 @@ export const useGeneration = () => {
       )
         return;
       const currentPost = useAppStore.getState().generatedPost;
-      if (currentPost) setPostImage({ ...currentPost, image });
+      // The earlier image's logo-corner note no longer describes this one.
+      if (currentPost)
+        setPostImage({
+          ...currentPost,
+          image,
+          aiMeta: withImageLogoCorner(currentPost.aiMeta, undefined),
+        });
     },
     onError: (err) => {
       const normalized = normalizeError(err);
@@ -1599,125 +1577,6 @@ export const useGeneration = () => {
       await editImageMutation.mutateAsync(editPrompt);
     },
     [editImageMutation],
-  );
-
-  /** Rebuild multi-platform pack for the current primary caption (non-fatal). */
-  const rebuildCaptionPack = useCallback(
-    async (
-      primaryCaption: string,
-      platformIds: string[],
-      operationAuthEpoch: number,
-    ): Promise<
-      | {
-          captions: Record<string, string>;
-          disclosures: string;
-          disclosureCategories: GeneratedPost["disclosureCategories"];
-        }
-      | undefined
-    > => {
-      // Callers reach this from mutations that already loaded the pipeline,
-      // so this await resolves from the memoized promise.
-      const pipeline = await loadPublishPipeline();
-      const {
-        analyzeCaptionSetForDelivery,
-        deliveryLanguageAllowedForBrief,
-        parsePlatformCaptionPack,
-        platformsToCaptionPackBrief,
-        prepareCaptionForDelivery,
-        shouldGenerateCaptionPack,
-        toPublicCustomerLabel,
-      } = pipeline;
-      if (!shouldGenerateCaptionPack(platformIds) || !selectedImage || !currentDealer) {
-        return undefined;
-      }
-      try {
-        assertOperationAuthEpoch(operationAuthEpoch);
-        const packBrief = platformsToCaptionPackBrief(
-          platformIds,
-          currentDealer.name,
-          primaryCaption,
-        );
-        const customerIdentityRequired = resolveCustomerIdentityRequired(
-          useAppStore.getState().generatedPost?.customerIdentityRequired,
-          generationParams?.customerIdentityRequired,
-        );
-        const { generatePlatformCaptionPack } = await loadGeminiService();
-        assertOperationAuthEpoch(operationAuthEpoch);
-        const rawPack = await runGeminiTask("ai.caption.pack", (signal) => {
-          assertOperationAuthEpoch(operationAuthEpoch);
-          return generatePlatformCaptionPack(
-            selectedImage,
-            packBrief,
-            generationParams?.customerName,
-            customerIdentityRequired,
-            signal,
-          );
-        });
-        assertOperationAuthEpoch(operationAuthEpoch);
-        const parsed = parsePlatformCaptionPack(rawPack, platformIds);
-        const cleaned: Record<string, string> = {};
-        const kit = brandKitFromDealer(currentDealer);
-        const deliveryLanguageAllowed = deliveryLanguageAllowedForBrief(
-          generationParams?.creativeBrief,
-          customerIdentityRequired,
-        );
-        const publicCustomer =
-          useAppStore.getState().generatedPost?.customerDisplayName ||
-          toPublicCustomerLabel(generationParams?.customerName);
-        for (const [id, caption] of Object.entries(parsed)) {
-          try {
-            const prepared = prepareCaptionForDelivery(
-              caption,
-              currentDealer.banned_phrases,
-              kit,
-              deliveryLanguageAllowed,
-            );
-            if (
-              !customerIdentityIsSafe(pipeline, {
-                caption: prepared.caption,
-                customerName: publicCustomer,
-                dealerName: currentDealer.name,
-                oemAffiliation: currentDealer.oem_affiliation,
-                vehicleDescription: generationParams?.websiteVehicleDescription,
-                identityRequired: resolveCustomerIdentityRequired(
-                  useAppStore.getState().generatedPost?.customerIdentityRequired,
-                  generationParams?.customerIdentityRequired,
-                ),
-              })
-            ) {
-              continue;
-            }
-            cleaned[id] = prepared.caption;
-          } catch {
-            /* skip prohibited variant */
-          }
-        }
-        if (Object.keys(cleaned).length === 0) return undefined;
-        const disclosureUnion = analyzeCaptionSetForDelivery(
-          [primaryCaption, ...Object.values(cleaned)],
-          currentDealer.banned_phrases,
-        );
-        return {
-          captions: cleaned,
-          disclosures: disclosureUnion.disclosures,
-          disclosureCategories: disclosureUnion.disclosureCategories,
-        };
-      } catch (err) {
-        logError("caption.pack_rebuild_failed", {
-          message: err instanceof Error ? err.message : String(err),
-          platforms: platformIds,
-        });
-        return undefined;
-      }
-    },
-    [
-      selectedImage,
-      currentDealer,
-      generationParams,
-      preferredTone,
-      loadGeminiService,
-      runGeminiTask,
-    ],
   );
 
   const regenerateTextMutation = useMutation({
@@ -1777,17 +1636,10 @@ export const useGeneration = () => {
         throw new Error(customerIdentityErrorFor(pipeline, offendingRegenerated));
       }
       const platformIds = generationParams.platformIds ?? sourcePost.platformIds ?? [];
-      const pack = await rebuildCaptionPack(
-        prepared.caption,
-        platformIds,
-        operationAuthEpoch,
-      );
-      assertOperationAuthEpoch(operationAuthEpoch);
       return {
         workspaceKey,
         operationAuthEpoch,
         prepared,
-        pack,
         platformIds,
         captionResult,
       };
@@ -1797,7 +1649,6 @@ export const useGeneration = () => {
       workspaceKey,
       operationAuthEpoch,
       prepared,
-      pack,
       platformIds,
       captionResult,
     }) => {
@@ -1818,11 +1669,13 @@ export const useGeneration = () => {
           captionResult,
           imageQualityTier,
         ),
-        platformCaptions: pack?.captions,
+        platformCaptions: captionForSavedChannels(
+          currentPost.platformCaptions,
+          prepared.caption,
+        ),
         platformIds: platformIds.length > 0 ? platformIds : currentPost.platformIds,
-        disclosures: pack?.disclosures ?? prepared.disclosures,
-        disclosureCategories:
-          pack?.disclosureCategories ?? prepared.disclosureCategories,
+        disclosures: prepared.disclosures,
+        disclosureCategories: prepared.disclosureCategories,
       });
     },
     onError: (err) => {
@@ -2025,17 +1878,11 @@ export const useGeneration = () => {
       ) {
         throw new Error(customerIdentityError);
       }
-      const platformIds = sourcePost.platformIds ?? [];
-      const pack = platformId
-        ? undefined
-        : await rebuildCaptionPack(prepared.caption, platformIds, operationAuthEpoch);
-      assertOperationAuthEpoch(operationAuthEpoch);
       return {
         workspaceKey,
         operationAuthEpoch,
         platformId,
         prepared,
-        pack,
         captionResult,
       };
     },
@@ -2045,7 +1892,6 @@ export const useGeneration = () => {
       operationAuthEpoch,
       platformId,
       prepared,
-      pack,
       captionResult,
     }) => {
       if (
@@ -2084,10 +1930,12 @@ export const useGeneration = () => {
           captionResult,
           imageQualityTier,
         ),
-        disclosures: pack?.disclosures ?? prepared.disclosures,
-        disclosureCategories:
-          pack?.disclosureCategories ?? prepared.disclosureCategories,
-        platformCaptions: pack?.captions,
+        disclosures: prepared.disclosures,
+        disclosureCategories: prepared.disclosureCategories,
+        platformCaptions: captionForSavedChannels(
+          currentPost.platformCaptions,
+          prepared.caption,
+        ),
       });
     },
     onError: (err) => {

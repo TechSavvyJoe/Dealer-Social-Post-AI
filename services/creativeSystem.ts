@@ -62,8 +62,10 @@ export const LOOK_DEFINITIONS: Readonly<Record<SignatureLook, LookDefinition>> =
   Object.freeze({
     showroom: Object.freeze({
       label: "Showroom",
+      // No Look names a logo corner: the store's own corner
+      // (dealer.logo_placement, services/logoPlacement.ts) decides it.
       description:
-        "Premium and composed. Clean type, logo bottom-right, warm key light.",
+        "Premium and composed. Clean type, logo in the corner, warm key light.",
       style: StyleOption.Luxury,
       tone: ToneOption.Professional,
       motionStyle: VideoStyle.GoldenRadiance,

@@ -14,6 +14,7 @@ import {
 } from "../types";
 import { loadSession, saveSession, clearSession } from "../utils/persistence";
 import { setProxyCapabilities } from "../services/proxyCapabilities";
+import { adoptStoreImageSettings } from "../utils/storeImageSettings";
 import { MODEL_POLICY_VERSION } from "../services/modelConfig";
 // Removed duplicate import
 import { logEvent, logError } from "../utils/telemetry";
@@ -178,6 +179,13 @@ interface AppState {
    */
   startRemix: () => void;
   restoreSession: () => Promise<void>;
+  /**
+   * Re-read the session and adopt the store's image settings (image quality,
+   * logo corner and size, logo) when a manager changed them after this app
+   * signed in. Nothing else in the session or the workflow changes, and a
+   * failed or mismatched read changes nothing.
+   */
+  refreshStoreImageSettings: () => Promise<void>;
   applyAuthPayload: (body: {
     role?: string;
     dealer?: Dealer;
@@ -196,6 +204,9 @@ const stepForRole = (role: UserRole): AppStep => {
 };
 
 const SESSION_REQUEST_TIMEOUT_MS = 8_000;
+
+/** The store image settings read in flight (refreshStoreImageSettings). */
+let storeImageSettingsRead: Promise<void> | null = null;
 
 export const resolveRestoredCustomerIdentityRequired = (
   generatedPostValue?: boolean,
@@ -890,6 +901,46 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       set({ isRestoringSession: false });
     }
+  },
+
+  refreshStoreImageSettings: () => {
+    const started = get();
+    const dealer = started.currentDealer;
+    if (!dealer || started.isRestoringSession) return Promise.resolve();
+    // The app regaining the screen fires both visibilitychange and focus.
+    if (storeImageSettingsRead) return storeImageSettingsRead;
+    storeImageSettingsRead = (async () => {
+      try {
+        const res = await fetchSession({ method: "GET" });
+        if (!res.ok) return;
+        const body = (await res.json()) as {
+          role?: unknown;
+          dealer?: unknown;
+          person?: { id?: unknown } | null;
+          is_impersonation?: unknown;
+        };
+        const now = get();
+        // Apply only to the same signed-in person and the same dealer object
+        // the read started from: a sign-out, a switch of person, or a local
+        // settings save or logo upload during the read wins over it.
+        if (
+          now.authEpoch !== started.authEpoch ||
+          now.currentDealer !== dealer ||
+          ((body.role as UserRole) || "salesperson") !== now.role ||
+          (body.person?.id ?? null) !== (now.currentPerson?.id ?? null) ||
+          !!body.is_impersonation !== now.isImpersonating
+        ) {
+          return;
+        }
+        const next = adoptStoreImageSettings(dealer, body.dealer);
+        if (next !== dealer) set({ currentDealer: next });
+      } catch {
+        // Nothing changes; the next return to the app reads again.
+      } finally {
+        storeImageSettingsRead = null;
+      }
+    })();
+    return storeImageSettingsRead;
   },
 }));
 

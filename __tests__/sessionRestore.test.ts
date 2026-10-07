@@ -281,3 +281,162 @@ describe("proxy capability negotiation", () => {
     expect(proxyCapabilities()).toEqual({});
   });
 });
+
+describe("a teammate's open app picks up the store's image settings", () => {
+  const signedIn = {
+    id: "dealer-1",
+    name: "Northside Motors",
+    logo: "/api/files/dealers/dealer-1/logo_old.png",
+    logo_placement: null,
+    image_quality_tier: "studio" as const,
+  };
+  const workPost = { image: "data:image/png;base64,d29yaw==", text: "Draft caption" };
+  /** What a manager's save left on the server. */
+  const managerChanged = {
+    ...signedIn,
+    name: "Northside Motors (renamed)",
+    logo: "/api/files/dealers/dealer-1/logo_new.png",
+    logo_placement: { corner: "top_left", scale: 0.25 },
+    image_quality_tier: "standard",
+  };
+  const sessionAnswer = (body: Record<string, unknown>, status = 200) => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  };
+  const salesperson = {
+    role: "salesperson",
+    person: { id: "person-1" },
+    is_impersonation: false,
+  };
+
+  const signIn = () =>
+    useAppStore.setState({
+      currentDealer: { ...signedIn },
+      currentPerson: { id: "person-1", name: "Sam", role: "salesperson" } as never,
+      role: "salesperson",
+      isImpersonating: false,
+      isRestoringSession: false,
+      generatedPost: workPost,
+      step: AppStep.POST,
+    });
+
+  it("adopts the new image quality, logo corner and size, and logo, and nothing else", async () => {
+    signIn();
+    const fetchMock = sessionAnswer({ ...salesperson, dealer: managerChanged });
+
+    await useAppStore.getState().refreshStoreImageSettings();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/app/session",
+      expect.objectContaining({ method: "GET" }),
+    );
+    const state = useAppStore.getState();
+    expect(state.currentDealer).toEqual({
+      ...signedIn,
+      logo: managerChanged.logo,
+      logo_placement: managerChanged.logo_placement,
+      image_quality_tier: "standard",
+    });
+    // The work on screen is untouched.
+    expect(state.generatedPost).toBe(workPost);
+    expect(state.step).toBe(AppStep.POST);
+  });
+
+  it("reads once when the screen and the window both report the app is back", async () => {
+    signIn();
+    const fetchMock = sessionAnswer({ ...salesperson, dealer: managerChanged });
+
+    await Promise.all([
+      useAppStore.getState().refreshStoreImageSettings(),
+      useAppStore.getState().refreshStoreImageSettings(),
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(useAppStore.getState().currentDealer?.image_quality_tier).toBe("standard");
+  });
+
+  it.each([
+    {
+      label: "the session was rejected",
+      body: { error: "Invalid session" },
+      status: 401,
+    },
+    { label: "the server failed", body: { error: "UNAVAILABLE" }, status: 503 },
+    {
+      label: "the cookie now belongs to another person",
+      body: { ...salesperson, person: { id: "person-2" }, dealer: managerChanged },
+      status: 200,
+    },
+    {
+      label: "the cookie now has another role",
+      body: { ...salesperson, role: "dealer_admin", dealer: managerChanged },
+      status: 200,
+    },
+    {
+      label: "the cookie now belongs to another store",
+      body: { ...salesperson, dealer: { ...managerChanged, id: "dealer-2" } },
+      status: 200,
+    },
+  ])("changes nothing when $label", async ({ body, status }) => {
+    signIn();
+    const before = useAppStore.getState().currentDealer;
+    sessionAnswer(body, status);
+
+    await useAppStore.getState().refreshStoreImageSettings();
+
+    expect(useAppStore.getState().currentDealer).toBe(before);
+  });
+
+  it("lets a local save or a sign-out during the read win", async () => {
+    signIn();
+    let answer!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            answer = resolve;
+          }),
+      ),
+    );
+    const read = useAppStore.getState().refreshStoreImageSettings();
+    // This manager saved Studio while the read was in flight.
+    const saved = { ...signedIn, image_quality_tier: "studio" as const };
+    useAppStore.setState({ currentDealer: saved });
+    answer(
+      new Response(JSON.stringify({ ...salesperson, dealer: managerChanged }), {
+        status: 200,
+      }),
+    );
+    await read;
+    expect(useAppStore.getState().currentDealer).toBe(saved);
+
+    signIn();
+    const secondRead = useAppStore.getState().refreshStoreImageSettings();
+    useAppStore.setState({ authEpoch: useAppStore.getState().authEpoch + 1 });
+    answer(
+      new Response(JSON.stringify({ ...salesperson, dealer: managerChanged }), {
+        status: 200,
+      }),
+    );
+    await secondRead;
+    expect(useAppStore.getState().currentDealer?.image_quality_tier).toBe("studio");
+  });
+
+  it("does not read while signed out or while the session is being restored", async () => {
+    const fetchMock = sessionAnswer({ ...salesperson, dealer: managerChanged });
+    useAppStore.setState({ currentDealer: null });
+    await useAppStore.getState().refreshStoreImageSettings();
+    signIn();
+    useAppStore.setState({ isRestoringSession: true });
+    await useAppStore.getState().refreshStoreImageSettings();
+    expect(fetchMock).not.toHaveBeenCalled();
+    useAppStore.setState({ isRestoringSession: false });
+  });
+});

@@ -166,15 +166,81 @@ describe("dealer Brand section", () => {
     expect(screen.queryByText(/creative resolver/)).toBeNull();
   });
 
-  it("states that each device still uses its own image quality", () => {
+  it("says the store's image quality applies to the whole team and what Studio costs", () => {
     renderSettings();
     openCreative(true);
     expect(
       screen.getByText(
-        "Your choice is saved for the store. For now, each device still uses its own image quality setting.",
+        "Your choice applies to every new image your team creates. Studio asks for more detailed 4K images, which cost more per image.",
       ),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/higher-cost tier/)).toBeNull();
+    // Generation now reads the store's tier, so the old disclaimer is untrue.
+    expect(screen.queryByText(/each device still uses/)).toBeNull();
+  });
+
+  it("says new designed photos ask for the logo in the corner and at the size picked", () => {
+    renderSettings({ ...baseDealer, logo: "/api/files/dealers/dealer-1/logo.png" });
+    openCreative(true);
+    expect(
+      screen.getByText(
+        "No corner picked, so each new designed photo picks one for your logo.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Percent of the photo width. Pick a corner under Placement on photos to use it.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Top left" }));
+    expect(
+      screen.getByText("New designed photos ask for your logo in this corner."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Percent of the photo width. New designed photos ask for your logo at about this size.",
+      ),
+    ).toBeInTheDocument();
+    // Generation now reads the corner and size, so the old disclaimer is untrue.
+    expect(screen.queryByText(/do not use it yet/i)).toBeNull();
+  });
+
+  it("says the corner applies once a logo is uploaded when the store has none", () => {
+    renderSettings();
+    openCreative();
+    expect(
+      screen.getByText(
+        "Once you upload a logo, new designed photos ask for it in the corner you pick.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("never says the size reaches photos while the store has no logo", () => {
+    // With no logo, generation uses the store name as a text watermark and asks
+    // for no size, so neither helper may claim the size is used yet.
+    renderSettings({
+      ...baseDealer,
+      logo_placement: { corner: "top_left", scale: 0.25 },
+    });
+    openCreative(true);
+    expect(
+      screen.getByText(
+        "Once you upload a logo, new designed photos ask for it in the corner you pick.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Percent of the photo width. Once you upload a logo, new designed photos ask for it at about this size.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/ask for your logo at about this size/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(
+      screen.getByText(
+        "Percent of the photo width. Upload a logo and pick a corner under Placement on photos to use it.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("says what the creative-system switch changes when it is on", () => {

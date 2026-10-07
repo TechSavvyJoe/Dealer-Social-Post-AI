@@ -9,12 +9,7 @@ export {
   prepareCaptionForDelivery,
 } from "../utils/complianceDisclosures";
 export { linkReleaseToPost, runWithPersistedPhotoRelease } from "./photoReleases";
-export {
-  parsePlatformCaptionPack,
-  platformsToCaptionPackBrief,
-  resolvePrimaryImageProfile,
-  shouldGenerateCaptionPack,
-} from "./platformCopy";
+export { resolvePrimaryImageProfile } from "./platformCopy";
 export { EXPORT_FORMATS, renderFormat } from "../utils/multiFormatExport";
 export {
   captionUsesOnlyExpectedCustomer,

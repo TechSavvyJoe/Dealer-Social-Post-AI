@@ -15,7 +15,7 @@ import {
   soundtracks as motionAudioOptions,
   styles as motionStyleOptions,
 } from "../video-director/constants";
-import { LogoField } from "./LogoField";
+import { LogoField, logoSizeHelp } from "./LogoField";
 import { SamplePhoto } from "./SamplePhoto";
 import {
   HEX_RE,
@@ -70,6 +70,8 @@ export const CreativeSection: React.FC<CreativeSectionProps> = ({
 }) => {
   const { values, draft } = form;
   const lookOn = isCreativeSystemEnabled(dealer);
+  // The session record: a logo uploaded here is merged into it at once.
+  const hasLogo = Boolean(dealer.logo);
   const lookHeadingId = useId();
   const secondLookName = useId();
   const imageQualityName = useId();
@@ -376,7 +378,7 @@ export const CreativeSection: React.FC<CreativeSectionProps> = ({
             <SettingRow
               label="Logo size"
               labelFor
-              helper="Percent of the photo width. Saved for your store; designed photos do not use it yet."
+              helper={logoSizeHelp(hasLogo, form.logoCorner)}
             >
               {({ controlId, helperId }) => (
                 <div className="flex w-full items-center gap-3 sm:w-[12.5rem]">
@@ -405,7 +407,7 @@ export const CreativeSection: React.FC<CreativeSectionProps> = ({
             </SettingRow>
             <SettingRow
               label="Image quality"
-              helper="Your choice is saved for the store. For now, each device still uses its own image quality setting."
+              helper="Your choice applies to every new image your team creates. Studio asks for more detailed 4K images, which cost more per image."
             >
               {({ labelId, helperId }) => (
                 <div
