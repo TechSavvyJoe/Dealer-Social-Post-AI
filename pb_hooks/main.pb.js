@@ -3133,29 +3133,11 @@ routerAdd("PATCH", "/api/app/posts/:id/draft", (c) => {
     }
 
     const body = $apis.requestInfo(c).data || {};
-    // Phase A rollout compatibility: an older installed frontend omits this
-    // field entirely. Bind that request to the revision loaded above, then
-    // apply the same transaction recheck. Once the sender rollout is proven,
-    // Phase C removes this absence-only fallback.
-    const revisionWasSupplied = Object.prototype.hasOwnProperty.call(
-      body,
-      "expected_post_revision",
-    );
-    if (!revisionWasSupplied) {
-      // Stage C's release gate: strict enforcement ships only after these
-      // lines stop appearing in the production log for the rollout window.
-      console.log("[revision-legacy-client] route=draft post=" + record.id);
-    }
-    const expectedPostRevision = revisionWasSupplied
-      ? typeof body.expected_post_revision === "string"
+    const expectedPostRevision =
+      typeof body.expected_post_revision === "string"
         ? body.expected_post_revision.trim()
-        : ""
-      : record.getString("updated");
-    if (
-      (revisionWasSupplied && typeof body.expected_post_revision !== "string") ||
-      !expectedPostRevision ||
-      expectedPostRevision.length > 80
-    ) {
+        : "";
+    if (!expectedPostRevision || expectedPostRevision.length > 80) {
       return c.json(409, {
         error: "Reload this saved post before editing it.",
         code: "POST_DRAFT_REVISION_REQUIRED",
@@ -3576,19 +3558,10 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
   }
   const channel = typeof body.channel === "string" ? body.channel.trim() : "";
   const via = typeof body.via === "string" ? body.via.trim() : "";
-  // Phase A rollout compatibility mirrors draft saves: only true absence gets
-  // the record revision loaded for this request. A malformed supplied value
-  // never downgrades to legacy behavior, and the transaction rechecks either
-  // token after taking the post write fence.
-  const revisionWasSupplied = Object.prototype.hasOwnProperty.call(
-    body,
-    "expected_post_revision",
-  );
-  const expectedPostRevision = revisionWasSupplied
-    ? typeof body.expected_post_revision === "string"
+  const expectedPostRevision =
+    typeof body.expected_post_revision === "string"
       ? body.expected_post_revision.trim()
-      : ""
-    : record.getString("updated");
+      : "";
   if (helpers.allowedPostPlatformIds().indexOf(channel) === -1) {
     return c.json(400, {
       error: "INVALID_SHARE_CHANNEL",
@@ -3603,11 +3576,7 @@ routerAdd("POST", "/api/app/posts/:id/shared", (c) => {
       message: "Unknown share method.",
     });
   }
-  if (
-    (revisionWasSupplied && typeof body.expected_post_revision !== "string") ||
-    !expectedPostRevision ||
-    expectedPostRevision.length > 80
-  ) {
+  if (!expectedPostRevision || expectedPostRevision.length > 80) {
     return c.json(409, {
       error: "Save or reload this post before recording its share.",
       code: "POST_SHARE_REVISION_REQUIRED",

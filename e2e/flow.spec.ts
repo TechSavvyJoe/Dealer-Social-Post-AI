@@ -932,7 +932,9 @@ test.describe("Dealer Social Post AI Flow", () => {
           return {
             barTop: bar ? bar.getBoundingClientRect().top : null,
             captionTop: firstLine ? firstLine.getBoundingClientRect().top : null,
-            lineHeight: firstLine ? parseFloat(getComputedStyle(firstLine).lineHeight) : null,
+            lineHeight: firstLine
+              ? parseFloat(getComputedStyle(firstLine).lineHeight)
+              : null,
           };
         });
         expect(captionGeometry.barTop, "the share bar is fixed").not.toBeNull();
@@ -1013,7 +1015,11 @@ test.describe("Dealer Social Post AI Flow", () => {
       if (path === "/api/app/session")
         return reply({
           role: "salesperson",
-          dealer: { id: "qa-dealer", name: "Northline Motors", requires_approval: false },
+          dealer: {
+            id: "qa-dealer",
+            name: "Northline Motors",
+            requires_approval: false,
+          },
           person: {
             id: "qa-person",
             dealer: "qa-dealer",
@@ -1048,7 +1054,10 @@ test.describe("Dealer Social Post AI Flow", () => {
       (window as unknown as { __clipboardWrites: string[] }).__clipboardWrites = [];
       (window as unknown as { __downloads: string[] }).__downloads = [];
       // This browser has no Web Share API at all.
-      Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
+      Object.defineProperty(navigator, "share", {
+        configurable: true,
+        value: undefined,
+      });
       Object.defineProperty(navigator, "canShare", {
         configurable: true,
         value: undefined,
@@ -1163,7 +1172,8 @@ test.describe("Dealer Social Post AI Flow", () => {
     await expect
       .poll(() =>
         page.evaluate(
-          () => (window as unknown as { __clipboardWrites: string[] }).__clipboardWrites,
+          () =>
+            (window as unknown as { __clipboardWrites: string[] }).__clipboardWrites,
         ),
       )
       .toHaveLength(1);
@@ -1174,10 +1184,14 @@ test.describe("Dealer Social Post AI Flow", () => {
     await save.click();
     await expect
       .poll(() =>
-        page.evaluate(() => (window as unknown as { __downloads: string[] }).__downloads),
+        page.evaluate(
+          () => (window as unknown as { __downloads: string[] }).__downloads,
+        ),
       )
       .toEqual(["dealer-social-qa-post-1-facebook-feed-photo-4x5-1080x1350.jpg"]);
-    await expect.poll(() => shares.map((share) => share.via)).toEqual(["copy", "download"]);
+    await expect
+      .poll(() => shares.map((share) => share.via))
+      .toEqual(["copy", "download"]);
     for (const share of shares) {
       expect(share).toMatchObject({ channel: "facebook_feed" });
       expect(["2026-08-05 09:43:00.000Z", draftRevision]).toContain(

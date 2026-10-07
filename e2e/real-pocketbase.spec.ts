@@ -96,7 +96,10 @@ const handOffSessionSwapsToLoopbackShim = async (
     /** The dealer_session cookie the server minted for this swap's response. */
     mintedCookie: (response: Response): string => {
       const minted = mintedBy.get(response.request());
-      expect(minted, "the session swap should mint a dealer_session cookie").toBeTruthy();
+      expect(
+        minted,
+        "the session swap should mint a dealer_session cookie",
+      ).toBeTruthy();
       return `dealer_session=${minted || ""}`;
     },
   };
@@ -419,7 +422,9 @@ test.describe("real PocketBase release flow", () => {
       storeDetail.getByRole("heading", { name: /^\d+ things? left to set up$/ }),
     ).toBeVisible();
     await expect(storeDetail.getByText("Brand voice", { exact: true })).toBeVisible();
-    await expect(storeDetail.getByRole("button", { name: "Open Voice" })).toBeDisabled();
+    await expect(
+      storeDetail.getByRole("button", { name: "Open Voice" }),
+    ).toBeDisabled();
     await expect(
       storeDetail.getByText("This store has no active manager yet."),
     ).toBeVisible();
@@ -442,7 +447,9 @@ test.describe("real PocketBase release flow", () => {
     const saveNotesResponse = await saveNotesPromise;
     expect(saveNotesResponse.status()).toBe(200);
     await expect(storeDetail.getByText(/^Saved /)).toBeVisible();
-    await expect(storeDetail.getByRole("button", { name: "Save notes" })).toHaveCount(0);
+    await expect(storeDetail.getByRole("button", { name: "Save notes" })).toHaveCount(
+      0,
+    );
 
     await installLoopbackSessionCookie(context, page, adminCookie);
     await page.reload({ waitUntil: "networkidle" });
@@ -729,7 +736,9 @@ test.describe("real PocketBase release flow", () => {
 
     await openSettingsSection("Voice");
     await expect(samplePost().getByText(expectedFooter)).toHaveCount(0);
-    await managerSettingsCard.getByLabel("Footer", { exact: true }).fill(expectedFooter);
+    await managerSettingsCard
+      .getByLabel("Footer", { exact: true })
+      .fill(expectedFooter);
     await expect(
       samplePost().locator('[data-part="footer"]').getByText(expectedFooter, {
         exact: true,
@@ -769,10 +778,12 @@ test.describe("real PocketBase release flow", () => {
       expectedFooter,
     );
     // Setup notes belong to the system admin alone; no session payload carries them.
-    expect(Object.hasOwn(managerSessionAfterSave.dealer as JsonObject, "setup_notes")).toBe(
-      false,
+    expect(
+      Object.hasOwn(managerSessionAfterSave.dealer as JsonObject, "setup_notes"),
+    ).toBe(false);
+    expect(JSON.stringify(managerSessionAfterSave)).not.toContain(
+      `E2E setup notes ${suffix}`,
     );
-    expect(JSON.stringify(managerSessionAfterSave)).not.toContain(`E2E setup notes ${suffix}`);
 
     // The explicit loopback session probe above also receives PocketBase's
     // production Secure refresh cookie. Restore the HTTP-only test shim before
@@ -1239,13 +1250,18 @@ test.describe("real PocketBase release flow", () => {
     expect(deepLinkResponse.status()).toBe(200);
     const deepLinked = (await deepLinkResponse.json()) as JsonObject;
     expect(deepLinked.is_impersonation).toBe(true);
-    expectSessionPersonSummary(deepLinked.person, { name: managerName, role: "manager" });
+    expectSessionPersonSummary(deepLinked.person, {
+      name: managerName,
+      role: "manager",
+    });
     expect(JSON.stringify(deepLinked)).not.toContain("setup_notes");
     expect(JSON.stringify(deepLinked)).not.toContain(`E2E setup notes ${suffix}`);
     const deepLinkCookie = sessionSwaps.mintedCookie(deepLinkResponse);
     await installLoopbackSessionCookie(context, page, deepLinkCookie);
 
-    await expect(impersonationBanner.getByText(managerName, { exact: true })).toBeVisible({
+    await expect(
+      impersonationBanner.getByText(managerName, { exact: true }),
+    ).toBeVisible({
       timeout: 15_000,
     });
     await expect(page.getByRole("tab", { name: "Settings" })).toHaveAttribute(
