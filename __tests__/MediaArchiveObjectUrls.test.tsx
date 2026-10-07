@@ -2,7 +2,7 @@ import React, { StrictMode } from "react";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalMediaArchive } from "../components/LocalMediaArchive";
-import { RecentCaptureShelf } from "../components/RecentCaptureShelf";
+import { DeviceRecoveryGrid } from "../components/work/DeviceRecoveryGrid";
 import { ToastProvider } from "../components/ui/Toast";
 import type { ArchivedMediaRecord } from "../utils/creativeStorage";
 
@@ -62,8 +62,14 @@ describe("media archive object URL lifecycle", () => {
 
   it.each([
     [
-      "recent captures",
-      () => <RecentCaptureShelf dealerId="dealer-1" onSelect={vi.fn()} />,
+      // My work's recovery grid: the original photo, post images and videos.
+      // It replaced the retired camera screen's recent-capture shelf.
+      "the My work recovery grid",
+      () => (
+        <ToastProvider>
+          <DeviceRecoveryGrid dealerId="dealer-1" onReusePhoto={vi.fn()} />
+        </ToastProvider>
+      ),
     ],
     [
       "local generated media",

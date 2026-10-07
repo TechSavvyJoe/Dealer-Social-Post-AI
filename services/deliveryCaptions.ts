@@ -12,7 +12,6 @@
  * and inside every outgoing caption.
  */
 import type { Dealer } from "../types";
-import type { PlatformShareCaption } from "../components/ShareDialog";
 import {
   analyzeCaptionForDelivery,
   prependEmployeeDisclosure,
@@ -25,6 +24,13 @@ import {
   dealershipMentionFor,
 } from "../utils/socialAttribution";
 import { checkCaptionIdentity, type CaptionIdentityContext } from "../utils/postLocks";
+
+/** One destination's outgoing caption: body only, plus its compliance disclosures. */
+export interface PlatformShareCaption {
+  text: string;
+  disclosures?: string;
+  blockedReason?: string;
+}
 
 /** One destination per network with a store tag or handle (see dealershipMentionFor). */
 const STORE_TAG_NETWORKS = [

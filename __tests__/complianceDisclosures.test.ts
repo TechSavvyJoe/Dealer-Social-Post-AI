@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PLATFORM_LIMITS, evaluate } from "../utils/platformLimits";
-import { fitPublishCaptionToBudget } from "../services/publishTargets";
+import { PUBLISH_TARGETS, fitPublishCaptionToBudget } from "../services/publishTargets";
+import { buildShareCaptions } from "../services/deliveryCaptions";
+import { outboundPreviewParts } from "../components/post/PostPreviewCard";
+import type { Dealer } from "../types";
 import {
   CANONICAL_DISCLOSURE_HEADER,
   DEFAULT_EMPLOYEE_DISCLOSURE_TEMPLATE,
@@ -248,7 +251,8 @@ describe("the disclosure survives the caption sanitizer", () => {
  * wiring, and the preview has to show exactly what ships:
  *
  *   PostScreen.tsx      buildShareCaptions({ ..., bodyEditSupersedesPack: true })
- *                       -> selectedCaption -> shareContent { text, disclosures,
+ *                       -> selectedCaption -> shareContent { text, disclosures:
+ *                       selectedCaption?.disclosures || captionSetAnalysis.disclosures,
  *                       requiredPrefix: employeeDisclosure || undefined }
  *                       -> usePostShare({ content: shareContent })
  *                       -> <PostPreviewCard outboundText employeeDisclosure disclosures />
@@ -258,6 +262,11 @@ describe("the disclosure survives the caption sanitizer", () => {
  * `requiredPrefix` is the one channel the fitter (fitPublishCaptionToBudget)
  * uses to put the team-member disclosure first and protect it from
  * truncation, so dropping it removes the disclosure from every share.
+ * `disclosures` is the one channel for the compliance block (financing, lease
+ * terms): the selected caption's own scan first, and when that found none,
+ * the scan of the whole caption set. That set starts with the caption on
+ * screen, so the fallback can only add a disclosure, never lose one the
+ * shipped text needs (decided 2026-10-06; this guard is the oracle).
  */
 type WiringSources = {
   postScreen: string;
@@ -323,15 +332,18 @@ const shareContentMemo = (source: string) =>
   sliceFrom(source, "const shareContent = useMemo(", "}),");
 const captionAnalysisMemo = (source: string) =>
   sliceFrom(source, "const captionAnalysis = useMemo(", "]");
+const captionSetAnalysisMemo = (source: string) =>
+  sliceFrom(source, "const captionSetAnalysis = useMemo(", "]");
 
 const PIN = {
   oneCaption: "every channel ships from the one caption on screen",
   scannedText: "the shared text is the selected channel's scanned caption",
   requiredPrefix: "the team-member disclosure rides as the required prefix",
+  disclosures: "the compliance disclosures ride with the shared text",
   delivered: "the share hook delivers that content",
   previewProps: "the preview is handed what ships",
   previewSplit: "the preview splits the outbound text",
-  previewRender: "the preview renders every outbound part",
+  previewRender: "the preview renders every outbound part, in the order it ships",
   deliveredCaptionFor: "deliveredCaptionFor prepends after appending the disclosures",
 } as const;
 
@@ -380,6 +392,19 @@ const DELIVERED_STRING_PINS: ReadonlyArray<{
       ),
   },
   {
+    // The selected caption's own disclosures win; the fallback is the scan of
+    // the caption set, which must include the caption on screen.
+    id: PIN.disclosures,
+    file: "postScreen",
+    holds: (s) =>
+      /\bdisclosures:\s*selectedCaption\?\.disclosures\s*\|\|\s*captionSetAnalysis\.disclosures\s*\|\|\s*undefined\s*,/.test(
+        shareContentMemo(s),
+      ) &&
+      /^const captionSetAnalysis = useMemo\(\s*\(\)\s*=>\s*analyzeCaptionSetForDelivery\(\s*\[\s*caption\s*,/.test(
+        captionSetAnalysisMemo(s),
+      ),
+  },
+  {
     id: PIN.delivered,
     file: "postScreen",
     holds: (s) =>
@@ -412,11 +437,16 @@ const DELIVERED_STRING_PINS: ReadonlyArray<{
     file: "previewCard",
     holds: (s) => {
       const view = sliceFrom(s, 'data-testid="post-outbound-preview"', "</div>");
-      return [
+      const present = [
         /\{parts\.prefix\}/,
         /data-outbound-part="body"[^>]*>\s*\{parts\.body\}\s*<\/p>/,
         /\{parts\.disclosureBlock\}/,
       ].every((part) => part.test(view));
+      // Same order as fitPublishCaptionToBudget: prefix, body, disclosures.
+      const order = ["{parts.prefix}", "{parts.body}", "{parts.disclosureBlock}"].map(
+        (part) => view.indexOf(part),
+      );
+      return present && order[0] < order[1] && order[1] < order[2];
     },
   },
   {
@@ -457,6 +487,27 @@ const DELIVERED_STRING_MUTANTS: ReadonlyArray<{
     from: "requiredPrefix: employeeDisclosure || undefined,",
     to: "",
     fault: PIN.requiredPrefix,
+  },
+  {
+    regression: "drops the compliance disclosures",
+    file: "postScreen",
+    from: "disclosures:\n        selectedCaption?.disclosures || captionSetAnalysis.disclosures || undefined,",
+    to: "",
+    fault: PIN.disclosures,
+  },
+  {
+    regression: "ships only the stale variants' disclosures",
+    file: "postScreen",
+    from: "selectedCaption?.disclosures || captionSetAnalysis.disclosures",
+    to: "captionSetAnalysis.disclosures",
+    fault: PIN.disclosures,
+  },
+  {
+    regression: "falls back to a scan that leaves out the caption on screen",
+    file: "postScreen",
+    from: "[caption, ...Object.values(effectivePack || {})]",
+    to: "[...Object.values(effectivePack || {})]",
+    fault: PIN.disclosures,
   },
   {
     regression: "ships each channel's saved AI variant",
@@ -573,6 +624,13 @@ const COMMENTED_OUT_MUTANTS: typeof DELIVERED_STRING_MUTANTS = [
     fault: PIN.requiredPrefix,
   },
   {
+    regression: "comments out the compliance disclosures",
+    file: "postScreen",
+    from: "disclosures:\n        selectedCaption?.disclosures || captionSetAnalysis.disclosures || undefined,",
+    to: "// disclosures: selectedCaption?.disclosures || captionSetAnalysis.disclosures || undefined,",
+    fault: PIN.disclosures,
+  },
+  {
     regression: "comments out the one-caption rule",
     file: "postScreen",
     from: "bodyEditSupersedesPack: true,",
@@ -686,6 +744,144 @@ describe("the meter measures what is actually delivered", () => {
       expect(deliveredStringWiringFaults(mutated)).toEqual([fault]);
     },
   );
+
+  it("the delivered-string guard fails when the preview reorders the outbound parts (planted mutant)", () => {
+    // Every part still renders, so only the order check can catch it: the
+    // compliance block now shows first and the team-member disclosure last.
+    const sources = readWiringSources();
+    const view = sliceFrom(
+      sources.previewCard,
+      'data-testid="post-outbound-preview"',
+      "</div>",
+    );
+    expect(view).toContain("{parts.prefix}");
+    const swapped = view
+      .split("{parts.prefix}")
+      .join("\u0000")
+      .split("{parts.disclosureBlock}")
+      .join("{parts.prefix}")
+      .split("\u0000")
+      .join("{parts.disclosureBlock}");
+    const mutated = {
+      ...sources,
+      previewCard: sources.previewCard.replace(view, swapped),
+    };
+    expect(mutated.previewCard).not.toBe(sources.previewCard);
+    expect(deliveredStringWiringFaults(mutated)).toEqual([PIN.previewRender]);
+  });
+});
+
+/**
+ * The behavioural half of the guard above: for a real financing caption, the
+ * parts the Post preview shows, joined the way the share joins them, are
+ * exactly the string fitPublishCaptionToBudget delivers.
+ */
+describe("the Post preview matches what ships within the channel budget", () => {
+  const dealer = {
+    id: "dealer-1",
+    name: "Bob Maxey Ford of Howell",
+    facebook_page_tag: "BobMaxeyFordHowell",
+  } as Dealer;
+  const employeeDisclosure = buildEmployeeDisclosure(dealer);
+
+  it("joins prefix, body and disclosure block into the delivered caption", () => {
+    const captions = buildShareCaptions({
+      effectivePack: { facebook_feed: "A saved AI variant nobody sees." },
+      activeCaptionPlatform: null,
+      editedText: "Drive home today with 4.9% APR on approved credit. #BobMaxeyFord",
+      dealer,
+      deliveryLanguageAllowed: true,
+      identity: { dealerName: dealer.name },
+      identityBlockedMessage: "Check the customer's name",
+      bodyEditSupersedesPack: true,
+    });
+    const selected = captions?.facebook_feed;
+    expect(selected?.blockedReason).toBeUndefined();
+    expect(selected?.disclosures).toContain("Financing subject to credit approval");
+    expect(selected?.text).toContain("@BobMaxeyFordHowell");
+
+    const delivered = fitPublishCaptionToBudget(
+      {
+        text: selected!.text,
+        disclosures: selected!.disclosures,
+        requiredPrefix: employeeDisclosure,
+      },
+      10_000,
+    );
+    const parts = outboundPreviewParts(
+      selected!.text,
+      employeeDisclosure,
+      selected!.disclosures,
+    );
+    const previewed = [parts.prefix, parts.body, parts.disclosureBlock]
+      .filter(Boolean)
+      .join("\n\n");
+
+    expect(delivered.startsWith(employeeDisclosure)).toBe(true);
+    expect(delivered).toContain("Financing subject to credit approval");
+    expect(previewed).toBe(delivered);
+  });
+
+  // The share step fits the caption to the chosen channel's real budget
+  // (preparePublishShare -> fitPublishCaptionToBudget(content,
+  // target.charBudget)). Google Business allows 1,500 characters.
+  const gbpBudget = PUBLISH_TARGETS.find((target) => target.id === "gbp")!.charBudget;
+  const previewAndDelivered = (editedText: string) => {
+    const selected = buildShareCaptions({
+      effectivePack: { gbp: "A saved AI variant nobody sees." },
+      activeCaptionPlatform: null,
+      editedText,
+      dealer,
+      deliveryLanguageAllowed: true,
+      identity: { dealerName: dealer.name },
+      identityBlockedMessage: "Check the customer's name",
+      bodyEditSupersedesPack: true,
+    })?.gbp;
+    expect(selected?.blockedReason).toBeUndefined();
+    const parts = outboundPreviewParts(
+      selected!.text,
+      employeeDisclosure,
+      selected!.disclosures,
+    );
+    return {
+      previewed: [parts.prefix, parts.body, parts.disclosureBlock]
+        .filter(Boolean)
+        .join("\n\n"),
+      delivered: fitPublishCaptionToBudget(
+        {
+          text: selected!.text,
+          disclosures: selected!.disclosures,
+          requiredPrefix: employeeDisclosure,
+        },
+        gbpBudget,
+      ),
+    };
+  };
+
+  it("matches the delivered caption at a real channel budget when the caption fits", () => {
+    expect(gbpBudget).toBe(1500);
+    const { previewed, delivered } = previewAndDelivered(
+      "Drive home today with 4.9% APR on approved credit. #BobMaxeyFord",
+    );
+    expect(delivered.length).toBeLessThanOrEqual(gbpBudget);
+    expect(previewed).toBe(delivered);
+  });
+
+  it("records the known gap: a caption over the channel budget ships shortened, and the preview does not show that yet", () => {
+    // KNOWN GAP (verification record, "Posting flow"): PostPreviewCard shows
+    // the whole body; the share step shortens it to the budget. When the
+    // preview learns the budget (the post unit's proposed
+    // fitPublishCaptionParts), flip the last assertion to toBe.
+    const longBody = `Drive home today with 4.9% APR on approved credit. ${"Our team walks every buyer through the paperwork, the features and the first service visit. ".repeat(30)}#BobMaxeyFord`;
+    const { previewed, delivered } = previewAndDelivered(longBody);
+    expect(previewed.length).toBeGreaterThan(gbpBudget);
+    // What legally matters still ships: the fitter protects the prefix and
+    // the disclosure block and shortens only the body.
+    expect(delivered.length).toBeLessThanOrEqual(gbpBudget);
+    expect(delivered.startsWith(employeeDisclosure)).toBe(true);
+    expect(delivered).toContain("Financing subject to credit approval");
+    expect(previewed).not.toBe(delivered);
+  });
 });
 
 /**

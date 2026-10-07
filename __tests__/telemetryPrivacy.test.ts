@@ -134,8 +134,10 @@ describe("telemetry privacy", () => {
       resolve(process.cwd(), "components/VinScanner.tsx"),
       "utf8",
     );
+    // The release sheet Details opens; it replaced the retired
+    // PhotoReleaseModal and logs the same capture event.
     const photoRelease = readFileSync(
-      resolve(process.cwd(), "components/PhotoReleaseModal.tsx"),
+      resolve(process.cwd(), "components/details/ReleaseSheet.tsx"),
       "utf8",
     );
     const backend = readFileSync(resolve(process.cwd(), "pb_hooks/main.pb.js"), "utf8");
