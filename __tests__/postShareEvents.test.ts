@@ -1380,18 +1380,16 @@ describe("recordPostShared", () => {
 
   it("declares the one visible caption and the footer actually delivered", async () => {
     setActiveAuthEpoch(703);
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        jsonResponse({
-          id: "post-1",
-          channel: "facebook_feed",
-          via: "copy",
-          shared_at: "now",
-          deduplicated: false,
-          post_revision: "revision-1",
-        }),
-      );
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: "post-1",
+        channel: "facebook_feed",
+        via: "copy",
+        shared_at: "now",
+        deduplicated: false,
+        post_revision: "revision-1",
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     await recordPostShared("post-1", {
       channel: "facebook_feed",
