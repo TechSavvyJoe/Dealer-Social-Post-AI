@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getPostApprovalStatus } from "../services/posts";
+import { useAppStore } from "../stores/appStore";
 import { adoptPostRevision } from "../utils/postRevision";
 import { useToast } from "../components/ui/Toast";
 import type { GeneratedPost } from "../types";
@@ -77,17 +78,31 @@ export const useApprovalStatus = ({
         schedule();
         return;
       }
+      const before = useAppStore.getState();
+      const observed = {
+        revision: before.generatedPost?.postRevision,
+        authEpoch: before.authEpoch,
+      };
       try {
         const result = await getPostApprovalStatus(
           post.postId as string,
           controller.signal,
         );
-        if (!active) return;
+        if (!active || useAppStore.getState().authEpoch !== observed.authEpoch) return;
+        const current = useAppStore.getState().generatedPost;
+        if (
+          current &&
+          current.postId === post.postId &&
+          current.postRevision !== observed.revision
+        ) {
+          schedule();
+          return;
+        }
         // A manager decision advances the post revision. This post left the
         // n_a state, so its content is immutable and the new token is safe to
         // adopt for share receipts.
         if (result.approval_status !== "n_a") {
-          adoptPostRevision(post.postId as string, result.post_revision);
+          adoptPostRevision(post.postId as string, result.post_revision, observed);
         }
         setApprovalCheckError(null);
         setImageReviewRequired(Boolean(result.image_review_required));

@@ -6,6 +6,7 @@ import { PostScreen } from "../components/PostScreen";
 import { ToastProvider } from "../components/ui/Toast";
 import { StyleOption, ToneOption, VideoStyle, type GeneratedPost } from "../types";
 import { useAppStore } from "../stores/appStore";
+import { derivePlatformDeliveryPlan } from "../services/platformOutputs";
 import { DRAFT_CONFLICT_MESSAGE } from "../hooks/useDraftAutosave";
 import { buildEmployeeDisclosure } from "../utils/complianceDisclosures";
 import {
@@ -223,7 +224,12 @@ vi.mock("../hooks/useVideoJobs", () => ({
   }),
 }));
 vi.mock("../hooks/usePreparedDelivery", () => ({
-  usePreparedDelivery: () => ({
+  usePreparedDelivery: ({ post }: { post: GeneratedPost }) => ({
+    deliveryPlan: derivePlatformDeliveryPlan(
+      post.platformIds ?? ["instagram_feed"],
+      "photo",
+      "test",
+    ),
     websiteOnly: mocks.preparedState.websiteOnly ?? false,
     selectDelivery: mocks.selectDelivery,
     selectedDelivery: { mediaKind: "photo" },
@@ -363,6 +369,7 @@ const outboundParts = () =>
 describe("PostScreen", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.selectDelivery.mockReturnValue(true);
     mocks.autosaveStatus = "saved";
     mocks.shareState = {};
     mocks.websiteState = {};
@@ -1075,11 +1082,21 @@ describe("PostScreen", () => {
 
       // Autosave and the website step still read the saved captions as before.
       expect(mocks.useDraftAutosave).toHaveBeenLastCalledWith(
-        expect.objectContaining({ effectivePack: savedCaptions }),
+        expect.objectContaining({
+          effectivePack: {
+            facebook_feed: basePost.text,
+            instagram_feed: basePost.text,
+          },
+        }),
       );
       expect(mocks.useWebsiteHandoff).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          captions: expect.objectContaining({ effectivePack: savedCaptions }),
+          captions: expect.objectContaining({
+            effectivePack: {
+              facebook_feed: basePost.text,
+              instagram_feed: basePost.text,
+            },
+          }),
         }),
       );
 
@@ -1237,5 +1254,64 @@ describe("PostScreen", () => {
       await user.click(send[0]);
       expect(mocks.websiteSend).toHaveBeenCalledTimes(1);
     });
+  });
+  it("keeps unsaved media at risk after only the caption was copied", () => {
+    renderScreen({
+      post: {
+        ...basePost,
+        postId: undefined,
+        sharedTo: [
+          { channel: "facebook_feed", via: "copy", at: "2026-10-07T14:00:00Z" },
+        ],
+      },
+    });
+    expect(lastLeaveGuardOptions().hasSavedMedia).toBe(false);
+  });
+
+  it("uses saved delivery destinations even if the store defaults have since changed", () => {
+    mocks.defaultsOverrides = {
+      channels: [{ id: "instagram_feed", label: "Instagram" }],
+    };
+    renderScreen({ post: { ...basePost, platformIds: ["facebook_feed"] } });
+    expect(lastShareOptions().channelId).toBe("facebook_feed");
+    expect(screen.queryByRole("button", { name: "Instagram" })).toBeNull();
+  });
+
+  it("does not offer caption editing during a creative update", () => {
+    mocks.creativeState = { busy: true };
+    renderScreen();
+    expect(screen.queryByRole("button", { name: "Edit caption" })).toBeNull();
+  });
+
+  it("checks only the visible single caption and stages it over hidden legacy variants", () => {
+    renderScreen({
+      post: {
+        ...basePost,
+        platformCaptions: { instagram_feed: "Guaranteed credit approval for everyone" },
+      },
+    });
+    expect(lastShareOptions().blockedReason).toBeUndefined();
+    expect(mocks.useDraftAutosave).toHaveBeenLastCalledWith(
+      expect.objectContaining({ effectivePack: { instagram_feed: basePost.text } }),
+    );
+  });
+
+  it("previews the exact fitted Google caption before delivery", () => {
+    renderScreen({
+      post: {
+        ...basePost,
+        platformIds: ["gbp"],
+        scenarioId: "new_arrival",
+        customerIdentityRequired: false,
+        customerDisplayName: undefined,
+        text: "A new arrival on the lot. ".repeat(110),
+      },
+    });
+    const content = lastShareOptions().content;
+    const preview = outboundParts()
+      .map((part) => part.text)
+      .join("\n\n");
+    expect(preview).toBe(fitPublishCaptionToBudget(content, 1500));
+    expect(preview.length).toBeLessThanOrEqual(1500);
   });
 });

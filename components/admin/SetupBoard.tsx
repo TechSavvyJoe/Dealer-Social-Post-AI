@@ -410,8 +410,7 @@ const StoreDetail: React.FC<StoreDetailProps> = ({
   const stacked = layout === "stack";
   const missing = status.missing;
 
-  // The store's managers, fetched when the store is opened. The page is the
-  // one the Admins tab shows for this store, so both share one cache entry.
+  // Fetch active managers so retired accounts cannot fill the first page.
   const managersParams = storeManagersParams(dealer.id);
   const managers = useQuery({
     queryKey: peopleQueryKey(managersParams),

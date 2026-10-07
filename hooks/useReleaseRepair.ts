@@ -67,27 +67,60 @@ export const useReleaseRepair = ({
       const releaseId = sourcePost.releaseId;
       const postId = sourcePost.postId;
       if (!releaseId || !postId || releaseRetryingRef.current) return;
+      const before = useAppStore.getState();
+      const observedRevision =
+        before.generatedPost?.postRevision ?? sourcePost.postRevision;
+      const authEpoch = before.authEpoch;
       releaseRetryingRef.current = true;
       setReleaseRetrying(true);
       setReleaseRetryNotice(null);
       try {
         const linked = await linkReleaseToPostWithRetry(releaseId, postId);
+        if (
+          useAppStore.getState().authEpoch !== authEpoch ||
+          currentPostPropRef.current.postId !== postId
+        )
+          return;
         setReleaseStatus("saved");
         setReleaseLinkStatus(undefined);
         const store = useAppStore.getState();
         const current = store.generatedPost;
         if (!current || current.postId === postId) {
           const base = current || sourcePost;
+          let revision = linked.post_revision;
+          if (base.postRevision !== observedRevision) {
+            // PocketBase revisions are server timestamps. Either operation
+            // may commit last, independently of when its response arrives.
+            const currentTime = Date.parse((base.postRevision || "").replace(" ", "T"));
+            const linkedTime = Date.parse(
+              (linked.post_revision || "").replace(" ", "T"),
+            );
+            revision =
+              Number.isFinite(currentTime) && Number.isFinite(linkedTime)
+                ? linkedTime > currentTime
+                  ? linked.post_revision
+                  : (base.postRevision as string)
+                : "";
+          }
           store.setGeneratedPost({
             ...base,
-            postRevision: linked.post_revision,
+            postRevision: revision || undefined,
             releaseStatus: "saved",
             releaseLinkStatus: undefined,
           });
         }
-        toast.success(
-          "Photo release saved to this post. Copy, share, save, and export are unlocked.",
-        );
+        if (!current || current.postId === postId) {
+          const live = useAppStore.getState().generatedPost;
+          if (live && !live.postRevision) {
+            toast.warning(
+              "Photo release saved. Reopen this post from My work before sharing.",
+            );
+          } else {
+            toast.success(
+              "Photo release saved to this post. Copy, share, save, and export are unlocked.",
+            );
+          }
+        }
       } catch (error) {
         logError("photo_release.link_retry_failed", {
           message: error instanceof Error ? error.message : String(error),

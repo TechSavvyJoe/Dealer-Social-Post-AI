@@ -11,10 +11,7 @@ import {
   type PublishContent,
   type PublishStatus,
 } from "../services/publishTargets";
-import { recordPostShared } from "../services/posts";
-import { ApiError } from "../services/apiErrors";
-import { logError } from "../utils/telemetry";
-import { connectionManager } from "../utils/connectionManager";
+import { submitShareReceipt } from "../services/shareReceipts";
 import { useAppStore } from "../stores/appStore";
 import { toUiMessage } from "../utils/errorMessages";
 import { sharedLabel } from "../utils/postLabels";
@@ -31,6 +28,7 @@ export interface UsePostShareOptions {
   expectedPostRevision?: string;
   /** Flush starts only after navigator.share has been invoked. */
   flushDraft: () => Promise<boolean>;
+  onMediaDelivered?: (content: PublishContent) => void;
 }
 
 export interface PostShareFeedback {
@@ -78,60 +76,6 @@ const localShare = (
   at: new Date().toISOString(),
 });
 
-interface PendingReceipt {
-  postId: string;
-  channel: PlatformDestinationId;
-  via: PostShareVia;
-  expectedPostRevision: string;
-  retried: boolean;
-}
-
-/**
- * One pending receipt per post, channel and method: a later Copy caption must
- * not discard a share-sheet receipt still waiting for the connection.
- */
-const receiptKey = (
-  postId: string,
-  channel: PlatformDestinationId,
-  via: PostShareVia,
-) => `${postId}\u0000${channel}\u0000${via}`;
-
-/** 4xx statuses that mean "try again later", not "this receipt is refused". */
-const TRANSIENT_CLIENT_STATUSES = new Set([408, 425, 429]);
-
-/**
- * The server refused the receipt itself (stale revision, delivery lock, bad
- * input). Sending the same receipt again can only be refused again, so it is
- * logged and dropped. Timeouts, rate limits, 5xx and network failures are
- * transport problems and keep the single reconnect retry.
- */
-const isRejectedReceipt = (error: unknown): error is ApiError =>
-  error instanceof ApiError &&
-  error.status >= 400 &&
-  error.status < 500 &&
-  !TRANSIENT_CLIENT_STATUSES.has(error.status);
-
-/**
- * The receipt echoes the revision whose delivery locks were checked. Adopt a
- * different one only while the store still holds the token the receipt was
- * sent with: a draft save that finished meanwhile owns a newer token, and
- * rolling it back would make the next autosave look like a conflict.
- */
-const adoptReceiptRevision = (
-  postId: string,
-  sentRevision: string,
-  receiptRevision: string | undefined,
-): void => {
-  if (!receiptRevision || receiptRevision === sentRevision) return;
-  const store = useAppStore.getState();
-  const current = store.generatedPost;
-  if (current?.postId !== postId || current.postRevision !== sentRevision) return;
-  store.setGeneratedPost(
-    { ...current, postRevision: receiptRevision },
-    { archive: false },
-  );
-};
-
 const isVideoContent = (content: PublishContent): boolean =>
   Boolean(content.videoUrl || content.preparedFile?.type.startsWith("video/"));
 
@@ -148,6 +92,7 @@ export const usePostShare = ({
   blockedReason,
   expectedPostRevision,
   flushDraft,
+  onMediaDelivered,
 }: UsePostShareOptions): UsePostShareResult => {
   const [prepared, setPrepared] = useState<PreparedPublishShare | null>(null);
   const [preparedKey, setPreparedKey] = useState<string | null>(null);
@@ -159,7 +104,6 @@ export const usePostShare = ({
   const [fallbackActive, setFallbackActive] = useState(false);
   /** The share sheet carried the media for this channel in this session. */
   const sharedViaSheetRef = useRef(false);
-  const pendingRecordsRef = useRef(new Map<string, PendingReceipt>());
   const effectiveBlockedReason =
     blockedReason ||
     (post.postId && !expectedPostRevision
@@ -190,16 +134,27 @@ export const usePostShare = ({
   );
 
   const activePrepared = preparedKey === requestedKey ? prepared : null;
+  const deliveredCreativeKey = [
+    channelId,
+    content.text,
+    content.disclosures,
+    content.requiredPrefix,
+    content.imageDataUrl,
+    content.videoUrl,
+    preparedFileKey(content.preparedFile),
+  ].join("\u0000");
+  const previousCreativeKey = useRef(deliveredCreativeKey);
 
   useEffect(() => {
     let active = true;
     const channelChanged = previousChannelRef.current !== channelId;
     previousChannelRef.current = channelId;
-    if (channelChanged) {
+    if (channelChanged || previousCreativeKey.current !== deliveredCreativeKey) {
       setFeedback(null);
       setFallbackActive(false);
       sharedViaSheetRef.current = false;
     }
+    previousCreativeKey.current = deliveredCreativeKey;
     setPreparationError(null);
 
     if (effectiveBlockedReason || !content.text.trim() || !content.preparedFile) {
@@ -240,7 +195,7 @@ export const usePostShare = ({
       active = false;
       clearTimeout(timeoutId);
     };
-  }, [channelId, content, effectiveBlockedReason, requestedKey]);
+  }, [channelId, content, deliveredCreativeKey, effectiveBlockedReason, requestedKey]);
 
   const mergeLocalShare = useCallback(
     (via: PostShareVia) => {
@@ -258,92 +213,28 @@ export const usePostShare = ({
 
   const record = useCallback(
     async (via: PostShareVia) => {
-      if (post.postId && !expectedPostRevision) return;
+      // A manager can deliver a teammate's file, but only its author owns
+      // saved share receipts. Local delivery feedback still describes the action.
+      if (post.historyReadOnly || (post.postId && !expectedPostRevision)) return;
       mergeLocalShare(via);
       if (!post.postId) return;
-      const sentRevision = expectedPostRevision as string;
-      const key = receiptKey(post.postId, channelId, via);
-      try {
-        const recorded = await recordPostShared(post.postId, {
-          channel: channelId,
-          via,
-          expectedPostRevision: sentRevision,
-        });
-        adoptReceiptRevision(post.postId, sentRevision, recorded.post_revision);
-        // Only this receipt is settled; another method's may still be waiting.
-        pendingRecordsRef.current.delete(key);
-      } catch (error) {
-        // The share itself already happened and is shown locally. A rejected
-        // receipt (stale revision, delivery lock) can only be rejected again,
-        // so only a transport failure is retried when the device reconnects.
-        // Re-reading the revision to resend is deliberately not done: that
-        // would record a share against content the salesperson did not share.
-        if (isRejectedReceipt(error)) {
-          logError("post.share_receipt_rejected", {
-            postId: post.postId,
-            status: error.status,
-            // "code" is a redacted telemetry key; keep the server code readable.
-            errorCode: error.code || String(error.status),
-          });
-          pendingRecordsRef.current.delete(key);
-          return;
-        }
-        pendingRecordsRef.current.set(key, {
-          postId: post.postId,
-          channel: channelId,
-          via,
-          expectedPostRevision: sentRevision,
-          retried: false,
-        });
-      }
+      await submitShareReceipt({
+        postId: post.postId,
+        channel: channelId,
+        via,
+        expectedPostRevision: expectedPostRevision as string,
+        captionMode: "primary",
+        disclosures: content.disclosures || "",
+      });
     },
-    [channelId, expectedPostRevision, mergeLocalShare, post.postId],
-  );
-
-  useEffect(
-    () =>
-      connectionManager.subscribe((online) => {
-        if (!online) return;
-        const pendingRecords = pendingRecordsRef.current;
-        for (const [key, pending] of pendingRecords) {
-          if (pending.retried) continue;
-          pending.retried = true;
-          void recordPostShared(pending.postId, {
-            channel: pending.channel,
-            via: pending.via,
-            expectedPostRevision: pending.expectedPostRevision,
-          })
-            .then((recorded) => {
-              adoptReceiptRevision(
-                pending.postId,
-                pending.expectedPostRevision,
-                recorded?.post_revision,
-              );
-            })
-            .catch((error) => {
-              // One retry only. Whatever the reason, the receipt is dropped now.
-              logError(
-                isRejectedReceipt(error)
-                  ? "post.share_receipt_rejected"
-                  : "post.share_receipt_failed",
-                {
-                  postId: pending.postId,
-                  status: error instanceof ApiError ? error.status : undefined,
-                  errorCode:
-                    error instanceof ApiError
-                      ? error.code || String(error.status)
-                      : error instanceof Error
-                        ? error.name
-                        : "unknown",
-                },
-              );
-            })
-            .finally(() => {
-              if (pendingRecords.get(key) === pending) pendingRecords.delete(key);
-            });
-        }
-      }),
-    [],
+    [
+      channelId,
+      content.disclosures,
+      expectedPostRevision,
+      mergeLocalShare,
+      post.historyReadOnly,
+      post.postId,
+    ],
   );
 
   const share = useCallback((): Promise<PublishStatus> => {
@@ -375,6 +266,7 @@ export const usePostShare = ({
             : `Tap Copy caption, then paste it into your ${channelLabel} post.`,
           via: "share_sheet",
         });
+        onMediaDelivered?.(content);
         void record("share_sheet");
       } else if (result.kind === "fallback") {
         setFallbackActive(true);
@@ -396,6 +288,8 @@ export const usePostShare = ({
     effectiveBlockedReason,
     flushDraft,
     mediaNoun,
+    onMediaDelivered,
+    content,
     record,
   ]);
 
@@ -438,6 +332,7 @@ export const usePostShare = ({
     if (!activePrepared || effectiveBlockedReason) return false;
     const downloaded = downloadPreparedMedia(activePrepared);
     if (downloaded) {
+      onMediaDelivered?.(content);
       void record("download");
       setFeedback({
         title: mediaNoun === "video" ? "Video downloaded" : "Image downloaded",
@@ -446,7 +341,15 @@ export const usePostShare = ({
       });
     }
     return downloaded;
-  }, [activePrepared, channelLabel, effectiveBlockedReason, mediaNoun, record]);
+  }, [
+    activePrepared,
+    channelLabel,
+    effectiveBlockedReason,
+    mediaNoun,
+    record,
+    onMediaDelivered,
+    content,
+  ]);
 
   const openTarget = useCallback(
     () => (activePrepared ? openPreparedTarget(activePrepared) : "none"),

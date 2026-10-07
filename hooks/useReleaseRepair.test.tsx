@@ -169,4 +169,83 @@ describe("useReleaseRepair", () => {
     });
     expect(result.current.releaseStatus).toBe("saved");
   });
+  it("keeps a newer revision while a release-link reply is delayed", async () => {
+    let resolve!: (value: unknown) => void;
+    mocks.store.generatedPost = basePost;
+    mocks.linkReleaseToPostWithRetry.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    const { result } = renderHook(() => useReleaseRepair({ post: basePost }));
+    let retry!: Promise<void>;
+    act(() => {
+      retry = result.current.retry("manual");
+    });
+    mocks.store.generatedPost = {
+      ...basePost,
+      postRevision: "2026-10-07 10:00:03.000Z",
+    };
+    await act(async () => {
+      resolve({ post_revision: "2026-10-07 10:00:02.000Z" });
+      await retry;
+    });
+    expect(mocks.setGeneratedPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        postRevision: "2026-10-07 10:00:03.000Z",
+        releaseStatus: "saved",
+      }),
+    );
+  });
+  it("adopts the link revision when its server write follows the in-flight autosave", async () => {
+    let resolve!: (value: unknown) => void;
+    mocks.store.generatedPost = basePost;
+    mocks.linkReleaseToPostWithRetry.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    const { result } = renderHook(() => useReleaseRepair({ post: basePost }));
+    let retry!: Promise<void>;
+    act(() => {
+      retry = result.current.retry("manual");
+    });
+    mocks.store.generatedPost = {
+      ...basePost,
+      postRevision: "2026-10-07 10:00:02.000Z",
+    };
+    await act(async () => {
+      resolve({ post_revision: "2026-10-07 10:00:03.000Z" });
+      await retry;
+    });
+    expect(mocks.setGeneratedPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        postRevision: "2026-10-07 10:00:03.000Z",
+        releaseStatus: "saved",
+      }),
+    );
+  });
+
+  it("requires reopening when concurrent revision ordering cannot be established", async () => {
+    let resolve!: (value: unknown) => void;
+    mocks.store.generatedPost = basePost;
+    mocks.linkReleaseToPostWithRetry.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    const { result } = renderHook(() => useReleaseRepair({ post: basePost }));
+    let retry!: Promise<void>;
+    act(() => {
+      retry = result.current.retry("manual");
+    });
+    mocks.store.generatedPost = { ...basePost, postRevision: "unorderable-new-token" };
+    await act(async () => {
+      resolve({ post_revision: "unorderable-link-token" });
+      await retry;
+    });
+    expect(mocks.setGeneratedPost).toHaveBeenCalledWith(
+      expect.objectContaining({ postRevision: undefined, releaseStatus: "saved" }),
+    );
+  });
 });

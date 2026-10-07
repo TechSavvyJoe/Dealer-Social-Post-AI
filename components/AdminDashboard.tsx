@@ -138,7 +138,6 @@ export const AdminDashboard: React.FC = () => {
     isPending: peopleLoading,
     isFetching: peopleFetching,
     error: peopleError,
-    refetch: refetchPeople,
   } = useQuery({
     queryKey: peopleQueryKey(peopleParams),
     queryFn: () => fetchPeoplePage(peopleParams),
@@ -187,7 +186,8 @@ export const AdminDashboard: React.FC = () => {
    */
   const handleRefresh = () => {
     void refetch();
-    if (tab === "admins" || tab === "users") void refetchPeople();
+    if (tab === "admins" || tab === "users")
+      void queryClient.invalidateQueries({ queryKey: ["people"] });
     if (tab === "connections") {
       void queryClient.invalidateQueries({ queryKey: [SYSTEM_CONNECTIONS_QUERY_KEY] });
     }
@@ -318,7 +318,7 @@ export const AdminDashboard: React.FC = () => {
           : `Salesperson added to ${selectedDealer.name}.`,
       );
       setPersonForm({ name: "" });
-      await refetchPeople();
+      await queryClient.invalidateQueries({ queryKey: ["people"] });
     } catch (err) {
       toast.error(toUiMessage(err, "Failed to add person."));
     } finally {
@@ -329,7 +329,7 @@ export const AdminDashboard: React.FC = () => {
   const handleTogglePerson = async (person: Person) => {
     try {
       await updatePerson(person.id, { active: !person.active });
-      await refetchPeople();
+      await queryClient.invalidateQueries({ queryKey: ["people"] });
     } catch (err) {
       toast.error(toUiMessage(err, "Update failed."));
     }
@@ -779,7 +779,7 @@ export const AdminDashboard: React.FC = () => {
                       void acknowledgePinDistribution(oneTimeCredential.person.id)
                         .then(() => {
                           setOneTimeCredential(null);
-                          void refetchPeople();
+                          void queryClient.invalidateQueries({ queryKey: ["people"] });
                           toast.success("Code marked as shared.");
                         })
                         .catch((err) =>
@@ -977,7 +977,7 @@ export const AdminDashboard: React.FC = () => {
         onSaved={(updated) => {
           handlePersonCommitted(updated);
           setEditingPerson(null);
-          void refetchPeople();
+          void queryClient.invalidateQueries({ queryKey: ["people"] });
           toast.success("Profile updated.");
         }}
       />

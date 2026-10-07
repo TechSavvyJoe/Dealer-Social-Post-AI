@@ -311,10 +311,17 @@ const AppContent: React.FC = () => {
       app.setStep(AppStep.HOME);
       useAppStore.getState().setPendingPhoto(selection);
     });
-  const requestLogout = () =>
+  const requestLogout = () => {
+    if (step === AppStep.DETAILS && useAppStore.getState().pendingRelease) {
+      confirmLeave("draft", () => {
+        void app.logout();
+      });
+      return;
+    }
     requestLeave(() => {
       void app.logout();
     });
+  };
   useUrlStepSync({
     managementDirty,
     onBlockedManagementBack: (target) => {

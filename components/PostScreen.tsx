@@ -20,6 +20,7 @@ import type {
   VideoStyle,
 } from "../types";
 import type { WebsiteDraft } from "../services/websitePublishing";
+import { PUBLISH_TARGETS, fitPublishCaptionToBudget } from "../services/publishTargets";
 import type { PlatformDestinationId } from "../services/platformOutputs";
 import type { StoreLook } from "../services/storeDefaults";
 import { resolveStoreDefaults } from "../services/storeDefaults";
@@ -30,6 +31,7 @@ import {
   analyzeCaptionForDelivery,
   analyzeCaptionSetForDelivery,
   buildEmployeeDisclosure,
+  captionIncludesEmployeeDisclosure,
 } from "../utils/complianceDisclosures";
 import { buildShareCaptions, effectivePackFor } from "../services/deliveryCaptions";
 import {
@@ -265,12 +267,8 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     [bannedPhrases, caption, deliveryLanguageAllowed],
   );
   const captionSetAnalysis = useMemo(
-    () =>
-      analyzeCaptionSetForDelivery(
-        [caption, ...Object.values(effectivePack || {})],
-        bannedPhrases,
-      ),
-    [bannedPhrases, caption, effectivePack],
+    () => analyzeCaptionSetForDelivery([caption], bannedPhrases),
+    [bannedPhrases, caption],
   );
 
   const approval = useApprovalStatus({
@@ -299,7 +297,9 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
       editedText: caption,
       bannedPhrases,
       deliveryLanguageAllowed,
-      effectivePack,
+      effectivePack: effectivePack
+        ? Object.fromEntries(Object.keys(effectivePack).map((id) => [id, caption]))
+        : undefined,
       disclosures: captionSetAnalysis.disclosures,
     },
   });
@@ -330,7 +330,7 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   const locks = useMemo(
     () =>
       derivePostLocks({
-        captions: [caption, ...Object.values(effectivePack || {})],
+        captions: [caption],
         identity: identityContext,
         prohibited: captionSetAnalysis.prohibited,
         imageReviewRequired: approval.imageReviewRequired,
@@ -386,12 +386,9 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     primaryCaption: caption,
     captionAnalysis,
     captionSetAnalysis,
-    effectivePack:
-      caption !== post.text
-        ? Object.fromEntries(
-            Object.keys(effectivePack || {}).map((id) => [id, caption]),
-          )
-        : effectivePack,
+    effectivePack: effectivePack
+      ? Object.fromEntries(Object.keys(effectivePack).map((id) => [id, caption]))
+      : undefined,
     identityLocked: locks.identityLocked,
     grounding: draftGrounding,
   });
@@ -418,29 +415,48 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     video,
   });
 
-  const availableChannels = defaults.channels.filter((channel) =>
-    isPlatformDestinationId(channel.id),
-  );
-  const initialChannelId =
-    availableChannels.find((channel) => (post.platformIds || []).includes(channel.id))
-      ?.id ||
-    availableChannels[0]?.id ||
-    "facebook_feed";
-  const [selectedChannelId, setSelectedChannelId] = useState(initialChannelId);
+  const deliveryKind =
+    video.videoUrl || post.mediaOutputMode === "video" ? "video" : "photo";
+  const availableChannels = useMemo(() => {
+    const ids = new Set(
+      preparedDelivery.deliveryPlan.deliveries
+        .filter((delivery) => delivery.mediaKind === deliveryKind)
+        .flatMap((delivery) =>
+          delivery.requestedVia.length
+            ? delivery.requestedVia
+            : [delivery.destinationId],
+        )
+        .filter(isPlatformDestinationId),
+    );
+    return [...ids].map((id) => ({
+      id,
+      label:
+        defaults.channels.find((channel) => channel.id === id)?.label ||
+        PUBLISH_TARGETS.find((target) => target.id === id)?.label ||
+        id,
+    }));
+  }, [defaults.channels, deliveryKind, preparedDelivery.deliveryPlan]);
+  const initialChannelId = availableChannels[0]?.id || "facebook_feed";
+  const [requestedChannelId, setSelectedChannelId] = useState(initialChannelId);
+  const selectedChannelId = availableChannels.some(
+    (channel) => channel.id === requestedChannelId,
+  )
+    ? requestedChannelId
+    : initialChannelId;
   const selectedChannel = availableChannels.find(
     (channel) => channel.id === selectedChannelId,
-  ) ||
-    availableChannels[0] || { id: "facebook_feed", label: "Facebook" };
+  ) || { id: selectedChannelId, label: "Facebook" };
 
   useEffect(() => {
-    preparedDelivery.selectDelivery(
-      selectedChannelId,
-      video.videoUrl ? "video" : "photo",
-    );
+    preparedDelivery.selectDelivery(selectedChannelId, deliveryKind);
     // selectDelivery is intentionally keyed by destination/media. The hook's
     // function identity follows its live plan and must not restart this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedChannelId, video.videoUrl]);
+  }, [
+    selectedChannelId,
+    deliveryKind,
+    availableChannels.map((channel) => channel.id).join(","),
+  ]);
 
   // Every channel the salesperson can pick gets its own outgoing caption. In
   // this mode the pack's values are never read (bodyEditSupersedesPack), only
@@ -515,6 +531,24 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
       video.videoUrl,
     ],
   );
+  const fittedCaption = useMemo(() => {
+    try {
+      return fitPublishCaptionToBudget(
+        shareContent,
+        PUBLISH_TARGETS.find((target) => target.id === selectedChannelId)?.charBudget ||
+          2200,
+      );
+    } catch {
+      return null;
+    }
+  }, [shareContent, selectedChannelId]);
+  const preparedCaption = shareContent.text.trim() ? fittedCaption : "";
+  const previewOutboundText =
+    preparedCaption &&
+    employeeDisclosure &&
+    !captionIncludesEmployeeDisclosure(shareContent.text, employeeDisclosure)
+      ? preparedCaption.slice(employeeDisclosure.length).trim()
+      : preparedCaption || "";
   const autosaveBlockedReason =
     autosave.status === "conflict"
       ? DRAFT_CONFLICT_MESSAGE
@@ -531,17 +565,32 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     channelLabel: selectedChannel.label,
     content: shareContent,
     blockedReason:
+      (website.revisionRecoveryRequired
+        ? "Reopen this post from My work before sharing to another destination."
+        : undefined) ||
+      (postChanging ? "Wait for the current creative update to finish." : undefined) ||
       (locks.deliveryLocked ? locks.primary.message : undefined) ||
       autosaveBlockedReason ||
-      selectedCaption?.blockedReason,
+      selectedCaption?.blockedReason ||
+      (fittedCaption === null
+        ? "The required disclosures do not fit this destination. Choose another destination."
+        : undefined),
     expectedPostRevision,
     flushDraft: autosave.flush,
+    onMediaDelivered: (delivered) => {
+      if (delivered.videoUrl) video.markVideoDelivered(delivered.videoUrl);
+    },
   });
 
   const leaveGuard = usePostLeaveGuard({
     // A conflicted draft is as unsaved as a failed one: the edit is only here.
     hasSavedMedia:
-      Boolean(post.postId || post.sharedTo?.length) &&
+      Boolean(
+        post.postId ||
+        post.sharedTo?.some(
+          (event) => event.via === "download" || event.via === "share_sheet",
+        ),
+      ) &&
       autosave.status !== "saving" &&
       autosave.status !== "failed" &&
       autosave.status !== "conflict",
@@ -568,10 +617,10 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
   const selectChannel = useCallback(
     (channel: { id: string }) => {
       if (!isPlatformDestinationId(channel.id)) return;
-      setSelectedChannelId(channel.id);
-      preparedDelivery.selectDelivery(channel.id, video.videoUrl ? "video" : "photo");
+      if (preparedDelivery.selectDelivery(channel.id, deliveryKind))
+        setSelectedChannelId(channel.id);
     },
-    [preparedDelivery, video.videoUrl],
+    [preparedDelivery, deliveryKind],
   );
 
   const sendWebsite = useCallback(
@@ -608,21 +657,25 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
     preparedDelivery.retryPreparation();
   }, [preparedDelivery, share]);
 
-  const sharedSelectedChannel = post.sharedTo?.some(
-    (event) => event.channel === selectedChannelId && event.via === "share_sheet",
-  );
+  const visibleCreativeSaved = caption === post.text && !postChanging;
+  const sharedSelectedChannel =
+    visibleCreativeSaved &&
+    post.sharedTo?.some(
+      (event) => event.channel === selectedChannelId && event.via === "share_sheet",
+    );
   const sharedChannelIds = useMemo(
     () =>
       new Set(
         (post.sharedTo || [])
-          .filter((event) => event.via === "share_sheet")
+          .filter((event) => visibleCreativeSaved && event.via === "share_sheet")
           .map((event) => event.channel),
       ),
-    [post.sharedTo],
+    [post.sharedTo, visibleCreativeSaved],
   );
   // "Shared" (and the primary Done) follows a completed share-sheet share only.
   const sharedViaSheet =
-    share.feedback?.via === "share_sheet" || Boolean(sharedSelectedChannel);
+    visibleCreativeSaved &&
+    (share.feedback?.via === "share_sheet" || Boolean(sharedSelectedChannel));
   const hideCreativeTools =
     approval.reviewRequired || website.handoffStarted || historyReadOnly;
   const canChangeLook =
@@ -645,7 +698,13 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
       : undefined;
   const contentBlockedReason =
     missingRevisionReason ||
+    (website.revisionRecoveryRequired
+      ? "Reopen this post from My work before sharing to another destination."
+      : undefined) ||
     selectedCaption?.blockedReason ||
+    (fittedCaption === null
+      ? "The required disclosures do not fit this destination. Choose another destination."
+      : undefined) ||
     (shareContent.text.trim() ? undefined : "Write a caption to share this post.");
   const blockedReason =
     (autosave.status === "saving" || autosave.status === "failed"
@@ -1353,11 +1412,11 @@ export const PostScreen: React.FC<PostScreenProps> = (props) => {
             image={post.image}
             videoUrl={video.videoUrl}
             caption={caption}
-            outboundText={shareContent.text}
+            outboundText={previewOutboundText}
             employeeDisclosure={employeeDisclosure}
             disclosures={shareContent.disclosures}
             editing={editingCaption}
-            canEdit={editable}
+            canEdit={editable && !postChanging}
             busyLabel={creative.busyLabel}
             onEdit={() => setEditingCaption(true)}
             onCaptionChange={setCaption}

@@ -27,6 +27,7 @@ vi.mock("../utils/telemetry", async (importOriginal) => ({
 }));
 
 import { usePostShare } from "./usePostShare";
+import { clearPendingShareReceipts } from "../services/shareReceipts";
 import { useAppStore } from "../stores/appStore";
 import { ApiError } from "../services/apiErrors";
 import { sharedLabel } from "../utils/postLabels";
@@ -77,6 +78,7 @@ const shareOnce = async (result: { current: ReturnType<typeof usePostShare> }) =
 
 describe("usePostShare", () => {
   beforeEach(() => {
+    clearPendingShareReceipts();
     vi.useFakeTimers();
     vi.clearAllMocks();
     mocks.preparePublishShare.mockImplementation(async (targetId, content) => ({
@@ -115,6 +117,7 @@ describe("usePostShare", () => {
   });
 
   afterEach(() => {
+    clearPendingShareReceipts();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -146,6 +149,8 @@ describe("usePostShare", () => {
       channel: "facebook_feed",
       via: "share_sheet",
       expectedPostRevision: "revision-1",
+      captionMode: "primary",
+      disclosures: "",
     });
     expect(result.current.feedback?.title).toBe("Shared · Facebook");
     expect(useAppStore.getState().generatedPost?.sharedTo).toHaveLength(1);
@@ -196,11 +201,15 @@ describe("usePostShare", () => {
       channel: "facebook_feed",
       via: "copy",
       expectedPostRevision: "revision-1",
+      captionMode: "primary",
+      disclosures: "",
     });
     expect(mocks.recordPostShared).toHaveBeenCalledWith("post-1", {
       channel: "facebook_feed",
       via: "download",
       expectedPostRevision: "revision-1",
+      captionMode: "primary",
+      disclosures: "",
     });
   });
 
@@ -221,6 +230,8 @@ describe("usePostShare", () => {
       channel: "facebook_feed",
       via: "copy",
       expectedPostRevision: "revision-2",
+      captionMode: "primary",
+      disclosures: "",
     });
   });
 
@@ -598,6 +609,8 @@ describe("usePostShare", () => {
         channel: "facebook_feed",
         via: "share_sheet",
         expectedPostRevision: "revision-1",
+        captionMode: "primary",
+        disclosures: "",
       });
 
       // A flapping connection while the retry is still in flight adds nothing.
@@ -644,6 +657,8 @@ describe("usePostShare", () => {
       channel: "facebook_feed",
       via: "share_sheet",
       expectedPostRevision: "revision-1",
+      captionMode: "primary",
+      disclosures: "",
     });
   });
 
@@ -669,6 +684,87 @@ describe("usePostShare", () => {
       .map(([, receipt]) => receipt.via)
       .sort();
     expect(retried).toEqual(["download", "share_sheet"]);
+  });
+
+  it("still retries a receipt lost in transit after the Post screen closes", async () => {
+    mocks.recordPostShared.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const { result, unmount } = renderHook(() => usePostShare(options()));
+    await shareOnce(result);
+    expect(mocks.recordPostShared).toHaveBeenCalledTimes(1);
+
+    // Done leaves the Post screen before the connection comes back.
+    unmount();
+    await reconnect();
+    expect(mocks.recordPostShared).toHaveBeenCalledTimes(2);
+    expect(mocks.recordPostShared).toHaveBeenLastCalledWith("post-1", {
+      channel: "facebook_feed",
+      via: "share_sheet",
+      expectedPostRevision: "revision-1",
+      captionMode: "primary",
+      disclosures: "",
+    });
+  });
+
+  it("still retries a receipt whose first attempt fails after the Post screen closed", async () => {
+    let failFirst: (reason: unknown) => void = () => {};
+    mocks.recordPostShared.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          failFirst = reject;
+        }),
+    );
+    const { result, unmount } = renderHook(() => usePostShare(options()));
+    await shareOnce(result);
+    unmount();
+    await act(async () => {
+      failFirst(new TypeError("Failed to fetch"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await reconnect();
+    expect(mocks.recordPostShared).toHaveBeenCalledTimes(2);
+    expect(mocks.recordPostShared).toHaveBeenLastCalledWith("post-1", {
+      channel: "facebook_feed",
+      via: "share_sheet",
+      expectedPostRevision: "revision-1",
+      captionMode: "primary",
+      disclosures: "",
+    });
+  });
+
+  it("drops a waiting receipt once the signed-in workspace changes", async () => {
+    mocks.recordPostShared.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    const { result } = renderHook(() => usePostShare(options()));
+    await shareOnce(result);
+    expect(mocks.recordPostShared).toHaveBeenCalledTimes(1);
+
+    // Signing out (or in as someone else) starts a new workspace.
+    useAppStore.setState({ authEpoch: useAppStore.getState().authEpoch + 1 });
+    await reconnect();
+    expect(mocks.recordPostShared).toHaveBeenCalledTimes(1);
+  });
+
+  it("records nothing for a teammate's post a manager delivers from My work", async () => {
+    const teammate: GeneratedPost = { ...post, historyReadOnly: true };
+    useAppStore.setState({ generatedPost: teammate });
+    const { result } = renderHook(() => usePostShare({ ...options(), post: teammate }));
+    await shareOnce(result);
+    // The share sheet did open on this device, so its guidance still shows.
+    expect(result.current.feedback?.title).toBe("Shared · Facebook");
+
+    await act(async () => {
+      await result.current.copyCaption();
+    });
+    act(() => {
+      expect(result.current.download()).toBe(true);
+    });
+    await reconnect();
+
+    // The server only takes a receipt from the post's author, so none is
+    // sent, and the post never claims a share My work will not show.
+    expect(mocks.recordPostShared).not.toHaveBeenCalled();
+    expect(useAppStore.getState().generatedPost?.sharedTo).toBeUndefined();
   });
 
   it.each([

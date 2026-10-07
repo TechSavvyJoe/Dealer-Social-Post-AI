@@ -8,6 +8,8 @@ permissions:
 
 jobs:
   fetch-logs:
+    # Fly credentials are scoped to the same protected environment as deploys.
+    environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -16,6 +18,11 @@ jobs:
         with:
           version: 0.4.71
       - name: Get logs
-        run: flyctl logs --app dealer-social-post-ai-production --no-tail
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "Production environment is missing FLY_API_TOKEN." >&2
+            exit 1
+          fi
+          flyctl logs --app dealer-social-post-ai-production --no-tail
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

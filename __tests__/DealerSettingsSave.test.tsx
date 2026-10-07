@@ -1,5 +1,12 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DealerAdminDashboard } from "../components/DealerAdminDashboard";
 import { useAppStore } from "../stores/appStore";
@@ -133,6 +140,41 @@ describe("dealership settings save", { timeout: 90_000 }, () => {
     expect(saveButton()).toBeDisabled();
     expect(onSettingsDirtyChange).toHaveBeenLastCalledWith(false);
   });
+
+  it.each(["different store", "new login in the same store"])(
+    "does not merge an old settings reply into a %s",
+    async (boundary) => {
+      let resolve!: (value: { id: string }) => void;
+      dbMocks.updateDealerWithFile.mockReturnValueOnce(
+        new Promise((r) => {
+          resolve = r;
+        }),
+      );
+      renderDashboard();
+      fireEvent.change(screen.getByLabelText("Phone"), {
+        target: { value: "517-555-0199" },
+      });
+      fireEvent.click(saveButton());
+      await waitFor(() => expect(dbMocks.updateDealerWithFile).toHaveBeenCalledOnce());
+      const newDealer = {
+        ...dealer,
+        id: boundary === "different store" ? "dealer-2" : dealer.id,
+        name: "Other session",
+        phone: "517-555-0123",
+      };
+      act(() =>
+        useAppStore.setState({
+          currentDealer: newDealer,
+          authEpoch: useAppStore.getState().authEpoch + 1,
+        }),
+      );
+      await act(async () => {
+        resolve({ id: dealer.id });
+        await Promise.resolve();
+      });
+      expect(useAppStore.getState().currentDealer).toEqual(newDealer);
+    },
+  );
 
   it("keeps the open section after a save", async () => {
     renderDashboard();

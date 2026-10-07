@@ -221,4 +221,28 @@ describe("useApprovalStatus", () => {
     unmount();
     expect(capturedSignal?.aborted).toBe(true);
   });
+  it("does not adopt a poll revision after another transition advanced the post", async () => {
+    const post = {
+      ...basePost,
+      approvalStatus: "pending" as const,
+      postRevision: "rev-1",
+    };
+    useAppStore.setState({ generatedPost: post });
+    let resolve!: (value: unknown) => void;
+    mocks.getPostApprovalStatus.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    const { result } = renderHook(() =>
+      useApprovalStatus({ post, requiresApproval: true }),
+    );
+    useAppStore.setState({ generatedPost: { ...post, postRevision: "rev-3" } });
+    await act(async () => {
+      resolve({ approval_status: "approved", post_revision: "rev-2" });
+      await Promise.resolve();
+    });
+    expect(useAppStore.getState().generatedPost?.postRevision).toBe("rev-3");
+    expect(result.current.approvalStatus).toBe("pending");
+  });
 });
