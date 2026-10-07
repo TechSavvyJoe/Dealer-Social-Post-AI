@@ -630,6 +630,8 @@ test("restored Post prepares direct sharing and follows Sunlight preference", as
       channel: "facebook_feed",
       via: "share_sheet",
       expected_post_revision: DRAFT_REVISION,
+      caption_mode: "primary",
+      disclosures: "",
     });
     await expect(page.getByText("Shared · Facebook", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Done", exact: true })).toBeVisible();
@@ -655,6 +657,8 @@ test("restored Post prepares direct sharing and follows Sunlight preference", as
       channel: "facebook_feed",
       via: "copy",
       expected_post_revision: DRAFT_REVISION,
+      caption_mode: "primary",
+      disclosures: "",
     });
   }
 });
@@ -741,6 +745,8 @@ test("My work reopens a saved post and shares it with the disclosure first", asy
       channel: "linkedin",
       via: "share_sheet",
       expected_post_revision: revisionAtShare,
+      caption_mode: "primary",
+      disclosures: "",
     });
     await expect(page.getByText("Shared · LinkedIn", { exact: true })).toBeVisible();
   } else {
@@ -759,6 +765,8 @@ test("My work reopens a saved post and shares it with the disclosure first", asy
       channel: "linkedin",
       via: "copy",
       expected_post_revision: revisionAtShare,
+      caption_mode: "primary",
+      disclosures: "",
     });
   }
   // Every draft save of the reopened post was bound to a revision it was given.
